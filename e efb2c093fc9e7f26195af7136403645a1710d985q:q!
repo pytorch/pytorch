@@ -1,0 +1,1573 @@
+[33mcommit f703754d8253b3aa55991f76b43f36ae17c6e37a[m[33m ([m[1;36mHEAD[m[33m)[m
+Author: George Qi <georgeqi94@gmail.com>
+Date:   Fri May 20 00:45:25 2022 +0000
+
+    masked logsumexp/logaddexp
+    
+    ghstack-source-id: 32a8398621dd2c23b9253af10daab35a48792a90
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77876
+
+[33mcommit 0c2287b7f1dce420b8803c0df4578db44096cf28[m
+Author: George Qi <georgeqi94@gmail.com>
+Date:   Mon Apr 4 19:18:14 2022 +0000
+
+    masked argmin/argmax
+    
+    ghstack-source-id: f3500e68102439900871c601a9e41fafb11137d4
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/75212
+
+[33mcommit 83d875d43150b0b7542095ee30999dd6a1b08386[m
+Author: Philip Meier <github.pmeier@posteo.de>
+Date:   Fri May 20 07:01:23 2022 +0000
+
+    re-enable kernel launch checks in CI (#77841)
+    
+    I just saw that I forgot to update the lint workflow in #60862. Unfortunately, [CI doesn't go red](https://github.com/pytorch/pytorch/runs/6503564764#step:9:11):
+    
+    ```
+    + python torch/testing/_check_kernel_launches.py
+    + tee /home/runner/actions-runner/_work/pytorch/pytorch/cuda_kernel_launch_checks.txt
+    python: can't open file '/home/runner/actions-runner/_work/pytorch/pytorch/torch/testing/_check_kernel_launches.py': [Errno 2] No such file or directory
+    ```
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77841
+    Approved by: https://github.com/janeyx99
+
+[33mcommit df1f9b9840e4d981e99575f364efe37d072df490[m
+Author: Nikolay Korovaiko <korovaikon@gmail.com>
+Date:   Fri May 20 05:39:03 2022 +0000
+
+    Implement sym_sizes to create proper IR for sym ints representing tensor sizes (#77756)
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77756
+    Approved by: https://github.com/desertfire
+
+[33mcommit a8c929b0a62f83dc651813fb7835902be0d64952[m
+Author: Zafar <cc.rafaz@zafar.cc>
+Date:   Wed May 18 15:43:04 2022 -0700
+
+    [quant] Reordering the imports in the torch/__init__.py
+    
+    Because the AO stuff depends on the torch packages, but very few (if any)
+    torch packages depend on AO, we are moving the imports lower.
+    That will reduce the probability of cyclic imports, as by the time the
+    AO would start importing, the rest of the torch would be already imported.
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77065
+    
+    Approved by: https://github.com/albanD
+
+[33mcommit 68e22aa9fc69290128ab7bf9f2d53652709a4c19[m
+Author: Michael Suo <suo@fb.com>
+Date:   Thu May 19 17:10:29 2022 -0700
+
+    [symint] add support for negative integers
+    
+    The bit packing scheme is described in the comments.
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77913
+    
+    Approved by: https://github.com/Krovatkin
+
+[33mcommit f54098cd3e3b47a1958b97b13717fc9f0485e1fa[m
+Author: Drazen Borkovic <dborkovic@fb.com>
+Date:   Fri May 20 03:20:57 2022 +0000
+
+    Create JSON from new FX IR and lower to LLVM (#77765)
+    
+    Summary:
+    Replace TensorView objects with maps for JSONing.
+    Lower to LLVM.
+    
+    Reviewed By: jaybean-dev, jfix71
+    
+    Differential Revision: D36318989
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77765
+    Approved by: https://github.com/jfix71, https://github.com/jamesr66a
+
+[33mcommit 3d83321b44b3f0c19315c3f646d5601f2a22e2fd[m
+Author: Kulin Seth <kulin_seth@apple.com>
+Date:   Fri May 20 03:18:09 2022 +0000
+
+    MPS Fixes: copy operations, addmm and baddmm (#77791)
+    
+    Fixes for the copy operations and GEMM operations on MPS backend.
+    
+    Fixes https://github.com/pytorch/pytorch/issues/77819
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77791
+    Approved by: https://github.com/albanD
+
+[33mcommit c60d2ef4eb4bae01aa8375c49ab3b1a6b85ddf27[m
+Author: Hao Lu <hlu@fb.com>
+Date:   Fri May 20 03:14:01 2022 +0000
+
+    [StaticRuntime] Replace Permute with copy version only when it's followed by reshape or flatten (#77832)
+    
+    Reviewed By: mikeiovine
+    
+    Differential Revision: D36466622
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77832
+    Approved by: https://github.com/mikeiovine
+
+[33mcommit 03546e9c07793749b94ac1a6d3414768ff47afbc[m
+Author: PyTorch MergeBot <pytorchmergebot@users.noreply.github.com>
+Date:   Fri May 20 02:31:57 2022 +0000
+
+    Revert "Fixed type promotion semantics for native_batch_norm and native_layer_norm (#77407)"
+    
+    This reverts commit 70d80fb42480f4df7bd369f8f9f1500b58c5c603.
+    
+    Reverted https://github.com/pytorch/pytorch/pull/77407 on behalf of https://github.com/malfet due to as it broke meta tests ( I guess due to landrace), see https://hud.pytorch.org/pytorch/pytorch/commit/70d80fb42480f4df7bd369f8f9f1500b58c5c603
+
+[33mcommit cecb2ad95e817782b3f6eed82507bb072eb362b1[m
+Author: Kurt Mohler <kmohler@quansight.com>
+Date:   Fri May 20 02:03:34 2022 +0000
+
+    Restore old names for private funcs in legacy storages (#77861)
+    
+    Followup from #75459
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77861
+    Approved by: https://github.com/ezyang
+
+[33mcommit 6583c0384befd122e885e0dcf4438272b0f51e14[m
+Author: jjsjann123 <jiej@nvidia.com>
+Date:   Fri May 20 02:00:42 2022 +0000
+
+    fixing trivial reduction & broadcast scheduling (#77884)
+    
+    cherry-picked fixes from https://github.com/csarofeen/pytorch/pull/1714
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77884
+    Approved by: https://github.com/csarofeen, https://github.com/davidberard98
+
+[33mcommit 0d76299ff782224810b997d99f8af490cd96eede[m
+Author: Justin Chu <justinchuby@users.noreply.github.com>
+Date:   Fri May 20 01:56:24 2022 +0000
+
+    [ONNX] Clean up module imports (#77423)
+    
+    Cleaning up onnx module imports to prepare for updating `__init__`.
+    
+    - Simplify importing the `_C` and `_C._onnx` name spaces
+    - Remove alias of the symbolic_helper module in imports
+    - Remove any module level function imports. Import modules instead
+        - Alias `symbilic_opsetx` as `opsetx`
+    - Fix some docstrings
+    
+    Requires:
+    - https://github.com/pytorch/pytorch/pull/77448
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77423
+    Approved by: https://github.com/BowenBao
+
+[33mcommit e67284d9ee1f9c8dbb14169c69c71d035014e38b[m
+Author: Milad Mohammadi <milad.mo@gmail.com>
+Date:   Fri May 20 01:34:56 2022 +0000
+
+    Added support for `slogdet` in LazyTensor shape inference (#77904)
+    
+    Fixes https://github.com/pytorch/xla/pull/3576
+    
+    Added support for `slogdet` in LazyTensor shape inference
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77904
+    Approved by: https://github.com/wconstab, https://github.com/JackCaoG
+
+[33mcommit d6ae650738f6f55ea82589c0e52977c3b4abc936[m
+Author: Milad Mohammadi <milad.mo@gmail.com>
+Date:   Fri May 20 01:31:13 2022 +0000
+
+    Added support for `inverse` in LazyTensor shape inference (#77888)
+    
+    Fixes https://github.com/pytorch/xla/pull/3575
+    
+    Added support for `inverse` in LazyTensor shape inference
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77888
+    Approved by: https://github.com/wconstab
+
+[33mcommit 67c30a04f1d079cbfd7b07873b0963038c0c81cc[m
+Author: Nikita Shulga <nshulga@fb.com>
+Date:   Fri May 20 01:15:59 2022 +0000
+
+    [GHF] Add checkruns pagination (#77922)
+    
+    Rename `GH_GET_PR_NEXT_CHECK_RUNS` into `GH_GET_PR_NEXT_CHECKSUITES`
+    (because this is what it does)
+    Modify `checkSuites` checkout loop to query edges and request cursor for
+    every nodes
+    Add `GH_GET_PR_NEXT_CHECK_RUNS` which takes two cursors - one to
+    checkSuite and another for checkrun
+    
+    Added `test_get_checkruns_many_runs` test and verified that it works by looking for `cr_cursor` ins `gql_mocks.json`
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77922
+    Approved by: https://github.com/suo, https://github.com/seemethere
+
+[33mcommit 1bec7f846800e1b91439d77e1c53c119221934a9[m
+Author: Eli Uriegas <eliuriegas@fb.com>
+Date:   Thu May 19 18:06:40 2022 -0700
+
+    torch: Fix black linter
+    
+    Fixes formatting issues when trying to import diff train
+    
+    Signed-off-by: Eli Uriegas <eliuriegasfb.com>
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77925
+    
+    Approved by: https://github.com/mehtanirav, https://github.com/osalpekar
+
+[33mcommit a5766c86497ffa4c2210fd1c331fad2c2a1861b4[m
+Author: David Berard <dberard@fb.com>
+Date:   Thu May 19 14:46:05 2022 -0700
+
+    fix another missing c10::
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77905
+    
+    Approved by: https://github.com/tugsbayasgalan
+
+[33mcommit c915fbe201ec6f3d8a3f20da8cb8bb586f93c3c8[m[33m ([m[1;31morigin/gh/seemethere/237/base[m[33m)[m
+Author: Rohit Goswami <rog32@hi.is>
+Date:   Fri May 20 00:59:48 2022 +0000
+
+    ENH: Convert finfo.tiny to finfo.smallest_normal (#76292)
+    
+    Fixes #70909, by a straightforward search and replace discussed in #70909.
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/76292
+    Approved by: https://github.com/mruberry
+
+[33mcommit 7892a4574172b1ab6088795e4a1e7d791d66e115[m
+Author: Kurt Mohler <kmohler@quansight.com>
+Date:   Fri May 20 00:53:19 2022 +0000
+
+    Add missing decref to `createStorageGetType` (#77860)
+    
+    Followup from PR #75459
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77860
+    Approved by: https://github.com/ezyang
+
+[33mcommit 11daf200e83f1f9895ed67c6f38f31ff4f3c6d0c[m
+Author: Kevin Stephano <kevin.stephano@gmail.com>
+Date:   Fri May 20 00:47:31 2022 +0000
+
+    Adding activation references for celu, mish, selu, softplus, and tanh (#77473)
+    
+    Adding activation references for celu, softplus, mish, selu.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77473
+    Approved by: https://github.com/mruberry
+
+[33mcommit e69d13b8b3eab5d4a4d5e690794427f2ac1b914b[m
+Author: Andrew Gu <andgu@fb.com>
+Date:   Thu May 19 20:36:47 2022 +0000
+
+    [FSDP][Easy] Update `state_dict()` docstring
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77853
+    
+    Approved by: https://github.com/rohan-varma
+
+[33mcommit d9b3feb27d22ad306cdbca5228eceae95f6826fa[m
+Author: Andrew Gu <andgu@fb.com>
+Date:   Thu May 19 20:36:47 2022 +0000
+
+    [FSDP][Easy] Reword device placement warning
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77850
+    
+    Approved by: https://github.com/rohan-varma
+
+[33mcommit 36bf8007f7f51a38d9c7de89b46940e0726d34ca[m
+Author: Andrew Gu <andgu@fb.com>
+Date:   Thu May 19 20:36:46 2022 +0000
+
+    [FSDP][Easy] Fix `state_dict_type()` docstring example
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77848
+    
+    Approved by: https://github.com/rohan-varma
+
+[33mcommit 96e674a0c9bc6112fdcd32de4d2dcf572495b617[m
+Author: Andrew Gu <andgu@fb.com>
+Date:   Thu May 19 20:36:46 2022 +0000
+
+    [FSDP][Easy] Doc fixes
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77847
+    
+    Approved by: https://github.com/rohan-varma
+
+[33mcommit 0bc4b2af56c4d16a38ea611f3f5459d798b94545[m
+Author: Han Qi (qihqi) <qihan@fb.com>
+Date:   Thu May 19 23:51:51 2022 +0000
+
+    Populate bytecode version and operator version (#77685)
+    
+    Summary: title
+    
+    Test Plan: unittest
+    
+    Differential Revision: D36459217
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77685
+    Approved by: https://github.com/pavithranrao
+
+[33mcommit 94eba341f8733c67b0ef444e464415210f77e24b[m
+Author: Pavel Belevich <pbelevich@fb.com>
+Date:   Thu May 19 15:10:16 2022 -0400
+
+    Revert RPC Meta device support
+    
+    This reverts commit 058be5f16293357b4bd2bc087f1f54cd8c17f468 and 2e2200d76c611eed8d0aed2ff93e0adc344407d2.
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77875
+    
+    Approved by: https://github.com/mrshenli
+
+[33mcommit 82682aab0bb3ca8e5310a8ab0a5f31c840578ff3[m
+Author: Sherlockk Huang <bahuang@fb.com>
+Date:   Thu May 19 23:46:23 2022 +0000
+
+    Prepare Jiterator code template for multiple outputs (#77902)
+    
+    Part 1: make existing jiterator code strings work with multiple outputs code template
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77902
+    Approved by: https://github.com/ngimel
+
+[33mcommit 0d6fa91d1ba93b423a31a7811b679a4770470363[m
+Author: PyTorch MergeBot <pytorchmergebot@users.noreply.github.com>
+Date:   Thu May 19 23:00:23 2022 +0000
+
+    Revert "Switch to use nested tensor by-default in TransformerEncoder (#77217)"
+    
+    This reverts commit 8cacb199ba34d63f9d186d0eac3798d6bab82a82.
+    
+    Reverted https://github.com/pytorch/pytorch/pull/77217 on behalf of https://github.com/albanD due to please as it broke many tests: https://github.com/pytorch/pytorch/runs/6515962633?check_suite_focus=true
+
+[33mcommit 294fff16ec7ad5382c551b00fdc7a3c3e15d1bfd[m
+Author: George Qi <georgeqi@fb.com>
+Date:   Thu May 19 22:52:45 2022 +0000
+
+    add slow path for is_contiguous (#77906)
+    
+    Test Plan: CI
+    
+    Reviewed By: malfet, b0noI
+    
+    Differential Revision: D36493890
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77906
+    Approved by: https://github.com/malfet
+
+[33mcommit 009c14b01443cacf3c7b82cac8b442e1536e188d[m
+Author: Eli Uriegas <eliuriegas@fb.com>
+Date:   Thu May 19 15:22:48 2022 -0700
+
+    aten: Removed unused-local-typedef
+    
+    This was causing internal build failures so removing it since it was
+    actually unused
+    
+    Signed-off-by: Eli Uriegas <eliuriegasfb.com>
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77910
+    
+    Approved by: https://github.com/malfet
+
+[33mcommit b3ca7fc88d12d8d10e12bfc75b639176292191c9[m
+Author: Ian Graves <iangraves@fb.com>
+Date:   Thu May 19 22:15:17 2022 +0000
+
+    Support saving extra files in pytorch flat buffer format via python (#77870)
+    
+    Summary: The extra files serialization paths were not exposed to the python layer for flat buffers, this diff does just that.
+    
+    Reviewed By: qihqi
+    
+    Differential Revision: D36469535
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77870
+    Approved by: https://github.com/qihqi
+
+[33mcommit fd121dfeec4895a61372d35b96f3d645ab1e73dd[m
+Author: Alban Desmaison <albandes@fb.com>
+Date:   Wed May 18 10:58:20 2022 -0400
+
+    Move x86 binaries builder to macos-12 to enable MPS build
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77662
+    
+    Approved by: https://github.com/seemethere
+
+[33mcommit 8cacb199ba34d63f9d186d0eac3798d6bab82a82[m
+Author: Rui Zhu <zrphercule@fb.com>
+Date:   Thu May 19 21:57:45 2022 +0000
+
+    Switch to use nested tensor by-default in TransformerEncoder (#77217)
+    
+    Summary: Switch to use nested tensor as by default setting in TransformerEncoderLayer.
+    
+    Test Plan:
+    CI
+    
+    Torchtext
+    buck test mode/opt pytorch/text/test:integration_tests_test_models -- test_xlmr_base_model
+    
+    Reviewed By: frank-wei
+    
+    Differential Revision: D36153335
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77217
+    Approved by: https://github.com/cpuhrsch
+
+[33mcommit de646c06d457277f24d790eb41545e72f2d76f66[m[33m ([m[1;31morigin/gh/davidberard98/120/base[m[33m)[m
+Author: Brian Hirsh <hirsheybar@fb.com>
+Date:   Thu May 19 07:36:28 2022 -0700
+
+    fix jit List[Optional[Tensor]] type singleton bug
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77846
+    
+    Approved by: https://github.com/ezyang
+
+[33mcommit e0295f55b574ab4883e01d228c0cc4fdd3f8b111[m[33m ([m[1;31morigin/gh/yuguo68/3/base[m[33m)[m
+Author: lezcano <lezcano-93@hotmail.com>
+Date:   Wed May 18 11:40:47 2022 +0000
+
+    Fix derivatives for linalg.vector_norm(..., dtype=)
+    
+    As per title
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/76551
+    
+    Approved by: https://github.com/albanD
+
+[33mcommit 5984bc82337894108f18664822a24a9ab36a1116[m[33m ([m[1;31morigin/gh/seemethere/236/base[m[33m)[m
+Author: anjali411 <chourdiaanjali123@gmail.com>
+Date:   Thu May 19 17:35:06 2022 +0000
+
+    Allow specifying alias analysis while registering new ops
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77690
+    
+    Approved by: https://github.com/ezyang
+
+[33mcommit 9e0e94948485e1bdb24e6825d611bcc9ec597423[m
+Author: Edward Z. Yang <ezyang@fb.com>
+Date:   Thu May 19 10:24:05 2022 -0700
+
+    Fix bugs, increase meta coverage
+    
+    Signed-off-by: Edward Z. Yang <ezyangfb.com>
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77499
+    
+    Approved by: https://github.com/mruberry
+
+[33mcommit 7a4e3f329f317604d66d489c92d9493bc4cb2e51[m
+Author: PyTorch MergeBot <pytorchmergebot@users.noreply.github.com>
+Date:   Thu May 19 21:04:23 2022 +0000
+
+    Revert "Fix derivatives for linalg.vector_norm(..., dtype=)"
+    
+    This reverts commit 13d8fb93bb59c6f3404424b4095305a991cca90a.
+    
+    Reverted https://github.com/pytorch/pytorch/pull/76551 on behalf of https://github.com/seemethere due to Reverting the entire stack, errors originated from
+    * https://github.com/pytorch/pytorch/pull/76547
+    
+    Failed internal builds due to ([Link for Meta Employees](https://www.internalfb.com/diff/D36494019?selected_signal=c2FuZGNhc3RsZV93b3JrZmxvd19ydW46MTgwMTQzOTg1MTUzNTQ3NzQ%3D&selected_signal_verification_phase=1&dst_version_fbid=1211273672948052)):
+    ```
+    aten/src/ATen/native/LinearAlgebra.cpp:2496:9: error: unused type alias 'Int' [-Werror,-Wunused-local-typedef]
+      using Int = IntArrayRef::value_type;
+            ^
+    1 error generated.
+    Command failed with exit code 1.
+    ```
+
+[33mcommit b65a44d7b9d54cb984a29ac8f873d8e470315fca[m
+Author: Eli Uriegas <eliuriegas@fb.com>
+Date:   Thu May 19 13:54:57 2022 -0700
+
+    ci: Have revert use hosted runners
+    
+    Signed-off-by: Eli Uriegas <eliuriegasfb.com>
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77887
+    
+    Approved by: https://github.com/malfet
+
+[33mcommit 8bffb877356a6ae784d14c7039bf5b22e14ef6b7[m
+Author: David Berard <dberard@fb.com>
+Date:   Wed May 18 13:33:38 2022 -0700
+
+    fix missing c10::
+    
+    Fixes #77711
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77783
+    
+    Approved by: https://github.com/tugsbayasgalan
+
+[33mcommit 17fbb857346e99bbba660f87d4caebafc6d145de[m
+Author: jjsjann123 <alex.jann2012@gmail.com>
+Date:   Thu May 19 20:43:14 2022 +0000
+
+    [nvfuser] prevent spamming warning message (#77777)
+    
+    updating TORCH_WARN to TORCH_WARN_ONCE to prevent spamming the log
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77777
+    Approved by: https://github.com/davidberard98
+
+[33mcommit 5e0589ca205eeff0b4d9b758a117ad838137f154[m
+Author: Nikita Shulga <nshulga@fb.com>
+Date:   Thu May 19 20:25:52 2022 +0000
+
+    [CI] Do not use conda-forge for Python-3.9 configs (#77873)
+    
+    All dependencies has long been available in conda
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77873
+    Approved by: https://github.com/seemethere, https://github.com/atalman
+
+[33mcommit b4a6730ce1d403e4fc7c20c82dcb5abe6bb5e472[m
+Author: Kevin Tse <ktse@fb.com>
+Date:   Thu May 19 11:26:07 2022 -0400
+
+    [DataPipe] Refactor 'mux' to have buffer as an instance variable
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77775
+    
+    Approved by: https://github.com/ejguan
+
+[33mcommit ba0ca0f591221520673b6974d2107f459aa1bcb8[m
+Author: samdow <samdow@fb.com>
+Date:   Thu May 19 19:53:57 2022 +0000
+
+    Add torch dispatch mode to ProxyTensor tracing (#77174)
+    
+    Uses a mode for ProxyTensor tracing so that it traces factory functions as well
+    
+    cc @dhruvbird
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77174
+    Approved by: https://github.com/ezyang
+
+[33mcommit 327d313705e28ee18a5d159663a049c3d9c0cf8f[m
+Author: pritam <9958665+pritamdamania87@users.noreply.github.com>
+Date:   Thu May 19 10:41:31 2022 -0700
+
+    Refactor operator dispatch framework across different Tensors.
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77707
+    
+    Refactor to clean up the following pieces:
+    
+    1) Consolidate decorators to use a common way to look up operator tables.
+    2) Move a bunch of utilities to `op_registry_utils` and `common_op_utils` and
+    reuse them across ShardedTensor, ReplicatedTensor and PartialTensor.
+    
+    Differential Revision: [D36465639](https://our.internmc.facebook.com/intern/diff/D36465639/)
+    
+    Approved by: https://github.com/wanchaol, https://github.com/fduwjj
+
+[33mcommit 0161e9eb00eeacb54389309a6b53f2c97b655921[m[33m ([m[1;31morigin/gh/pbelevich/156/base[m[33m)[m
+Author: Brian Hirsh <hirsheybar@fb.com>
+Date:   Thu May 19 09:00:41 2022 -0700
+
+    [test] attempt to functionalize ops with mutable positional-only args
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/76320
+    
+    Approved by: https://github.com/ezyang
+
+[33mcommit b8639cf6e1dd1c3c75adeacfe382a7839f243230[m[33m ([m[1;31morigin/gh/george-qi/40/base[m[33m)[m
+Author: George Qi <georgeqi94@gmail.com>
+Date:   Thu May 19 07:38:30 2022 +0000
+
+    masked median
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77677
+    
+    Approved by: https://github.com/cpuhrsch
+
+[33mcommit b333a752c001285050f82f6a45c5f714a69fa574[m[33m ([m[1;31morigin/gh/seemethere/235/base[m[33m)[m
+Author: pritam <9958665+pritamdamania87@users.noreply.github.com>
+Date:   Wed May 18 17:40:01 2022 -0700
+
+    Validate that tensors are contiguous in ProcessGroupNCCL
+    
+    Fixes https://github.com/pytorch/pytorch/issues/77554 by ensuring we
+    require contiguous tensors for send/recv in ProcessGroupNCCL.
+    
+    Differential Revision: [D36500769](https://our.internmc.facebook.com/intern/diff/D36500769/)
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77809
+    
+    Approved by: https://github.com/rohan-varma, https://github.com/wanchaol
+
+[33mcommit 282951da203f91e859eda6a62a426c35760a0d46[m
+Author: Yeounoh Chung <yeounoh@google.com>
+Date:   Thu May 19 17:43:09 2022 +0000
+
+    Add knobs for XLA build options (#77729)
+    
+    This is to enable XLA build option controls for cloud cache, and bazel sandboxed strategies. Some of the configurations worked in the downstream, but crashed the upstream XLA workflows. This doesn't change the current build configurations in the XLA workflow, but helps us decouple/configure different build options for the downstream CI runs without affecting the upstream.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77729
+    Approved by: https://github.com/seemethere
+
+[33mcommit 99f6e614e8f3d59becb92747fdffd1b6ba33f430[m
+Author: erjia <erjia@fb.com>
+Date:   Thu May 19 17:28:26 2022 +0000
+
+    Seed `Shuffler` for MP DataLoader without explicit `manual_seed`. (#77855)
+    
+    Follow up on https://github.com/pytorch/pytorch/pull/77741
+    
+    This PR guarantees the `Shuffler` in first iteration with MP DataLoader has the same seed across worker processes when users don't specify the seed.
+    Check newly added tests
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77855
+    Approved by: https://github.com/NivekT
+
+[33mcommit 2ac35e2ed120256be6a24a9642e71e982cd0e90a[m
+Author: Nikita Shulga <nshulga@fb.com>
+Date:   Thu May 19 17:13:09 2022 +0000
+
+    [GHF] Preserve revert reason in commit message (#77798)
+    
+    If explanation were given to mergebot it should be preserved in commit
+    history
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77798
+    Approved by: https://github.com/seemethere, https://github.com/janeyx99
+
+[33mcommit 70d80fb42480f4df7bd369f8f9f1500b58c5c603[m
+Author: Horace He <chilli@fb.com>
+Date:   Thu May 19 17:11:46 2022 +0000
+
+    Fixed type promotion semantics for native_batch_norm and native_layer_norm (#77407)
+    
+    Originally, when these were written, they simply used the naive strategy of "upcast all inputs to floats, and downcast all inputs back". In addition to being... not quite what the kernels did, they also didn't capture some additional semantics. Namely, that the norms (except for layer norm on CPU! cc: @ngimel) return fp32 for the mean and rstd values.
+    
+    Also, folks didn't like that I wrote `native_layer_norm` in terms of `native_batch_norm`. Which is fair - so I refactored the common logic into a `normalize` function.
+    
+    cc: @jansel / @bertmaher , who've been looking at lowering layer norm/batch norm.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77407
+    Approved by: https://github.com/bertmaher
+
+[33mcommit 00a187c373c91bc59b6e5acedc52e2682d579242[m
+Author: PyTorch MergeBot <pytorchmergebot@users.noreply.github.com>
+Date:   Thu May 19 17:07:54 2022 +0000
+
+    Revert "add slow path for is_contiguous"
+    
+    This reverts commit f6beda89c6acbb92ff7f82699b9ea4c5c7428a19.
+    
+    Reverted https://github.com/pytorch/pytorch/pull/77396 on behalf of https://github.com/malfet
+
+[33mcommit 2d2b9f9980312ac3c5f1e6e245c7feb57d7703c1[m
+Author: Jane Xu <janeyx@fb.com>
+Date:   Thu May 19 17:03:59 2022 +0000
+
+    [GH1] Increase checkruns to 60 as we have over 50 in pull (#77859)
+    
+    I counted again, and we now have 54 check runs in pull.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77859
+    Approved by: https://github.com/malfet
+
+[33mcommit 97fa1d317f68fec5c99eb4144d01795d3fb2a9e1[m
+Author: Kevin Tse <ktse@fb.com>
+Date:   Thu May 19 11:26:07 2022 -0400
+
+    [DataPipe] Preventing automatic reset call after state is restored
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77774
+    
+    Approved by: https://github.com/ejguan
+
+[33mcommit 0d9e42408b6fcf7540273b74ecdbdf66effc424d[m
+Author: PyTorch MergeBot <pytorchmergebot@users.noreply.github.com>
+Date:   Thu May 19 16:44:53 2022 +0000
+
+    Revert "[GH1] Add builds as required status checks (#77596)"
+    
+    This reverts commit e52609982414a2939c79c41f5481002c141d5899.
+    
+    Reverted https://github.com/pytorch/pytorch/pull/77596 on behalf of https://github.com/janeyx99
+
+[33mcommit 007cc731ce21e4adfd140ccc5d5b76a1bd0c7d19[m
+Author: Sergii Dymchenko <sdym@fb.com>
+Date:   Thu May 19 16:42:44 2022 +0000
+
+    Move pull linux-docs job to Ubuntu 20.04 (#77700)
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77700
+    Approved by: https://github.com/janeyx99
+
+[33mcommit 3c4af1c49617d9e74504061d3402bdc9025db7fa[m
+Author: Ryan Spring <rdspring1@gmail.com>
+Date:   Thu May 19 16:26:01 2022 +0000
+
+    [WIP] Add support for elementwise unary ops (#77807)
+    
+     * Add support for `log2, isinf, zeros_like`
+     * Add primitives for `log2` and `is_infinite`
+    
+    I left a TODO to remove the `is_infinite` prim and to implement `isinf` reference using `isfinite` and `isnan`.
+    We're missing `real` and `imag` ops to handle complex tensors.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77807
+    Approved by: https://github.com/mruberry
+
+[33mcommit 5cdf79fddc27368ebef0536db19cf6c64c4cf405[m
+Author: Peter Bell <peterbell10@live.co.uk>
+Date:   Tue May 17 23:47:05 2022 +0100
+
+    Bump minimum CMake version to 3.13
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/76312
+    
+    Approved by: https://github.com/malfet
+
+[33mcommit 00b3b4dc759e847955c5f0c082bbd49b7d511fe8[m
+Author: Peter Bell <peterbell10@live.co.uk>
+Date:   Tue May 17 23:47:04 2022 +0100
+
+    [vulkan] Fix sign mismatch warning
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/76502
+    
+    Approved by: https://github.com/malfet
+
+[33mcommit 50c60c770e361a5fe37c34ba60408d3836e01e45[m
+Author: Rohan Varma <rvarm1@fb.com>
+Date:   Thu May 19 14:49:11 2022 +0000
+
+    Remove commented out code in test file (#77810)
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77810
+    Approved by: https://github.com/awgu
+
+[33mcommit eb0ff991f7508f0f9248994a3bd6566696aa9fc2[m
+Author: Rohan Varma <rvarm1@fb.com>
+Date:   Thu May 19 14:47:50 2022 +0000
+
+    [FSDP] Dont move if on CPU (#77720)
+    
+    After offline discussion, decided that by default moving CPU module to GPU is a bit too risky due to possible OOM during init issue.
+    
+    Theoretically, we should not OOM because it is required for module that is being wrapped by FSDP to fit into GPU, i.e. during forward. But possibly can be temporary GPU tensors etc allocated during __init___ that break this assumption, it is better for now to allow users a way to init on CPU if needed.
+    
+    We still warn to use `device_id` for faster init if model is on CPU.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77720
+    Approved by: https://github.com/zhaojuanmao
+
+[33mcommit e69e9b0ed8222b311a486e323a6227f89bc804b0[m
+Author: Edward Z. Yang <ezyang@fb.com>
+Date:   Wed May 18 18:41:39 2022 -0700
+
+    Don't test std values if tensor is meta; fixes normal meta
+    
+    Signed-off-by: Edward Z. Yang <ezyangfb.com>
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77740
+    
+    Approved by: https://github.com/mruberry
+
+[33mcommit 88c89c9eb9f6775a7e2e9817dba2381de4f2c21b[m
+Author: Edward Z. Yang <ezyang@fb.com>
+Date:   Wed May 18 18:41:38 2022 -0700
+
+    log_sigmoid_forward out support; out_wrapper_multi
+    
+    Signed-off-by: Edward Z. Yang <ezyangfb.com>
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77739
+    
+    Approved by: https://github.com/mruberry
+
+[33mcommit baeffdbc6cdf3a5d653f0e64c197654e425ab53b[m
+Author: Edward Z. Yang <ezyang@fb.com>
+Date:   Wed May 18 18:41:38 2022 -0700
+
+    reflection_pad2d support
+    
+    Signed-off-by: Edward Z. Yang <ezyangfb.com>
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77681
+    
+    Approved by: https://github.com/mruberry
+
+[33mcommit e52609982414a2939c79c41f5481002c141d5899[m
+Author: Jane Xu <janeyx@fb.com>
+Date:   Thu May 19 14:40:30 2022 +0000
+
+    [GH1] Add builds as required status checks (#77596)
+    
+    Requires builds to now pass before merge.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77596
+    Approved by: https://github.com/suo
+
+[33mcommit fdd5f7214e964dfc4e1d1fc34f36cb915e971b91[m
+Author: PyTorch MergeBot <pytorchmergebot@users.noreply.github.com>
+Date:   Thu May 19 14:26:42 2022 +0000
+
+    Revert "[DataPipe] Preventing automatic reset call after state is restored"
+    
+    This reverts commit ac1837ddd3082429886abbe2335d2fff75211d05.
+    
+    Reverted https://github.com/pytorch/pytorch/pull/77774 on behalf of https://github.com/janeyx99
+
+[33mcommit ec290949aa064ba6d0cefb59d97c3ce46c0d5eb6[m
+Author: Christian Puhrsch <cpuhrsch@fb.com>
+Date:   Thu May 19 14:17:55 2022 +0000
+
+    Change transpose to return CSC when given CSR, adjust addmm, addmv, mm (#77615)
+    
+    Changes transpose to return CSC when given CSR and adds CSC support via to_sparse_csr to addmm and addmv.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77615
+    Approved by: https://github.com/pearu, https://github.com/albanD
+
+[33mcommit 2d4291fb81b385f2b6ec064b61599a9bcd75a519[m[33m ([m[1;31morigin/gh/shunting314/20/base[m[33m)[m
+Author: Eric Sauser <esauser@fb.com>
+Date:   Thu May 19 14:04:13 2022 +0000
+
+    [torch] Fixed a few test for Windows & Linux GPUs (#77531)
+    
+    Summary:
+    While running those tests on
+    - my local windows GPU machine
+    - a dev server
+    - an on-demand GPU
+    I noticed a few test failures and here's some tentative fixes
+    
+    Test Plan:
+    Ran tests on:
+    - my local windows GPU machine
+    - a linux dev server w/o GPU
+    - an linux on-demand GPU server
+    
+    Note that when using CUDA11, the tests crashes (segfaults) on calls to torch.nn.ConvTranspose3d. Fails on master, but works with CUDA10.
+    
+    Differential Revision: D36377288
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77531
+    Approved by: https://github.com/ezyang
+
+[33mcommit aea6e2c396fd1196f70a518b1d027d6eeabc4b01[m
+Author: Kurt Mohler <kmohler@quansight.com>
+Date:   Thu May 19 13:54:37 2022 +0000
+
+    Merge torch.cuda._UntypedStorage into torch._UntypedStorage (#75459)
+    
+    Fixes #74933
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/75459
+    Approved by: https://github.com/ezyang
+
+[33mcommit ac1837ddd3082429886abbe2335d2fff75211d05[m
+Author: Kevin Tse <ktse@fb.com>
+Date:   Thu May 19 09:46:58 2022 -0400
+
+    [DataPipe] Preventing automatic reset call after state is restored
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77774
+    
+    Approved by: https://github.com/ejguan
+
+[33mcommit 7945fa6ce2669208624ff409fbf145694b4124ba[m
+Author: Nikita Vedeneev <nik@quansight.com>
+Date:   Thu May 19 13:13:58 2022 +0000
+
+    `BCE` loss: forward ad support (#77755)
+    
+    As per title + BCE with logits gets a simpler implementation.
+    Relevant for https://github.com/pytorch/pytorch/issues/71117
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77755
+    Approved by: https://github.com/soulitzer
+
+[33mcommit d1bb420fb1087d680b7ad526536e14acbc2f18bf[m
+Author: Kshiteej K <kshitijkalambarkar@gmail.com>
+Date:   Thu May 19 06:05:31 2022 +0000
+
+    std_mean, var_mean : update skip message (#77150)
+    
+    Reference : https://github.com/pytorch/pytorch/issues/69991
+    
+    ~~It just worked :)~~ (but not on ASAN :( )
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77150
+    Approved by: https://github.com/ngimel
+
+[33mcommit b3e7230efa30e03b9ee8ff3e2b31c38754a6b2b1[m[33m ([m[1;31morigin/gh/suo/518/base[m[33m, [m[1;31morigin/gh/gamrix/62/base[m[33m, [m[1;31morigin/gh/Lezcano/77/base[m[33m)[m
+Author: Michael Suo <suo@fb.com>
+Date:   Wed May 18 19:20:29 2022 -0700
+
+    [symint] Fix SizesAndStridesTest to not use negative sizes/strides
+    
+    With SymInt we are using the negative space of `int64_t` in our internal
+    representation. `SizesAndStridesTest` breaks this because it initializes
+    `SizesAndStrides` with negative sizes/strides. This PR fixes that.
+    
+    As an aside: feels like `SizesAndStrides` (and `SymInt`) should really
+    take a uint64_t, but that would be BC-breaking so I don't do it here.
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77820
+    
+    Approved by: https://github.com/ezyang
+
+[33mcommit c2ff4136228f401557726f2bb2a40970145725af[m
+Author: Michael Andreas Dagitses <mikeyd@fb.com>
+Date:   Wed May 18 11:28:43 2022 -0700
+
+    move generated-autograd-headers to the shared build structure
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/76183
+    
+    This is a relatively simple target but we have to fix our header
+    expansion to understand generated files. Next step will be to use this
+    in Bazel.
+    
+    Differential Revision: [D35820541](https://our.internmc.facebook.com/intern/diff/D35820541/)
+    
+    **NOTE FOR REVIEWERS**: This PR has internal Facebook specific changes or comments, please review them on [Phabricator](https://our.internmc.facebook.com/intern/diff/D35820541/)!
+    
+    Approved by: https://github.com/dreiss, https://github.com/malfet
+
+[33mcommit 0c91efb64e6218e32fe10b2a01ff030f41b43201[m[33m ([m[1;31morigin/gh/yuguo68/2/base[m[33m)[m
+Author: Jordan Fix <jfix@fb.com>
+Date:   Thu May 19 03:28:28 2022 +0000
+
+    [fx/graph_manipulation] Fix _update_weight_fused_dtypes (#77702)
+    
+    Summary: D36335238 (https://github.com/pytorch/pytorch/commit/18e36a6295ebc4ff4de69e14c71a15619eb69bcb) wasn't fully working due to previous impl which used op names for looking for matches. Instead use the FX graph itself.
+    
+    Differential Revision: D36462875
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77702
+    Approved by: https://github.com/jamesr66a
+
+[33mcommit f9db8b72ac85dbd32d8e3552e9a44652d08877b9[m[33m ([m[1;31morigin/gh/suo/517/base[m[33m, [m[1;31morigin/gh/suo/516/base[m[33m, [m[1;31morigin/ci-all/sharding_multigpu_tests[m[33m)[m
+Author: George Qi <georgeqi94@gmail.com>
+Date:   Wed May 18 21:08:56 2022 +0000
+
+    MHA forward pass bug fix
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77761
+    
+    Approved by: https://github.com/jbschlosser
+
+[33mcommit e3403ff4ab55bc6e318df65ce84996475d21c890[m
+Author: Edward Z. Yang <ezyang@fb.com>
+Date:   Wed May 18 14:52:20 2022 -0700
+
+    square support
+    
+    Signed-off-by: Edward Z. Yang <ezyangfb.com>
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77682
+    
+    Approved by: https://github.com/ngimel, https://github.com/mruberry
+
+[33mcommit 4a57321a936c87ec8aa45915a37462dc6a14f93a[m
+Author: Rohan Varma <rvarm1@fb.com>
+Date:   Thu May 19 00:35:34 2022 +0000
+
+    [FSDP] Use post load_state_dict hooks (#76912)
+    
+    Rehash of https://github.com/pytorch/pytorch/pull/75426 now that a revised version of load_state_dict_post_hook has landed.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/76912
+    Approved by: https://github.com/awgu
+
+[33mcommit ea27244383116d83623c9bba29f275976c86532b[m
+Author: George Qi <georgeqi94@gmail.com>
+Date:   Wed May 18 20:02:29 2022 +0000
+
+    masked cumsum/cumprod
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77663
+    
+    Approved by: https://github.com/cpuhrsch
+
+[33mcommit 365ce350cb679a9f5f34a698753a1503a48c4577[m
+Author: erjia <erjia@fb.com>
+Date:   Wed May 18 23:32:07 2022 +0000
+
+    Make ShufflerDataPipe deterministic for SP & MP DataLoader (#77741)
+    
+    This is the first PR to make DataPipe deterministic.
+    
+    Users should be able to use `torch.manual_seed(seed)` to control the shuffle order for the following cases:
+    - Directly over `DataPipe`
+    - For single-process DataLoader
+    - Multiprocessing DataLoader
+    
+    Unfortunately, for distributed training, users have to run `apply_shuffle_seed` manually to make sure all distributed processes having the same order of shuffle.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77741
+    Approved by: https://github.com/VitalyFedyunin, https://github.com/NivekT
+
+[33mcommit 4124307faeed923175d3e02fa685c0788e99f0ee[m[33m ([m[1;31morigin/gh/george-qi/39/base[m[33m)[m
+Author: Wanchao Liang <wanchaol@users.noreply.github.com>
+Date:   Wed May 18 23:11:38 2022 +0000
+
+    [shard] fix failed tests in sharded tensor
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77800
+    
+    Approved by: https://github.com/pritamdamania87, https://github.com/fduwjj
+
+[33mcommit 929f1d5317755ef1161e27bc9925fa8c546c345c[m
+Author: Michael Carilli <mcarilli@gmail.com>
+Date:   Wed May 18 23:18:53 2022 +0000
+
+    [RELAND] Adds torch.cuda.is_current_stream_capturing (#77789)
+    
+    Resubmit of https://github.com/pytorch/pytorch/pull/77673, which was reverted due to Windows test failures: https://github.com/pytorch/pytorch/pull/77673#issuecomment-1130425845.
+    
+    I suspect these failures happened because I don't explicitly set a side stream for graph capture in the new test.
+    Not setting a side stream explicitly is alright on Linux because cuda tests implicitly use a side stream.
+    I think Windows cuda tests implicitly use the default stream, breaking capture and leaving the backend in a bad state.
+    Other graphs tests explicitly set side streams and don't error in Windows builds, so i'm 95% sure doing the same for the new test will work.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77789
+    Approved by: https://github.com/ezyang
+
+[33mcommit 0f328f3532fd0afc7aafabf677f8accc5708c74d[m
+Author: Michael Suo <suo@fb.com>
+Date:   Wed May 18 23:12:12 2022 +0000
+
+    Update scale-config.yml (#77803)
+    
+    more!
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77803
+    Approved by: https://github.com/seemethere
+
+[33mcommit dac3fba2744b5125a04f74f3374ccf58fd0e570c[m
+Author: Rodrigo Kumpera <kumpera@fb.com>
+Date:   Wed May 18 22:54:15 2022 +0000
+
+    Add testing workaround for EFA and TensorPipe (#77363)
+    
+    This is a workaround for EFA for TensorPipe.
+    
+    This allows RPC enabled tests to be ran on AWS clusters.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77363
+    Approved by: https://github.com/wanchaol
+
+[33mcommit d40a24005b87b84ec330d01a124d33dc1c23a6aa[m
+Author: Nikita Shulga <nshulga@fb.com>
+Date:   Wed May 18 22:09:02 2022 +0000
+
+    [GHF] Add URL for pending/failed mandatory checks (#77763)
+    
+    Makes debugging of failures like https://github.com/pytorch/pytorch/pull/76999#issuecomment-1129474207 easier, by posting a link to checkrun that have failed/still pending
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77763
+    Approved by: https://github.com/seemethere
+
+[33mcommit 5e0f559d234079aaca084cb31648cb7332a06233[m
+Author: PyTorch MergeBot <pytorchmergebot@users.noreply.github.com>
+Date:   Wed May 18 21:47:11 2022 +0000
+
+    Revert "Add sharding tests to multigpu-test.sh (#77708)"
+    
+    This reverts commit a7cf95a609a09dfb01558dc946b1cd1dfe0f5249.
+    
+    Reverted https://github.com/pytorch/pytorch/pull/77708 on behalf of https://github.com/suo
+
+[33mcommit c9570e4b88a86d317e7d046d2e63fe75d67b4a4d[m
+Author: Rodrigo Kumpera <kumpera@fb.com>
+Date:   Wed May 18 21:24:09 2022 +0000
+
+    [checkpoint] Synchronize error handling across all ranks (#77091)
+    
+    Introduce error handling across all ranks when loading and saving checkpoints.
+    
+    This makes it a lot simpler for users to handle failures and, as a positive side-effect, coordination of when it successfully finished.
+    
+    This change requires 3 collectives when saving and 1 when loading.
+    All those collectives carry a small payload so they will be latency bound and write time should dominate it.
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77091
+    Approved by: https://github.com/pritamdamania87, https://github.com/wanchaol
+
+[33mcommit 8b5f11c61eecd58214c631056a634f2eedc6455a[m
+Author: Pearu Peterson <pearu.peterson@gmail.com>
+Date:   Wed May 18 23:11:33 2022 +0300
+
+    Support copy_ for Sparse Compressed tensors.
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77605
+    
+    Approved by: https://github.com/cpuhrsch
+
+[33mcommit dcd2ba353844bbc7d480bf3aa15fd0eeb0d55e78[m[33m ([m[1;31morigin/prepare-custom-config[m[33m, [m[1;31morigin/gh/davidberard98/119/base[m[33m, [m[1;31morigin/gh/SS-JIA/50/base[m[33m)[m
+Author: Alban Desmaison <albandes@fb.com>
+Date:   Wed May 18 20:17:21 2022 +0000
+
+    improve mps note to describe the different functions available (#77767)
+    
+    Fixing https://github.com/pytorch/pytorch/issues/77748
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77767
+    Approved by: https://github.com/soulitzer
+
+[33mcommit 1f7d243e3619a3df0d4c0ad734c3c77849829d08[m
+Author: drisspg <drisspg@fb.com>
+Date:   Wed May 18 13:08:18 2022 -0700
+
+    Add USE_MPS option to cmake summary
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77782
+    
+    Approved by: https://github.com/albanD
+
+[33mcommit 0794d59d7672c95b0f6c18a66de728c8a65680b4[m
+Author: Joel Benjamin Schlosser <jbschlosser@fb.com>
+Date:   Wed May 18 15:54:39 2022 -0400
+
+    Throw a nice error when SubTensor.__torch_dispatch__() returns the wrong type for detach()
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77655
+    
+    Approved by: https://github.com/albanD
+
+[33mcommit 8881d7ac6ca3198e0f3b186c4341ecc61fe6f9e5[m
+Author: Joel Benjamin Schlosser <jbschlosser@fb.com>
+Date:   Tue May 17 11:27:10 2022 -0400
+
+    Support no-batch-dim for CrossEntropyLoss with prob target
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77653
+    
+    Approved by: https://github.com/albanD
+
+[33mcommit de86146c617747558c63a47eed52061b7215010d[m[33m ([m[1;31morigin/gh/drisspg/9/base[m[33m)[m
+Author: Jeff Daily <jeff.daily@amd.com>
+Date:   Wed May 18 19:42:58 2022 +0000
+
+    rocblas alt impl during backward pass only (#71881)
+    
+    In preparation of adopting future rocblas library options, it is necessary to track when the backward pass of training is executing.  The scope-based helper class `BackwardPassGuard` is provided to toggle state.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/71881
+    Approved by: https://github.com/albanD
+
+[33mcommit 0d8a0f186b1f6799c6bd6c4b7a577e4be306f031[m
+Author: PyTorch MergeBot <pytorchmergebot@users.noreply.github.com>
+Date:   Wed May 18 19:31:49 2022 +0000
+
+    Revert "Adds torch.cuda.is_current_stream_capturing (#77673)"
+    
+    This reverts commit d03d43df527e48771875537ad20212d5cb333215.
+    
+    Reverted https://github.com/pytorch/pytorch/pull/77673 on behalf of https://github.com/suo
+
+[33mcommit a2802ad0b928874a130bc8631adfabc8dc3c09a7[m
+Author: jjsjann123 <jiej@nvidia.com>
+Date:   Wed May 18 11:48:50 2022 -0700
+
+    Upstream master bump 0513 (#77471)
+    
+    Updating nvfuser code base.
+    
+    This should fix the indexing issue observed in https://github.com/pytorch/vision/issues/6015.
+    
+    Running tests locally as well. Will update the description here at a later point
+    
+    @bypass-github-export-checks
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77471
+    Approved by: https://github.com/seemethere, https://github.com/eellison
+
+[33mcommit 4941e72e409ef202e8ebe238096b665b2236482e[m
+Author: Edward Z. Yang <ezyang@fb.com>
+Date:   Wed May 18 08:53:20 2022 -0700
+
+    Revert "Revert "Implement sym_sizes to create proper IR for sym ints representing tensor sizes (#76836)""
+    
+    This reverts commit c35bd8d423ca53408c3aa39c2280167f3a22cea0.
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77719
+    
+    Approved by: https://github.com/Chillee, https://github.com/malfet
+
+[33mcommit befa4e371e561f795348106f1d02885d52af427f[m
+Author: Edward Z. Yang <ezyang@fb.com>
+Date:   Sat May 14 12:43:27 2022 -0400
+
+    Fix typo
+    
+    Fixes #77412
+    
+    Signed-off-by: Edward Z. Yang <ezyangfb.com>
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77488
+    
+    Approved by: https://github.com/mruberry
+
+[33mcommit 55be35ae395edc5e880b0d8902736ee580b313bd[m
+Author: Antonio Kim <antonio.kim@cerebras.net>
+Date:   Wed May 18 17:58:47 2022 +0000
+
+    Fix 'Code below assumes there is at least one tensor arg' assumption (#76917)
+    
+    Previously when codegening ops like `zeros_` or `ones_` we'd hit a `Code below assumes there is at least one tensor arg error`. This check is not entirely correct which is what is causing the error to be thrown. There are ops like the ones mentioned that pass in a `device` parameter that can be used in place of the "first tensor".
+    
+    CC: @wconstab @desertfire @henrytwo @ke1337
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/76917
+    Approved by: https://github.com/desertfire
+
+[33mcommit a7cf95a609a09dfb01558dc946b1cd1dfe0f5249[m
+Author: pritam <9958665+pritamdamania87@users.noreply.github.com>
+Date:   Wed May 18 17:37:55 2022 +0000
+
+    Add sharding tests to multigpu-test.sh (#77708)
+    
+    Summary: These tests were being skipped since they don't run on multigpu
+    jobs.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77708
+    Approved by: https://github.com/wanchaol
+
+[33mcommit 2a9901814759690eb4f4a2ea27acc58165c34920[m
+Author: John Clow <jclow@fb.com>
+Date:   Tue May 17 15:31:30 2022 -0700
+
+    Adding a way to register both upper and lower bound functions
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77388
+    
+    Approved by: https://github.com/eellison
+
+[33mcommit 73480bcbe09bf06e60431b945c1e049667de68dd[m
+Author: John Clow <jclow@fb.com>
+Date:   Tue May 17 15:43:55 2022 -0700
+
+    Adding support for nonzero in LazyTensor shape functions
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77572
+    
+    Approved by: https://github.com/Krovatkin
+
+[33mcommit 23b2e8821fbcd706d90cf1fdf8732b910a3f561f[m
+Author: kshitij12345 <kshitijkalambarkar@gmail.com>
+Date:   Wed May 18 17:24:03 2022 +0000
+
+    [fix] composite compliance : nuclear_norm (#77734)
+    
+    Reference : https://github.com/pytorch/pytorch/issues/69991
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77734
+    Approved by: https://github.com/zou3519
+
+[33mcommit 4eec865f5802f2c34eb34f9f89165f0aa4b5502f[m
+Author: Xiang Gao <qasdfgtyuiop@gmail.com>
+Date:   Wed May 18 17:21:34 2022 +0000
+
+    [nvFuser] Improving bitwise ops support (#77158)
+    
+    - Some renaming to better match PyTorch API:
+      - `lshift` -> `bitwise_left_shift`
+      - `rshift` -> `bitwise_right_shift`
+      - `andOp` -> `bitwise_and`
+      - `orOp` -> `bitwise_or`
+      - `xorOp` -> `bitwise_xor`
+      - `notOp` -> `bitwise_not`
+    - Fix type inferences and type checking of these ops
+    - Add `bitwise_*` to parser and python frontend
+    - Improve test coverage
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77158
+    Approved by: https://github.com/kevinstephano, https://github.com/jjsjann123
+
+[33mcommit 8571007017b61d793c406142bad6baeda331d00d[m
+Author: kshitij12345 <kshitijkalambarkar@gmail.com>
+Date:   Wed May 18 17:01:08 2022 +0000
+
+    [chalf] div, eq, masked_fill, index_put (#77479)
+    
+    Ref: https://github.com/pytorch/pytorch/issues/74537
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77479
+    Approved by: https://github.com/anjali411
+
+[33mcommit d03d43df527e48771875537ad20212d5cb333215[m
+Author: Michael Carilli <mcarilli@gmail.com>
+Date:   Wed May 18 16:46:35 2022 +0000
+
+    Adds torch.cuda.is_current_stream_capturing (#77673)
+    
+    Exposes a way to query if CUDA graph capture is underway on the current stream.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77673
+    Approved by: https://github.com/ezyang
+
+[33mcommit ddb2eb7aee3b6812dde7bfc32fc0f26f5e916e6a[m
+Author: lezcano <lezcano-93@hotmail.com>
+Date:   Wed May 18 11:13:27 2022 +0000
+
+    Micro-optimisations for matmul 2.0: Electric boogaloo
+    
+    This PR implements the bulk of
+    https://github.com/pytorch/pytorch/pull/64387
+    
+    Part of the optimisations were already merged in
+    https://github.com/pytorch/pytorch/pull/72230
+    
+    A number of these optimisations include:
+    - Make the code `const` correct.
+    - Create `DimVector`'s more efficiently (e.g. prefer `append` over
+    `insert`).
+    - Access sizes of the tensors via `sizes().front()` / `sizes().back()`
+      / `sizes().end()[-2]`
+    - Do not create intermediary tensors / vectors when it can be avoided.
+    - Call `reshape` rather than `expect_contiguous`  + `view`
+    
+    On top of these, it fixes a correctness issue of `matmul_out`, where the
+    out parameter was not resized correctly when passed to the backends.
+    This involves removing the use of `set_` from the calling code, as
+    requested by ezyang, and it incurs on most of the complexity of the
+    code that this PR adds.
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/75197
+    
+    Approved by: https://github.com/mruberry
+
+[33mcommit c446f78ffd1bf2ce39a890f02325991b4441080b[m
+Author: lezcano <lezcano-93@hotmail.com>
+Date:   Wed May 18 11:13:26 2022 +0000
+
+    Use any_type in test_out
+    
+    Previously, test_out used `OpDTypes.none` and then it pretty much
+    implemented `OpDtypes.any_type` inside. This PR changes it to use
+    `OpDTypes`. This has the advantage that the test now has a dtype, so it
+    can be used together with decorators that require a `dtype`, such as
+    `toleranceOverride`.
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77735
+    
+    Approved by: https://github.com/mruberry
+
+[33mcommit 4d1ead6dff12620c979850593fe93466f2014033[m
+Author: Ning Li (Seattle) <ningli@fb.com>
+Date:   Wed May 18 16:23:07 2022 +0000
+
+    [DataPipe] Update `mux` data pipe (#76384) (#77145)
+    
+    Summary:
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/76384
+    
+    OSS issue discussion: https://github.com/pytorch/data/issues/346
+    This diff updates `mux` and `mux_longest` data pipe.
+    `mux`: Yields one element at a time from each of the input Iterable DataPipes (functional name: ``mux``). As in, one element from the 1st input DataPipe, then one element from the 2nd DataPipe in the next iteration, and so on. It ends when the shortest input DataPipe is exhausted.
+    
+    `mux` example:
+    
+    ```
+    >>> from torchdata.datapipes.iter import IterableWrapper
+    >>> dp1, dp2, dp3 = IterableWrapper(range(3)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
+    >>> list(dp1.mux(dp2, dp3))
+    [0, 10, 20, 1, 11, 21, 2, 12, 22]
+    ```
+    
+    Test Plan:
+    buck test mode/opt //caffe2/test:datapipe
+    
+    https://www.internalfb.com/intern/testinfra/testrun/4785074706282345
+    
+    Differential Revision: D36017945
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77145
+    Approved by: https://github.com/NivekT, https://github.com/ejguan
+
+[33mcommit 4c34343216b8b47f1826b09bc0df252b803fcf99[m
+Author: Rohan Varma <rvarm1@fb.com>
+Date:   Wed May 18 14:59:36 2022 +0000
+
+    [FSDP] Warning for shared params, small doc fixes (#77726)
+    
+    - Add warning about limited shared param suppport
+    - Some small doc fixes after combing through the docs ; we should do a more thorough doc lookthrough.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77726
+    Approved by: https://github.com/zhaojuanmao
+
+[33mcommit 05ce0f9be63dd6fadd2fb40c29f8f867f267002b[m
+Author: Elias Ellison <eellison@devfair044.h1.fair>
+Date:   Mon May 16 10:14:09 2022 -0700
+
+    Add option to disable autocast pass
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77566
+    
+    Approved by: https://github.com/anijain2305, https://github.com/davidberard98
+
+[33mcommit e10a002e52d6b677be07405f9bd97bc0d4dd06bf[m
+Author: Christian Puhrsch <cpuhrsch@fb.com>
+Date:   Wed May 18 14:49:11 2022 +0000
+
+    2D Strided to/from CSC, COO to CSC, CSC to CSC conversion. (#77521)
+    
+    Adds
+    - to_sparse_csc for strided input
+    - to_sparse_csc for COO input
+    - CSC to strided
+    - CSC to CSR
+    - CSC to CSC
+    
+    Uses SciPy as a reference
+    
+    Follow up work is changing transpose to return CSC when passed CSR and the resulting ripples through our matmul operations.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77521
+    Approved by: https://github.com/pearu, https://github.com/anjali411
+
+[33mcommit 687ab97338c434f2d428325fd742ae7cd3042b53[m
+Author: Kshiteej K <kshitijkalambarkar@gmail.com>
+Date:   Wed May 18 14:33:59 2022 +0000
+
+    [reland][chalf] enable testing for multiple ops (#77656)
+    
+    Reland: https://github.com/pytorch/pytorch/pull/77405
+    Ref: #74537
+    
+    Enable for `permute, split, split_with_sizes, select, ravel, reshape, reshape_as, unfold, squeeze, unsqueeze, transpose`
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77656
+    Approved by: https://github.com/anjali411
+
+[33mcommit edc904d6ba50f8db2777fb1d60b3e7e074786760[m
+Author: Brian Hirsh <hirsheybar@fb.com>
+Date:   Tue May 17 20:09:44 2022 -0700
+
+    add native view_copy.out ops, teach codegen about tensorlist out=
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/76126
+    
+    Approved by: https://github.com/ezyang
+
+[33mcommit a325fa94b9bc62406cd512065227d0c3fc03c6f6[m[33m ([m[1;31morigin/gh/dreiss/117/base[m[33m, [m[1;31morigin/gh/dreiss/116/base[m[33m)[m
+Author: Jane Xu <janeyx@fb.com>
+Date:   Wed May 18 14:17:16 2022 +0000
+
+    [flaky test reporting] print stack trace for flaky reruns (#77664)
+    
+    Give context about failures ~and include it in the test report~! Unfortunately I cannot include it easily in the test report through the addExpectedFailures :c as tracebacks are not something I can instantiate. (see revert comment)
+    
+    Current way doesn't print the stack traces, which has been fine because we don't hide the signal and it shows up at the end:
+    <img width="545" alt="image" src="https://user-images.githubusercontent.com/31798555/168878182-914edc39-369f-40bc-8b35-9d5cd47a6b1c.png">
+    
+    However, when we want to hide the signal, we'd like to print the stack traces for each failed attempt, as it won't be shown at the end.
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77664
+    Approved by: https://github.com/suo
+
+[33mcommit 580a053832cea61affce5fdb61c737036c8954af[m
+Author: Mike Ruberry <mruberry@fb.com>
+Date:   Wed May 18 13:57:26 2022 +0000
+
+    [primTorch] Enforces stride metadata (#77542)
+    
+    This PR...
+    
+    **Filed the Following Issues**
+    - https://github.com/pytorch/pytorch/issues/77553
+    - https://github.com/pytorch/pytorch/issues/77526
+    - https://github.com/pytorch/pytorch/issues/77600
+    
+    **Testing**
+    - Updates test_dtypes to longer attempt to test the backward of sample inputs where no inputs require grad
+    - Adds a new test_python_reference_errors; it ensures the meta operations for references throw errors as expected
+    - Updates compare_tensor_meta to better handle CUDA devices, and (temporarily) restricts stride checking to the CUDA device type
+    - Elementwise unary and elementwise binary operators now have arbitrarily strided reference inputs
+    - Reference inputs for _like functions are added
+    - An OpInfo for torch.empty is added
+    - Reference inputs for torch.clone are added
+    - A NumPy reference for clone is added
+    - Adds OpInfos for refs.empty and refs.empty_like
+    
+    **Prims**
+    - Renames the "max" and "min" prims have been renamed to "maximum" and "minimum," respectively, to better conform to their ATen names
+    - Adds the empty, empty_like, full, and full_like prims
+    - Fixes the elementwise meta function's stride propagation
+    - Fixes clone's meta function's stride propagation
+    - Fixes convert_element_type's meta's stride propagation
+    - Adds a (temporary) _to_dtype pprivate prim that casts a tensor while preserving its stride permutation
+    - Removes the _set prim comment
+    - Adds utils.compute_elementwise_output_strides, which computes the correct output strides for elementwise operations
+    - Corrects an issue where utils.make_contiguous_strides_for was creating the incorrect strides for tensors with no elements
+    
+    **References**
+    - Adds the empty, empty_like, full, full_like, and ones_like refs
+    - Extends make_elementwise_unary_reference to accept an additional callable to perform extra input validation
+    - Adds an extra validation function to handle refs.neg(BoolTensor)
+    - Updates the isfinite ref to call ones_like when appropriate
+    - Models Python scalar handling for elementwise binary operations
+    - Added a 64 dim check for the amin and amax references
+    - opmath is now a flag that can be set separately for cpu and CUDA
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77542
+    Approved by: https://github.com/ezyang
+
+[33mcommit 93b20b0232c61adf89c0d9b484320079d8632480[m
+Author: Andrew Gu <andgu@fb.com>
+Date:   Tue May 17 23:54:59 2022 +0000
+
+    [FSDP][Easy] Remove extraneous print
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77705
+    
+    Approved by: https://github.com/zhaojuanmao
+
+[33mcommit ccc991ba290fdd2aab3b4de5765a6f80864196f3[m
+Author: Pearu Peterson <pearu.peterson@gmail.com>
+Date:   Wed May 18 13:31:29 2022 +0300
+
+    Support str for Sparse Compressed tensors
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77530
+    
+    Approved by: https://github.com/cpuhrsch
+
+[33mcommit 6436fba3195ab4dea751836a2a1265962bc60f20[m
+Author: Alban Desmaison <albandes@fb.com>
+Date:   Tue May 17 17:15:06 2022 -0400
+
+    Migrate cross compilation trunk test to use macos12 to build MPS
+    
+    Note that the generated binaries are not tested yet
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77647
+    
+    Approved by: https://github.com/malfet, https://github.com/seemethere
+
+[33mcommit 7c3d3b759b4b5f9c3012dfbf228a72e4c2d58bce[m[33m ([m[1;31morigin/gh/george-qi/38/base[m[33m)[m
+Author: Alban Desmaison <albandes@fb.com>
+Date:   Tue May 17 17:15:05 2022 -0400
+
+    Migrate x86 trunk build/test to macos12
+    
+    This will enable MPS building but will NOT test mps
+    as the runner do not have AMD gpus
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/77645
+    
+    Approved by: https://github.com/malfet, https://github.com/seemethere
+
+[33mcommit 13d8fb93bb59c6f3404424b4095305a991cca90a[m
+Author: lezcano <lezcano-93@hotmail.com>
+Date:   Wed May 18 11:40:47 2022 +0000
+
+    Fix derivatives for linalg.vector_norm(..., dtype=)
+    
+    As per title
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/76551
+    
+    Approved by: https://github.com/mruberry
+
+[33mcommit ff7b6d6b5fb343c7e5e72c8a9ee4df3302396867[m
+Author: lezcano <lezcano-93@hotmail.com>
+Date:   Wed May 18 11:40:47 2022 +0000
+
+    Update linalg.*norm
+    
+    This PR does a number of things:
+    - Move linalg.vector_norm to structured kernels and simplify the logic
+    - Fixes a number of prexisting issues with the dtype kwarg of these ops
+    - Heavily simplifies and corrects the logic of `linalg.matrix_norm` and `linalg.norm` to be consistent with the docs
+      - Before the `_out` versions of these functions were incorrect
+      - Their implementation is now as efficient as expected, as it avoids reimplementing these operations whenever possible.
+    - Deprecates `torch.frobenius_norm` and `torch.nuclear_norm`, as they were exposed in the API and they are apparently being used in mobile (??!!) even though they were not documented and their implementation was slow.
+      - I'd love to get rid of these functions already, but I guess we have to go through their deprecation.
+    
+    Pull Request resolved: https://github.com/pytorch/pytorch/pull/76547
+    
+    Approved by: https://github.com/mruberry
