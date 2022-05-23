@@ -1604,7 +1604,7 @@ def rot90(a: TensorLikeType, k: int = 1, dims: DimsType = (0, 1)) -> TensorLikeT
 
 def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
-    # ATen has int[1] type which expands intgers to tuples of length 1
+    # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
     if not isinstance(shifts, Iterable):
         shifts = (shifts,)
     if not isinstance(dims, Iterable):
