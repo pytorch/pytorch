@@ -598,7 +598,9 @@ class TestCudaFuser(JitTestCase):
             #  bfloat16 kernels instead of eager mode
             #  implementation, since mismatch in cast
             #  adds excessive noise.
-            o = t(x.to(torch.float64), y.to(torch.float64)).to(torch.bfloat16)
+            o = t(x.to(torch.float64), y.to(torch.float64))
+            if o.dtype.is_floating_point:
+                o = o.to(torch.bfloat16)
         else:
             o = t(x, y)
 
@@ -921,7 +923,6 @@ class TestCudaFuser(JitTestCase):
                 self.assertEqual(o.dtype, jit_o.dtype)
                 if test_value:
                     self.assertEqual(o, jit_o)
-                print(t_jit.graph_for(x, y))
                 self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
         except Exception as e:
             print("failing test for op: ", operation.__name__)
