@@ -1579,7 +1579,7 @@ def rot90(a: TensorLikeType, k: int = 1, dims: DimsType = (0, 1)) -> TensorLikeT
         raise ValueError(f"expected total rotation dims == 2, but got dims = {len(dims)}")
     if a.ndim < 2:
         raise ValueError(f"expected total dims >= 2, but got total dims = {a.ndim}")
-    if not (dims[0] != dims[1] and abs(dims[0] - dims[1]) != a.ndim):
+    if not (dims[0] != dims[1] and (dims[0] - dims[1]).__abs__() != a.ndim):
         raise ValueError(f"expected rotation dims to be different, but got dim0 = {dims[0]} and dim1 = {dims[1]}")
     if not (dims[0] < a.ndim and dims[0] >= -a.ndim):
         raise ValueError(f"Rotation dim0 out of range, dim0 = {dims[0]}")
@@ -1587,11 +1587,11 @@ def rot90(a: TensorLikeType, k: int = 1, dims: DimsType = (0, 1)) -> TensorLikeT
         raise ValueError(f"Rotation dim1 out of range, dim1 = {dims[1]}")
     k = k % 4  # Rotation direction is from the second towards the first axis for k < 0
     if k == 1:
-        return transpose(flip(a, (dims[1],)), dims[0], dims[1])
+        return clone(transpose(flip(a, (dims[1],)), dims[0], dims[1]))
     elif k == 2:
         return flip(a, dims)
     elif k == 3:
-        return transpose(flip(a, (dims[0],)), dims[0], dims[1])
+        return clone(transpose(flip(a, (dims[0],)), dims[0], dims[1]))
     else:
         return clone(a)
 

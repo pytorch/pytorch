@@ -19229,6 +19229,10 @@ python_ref_db = [
         torch_opinfo_name="reshape",
     ),
     PythonRefInfo(
+        "_refs.rot90",
+        torch_opinfo_name="rot90",
+    ),
+    PythonRefInfo(
         "_refs.stack",
         torch_opinfo_name="stack",
         skips=(
