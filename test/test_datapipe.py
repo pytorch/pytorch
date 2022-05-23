@@ -1492,7 +1492,6 @@ class TestFunctionalIterDataPipe(TestCase):
 
             # Test Deterministic
             for num_workers in (0, 1, 2):
-                dl_res = []
                 mp_ctx = "spawn" if num_workers > 0 else None
                 dl = DataLoader(
                     shuffle_dp,
@@ -1501,6 +1500,14 @@ class TestFunctionalIterDataPipe(TestCase):
                     multiprocessing_context=mp_ctx,
                     worker_init_fn=_worker_init_fn
                 )
+
+                # No seed
+                dl_res_ns = list(dl)
+                self.assertEqual(len(dl_res_ns), len(exp))
+                self.assertEqual(sorted(dl_res_ns), sorted(exp))
+
+                # Same seeds
+                dl_res = []
                 for epoch in range(2):
                     torch.manual_seed(123)
                     dl_res.append(list(dl))
@@ -2190,7 +2197,7 @@ class TestSerialization(TestCase):
         dl = DataLoader(idp, num_workers=2, shuffle=True,
                         multiprocessing_context='spawn', collate_fn=unbatch, batch_size=1)
         result = list(dl)
-        self.assertEquals([1, 1, 2, 2, 3, 3], sorted(result))
+        self.assertEqual([1, 1, 2, 2, 3, 3], sorted(result))
 
     @skipIfNoDill
     def test_spawn_lambdas_map(self):
@@ -2198,7 +2205,7 @@ class TestSerialization(TestCase):
         dl = DataLoader(mdp, num_workers=2, shuffle=True,
                         multiprocessing_context='spawn', collate_fn=unbatch, batch_size=1)
         result = list(dl)
-        self.assertEquals([1, 2, 3, 4, 5, 6], sorted(result))
+        self.assertEqual([1, 2, 3, 4, 5, 6], sorted(result))
 
 
 class TestCircularSerialization(TestCase):
