@@ -1,3 +1,4 @@
+
 #define __NVFUSER_HALF_TO_US(var) *(reinterpret_cast<unsigned short*>(&(var)))
 #define __NVFUSER_HALF_TO_CUS(var) \
   *(reinterpret_cast<const unsigned short*>(&(var)))
@@ -30,13 +31,24 @@ __device__ float __half2float(const __half h) {
   return val;
 }
 
-// aligned vector generates vectorized load/store on CUDA
-template <typename scalar_t, int vec_size>
-struct alignas(sizeof(scalar_t) * vec_size) Array {
-  scalar_t val[vec_size];
-  __device__ void set(scalar_t v) {
-    for (int i = 0; i < vec_size; ++i) {
-      val[i] = v;
-    }
-  }
-};
+__device__ __half __double2half(const double d) {
+#if __CUDA_ARCH__ >= 700
+  __half val;
+  asm("{  cvt.rn.f16.f64 %0, %1;}\n"
+      : "=h"(__NVFUSER_HALF_TO_US(val))
+      : "d"(d));
+  return val;
+#else
+  return __float2half(static_cast<float>(d));
+#endif
+}
+
+__device__ double __half2double(const __half h) {
+#if __CUDA_ARCH__ >= 700
+  double val;
+  asm("{  cvt.f64.f16 %0, %1;}\n" : "=d"(val) : "h"(__NVFUSER_HALF_TO_CUS(h)));
+  return val;
+#else
+  return static_cast<double>(__half2float(h));
+#endif
+}

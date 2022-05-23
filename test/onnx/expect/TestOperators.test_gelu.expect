@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "1"
+    output: "onnx::Div_1"
     name: "Constant_0"
     op_type: "Constant"
     attribute {
@@ -16,20 +16,20 @@ graph {
     }
   }
   node {
-    input: "x"
-    input: "1"
-    output: "2"
+    input: "onnx::Div_0"
+    input: "onnx::Div_1"
+    output: "onnx::Erf_2"
     name: "Div_1"
     op_type: "Div"
   }
   node {
-    input: "2"
-    output: "3"
+    input: "onnx::Erf_2"
+    output: "onnx::Add_3"
     name: "Erf_2"
     op_type: "Erf"
   }
   node {
-    output: "4"
+    output: "onnx::Add_4"
     name: "Constant_3"
     op_type: "Constant"
     attribute {
@@ -42,21 +42,21 @@ graph {
     }
   }
   node {
-    input: "3"
-    input: "4"
-    output: "5"
+    input: "onnx::Add_3"
+    input: "onnx::Add_4"
+    output: "onnx::Mul_5"
     name: "Add_4"
     op_type: "Add"
   }
   node {
-    input: "x"
-    input: "5"
-    output: "6"
+    input: "onnx::Div_0"
+    input: "onnx::Mul_5"
+    output: "onnx::Mul_6"
     name: "Mul_5"
     op_type: "Mul"
   }
   node {
-    output: "7"
+    output: "onnx::Mul_7"
     name: "Constant_6"
     op_type: "Constant"
     attribute {
@@ -69,15 +69,15 @@ graph {
     }
   }
   node {
-    input: "6"
-    input: "7"
+    input: "onnx::Mul_6"
+    input: "onnx::Mul_7"
     output: "8"
     name: "Mul_7"
     op_type: "Mul"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "x"
+    name: "onnx::Div_0"
     type {
       tensor_type {
         elem_type: 1
@@ -122,5 +122,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }

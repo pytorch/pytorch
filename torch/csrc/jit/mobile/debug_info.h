@@ -3,6 +3,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/ir/scope.h>
+#include <torch/csrc/jit/serialization/source_range_serialization.h>
 
 namespace torch {
 namespace jit {
@@ -23,6 +24,10 @@ class MobileDebugTable {
   MobileDebugTable(
       std::unique_ptr<caffe2::serialize::PyTorchStreamReader>& reader,
       const std::shared_ptr<CompilationUnit>& cu);
+
+  template <typename It>
+  MobileDebugTable(It begin, It end) : callstack_ptr_map_(begin, end) {}
+
   std::string getSourceDebugString(
       const int64_t debug_handle,
       const std::string& top_module_type_name = "ModuleTypeUnknown") const;
@@ -35,6 +40,11 @@ class MobileDebugTable {
   std::string getModuleHierarchyInfo(
       const std::vector<int64_t>& debug_handles,
       const std::string& top_module_type_name = "ModuleTypeUnknown") const;
+
+  const ska::flat_hash_map<int64_t, DebugInfoTuple>& getCallStackPtrMap()
+      const {
+    return callstack_ptr_map_;
+  }
 
  private:
   std::pair<std::string, std::string> getSourceDebugModuleHierarchyInfo(

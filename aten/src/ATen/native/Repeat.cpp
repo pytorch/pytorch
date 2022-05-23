@@ -47,8 +47,19 @@ Tensor repeat_interleave(
     c10::optional<int64_t> dim,
     c10::optional<int64_t> output_size) {
   Tensor input = self;
+
+  // Store conj and neg bits
+  const auto conj = input.is_conj();
+  if (conj) {
+    input = input.conj();
+  }
+  const auto neg = input.is_neg();
+  if (neg) {
+    input = input._neg_view();
+  }
+
   if (!dim) {
-    input = self.flatten();
+    input = input.flatten();
     dim = 0;
   }
 
@@ -63,8 +74,16 @@ Tensor repeat_interleave(
     AT_ERROR("repeats must be 0-dim or 1-dim tensor");
   }
 
-  return input.index_select(
+  auto ret = input.index_select(
       dim.value(), at::repeat_interleave(repeats_, output_size));
+  // Restore conj and neg bits
+  if (conj) {
+    ret = ret.conj();
+  }
+  if (neg) {
+    ret = ret._neg_view();
+  }
+  return ret;
 }
 
 Tensor repeat_interleave(

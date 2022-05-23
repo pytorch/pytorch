@@ -15,6 +15,7 @@ set CMAKE_VERBOSE_MAKEFILE=1
 
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
 
+
 call %INSTALLER_DIR%\install_mkl.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
@@ -88,6 +89,7 @@ if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=5.2
 
 :: The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
 set SCCACHE_IDLE_TIMEOUT=0
+set SCCACHE_IGNORE_SERVER_IO_ERROR=1
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats
@@ -139,7 +141,7 @@ python setup.py install --cmake && sccache --show-stats && (
   if "%BUILD_ENVIRONMENT%"=="" (
     echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
   ) else (
-    7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
+    7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torchgen %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
     if errorlevel 1 exit /b
     if not errorlevel 0 exit /b
 
@@ -153,4 +155,5 @@ python setup.py install --cmake && sccache --show-stats && (
 
 sccache --show-stats > stats.txt
 python -m tools.stats.upload_sccache_stats stats.txt
+sccache --stop-server
 rm stats.txt

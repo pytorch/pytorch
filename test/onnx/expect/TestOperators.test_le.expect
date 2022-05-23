@@ -3,21 +3,15 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    input: "1"
+    input: "onnx::LessOrEqual_0"
+    input: "onnx::LessOrEqual_1"
     output: "2"
-    name: "Greater_0"
-    op_type: "Greater"
+    name: "LessOrEqual_0"
+    op_type: "LessOrEqual"
   }
-  node {
-    input: "2"
-    output: "3"
-    name: "Not_1"
-    op_type: "Not"
-  }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::LessOrEqual_0"
     type {
       tensor_type {
         elem_type: 6
@@ -33,7 +27,7 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "onnx::LessOrEqual_1"
     type {
       tensor_type {
         elem_type: 6
@@ -49,7 +43,7 @@ graph {
     }
   }
   output {
-    name: "3"
+    name: "2"
     type {
       tensor_type {
         elem_type: 9
@@ -66,5 +60,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }

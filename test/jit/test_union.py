@@ -33,6 +33,21 @@ class TestUnion(JitTestCase):
     equivalent functions to emulate `checkScript`.
     """
 
+    def test_check_union_annotation(self):
+        def test_func(a: Union[int, float], b: Optional[int]):
+            return 0
+
+        scripted_func = torch.jit.script(test_func)
+        graph_rep = str(scripted_func.graph)
+        code_rep = str(scripted_func.code)
+        # TS graph IR for Union should be annotated as Union()
+        FileCheck().check("Union(").check("int?").run(graph_rep)
+        # Serialized code for Union should be annotated as Union[]
+        FileCheck().check("Union[").check("Optional[int]").run(code_rep)
+        self.checkScript(test_func, (5, 6))
+        # this shouldn't error out
+        torch._C.parse_ir(str(scripted_func.graph))
+
     def test_union_with_scalar_values(self):
         def fn(x: Union[int, float]) -> str:
             return "foo"
@@ -97,7 +112,7 @@ class TestUnion(JitTestCase):
 
     def test_union_in_class_constructor(self):
 
-        @torch.jit.script
+        @torch.jit.script  # noqa: B903
         class A(object):    # noqa: B903
             def __init__(self, x: Union[int, str]) -> None:
                 self.x = x
@@ -210,7 +225,7 @@ class TestUnion(JitTestCase):
 
         s = fn.graph
 
-        FileCheck().check("x : Union[float, int, str]")    \
+        FileCheck().check("x : Union(float, int, str)")    \
                    .run(s)
 
     def test_unions_of_a_single_argument_vanish(self):
@@ -230,7 +245,7 @@ class TestUnion(JitTestCase):
 
         s = fn.graph
 
-        FileCheck().check("x : Union[int, str]")    \
+        FileCheck().check("x : Union(int, str)")    \
                    .run(s)
 
     def test_union_redundant_arguments_are_skipped_optional(self):
@@ -240,7 +255,7 @@ class TestUnion(JitTestCase):
 
         s = fn.graph
 
-        FileCheck().check("x : Union[float, int, NoneType]")    \
+        FileCheck().check("x : Union(float, int, NoneType)")    \
                    .run(s)
 
     def test_union_redundant_arguments_are_skipped_subtyping(self):
@@ -250,7 +265,7 @@ class TestUnion(JitTestCase):
 
         s = fn.graph
 
-        FileCheck().check("x : Union[(int?, int), str]")    \
+        FileCheck().check("x : Union((int?, int), str)")    \
                    .run(s)
 
     def test_union_redundant_arguments_are_skipped_container(self):
@@ -260,7 +275,7 @@ class TestUnion(JitTestCase):
 
         s = fn.graph
 
-        FileCheck().check("x : Union[float[], str[]]")     \
+        FileCheck().check("x : Union(float[], str[])")     \
                    .run(s)
 
     def test_union_argument_order_is_ignored(self):
@@ -273,7 +288,7 @@ class TestUnion(JitTestCase):
             return "foo"
 
         for s in (fn1.graph, fn2.graph):
-            FileCheck().check("x : Union[int, str]")     \
+            FileCheck().check("x : Union(int, str)")     \
                 .run(s)
 
     def test_union_argument_order_is_ignored_container(self):
@@ -286,7 +301,7 @@ class TestUnion(JitTestCase):
             return "foo"
 
         for s in (fn1.graph, fn2.graph):
-            FileCheck().check("x : Union[int[], str[]]")     \
+            FileCheck().check("x : Union(int[], str[])")     \
                 .run(s)
 
     def test_union_T_None_is_equivalent_to_optional_T(self):

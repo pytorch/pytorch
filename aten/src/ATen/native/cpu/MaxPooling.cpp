@@ -1,4 +1,6 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/MaxPooling.h>
@@ -30,13 +32,13 @@ void max_pool1d_impl(
     Tensor& output,
     const Tensor& input,
     const PoolingParams1D& p) {
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "max_pool1d_impl", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool1d_impl", [&] {
     const Tensor in = input.contiguous();
     scalar_t* const OP = output.data_ptr<scalar_t>();
     const scalar_t* const IP = in.data_ptr<scalar_t>();
 
     // Value used for padding
-    constexpr scalar_t FILL = std::numeric_limits<scalar_t>::has_infinity
+    scalar_t FILL = std::numeric_limits<scalar_t>::has_infinity
         ? -std::numeric_limits<scalar_t>::infinity()
         : std::numeric_limits<scalar_t>::lowest();
 

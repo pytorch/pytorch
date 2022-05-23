@@ -30,7 +30,7 @@ Tensor flatten_indices(const Tensor& indices, IntArrayRef full_size, bool force_
     }
   } else {
     std::vector<int64_t> indices_mult_cpu_vec;
-    indices_mult_cpu_vec.reserve(sparse_dim);
+    indices_mult_cpu_vec.resize(sparse_dim);
     int64_t mult = 1;
     for (int64_t i = sparse_dim - 1; i >= 0; i--) {
       indices_mult_cpu_vec[i] = mult;

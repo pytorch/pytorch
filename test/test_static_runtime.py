@@ -18,10 +18,7 @@ class StaticModule:
             self.static_module = torch._C._jit_to_static_module(scripted.graph)
 
     def __call__(self, *args, **kwargs):
-        if not kwargs:
-            return self.static_module(args, {})
-        else:
-            return self.static_module(args, kwargs)
+        return self.static_module(*args, **kwargs)
 
     def benchmark(self, args, kwargs, warmup_runs, main_runs):
         self.static_module.benchmark(args, kwargs, warmup_runs, main_runs)
@@ -361,6 +358,27 @@ class TestStaticModule(TestCase):
         for i in o_ref.keys():
             torch.testing.assert_close(o_ref[i], o_test[i])
 
+    def test_create_object(self):
+        class Foo:  # noqa: B903
+            def __init__(self, x: torch.Tensor) -> None:
+                self.x = x
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, y: torch.Tensor) -> torch.Tensor:
+                foo = Foo(y)
+                return y * foo.x
+
+        mod = torch.jit.script(Mod()).eval()
+        y = torch.randn((1, ))
+        expected = mod(y)
+
+        static_mod = StaticModule(torch.jit.freeze(mod))
+        actual = static_mod(y)
+
+        self.assertEqual(expected, actual)
 
 if __name__ == "__main__":
     run_tests()

@@ -122,7 +122,7 @@ Value* TracingState::getValue(const IValue& var) {
   } else if (var.isTuple()) {
     return graph
         ->insertNode(graph->createTuple(fmap(
-            var.toTuple()->elements(),
+            var.toTupleRef().elements(),
             [&](const IValue& val) { return getValue(val); })))
         ->output();
   } else if (var.isGenericDict()) {
@@ -270,7 +270,7 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
                 [&](const IValue& ival) { return getOutput(ival, i); })))
         ->output();
   } else if (iv.isTuple()) {
-    const auto& tuple = iv.toTuple()->elements();
+    const auto& tuple = iv.toTupleRef().elements();
     auto tuple_node = graph->createTuple(
         fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }));
     graph->insertNode(tuple_node);
@@ -321,6 +321,14 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
     AT_ERROR(
         "Only tensors, lists, tuples of tensors, or dictionary of tensors can be output from traced functions");
   }
+}
+
+Node* TracingState::createNode(c10::Symbol op_name, size_t num_outputs) {
+  return graph->create(op_name, num_outputs);
+}
+
+void TracingState::insertNode(Node* node) {
+  graph->insertNode(node);
 }
 
 // XXX: this function mutates input
@@ -547,7 +555,7 @@ void TracingState::setValue(const IValue& v, Value* value) {
       setValue(outputs.get(i), unpack_node->outputs()[i]);
     }
   } else if (v.isTuple()) {
-    const auto& outputs = v.toTuple()->elements();
+    const auto& outputs = v.toTupleRef().elements();
     Node* unpack_node = graph->insertNode(graph->createTupleUnpack(value));
     for (const auto i : c10::irange(outputs.size())) {
       setValue(outputs[i], unpack_node->outputs()[i]);
@@ -582,6 +590,16 @@ void TracingState::setValue(const IValue& v, Value* value) {
 }
 
 void addInputs(Node* n, const char* name, int64_t value) {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasValue(name)) {
+    Value* v = ArgumentStash::popValue(name);
+    n->addInput(v);
+  } else {
+    detail::genericAddInput(n, value);
+  }
+}
+
+void addInputs(Node* n, const char* name, c10::SymInt value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {
     Value* v = ArgumentStash::popValue(name);
@@ -782,11 +800,28 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
       g->insertNode(g->createList(jit::IntType::get(), info))->output());
 }
 
+void addInputs(Node* n, const char* name, c10::SymIntArrayRef value) {
+  TORCH_CHECK(false, "Tracing operations taking symbolic ints isn't supported");
+}
+
 void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::IntArrayRef>& opt_value) {
   detail::genericAddOptionalInput(n, name, opt_value);
+}
+
+void addInputs(
+    Node* n,
+    const char* name,
+    const at::OptionalIntArrayRef& opt_value) {
+  if (opt_value.has_value()) {
+    jit::tracer::addInputs(n, name, *opt_value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
 }
 
 void addInputs(Node* n, const char* name, ArrayRef<double> value) {
@@ -884,6 +919,27 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
       graph->insertNode(graph->createNumToTensor(node->output()))->output();
   setValueTrace(size_var, ten);
   return size_var;
+}
+
+autograd::Variable getNumelOf(const autograd::Variable& var) {
+  auto& tracing_state = getTracingState();
+  auto& graph = tracing_state->graph;
+
+  Variable numel_var;
+  {
+    // Make sure this scalar to tensor isn't traced!
+    at::AutoDispatchBelowADInplaceOrView guard;
+    numel_var = scalar_to_tensor(at::Scalar(var.numel()));
+  }
+  auto* value = getValueTrace(var);
+  auto* node = graph->insertNode(graph->create(Symbol::aten("numel"), {value}));
+  recordSourceLocation(node);
+  node->output()->setType(jit::IntType::get());
+
+  auto ten =
+      graph->insertNode(graph->createNumToTensor(node->output()))->output();
+  setValueTrace(numel_var, ten);
+  return numel_var;
 }
 
 void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {

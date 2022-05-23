@@ -16,36 +16,33 @@ class Example(TypedDict):
 
 def parse_block(block: List[str]) -> Optional[Example]:
     if block:
-        match = re.match(r'^\$ ([^ ]+) (.*)$', block[0])
+        match = re.match(r"^\$ ([^ ]+) (.*)$", block[0])
         if match:
             cmd, first = match.groups()
             args = []
             for i, line in enumerate([first] + block[1:]):
-                if line.endswith('\\'):
+                if line.endswith("\\"):
                     args.append(line[:-1])
                 else:
                     args.append(line)
                     break
             return {
-                'cmd': cmd,
-                'args': shlex.split(''.join(args)),
-                'lines': block[i + 1:]
+                "cmd": cmd,
+                "args": shlex.split("".join(args)),
+                "lines": block[i + 1 :],
             }
     return None
 
 
 def parse_description(description: str) -> List[Example]:
     examples: List[Example] = []
-    for block in description.split('\n\n'):
-        matches = [
-            re.match(r'^    (.*)$', line)
-            for line in block.splitlines()
-        ]
+    for block in description.split("\n\n"):
+        matches = [re.match(r"^    (.*)$", line) for line in block.splitlines()]
         if all(matches):
             lines = []
             for match in matches:
                 assert match
-                line, = match.groups()
+                (line,) = match.groups()
                 lines.append(line)
             example = parse_block(lines)
             if example:
@@ -53,6 +50,7 @@ def parse_description(description: str) -> List[Example]:
     return examples
 
 
+@unittest.skip("Skipping as this test is fragile, issue #73083")
 class TestTestHistory(unittest.TestCase):
     maxDiff = None
 
@@ -61,14 +59,16 @@ class TestTestHistory(unittest.TestCase):
         self.assertEqual(len(examples), 3)
         for i, example in enumerate(examples):
             with self.subTest(i=i):
-                self.assertTrue(test_history.__file__.endswith(example['cmd']))
-                expected = example['lines']
-                actual = list(itertools.islice(
-                    test_history.run(example['args']),
-                    len(expected),
-                ))
+                self.assertTrue(test_history.__file__.endswith(example["cmd"]))
+                expected = example["lines"]
+                actual = list(
+                    itertools.islice(
+                        test_history.run(example["args"]),
+                        len(expected),
+                    )
+                )
                 self.assertEqual(actual, expected)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

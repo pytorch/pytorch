@@ -41,7 +41,7 @@ TEST(TorchDeployGPUTest, SimpleModel) {
   {
     auto I = p.acquireSession();
     auto eg = I.self.attr("load_pickle")({"model", "example.pkl"}).toIValue();
-    inputs = eg.toTuple()->elements();
+    inputs = eg.toTupleRef().elements();
     inputs[0] = inputs[0].toTensor().to("cuda");
   }
   at::Tensor output = model(inputs).toTensor();
@@ -67,6 +67,7 @@ TEST(TorchDeployGPUTest, UsesDistributed) {
   }
 }
 
+#ifdef FBCODE_CAFFE2
 TEST(TorchDeployGPUTest, TensorRT) {
   if (!torch::cuda::is_available()) {
     GTEST_SKIP();
@@ -85,6 +86,7 @@ TEST(TorchDeployGPUTest, TensorRT) {
         output.allclose(model(at::IValue{input}).toIValue().toTensor()));
   }
 }
+#endif
 
 // OSS build does not have bultin numpy support yet. Use this flag to guard the
 // test case.

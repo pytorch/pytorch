@@ -1,5 +1,5 @@
-#include <ATen/ATen.h>
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
@@ -11,7 +11,7 @@ namespace at { namespace native {
 
 namespace {
 
-template <typename scalar_t>
+template <typename scalar_t, typename accscalar_t>
 void cpu_avg_pool(
     const Tensor& output_,
     const Tensor& input_,
@@ -65,7 +65,7 @@ void cpu_avg_pool(
         continue;
       }
 
-      scalar_t sum = 0;
+      accscalar_t sum = 0;
 
       int64_t divide_factor;
       if (divisor_override.has_value()) {
@@ -83,7 +83,7 @@ void cpu_avg_pool(
           sum += input_ptr[ih * input_width + iw];
         }
       }
-      output_data[i] += sum / divide_factor;
+      output_data[i] += scalar_t(sum / divide_factor);
 
       // move on to next output index
       data_index_step(c, channels, oh, output_height, ow, output_width);
@@ -196,6 +196,138 @@ void cpu_avg_pool_channels_last(
       }
       for (; d3 < size; d3++) {
         out[d3] = out[d3] / divide_factor;
+      }
+
+      // move on to next output index
+      data_index_step(n, nbatch, oh, output_height, ow, output_width);
+    }
+  });
+
+  if (!output_.is_contiguous(memory_format)) {
+    output_.copy_(output);
+  }
+}
+
+template <>
+void cpu_avg_pool_channels_last<BFloat16>(
+    const Tensor& output_,
+    const Tensor& input_,
+    int64_t kW, int64_t kH,
+    int64_t dW, int64_t dH,
+    int64_t padW, int64_t padH,
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override) {
+  TORCH_CHECK(input_.ndimension() == 4,
+              "average pooling with channels last format supports tensors with 4 dims");
+  auto memory_format = at::MemoryFormat::ChannelsLast;
+  auto input = input_.contiguous(memory_format);
+  auto output = output_.contiguous(memory_format);
+
+  auto input_data = input.data_ptr<BFloat16>();
+  auto output_data = output.data_ptr<BFloat16>();
+
+  int64_t nbatch = input.size(0);
+  int64_t channels = input.size(1);
+  int64_t input_height = input.size(2);
+  int64_t input_width = input.size(3);
+  int64_t output_height = output.size(2);
+  int64_t output_width = output.size(3);
+
+  using bVec = vec::Vectorized<BFloat16>;
+  using fVec = vec::Vectorized<float>;
+  // parallel on dim N, H, W
+  at::parallel_for(0, nbatch * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
+    int64_t n = 0;
+    int64_t oh = 0;
+    int64_t ow = 0;
+    data_index_init(begin, n, nbatch, oh, output_height, ow, output_width);
+
+    // temp buffer for sum, use float as accumulation type
+    // can't reuse output buffer to store sum since it is BFloat16
+    std::unique_ptr<float []> sum_arr(new float[channels]);
+    float* sum = sum_arr.get();
+
+    int64_t size = channels;
+    for (const auto i : c10::irange(begin, end)) {
+      // compute the mean of the input image...
+      int64_t ih0 = oh * dH - padH;
+      int64_t iw0 = ow * dW - padW;
+      int64_t ih1 = std::min(ih0 + kH, input_height + padH);
+      int64_t iw1 = std::min(iw0 + kW, input_width + padW);
+      int64_t pool_size = (ih1 - ih0) * (iw1 - iw0);
+      ih0 = std::max(ih0, (int64_t) 0);
+      iw0 = std::max(iw0, (int64_t) 0);
+      ih1 = std::min(ih1, input_height);
+      iw1 = std::min(iw1, input_width);
+
+      int64_t divide_factor;
+      if (divisor_override.has_value()) {
+        divide_factor = divisor_override.value();
+      } else {
+        if(count_include_pad) {
+          divide_factor = pool_size;
+        } else {
+          divide_factor = (ih1 - ih0) * (iw1 - iw0);
+        }
+      }
+
+      BFloat16* out = output_data + i * channels;
+
+      // Pass I: zero the out lane
+      int64_t d1 = 0;
+      for (; d1 < size - (size % fVec::size()); d1 += fVec::size()) {
+        fVec sum_fvec = fVec(float(0));
+        sum_fvec.store(sum + d1);
+      }
+      for (; d1 < size; d1++) {
+        sum[d1] = float(0);
+      }
+
+      if (ih0 >= ih1 || iw0 >= iw1) {
+        // since we are not directly using output as the accumulation buffer,
+        // in case the kernel window is out of range, need to zero the output buffer here.
+        for (int64_t k = 0; k < size; k++) {
+          out[k] = 0;
+        }
+        // move on to next output index
+        data_index_step(n, nbatch, oh, output_height, ow, output_width);
+        continue;
+      }
+
+      // Pass II: compute local sum
+      for (const auto ih : c10::irange(ih0, ih1)) {
+        for (const auto iw : c10::irange(iw0, iw1)) {
+          BFloat16* in = input_data + n * input_height * input_width * channels +
+              ih * input_width * channels + iw * channels;
+
+          int64_t d2 = 0;
+          for (; d2 < size - (size % bVec::size()); d2 += bVec::size()) {
+            bVec data_bvec = bVec::loadu(in + d2);
+            fVec data_fvec0, data_fvec1;
+            std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+
+            fVec sum_fvec0 = fVec::loadu(sum + d2) + data_fvec0;
+            fVec sum_fvec1 = fVec::loadu(sum + d2 + fVec::size()) + data_fvec1;
+            sum_fvec0.store(sum + d2);
+            sum_fvec1.store(sum + d2 + fVec::size());
+          }
+          for (; d2 < size; d2++) {
+            sum[d2] += float(in[d2]);
+          }
+        }
+      }
+
+      // Pass III: compute local average
+      int64_t d3 = 0;
+      for (; d3 < size - (size % bVec::size()); d3 += bVec::size()) {
+        fVec out_fvec0 = fVec::loadu(sum + d3) / fVec(float(divide_factor));
+        fVec out_fvec1 = fVec::loadu(sum + d3 + fVec::size()) / fVec(float(divide_factor));
+
+        bVec out_bvec = convert_float_bfloat16(out_fvec0, out_fvec1);
+        out_bvec.store(out + d3);
+      }
+      for (; d3 < size; d3++) {
+        out[d3] = BFloat16(sum[d3] / divide_factor);
       }
 
       // move on to next output index
@@ -356,7 +488,6 @@ void cpu_avg_pool_backward_channels_last(
   }
 }
 
-
 void avg_pool2d_kernel_impl(
     const Tensor& output,
     const Tensor& input,
@@ -367,13 +498,17 @@ void avg_pool2d_kernel_impl(
     c10::optional<int64_t> divisor_override) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(), "avg_pool2d", [&] {
-        cpu_avg_pool<scalar_t>(output, input, kW, kH, dW, dH, padW, padH, count_include_pad, divisor_override);
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Long, ScalarType::BFloat16, input.scalar_type(), "avg_pool2d", [&] {
+        if (input.scalar_type() == ScalarType::BFloat16) {
+          cpu_avg_pool<BFloat16, /*accscalar_t*/float>(output, input, kW, kH, dW, dH, padW, padH, count_include_pad, divisor_override);
+        } else {
+          cpu_avg_pool<scalar_t, scalar_t>(output, input, kW, kH, dW, dH, padW, padH, count_include_pad, divisor_override);
+        }
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(), "avg_pool2d_channels_last", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Long, ScalarType::BFloat16, input.scalar_type(), "avg_pool2d_channels_last", [&] {
         cpu_avg_pool_channels_last<scalar_t>(output, input, kW, kH, dW, dH, padW, padH, count_include_pad, divisor_override);
       });
       break;
@@ -393,13 +528,13 @@ void avg_pool2d_backward_kernel_impl(
     c10::optional<int64_t> divisor_override) {
   switch (grad_output.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, grad_output.scalar_type(), "avg_pool2d_backward", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Long, ScalarType::BFloat16, grad_output.scalar_type(), "avg_pool2d_backward", [&] {
         cpu_avg_pool_backward<scalar_t>(grad_input, grad_output, kW, kH, dW, dH, padW, padH, count_include_pad, divisor_override);
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, grad_output.scalar_type(), "avg_pool2d_backward_channels_last", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Long, ScalarType::BFloat16, grad_output.scalar_type(), "avg_pool2d_backward_channels_last", [&] {
         cpu_avg_pool_backward_channels_last<scalar_t>(grad_input, grad_output, kW, kH, dW, dH, padW, padH, count_include_pad, divisor_override);
       });
       break;

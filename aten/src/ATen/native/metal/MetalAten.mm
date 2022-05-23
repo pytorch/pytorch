@@ -104,8 +104,8 @@ at::Tensor empty_strided(
 
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("empty.memory_format", empty);
-  m.impl("empty_strided", TORCH_FN(empty_strided));
+  m.impl(TORCH_SELECTIVE_NAME("aten::empty.memory_format"), empty);
+  m.impl(TORCH_SELECTIVE_NAME("aten::empty_strided"), TORCH_FN(empty_strided));
 }
 
 } // namespace metal

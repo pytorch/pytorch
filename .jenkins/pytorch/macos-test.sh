@@ -4,13 +4,13 @@
 # shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
-export PYTORCH_TEST_SKIP_NOARCH=1
-
 conda install -y six
 pip install -q hypothesis "expecttest==0.1.3" "librosa>=0.6.2" "numba<=0.49.1" psutil "scipy==1.6.3"
 
 # TODO move this to docker
-pip install unittest-xml-reporting pytest
+# Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
+pip install "unittest-xml-reporting<=3.2.0,>=2.0.0" \
+  pytest
 
 if [ -z "${IN_CI}" ]; then
   rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
@@ -38,27 +38,35 @@ if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available(
 fi
 popd
 
-test_python_all() {
+
+setup_test_python() {
   # The CircleCI worker hostname doesn't resolve to an address.
   # This environment variable makes ProcessGroupGloo default to
   # using the address associated with the loopback interface.
   export GLOO_SOCKET_IFNAME=lo0
   echo "Ninja version: $(ninja --version)"
 
-  # Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
-  # CIRCLE_PULL_REQUEST comes from CircleCI
-  # NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
-  #       see https://github.com/pytorch/pytorch/issues/60111
-  IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
-  if [ -n "$IN_PULL_REQUEST" ]; then
-    DETERMINE_FROM=$(mktemp)
-    file_diff_from_base "$DETERMINE_FROM"
-  fi
-
   # Increase default limit on open file handles from 256 to 1024
   ulimit -n 1024
+}
 
-  python test/run_test.py --verbose --exclude-jit-executor --determine-from="$DETERMINE_FROM"
+test_python_all() {
+  setup_test_python
+
+  time python test/run_test.py --verbose --exclude-jit-executor
+
+  assert_git_not_dirty
+}
+
+test_python_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+
+  setup_test_python
+
+  time python test/run_test.py --verbose --exclude-jit-executor --shard "$1" "$NUM_TEST_SHARDS"
 
   assert_git_not_dirty
 }
@@ -153,19 +161,19 @@ test_jit_hooks() {
   assert_git_not_dirty
 }
 
-if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
+if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
+  test_python_shard "${SHARD_NUMBER}"
+  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    test_libtorch
+    test_custom_script_ops
+  elif [[ "${SHARD_NUMBER}" == 2 ]]; then
+    test_jit_hooks
+    test_custom_backend
+  fi
+else
   test_python_all
   test_libtorch
   test_custom_script_ops
   test_jit_hooks
   test_custom_backend
-else
-  if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
-    test_python_all
-  elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
-    test_libtorch
-    test_custom_script_ops
-    test_jit_hooks
-    test_custom_backend
-  fi
 fi

@@ -1,8 +1,8 @@
 #pragma once
-#include <ATen/core/Macros.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/frontend/strtod.h>
@@ -13,6 +13,11 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
 
 namespace torch {
 namespace jit {
@@ -182,39 +187,39 @@ struct TORCH_API SharedParserData {
 #undef ADD_CASE
   }
 
-  // find the longest match of str.substring(pos) against a token, return true
-  // if successful filling in kind, start,and len
   bool match(
-      c10::string_view str,
-      size_t pos,
+      StringCordView::Iterator pos,
       bool continuation, // are we inside a scope where newlines don't count
                          // (e.g. inside parens)
       bool whitespace_token, // should we treat whitespace as a token
       int* kind,
-      size_t* start,
-      size_t* len) {
+      StringCordView::Iterator* start,
+      StringCordView::Iterator* end) {
     *start = pos;
     // skip whitespace
-    while (pos < str.size() && isblank(str[pos]))
-      pos++;
+    while (pos.has_next() && isblank(*pos)) {
+      ++pos;
+    }
 
     // special handling
-    if (pos < str.size()) {
-      if (str[pos] == '#' && !isTypeComment(str, pos)) {
+    if (pos.has_next()) {
+      if (*pos == '#' && !isTypeComment(pos)) {
         // skip comments
-        while (pos < str.size() && str[pos] != '\n')
-          pos++;
+        while (pos.has_next() && *pos != '\n')
+          ++pos;
         // tail call, handle whitespace and more comments
-        return match(
-            str, pos, continuation, whitespace_token, kind, start, len);
+        return match(pos, continuation, whitespace_token, kind, start, end);
       }
-      if (str[pos] == '\\' && pos + 1 < str.size() && str[pos + 1] == '\n' &&
-          !whitespace_token) {
-        return match(str, pos + 2, continuation, false, kind, start, len);
+      if (*pos == '\\') {
+        auto newiter = pos;
+        ++newiter;
+        if (newiter.has_next() && *newiter == '\n' && !whitespace_token) {
+          ++newiter;
+          return match(newiter, continuation, false, kind, start, end);
+        }
       }
-      if (str[pos] == '\n') {
-        return match(
-            str, pos + 1, continuation, !continuation, kind, start, len);
+      if (*pos == '\n') {
+        return match(++pos, continuation, !continuation, kind, start, end);
       }
     }
     // we handle white space before EOF because in the case we have something
@@ -223,26 +228,31 @@ struct TORCH_API SharedParserData {
     // else:
     //   pass
     if (whitespace_token) {
-      *kind = pos == str.size() ? TK_WHITESPACE_EOF : TK_WHITESPACE;
-      *len = pos - *start;
+      *kind = !pos.has_next() ? TK_WHITESPACE_EOF : TK_WHITESPACE;
+      *end = pos;
       return true;
     }
-    if (pos == str.size()) {
+    if (!pos.has_next()) {
       *kind = TK_EOF;
       *start = pos;
-      *len = 0;
+      *end = *start;
       return true;
     }
     // invariant: the next token is not whitespace or newline
     *start = pos;
     // check for a valid number
-    if (isNumber(str, pos, len)) {
+    size_t len;
+    if (isNumber(pos.rest_line(), 0, &len)) {
+      *end = *start;
+      *end += len;
       *kind = TK_NUMBER;
       return true;
     }
     // check for string
-    if (isString(str, pos, len)) {
+    if (isString(pos.rest_line(), 0, &len)) {
       *kind = TK_STRINGLITERAL;
+      *end = *start;
+      *end += len;
       return true;
     }
 
@@ -252,11 +262,14 @@ struct TORCH_API SharedParserData {
     bool matched = false;
     bool ident = true;
     TokenTrie* cur = head.get();
-    for (size_t i = 0; pos + i < str.size() && (ident || cur != nullptr); i++) {
-      ident = ident && validIdent(i, str[pos + i]);
+    // for (size_t i = 0; pos + i < str.size() && (ident || cur != nullptr);
+    // i++)
+    for (size_t i = 0; pos.has_next() && (ident || cur != nullptr);
+         ++pos, ++i) {
+      ident = ident && validIdent(i, *pos);
       if (ident) {
         matched = true;
-        *len = i + 1;
+        *end = pos.next_iter();
         *kind = TK_IDENT;
       }
       // check for token second, so that e.g. 'max' matches the token TK_MAX
@@ -265,14 +278,14 @@ struct TORCH_API SharedParserData {
       if (cur) {
         const auto begin_it = cur->child_chars.begin();
         const auto end_it = cur->child_chars.end();
-        const auto ch_it = std::find(begin_it, end_it, str[pos + i]);
+        const auto ch_it = std::find(begin_it, end_it, *pos);
 
         cur = (ch_it == end_it) ? nullptr
                                 : cur->child_tries[ch_it - begin_it].get();
 
         if (cur && cur->kind != 0) {
           matched = true;
-          *len = i + 1;
+          *end = pos.next_iter();
           *kind = cur->kind;
         }
       }
@@ -286,6 +299,7 @@ struct TORCH_API SharedParserData {
     switch (kind) {
       case '?':
       case TK_POW:
+      case TK_IF:
         return true;
       default:
         return false;
@@ -362,8 +376,19 @@ struct TORCH_API SharedParserData {
   bool isblank(int n) {
     return isspace(n) && n != '\n';
   }
+
+  bool isTypeComment(StringCordView::Iterator str_iter) {
+    c10::string_view rest_line = str_iter.rest_line();
+    const std::string type_string = "# type:";
+    if (rest_line.size() < type_string.length()) {
+      return false;
+    }
+    auto match_string = rest_line.substr(0, type_string.size());
+    return match_string == type_string;
+  }
+
   // Make an exception ignoring comments for type annotation comments
-  bool isTypeComment(c10::string_view str, size_t pos) {
+  bool isTypeComment(StringCordView str, size_t pos) {
     const std::string type_string = "# type:";
     if (str.size() < pos + type_string.length()) {
       return false;
@@ -382,7 +407,7 @@ struct Token {
   SourceRange range;
   Token(int kind, SourceRange range) : kind(kind), range(std::move(range)) {}
   std::string text() {
-    return range.text();
+    return std::string(range.token_text());
   }
   std::string kindString() const {
     return kindToString(kind);
@@ -390,7 +415,7 @@ struct Token {
 };
 
 struct Lexer {
-  explicit Lexer(std::shared_ptr<SourceView> source)
+  explicit Lexer(std::shared_ptr<Source> source)
       : source(std::move(source)),
         pos(0),
         nesting(0),
@@ -508,30 +533,37 @@ struct Lexer {
   Token lexRaw(bool whitespace_token = false) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int kind;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t start;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t length;
     AT_ASSERT(source);
+    if (current == nullptr) {
+      AT_ASSERT(pos == 0);
+      current = std::make_unique<StringCordView::Iterator>(
+          source->text_str().begin());
+    }
+
+    StringCordView::Iterator start_iter = *current;
+    StringCordView::Iterator end_iter = *current;
     if (!shared.match(
-            source->text(),
-            pos,
+            *current,
             nesting > 0,
             whitespace_token,
             &kind,
-            &start,
-            &length)) {
+            &start_iter,
+            &end_iter)) {
       expected(
           "a valid token",
           Token(
-              (source->text())[start], SourceRange(source, start, start + 1)));
+              **current,
+              SourceRange(source, start_iter, start_iter.pos() + 1)));
     }
-    auto t = Token(kind, SourceRange(source, start, start + length));
-    pos = start + length;
+
+    auto t = Token(kind, SourceRange(source, start_iter, end_iter.pos()));
+    pos = end_iter.pos();
+    *current = end_iter;
     return t;
   }
 
-  std::shared_ptr<SourceView> source;
+  std::shared_ptr<Source> source;
+  std::unique_ptr<StringCordView::Iterator> current;
   size_t pos;
   size_t nesting; // depth of ( [ { nesting...
   std::vector<int> indent_stack; // stack of indentation level of blocks
@@ -541,3 +573,5 @@ struct Lexer {
 };
 } // namespace jit
 } // namespace torch
+
+C10_CLANG_DIAGNOSTIC_POP()

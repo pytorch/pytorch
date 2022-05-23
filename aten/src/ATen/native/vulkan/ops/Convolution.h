@@ -15,7 +15,6 @@ enum Conv2dMethod {
   Conv2dPointwise,
   Conv2dSlidingWindow,
   Conv2dWinograd_2_3,
-  Conv2dTranspose,
 };
 
 class Conv2dOpContext final : public torch::jit::CustomClassHolder {
@@ -62,7 +61,8 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
   void conv2d_sliding_window(
       const api::Shader::Descriptor& shader,
       vTensor& v_output,
-      const vTensor& v_input) const;
+      const vTensor& v_input,
+      const std::string& op_name) const;
 
   void conv2d_winograd_2_3(
       vTensor& v_output,
@@ -94,7 +94,6 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
   } unpacked_;
 
   Conv2dMethod method_;
-  bool transposed_;
 };
 
 Tensor conv2d_clamp_run(

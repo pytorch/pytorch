@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/accumulate.h>
 
@@ -65,10 +65,7 @@ C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_layer_norm_inputs(
 
 void layer_norm_cpu_out(
     at::Tensor& out,
-    at::Tensor& mean,
-    at::Tensor& rstd,
     const at::Tensor& input,
-    IntArrayRef normalized_shape,
     const Tensor& gamma,
     const Tensor& beta,
     double eps,

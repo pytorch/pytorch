@@ -1,10 +1,10 @@
-ir_version: 7
+ir_version: 6
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    input: "1"
+    input: "onnx::GatherElements_0"
+    input: "onnx::GatherElements_1"
     output: "2"
     name: "GatherElements_0"
     op_type: "GatherElements"
@@ -14,9 +14,9 @@ graph {
       type: INT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::GatherElements_0"
     type {
       tensor_type {
         elem_type: 1
@@ -35,7 +35,7 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "onnx::GatherElements_1"
     type {
       tensor_type {
         elem_type: 7

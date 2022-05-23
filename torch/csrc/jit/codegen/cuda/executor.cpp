@@ -1,3 +1,4 @@
+
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
@@ -8,11 +9,11 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/llvm_jit_strings.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
@@ -49,10 +50,23 @@ static const char* defineIntegerTypes() {
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
 typedef short int int16_t;
+typedef int int32_t;
 typedef unsigned int uint32_t;
 typedef long long int int64_t;
 typedef unsigned long long int uint64_t;
 )";
+}
+
+static const std::string& defineComplexTypes() {
+  static std::string result = std::string(R"ESCAPE(
+#define POS_INFINITY __int_as_float(0x7f800000)
+#define INFINITY POS_INFINITY
+#define NEG_INFINITY __int_as_float(0xff800000)
+#define NAN __int_as_float(0x7fffffff)
+)ESCAPE") +
+      at::cuda::get_traits_string() + at::cuda::get_complex_body_string() +
+      at::cuda::get_cmath_string() + at::cuda::get_complex_math_string();
+  return result;
 }
 
 } // namespace
@@ -60,15 +74,16 @@ typedef unsigned long long int uint64_t;
 std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   // generating cuda code;
   std::string code = "";
-#if defined(USE_ROCM)
+#ifdef __HIP_PLATFORM_HCC__
 #if ROCM_VERSION < 40200
   code += std::string("#include <hip/hip_runtime.h>\n") +
+      std::string("#include <hip/hip_bf16.h>\n") +
       std::string("#include <hip/hip_fp16.h>\n");
 #endif
 #endif
   code += std::string("namespace ") + FusionExecutor::kernelNamespace() +
       " {\n" + defineIntegerTypes() + defineIndexMode(options_.index_mode) +
-      executor_utils::kernelPreamble() + kernel + "}\n";
+      defineComplexTypes() + executor_utils::kernelPreamble() + kernel + "}\n";
 
   if (isDebugDumpEnabled(DebugDumpOption::CudaKernel)) {
     std::cout << "\n======= Codegen output for kernel: " << kernelName()
@@ -97,8 +112,6 @@ void FusionExecutor::debugCompileFusionFromStr(
     const std::string& name,
     int id,
     CompileOptions options) {
-  fusion_ = *fusion;
-  FusionGuard fg(&fusion_);
   options_ = options;
 
   if (isDebugDumpEnabled(DebugDumpOption::FusionIr)) {
@@ -115,11 +128,12 @@ void FusionExecutor::debugCompileFusionFromStr(
               << std::endl;
   }
 
-  setUsedTVs();
+  lowered_ = std::make_unique<GpuLower>(fusion);
+  const auto kernel = lowered_->kernel();
+  fusion_ = lowered_->kernel();
 
   fusion_id_ = id;
-  lowered_ = GpuLower(&fusion_);
-  const auto kernel = lowered_.kernel();
+  setUsedTVs();
 
   if (isDebugDumpEnabled(DebugDumpOption::KernelIr)) {
     kernel->print();
@@ -133,20 +147,21 @@ void FusionExecutor::debugCompileFusionFromStr(
     const auto static_smem_size = computeSharedMemory(
         static_evaluator, kernel_summary.static_smem_allocations);
     TORCH_INTERNAL_ASSERT(
-        static_smem_size < max_device_smem,
+        static_smem_size < max_static_smem_,
         "The static shared memory allocation is larger than available memory.");
   }
 
-  compiled_kernel_ = executor_utils::nvrtcCompile(code, name, fusion_id_);
+  std::tie(compiled_kernel_, last_compiler_log_) =
+      executor_utils::nvrtcCompile(code, name, fusion_id_);
   TORCH_INTERNAL_ASSERT(
       fusion_id_ > 0, "assign a fusion_id_ <= 0 is not accepted.");
 }
 
 void FusionExecutor::compileFusion(
     Fusion* fusion,
-    CompileOptions options,
     const at::ArrayRef<IValue>& inputs,
-    const LaunchParams& launch_constraints) {
+    const LaunchParams& launch_constraints,
+    CompileOptions options) {
   FUSER_PERF_SCOPE("compileFusion");
 
   TORCH_INTERNAL_ASSERT(
@@ -164,39 +179,50 @@ void FusionExecutor::compileFusion(
     fusion->printMath();
   }
 
-  // Clone the fusion so we can store it
-  fusion_ = *fusion;
-  FusionGuard fg(&fusion_);
   options_ = options;
   c10::DeviceGuard dg(options_.device);
 
   TORCH_INTERNAL_ASSERT(
-      options.device.is_cuda(), "Provided device to CUDA fuser is the CPU.");
-  max_device_smem =
-      at::cuda::getDeviceProperties(options.device.index())->sharedMemPerBlock;
+      options_.device.is_cuda(), "Provided device to CUDA fuser is the CPU.");
+  auto properties = at::cuda::getDeviceProperties(options_.device.index());
+  configured_device_smem_ = properties->sharedMemPerBlock;
+#ifndef __HIP_PLATFORM_HCC__
+  device_smem_limit_ = properties->sharedMemPerBlockOptin;
+#else
+  // don't know if rocm supports opt-in shared memroy reconfiguration
+  device_smem_limit_ = properties->sharedMemPerBlock;
+#endif
+  warp_size_ = properties->warpSize;
 
-  setUsedTVs();
+  lowered_ = std::make_unique<GpuLower>(
+      fusion,
+      options_.index_mode == KernelIndexMode::INT64 ? DataType::Int
+                                                    : DataType::Int32);
+  const auto kernel = lowered_->kernel();
+  fusion_ = lowered_->kernel()->as<Fusion>();
 
   fusion_id_ = ++fusion_id_counter_;
-  lowered_ = GpuLower(&fusion_);
-  const auto kernel = lowered_.kernel();
+  setUsedTVs();
 
   if (isDebugDumpEnabled(DebugDumpOption::KernelIr)) {
     kernel->print();
   }
 
-  const auto kernel_code = codegen::generateCudaKernel(kernel, kernelName());
-  const auto structured_code = getStructuredCode(kernel_code);
+  kernel_code_ = codegen::generateCudaKernel(kernel, kernelName());
+  const auto structured_code = getStructuredCode(kernel_code_);
 
   const auto& kernel_summary = kernel->summary();
 
+  // We currently shouldn't allocate any more shared mem
+  //  tensors statically but could keep this path if
+  //  needed in later development.
   if (!kernel_summary.static_smem_allocations.empty()) {
     kir::ExpressionEvaluator static_evaluator;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     const auto static_smem_size = computeSharedMemory(
         static_evaluator, kernel_summary.static_smem_allocations);
     TORCH_INTERNAL_ASSERT(
-        static_smem_size < max_device_smem,
+        static_smem_size < max_static_smem_,
         "The static shared memory allocation is larger than available memory.");
   }
 
@@ -204,40 +230,49 @@ void FusionExecutor::compileFusion(
     std::stringstream ss;
     ss << "Allocations must be based on constant integers for local memory. However, found: ";
     for (auto alloc : kernel_summary.dynamic_lmem_allocations) {
-      ss << toString(alloc->buffer(), false) << ", ";
+      ss << alloc->buffer()->toString() << ", ";
     }
     ss << " have dynamic allocations but are placed in local memory.";
     TORCH_INTERNAL_ASSERT(false, ss.str());
   }
 
-  TORCH_CHECK(
-      !kernel_summary.has_grid_reduction_in_loop,
-      "Grid reduction must not be placed inside a loop.");
-
   // TODO: pass block_size here;
   c10::optional<int> block_size = c10::nullopt;
   if (!inputs.empty()) {
     auto expr_eval = executor_utils::bindKernelInputs(inputs, kernel);
-    auto launch_params = computeLaunchParams(launch_constraints, expr_eval);
+    auto launch_params =
+        computeLaunchParams(launch_constraints, expr_eval, warp_size_);
     block_size = launch_params.nThreads();
     TORCH_INTERNAL_ASSERT(
         block_size > 0, "launch param inferred block size < 0");
   }
 
-  compiled_kernel_ = executor_utils::nvrtcCompile(
+  block_size_high_water_mark =
+      block_size.has_value() ? block_size.value() : block_size_high_water_mark;
+  std::tie(compiled_kernel_, last_compiler_log_) = executor_utils::nvrtcCompile(
       structured_code,
       (kernelNamespace() + "::" + kernelName()).c_str(),
       fusion_id_,
       block_size);
   TORCH_INTERNAL_ASSERT(
       fusion_id_ > 0, "failed to assign a fusion_id_ after compilation.");
+
+#ifndef __HIP_PLATFORM_HCC__
+  // The driver API call requires an int argument.
+  int max_dynamic_smem = 0;
+  AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuFuncGetAttribute(
+      &max_dynamic_smem,
+      CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+      compiled_kernel_.function));
+  maybe_available_dynamic_smem_ = max_dynamic_smem;
+#endif
 }
 
 namespace {
 
 at::Tensor inferAndAlloc(
-    const kir::TensorView* tv,
-    const std::vector<kir::Val*>& sizes,
+    const TensorView* tv,
+    const std::vector<Val*>& sizes,
     kir::ExpressionEvaluator& expr_eval,
     const CompileOptions& options,
     bool zero_init = false) {
@@ -251,9 +286,11 @@ at::Tensor inferAndAlloc(
     TORCH_INTERNAL_ASSERT(
         inferred_val.has_value(),
         "Could not launch kernel as program could not infer ",
-        kir::toString(size),
-        " for the buffer ",
-        kir::toString(tv));
+        size->toString(),
+        "(",
+        size->name(),
+        ") for the buffer ",
+        tv->toString());
     inferred_sizes.push_back(inferred_val.value());
   }
 
@@ -274,19 +311,20 @@ at::Tensor inferAndAlloc(
 }
 
 at::Tensor inferAndAllocOutput(
-    const kir::TensorView* tv,
+    const TensorView* tv,
     kir::ExpressionEvaluator& expr_eval,
     const CompileOptions& options,
     bool zero_init = false) {
   const auto domain = tv->domain();
-  const auto maybe_rfactor_domain =
-      domain->hasRFactor() ? domain->rfactorDomain() : domain->rootDomain();
+  const auto maybe_rfactor_domain = domain->hasRFactor()
+      ? domain->getRFactorDomain()
+      : domain->getRootDomain();
 
-  std::vector<kir::Val*> sizes;
+  std::vector<Val*> sizes;
 
   for (const auto id : maybe_rfactor_domain) {
-    if (id->isReduction() ||
-        id->iterType() == IterType::BroadcastWithoutStride) {
+    if (id->isReduction() || id->isStride() ||
+        id->getIterType() == IterType::BroadcastWithoutStride) {
       continue;
     }
     sizes.push_back(id->extent());
@@ -312,7 +350,8 @@ uint64_t FusionExecutor::computeSharedMemory(
         const uint64_t data_size = dataTypeSize(smem_alloc->buffer()->dtype());
         // Add padding to align dynamic shared memory
         if (align_padding) {
-          total = ceilDiv(total, data_size) * data_size;
+          const int align_size = 16; // always align to 16B/128b.
+          total = ceilDiv(total, align_size) * align_size;
         }
         total += inferred_val.value() * data_size;
       } else {
@@ -330,28 +369,63 @@ uint64_t FusionExecutor::computeSharedMemory(
 
 LaunchParams FusionExecutor::computeLaunchParams(
     const LaunchParams& launch_constraints,
-    kir::ExpressionEvaluator& expr_eval) {
+    kir::ExpressionEvaluator& expr_eval,
+    const int warp_size) {
   FUSER_PERF_SCOPE("FusionExecutor::ComputeLaunchParams");
+  TORCH_INTERNAL_ASSERT(warp_size > 0, "WARP_SIZE should be larger than 0");
 
   LaunchParams launch_params;
 
-  // Lets collect all IterDomains that are bound to a thread binding
-  std::unordered_map<ParallelType, std::vector<const kir::Val*>, TypeHash>
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      parallel_iter_extents;
-  for (auto tv : getUsedTVs()) {
-    for (auto id : tv->domain()->domain()) {
-      if (id->isThread() && !id->isBroadcast()) {
-        // TODO(kir): we should rewrite this logic based on the Kernel object
-        auto kir_extent = lowered_.lowerValue(id->extent());
-        const auto it = parallel_iter_extents.find(id->getParallelType());
-        if (it != parallel_iter_extents.end()) {
-          it->second.push_back(kir_extent);
-        } else {
-          parallel_iter_extents[id->getParallelType()] = {kir_extent};
-        }
-      }
-    }
+  auto data_cache = compileTimeDataCache();
+
+  auto lower = lowered_.get();
+  auto& used_tvs = getUsedTVs();
+  auto parallel_binding_ids_entry =
+      executor_utils::caching::ExecutorCompileTimeEntry<
+          executor_utils::caching::ParallelBindingIterDomains>(
+          data_cache, [&used_tvs, &lower]() {
+            return std::make_unique<std::vector<IterDomain*>>(
+                executor_utils::getParallelBindingsIterDomains(
+                    lower, used_tvs));
+          });
+  auto& parallel_binding_ids = parallel_binding_ids_entry.get();
+
+  auto parallel_iter_extent_entry =
+      executor_utils::caching::ExecutorCompileTimeEntry<
+          executor_utils::caching::ParallelIterExtentMap>(
+          data_cache, [&parallel_binding_ids]() {
+            return executor_utils::getParallelIterExtents(parallel_binding_ids);
+          });
+  auto& parallel_iter_extents = parallel_iter_extent_entry.get();
+
+  auto simplified_parallel_iter_extent_entry =
+      executor_utils::caching::ExecutorCompileTimeEntry<
+          executor_utils::caching::SimplifiedParallelIterExtentMap>(
+          data_cache, [&parallel_binding_ids, &lower]() {
+            return executor_utils::getSimplifiedParallelIterExtents(
+                lower, parallel_binding_ids);
+          });
+  auto& simplified_parallel_iter_extents =
+      simplified_parallel_iter_extent_entry.get();
+
+  auto warp_padded_parallel_entry =
+      executor_utils::caching::ExecutorCompileTimeEntry<
+          executor_utils::caching::WarpPaddedParallelExtents>(
+          data_cache, [&parallel_binding_ids, &lower]() {
+            return executor_utils::getWarpPaddedExtentsInfo(
+                lower->kernel(), parallel_binding_ids);
+          });
+  auto& warp_padded_extent_set =
+      warp_padded_parallel_entry.get().warp_padded_extent_set;
+  auto& warp_padded_constant =
+      warp_padded_parallel_entry.get().warp_padded_constant;
+
+  // TODO: Need to redesign this part a bit to
+  //   find the right place to trigger evaluate
+  if (expr_eval.precomputedIntegers()) {
+    expr_eval.precomputedIntegers()->bindParallelExtents(
+        parallel_iter_extents, launch_constraints);
+    expr_eval.precomputedIntegers()->evaluate();
   }
 
   // If any dimension was set in launch constraints we need to run through
@@ -373,42 +447,83 @@ LaunchParams FusionExecutor::computeLaunchParams(
                 "Cannot validate parallelization scheme, "
                 "this may be due to mixed broadcast axes that are parallelized.");
           }
-        } else {
-          // Bind the launch constraint into our evaluation context
+        } else if (!expr_eval.precomputedIntegers()) {
           expr_eval.bind(extent, launch_constraints.getDim(p_type));
+        }
+        if (!launch_params.hasDim(p_type)) {
+          // Bind the launch constraint into our evaluation context
           launch_params.bind(launch_constraints.getDim(p_type), p_type);
+          // Makes sure the p-types bound to evaluators are the
+          //  final values that will become the actual launch
+          //  param size to ensure accurate smem buffer size
+          //  computation.
+          expr_eval.bind(p_type, launch_constraints.getDim(p_type));
         }
       }
     }
   }
 
   // Run through the rest of the parallel IterDomains and infer their size
-  for (auto& entry : parallel_iter_extents) {
+  for (auto& entry : simplified_parallel_iter_extents) {
+    FUSER_PERF_SCOPE("FusionExecutor::ParallelBindingResolution");
     auto p_type = entry.first;
     auto parallel_extents = entry.second;
     // Select the maxmimum value out of all the parallel extents
     int64_t maximum_value = std::numeric_limits<int64_t>::min();
     for (auto extent : parallel_extents) {
-      const auto val = expr_eval.evaluate(extent);
+      auto val = expr_eval.evaluate(extent);
       TORCH_INTERNAL_ASSERT(
           val.has_value(),
-          "Tried to evaluate the extent of ",
+          "Tried to evaluate the extent, ",
+          extent->toInlineString(),
+          " for the ptype: ",
           p_type,
           " to set launch bounds but could not.");
+
+      // apply padding to the extent if needed
+      if (warp_padded_extent_set.count(extent)) {
+        // Check if the extent has const value
+        auto padded_constant_it = warp_padded_constant.find(extent);
+
+        if (padded_constant_it != warp_padded_constant.end()) {
+          // If already specified padded to constant, need to check
+          //  runtime value not over the constant bound
+          TORCH_INTERNAL_ASSERT(*val <= padded_constant_it->second);
+          *val = padded_constant_it->second;
+        } else {
+          // If no specified constant, pad to the smallest multiple of warp
+          //  above the value.
+          auto padded_number_of_warps = (*val + warp_size - 1) / warp_size;
+          *val = warp_size * padded_number_of_warps;
+        }
+        TORCH_INTERNAL_ASSERT(
+            *val <= 1024, "padded dimension larger than max block size");
+      }
       maximum_value = std::max(maximum_value, *val);
     }
-    launch_params.bind(maximum_value, p_type);
+    // Protect for size-0 tensors, they still have a value so would prefer to
+    // bind nothing than 0
+    if (maximum_value > 0) {
+      expr_eval.bind(p_type, maximum_value);
+      launch_params.bind(maximum_value, p_type);
+    }
   }
 
-  const auto kernel = lowered_.kernel();
+  // Re-run the integer machine with all
+  //  the thread sizes now determined.
+  if (expr_eval.precomputedIntegers()) {
+    expr_eval.precomputedIntegers()->evaluate();
+  }
+
+  const auto kernel = lowered_->kernel();
   const auto& kernel_summary = kernel->summary();
 
   // Calculate Dynamic Shared Memory Size
   // Add workspace for reduction and broadcast
   uint64_t reduction_broadcast_workspace = 0;
   const bool has_workspace = kernel_summary.has_block_reductions ||
-      kernel_summary.number_of_grid_reductions > 0 ||
-      kernel_summary.has_block_broadcasts;
+      kernel_summary.has_grid_reductions ||
+      kernel_summary.has_block_broadcasts || kernel_summary.has_grid_broadcasts;
   if (has_workspace &&
       kernel_summary.largest_smem_data_type != DataType::Null) {
     // Not using nThreads here since it does not handle uninitialized value
@@ -431,13 +546,35 @@ LaunchParams FusionExecutor::computeLaunchParams(
       true,
       reduction_broadcast_workspace);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  const uint64_t static_smem_size =
-      computeSharedMemory(expr_eval, kernel_summary.static_smem_allocations);
+  // Check that requested smem size can be dynamically allocated.
+  //  This check is only done once a kernel has been compiled, since
+  //  maybe_available_dynamic_smem_ needs to be evaluated on
+  //  a compiled kernel.
+  if (maybe_available_dynamic_smem_.has_value()) {
+    // Dynamic shared memory space that we can allocate without
+    //  carving more space from L1.
+    const uint64_t available_dynamic_smem_without_reconfiguration =
+        maybe_available_dynamic_smem_.value();
+    // Maximum additional shared memory size we could request
+    //  if we do re-configuration.
+    const uint64_t additional_dynamic_smem_available_through_reconfiguration =
+        device_smem_limit_ - configured_device_smem_;
 
-  TORCH_INTERNAL_ASSERT(
-      (dynamic_smem_size + static_smem_size) < max_device_smem,
-      "The total shared memory allocation is larger than available memory.");
+    TORCH_INTERNAL_ASSERT(
+        (dynamic_smem_size) <
+            (available_dynamic_smem_without_reconfiguration +
+             additional_dynamic_smem_available_through_reconfiguration),
+        "The total shared memory allocation is larger than available memory.",
+        " Dynamic size: ",
+        dynamic_smem_size,
+        ". Available size: ",
+        maybe_available_dynamic_smem_.value(),
+        ". Configured smem size: ",
+        configured_device_smem_,
+        ". Device limit size: ",
+        device_smem_limit_);
+  }
+
   launch_params.setSmem(dynamic_smem_size);
 
   return launch_params;
@@ -447,14 +584,14 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
     kir::ExpressionEvaluator& expr_eval) {
   FUSER_PERF_SCOPE("FusionExecutor::AllocGlobalVals");
   GlobalBuffers global_buffers;
-  const auto kernel = lowered_.kernel();
-  const auto& kernel_summary = lowered_.kernel()->summary();
+  const auto kernel = lowered_->kernel();
+  const auto& kernel_summary = kernel->summary();
   for (auto alloc : kernel_summary.global_allocations) {
     TORCH_INTERNAL_ASSERT(
-        alloc->buffer()->isA<kir::TensorView>(),
+        alloc->buffer()->isA<TensorView>(),
         "Cannot allocate global buffers that are not tensors.");
-    auto tv = alloc->buffer()->as<kir::TensorView>();
-    if (kernel->isOutput(tv)) {
+    auto tv = alloc->buffer()->as<TensorView>();
+    if (tv->isFusionOutput()) {
       continue;
     }
     if (alloc->zeroInit()) {
@@ -472,30 +609,48 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
 }
 
 std::vector<at::Tensor> FusionExecutor::allocOutputs(
+    const at::ArrayRef<IValue>& inputs,
     kir::ExpressionEvaluator& expr_eval,
     const std::unordered_set<int>& alias_indices) {
   FUSER_PERF_SCOPE("FusionExecutor::AllocOutputs");
-  const auto kernel = lowered_.kernel();
+  const auto kernel = lowered_->kernel();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> outputs;
-  for (size_t i = 0; i < kernel->outputs().size(); ++i) {
-    TORCH_INTERNAL_ASSERT(
-        kernel->outputs()[i]->isA<kir::TensorView>(),
-        "Cannot allocate outputs that are not tensors.");
-    auto output = kernel->outputs()[i]->as<kir::TensorView>();
-    if (alias_indices.count(i) == 0) {
-      outputs.push_back(
-          inferAndAllocOutput(output, expr_eval, options_, false));
+  for (const auto out_i : c10::irange(kernel->outputs().size())) {
+    // Dummy output.
+    if (kernel->outputs()[out_i]->isFusionInput()) {
+      for (auto inp_i : c10::irange(kernel->inputs().size())) {
+        if (kernel->inputs()[inp_i] == kernel->outputs()[out_i]) {
+          TORCH_INTERNAL_ASSERT(
+              inp_i < inputs.size(),
+              "Issue with an input showing up as output, couldn't find input.");
+          TORCH_INTERNAL_ASSERT(
+              inputs[inp_i].isTensor(),
+              "Cannot register a scalar as an output in a fusion.");
+          outputs.push_back(inputs[inp_i].toTensor());
+          break;
+        }
+      }
     } else {
-      // aliasing to inputs, no need to allocate real output
-      outputs.push_back(inferAndAlloc(output, {}, expr_eval, options_, false));
+      TORCH_INTERNAL_ASSERT(
+          kernel->outputs()[out_i]->isA<TensorView>(),
+          "Cannot allocate outputs that are not tensors.");
+      auto output = kernel->outputs()[out_i]->as<TensorView>();
+      if (alias_indices.count(out_i) == 0) {
+        outputs.push_back(
+            inferAndAllocOutput(output, expr_eval, options_, false));
+      } else {
+        // aliasing to inputs, no need to allocate real output
+        outputs.push_back(
+            inferAndAlloc(output, {}, expr_eval, options_, false));
+      }
     }
   }
   return outputs;
 }
 
 void FusionExecutor::setUsedTVs() {
-  auto used_vals = fusion_.usedMathVals();
+  auto used_vals = fusion_->usedMathVals();
   auto used_tvs = ir_utils::filterByType<TensorView>(used_vals);
   used_tvs_.clear();
 
@@ -509,35 +664,54 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     const LaunchParams& launch_constraints,
     const c10::optional<size_t>& opt_code) {
   FUSER_PERF_SCOPE("FusionExecutor::RunFusion");
-
+  TORCH_INTERNAL_ASSERT(compiled());
   TORCH_INTERNAL_ASSERT(
       fusion_id_ > 0, "Cannot run fusion, it was not compiled.");
   TORCH_INTERNAL_ASSERT(
       !opt_code.has_value() || outputs.empty(),
       "short cut input cache is not compatible with pre-allocated output");
 
+  if (isDebugDumpEnabled(DebugDumpOption::FusionArgs)) {
+    std::cout << "Arguments for fusion" << fusion_id_ << ":" << std::endl
+              << "Inputs:" << std::endl;
+    for (const auto& input : inputs) {
+      if (input.isTensor()) {
+        const auto& input_tensor = input.toTensor();
+        std::cout << "  " << input_tensor.scalar_type() << " "
+                  << input.toTensor().sizes()
+                  << " (strides = " << input.toTensor().strides() << ")"
+                  << std::endl;
+      }
+    }
+    std::cout << "Outputs:" << std::endl;
+    for (const auto& output : outputs) {
+      std::cout << "  " << output.scalar_type() << " " << output.sizes()
+                << " (strides = " << output.strides() << ")" << std::endl;
+    }
+    std::cout << launch_constraints.toString();
+  }
+
   ExecutorEntry* executor_entry = nullptr;
   if (opt_code.has_value()) {
     executor_entry = &executor_entry_lookup_[*opt_code];
   }
 
-  FusionGuard fg(&fusion_);
   c10::DeviceGuard dg(options_.device);
   auto stream = at::cuda::getCurrentCUDAStream();
   executor_utils::initializeCudaContext();
-
-  LaunchParams launch_params;
+  TORCH_INTERNAL_ASSERT(lowered_);
+  launch_params_ = LaunchParams();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> allocated_outputs = outputs;
   GlobalBuffers global_buffers;
   uint64_t rand_offset = 0;
 
-  if (executor_entry && executor_entry->init) {
+  if (executor_entry && executor_entry->init && !disable_parameter_cache_) {
     {
       // context manager to disable auto grad for `empty_cuda` calls later
       at::AutoDispatchBelowADInplaceOrView non_variable_type_mode;
       // take the short-cut for launch if we see a recorded input set again
-      launch_params = executor_entry->launch_params;
+      launch_params_ = executor_entry->launch_params;
       // only allocate outputs when not given
       if (outputs.empty()) {
         FUSER_PERF_SCOPE("ExecutorRunFusion::OutputAlloc");
@@ -556,7 +730,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
         }
       } else {
         TORCH_INTERNAL_ASSERT(
-            outputs.size() == fusion_.outputs().size(),
+            outputs.size() == fusion_->outputs().size(),
             __func__,
             " provided number of outputs does match fusion output");
       }
@@ -586,24 +760,97 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     // code path to take when either:
     //   1. no opt_code is provided or
     //   2. `executor_entry` is not initialized
-    executor_utils::validateKernelInputs(&fusion_, inputs, options_.device);
+    executor_utils::validateKernelInputs(fusion_, inputs, options_.device);
 
-    const auto kernel = lowered_.kernel();
+    if (!evaluator_precomputed_integers_) {
+      evaluator_precomputed_integers_ =
+          std::make_unique<KernelPrecomputedIntegers>(lowered_->kernel());
+    }
 
-    auto expr_eval = executor_utils::bindKernelInputs(inputs, kernel);
+    kir::ExpressionEvaluator expr_eval;
+    evaluator_precomputed_integers_->bindKernelInputs(
+        lowered_->kernel(), inputs);
+    expr_eval.precomputedIntegers() = evaluator_precomputed_integers_.get();
 
-    launch_params = computeLaunchParams(launch_constraints, expr_eval);
+    launch_params_ =
+        computeLaunchParams(launch_constraints, expr_eval, warp_size_);
+
+    // Recompile the kernel if the number of threads in the block has increased
+    if (launch_params_.nThreads() > block_size_high_water_mark) {
+      const auto kernel = lowered_->kernel();
+      kernel_code_ = codegen::generateCudaKernel(kernel, kernelName());
+      const auto structured_code = getStructuredCode(kernel_code_);
+      block_size_high_water_mark = launch_params_.nThreads();
+
+      std::tie(compiled_kernel_, last_compiler_log_) =
+          executor_utils::nvrtcCompile(
+              structured_code,
+              (kernelNamespace() + "::" + kernelName()).c_str(),
+              fusion_id_,
+              block_size_high_water_mark);
+    }
+
+    if (kernel()->summary().has_cooperative_grid_reduction) {
+#ifndef __HIP_PLATFORM_HCC__
+      int num_blocks_per_SM = -1;
+      at::globalContext().getNVRTC().cuOccupancyMaxActiveBlocksPerMultiprocessor(
+          &num_blocks_per_SM,
+          compiled_kernel_.function,
+          (int)(launch_params_.bdimx() * launch_params_.bdimy() * launch_params_.bdimz()),
+          (size_t)launch_params_.smem());
+
+      TORCH_INTERNAL_ASSERT(
+          (int64_t)(
+              num_blocks_per_SM *
+              at::cuda::getDeviceProperties(options_.device.index())
+                  ->multiProcessorCount) >= launch_params_.gdimx() *
+                  launch_params_.gdimy() * launch_params_.gdimz(),
+          "Wanted to launch a cooperative kernel, however the number of blocks is greater than ",
+          "what can be resident on the GPU at once. Need: ",
+          launch_params_.gdimx() * launch_params_.gdimy() *
+              launch_params_.gdimz(),
+          " but limited to ",
+          num_blocks_per_SM,
+          " * ",
+          at::cuda::getDeviceProperties(options_.device.index())
+              ->multiProcessorCount);
+#else
+      TORCH_INTERNAL_ASSERT(
+          false, "Cross grid communication not supported with HIP.");
+#endif
+    }
 
     executor_utils::validateVectorizedTensors(
-        &fusion_, inputs, outputs, lowered_, expr_eval);
+        lowered_.get()->kernel(),
+        inputs,
+        outputs,
+        compileTimeDataCache(),
+        expr_eval);
 
-    auto alias_indices = fusion_.getInputAliasIndices();
+    auto alias_indices_entry =
+        executor_utils::caching::ExecutorCompileTimeEntry<
+            executor_utils::caching::InputAliasIndices>(
+            compileTimeDataCache(), [&]() {
+              return std::make_unique<std::vector<std::pair<int, int>>>(
+                  fusion_->getInputAliasIndices());
+            });
+
+    auto& alias_indices = alias_indices_entry.get();
 
     // ditch pre-allocated outputs if the number doesn't match.
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (outputs.empty()) {
-      allocated_outputs =
-          allocOutputs(expr_eval, fusion_.getOutputAliasIndices());
+      auto output_alias_indices_entry =
+          executor_utils::caching::ExecutorCompileTimeEntry<
+              executor_utils::caching::OutputAliasIndices>(
+              compileTimeDataCache(), [&]() {
+                return std::make_unique<std::unordered_set<int>>(
+                    fusion_->getOutputAliasIndices());
+              });
+
+      auto& output_alias_indices = output_alias_indices_entry.get();
+
+      allocated_outputs = allocOutputs(inputs, expr_eval, output_alias_indices);
 
       for (const auto& entry : alias_indices) {
         TORCH_INTERNAL_ASSERT(
@@ -613,12 +860,12 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     } else {
       // TODO: Update this as well;
       executor_utils::validateKernelOutputs(
-          &fusion_, allocated_outputs, options_.device);
+          fusion_, allocated_outputs, options_.device);
     }
 
     global_buffers = allocGlobalVals(expr_eval);
 
-    if (kernel->summary().is_stochastic) {
+    if (kernel()->summary().is_stochastic) {
       // NOTE: this is how we map offset to PW kernels in order to have
       // identical random number generator to match native PyTorch results.
       // But it doesn't really work as it takes assumption how threads are
@@ -628,7 +875,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       rand_offset = 4 *
           (std::ceil(
                allocated_outputs[0].numel() /
-               (4.0 * 128 * launch_params.gdimx())) + // NOLINT
+               (4.0 * 128 * launch_params_.gdimx())) + // NOLINT
            1);
     }
 
@@ -637,7 +884,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     if (executor_entry) {
       FUSER_PERF_SCOPE("ExecutorRunFusion::FillCacheEntry");
       // record the the short-cut executor entry for the given input set;
-      executor_entry->launch_params = launch_params;
+      executor_entry->launch_params = launch_params_;
       executor_entry->io_alias_indices = alias_indices;
       for (const auto& output : allocated_outputs) {
         executor_entry->output_sizes.push_back(output.sizes().vec());
@@ -662,28 +909,31 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     kernel_arguments.push(inputs);
     kernel_arguments.push(allocated_outputs);
     kernel_arguments.push(global_buffers.buffers);
-    if (lowered_.kernel()->summary().is_stochastic) {
+    if (lowered_->kernel()->summary().is_stochastic) {
       kernel_arguments.appendPhiloxRNGSeed(rand_offset);
     }
   }
 
   if (isDebugDumpEnabled(DebugDumpOption::LaunchParam)) {
-    launch_params.print();
+    launch_params_.print();
   }
 
-  if (isDebugDumpEnabled(DebugDumpOption::PrintRuntimeArgs)) {
+  if (isDebugDumpEnabled(DebugDumpOption::KernelArgs)) {
     std::cout << "Arguments for kernel" << fusion_id_ << ":" << std::endl
               << "Inputs:" << std::endl;
     for (const auto& input : inputs) {
       if (input.isTensor()) {
-        std::cout << input.toTensor().scalar_type() << " "
-                  << input.toTensor().sizes() << std::endl;
+        const auto& input_tensor = input.toTensor();
+        std::cout << "  " << input_tensor.scalar_type() << " "
+                  << input.toTensor().sizes()
+                  << " (strides = " << input.toTensor().strides() << ")"
+                  << std::endl;
       }
     }
     std::cout << "Outputs:" << std::endl;
     for (const auto& output : allocated_outputs) {
       std::cout << "  " << output.scalar_type() << " " << output.sizes()
-                << std::endl;
+                << " (strides = " << output.strides() << ")" << std::endl;
     }
     std::cout << "Reduction and semaphore buffers:" << std::endl;
     for (const auto& buffer : global_buffers.buffers) {
@@ -696,30 +946,66 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   cudaEvent_t finish_event = {};
 
   if (measure_kernel_time_ ||
-      isDebugDumpEnabled(DebugDumpOption::EffectiveBandwidth)) {
+      isDebugDumpEnabled(DebugDumpOption::EffectiveBandwidth) ||
+      isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
     cudaEventCreate(&start_event);
     cudaEventCreate(&finish_event);
     cudaEventRecord(start_event);
   }
 
   if (execute_kernel_) {
-    FUSER_PERF_SCOPE("ExecutorRunFusion::cuLaunchKernel");
-    AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
-        compiled_kernel_.function,
-        launch_params.gdimx(),
-        launch_params.gdimy(),
-        launch_params.gdimz(),
-        launch_params.bdimx(),
-        launch_params.bdimy(),
-        launch_params.bdimz(),
-        launch_params.smem(),
-        stream,
-        kernel_arguments.getBuffer(),
-        nullptr));
+    if (maybe_available_dynamic_smem_.has_value() &&
+        launch_params_.smem() > maybe_available_dynamic_smem_.value()) {
+#ifndef __HIP_PLATFORM_HCC__
+      // Increase limit of dynamic shared memory if needed.
+      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuFuncSetAttribute(
+          compiled_kernel_.function,
+          CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+          launch_params_.smem()));
+#else
+      TORCH_INTERNAL_ASSERT(
+          false, "cuFuncSetAttribute not supported with HIP.");
+#endif
+    }
+    if (!kernel()->summary().has_cooperative_grid_reduction) {
+      FUSER_PERF_SCOPE("ExecutorRunFusion::cuLaunchKernel");
+      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
+          compiled_kernel_.function,
+          launch_params_.gdimx(),
+          launch_params_.gdimy(),
+          launch_params_.gdimz(),
+          launch_params_.bdimx(),
+          launch_params_.bdimy(),
+          launch_params_.bdimz(),
+          launch_params_.smem(),
+          stream,
+          kernel_arguments.getBuffer(),
+          nullptr));
+    } else {
+#ifndef __HIP_PLATFORM_HCC__
+      FUSER_PERF_SCOPE("ExecutorRunFusion::cuLaunchCooperativeKernel");
+      AT_CUDA_DRIVER_CHECK(
+          at::globalContext().getNVRTC().cuLaunchCooperativeKernel(
+              compiled_kernel_.function,
+              launch_params_.gdimx(),
+              launch_params_.gdimy(),
+              launch_params_.gdimz(),
+              launch_params_.bdimx(),
+              launch_params_.bdimy(),
+              launch_params_.bdimz(),
+              launch_params_.smem(),
+              stream,
+              kernel_arguments.getBuffer()));
+#else
+      TORCH_INTERNAL_ASSERT(
+          false, "Cross grid communication not supported with HIP.");
+#endif
+    }
   }
 
   if (measure_kernel_time_ ||
-      isDebugDumpEnabled(DebugDumpOption::EffectiveBandwidth)) {
+      isDebugDumpEnabled(DebugDumpOption::EffectiveBandwidth) ||
+      isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
     cudaEventRecord(finish_event);
     cudaEventSynchronize(start_event);
     cudaEventSynchronize(finish_event);
@@ -727,21 +1013,23 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     cudaEventDestroy(start_event);
     cudaEventDestroy(finish_event);
 
+    bytes_processed_ = 0;
+    // Figure how many bytes are inputs, outputs, and temporary buffers
+    for (auto input : inputs) {
+      if (input.isTensor()) {
+        bytes_processed_ += input.toTensor().numel() *
+            dataTypeSize(aten_to_data_type(input.toTensor().scalar_type()));
+      }
+    }
+    for (const auto& output : allocated_outputs) {
+      bytes_processed_ += output.numel() *
+          dataTypeSize(aten_to_data_type(output.scalar_type()));
+    }
+
     if (isDebugDumpEnabled(DebugDumpOption::EffectiveBandwidth)) {
-      size_t bytes = 0;
-      // Figure how many bytes are inputs, outputs, and temporary buffers
-      for (auto input : inputs) {
-        if (input.isTensor()) {
-          bytes += input.toTensor().numel() *
-              dataTypeSize(aten_to_data_type(input.toTensor().scalar_type()));
-        }
-      }
-      for (const auto& output : allocated_outputs) {
-        bytes += output.numel() *
-            dataTypeSize(aten_to_data_type(output.scalar_type()));
-      }
       double gb_per_s =
-          ((double)bytes / ((double)kernel_time_ms_ / 1000)) / (double)1.0e9;
+          ((double)bytes_processed_ / ((double)kernel_time_ms_ / 1000)) /
+          (double)1.0e9;
       std::cout << "kernel" << fusion_id_ << " run in " << kernel_time_ms_
                 << " ms, achieved: " << gb_per_s << " GB/s" << std::endl;
     }
@@ -763,7 +1051,9 @@ void FusionExecutor::compileRtc(
   }
   fusion_id_ = 1;
   options_ = CompileOptions();
-  compiled_kernel_ = executor_utils::nvrtcCompile(scode, name, fusion_id_);
+
+  std::tie(compiled_kernel_, last_compiler_log_) =
+      executor_utils::nvrtcCompile(scode, name, fusion_id_);
 }
 
 void FusionExecutor::runRtc(

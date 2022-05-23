@@ -1,8 +1,9 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/cpu/MaxUnpoolKernel.h>
 
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/Pool.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
@@ -149,7 +150,7 @@ void cpu_max_unpool_channels_last(
   if (optional_error_index) {
     AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
         " (output volumes are of size ", output_height,
-        "x", output_width);
+        "x", output_width, ")");
   }
 
   if (!output_.is_contiguous(memory_format)) {
@@ -232,68 +233,6 @@ void cpu_max_unpool_backward(
   }
 }
 
-template <typename scalar_t>
-void cpu_max_unpool_backward_channels_last(
-    Tensor& grad_input_,
-    const Tensor& grad_output,
-    const Tensor& indices) {
-  TORCH_CHECK(grad_output.ndimension() == 4,
-      "max_unpool2d  backward with channels last format supports tensors with 4 dims.");
-  auto memory_format = at::MemoryFormat::ChannelsLast;
-  auto grad_input = grad_input_.contiguous(memory_format);
-
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
-  auto indices_data = indices.data_ptr<int64_t>();
-
-  int64_t nbatch = grad_input.size(0);
-  int64_t channels = grad_input.size(1);
-  int64_t input_height = grad_input.size(2);
-  int64_t input_width = grad_input.size(3);
-  int64_t output_height = grad_output.size(2);
-  int64_t output_width = grad_output.size(3);
-  int64_t input_image_size = input_height * input_width;
-  int64_t output_image_size = output_height * output_width;
-
-  c10::optional<int64_t> optional_error_index;
-
-  // parallel on dim N, H, W
-  at::parallel_for(0, nbatch * input_image_size, 0, [&](int64_t begin, int64_t end) {
-    int64_t n = 0;
-    int64_t ip = 0;
-    data_index_init(begin, n, nbatch, ip, input_image_size);
-
-    for (const auto i : c10::irange(begin, end)) {
-      scalar_t* grad_output_ptr = grad_output_data + n * output_image_size * channels;
-      scalar_t* grad_input_ptr = grad_input_data + i * channels;
-      int64_t* indices_ptr = indices_data + i * channels;
-
-      for (const auto c : c10::irange(channels)) {
-        int64_t maxp = indices_ptr[c];
-        if (maxp < 0 || maxp >= output_image_size) {
-          optional_error_index = maxp;
-          std::atomic_thread_fence(std::memory_order_release);
-        } else {
-          grad_input_ptr[c] = grad_output_ptr[maxp * channels + c];
-        }
-      }
-
-      // move on to next input index
-      data_index_step(n, nbatch, ip, input_image_size);
-    }
-  });
-
-  if (optional_error_index) {
-    AT_ERROR("invalid max index ", optional_error_index.value(),
-        ", owidth= ", output_width,
-        ", oheight= ", output_height);
-  }
-
-  if (!grad_input_.is_contiguous(memory_format)) {
-    grad_input_.copy_(grad_input);
-  }
-}
-
 void max_unpool2d_kernel_impl(
     Tensor& output,
     const Tensor& input,
@@ -325,42 +264,9 @@ void max_unpool3d_kernel_impl(
   });
 }
 
-void max_unpool2d_backward_kernel_impl(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& indices) {
-  switch(grad_output.suggest_memory_format()) {
-    case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "max_unpool2d_backward", [&] {
-        cpu_max_unpool_backward<scalar_t, /*is_3d*/false>(grad_input, grad_output, indices);
-      });
-      break;
-    }
-    case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "max_unpool2d_backward_channels_last", [&] {
-        cpu_max_unpool_backward_channels_last<scalar_t>(grad_input, grad_output, indices);
-      });
-      break;
-    }
-    default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
-  }
-}
-
-void max_unpool3d_backward_kernel_impl(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& indices) {
-  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "max_unpool3d_backward", [&] {
-    cpu_max_unpool_backward<scalar_t, /*is_3d*/true>(grad_input, grad_output, indices);
-  });
-}
-
 } // anonymous namespace
 
 REGISTER_DISPATCH(max_unpool2d_kernel, &max_unpool2d_kernel_impl);
-REGISTER_DISPATCH(max_unpool2d_backward_kernel, &max_unpool2d_backward_kernel_impl);
 REGISTER_DISPATCH(max_unpool3d_kernel, &max_unpool3d_kernel_impl);
-REGISTER_DISPATCH(max_unpool3d_backward_kernel, &max_unpool3d_backward_kernel_impl);
 
 }} // at::native

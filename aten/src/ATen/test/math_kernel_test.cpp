@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/CPUFunctions.h>
+#include <c10/util/irange.h>
 
 using namespace at;
 
@@ -115,7 +116,7 @@ TEST(MathKernelTest, MishBackward) {
 
 TEST(MathKernelTest, NarrowCopy)  {
   auto x = rand({5, 8, 7});
-  for (int64_t dim = 0; dim < 3; ++dim) {
+  for (const auto dim : c10::irange(3)) {
     const int64_t start = 1, length = 4;
     auto y_ref = x.narrow(dim, start, length);
     auto y_test = at::native::narrow_copy_dense(x, dim, start, length);

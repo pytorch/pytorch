@@ -5,7 +5,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <c10/util/sparse_bitset.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <list>
 #include <unordered_map>

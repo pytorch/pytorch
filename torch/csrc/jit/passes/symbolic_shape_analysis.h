@@ -1,6 +1,7 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/util/variant.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <unordered_map>
 
@@ -47,5 +48,10 @@ PropagateShapesAndBuildLargeShapeComputeGraph(
 TORCH_API bool setSymbolicShapeAnalysisTestMode(bool value);
 TORCH_API bool symbolicShapeAnalysisTestModeEnabled();
 
+using SSAInput = c10::variant<IValue, c10::SymbolicShape>;
+TORCH_API c10::optional<std::vector<c10::SymbolicShape>>
+calculateSymbolicShapesOnOp(
+    const FunctionSchema* schema,
+    const std::vector<SSAInput>& inputs);
 } // namespace jit
 } // namespace torch

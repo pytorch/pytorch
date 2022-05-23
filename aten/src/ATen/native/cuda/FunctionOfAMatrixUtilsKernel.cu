@@ -1,5 +1,7 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/FunctionOfAMatrixUtils.h>
 
+#include <ATen/Dispatch.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/Atomic.cuh>
@@ -85,7 +87,7 @@ void _compute_linear_combination_internal_kernel(
     }
   };
 
-  _lauch_kernel<num_threads, thread_work_size>(iter.numel(), loop);
+  _lauch_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
 }
 
 void _compute_linear_combination_cuda_kernel(

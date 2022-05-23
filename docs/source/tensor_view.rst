@@ -26,10 +26,10 @@ Since views share underlying data with its base tensor, if you edit the data
 in the view, it will be reflected in the base tensor as well.
 
 Typically a PyTorch op returns a new tensor as output, e.g. :meth:`~torch.Tensor.add`.
-But in case of view ops, outputs are views of input tensors to avoid unncessary data copy.
+But in case of view ops, outputs are views of input tensors to avoid unnecessary data copy.
 No data movement occurs when creating a view, view tensor just changes the way
 it interprets the same data. Taking a view of contiguous tensor could potentially produce a non-contiguous tensor.
-Users should be pay additional attention as contiguity might have implicit performance impact.
+Users should pay additional attention as contiguity might have implicit performance impact.
 :meth:`~torch.Tensor.transpose` is a common example.
 
 ::

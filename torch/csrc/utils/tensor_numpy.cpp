@@ -170,10 +170,10 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
 
 void warn_numpy_not_writeable() {
   TORCH_WARN_ONCE(
-    "The given NumPy array is not writeable, and PyTorch does "
-    "not support non-writeable tensors. This means you can write to the "
-    "underlying (supposedly non-writeable) NumPy array using the tensor. "
-    "You may want to copy the array to protect its data or make it writeable "
+    "The given NumPy array is not writable, and PyTorch does "
+    "not support non-writable tensors. This means writing to this tensor "
+    "will result in undefined behavior. "
+    "You may want to copy the array to protect its data or make it writable "
     "before converting it to a tensor. This type of warning will be "
     "suppressed for the rest of this program.");
 }
@@ -371,7 +371,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   {
     PyObject *py_strides = PyDict_GetItemString(cuda_dict, "strides");
     if (py_strides != nullptr && py_strides != Py_None) {
-      if (PySequence_Length(py_strides) == -1 || PySequence_Length(py_strides) != sizes.size()) {
+      if (PySequence_Length(py_strides) == -1 || static_cast<size_t>(PySequence_Length(py_strides)) != sizes.size()) {
         throw TypeError("strides must be a sequence of the same length as shape");
       }
       strides = seq_to_aten_shape(py_strides);

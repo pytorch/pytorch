@@ -18,9 +18,10 @@ from torch.ao.quantization import (
     per_channel_dynamic_qconfig,
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig,
+    float_qparams_weight_only_qconfig_4bit,
     PerChannelMinMaxObserver,
-    QConfigDynamic,
     default_dynamic_quant_observer,
+    QConfig,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -61,6 +62,8 @@ from torch.testing._internal.common_quantized import (
     override_qengines,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_utils import skipIfNoCaffe2
+
 from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
@@ -72,7 +75,266 @@ import io
 import unittest
 import numpy as np
 
-class TestPostTrainingStatic(QuantizationTestCase):
+class TestQuantizeEagerOps(QuantizationTestCase):
+    @override_qengines
+    def _test_reference_module_impl(self,
+                                    float_module_class,
+                                    quantized_module_class,
+                                    extra_module_kwargs,
+                                    input_size):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = float_module_class(**extra_module_kwargs)
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv(x)
+                x = self.dequant(x)
+                return x
+
+        class RefM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = float_module_class(**extra_module_kwargs)
+                self.quant1 = QuantStub()
+                self.dequant1 = DeQuantStub()
+                self.quant2 = QuantStub()
+                self.dequant2 = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant1(x)
+                x = self.dequant1(x)
+                x = self.conv(x)
+                x = self.quant2(x)
+                x = self.dequant2(x)
+                return x
+
+        qengine = torch.backends.quantized.engine
+        if qengine not in supported_qengines or qengine == 'qnnpack':
+            return   # qnnpack does not support nnq.ConvTranspose3d
+
+        data = torch.randn(*input_size, dtype=torch.float)
+        original_m = M()
+        original_ref_m = RefM()
+
+        original_ref_m.conv.weight = torch.nn.Parameter(original_m.conv.weight.detach())
+        original_ref_m.conv.bias = torch.nn.Parameter(original_m.conv.bias.detach())
+
+        original_m.qconfig = torch.quantization.default_qconfig
+
+        m = prepare(original_m)
+        # calibration
+        m(data)
+        m = convert(m)
+        # check if the module is properly quantized
+        self.assertEqual(type(m.quant), nnq.Quantize)
+        self.assertEqual(type(m.conv), quantized_module_class)
+        self.assertEqual(type(m.dequant), nnq.DeQuantize)
+        res = m(data)
+
+        # quantize the reference model
+        original_ref_m.eval()
+        original_ref_m.qconfig = torch.quantization.default_qconfig
+
+        ref_m = prepare(original_ref_m)
+        ref_m(data)
+        ref_m = convert(ref_m, is_reference=True)
+        ref_res = ref_m(data)
+        self.assertEqual(res, ref_res)
+
+    def test_conv_1d(self):
+        self._test_reference_module_impl(
+            nn.Conv1d,
+            nnq.Conv1d,
+            {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1},
+            (16, 1, 1)
+        )
+
+    def test_conv_2d(self):
+        self._test_reference_module_impl(
+            nn.Conv2d,
+            nnq.Conv2d,
+            {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1},
+            (16, 1, 10, 10)
+        )
+
+    def test_conv_3d(self):
+        self._test_reference_module_impl(
+            nn.Conv3d,
+            nnq.Conv3d,
+            {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1},
+            (16, 1, 10, 10, 10)
+        )
+
+    def test_conv_transpose_1d(self):
+        self._test_reference_module_impl(
+            nn.ConvTranspose1d,
+            nnq.ConvTranspose1d,
+            {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1},
+            (16, 1, 1)
+        )
+
+    def test_conv_transpose_2d(self):
+        self._test_reference_module_impl(
+            nn.ConvTranspose2d,
+            nnq.ConvTranspose2d,
+            {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1},
+            (16, 1, 10, 10)
+        )
+
+    def test_conv_transpose_3d(self):
+        self._test_reference_module_impl(
+            nn.ConvTranspose3d,
+            nnq.ConvTranspose3d,
+            {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1},
+            (16, 1, 10, 10, 10)
+        )
+
+    def test_linear(self):
+        self._test_reference_module_impl(
+            nn.Linear,
+            nnq.Linear,
+            {'in_features': 5, 'out_features': 10},
+            (16, 5)
+        )
+
+    @override_qengines
+    def test_int16_reference_module(self):
+
+        class RefM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.ConvTranspose2d(1, 1, 1)
+                self.quant1 = QuantStub()
+                self.dequant1 = DeQuantStub()
+                self.quant2 = QuantStub()
+                self.dequant2 = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant1(x)
+                x = self.dequant1(x)
+                x = self.conv(x)
+                x = self.quant2(x)
+                x = self.dequant2(x)
+                return x
+
+
+        input_size = (16, 1, 10, 10)
+        data = torch.randn(*input_size, dtype=torch.float)
+
+        original_ref_m = RefM()
+        rand_w = torch.randn_like(original_ref_m.conv.weight)
+        rand_b = torch.randn_like(original_ref_m.conv.bias)
+        original_ref_m.conv.weight = torch.nn.Parameter(rand_w, requires_grad=False)
+        original_ref_m.conv.bias = torch.nn.Parameter(rand_b, requires_grad=False)
+
+        qengine = torch.backends.quantized.engine
+        if qengine not in supported_qengines:
+            return
+        from torch.ao.quantization.observer import MovingAverageMinMaxObserver
+
+        weight_obs = MovingAverageMinMaxObserver.with_args(
+            dtype=torch.qint32,
+            # set qmin and qmax to represent qint16
+            quant_min=-1 * (2 ** 15),
+            quant_max=(2 ** 15) - 1,
+            qscheme=torch.per_tensor_symmetric,
+        )
+        act_obs = MovingAverageMinMaxObserver.with_args(
+            dtype=torch.qint32,
+            quant_min=-1 * (2 ** 15),
+            quant_max=(2 ** 15) - 1,
+        )
+        custom_qconfig = QConfig(activation=act_obs, weight=weight_obs)
+
+        # quantize the reference model
+        original_ref_m.eval()
+        original_ref_m.qconfig = custom_qconfig
+
+        ref_m = prepare(original_ref_m)
+        # calibration
+        ref_m(torch.randn(*input_size, dtype=torch.float))
+
+        ref_m = convert(ref_m, is_reference=True)
+
+        myobs = MovingAverageMinMaxObserver(averaging_constant=0.5,
+                                            dtype=torch.qint32,
+                                            # set qmin and qmax to represent qint16
+                                            quant_min=-1 * (2 ** 15),
+                                            quant_max=(2 ** 15) - 1,
+                                            qscheme=torch.per_tensor_symmetric,
+                                            )
+        result = myobs(rand_w)
+        qparams = myobs.calculate_qparams()
+        self.assertEqual(ref_m.conv.weight_scale, qparams[0])
+
+
+    def _test_activation_op_impl(
+            self, float_module_class, quantized_module_class, extra_module_kwargs):
+        """ Implementation for testing common activation ops like leaky relu
+        Args:
+            extra_module_kwargs: keyword args to instantiate the float module
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.activation_op = float_module_class(**extra_module_kwargs)
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.activation_op(x)
+                x = self.dequant(x)
+                return x
+
+        m = M().eval()
+        m.qconfig = default_qconfig
+        m = prepare(m)
+        self.checkObservers(m)
+        m = convert(m)
+        self.assertEqual(type(m.activation_op), quantized_module_class)
+
+    def test_leaky_relu(self):
+        self._test_activation_op_impl(nn.LeakyReLU, nnq.LeakyReLU, {'negative_slope': 0.1, 'inplace': False})
+
+    def test_relu(self):
+        self._test_activation_op_impl(nn.ReLU, nn.ReLU, {'inplace': False})
+
+    # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
+    @given(train_mode=st.booleans())
+    def test_functional_module(self, train_mode):
+        model = ModelWithFunctionals()
+        x = torch.rand(10, 1, dtype=torch.float)
+        xq = torch.quantize_per_tensor(x, 0.01, 30, torch.quint8)
+        self.checkScriptable(model, [[x]], check_save_load=True)
+        if train_mode:
+            model.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
+            model = prepare_qat(model)
+        else:
+            model.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
+            model = prepare(model)
+        # Check if observers and quant/dequant nodes are inserted
+        self.checkNoPrepModules(model)
+        self.checkObservers(model)
+        # Calibrate
+        model(xq.dequantize())
+        model = convert(model)
+
+        def checkQuantized(model):
+            self.checkNoPrepModules(model)
+            self.assertEqual(type(model.myadd), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.mycat), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.myadd_relu), torch.nn.quantized.QFunctional)
+            self.checkNoQconfig(model)
+
+        checkQuantized(model)
+        self.checkScriptable(model, [[xq]], check_save_load=True)
+
+class TestQuantizeEagerPTQStatic(QuantizationTestCase):
 
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
@@ -505,26 +767,28 @@ class TestPostTrainingStatic(QuantizationTestCase):
         r""" Test the post-training quantization flow, serialization and scripting
         of embedding modules
         """
-        model = EmbeddingModule().eval()
-        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
-        weights = torch.randn(10, 12, dtype=torch.float32)
-        model.qconfig = float_qparams_weight_only_qconfig
-        prepare(model, inplace=True)
-        convert(model, inplace=True)
-        self.assertTrue('QuantizedEmbedding' in str(model))
-        self.assertEqual(type(model.emb), torch.nn.quantized.Embedding)
-        self.checkScriptable(model, [[indices]], check_save_load=True)
 
-        idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
-        offsets = torch.LongTensor([0, 4])
-        x = torch.randn(2, 4)
-        model = EmbeddingWithStaticLinear().eval()
-        prepare(model, inplace=True)
-        convert(model, inplace=True)
-        self.assertTrue('QuantizedEmbedding' in str(model))
-        self.assertTrue('QuantizedLinear' in str(model))
-        self.checkQuantizedLinear(model.fc)
-        model(idx, offsets, x)
+        for qconfig in [float_qparams_weight_only_qconfig, float_qparams_weight_only_qconfig_4bit]:
+            model = EmbeddingModule().eval()
+            indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+            weights = torch.randn(10, 12, dtype=torch.float32)
+            model.qconfig = qconfig
+            prepare(model, inplace=True)
+            convert(model, inplace=True)
+            self.assertTrue('QuantizedEmbedding' in str(model))
+            self.assertEqual(type(model.emb), torch.nn.quantized.Embedding)
+            self.checkScriptable(model, [[indices]], check_save_load=True)
+
+            idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
+            offsets = torch.LongTensor([0, 4])
+            x = torch.randn(2, 4)
+            model = EmbeddingWithStaticLinear().eval()
+            prepare(model, inplace=True)
+            convert(model, inplace=True)
+            self.assertTrue('QuantizedEmbedding' in str(model))
+            self.assertTrue('QuantizedLinear' in str(model))
+            self.checkQuantizedLinear(model.fc)
+            model(idx, offsets, x)
 
     @skipIfNoFBGEMM
     def test_dequant_stub(self):
@@ -560,8 +824,8 @@ class TestPostTrainingStatic(QuantizationTestCase):
             float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=dtype,
                                                                         qscheme=torch.per_channel_affine_float_qparams,
                                                                         ch_axis=0)
-            float_qparams_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                                   weight=float_qparams_observer)
+            float_qparams_qconfig = QConfig(activation=default_dynamic_quant_observer,
+                                            weight=float_qparams_observer)
             model.qconfig = float_qparams_qconfig
 
             prepare(model, inplace=True)
@@ -749,9 +1013,22 @@ class TestPostTrainingStatic(QuantizationTestCase):
         m[0].qconfig = None
         mp = torch.ao.quantization.prepare(m)
 
+    @skipIfNoFBGEMM
+    def test_quantwrapper_attaches_qconfig_to_dequant(self):
+        qconfig = torch.ao.quantization.default_qconfig
+
+        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        for i in range(len(m)):
+            m[i].qconfig = qconfig
+            m[i] = torch.ao.quantization.QuantWrapper(m[i])
+
+        mp = torch.ao.quantization.prepare(m)
+        mq = torch.ao.quantization.convert(mp)
+        self.assertTrue(isinstance(mq[0].dequant, nnq.DeQuantize))
+
 
 @skipIfNoFBGEMM
-class TestPostTrainingDynamic(QuantizationTestCase):
+class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
     def test_single_layer(self):
         r"""Dynamic Quantize SingleLayerLinearDynamicModel which has one Linear module,
         make sure it is swapped to nnqd.Linear which is the quantized version of
@@ -1166,72 +1443,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         self.assertTrue('QuantizedEmbedding' in str(q_model))
         self.assertTrue('DynamicQuantizedLinear' in str(q_model))
 
-
-class TestEagerModeActivationOps(QuantizationTestCase):
-    def _test_activation_op_impl(
-            self, float_module_class, quantized_module_class, extra_module_kwargs):
-        """ Implementation for testing common activation ops like leaky relu
-        Args:
-            extra_module_kwargs: keyword args to instantiate the float module
-        """
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.activation_op = float_module_class(**extra_module_kwargs)
-                self.quant = QuantStub()
-                self.dequant = DeQuantStub()
-
-            def forward(self, x):
-                x = self.quant(x)
-                x = self.activation_op(x)
-                x = self.dequant(x)
-                return x
-
-        m = M().eval()
-        m.qconfig = default_qconfig
-        m = prepare(m)
-        self.checkObservers(m)
-        m = convert(m)
-        self.assertEqual(type(m.activation_op), quantized_module_class)
-
-    def test_leaky_relu(self):
-        self._test_activation_op_impl(nn.LeakyReLU, nnq.LeakyReLU, {'negative_slope': 0.1, 'inplace': False})
-
-    def test_relu(self):
-        self._test_activation_op_impl(nn.ReLU, nn.ReLU, {'inplace': False})
-
-class TestFunctionalModule(QuantizationTestCase):
-    # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
-    @given(train_mode=st.booleans())
-    def test_functional_module(self, train_mode):
-        model = ModelWithFunctionals()
-        x = torch.rand(10, 1, dtype=torch.float)
-        xq = torch.quantize_per_tensor(x, 0.01, 30, torch.quint8)
-        self.checkScriptable(model, [[x]], check_save_load=True)
-        if train_mode:
-            model.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
-            model = prepare_qat(model)
-        else:
-            model.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
-            model = prepare(model)
-        # Check if observers and quant/dequant nodes are inserted
-        self.checkNoPrepModules(model)
-        self.checkObservers(model)
-        # Calibrate
-        model(xq.dequantize())
-        model = convert(model)
-
-        def checkQuantized(model):
-            self.checkNoPrepModules(model)
-            self.assertEqual(type(model.myadd), torch.nn.quantized.QFunctional)
-            self.assertEqual(type(model.mycat), torch.nn.quantized.QFunctional)
-            self.assertEqual(type(model.myadd_relu), torch.nn.quantized.QFunctional)
-            self.checkNoQconfig(model)
-
-        checkQuantized(model)
-        self.checkScriptable(model, [[xq]], check_save_load=True)
-
-class TestQuantizeONNXExport(JitTestCase):
+class TestQuantizeEagerONNXExport(JitTestCase):
     def _test_lower_graph_impl(self, model, data):
         model.qconfig = torch.ao.quantization.default_qconfig
         model = torch.ao.quantization.prepare(model)
@@ -1249,10 +1461,12 @@ class TestQuantizeONNXExport(JitTestCase):
             model = torch.jit.load(buf)
             f = io.BytesIO()
             torch.onnx.export(model, input, f, input_names=input_names,
-                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
+                              opset_version=9)
         onnx_model = export_to_onnx(model, data, input_names)
 
     @skipIfNoFBGEMM
+    @skipIfNoCaffe2
     def test_lower_graph_linear(self):
         model = torch.ao.quantization.QuantWrapper(torch.nn.Linear(5, 10, bias=True)).to(dtype=torch.float)
         data_numpy = np.random.rand(1, 2, 5).astype(np.float32)
@@ -1260,6 +1474,7 @@ class TestQuantizeONNXExport(JitTestCase):
         self._test_lower_graph_impl(model, data)
 
     @skipIfNoFBGEMM
+    @skipIfNoCaffe2
     def test_lower_graph_conv2d(self):
         model = torch.ao.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True)).to(dtype=torch.float)
         data_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)

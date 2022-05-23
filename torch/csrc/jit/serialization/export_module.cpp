@@ -16,6 +16,10 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
+#if defined(ENABLE_FLATBUFFER)
+#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
+#endif
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -38,6 +42,24 @@
 namespace torch {
 namespace jit {
 
+CompilationOptions getOptionsFromGlobal() {
+  CompilationOptions compilation_options;
+  compilation_options.enable_default_args_before_out_args =
+      BytecodeEmitMode::is_default_args_before_out_args_enabled();
+  compilation_options.enable_default_value_for_unspecified_arg =
+      BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled();
+  compilation_options.enable_emit_promoted_ops =
+      BytecodeEmitMode::is_emit_promoted_ops_enabled();
+  compilation_options.incl_interface_call = getMobileInterfaceCallExport();
+  compilation_options.model_version =
+      caffe2::serialize::kProducedBytecodeVersion;
+  return compilation_options;
+}
+
+IValue to_tuple(std::initializer_list<IValue> ivalues) {
+  return c10::ivalue::Tuple::create(ivalues);
+}
+
 IValue to_tuple(std::vector<IValue> ivalues) {
   return c10::ivalue::Tuple::create(std::move(ivalues));
 }
@@ -58,224 +80,190 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
   return func;
 }
 
-std::pair<IValue, IValue> getFunctionTuple(
-    const Module& module,
-    const Function& func,
-    std::unique_ptr<Graph> optimizedGraph,
-    BackendDebugInfoRecorder& debug_info_recorder,
-    const std::string& qn,
-    TypeNameUniquer& type_name_uniquer_) {
-  TORCH_INTERNAL_ASSERT(optimizedGraph);
-  std::shared_ptr<MobileCode> code;
-  code = std::make_shared<MobileCode>(
-      std::move(optimizedGraph), func.name(), BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() /* emit_default_input_instructions */, BytecodeEmitMode::is_default_args_before_out_args_enabled() /* enable_defaults_args_with_out_args */);
-  auto instructions_copy = code->instructions();
-
-  // operator names
-  std::vector<c10::OperatorName> opnames;
-  std::vector<std::string> method_names;
-  std::vector<int64_t> op_debug_handles;
-  int next_new_op_index = 0;
-  for (size_t i = 0; i < instructions_copy.size(); ++i) {
-    Instruction ins = instructions_copy[i];
-    if ((ins.op == OP || ins.op == OPN) && ins.X == next_new_op_index) {
-      // Found a new op (assumes new operators ordered by ascending ins.X)
-      auto node = code->instructions_source()[i];
-      opnames.emplace_back(node->schema().operator_name());
-      next_new_op_index++;
-    }
-    // CALL nodes at this point represent built-in (i.e. non-Graph)
-    // functions that were not inlined. Here we convert the CALL
-    // instructions for these functions into INTERFACE_CALL instructions
-    // s.t. at runtime, we will look up the Function* on the Type of the
-    // 0th argument in the stack and call that directly.
-    if (ins.op == CALL) {
-      auto node = code->instructions_source()[i];
-      if (node->kind() == prim::CallMethod) {
-        // NB: replacing instruction
-        auto method_name_idx =
-            code->constant_table().size() + method_names.size();
-        method_names.emplace_back(node->s(attr::name));
-        Instruction new_instr{
-            INTERFACE_CALL,
-            static_cast<int32_t>(method_name_idx),
-            static_cast<uint16_t>(node->inputs().size())};
-        instructions_copy[i] = new_instr;
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            false, "Unsupported node kind on CALL opcode for mobile");
-      }
-    } else if (ins.op == RET) {
-      auto node = code->instructions_source()[i];
-      for (const auto& input : node->inputs()) {
-        const auto& input_type = input->type();
-        if (input_type->kind() == TypeKind::ListType ||
-            input_type->kind() == TypeKind::DictType) {
-          for (const TypePtr& element_type : input_type->containedTypes()) {
-            TORCH_CHECK(
-                element_type->kind() != TypeKind::ClassType,
-                "Returining a list or dictionary with pytorch class type ",
-                "is not supported in mobile module "
-                "(List[Foo] or Dict[int, Foo] for class Foo(torch.nn.Module)). "
-                "Workaround: instead of using pytorch class as their element type, ",
-                "use a combination of list, dictionary, and single types.");
-          }
-        }
-      }
-    } else {
-      TORCH_CHECK(
-          isOpSupportedInMobile(ins.op),
-          toString(ins.op),
-          " is not supported in mobile module.");
-    }
-    auto node = code->instructions_source()[i];
-    int64_t debug_handle = debug_info_recorder.getNextDebugHandle(node);
-    // Note 1-to-1 correspondence between instructions and debug handles
-    op_debug_handles.emplace_back(debug_handle);
-  }
-
-  // instructions
-  std::vector<IValue> instructions;
-  instructions.reserve(instructions_copy.size());
-  for (Instruction ins : instructions_copy) {
-    instructions.emplace_back(to_tuple({toString(ins.op), ins.X, ins.N}));
-  }
-
-  // operators
-  std::vector<IValue> operators;
-  auto op_to_specified_args = code->op_to_num_specified_args();
-  operators.reserve(opnames.size());
-  for (const auto& opname : opnames) {
-    auto unique_name = c10::toString(opname);
-    // For operator with vararg, adding default arguments would be confusing and
-    // is not allowed. For an operator with num_args = -1, it means the number
-    // of arguments is not available for this operator, we don't do any backward
-    // compatibility adaptation at runtime.
-    int num_args = -1;
-    auto it = op_to_specified_args.find(unique_name);
-    if (it != op_to_specified_args.end()) {
-      num_args = it->second;
-    }
-    if (BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled()) {
-      operators.emplace_back(to_tuple({opname.name, opname.overload_name}));
-    } else {
-      operators.emplace_back(
-          to_tuple({opname.name, opname.overload_name, num_args}));
-    }
-  }
-
-  // constants
-  //
-  // Make a copy of the constants and append the method names
-  // that we emitted for the converted INTERFACE_CALL nodes above.
-  auto constants = code->constant_table();
-  for (auto& method_name : method_names) {
-    constants.emplace_back(std::move(method_name));
-  }
-
-  // types
-  std::vector<IValue> types;
-  types.reserve(code->type_table().size());
-  static const std::string torch_prefix("__torch__");
-  static const std::string class_prefix("__torch__.torch.classes");
-  std::shared_ptr<torch::jit::CompilationUnit> cu =
-      module._ivalue()->compilation_unit();
-
-  for (const TypePtr& t : code->type_table()) {
-    std::string type_str = t->annotation_str();
-    if (t->kind() == TypeKind::TupleType) {
-      TORCH_CHECK(
-          cu->get_named_tuple(t->str()),
-          "Can't find definition for the qualified name: ",
-          t->str(),
-          "(TypeKind::TupleType)  in compilation unit.",
-          "Please report a bug to PyTorch.");
-      auto named_tuple_type = cu->get_named_tuple(t->str());
-      if (named_tuple_type != nullptr) {
-        std::string named_tuple_str = t->str();
+/**
+ * If the type is not NamedTuple, it will return default_type_str. If the type
+ * is a NamedTuple, it will return a string with following structure to describe
+ * the content in the NamedTuple: "qualified_named[ NamedTuple, [ [filed_name_1,
+ * field_type_1], [filed_name_2, field_type_2]
+ *   ]
+ * ]"
+ *  Example NamedTuple type:
+ *  "__torch__.base_models.sparse_nn.pytorch_preproc_types.PreprocOutputType[
+ *     NamedTuple, [
+ *         [float_features, Tensor],
+ *         [id_list_features, List[Tensor]],
+ *         [label,  Tensor],
+ *         [weight, Tensor],
+ *         ]
+ *     ]"
+ *
+ * @param compilation_unit Jit compilcation unit to look up function schema.
+ * @param type_ptr A type pointer and it can be possibly any type.
+ * @param default_type_str The default string representation. The string can
+ * either from type_ptr->str(), type_ptr->annotation_str(), or
+ * type_ptr->repr_str(). In some cases, they could be different in different
+ * scenario. For example, Tensor type can be "Tensor", "Tensor (inferred)" and
+ * "Tensor[]", and we only want "Tensor". Leave it as part of arguments as the
+ * default return, when type_ptr is not a NamedTuple.
+ * @return string representation.
+ */
+std::string get_named_tuple_str_or_default(
+    const CompilationUnit& compilation_unit,
+    const TypePtr& type_ptr,
+    std::string default_type_str) {
+  if (type_ptr->kind() == TypeKind::TupleType) {
+    // For the simple types (Tensor, Tensor), the mobile type parse can parse
+    // it and compilation unit won't have it's definition. The default type
+    // string will be returned instead.
+    if (compilation_unit.get_named_tuple(type_ptr->str())) {
+      auto named_tuple_ptr = compilation_unit.get_named_tuple(type_ptr->str());
+      if (named_tuple_ptr != nullptr) {
+        std::string named_tuple_str = type_ptr->str();
         named_tuple_str.append("[NamedTuple, [");
         std::vector<IValue> name_type_pairs;
 
         // Get the field name and field type for the NamedTuple
-        for (auto it = named_tuple_type->schema()->arguments().begin();
-             it != named_tuple_type->schema()->arguments().end();
+        for (auto it = named_tuple_ptr->schema()->arguments().begin();
+             it != named_tuple_ptr->schema()->arguments().end();
              it++) {
-          name_type_pairs.emplace_back(
-              c10::ivalue::Tuple::create({it->name(), it->type()->repr_str()}));
-
+          const std::string named_tuple_name = it->name();
+          const c10::TypePtr& named_tuple_type = it->type();
           // When it->type() is Tensor type, in Python, if it's inferred type,
           // str() return "Tensor" and repr_str() return "Tensor (inferred)". If
           // it's not inferred type, str() return "Tensor[]" and repr_str()
           // return "Tensor". In cpp, repr_str() will always return "Tensor"
           // regardless inferred type. When exporing custom type in bytecode,
           // "Tensor" is the preferred way to deserialize Tensor type
-          type_str = it->is_inferred_type() ? it->type()->str()
-                                            : it->type()->repr_str();
-          named_tuple_str.append("[" + it->name() + ", " + type_str + "]");
-          if (it != named_tuple_type->schema()->arguments().end() - 1) {
+          std::string named_tuple_type_str = it->is_inferred_type()
+              ? named_tuple_type->str()
+              : named_tuple_type->repr_str();
+          // The type can also be NamedTuple. Will parse it recursively and get
+          // it's string representation.
+          named_tuple_type_str = get_named_tuple_str_or_default(
+              compilation_unit, named_tuple_type, named_tuple_type_str);
+          name_type_pairs.emplace_back(
+              c10::ivalue::Tuple::create({it->name(), named_tuple_type_str}));
+
+          named_tuple_str.append("[")
+              .append(named_tuple_name)
+              .append(", ")
+              .append(named_tuple_type_str)
+              .append("]");
+          if (it != named_tuple_ptr->schema()->arguments().end() - 1) {
             named_tuple_str.append(",");
           }
         }
         named_tuple_str.append("]]");
-        // Create a named_tuple type with following structure
-        // "qualified_named[
-        //   NamedTuple, [
-        //       [filed_name_1, field_type_1],
-        //       [filed_name_2, field_type_2]
-        //   ]
-        // ]"
-        //  Example NamedTuple type:
-        //  "__torch__.base_models.sparse_nn.pytorch_preproc_types.PreprocOutputType[
-        //     NamedTuple, [
-        //         [float_features, Tensor],
-        //         [id_list_features, List[Tensor]],
-        //         [label,  Tensor],
-        //         [weight, Tensor],
-        //         ]
-        //     ]"
-        types.emplace_back(named_tuple_str);
-        continue;
+        return named_tuple_str;
       }
+    }
+  }
+  return default_type_str;
+}
+
+std::pair<IValue, IValue> getFunctionTuple(
+    const CompilationUnit& compilation_unit,
+    const mobile::Function& func,
+    BackendDebugInfoRecorder& debug_info_recorder,
+    TypeNameUniquer& type_name_uniquer_) {
+  const auto& mobile_code = func.get_code();
+
+  // instructions
+  std::vector<IValue> instructions;
+  instructions.reserve(mobile_code.instructions_.size());
+  for (Instruction ins : mobile_code.instructions_) {
+    instructions.emplace_back(to_tuple({toString(ins.op), ins.X, ins.N}));
+  }
+
+  // operators
+  std::vector<IValue> operators;
+  operators.reserve(mobile_code.op_names_.size());
+  for (int i = 0; i < mobile_code.op_names_.size(); ++i) {
+    const auto& opname = mobile_code.op_names_[i];
+    const int size = mobile_code.operator_input_sizes_[i];
+    if (BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled()) {
+      operators.emplace_back(to_tuple({opname.name, opname.overload_name}));
+    } else {
+      operators.emplace_back(
+          to_tuple({opname.name, opname.overload_name, size}));
+    }
+  }
+
+  // types
+  std::vector<IValue> types;
+  types.reserve(mobile_code.types_.size());
+  static const std::string torch_prefix("__torch__");
+  static const std::string class_prefix("__torch__.torch.classes");
+
+  for (const TypePtr& ty : mobile_code.types_) {
+    auto t = ty;
+    if (auto dyn = t->castRaw<c10::DynamicType>()) {
+      t = dyn->fallback();
+    }
+    std::string type_str = t->annotation_str();
+    if (t->kind() == TypeKind::DictType) {
+      // For DictType, there are two items in t->containedTypes(), the first one
+      // is key and the second one is value. Both of them could be NamedTuple
+      // type.
+      const TypePtr& key_type = t->containedTypes()[0];
+      const TypePtr& value_type = t->containedTypes()[1];
+      std::string key_type_str = get_named_tuple_str_or_default(
+          compilation_unit, key_type, key_type->annotation_str());
+      std::string value_type_str = get_named_tuple_str_or_default(
+          compilation_unit, value_type, value_type->annotation_str());
+
+      // Construct the dict representation after achieving correct string
+      // representation for both key and value, like
+      // "Dict[str,__torch__.dper3.core.pytorch_schema_utils.IdScoreListFeatureTuple[NamedTuple,
+      // [[lengths, Tensor],[values,
+      // __torch__.dper3.core.pytorch_schema_utils.IdScoreTuple[NamedTuple,
+      // [[ids, Tensor],[scores, Tensor]]]],[offsets, Optional[Tensor]]]]]"
+      std::string dict_str;
+      dict_str.append("Dict[")
+          .append(key_type_str)
+          .append(",")
+          .append(value_type_str)
+          .append("]");
+      types.emplace_back(dict_str);
+      continue;
+    } else if (t->kind() == TypeKind::TupleType) {
+      std::string named_tuple_str =
+          get_named_tuple_str_or_default(compilation_unit, t, type_str);
+      types.emplace_back(named_tuple_str);
+      continue;
     } else if (type_str.find(torch_prefix) == 0) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
-          "__torch__ types other than torchbind (__torch__.torch.classes)"
+          "__torch__ types other than custom c++ classes (__torch__.torch.classes)"
           "are not supported in lite interpreter. ",
           "Workaround: instead of using arbitrary class type (class Foo()), ",
-          "define a pytorch class (class Foo(torch.nn.Module)).");
+          "define a pytorch class (class Foo(torch.nn.Module)). The problematic type is: ",
+          type_str);
     }
     types.emplace_back(type_str);
   }
 
   // since the register location is embedded into the bytecode, pass the
   // register size
-  auto register_size = static_cast<int>(code->register_size());
+  auto register_size = static_cast<int>(mobile_code.register_size_);
 
   auto codeTable = Table(
       {{"instructions", to_tuple(instructions)},
        {"operators", to_tuple(operators)},
-       {"constants", to_tuple(constants)},
+       {"constants", to_tuple(mobile_code.constants_)},
        {"types", to_tuple(types)},
        {"register_size", register_size}});
 
   // schema
   const auto& schema = func.getSchema();
-  auto type_printer =
-      [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
-    auto namedType = t->cast<c10::NamedType>();
+  auto type_printer = [&](const c10::Type& t) -> c10::optional<std::string> {
+    auto namedType = t.cast<c10::NamedType>();
     if (namedType && namedType->name()) {
       return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
     }
     return c10::nullopt;
   };
-  TORCH_CHECK(
-      schema.overload_name().empty(), // @TODO: is this check correct?
-      "Overloads are not supported in mobile modules.");
-  TORCH_CHECK(
-      !schema.is_vararg(), "Python *args are not supported in mobile modules.");
-  TORCH_CHECK(
-      !schema.is_varret(),
-      "A variable number of return values is not supported in mobile modules.");
+
   auto makeArgTuple = [&](const std::vector<Argument>& args) {
     std::vector<IValue> argTables;
     for (auto&& arg : args) {
@@ -296,9 +284,13 @@ std::pair<IValue, IValue> getFunctionTuple(
         arg.type()->annotation_str(type_printer) => mangled unique name of the
         module/submodule
       */
+      auto arg_type = arg.type();
+      if (auto dyn = arg_type->castRaw<c10::DynamicType>()) {
+        arg_type = dyn->fallback();
+      }
       argTables.emplace_back(Table({
           {"name", arg.name()},
-          {"type", arg.type()->annotation_str(type_printer)},
+          {"type", arg_type->annotation_str(type_printer)},
           {"default_value", arg.default_value()},
       }));
     }
@@ -310,6 +302,17 @@ std::pair<IValue, IValue> getFunctionTuple(
   });
 
   // function tuple
+  std::string qn;
+  if (func.name() == "__setstate__" || func.name() == "__getstate__") {
+    auto classtype = func.getSchema().arguments()[0].type()->cast<ClassType>();
+    TORCH_INTERNAL_ASSERT(
+        classtype, "class is null ", func.qualname().qualifiedName());
+    qn = c10::QualifiedName(
+             type_name_uniquer_.getUniqueName(classtype), func.name())
+             .qualifiedName();
+  } else {
+    qn = func.qualname().qualifiedName();
+  }
   auto bytecode_vals = to_tuple({qn, codeTable, schemaTable});
 
   c10::optional<IValue> debug_info_vals;
@@ -319,41 +322,27 @@ std::pair<IValue, IValue> getFunctionTuple(
   // debug handles generated by debug_handle_manager
   // will correspond to {source_range, inlinedCallStackPtr} which we will
   // serialize separately.
-  IValue module_debug_tuple = c10::ivalue::Tuple::create(op_debug_handles);
+  IValue module_debug_tuple =
+      c10::ivalue::Tuple::create(mobile_code.debug_handles_);
   auto function_debug_info =
       Table({{"function_debug_handles", module_debug_tuple}});
   debug_info_vals = to_tuple({qn, function_debug_info});
   return std::make_pair(bytecode_vals, debug_info_vals);
 }
 
-void pushFunctionToIValues(
-    BytecodeExportSet exportSet,
+void pushMobileFunctionsToIValues(
+    const CompilationUnit& compilation_unit,
+    const mobile::Module& module,
     std::vector<c10::IValue>& elements,
     std::vector<c10::IValue>& debugInfoElements,
     BackendDebugInfoRecorder& recorder,
     TypeNameUniquer& uniquer) {
-  exportSet.visit(
-      [&](const c10::QualifiedName& qn, ExportedFunction& exported) {
-        auto tuple = getFunctionTuple(
-            exported.mod,
-            exported.function,
-            std::move(exported.optimizedGraph),
-            recorder,
-            qn.qualifiedName(),
-            uniquer);
-        elements.push_back(std::move(tuple.first));
-        debugInfoElements.push_back(std::move(tuple.second));
-      });
-}
-
-void pushFunctionToIValues(
-    BytecodeExportSet exportSet,
-    std::vector<c10::IValue>& elements,
-    BackendDebugInfoRecorder& recorder,
-    TypeNameUniquer& uniquer) {
-  std::vector<c10::IValue> debugInfoElements;
-  pushFunctionToIValues(
-      std::move(exportSet), elements, debugInfoElements, recorder, uniquer);
+  for (const auto& method : module.get_methods()) {
+    auto tuple = getFunctionTuple(
+        compilation_unit, method.function(), recorder, uniquer);
+    elements.push_back(std::move(tuple.first));
+    debugInfoElements.push_back(std::move(tuple.second));
+  }
 }
 
 std::unordered_set<const FunctionSchema*> getInterfaceCalls(Graph& graph) {
@@ -395,61 +384,6 @@ std::vector<ModuleMethod> getModuleInterfaceExports(
     }
   }
   return ret;
-}
-
-void exportFunction(
-    BytecodeExportSet& exportSet,
-    const ModuleMethod& method,
-    bool toplevel = false) {
-  const auto& func = method.function;
-  const auto& qn = method.exportName;
-  if (exportSet.contains(qn)) {
-    if (toplevel) {
-      exportSet.update(qn, toplevel);
-    }
-    return;
-  }
-  auto graph = func.graph()->copyUnique();
-  Inline(*graph);
-  auto interfaceCalls = getInterfaceCalls(*graph);
-  exportSet.add(
-      qn, ExportedFunction{method.module, func, std::move(graph), toplevel});
-
-  if (!getMobileInterfaceCallExport()) {
-    return;
-  }
-
-  auto interfaces = getModuleInterfaceExports(method.module, interfaceCalls);
-  for (const auto& interface : interfaces) {
-    exportFunction(exportSet, interface);
-  }
-}
-
-void setstateTuple(
-    BytecodeExportSet& exportSet,
-    const Module& module,
-    const IValue& ivalue,
-    TypeNameUniquer& type_name_uniquer_,
-    bool toplevel = false) {
-  if (!ivalue.isObject())
-    return;
-  auto obj = ivalue.toObject();
-  auto type = obj->type();
-  if (checkHasValidSetGetState(type)) {
-    Function& setstate = type->getMethod("__setstate__");
-    auto qn = type_name_uniquer_.getUniqueName(obj->type()).qualifiedName() +
-        "." + setstate.name();
-    if (exportSet.contains(qn)) {
-      return;
-    }
-    if (auto f = tryToGraphFunction(setstate)) {
-      exportFunction(exportSet, ModuleMethod{module, *f, qn}, toplevel);
-    }
-  } else {
-    for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
-      setstateTuple(exportSet, module, obj->getSlot(i), type_name_uniquer_);
-    }
-  }
 }
 
 bool isLoweredModule(const Module& m) {
@@ -537,24 +471,6 @@ TORCH_API void enableMobileInterfaceCallExport() {
 }
 bool getMobileInterfaceCallExport() {
   return mobileInterfaceCallExport().load(std::memory_order_relaxed);
-}
-
-BytecodeExportSet moduleMethodsTuple(
-    const Module& module,
-    TypeNameUniquer& type_name_uniquer_) {
-  BytecodeExportSet exportSet;
-  auto methods = module.get_methods();
-  // top level methods
-  for (const auto& method : methods) {
-    const auto& f = toGraphFunction(method.function());
-    exportFunction(
-        exportSet, ModuleMethod{module, f, f.qualname()}, /* toplevel */ true);
-  }
-
-  // __setstate__ of all components
-  setstateTuple(exportSet, module, module._ivalue(), type_name_uniquer_, true);
-
-  return exportSet;
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
@@ -654,8 +570,12 @@ void ScriptModuleSerializer::writeArchive(
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
 
   for (const auto& td : data_pickle.tensorData()) {
-    WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string tensor_name = tensor_names[i++];
+    if (td.is_meta()) {
+      writer_.writeRecord(tensor_dir + tensor_name, nullptr, 0);
+      continue;
+    }
+    WriteableTensorData writable_td = getWriteableTensorData(td);
     if (use_storage_context && serialized_tensors.count(tensor_name)) {
       // storage has been serialzed already, skip
       continue;
@@ -769,9 +689,12 @@ void ScriptModuleSerializer::writeByteCode(
   // Always save debug handles
   debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
-  BytecodeExportSet exportSet = moduleMethodsTuple(module, type_name_uniquer_);
-  pushFunctionToIValues(
-      std::move(exportSet),
+  mobile::Module mobile_module =
+      jitModuleToMobile(module, getOptionsFromGlobal());
+
+  pushMobileFunctionsToIValues(
+      *module._ivalue()->compilation_unit(),
+      mobile_module,
       elements,
       debug_info_elements,
       debug_info_recorder,
@@ -835,9 +758,9 @@ void ScriptModuleSerializer::writeByteCode(
     getBackendDebugInfoMap(module, backend_debug_info_map);
     // Now get the debug-handles-to-inlined-cs-ptr-map
     // And serialize that in a separate archive
-    auto debug_handle_cs_ptr_map = debug_info_recorder.stopRecording();
-    debug_handle_cs_ptr_map.insert(
-        backend_debug_info_map.begin(), backend_debug_info_map.end());
+    const auto& debug_info = mobile_module.getDebugTable().getCallStackPtrMap();
+    BackendDebugInfoMapType debug_handle_cs_ptr_map(
+        debug_info.begin(), debug_info.end());
     CallStackDebugInfoPickler cs_debug_info_pickler;
     auto cs_data = cs_debug_info_pickler.pickle(
         debug_handle_cs_ptr_map, source_range_tags_);
@@ -851,6 +774,24 @@ void ScriptModuleSerializer::writeByteCode(
   }
 }
 
+namespace {
+
+c10::optional<std::string> type_printer(
+    const c10::Type& type,
+    torch::jit::TypeNameUniquer& type_name_uniquer) {
+  if (auto dyn = type.castRaw<c10::DynamicType>()) {
+    return dyn->fallback()->annotation_str(
+        [&](auto&& t) { return type_printer(t, type_name_uniquer); });
+  }
+  auto namedType = type.cast<c10::NamedType>();
+  if (namedType && namedType->name()) {
+    return type_name_uniquer.getUniqueName(namedType).qualifiedName();
+  }
+  return c10::nullopt;
+}
+
+} // namespace
+
 void ScriptModuleSerializer::convertNamedType(
     const c10::NamedTypePtr& class_type) {
   if (converted_types_.count(class_type)) {
@@ -861,21 +802,15 @@ void ScriptModuleSerializer::convertNamedType(
   std::string qualifier = qualname.prefix();
   PythonPrint* pp = file_streams_.find(qualifier);
 
-  auto type_printer =
-      [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
-    auto namedType = t->cast<c10::NamedType>();
-    if (namedType && namedType->name()) {
-      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
-    }
-    return c10::nullopt;
-  };
   if (!pp) {
     pp = &file_streams_.insert(
         std::move(qualifier),
         PythonPrint(
             constant_table_,
             class_deps_,
-            type_printer,
+            [&](const c10::Type& t) {
+              return type_printer(t, type_name_uniquer_);
+            },
             /*enforce_importable=*/true));
   }
   pp->printNamedType(class_type);
@@ -915,20 +850,49 @@ SerializationStorageContext& ScriptModuleSerializer::storage_context() {
   return storage_context_;
 }
 
+#if defined(ENABLE_FLATBUFFER)
+void save_mobile_module_to(
+    const Module& module,
+    const ExtraFilesMap& extra_files,
+    bool save_mobile_debug_info,
+    const std::function<size_t(const void*, size_t)>& writer_func) {
+  ExtraFilesMap jitFiles;
+  CompilationOptions options = getOptionsFromGlobal();
+  std::vector<IValue> constants;
+  jitModuleToPythonCodeAndConstants(module, &jitFiles, &constants);
+  mobile::Module mod = jitModuleToMobile(module, options);
+  auto buffer =
+      save_mobile_module_to_bytes(mod, extra_files, jitFiles, constants);
+  writer_func(reinterpret_cast<void*>(buffer.data()), buffer.size());
+}
+#endif
+
 void ExportModule(
     const Module& module,
     std::ostream& out,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
-  caffe2::serialize::PyTorchStreamWriter writer(
-      [&](const void* buf, size_t nbytes) -> size_t {
-        out.write(static_cast<const char*>(buf), nbytes);
-        return !out ? 0 : nbytes;
-      });
-  ScriptModuleSerializer serializer(writer);
-  serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
+  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+    out.write(static_cast<const char*>(buf), nbytes);
+    return !out ? 0 : nbytes;
+  };
+  if (use_flatbuffer) {
+#if defined(ENABLE_FLATBUFFER)
+    save_mobile_module_to(
+        module, extra_files, save_mobile_debug_info, writer_func);
+#else
+    TORCH_CHECK(
+        false,
+        "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
+#endif
+  } else {
+    caffe2::serialize::PyTorchStreamWriter writer(writer_func);
+    ScriptModuleSerializer serializer(writer);
+    serializer.serialize(
+        module, extra_files, bytecode_format, save_mobile_debug_info);
+  }
 }
 
 void ExportModule(
@@ -936,11 +900,29 @@ void ExportModule(
     const std::string& filename,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
-  caffe2::serialize::PyTorchStreamWriter writer(filename);
-  ScriptModuleSerializer serializer(writer);
-  serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
+  if (use_flatbuffer) {
+#if defined(ENABLE_FLATBUFFER)
+    auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+      std::fstream ofile(filename, std::ios::binary | std::ios::out);
+      ofile.write(static_cast<const char*>(buf), nbytes);
+      ofile.close();
+      return !ofile ? 0 : nbytes;
+    };
+    save_mobile_module_to(
+        module, extra_files, save_mobile_debug_info, writer_func);
+#else
+    TORCH_CHECK(
+        false,
+        "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
+#endif
+  } else {
+    caffe2::serialize::PyTorchStreamWriter writer(filename);
+    ScriptModuleSerializer serializer(writer);
+    serializer.serialize(
+        module, extra_files, bytecode_format, save_mobile_debug_info);
+  }
 }
 
 void ExportModule(
@@ -948,40 +930,34 @@ void ExportModule(
     const std::function<size_t(const void*, size_t)>& writer_func,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
-  caffe2::serialize::PyTorchStreamWriter writer(writer_func);
-  ScriptModuleSerializer serializer(writer);
-  serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
+  if (use_flatbuffer) {
+#if defined(ENABLE_FLATBUFFER)
+    save_mobile_module_to(
+        module, extra_files, save_mobile_debug_info, writer_func);
+#else
+    TORCH_CHECK(
+        false,
+        "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
+#endif
+  } else {
+    caffe2::serialize::PyTorchStreamWriter writer(writer_func);
+    ScriptModuleSerializer serializer(writer);
+    serializer.serialize(
+        module, extra_files, bytecode_format, save_mobile_debug_info);
+  }
 }
 
 namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
-  std::vector<c10::IValue> elements;
-  BackendDebugInfoRecorder dummy;
-  TypeNameUniquer dummy_uniquer = TypeNameUniquer();
-  BytecodeExportSet exportSet = moduleMethodsTuple(m, dummy_uniquer);
-  pushFunctionToIValues(std::move(exportSet), elements, dummy, dummy_uniquer);
-  for (const auto& element : elements) {
-    auto table = element.toTuple()->elements()[1];
-    auto row =
-        table.toTuple()->elements().at(BYTECODE_INDEX_OPERATOR).toTuple();
-    TORCH_INTERNAL_ASSERT(
-        row->elements().at(0).toStringRef() == "operators",
-        "Expected operators but found ",
-        row->elements().at(0).toStringRef());
-    const auto& ops_list = row->elements().at(1).toTuple()->elements();
-    for (const auto& op : ops_list) {
-      const auto& op_item = op.toTuple()->elements();
-      TORCH_CHECK(
-          op_item.size() >= 2,
-          "There should be either two parts (name and overload name), ",
-          "or three parts (name, overload name and number of specified args) ",
-          "for an operator.");
-      auto opname = op_item[0].toString()->string();
-      auto overload = op_item[1].toString()->string();
+  mobile::Module mobile_m = jitModuleToMobile(m, getOptionsFromGlobal());
+  for (const auto& method : mobile_m.get_methods()) {
+    for (const auto& op : method.function().get_code().op_names_) {
       // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-      opnames.emplace(overload.empty() ? opname : opname + "." + overload);
+      opnames.emplace(
+          op.overload_name.empty() ? op.name
+                                   : op.name + "." + op.overload_name);
     }
   }
 }
@@ -1013,6 +989,15 @@ bool BytecodeEmitMode::is_default_args_before_out_args_enabled() {
 }
 void BytecodeEmitMode::set_default_args_before_out_args_enabled(bool enabled) {
   emitDefautlArgsWithOutArgs = enabled;
+}
+
+thread_local bool emitDefaultEmitPromotedOps =
+    caffe2::serialize::kProducedBytecodeVersion <= 7 ? false : true;
+bool BytecodeEmitMode::is_emit_promoted_ops_enabled() {
+  return emitDefaultEmitPromotedOps;
+}
+void BytecodeEmitMode::set_default_emit_promoted_ops_enabled(bool enabled) {
+  emitDefaultEmitPromotedOps = enabled;
 }
 
 } // namespace jit

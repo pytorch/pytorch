@@ -1,4 +1,4 @@
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/frozen_linear_transpose.h>
 #include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -242,7 +243,7 @@ IValue Module::operator()(std::vector<IValue> inputs) {
     IValue result = Method(_ivalue(), pre_hook)({tuple_input});
     if (!result.isNone()) {
       if (result.isTuple()) {
-        inputs = result.toTuple()->elements().vec();
+        inputs = result.toTupleRef().elements().vec();
       } else {
         inputs = {result};
       }
@@ -434,7 +435,9 @@ void Module::train(bool on) {
     if (auto slot = m._ivalue()->type()->findAttributeSlot("training")) {
       m._ivalue()->setSlot(*slot, on);
     } else {
-      TORCH_INTERNAL_ASSERT("'training' attribute not found");
+      // FIXME[T110620981]: This assert was broken (never asserted), and once
+      // fixed it triggers test failures.  Fix me!
+      /* TORCH_INTERNAL_ASSERT(false, "'training' attribute not found"); */
     }
   }
 }
@@ -477,21 +480,36 @@ Module freeze(
 
   Module out_mod = freeze_module(
       module, preserved_attrs.value_or(std::vector<std::string>({})));
-  auto graph = module.get_method("forward").graph();
+  auto graph = out_mod.get_method("forward").graph();
   OptimizeFrozenGraph(graph, optimize_numerics);
   return out_mod;
 }
 
-Module optimize_for_inference(Module& module) {
-  // not frozen yet
-  if (module._ivalue()->type()->hasAttribute("training")) {
-    auto mod = freeze(module, {}, true);
-  }
-
-  auto graph = module.get_method("forward").graph();
+namespace {
+void optimize_for_inference(std::shared_ptr<Graph> graph) {
   FuseFrozenConvAddRelu(graph);
   ConvertFrozenOpsToMKLDNN(graph);
-  return module;
+  FrozenLinearTranspose(graph);
+}
+} // namespace
+
+Module optimize_for_inference(
+    Module& module,
+    const std::vector<std::string>& other_methods) {
+  // if not frozen yet
+  Module frozen_mod;
+  if (module._ivalue()->type()->hasAttribute("training")) {
+    frozen_mod = freeze(module, {}, true);
+  } else {
+    frozen_mod = module;
+  }
+
+  optimize_for_inference(frozen_mod.get_method("forward").graph());
+
+  for (const auto& method : other_methods) {
+    optimize_for_inference(frozen_mod.get_method(method).graph());
+  }
+  return frozen_mod;
 }
 
 buffer_list Module::buffers(bool recurse) const {

@@ -49,8 +49,8 @@ _all__ = [
     'default_per_channel_weight_observer',
     # FakeQuantize (for qat)
     'default_fake_quant', 'default_weight_fake_quant',
-    'default_symmetric_fixed_qparams_fake_quant',
-    'default_affine_fixed_qparams_fake_quant',
+    'default_fixed_qparams_range_neg1to1_fake_quant',
+    'default_fixed_qparams_range_0to1_fake_quant',
     'default_per_channel_weight_fake_quant',
     'default_histogram_fake_quant',
     # QConfig

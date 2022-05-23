@@ -49,11 +49,15 @@ def build_message(size: int) -> Dict[str, Any]:
             "pkg_type": pkg_type,
             "py_ver": py_ver,
             "cu_ver": cu_ver,
-            "pr": os.environ.get("CIRCLE_PR_NUMBER"),
+            "pr": os.environ.get("PR_NUMBER", os.environ.get("CIRCLE_PR_NUMBER")),
+            # This is the only place where we use directly CIRCLE_BUILD_NUM, everywhere else CIRCLE_* vars
+            # are used as fallback, there seems to be no direct analogy between circle build number and GHA IDs
             "build_num": os.environ.get("CIRCLE_BUILD_NUM"),
-            "sha1": os.environ.get("CIRCLE_SHA1"),
-            "branch": os.environ.get("CIRCLE_BRANCH"),
-            "workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID"),
+            "sha1": os.environ.get("SHA1", os.environ.get("CIRCLE_SHA1")),
+            "branch": os.environ.get("BRANCH", os.environ.get("CIRCLE_BRANCH")),
+            "workflow_id": os.environ.get(
+                "WORKFLOW_ID", os.environ.get("CIRCLE_WORKFLOW_ID")
+            ),
         },
         "int": {
             "time": int(time.time()),
@@ -116,11 +120,17 @@ def report_android_sizes(file_dir: str) -> None:
                     "pkg_type": "{}/{}/{}".format(android_build_type, arch, lib),
                     "cu_ver": "",  # dummy value for derived field `build_name`
                     "py_ver": "",  # dummy value for derived field `build_name`
-                    "pr": os.environ.get("CIRCLE_PR_NUMBER"),
+                    "pr": os.environ.get(
+                        "PR_NUMBER", os.environ.get("CIRCLE_PR_NUMBER")
+                    ),
+                    # This is the only place where we use directly CIRCLE_BUILD_NUM, everywhere else CIRCLE_* vars
+                    # are used as fallback, there seems to be no direct analogy between circle build number and GHA IDs
                     "build_num": os.environ.get("CIRCLE_BUILD_NUM"),
-                    "sha1": os.environ.get("CIRCLE_SHA1"),
-                    "branch": os.environ.get("CIRCLE_BRANCH"),
-                    "workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID"),
+                    "sha1": os.environ.get("SHA1", os.environ.get("CIRCLE_SHA1")),
+                    "branch": os.environ.get("BRANCH", os.environ.get("CIRCLE_BRANCH")),
+                    "workflow_id": os.environ.get(
+                        "WORKFLOW_ID", os.environ.get("CIRCLE_WORKFLOW_ID")
+                    ),
                 },
                 "int": {
                     "time": int(time.time()),

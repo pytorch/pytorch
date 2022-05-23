@@ -20,6 +20,7 @@ struct Code {
   std::vector<Instruction> instructions_;
   std::vector<DebugHandle> debug_handles_;
   std::vector<c10::OperatorName> op_names_;
+  std::vector<int> operator_input_sizes_;
   std::vector<std::function<void(Stack&)>> operators_;
   std::vector<c10::IValue> constants_;
   std::vector<c10::TypePtr> types_;
@@ -28,7 +29,9 @@ struct Code {
   // function objects, and then append referenced function pointers. This could
   // be done in parseMethods().
   std::vector<mobile::Function*> functions_;
-  size_t register_size_; // Aggregated output size.
+  size_t register_size_ = 0; // Aggregated output size.
+  // initialized means operators_ array is filled with operators
+  bool initialized = false;
 };
 
 } // namespace mobile

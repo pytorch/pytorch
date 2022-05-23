@@ -1,5 +1,7 @@
 #include <ATen/native/TensorTransformations.h>
+#include <ATen/native/IndexKernel.h>  // for flip_stub
 
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtilsMulti.h>
@@ -208,6 +210,10 @@ std::vector<Tensor> atleast_3d(TensorList tensors) {
   };
   std::transform(tensors.cbegin(), tensors.cend(), result.begin(), transform_lambda);
   return result;
+}
+
+Tensor chalf(const Tensor& self, c10::optional<MemoryFormat> memory_format) {
+  return self.to(kComplexHalf, false, false, memory_format);
 }
 
 DEFINE_DISPATCH(flip_stub);

@@ -40,7 +40,11 @@ if [[ $DRY_RUN = "disabled" ]]; then
 fi
 
 for pkg in ${pkgs_to_promote}; do
-    pkg_basename="$(basename "${pkg//linux/manylinux1}")"
+    pkg_basename="$(basename "${pkg}")"
+    # Don't attempt to change if manylinux2014
+    if [[ "${pkg}" != *manylinux2014* ]]; then
+        pkg_basename="$(basename "${pkg//linux/manylinux1}")"
+    fi
     orig_pkg="${tmp_dir}/${pkg_basename}"
     (
         set -x

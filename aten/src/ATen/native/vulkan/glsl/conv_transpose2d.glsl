@@ -1,15 +1,16 @@
 #version 450 core
 #define PRECISION $precision
+#define FORMAT    $format
 
 layout(std430) buffer;
 
 /* Qualifiers: layout - storage - precision - memory */
 
-layout(set = 0, binding = 0) uniform PRECISION restrict writeonly image3D   uOutput;
-layout(set = 0, binding = 1) uniform PRECISION                    sampler3D uInput;
-layout(set = 0, binding = 2) uniform PRECISION                    sampler2D uKernel;
-layout(set = 0, binding = 3) uniform PRECISION                    sampler2D uBias;
-layout(set = 0, binding = 4) uniform PRECISION restrict           Block {
+layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D   uOutput;
+layout(set = 0, binding = 1)         uniform PRECISION                    sampler3D uInput;
+layout(set = 0, binding = 2)         uniform PRECISION                    sampler3D uKernel;
+layout(set = 0, binding = 3)         uniform PRECISION                    sampler3D uBias;
+layout(set = 0, binding = 4)         uniform PRECISION restrict           Block {
   ivec4 size;
   ivec4 kernel;
   ivec2 ikernel;
@@ -37,7 +38,7 @@ void main() {
     const ivec2 end = min(isize, ivec2(floor(ipos_f/stride))+1);
     ivec2 kstart = start;
 
-    vec4 sum = texelFetch(uBias, ivec2(pos.z, 0), 0);
+    vec4 sum = texelFetch(uBias, ivec3(pos.z, 0, 0), 0);
 
     int ky_start = uBlock.kernel.y - 1 - (ipos.y - uBlock.stride.y*start.y) + pos.z * uBlock.ikernel.y;
     int kx_start = (uBlock.kernel.x - 1 - (ipos.x - uBlock.stride.x*start.x)) * uBlock.size.w;
@@ -49,10 +50,10 @@ void main() {
           const vec4 In = texelFetch(uInput, ivec3(x, y, z4), 0);
           const ivec4 kxs = kx + ivec4(0, 1, 2, 3);
 
-          sum = fma(In.xxxx, texelFetch(uKernel, ivec2(kxs.x, ky), 0), sum);
-          sum = fma(In.yyyy, texelFetch(uKernel, ivec2(kxs.y, ky), 0), sum);
-          sum = fma(In.zzzz, texelFetch(uKernel, ivec2(kxs.z, ky), 0), sum);
-          sum = fma(In.wwww, texelFetch(uKernel, ivec2(kxs.w, ky), 0), sum);
+          sum = fma(In.xxxx, texelFetch(uKernel, ivec3(kxs.x, ky, 0), 0), sum);
+          sum = fma(In.yyyy, texelFetch(uKernel, ivec3(kxs.y, ky, 0), 0), sum);
+          sum = fma(In.zzzz, texelFetch(uKernel, ivec3(kxs.z, ky, 0), 0), sum);
+          sum = fma(In.wwww, texelFetch(uKernel, ivec3(kxs.w, ky, 0), 0), sum);
         }
       }
     }

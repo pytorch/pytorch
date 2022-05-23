@@ -4,6 +4,7 @@
 #include <ATen/core/Reduction.h>
 #include <torch/cuda.h>
 #include <ATen/test/test_assert.h>
+#include <c10/util/irange.h>
 
 // for TH compat test only...
 struct THFloatTensor;
@@ -40,7 +41,9 @@ void TestOnesAndDot(DeprecatedTypeProperties& type) {
   Tensor b = ones({3, 4}, type);
   ASSERT_EQ_RESOLVED((b + b).sum().item<double>(), 24);
   ASSERT_EQ_RESOLVED(b.numel(), 12);
-  ASSERT_EQ_RESOLVED(b.view(-1).dot(b.view(-1)).item<double>(), 12);
+  if (type.backend() != Backend::CPU || type.scalarType() != kHalf) {
+    ASSERT_EQ_RESOLVED(b.view(-1).dot(b.view(-1)).item<double>(), 12);
+  }
 }
 
 void TestSort(DeprecatedTypeProperties& type) {
@@ -84,7 +87,8 @@ void TestAdd(DeprecatedTypeProperties& type) {
 void TestZeros(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor a = zeros({1024, 1024}, type);
-  for (int i = 1; i < 1000; ++i) {
+  for (const auto i : c10::irange(1, 1000)) {
+    (void)i; // Suppress unused variable warning
     a = zeros({128, 128}, type);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -102,7 +106,8 @@ void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  for (auto i = 0; i < 100000; i++) {
+  for (const auto i : c10::irange(100000)) {
+    (void)i; // Suppress unused variable warning
     add_out(r, r, d);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -119,7 +124,8 @@ void TestLoadOfAddsWithCopy(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  for (auto i = 0; i < 100000; i++) {
+  for (const auto i : c10::irange(100000)) {
+    (void)i; // Suppress unused variable warning
     r = add(r, d);
   }
   auto end = std::chrono::high_resolution_clock::now();
@@ -176,7 +182,7 @@ void TestCopyBroadcasting(DeprecatedTypeProperties& type) {
   Tensor a = zeros({4, 3}, type);
   Tensor e = rand({3}, type);
   a.copy_(e);
-  for (int i = 0; i < 4; ++i) {
+  for (const auto i : c10::irange(4)) {
     ASSERT_TRUE(a[i].equal(e));
   }
 }
@@ -247,13 +253,13 @@ void TestToString() {
 void TestIndexingByScalar() {
   Tensor tensor = arange(0, 10, kInt);
   Tensor one = ones({}, kInt);
-  for (int64_t i = 0; i < tensor.numel(); ++i) {
+  for (const auto i : c10::irange(tensor.numel())) {
     ASSERT_TRUE(tensor[i].equal(one * i));
   }
   for (size_t i = 0; i < static_cast<uint64_t>(tensor.numel()); ++i) {
     ASSERT_TRUE(tensor[i].equal(one * static_cast<int64_t>(i)));
   }
-  for (int i = 0; i < tensor.numel(); ++i) {
+  for (const auto i : c10::irange(tensor.numel())) {
     ASSERT_TRUE(tensor[i].equal(one * i));
   }
   // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
@@ -272,7 +278,7 @@ void TestIndexingByScalar() {
 void TestIndexingByZerodimTensor() {
   Tensor tensor = arange(0, 10, kInt);
   Tensor one = ones({}, kInt);
-  for (int i = 0; i < tensor.numel(); ++i) {
+  for (const auto i : c10::irange(tensor.numel())) {
     ASSERT_TRUE(tensor[one * i].equal(one * i));
   }
   // Throw StartsWith(

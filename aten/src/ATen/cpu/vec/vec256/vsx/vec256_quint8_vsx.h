@@ -31,7 +31,7 @@
 
 namespace at {
 namespace vec {
-namespace {
+inline namespace CPU_CAPABILITY {
 
 const vint16 mask_unsigned = vec_splats((short int)0xFF);
 template <>

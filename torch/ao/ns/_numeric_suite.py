@@ -436,6 +436,8 @@ def get_matching_activations(
     quantized_dict = get_logger_dict(q_module)
     act_dict: Dict[str, Dict] = {}
     for key in quantized_dict:
+        if len(quantized_dict[key]["tensor_val"]) == 0:
+            continue
         match_key = _find_match(sorted(float_dict, reverse=True), key, "stats")
         if match_key is not None:
             act_dict[key] = {}

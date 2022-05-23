@@ -8,10 +8,10 @@
 
 namespace ao {
 namespace sparse {
-torch::class_<LinearPackedParamsBase> register_linear_params() {
+int register_linear_params() {
   static auto register_linear_params =
-      torch::class_<LinearPackedParamsBase>(
-          "sparse", "LinearPackedParamsBase")
+      torch::selective_class_<LinearPackedParamsBase>(
+          "sparse", TORCH_SELECTIVE_CLASS("LinearPackedParamsBase"))
           .def_pickle(
               [](const c10::intrusive_ptr<LinearPackedParamsBase>& params)
                   -> LinearPackedSerializationType { // __getstate__
@@ -65,11 +65,13 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
 #endif // USE_FBGEMM
                 TORCH_CHECK(false, "Unknown qengine");
               });
-  return register_linear_params;
+  // (1) we can't (easily) return the static initializer itself because it can have a different type because of selective build
+  // (2) we can't return void and be able to call the function in the global scope
+  return 0;
 }
 
 namespace {
-static auto linear_params = register_linear_params();
+static C10_UNUSED auto linear_params = register_linear_params();
 }  // namespace
 
 }}  // namespace ao::sparse

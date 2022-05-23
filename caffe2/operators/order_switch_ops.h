@@ -1,10 +1,11 @@
 #ifndef CAFFE2_OPERATORS_ORDER_SWITCH_OPS_H_
 #define CAFFE2_OPERATORS_ORDER_SWITCH_OPS_H_
 
-#include <vector>
-
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include <c10/util/irange.h>
+
+#include <vector>
 
 namespace caffe2 {
 
@@ -30,7 +31,7 @@ class NHWC2NCHWOp final : public Operator<Context> {
     Y_dims[0] = N;
     Y_dims[1] = C;
     int HxW = 1;
-    for (int i = 2; i < ndim; ++i) {
+    for (const auto i : c10::irange(2, ndim)) {
       Y_dims[i] = X.dim32(i - 1);
       HxW *= Y_dims[i];
     }

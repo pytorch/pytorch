@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/batch_mm.h>
 
 #include <ATen/core/functional.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>

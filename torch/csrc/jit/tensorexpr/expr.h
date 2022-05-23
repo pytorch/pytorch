@@ -5,6 +5,8 @@
  */
 #pragma once
 
+#include <c10/core/MemoryFormat.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
@@ -184,13 +186,29 @@ class TORCH_API Var : public ExprNode<Var> {
   std::string name_hint_;
 };
 
+TORCH_API std::vector<ExprPtr> make_contiguous_strides(
+    const std::vector<ExprHandle>& dims);
+TORCH_API std::vector<ExprPtr> make_channels_last_strides(
+    const std::vector<ExprHandle>& dims);
+
 class TORCH_API Buf : public ExprNode<Buf> {
  public:
-  static ExprHandle make(
+  static BufHandle make(const std::vector<ExprHandle>& dims, Dtype dtype);
+
+  static BufHandle make(
       const std::string& name_hint,
       const std::vector<ExprHandle>& dims,
+      const std::vector<ExprHandle>& strides,
       Dtype dtype);
-  static ExprHandle make(const std::vector<ExprHandle>& dims, Dtype dtype);
+
+  static BufHandle make(
+      const std::string& name_hint,
+      const std::vector<ExprHandle>& dims,
+      Dtype dtype,
+      c10::optional<ExprHandle> initializer = c10::nullopt,
+      c10::optional<std::vector<ExprHandle>> strides = c10::nullopt,
+      c10::optional<ExprHandle> qscale = c10::nullopt,
+      c10::optional<ExprHandle> qzero = c10::nullopt);
 
   // TODO: unique_name
   VarPtr base_handle() const {
@@ -212,12 +230,14 @@ class TORCH_API Buf : public ExprNode<Buf> {
       const std::vector<ExprPtr>& dims,
       Dtype dtype,
       ExprPtr initializer = nullptr,
+      c10::optional<std::vector<ExprPtr>> strides = c10::nullopt,
       ExprPtr qscale = nullptr,
       ExprPtr qzero = nullptr)
       : Buf(alloc<Var>(name_hint, kHandle),
             dims,
             dtype,
             initializer,
+            strides,
             qscale,
             qzero) {}
 
@@ -226,16 +246,9 @@ class TORCH_API Buf : public ExprNode<Buf> {
       std::vector<ExprPtr> dims,
       Dtype dtype,
       ExprPtr initializer = nullptr,
+      c10::optional<std::vector<ExprPtr>> strides = c10::nullopt,
       ExprPtr qscale = nullptr,
-      ExprPtr qzero = nullptr)
-      : ExprNodeBase(dtype, kPrimitive),
-        base_handle_(var),
-        dims_(std::move(dims)),
-        initializer_(std::move(initializer)),
-        qscale_(std::move(qscale)),
-        qzero_(std::move(qzero)) {
-    TORCH_CHECK(var);
-  }
+      ExprPtr qzero = nullptr);
 
   size_t ndim() const {
     return dims_.size();
@@ -251,7 +264,15 @@ class TORCH_API Buf : public ExprNode<Buf> {
   }
   void set_dims(std::vector<ExprPtr> dims) {
     dims_ = dims;
-  };
+  }
+
+  std::vector<ExprPtr> strides() const {
+    return strides_;
+  }
+
+  void set_strides(std::vector<ExprPtr> strides) {
+    strides_ = strides;
+  }
 
   ExprPtr initializer() const {
     return initializer_;
@@ -282,9 +303,30 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return true;
   }
 
+  bool is_contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const;
+
+  // The channels-last 1d can benefit the performance of some operators like
+  // conv1d. But the MemoryFormat enum has not covered this layout yet. Hence,
+  // we abstract a dedicated function to check channels-last 1d contiguous.
+  //
+  // Channels-last 1d:
+  //   dims:              n   c    l
+  //   strides(nlc):    c*l   1    c
+  bool is_channels_last_1d_contiguous() const {
+    if (dims_.size() != 3) {
+      return false;
+    }
+    return is_stride_one(1) && is_cont_with(2, 1) && is_cont_with(0, 2);
+  }
+
  private:
+  bool is_cont_with(int cur_dim, int adjacent_dim) const;
+  bool is_stride_one(int cur_dim) const;
+
   VarPtr base_handle_;
   std::vector<ExprPtr> dims_;
+  std::vector<ExprPtr> strides_;
   ExprPtr initializer_;
   // qscale_ and qzero_ are used only for quantized dtypes Bufs: kQUInt8, kQInt8
   ExprPtr qscale_;
@@ -298,6 +340,13 @@ class TORCH_API BufHandle : public ExprHandle {
       const std::vector<ExprHandle>& dims,
       Dtype dtype)
       : ExprHandle(Buf::make(name_hint, dims, dtype)) {}
+
+  BufHandle(
+      const std::string& name_hint,
+      const std::vector<ExprHandle>& dims,
+      const std::vector<ExprHandle>& strides,
+      Dtype dtype)
+      : ExprHandle(Buf::make(name_hint, dims, strides, dtype)) {}
 
   BufHandle(const std::vector<ExprHandle>& dims, Dtype dtype)
       : ExprHandle(Buf::make("_", dims, dtype)) {}
@@ -346,6 +395,15 @@ class TORCH_API BufHandle : public ExprHandle {
 
   ExprHandle dim(size_t index) const {
     return ExprHandle(node()->dim(index));
+  }
+
+  bool is_contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
+    return node()->is_contiguous(memory_format);
+  }
+
+  bool is_channels_last_1d_contiguous() const {
+    return node()->is_channels_last_1d_contiguous();
   }
 };
 

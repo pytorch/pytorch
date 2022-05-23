@@ -1,4 +1,4 @@
-ir_version: 7
+ir_version: 3
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -40,7 +40,7 @@ graph {
       type: INTS
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 4
     dims: 2

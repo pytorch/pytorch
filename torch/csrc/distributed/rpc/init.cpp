@@ -110,11 +110,26 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           // c10::hash, so  we need to use the qualified name
           // py::detail::hash, which unfortunately is in a detail namespace.
           .def(py::detail::hash(py::self)) // NOLINT
-          .def("__repr__", [](const WorkerInfo& workerInfo) {
-            std::ostringstream os;
-            os << workerInfo;
-            return os.str();
-          });
+          .def(
+              "__repr__",
+              [](const WorkerInfo& workerInfo) {
+                std::ostringstream os;
+                os << workerInfo;
+                return os.str();
+              })
+          .def(py::pickle(
+              /* __getstate__ */
+              [](const WorkerInfo& workerInfo) {
+                return py::make_tuple(workerInfo.name_, workerInfo.id_);
+              },
+              /* __setstate__ */
+              [](py::tuple t) {
+                TORCH_CHECK(t.size() == 2, "Invalid WorkerInfo state.");
+
+                WorkerInfo info(
+                    t[0].cast<std::string>(), t[1].cast<worker_id_t>());
+                return info;
+              }));
 
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
@@ -122,7 +137,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               "join",
               &RpcAgent::join,
               py::call_guard<py::gil_scoped_release>(),
-              py::arg("shutdown") = false)
+              py::arg("shutdown") = false,
+              py::arg("timeout") = 0)
           .def(
               "sync", &RpcAgent::sync, py::call_guard<py::gil_scoped_release>())
           .def(
@@ -561,8 +577,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               [](const c10::intrusive_ptr<::c10d::Store>& store,
                  std::string selfName,
                  worker_id_t selfId,
-                 int worldSize,
-                 c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
+                 optional<int> worldSize,
                  TensorPipeRpcBackendOptions opts,
                  std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
                  std::vector<c10::Device> devices) {
@@ -572,7 +587,6 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                         std::move(selfName),
                         selfId,
                         worldSize,
-                        std::move(processGroup),
                         std::move(opts),
                         std::move(reverseDeviceMaps),
                         std::move(devices),
@@ -583,7 +597,6 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::arg("name"),
           py::arg("rank"),
           py::arg("world_size"),
-          py::arg("process_group"),
           py::arg("rpc_backend_options"),
           py::arg("reverse_device_maps"),
           py::arg("devices"))
@@ -591,7 +604,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "join",
           &TensorPipeAgent::join,
           py::call_guard<py::gil_scoped_release>(),
-          py::arg("shutdown") = false)
+          py::arg("shutdown") = false,
+          py::arg("timeout") = 0)
       .def(
           "shutdown",
           &TensorPipeAgent::shutdown,
@@ -620,7 +634,17 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "_get_device_map",
           (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst) const) &
               TensorPipeAgent::getDeviceMap,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_backend_options",
+          &TensorPipeAgent::getBackendOptions,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_update_group_membership",
+          &TensorPipeAgent::updateGroupMembership,
+          py::call_guard<py::gil_scoped_release>())
+      .def_readonly("is_static_group", &TensorPipeAgent::isStaticGroup_)
+      .def_property_readonly("store", &TensorPipeAgent::getStore);
 
 #endif // USE_TENSORPIPE
 
@@ -648,9 +672,10 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       },
       py::call_guard<py::gil_scoped_release>());
 
-  module.def("_reset_current_rpc_agent", []() {
-    RpcAgent::setCurrentRpcAgent(nullptr);
-  });
+  module.def(
+      "_reset_current_rpc_agent",
+      []() { RpcAgent::setCurrentRpcAgent(nullptr); },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_delete_all_user_and_unforked_owner_rrefs",

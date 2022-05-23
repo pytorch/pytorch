@@ -3,6 +3,9 @@ on:
   pull_request:
 
 env:
+  PYTHON_VERSION: "3.8"
+  CUDA_VERSION: "11.3"
+  MAGMA_VERSION: "magma-cuda113"
   PR_NUM: ${{ github.event.number }}
   PR_BODY: ${{ github.event.pull_request.body }}
   PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -21,32 +24,42 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           path: pytorch
-      - name: Checkout TorchBench
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          repository: pytorch/benchmark
-          path: benchmark
-      - name: Create conda environment
-        run: |
-          conda create -y -n pr-ci python=3.7
-          # shellcheck disable=SC1091
-          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
-          conda activate pr-ci
-          conda install -y numpy=1.17 requests=2.22 ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six dataclasses pillow pytest tabulate gitpython
-          conda install -y -c pytorch-nightly torchtext torchvision
       - name: Update self-hosted PyTorch
         run: |
           pushd "${HOME}"/pytorch
           git remote prune origin
           git fetch
           popd
-      - name: Install TorchBench dependencies
+      - name: Create conda environment and install deps
+        run: |
+          conda create -y -n pr-ci python="${PYTHON_VERSION}"
+          # shellcheck disable=SC1091
+          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          conda activate pr-ci
+          # pin cmake version to 3.22 since 3.23 breaks pytorch build
+          # see details at: https://github.com/pytorch/pytorch/issues/74985
+          conda install -y numpy requests ninja pyyaml mkl mkl-include setuptools cmake=3.22 cffi typing_extensions \
+                           future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
+          # install magma
+          conda install -y -c pytorch "${MAGMA_VERSION}"
+          # install ffmpeg-4.4.1
+          # torchvision doesn't compile on ffmpeg-5: https://github.com/pytorch/vision/issues/5616
+          conda install -y ffmpeg=4.4.1
+      - name: Setup TorchBench branch
         run: |
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          pushd "${PWD}"/benchmark
-          python install.py
+          PR_BODY_FILE=/tmp/pr-body.txt
+          echo "$PR_BODY" > ${PR_BODY_FILE}
+          python pytorch/.github/scripts/run_torchbench.py --pr-body "${PR_BODY_FILE}" set-torchbench-branch
+      - name: Checkout TorchBench
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          repository: pytorch/benchmark
+          path: benchmark
+          lfs: false
+          ref: ${{ env.TORCHBENCH_BRANCH }}
       - name: Run TorchBench
         run: |
           pushd "${HOME}"/pytorch
@@ -58,12 +71,13 @@ jobs:
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           python3 pytorch/.github/scripts/run_torchbench.py \
+                  --pr-body "$PR_BODY_FILE" \
+                  run \
                   --pytorch-path "${HOME}"/pytorch \
                   --torchbench-path "${PWD}"/benchmark \
                   --pr-num "$PR_NUM" \
                   --pr-base-sha "$PR_MERGE_BASE" \
-                  --pr-head-sha "$PR_HEAD_SHA" \
-                  --pr-body "$PR_BODY_FILE"
+                  --pr-head-sha "$PR_HEAD_SHA"
       - name: Remove conda environment and cleanup
         run: |
           conda env remove --name pr-ci
@@ -75,5 +89,5 @@ jobs:
           path: ~/.torchbench/bisection/pr${{ github.event.number }}
 
 concurrency:
-  group: run-torchbench-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

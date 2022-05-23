@@ -61,8 +61,7 @@ signature.
 - `int`. Think about this like a Python int. This is translated into a C++ argument of type `int64_t`.
 - `float`. Think about this like a Python `float`. It is translated into a C++ argument of type `double`.
 - `bool`
-- `str`.  It is translated into a C++ argument of type `std::string`
-  (but we should fix this, see https://github.com/pytorch/pytorch/issues/53546)
+- `str`.  It is translated into a C++ argument of non-owning type `c10::string_view`
 - `Scalar`. `Scalar` supports binding to any numerical types from Python, including integral types,
   floating point types, and zero dimensional tensors. `int` and `float` bind to the corresponding Python
   numerical types. However, you probably don't want to use `Scalar`;
@@ -250,6 +249,13 @@ There is also another situation in which we use annotations, namely views.
   - `transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)`
     An alias to the memory represented by `self` may be also returned, however it is not mutated.
 
+When a Tensor views are contained in a Tensor list, we need to represent that the output list
+contains Tensors that alias the input.
+  - `func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]`
+We assume lists contain memory which aliases the heap, so in order to correctly set up the aliasing
+relationship between the output and input, we annotate that the input Tensor enters the wildcard set `(a -> *)`.
+For more details, see the JIT [README](https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/OVERVIEW.md#aliasing-and-mutation-annotations-in-functionschema).
+
 We have some asserts to check whether a developer uses these annotations correctly and throw asserts
 if she doesn't. For example, any out function must use the `(a!)` annotation as described above.
  If this causes a lot of confusion please add @cpuhrsch to your PR.
@@ -285,7 +291,7 @@ If two backends have the same dispatch function, you can write `CPU, CUDA: func`
 to reuse the same function name in both cases.
 
 Available backend options can be found by searching `dispatch_keys` in
-[codegen](https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py).
+[codegen](https://github.com/pytorch/pytorch/blob/master/torchgen/gen.py).
 There are also two special "generic" backends:
 
   - `CompositeExplicitAutograd` (previously known as `DefaultBackend`):
@@ -346,6 +352,36 @@ added if applicable), so that it's still available for other backends to use.
 If you implemented a native function in C++ and want to find out which dispatch keyword
 should be used in native_functions.yaml, please [follow steps in dispatch keywords](#choosing-the-right-dispatch-keyword)
 
+### CompositeImplicitAutograd Compliance
+
+Functions registered as CompositeImplicitAutograd MUST work for most, if not
+all, backends. This means that we impose a set of constraints that make it more
+difficult to write a CompositeImplicitAutograd function than writing regular
+PyTorch code.
+
+If you wish to do something that is banned (you may wish to do this for perf
+reasons), please write a backwards formula for your operator so it is no longer
+CompositeImplicitAutograd or hide parts of the operator in a new operator
+that is not CompositeImplicitAutograd.
+
+CompositeImplicitAutograd operators must not:
+- call `resize_` or moral equivalents. These are tricky to handle for
+many backends, like vmap and meta.
+- call `out=` operations. These are impossible to handle for vmap and can cause
+dispatch-to-python objects to lose their subclassing.
+- Change the metadata of a Tensor without performing dispatches. Examples of these
+operations are directly accessing the TensorImpl API to modify the
+sizes/strides/metadata of a Tensor.
+- In the same vein as the last point, `data_ptr` access or `item` access are not
+allowed. These operations do not go through the dispatcher.
+- `copy_` is a marginal case. If you're able to rewrite your operation without
+`copy_` you should definitely do so; this should be trivial if you're not copy-ing
+into a view. Otherwise, it is fine to leave the code as-is.
+
+We have CompositeImplicitAutograd compliance tests in `test/test_ops.py`. These
+tests aren't perfect (it's pretty difficult to check for all of the above) so if
+something looks wrong please shout.
+
 ### `device_guard`
 
 ```
@@ -375,9 +411,9 @@ By default, ATen code generation will generate device check,
 which will ensure all the tensor parameters passed to kernel are
 on the same device.
 
-However, in some cases, checking the device is unncessary, becuase,
+However, in some cases, checking the device is unncessary, because,
 e.g., you call a function allows to work on multiple devices.
-In that case, code generation of the device check can e disabled by adding
+In that case, code generation of the device check can be disabled by adding
 `device_check: NoCheck` to your function definition.
 
 ### `manual_kernel_registration`
@@ -480,7 +516,7 @@ Here're steps to follow to decide the right dispatch keyword:
 
       You're done. This op will be called in inference for all backends.
 
-      Note: to support training you're required to add a autograd formula,
+      Note: to support training you're required to add an autograd formula,
       or it'll error out in backward pass when calling with a Tensor has requires_grad=True.
 
     - No: ops in this category are mainly using `_out` boilerplate where its out version doesn't have a derivative
@@ -506,7 +542,7 @@ Here're steps to follow to decide the right dispatch keyword:
       Note: current plan on record for ops using this boilerplate is to replace `at::` with `at::native` in
       the implementations and add dispatch section with device keywords instead.
 3. Validate the computed dispatch table matches what you want. You can use `PythonDispatcher` provided in
-[torch/_python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/torch/_python_dispacher.py).
+[torch/_python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/torch/_python_dispatcher.py).
 It shows for a certain operator, what the computed dispatch table looks like after your registrations.
 
     ```
@@ -535,6 +571,7 @@ The generated bindings are either exposed as methods on python_variable or funct
 the torch._C._nn (marked with `python_module: nn`),
 torch._C._fft (marked with `python_module: fft`),
 torch._C._linalg (marked with `python_module: linalg`) objects,
+torch._C._sparse (marked with `python_module: sparse`) objects,
 or torch._C._special (marked with `python_module: special`) objects.
 
 ### Undefined tensor conventions

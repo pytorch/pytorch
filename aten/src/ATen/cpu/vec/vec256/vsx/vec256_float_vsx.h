@@ -6,9 +6,9 @@
 #include <sleef.h>
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
+// See Note [CPU_CAPABILITY namespace]
 
-namespace {
+inline namespace CPU_CAPABILITY {
 
 template <>
 class Vectorized<float> {

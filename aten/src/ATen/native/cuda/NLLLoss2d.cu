@@ -1,7 +1,7 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
@@ -11,6 +11,16 @@
 #include <c10/macros/Macros.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/block_reduce.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/nll_loss2d_forward_native.h>
+#include <ATen/ops/nll_loss2d_backward_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -155,7 +165,6 @@ __global__ void nll_loss2d_backward_kernel(
   scalar_t* weights,
   scalar_t* total_weight,
   bool size_average,
-  int batch_size,
   int n_classes,
   int map_nelem,
   int blocks_per_sample,
@@ -434,7 +443,6 @@ void nll_loss2d_backward_out_cuda_template(
                   optional_data<scalar_t>(weight_),
                   total_weight.data_ptr<scalar_t>(),
                   reduction == at::Reduction::Mean,
-                  input.size(0),
                   input.size(1),
                   map_nelem,
                   blocks_per_sample,

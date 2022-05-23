@@ -3,7 +3,7 @@
 #include <c10/util/irange.h>
 #include <torch/serialize/archive.h>
 #include <torch/serialize/tensor.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <utility>
 

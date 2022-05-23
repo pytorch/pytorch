@@ -37,9 +37,9 @@ echo "error: python_doc_push_script.sh: install_path (arg1) not specified"
   exit 1
 fi
 
-is_master_doc=false
+is_main_doc=false
 if [ "$version" == "master" ]; then
-  is_master_doc=true
+  is_main_doc=true
 fi
 
 # Argument 3: The branch to push to. Usually is "site"
@@ -86,7 +86,7 @@ pushd docs
 
 # Build the docs
 pip -q install -r requirements.txt
-if [ "$is_master_doc" = true ]; then
+if [ "$is_main_doc" = true ]; then
   build_docs html
   [ $? -eq 0 ] || exit $?
   make coverage
@@ -131,8 +131,12 @@ git status
 git config user.email "soumith+bot@pytorch.org"
 git config user.name "pytorchbot"
 # If there aren't changes, don't make a commit; push is no-op
-git commit -m "Generate Python docs from pytorch/pytorch@$CIRCLE_SHA1" || true
+git commit -m "Generate Python docs from pytorch/pytorch@${GITHUB_SHA}" || true
 git status
+
+if [[ "${WITH_PUSH:-}" == true ]]; then
+  git push -u origin "${branch}"
+fi
 
 popd
 # =================== The above code **should** be executed inside Docker container ===================

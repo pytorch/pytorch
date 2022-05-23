@@ -371,7 +371,7 @@ constexpr inline typename std::enable_if<(N < 64), bool>::type isUInt(
 }
 template <unsigned N>
 constexpr inline typename std::enable_if<N >= 64, bool>::type isUInt(
-    uint64_t X) {
+    uint64_t /*X*/) {
   return true;
 }
 

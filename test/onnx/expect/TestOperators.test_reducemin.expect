@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
+    input: "onnx::ReduceMin_0"
     output: "1"
     name: "ReduceMin_0"
     op_type: "ReduceMin"
@@ -13,9 +13,9 @@ graph {
       type: INT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::ReduceMin_0"
     type {
       tensor_type {
         elem_type: 1
@@ -48,5 +48,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }

@@ -7,9 +7,10 @@ namespace jit {
 
 // This api will be used by serialization/export.cpp to extract function
 // information. It should do conversion on graph to
-//    1. Extract and preserve functions definition.
-//    2. Replace nodes within functions with a single node reflecting that
-//    function type.
+//    1. Extract subgraph pattern of functions and define as local function
+//    node.
+//    2. Replace subgraph pattern of functions with a single node reflecting
+//    that local function node type.
 // Function attribute map information is also returned, as Torch IR cannot
 // represent these info inside Graph object.
 // export.cpp will serialize the ONNX model with function_proto with
@@ -18,8 +19,6 @@ namespace onnx {
 
 // The following return types are used to track information regarding function
 // attributes, that are unable to be traced through Torch IR.
-// ValAttrNameMap tracks mapping from IR Value inside function subgraph,
-// to function attribute name.
 // NodeAttrNameMap tracks mapping from attribute name of IR Node inside function
 // subgraph, to function attribute name. Here's an example of exporting CELU and
 // LayerNorm.
@@ -42,10 +41,6 @@ namespace onnx {
 //
 // Returning
 //
-// ValAttrNameMap:
-// {
-//    %8 : Float = onnx::Constant[value={1}]() : 'Constant_25'
-// }
 // NodeAttrNameMap:
 // {
 //    %1 : Float(2, 3) = onnx::Celu[alpha=2.](%y) : {
@@ -55,14 +50,20 @@ namespace onnx {
 //
 // The info here helps graph._export_onnx to construct function attributes for
 // onnx local FunctionProto.
-using ValAttrNameMap = std::unordered_map<const Value*, std::string>;
 using NodeAttrNameMap = std::
     unordered_map<const Node*, std::unordered_map<std::string, std::string>>;
 
-TORCH_API std::pair<ValAttrNameMap, NodeAttrNameMap> ONNXFunctionExtraction(
+TORCH_API NodeAttrNameMap ONNXFunctionExtraction(
     std::shared_ptr<Graph>& graph,
     const std::unordered_set<std::string>& module_names,
     const std::vector<std::string>& param_names);
+
+TORCH_API void ONNXClearScopeRecords();
+
+TORCH_API void ONNXTrackScopeAttributes(
+    std::shared_ptr<Graph>& graph,
+    std::map<std::string, IValue>& attributes);
+
 } // namespace onnx
 
 } // namespace jit

@@ -48,9 +48,7 @@ VmaAllocator create_allocator(
 VmaAllocationCreateInfo create_allocation_create_info(
     const Resource::Memory::Descriptor& descriptor) {
   return VmaAllocationCreateInfo{
-    VMA_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT |
-        /* VMA_ALLOCATION_CREATE_MAPPED_BIT - MoltenVK Issue #175 */
-        0,
+    VMA_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT,
     descriptor.usage,
     descriptor.required,
     descriptor.preferred,
@@ -366,8 +364,8 @@ Resource::Pool::Pool(
   : device_(gpu.device),
     allocator_(
         create_allocator(
-            gpu.adapter->runtime->instance(),
-            gpu.adapter->handle,
+            gpu.instance,
+            gpu.adapter->physical_handle(),
             device_),
         vmaDestroyAllocator),
     memory_{

@@ -1,11 +1,18 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+#include <c10/macros/Export.h>
+
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/lower_sync_information.h>
+#include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
+#include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <torch/csrc/jit/codegen/cuda/vectorization_info.h>
 
 #include <memory>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -37,13 +44,17 @@ struct KernelSummary {
   bool has_block_reductions = false;
 
   //! Number of static grid reductions
-  int number_of_grid_reductions = 0;
+  bool has_grid_reductions = false;
 
-  //! Do we have any grid reduction in a loop?
-  bool has_grid_reduction_in_loop = false;
+  //! Do we have any grid reduction in a loop, or grid reductions dependent on
+  //! grid reductions
+  bool has_cooperative_grid_reduction = false;
 
   //! Do we have any block broadcasts?
   bool has_block_broadcasts = false;
+
+  //! Do we have any grid broadcasts?
+  bool has_grid_broadcasts = false;
 
   //! Do we have any welford op?
   bool has_welford = false;
@@ -63,115 +74,123 @@ struct KernelSummary {
   //! List of dynamic local memory buffers.
   //! Only used for debugging.
   std::vector<const kir::Allocate*> dynamic_lmem_allocations;
+
+  //! ceilDiv extents that must be divisible
+  std::vector<std::pair<const Val*, const Val*>> splits_to_validate;
+
+  //! Effective ParallelTypes of broadcast ops
+  std::unordered_map<const BroadcastOp*, ParallelTypeBitmap>
+      broadcast_parallel_types;
+
+  //! Track which tensor views are inputs or outputs of a vectorized operation
+  //! and their maximum vectorized access size
+  std::unordered_map<TensorView*, int> vectorized_accesses;
+
+  // Sync map is needed to figure out if global memory buffers need to be marked
+  // as volatile because they're used for communication.
+  SyncMap sync_map;
+
+  // Parallel dimension map needed to set the correct properties of grid buffers
+  // (is a dim inactive)
+  ParallelDimensionMap parallel_dimension_map_;
+
+  //! Track information on vectorized set operations for runtime validation
+  std::vector<VectorizedSetInfo> vectorized_set_info;
 };
+
+class KernelInternalProxy;
 
 //! Container for a lowered Kernel IR
 //!
-//! TODO(kir): currently, it is just pointing to nodes owned
-//!  by a Fusion object. The goal is to have the Kernel object
-//!  own the Kernel IR nodes
-//!
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
+class TORCH_CUDA_CU_API Kernel final : public Fusion {
+  friend KernelInternalProxy;
+
  public:
-  Kernel() = default;
+  // Kernel starts by grabbing all the nodes from the provided fusion.
+  // Kernel is not SSA, if a definition is not set, we should update it, but
+  // not remove previous definition if it is set. This is primarily because when
+  // we do something like generate an initialization statement for a reduction
+  // TV, we may want to continue to do fusion like analysis on the original
+  // expression.
+  // TODO: Assert index type is int or int32
+  Kernel(Fusion* fusion, DataType index_type = DataType::Int)
+      : Fusion(*fusion), index_type_(index_type) {}
+
+  Kernel() = delete;
+
+  // No move or copy semantics
+  Kernel(const Kernel&) = delete;
+  Kernel& operator=(const Kernel&) = delete;
 
   //! Finalize a kernel definition
   //!
   //! At this point we have a complete kernel definition and we can
-  //! run analysis passes to build a KernelSummary
-  //!
-  void finalize(std::vector<kir::Expr*> top_level_exprs);
+  //! run analysis passes to build a KernelSummary.
+  void finalize(std::vector<Expr*> top_level_exprs);
 
-  //! Register input as an input of the kernel
-  void addInput(Val* input) {
-    inputs_.push_back(input);
-    input_set_.insert(input);
-  }
-
-  //! Register output as an output of the kernel
-  void addOutput(Val* output) {
-    outputs_.push_back(output);
-    output_set_.insert(output);
-  }
-
-  const auto& inputs() const {
-    return inputs_;
-  }
-
-  const auto& outputs() const {
-    return outputs_;
-  }
-
-  bool isInput(Val* val) const {
-    return input_set_.find(val) != input_set_.end();
-  }
-
-  bool isOutput(Val* val) const {
-    return output_set_.find(val) != output_set_.end();
-  }
-
-  const auto& topLevelExprs() const {
+  const std::vector<Expr*>& topLevelExprs() const {
     return top_level_exprs_;
-  }
-
-  const auto& irNodes() const {
-    return ir_nodes_;
   }
 
   const KernelSummary& summary() const {
     return summary_;
   }
 
-  const ThreadPredicateMap& predicateMap() const {
-    return *predicate_map_;
+  DataType indexType() const {
+    return index_type_;
   }
 
-  //! Register a new Kernel IR node
-  //!
-  //! \note This is a specialized helper for kir::IrBuilder, not
-  //!   intendted for general use
-  //!
-  void registerIrNode(kir::Passkey passkey, std::unique_ptr<kir::Node> node) {
-    TORCH_CHECK(passkey.kernel == this);
-    ir_nodes_.push_back(std::move(node));
+  //! Checks if parallel type is padded
+  bool isParallelTypePadded(ParallelType ptype) const {
+    return ptype == ParallelType::TIDx &&
+        warp_padded_parallel_info_.is_tidx_padded;
   }
 
-  //! Allocates a new value identifier
-  kir::ValueId newValueId(kir::Passkey passkey) {
-    TORCH_CHECK(passkey.kernel == this);
-    return next_value_id_++;
+  const WarpPaddedParallelInfo& getWarpPaddedParallelInfo() const {
+    return warp_padded_parallel_info_;
   }
 
   //! Debug dump of the Kernel IR
   void print() const;
 
+ protected:
+  //! Register the Val with this fusion
+  void registerVal(Val* val) override;
+
+  //! Register expr with this fusion.
+  //! When we register an expression, we want to update the dependency tracking
+  //! of Vals. We add expr to our general expr_set_,
+  void registerExpr(Expr* expr) override;
+
  private:
   // Analyze the kernel IR and caches the summary of interesting data
   void analyze();
 
- private:
-  // Kernel IR nodes
-  std::vector<std::unique_ptr<kir::Node>> ir_nodes_;
-
   // Top level statements
-  std::vector<kir::Expr*> top_level_exprs_;
-
-  // Kernel inputs and outputs
-  std::vector<Val*> inputs_;
-  std::vector<Val*> outputs_;
-  std::unordered_set<Val*> input_set_;
-  std::unordered_set<Val*> output_set_;
-
-  // Used to allocate unique value IDs
-  kir::ValueId next_value_id_ = 1;
+  std::vector<Expr*> top_level_exprs_;
 
   // Summary of interesting kernel data
   KernelSummary summary_;
 
-  // Predicate map
-  // TODO(kir): consider a simpler, kernel IR based version
-  std::unique_ptr<ThreadPredicateMap> predicate_map_;
+  // Is this kernel being compiled with int32 or int64 indexing. This
+  // information is required to resolve DataType::Index
+  DataType index_type_ = DataType::Int;
+
+  WarpPaddedParallelInfo warp_padded_parallel_info_;
+};
+
+//! A special debugging proxy for Kernel.
+//!
+//! Should not be used for other than testing and debugging.
+class TORCH_CUDA_CU_API KernelInternalProxy {
+ public:
+  KernelInternalProxy(Kernel* kernel) : kernel_(kernel) {}
+
+  std::vector<Expr*>& topLevelExprs();
+
+ private:
+  Kernel* kernel_ = nullptr;
 };
 
 } // namespace kir

@@ -2,7 +2,12 @@
 
 #include <c10/core/Scalar.h>
 #include <ATen/Tensor.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#else
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 namespace at {
 namespace detail {

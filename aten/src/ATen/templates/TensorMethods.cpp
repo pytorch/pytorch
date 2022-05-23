@@ -7,7 +7,9 @@ namespace at {
    template <>                                                       \
    TORCH_API T* TensorBase::data_ptr() const {                       \
      TORCH_CHECK(                                                    \
-         scalar_type() == ScalarType::name,                          \
+         scalar_type() == ScalarType::name                           \
+         || (isQIntType(scalar_type())                               \
+         && toUnderlying(scalar_type()) == ScalarType::name),        \
          "expected scalar type "                                     \
          #name                                                       \
          " but found ",                                              \
@@ -15,7 +17,7 @@ namespace at {
      return this->unsafeGetTensorImpl()->data_ptr_impl<T>();         \
    }
 
- AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
+ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CAST)
  AT_FORALL_QINT_TYPES(DEFINE_CAST)
  #undef DEFINE_CAST
 
@@ -25,7 +27,7 @@ namespace at {
      return item().to##name();     \
    }
 
- AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
+ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ITEM)
  #undef DEFINE_ITEM
 
  } //namespace at

@@ -49,7 +49,8 @@ Tensor conv2d_depthwise_static(
 
   Tensor conv = Reduce(
       "conv2d_depthwise",
-      {{N, "n"}, {K, "k"}, {OH, "oh"}, {OW, "ow"}},
+      {N, K, OH, OW},
+      c10::nullopt, // TODO
       Sum(),
       [&](const std::vector<VarHandle>& v) { return init_func(v); },
       [&](const std::vector<VarHandle>& v) {
@@ -70,7 +71,7 @@ Tensor conv2d_depthwise_static(
             input.load(n, k, oh * stride - pad + r, ow * stride - pad + s));
         return in * weight.load(k, c, r, s);
       },
-      {{C / groups, "c"}, {R, "r"}, {S, "s"}});
+      {C / groups, R, S});
 
   LoopNest nest({conv});
 
@@ -120,7 +121,8 @@ Tensor conv2d_depthwise_dynamic(
 
   return Reduce(
       "conv2d_depthwise",
-      {{N, "n"}, {K, "k"}, {OH, "oh"}, {OW, "ow"}},
+      {N, K, OH, OW},
+      c10::nullopt, // TODO
       Sum(),
       [&](const std::vector<VarHandle>& v) { return init_func(v); },
       [&](const std::vector<VarHandle>& v) {
@@ -141,7 +143,7 @@ Tensor conv2d_depthwise_dynamic(
             input.load(n, k, oh * stride - pad + r, ow * stride - pad + s));
         return in * weight.load(k, c, r, s);
       },
-      {{C / groups, "c"}, {R, "r"}, {S, "s"}});
+      {C / groups, R, S});
 }
 
 } // namespace
@@ -250,6 +252,14 @@ std::vector<int64_t> _pair_int(ArgValue v) {
   return {i, i};
 }
 
+std::vector<int64_t> _single_int_list(ArgValue v) {
+  if (auto t = c10::get_if<IntList>(&v)) {
+    return {(*t)[0]};
+  }
+  auto i = c10::get<int64_t>(v);
+  return {i};
+}
+
 bool conv2dIsSupported(
     const TensorInfo& input,
     const TensorInfo& weight,
@@ -300,6 +310,7 @@ bool conv2dIsSupported(
 Tensor computeConv2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
@@ -344,9 +355,44 @@ Tensor computeConv2d(
   return Tensor(ResultBuf.node(), s);
 }
 
+Tensor computeConv1d(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf("conv", outputShape, dtype);
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& w = c10::get<BufHandle>(inputs[1]);
+  const BufHandle& b = c10::get<BufHandle>(inputs[2]);
+
+  auto strides = _single_int_list(inputs[3]);
+  auto padding = _single_int_list(inputs[4]);
+  auto dilation = _single_int_list(inputs[5]);
+
+  int groups = c10::get<int64_t>(inputs[6]);
+
+  auto inpInfo = getTensorInfo(inp);
+  auto wInfo = getTensorInfo(w);
+  auto bInfo = getTensorInfo(b);
+
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_conv1d",
+      {inp, w, b},
+      {strides[0], padding[0], dilation[0], groups});
+  return Tensor(ResultBuf.node(), s);
+}
+
 Tensor computePrepackedConv2dClampRun(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
@@ -365,6 +411,7 @@ Tensor computePrepackedConv2dClampRun(
 Tensor computePrepackedLinearClampRun(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
