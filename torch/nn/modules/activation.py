@@ -955,7 +955,7 @@ class MultiheadAttention(Module):
         self.head_dim = embed_dim // num_heads
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
 
-        if self._qkv_same_embed_dim is False:
+        if not self._qkv_same_embed_dim:
             self.q_proj_weight = Parameter(torch.empty((embed_dim, embed_dim), **factory_kwargs))
             self.k_proj_weight = Parameter(torch.empty((embed_dim, self.kdim), **factory_kwargs))
             self.v_proj_weight = Parameter(torch.empty((embed_dim, self.vdim), **factory_kwargs))
