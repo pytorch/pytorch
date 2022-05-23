@@ -7,6 +7,10 @@ inputs:
     description: If set, cleaning up the workspace will delete this too
     required: false
     default: ""
+  working-directory:
+    description: The directory to use as the working directory
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -14,12 +18,14 @@ runs:
     - name: Wait until all sessions have drained
       shell: powershell
       if: always()
+      working-directory: ${{ inputs.working-directory || github.workspace }}
       run: |
         .github\scripts\wait_for_ssh_to_drain.ps1
 
     - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
       shell: powershell
       if: always()
+      working-directory: ${{ inputs.working-directory || github.workspace }}
       run: |
         .github\scripts\kill_active_ssh_sessions.ps1
 

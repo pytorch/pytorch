@@ -1,0 +1,77 @@
+name: Upload binary artifacts
+
+description: Uploads binary artifacts to S3.
+
+inputs:
+  build-name:
+    required: true
+    description: Top-level label for which binary configuration is being built.
+  aws-access-key-id:
+    required: true
+    description: AWS access key ID for binary S3 bucket.
+  aws-secret:
+    required: true
+    description: AWS secret for binary S3 bucket.
+  conda-token:
+    required: true
+    description: Anaconda API token for PyTorch.
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout PyTorch
+      uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
+    - name: Setup Linux
+      uses: ./.github/actions/setup-linux
+
+    - name: Download Build Artifacts
+      uses: seemethere/download-artifact-s3@v3
+      with:
+        name: ${{ inputs.build-name }}
+        path: "${{ runner.temp }}/artifacts/"
+
+    - name: Set DRY_RUN (only for tagged pushes)
+      if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
+      shell: bash
+      run: |
+        echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+
+    - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+      if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+      shell: bash
+      run: |
+        # reference ends with an RC suffix
+        if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
+          echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
+        fi
+    - name: Upload binaries
+      env:
+        PKG_DIR: "${{ runner.temp }}/artifacts"
+        UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
+        # When running these on pull_request events these should be blank
+        AWS_ACCESS_KEY_ID: ${{ inputs.aws-access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.aws-secret }}
+        ANACONDA_API_TOKEN: ${{ inputs.conda-token }}
+      shell: bash
+      run: |
+        docker run --rm -i \
+          -e ANACONDA_API_TOKEN \
+          -e AWS_ACCESS_KEY_ID \
+          -e AWS_SECRET_ACCESS_KEY \
+          -e DRY_RUN \
+          -e PACKAGE_TYPE \
+          -e PKG_DIR=/artifacts \
+          -e UPLOAD_CHANNEL \
+          -e UPLOAD_SUBFOLDER \
+          -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+          -v "${GITHUB_WORKSPACE}:/v" \
+          -w /v \
+          308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+          bash -c '.circleci/scripts/binary_upload.sh'
+
+    - name: Teardown Linux
+      uses: ./.github/actions/teardown-linux
+      if: always()
+      with:
+        skip-wait-ssh: true

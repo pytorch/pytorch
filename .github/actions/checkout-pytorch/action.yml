@@ -14,31 +14,45 @@ inputs:
     description: Works as stated in actions/checkout, but the default value is 0
     required: false
     default: "0"
+  ref:
+    description: Works as stated in actions/checkout.
+    required: false
+    default: ""
+  repository:
+    description: Works as stated in actions/checkout.
+    required: false
+    default: pytorch/pytorch
+  path:
+    description: Works as stated in actions/checkout.
+    required: false
+    default: ""
 
 runs:
   using: composite
   steps:
-    - name: Clean workspace
-      shell: bash
-      env:
-        NO_SUDO: ${{ inputs.no-sudo }}
-      run: |
-        retry () {
-          $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
-        }
-        echo "${GITHUB_WORKSPACE}"
-        if [ -z "${NO_SUDO}" ]; then
-          retry sudo rm -rf "${GITHUB_WORKSPACE}"
-        else
-          retry rm -rf "${GITHUB_WORKSPACE}"
-        fi
-        mkdir "${GITHUB_WORKSPACE}"
+    # - name: Clean workspace
+    #   shell: bash
+    #   env:
+    #     PATH: ${{ inputs.path || github.workspace }}
+    #     NO_SUDO: ${{ inputs.no-sudo }}
+    #   run: |
+    #     retry () {
+    #       $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+    #     }
+    #     if [ -z "${NO_SUDO}" ]; then
+    #       retry sudo rm -rf "${PATH}"
+    #     else
+    #       retry rm -rf "${PATH}"
+    #     fi
+    #     mkdir "${PATH}"
 
     - name: Checkout PyTorch
       uses: malfet/checkout@silent-checkout
       with:
-        ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        ref: ${{ inputs.ref || (github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha) }}
         # --depth=1 for speed, manually fetch history and other refs as necessary
         fetch-depth: ${{ inputs.fetch-depth }}
         submodules: ${{ inputs.submodules }}
+        repository: ${{ inputs.repository }}
+        path: ${{ inputs.path }}
         quiet-checkout: true

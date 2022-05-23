@@ -204,15 +204,15 @@ def generate_wheels_matrix(os: str,
             ret.append(
                 {
                     "python_version": python_version,
-                    "gpu_arch_type": gpu_arch_type,
+                    "gpu_arch_type": gpu_arch_type,  # DERIVED
                     "gpu_arch_version": gpu_arch_version,
-                    "desired_cuda": translate_desired_cuda(
+                    "desired_cuda": translate_desired_cuda(  # DERVIED
                         gpu_arch_type, gpu_arch_version
                     ),
-                    "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                    "container_image": WHEEL_CONTAINER_IMAGES[arch_version],  # DERIVED
                     "package_type": package_type,
                     "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
-                        ".", "_"
+                        ".", "_"  # DERIVED
                     ),
                 }
             )

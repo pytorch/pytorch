@@ -1,0 +1,62 @@
+name: Windows binary build
+
+description: Builds a Windows binary for PyTorch.
+
+inputs:
+  build-name:
+    required: true
+    description: Top-level label for which binary configuration is being built.
+
+runs:
+  using: composite
+  steps:
+    # [see note: pytorch repo ref]
+    - name: Checkout PyTorch
+      uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      with:
+        no-sudo: true
+        path: pytorch
+
+    - name: Checkout PyTorch Builder
+      uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      with:
+        no-sudo: true
+        path: builder
+        repository: pytorch/builder
+
+    - name: Setup Windows
+      uses: ./.github/actions/setup-win
+      with:
+        cuda-version: ${{ inputs.cuda-version }}
+
+    - name: Populate binary env
+      shell: bash
+      run: |
+        echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+        echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+        echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
+
+    - name: Populate binary env
+      shell: bash
+      run: |
+        "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+
+    - name: Build PyTorch binary
+      shell: bash
+      run: |
+        "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
+
+    - name: Upload artifacts to s3
+      uses: seemethere/upload-artifact-s3@v4
+      with:
+        retention-days: 14
+        if-no-files-found: error
+        name: ${{ input.build-name }}
+        path: ${{ env.PYTORCH_FINAL_PACKAGE_DIR }}
+
+    - name: Teardown Windows
+      uses: ./.github/actions/teardown-win
+      if: always()
+      with:
+        extra-delete-dir: /c/${{ github.run_id }}/build-results/
+        working-directory: pytorch

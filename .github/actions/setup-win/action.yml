@@ -6,12 +6,17 @@ inputs:
   cuda-version:
     description: which cuda version to install, 'cpu' for none
     required: true
+  working-directory:
+    description: working directory to run shell commands in
+    required: false
+    default: ${{ github.workspace }}
 
 runs:
   using: composite
   steps:
     - name: Display EC2 information
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         set -euo pipefail
         function get_ec2_metadata() {
@@ -28,17 +33,20 @@ runs:
     # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
     - name: Enable long paths on Windows
       shell: powershell
+      working-directory: ${{ inputs.working-directory }}
       run: |
         Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
 
     # Since it's just a defensive command, the workflow should continue even the command fails
     - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
       shell: powershell
+      working-directory: ${{ inputs.working-directory }}
       run: |
         Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
 
     - name: Install Visual Studio 2019 toolchain
       shell: powershell
+      working-directory: ${{ inputs.working-directory }}
       env:
         VS_VERSION: "16.8.6"
         INSTALL_WINDOWS_SDK: "1"
@@ -47,6 +55,7 @@ runs:
 
     - name: Install CUDA and CUDNN
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       if: inputs.cuda-version != 'cpu'
       env:
         CUDA_VERSION: ${{ inputs.cuda-version }}
