@@ -13676,10 +13676,6 @@ op_db: List[OpInfo] = [
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            supports_expanded_weight=True,
-           skips=(
-               # Problem, needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-           ),
            decorators=(
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                             'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
