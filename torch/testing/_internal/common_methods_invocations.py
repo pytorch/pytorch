@@ -18960,14 +18960,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sin",
         torch_opinfo_name="sin",
-        #skips=(
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-        #    DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-        #                 dtypes=(torch.chalf,)),
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-        #    DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-        #                 dtypes=(torch.chalf,)),
-        #)
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sinh",
