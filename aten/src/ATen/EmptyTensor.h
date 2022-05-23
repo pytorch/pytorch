@@ -10,8 +10,11 @@ inline void check_size_nonnegative(IntArrayRef size) {
   }
 }
 
+TORCH_API size_t computeStorageNbytesContiguous(
+    IntArrayRef sizes, size_t itemsize, size_t storage_offset=0);
 TORCH_API size_t computeStorageNbytes(
-    IntArrayRef sizes, IntArrayRef strides, size_t itemsize);
+    IntArrayRef sizes, IntArrayRef strides,
+    size_t itemsize, size_t storage_offset=0);
 
 TORCH_API TensorBase empty_generic(
     IntArrayRef size,

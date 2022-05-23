@@ -371,6 +371,10 @@ void IrGraphGenerator::handle(const Int* i) {
   printValue(i, IrNodeLabel::gen(i, detail_level_));
 }
 
+void IrGraphGenerator::handle(const ComplexDouble* i) {
+  printValue(i, IrNodeLabel::gen(i, detail_level_));
+}
+
 void IrGraphGenerator::handle(const NamedScalar* i) {
   printValue(i, IrNodeLabel::gen(i, detail_level_));
 }

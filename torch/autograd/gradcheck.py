@@ -9,9 +9,14 @@ from typing import Callable, Union, Optional, Iterable, List, Tuple, Dict
 from torch._vmap_internals import vmap, _vmap
 import functools
 
+# Note: `get_*_jacobian` functions are added here even though we didn't intend to make them public
+# since they have been exposed from before we added `__all__`  and we already maintain BC for them
+# We should eventually deprecate them and remove them from `__all__`
+__all__ = ["gradcheck", "gradgradcheck", "GradcheckError", "get_numerical_jacobian",
+           "get_analytical_jacobian", "get_numerical_jacobian_wrt_specific_input"]
 
 class GradcheckError(RuntimeError):
-    # Custom error so that user errors are not caught in the gradcheck's try-catch
+    r"""Error raised by :func:`gradcheck` and :func:`gradgradcheck`"""
     pass
 
 
@@ -257,7 +262,7 @@ def _prepare_input(input: torch.Tensor, maybe_perturbed_input: Optional[torch.Te
         return input
 
 
-def check_outputs_same_dtype_and_shape(output1, output2, eps, idx=None) -> None:
+def _check_outputs_same_dtype_and_shape(output1, output2, eps, idx=None) -> None:
     # Check that the returned outputs don't have different dtype or shape when you
     # perturb the input
     on_index = "on index {idx} " if idx is not None else ""
@@ -284,7 +289,7 @@ def get_numerical_jacobian_wrt_specific_input(fn, input_idx, inputs, outputs, ep
     for x, idx, d_idx in _iter_tensor(input):
         wrapped_fn = _with_prepare_inputs(fn, inputs, input_idx, x)
         input_to_perturb = x[idx]
-        nbhd_checks_fn = functools.partial(check_outputs_same_dtype_and_shape, idx=idx, eps=eps)
+        nbhd_checks_fn = functools.partial(_check_outputs_same_dtype_and_shape, idx=idx, eps=eps)
         jvp_fn = _get_numerical_jvp_fn(wrapped_fn, input_to_perturb, eps, nbhd_checks_fn)
         jacobian_cols[d_idx] = _compute_numerical_jvps_wrt_specific_input(jvp_fn, eps, x.is_complex(), is_forward_ad)
     return _combine_jacobian_cols(jacobian_cols, outputs, input, input.numel())
@@ -428,7 +433,7 @@ def _get_numerical_jvp_wrt_specific_input(fn, input_idx, inputs, u, eps, is_forw
     input = inputs[input_idx]
     input_to_perturb = _get_input_to_perturb(input)
     wrapped_fn = _with_prepare_inputs(fn, inputs, input_idx, input_to_perturb, True)
-    nbhd_checks_fn = functools.partial(check_outputs_same_dtype_and_shape, eps=eps)
+    nbhd_checks_fn = functools.partial(_check_outputs_same_dtype_and_shape, eps=eps)
     jvp_fn = _get_numerical_jvp_fn(wrapped_fn, input_to_perturb, eps, nbhd_checks_fn)
     u = _reshape_tensor_or_tuple(u, input_to_perturb.shape)
     u = _mul_tensor_or_tuple(u, eps)
@@ -504,7 +509,7 @@ workarounds. The workaround depends on how your test invokes gradcheck/gradgradc
 If the test
 - manually invokes gradcheck/gradgradcheck, then call gradcheck/gradgradcheck
   with `nondet_tol=<tol>` as a keyword argument.
-- is OpInfo-based (e.g., in test_ops.py), then modify the OpInfo for the test
+- is OpInfo-based (e.g., in test_ops_gradients.py), then modify the OpInfo for the test
   to have `gradcheck_nondet_tol=<tol>`.
 - is a Module test (e.g., in common_nn.py), then modify the corresponding
   module_test entry to have `gradcheck_nondet_tol=<tol>`
@@ -717,7 +722,7 @@ workarounds. The workaround depends on how your test invokes gradcheck/gradgradc
 If the test
 - manually invokes gradcheck/gradgradcheck, then call gradcheck/gradgradcheck
   with `check_batched_grad=False` as a keyword argument.
-- is OpInfo-based (e.g., in test_ops.py), then modify the OpInfo for the test
+- is OpInfo-based (e.g., in test_ops_gradients.py), then modify the OpInfo for the test
   to have `check_batched_grad=False` and/or `check_batched_gradgrad=False`.
 
 If you're modifying an existing operator that supports batched grad computation,
@@ -743,7 +748,7 @@ workarounds. The workaround depends on how your test invokes gradcheck/gradgradc
 If the test
 - manually invokes gradcheck/gradgradcheck, then call gradcheck/gradgradcheck
   with `check_batched_forward_grad=False` as a keyword argument.
-- is OpInfo-based (e.g., in test_ops.py), then modify the OpInfo for the test
+- is OpInfo-based (e.g., in test_ops_gradients.py), then modify the OpInfo for the test
   to have `check_batched_forward_grad=False`
 """
 
@@ -1196,7 +1201,7 @@ workarounds. The workaround depends on how your test invokes gradcheck/gradgradc
 If the test
 - manually invokes gradcheck/gradgradcheck, then call gradcheck/gradgradcheck
   with `fast_mode=False` as a keyword argument.
-- is OpInfo-based (e.g., in test_ops.py), then modify the OpInfo for the test
+- is OpInfo-based (e.g., in test_ops_gradients.py), then modify the OpInfo for the test
   to have `gradcheck_fast_mode=False`
 - is a Module test (e.g., in common_nn.py), then modify the corresponding
   module_test entry to have `gradcheck_fast_mode=False`

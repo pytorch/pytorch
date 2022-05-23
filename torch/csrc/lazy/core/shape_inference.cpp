@@ -81,10 +81,11 @@ std::vector<int64_t> expand_param_if_needed(
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 
-std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out) {
+TORCH_API std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out) {
   double size_d = 0;
   // shape inference code copied from RangeFactories.cpp arange_out function
   // Note: AT_DISPATCH_ALL_TYPES_AND is just a macro that defines the correct c++ scalar_t type depending on out tensor
+
   AT_DISPATCH_ALL_TYPES_AND(c10::kBFloat16, out.scalar_type(), "compute_shape_arange_out", [&]() {
     // Note: acc_type further defines an accumulataion type depending on the scalar_t and whether its on cuda vs cpu.
     using accscalar_t = at::acc_type<scalar_t, false>;
@@ -129,7 +130,6 @@ std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::
   // If any of start, end, or stop are floating-point, the dtype is inferred to be the default dtype, see get_default_dtype().
   // Otherwise, the dtype is inferred to be torch.int64.
 
-  // Since out tensor is specified, its dtype should always be used?
   return {Shape(out.scalar_type(), {size})};
 }
 
@@ -139,6 +139,14 @@ std::vector<Shape> compute_shape_abs(const at::Tensor & self) {
     return {Shape(float_type, self.sizes().vec())};
   }
   return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_bernoulli(const at::Tensor & self, c10::optional<at::Generator> generator) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_bernoulli(const at::Tensor & self, double p, c10::optional<at::Generator> generator) {
+  return compute_shape_bernoulli(self, generator);
 }
 
 std::vector<Shape> compute_shape_binary_cross_entropy(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction) {
@@ -183,7 +191,7 @@ std::vector<Shape> compute_shape_constant_pad_nd(const at::Tensor & self, at::In
   return {Shape(self.scalar_type(), new_shape)};
 }
 
-std::vector<Shape> compute_shape_convolution_backward(const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & weight, c10::optional<at::IntArrayRef> bias_sizes, at::IntArrayRef stride, at::IntArrayRef padding, at::IntArrayRef dilation, bool transposed, at::IntArrayRef output_padding, int64_t groups, ::std::array<bool,3> output_mask) {
+std::vector<Shape> compute_shape_convolution_backward(const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & weight, at::OptionalIntArrayRef bias_sizes, at::IntArrayRef stride, at::IntArrayRef padding, at::IntArrayRef dilation, bool transposed, at::IntArrayRef output_padding, int64_t groups, ::std::array<bool,3> output_mask) {
   if (bias_sizes.has_value()) {
     return {Shape(input.scalar_type(), input.sizes().vec()),
             Shape(weight.scalar_type(), weight.sizes().vec()),
@@ -216,11 +224,11 @@ std::vector<Shape> compute_shape_convolution(const at::Tensor & input, const at:
   }
 }
 
-std::vector<Shape> compute_shape_masked_fill_(at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
+std::vector<Shape> compute_shape_masked_fill(const at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_masked_fill_(at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
+std::vector<Shape> compute_shape_masked_fill(const at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -236,6 +244,25 @@ std::vector<Shape> compute_shape_min(const at::Tensor & self){
     return {Shape(self.scalar_type(), {})};
 }
 
+std::vector<Shape> compute_shape_nonzero(const at::Tensor& t, bool as_tuple) {
+  if (as_tuple) {
+    auto res = std::vector<Shape>();
+    for (auto dim_size : t.sizes()) {
+      res.emplace_back(Shape(at::kLong, {dim_size}));
+    }
+    return res;
+  }
+  int64_t max_elements = 1;
+  for (auto dim_size : t.sizes()) {
+    max_elements *= dim_size;
+  }
+  return {Shape(at::kLong, {max_elements, (int64_t)t.sizes().size()})};
+}
+
+std::vector<Shape> compute_shape_nonzero(const at::Tensor& self) {
+  return compute_shape_nonzero(self, false);
+}
+
 std::vector<Shape> compute_shape_embedding(const at::Tensor & weight, const at::Tensor & indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse){
   // Based on aten/src/ATen/native/Embedding.cpp::embedding.
   std::vector<int64_t> out_sizes = indices.sizes().vec();
@@ -249,7 +276,7 @@ std::vector<Shape> compute_shape_std(const at::Tensor & self, bool unbiased){
 std::vector<Shape> compute_shape_std(const at::Tensor & self, at::IntArrayRef dim, bool unbiased, bool keepdim){
   return compute_shape_std(self, dim, c10::nullopt, keepdim);
 }
-std::vector<Shape> compute_shape_std(const at::Tensor & self, c10::optional<at::IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim){
+std::vector<Shape> compute_shape_std(const at::Tensor & self, at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim){
   if (dim.has_value()) {
     auto shape = at::native::shape_from_dim_mask(self, at::native::make_dim_mask(dim.value(), self.dim()), keepdim);
     return {Shape(self.scalar_type(), std::vector<int64_t>(shape.begin(), shape.end()))};
@@ -277,6 +304,10 @@ std::vector<Shape> compute_shape_index_select(const at::Tensor & self, int64_t d
   output_sizes[dim] = index_size;
 
   return {Shape(self.scalar_type(), output_sizes)};
+}
+
+std::vector<Shape> compute_shape_inverse(const at::Tensor & self) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_kl_div_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& target, int64_t reduction, bool log_target) {
@@ -353,12 +384,20 @@ std::vector<Shape> compute_shape_native_dropout_backward(const at::Tensor & grad
   return {Shape(grad_output.scalar_type(), grad_output.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
+std::vector<Shape> compute_shape_random_functional(const at::Tensor & self, c10::optional<at::Generator> generator) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_relu_(at::Tensor& self) {
-  return compute_shape_relu(self);
+std::vector<Shape> compute_shape_random_functional(const at::Tensor & self, int64_t to, c10::optional<at::Generator> generator) {
+  return compute_shape_random_functional(self, generator);
+}
+
+std::vector<Shape> compute_shape_random_functional(const at::Tensor & self, int64_t from, c10::optional<int64_t> to, c10::optional<at::Generator> generator) {
+  return compute_shape_random_functional(self, generator);
+}
+
+std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_bitwise_and(const at::Tensor& self, const at::Scalar& other) {
@@ -378,7 +417,7 @@ std::vector<Shape> compute_shape_sum(
   return {Shape(self.scalar_type(), {})};;
 }
 
-std::vector<Shape> compute_shape_zero_(at::Tensor& self) {
+std::vector<Shape> compute_shape_zero_functional(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -402,6 +441,17 @@ std::vector<Shape> compute_shape_smooth_l1_loss(
     default:
       return {Shape(self.scalar_type(), {})};
   }
+}
+
+std::vector<Shape> compute_shape_slogdet(const at::Tensor & self) {
+  // assumes self.shape is {*, n, n} and returns shape *
+  TORCH_INTERNAL_ASSERT(self.dim() >= 2);
+  std::vector<int64_t> out_sizes(self.sizes().begin(), self.sizes().end() - 2);
+  // Doesn't check input dtype, but output dtype either matches it,
+  // or the actual slogdet operation will throw if it's an unsupported type.
+  // Sign and det outputs hold the same shape, dtype.
+  return {Shape(self.scalar_type(), out_sizes),
+          Shape(self.scalar_type(), out_sizes)};
 }
 
 std::vector<Shape> compute_shape_smooth_l1_loss_backward(
@@ -525,12 +575,57 @@ std::vector<Shape> compute_shape_glu_backward(const at::Tensor & grad_output, co
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_glu_jvp(const at::Tensor & glu, const at::Tensor & x, const at::Tensor & dx, int64_t dim) {
+  return {Shape(glu.scalar_type(), glu.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_l1_loss_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction) {
   TORCH_INTERNAL_ASSERT(grad_output.scalar_type() == self.dtype());
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_clamp_min(const at::Tensor & self, const at::Scalar & min) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape__to_copy(const at::Tensor & self, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, bool non_blocking, c10::optional<at::MemoryFormat> memory_format) {
+  if(dtype){
+    return {Shape(*dtype, self.sizes().vec())};
+  }
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_stack(at::TensorList tensors, int64_t dim) {
+  TORCH_CHECK(tensors.size() > 0, "stack expects a non-empty TensorList");
+  auto wrapped_dim = at::maybe_wrap_dim(dim, tensors[0].ndimension() + 1);
+
+  // Copied from 'check_stack_inputs' in TensorShape.cpp
+  at::IntArrayRef entry_shape = tensors[0].sizes();
+  for (const auto i : c10::irange(1, tensors.size())) {
+    TORCH_CHECK(tensors[i].sizes() == entry_shape,
+      "stack expects each tensor to be equal size, but got ", entry_shape,
+      " at entry 0 and ", tensors[i].sizes(), " at entry ", i);
+  }
+
+  auto result_sizes = tensors[0].sizes().vec();
+  result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
+  return {Shape(tensors[0].scalar_type(), result_sizes)};
+}
+
+std::vector<Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef repeats) {
+  CHECK_GE(repeats.size(), self.dim());
+  int64_t num_new_dimensions = repeats.size() - self.dim();
+  std::vector<int64_t> padded_size(num_new_dimensions, 1);
+  padded_size.insert(padded_size.end(), self.sizes().begin(),
+                     self.sizes().end());
+  std::vector<int64_t> target_size(repeats.size());
+  for (const auto idx : c10::irange(repeats.size())) {
+    target_size[idx] = padded_size[idx] * repeats[idx];
+  }
+  return {Shape(self.scalar_type(), target_size)};
+}
+
+std::vector<Shape> compute_shape_narrow_copy(const at::Tensor & self, int64_t dim, int64_t start, c10::SymInt length) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 

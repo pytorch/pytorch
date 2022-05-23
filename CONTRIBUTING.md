@@ -49,6 +49,7 @@
 - [Caffe2 notes](#caffe2-notes)
 - [CI failure tips](#ci-failure-tips)
   - [Which commit is used in CI?](#which-commit-is-used-in-ci)
+- [Dev Infra Office Hours](#dev-infra-office-hours)
 
 <!-- tocstop -->
 
@@ -194,6 +195,7 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
     ```
     remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
 * If you're a Windows contributor, please check out [Best Practices](https://github.com/pytorch/pytorch/wiki/Best-Practices-to-Edit-and-Compile-Pytorch-Source-Code-On-Windows).
+* For help with any part of the contributing process, please don’t hesitate to utilize our Zoom office hours! See details [here](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours)
 
 ## Nightly Checkout & Pull
 
@@ -341,6 +343,8 @@ python test/test_jit.py TestJit.test_Sequential
 The `expecttest` and `hypothesis` libraries must be installed to run the tests. `mypy` is
 an optional dependency, and `pytest` may help run tests more selectively.
 All these packages can be installed with `conda` or `pip`.
+
+**Weird note:** In our CI (Continuous Integration) jobs, we actually run the tests from the `test` folder and **not** the root of the repo, since there are various dependencies we set up for CI that expects the tests to be run from the test folder. As such, there may be some inconsistencies between local testing and CI testing--if you observe an inconsistency, please [file an issue](https://github.com/pytorch/pytorch/issues/new/choose).
 
 ### Better local unit tests with `pytest`
 
@@ -1098,8 +1102,7 @@ This internally invokes our driver script and closely mimics how clang-tidy is r
 
 ## Pre-commit tidy/linting hook
 
-We use clang-tidy and flake8 (installed with flake8-bugbear,
-flake8-comprehensions, flake8-pyi, and others) to perform additional
+We use clang-tidy to perform additional
 formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 
@@ -1107,18 +1110,18 @@ performing these checks, before a commit is created:
   ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
   ```
 
-You'll need to install an appropriately configured flake8; see
-[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
-for documentation on how to do this.
-
-If you haven't set up the pre-commit hook and have already committed files and
+If you have already committed files and
 CI reports `flake8` errors, you can run the check locally in your PR branch with:
 
   ```bash
   flake8 $(git diff --name-only $(git merge-base --fork-point master))
   ```
 
-fix the code so that no errors are reported when you re-run the above check again,
+You'll need to install an appropriately configured flake8; see
+[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
+for documentation on how to do this.
+
+Fix the code so that no errors are reported when you re-run the above check again,
 and then commit the fix.
 
 ## Building PyTorch with ASAN
@@ -1245,39 +1248,17 @@ Once you submit a PR or push a new commit to a branch that is in
 an active PR, CI jobs will be run automatically. Some of these may
 fail and you will need to find out why, by looking at the logs.
 
-Fairly often, a CI failure might be unrelated to your changes. In this case, you
+Fairly often, a CI failure might be unrelated to your changes. You can
+confirm by going to our [HUD](hud.pytorch.org) and seeing if the CI job
+is failing upstream already. In this case, you
 can usually ignore the failure. See [the following
 subsection](#which-commit-is-used-in-ci) for more details.
 
 Some failures might be related to specific hardware or environment
-configurations. In this case, if the job is run by CircleCI, you can
-ssh into the job's session to perform manual debugging using the
-following steps:
+configurations. In this case, if you're a Meta employee, you can ssh into
+the job's session to perform manual debugging following the instructions in
+our [CI wiki](https://github.com/pytorch/pytorch/wiki/Debugging-using-with-ssh-for-Github-Actions).
 
-1. In the CircleCI page for the failed job, make sure you are logged in
-   and then click the `Rerun` actions dropdown button on the top right.
-   Click `Rerun Job with SSH`.
-
-2. When the job reruns, a new step will be added in the `STEPS` tab
-   labelled `Set up SSH`. Inside that tab will be an ssh command that
-   you can execute in a shell.
-
-3. Once you are connected through ssh, you may need to enter a docker
-   container. Run `docker ps` to check if there are any docker
-   containers running. Note that your CI job might be in the process
-   of initiating a docker container, which means it will not show up
-   yet. It is best to wait until the CI job reaches a step where it is
-   building pytorch or running pytorch tests. If the job does have a
-   docker container, run `docker exec -it IMAGE_ID /bin/bash` to
-   connect to it.
-
-4. Now you can find the pytorch working directory, which could be
-   `~/workspace` or `~/project`, and run commands locally to debug
-   the failure.
-
-For certain Windows failures, it may be useful to have a full [Remote
-Desktop](https://docs.microsoft.com/en-us/windows-server/remote/remote-desktop-services/clients/remote-desktop-clients) connection. See detailed instructions [here](https://github.com/pytorch/pytorch/wiki/Debugging-Windows-with-Remote-Desktop-or-CDB-(CLI-windbg)-on-CircleCI)
-for how to set that up after rerunning the job.
 
 ### Which commit is used in CI?
 
@@ -1331,3 +1312,6 @@ your PR branch. If you happen to have write access to this repo, you can choose
 to use `ghstack` to eliminate this nondeterminism for GitHub Actions jobs on
 your PRs, but it will still be present for the select CircleCI jobs listed
 above.
+
+## Dev Infra Office Hours
+[Dev Infra Office Hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours) are hosted every Friday to answer any questions regarding developer experience, Green HUD, and CI.

@@ -63,6 +63,26 @@ class C10_CUDA_API CUDAError : public c10::Error {
     }                                                          \
   } while (0)
 
+// Indicates that a CUDA error is handled in a non-standard way
+#define C10_CUDA_ERROR_HANDLED(EXPR) EXPR
+
+// Intentionally ignore a CUDA error
+#define C10_CUDA_IGNORE_ERROR(EXPR)                             \
+  do {                                                          \
+    cudaError_t __err = EXPR;                                   \
+    if (__err != cudaSuccess) {                                 \
+      cudaError_t error_unused C10_UNUSED = cudaGetLastError(); \
+      (void)error_unused;                                       \
+    }                                                           \
+  } while (0)
+
+// Clear the last CUDA error
+#define C10_CUDA_CLEAR_ERROR()                                \
+  do {                                                        \
+    cudaError_t error_unused C10_UNUSED = cudaGetLastError(); \
+    (void)error_unused;                                       \
+  } while (0)
+
 // This should be used directly after every kernel launch to ensure
 // the launch happened correctly and provide an early, close-to-source
 // diagnostic if it didn't.

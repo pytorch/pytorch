@@ -49,12 +49,16 @@ class KernelIrScanner : private IrVisitor {
       handle(out);
     }
   }
-  void handle(Sync* sync) final {
+  void handle(BlockSync* sync) final {
     // TODO: Move to a dedicated validation pass
     // which is not on the common execution/compilation path
     if (sync->isWarHazardSync()) {
       ++summary_.war_hazard_syncs_count;
     }
+  }
+
+  void handle(GridSync* sync) final {
+    summary_.has_cooperative_grid_reduction = true;
   }
 
   void handle(Allocate* allocate) final {
@@ -63,11 +67,7 @@ class KernelIrScanner : private IrVisitor {
         summary_.global_allocations.push_back(allocate);
         break;
       case MemoryType::Shared:
-        if (ExpressionEvaluator::isConst(allocate->size())) {
-          summary_.static_smem_allocations.push_back(allocate);
-        } else {
-          summary_.dynamic_smem_allocations.push_back(allocate);
-        }
+        summary_.dynamic_smem_allocations.push_back(allocate);
         break;
       case MemoryType::Local:
         if (!ExpressionEvaluator::isConst(allocate->size())) {
@@ -115,18 +115,22 @@ class KernelIrScanner : private IrVisitor {
   void handle(GridWelford* grid_welford) final {
     summary_.has_welford = true;
     summary_.has_grid_welford = true;
-    const auto dom =
-        grid_welford->welford_op()->out()->as<TensorIndex>()->view()->domain();
-    updateGridReductionInLoop(dom);
+    summary_.has_grid_reductions = true;
+    if (grid_welford->welford_op()->isAllreduce()) {
+      summary_.has_cooperative_grid_reduction = true;
+    }
   }
 
   void handle(GridReduction* grid_reduction) final {
     summary_.has_grid_reductions = true;
-    const auto dom = grid_reduction->reduction_op()
-                         ->out()
-                         ->as<TensorIndex>()
-                         ->view()
-                         ->domain();
+    if (grid_reduction->isAllreduce()) {
+      summary_.has_cooperative_grid_reduction = true;
+    }
+  }
+
+  void handle(GroupedGridReduction* grid_reduction) final {
+    summary_.has_grid_reductions = true;
+    const auto dom = ir_utils::getTvOutput(grid_reduction)->domain();
     updateGridReductionInLoop(dom);
   }
 
@@ -154,11 +158,9 @@ class KernelIrScanner : private IrVisitor {
 
  private:
   void updateGridReductionInLoop(TensorDomain* dom) {
-    summary_.has_grid_reductions = true;
-
     for (const auto i : c10::irange(dom->nDims())) {
-      const auto id = GpuLower::current()->caParallelMap().getConcreteMappedID(
-          dom->domain()[i]);
+      const auto id = GpuLower::current()->caMap()->getConcreteMappedID(
+          dom->domain()[i], IdMappingMode::LOOP);
 
       summary_.has_cooperative_grid_reduction =
           summary_.has_cooperative_grid_reduction ||
@@ -223,7 +225,8 @@ class ValidateAllocation : private OptOutConstDispatch {
           continue;
         }
         for (const auto& axis : tv->domain()->domain()) {
-          if (!GpuLower::current()->caParallelMap().areMapped(loop_id, axis)) {
+          if (!GpuLower::current()->caMap()->areMapped(
+                  loop_id, axis, IdMappingMode::LOOP)) {
             continue;
           }
           if (isParallelTypeThreadDim(loop_id->getParallelType())) {
@@ -276,6 +279,12 @@ void Kernel::finalize(std::vector<Expr*> top_level_exprs) {
   warp_padded_parallel_info_ = GpuLower::current()->getWarpPaddedParallelInfo();
   ValidateAllocation::validate(this);
   analyze();
+  // Make sure this is after analyze as it sets summary_
+  summary_.vectorized_accesses = GpuLower::current()->vectorizedAccesses();
+  summary_.vectorized_set_info = GpuLower::current()->vectorizedSetInfo();
+  summary_.sync_map = GpuLower::current()->syncMap();
+  summary_.parallel_dimension_map_ =
+      GpuLower::current()->parallelDimensionMap();
 }
 
 void Kernel::analyze() {
@@ -343,6 +352,10 @@ void Kernel::registerExpr(Expr* expr) {
   // Register expr is explicitly non-SSA when coming from a kernel. This is
   // detected inside Fusion::registerExpr
   Fusion::registerExpr(expr);
+}
+
+std::vector<Expr*>& KernelInternalProxy::topLevelExprs() {
+  return kernel_->top_level_exprs_;
 }
 
 } // namespace kir

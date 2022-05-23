@@ -477,6 +477,14 @@ operator!=(const _Tp& __x, const complex<_Tp>& __y)
     return !(__x == __y);
 }
 
+template<class _Tp>
+inline constexpr
+bool
+operator&&(const complex<_Tp>& __x, const complex<_Tp>& __y)
+{
+    return (__x.real() || __x.imag()) && (__y.real() || __y.imag());
+}
+
 // 26.3.7 values:
 
 template <class _Tp, bool = is_integral<_Tp>::value,
@@ -583,8 +591,39 @@ arg(_Tp __re)
 
 )ESCAPE";
 
+const std::string complex_half_body = R"ESCAPE(
+namespace std {
+template <>
+struct alignas(2) complex<at::Half> {
+  at::Half real_;
+  at::Half imag_;
+
+  // Constructors
+  complex() = default;
+
+  // implicit casting to and from `complex<float>`.
+  // NOTE: computation of `complex<Half>` will occur in `complex<float>`
+  __host__ __device__ inline complex(const std::complex<float>& value)
+      : real_(value.real()), imag_(value.imag()) {}
+
+  inline __host__ __device__ operator std::complex<float>() const {
+    return {real_, imag_};
+  }
+
+  at::Half real() const {return real_;}
+  at::Half imag() const {return imag_;}
+
+};
+}
+)ESCAPE";
+
+
 const std::string &get_complex_body_string() {
   return complex_body;
+}
+
+const std::string &get_complex_half_body_string() {
+  return complex_half_body;
 }
 
 const std::string complex_math = R"ESCAPE(
@@ -722,6 +761,16 @@ complex<_Tp>
 log10(const complex<_Tp>& __x)
 {
     return log(__x) / log(_Tp(10));
+}
+
+// log2
+
+template<class _Tp>
+inline
+complex<_Tp>
+log2(const complex<_Tp>& __x)
+{
+    return log(__x) / log(_Tp(2));
 }
 
 // sqrt

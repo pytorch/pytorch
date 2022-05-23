@@ -88,6 +88,10 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(
       return getTensorArg<int64_t, INDEX_MODE>(nDims);
     case c10::ScalarType::Int:
       return getTensorArg<int32_t, INDEX_MODE>(nDims);
+    case c10::ScalarType::ComplexFloat:
+      return getTensorArg<c10::complex<float>, INDEX_MODE>(nDims);
+    case c10::ScalarType::ComplexDouble:
+      return getTensorArg<c10::complex<double>, INDEX_MODE>(nDims);
     default:
       TORCH_CHECK(
           false,
@@ -193,6 +197,10 @@ void KernelArgumentHolder::push(const IValue& val) {
   auto scalar_val = val.toScalar();
   switch (scalar_val.type()) {
     // NOLINTNEXTLINE(bugprone-branch-clone)
+    case c10::ScalarType::ComplexDouble:
+      arguments_.push_back(
+          std::make_unique<ComplexDoubleArg>(scalar_val.toComplexDouble()));
+      return;
     case c10::ScalarType::Double:
       arguments_.push_back(std::make_unique<DoubleArg>(scalar_val.toDouble()));
       return;

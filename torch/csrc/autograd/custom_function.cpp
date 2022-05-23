@@ -112,7 +112,7 @@ void _process_forward_mode_AD(const variable_list &inputs,
   const auto num_forward_grads = forward_grads.size();
   // contrary to backward mode, we don't allow returning too many gradients
   TORCH_CHECK(num_forward_grads == num_outputs, "Function's jvp returned "
-              "an invalid number of of forward gradients (expected ", num_outputs,
+              "an invalid number of forward gradients (expected ", num_outputs,
               " but got ", num_forward_grads, ")");
 
   for (const auto i : c10::irange(num_outputs)) {

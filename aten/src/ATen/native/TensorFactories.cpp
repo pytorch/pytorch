@@ -110,9 +110,9 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / polar ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 void complex_check_floating(const Tensor& a, const Tensor& b) {
-  TORCH_CHECK((a.scalar_type() == kFloat || a.scalar_type() == kDouble) &&
-              (b.scalar_type() == kFloat || b.scalar_type() == kDouble),
-              "Expected both inputs to be Float or Double tensors but got ",
+  TORCH_CHECK((a.scalar_type() == kFloat || a.scalar_type() == kDouble || a.scalar_type() == kHalf) &&
+              (b.scalar_type() == kFloat || b.scalar_type() == kDouble || b.scalar_type() == kHalf),
+              "Expected both inputs to be Half, Float or Double tensors but got ",
               a.scalar_type(), " and ", b.scalar_type());
 }
 
@@ -932,7 +932,7 @@ Tensor& randperm_out_cpu(int64_t n, c10::optional<Generator> generator, Tensor& 
   auto gen = get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, result.scalar_type(), "randperm", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "randperm", [&]() -> void {
     randperm_cpu<scalar_t>(result, n, gen);
   });
 
@@ -1344,6 +1344,11 @@ Tensor kaiser_window(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   window_function_checks("kaiser_window", options, window_length);
+  // short-circuit for `meta`.
+  if (device == kMeta) {
+    return at::empty({window_length}, options);
+  }
+
   if (window_length == 0) {
     return at::empty({0}, options);
   }

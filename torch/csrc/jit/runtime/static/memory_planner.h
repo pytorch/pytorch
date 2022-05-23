@@ -92,17 +92,18 @@ TORCH_API std::vector<StorageGroup> assignStorageToManagedTensors(
 
 class MemoryPlanner {
  public:
-  explicit MemoryPlanner(
+  MemoryPlanner(
       BlockRunner* block_runner,
       const BlockInfo& block_info,
       bool enable_out_variant,
-      bool manage_output_tensors,
-      bool optimize_memory);
+      bool manage_output_tensors);
+
   // disable copying and moving
   MemoryPlanner(const MemoryPlanner&) = delete;
   MemoryPlanner& operator=(const MemoryPlanner&) = delete;
   MemoryPlanner(MemoryPlanner&&) = delete;
   MemoryPlanner& operator=(MemoryPlanner&&) = delete;
+  virtual ~MemoryPlanner() = default;
 
   void allocate();
   void deallocate();
@@ -110,6 +111,10 @@ class MemoryPlanner {
 
   size_t total_num_managed_tensors() const {
     return num_managed_tensors_;
+  }
+
+  size_t total_reused_tensors() const {
+    return reused_tensors_;
   }
 
   size_t total_num_managed_output_tensors() const {
@@ -130,10 +135,6 @@ class MemoryPlanner {
 
   size_t total_managed() const {
     return managed_bytes_;
-  }
-
-  size_t total_reused_tensors() const {
-    return reused_tensors_;
   }
 
   size_t numOutputBufferBytes() const {
@@ -180,6 +181,27 @@ class MemoryPlanner {
     return buffer_start_ <= data_ptr && data_ptr < buffer_end_;
   }
 
+ protected:
+  uint8_t* allocateBuffer(size_t num_bytes);
+
+  size_t managed_bytes_{0};
+  size_t reused_tensors_{0};
+
+  // each pair contains the size (in bytes) of data to be allocated
+  // and a vector of Tensors' storages that should be backed by that
+  // same data. Thus, if memonger is disabled, all vectors are of
+  // size 1.
+  // We allocate StorageImpls ourselves so that 1) we don't have to do
+  // an extra two loads per Tensor (which will likely miss in the CPU
+  // data cache) first reading the Storage (i.e., StorageImpl pointer)
+  // from the TensorImpl object and then second dereferencing it and
+  // 2) our memory access pattern during allocate() has high locality.
+  // We don't have any guarantee that the model doesn't change the
+  // Storage for managed tensors out from under us during execution,
+  // so we have to check the StorageImpls each time we deallocate.
+  std::vector<std::pair<size_t, at::StorageImpl>>
+      managed_tensor_storage_impls_{};
+
  private:
   // ivalues created in one run but not managed by MemoryPlanner
   std::vector<IValue*> unmanaged_ivalues_;
@@ -194,39 +216,36 @@ class MemoryPlanner {
   // to an ordinary "strong reference" state.
   std::vector<IValue*> borrowed_ivalues_needing_incref_;
 
-  // each pair contains the size (in bytes) of data to be allocated
-  // and a vector of Tensors' storages that should be backed by that
-  // same data. Thus, if memonger is disabled, all vectors are of
-  // size 1.
-
-  // We allocate StorageImpls ourselves so that 1) we don't have to do
-  // an extra two loads per Tensor (which will likely miss in the CPU
-  // data cache) first reading the Storage (i.e., StorageImpl pointer)
-  // from the TensorImpl object and then second dereferencing it and
-  // 2) our memory access pattern during allocate() has high locality.
-  std::vector<std::pair<size_t, at::StorageImpl>>
-      managed_tensor_storage_impls_{};
-  // We don't have any guarantee that the model doesn't change the
-  // Storage for managed tensors out from under us during execution,
-  // so we have to check the StorageImpls each time we deallocate.
-  std::vector<StorageGroup> managed_tensors_{};
   std::vector<std::pair<size_t, at::Tensor*>> managed_output_tensors_{};
   at::DataPtr buffer_; // allocated each time we call Run()
   uint8_t* buffer_start_{nullptr};
   uint8_t* buffer_end_{nullptr};
   size_t num_managed_tensors_{0};
-  size_t managed_bytes_{0};
-  size_t reused_tensors_{0};
   size_t num_unmanaged_scalar_ivalues_{0};
 
   at::DataPtr output_buffer_;
   size_t output_buffer_bytes_{0};
 
-  void allocateManagedTensors();
-  void allocateOutputTensors();
+  virtual void allocateManagedTensors() = 0;
+  virtual void deallocateManagedTensors() = 0;
 
-  static size_t compute_aligned_tensor_size(size_t nbytes);
-  static at::DataPtr allocate_buffer(size_t size);
+  void allocateOutputTensors();
+};
+
+class StandardMemoryPlanner : public MemoryPlanner {
+ public:
+  StandardMemoryPlanner(
+      BlockRunner* block_runner,
+      const BlockInfo& block_info,
+      bool enable_out_variant,
+      bool manage_output_tensors,
+      bool optimize_memory);
+
+ protected:
+  void allocateManagedTensors() override;
+  void deallocateManagedTensors() override;
+
+  std::vector<StorageGroup> managed_tensors_{};
 };
 
 } // namespace jit

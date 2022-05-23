@@ -17,7 +17,7 @@ namespace metal {
 
 Tensor upsample_nearest2d_vec(
     const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   TORCH_CHECK(input.is_metal());
   auto osize =

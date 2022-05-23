@@ -39,7 +39,7 @@ class TestTypesAndAnnotation(JitTestCase):
         expected = fn(x)
         scripted = torch.jit.script(fn)(x)
 
-        self.assertEquals(expected, scripted)
+        self.assertEqual(expected, scripted)
 
     def test_types_as_values(self):
         def fn(m: torch.Tensor) -> torch.device:

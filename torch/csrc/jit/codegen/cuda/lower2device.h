@@ -8,8 +8,12 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower_allocation.h>
 #include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
+#include <torch/csrc/jit/codegen/cuda/lower_fused_reduction.h>
+#include <torch/csrc/jit/codegen/cuda/lower_index_hoist.h>
 #include <torch/csrc/jit/codegen/cuda/lower_predicate.h>
+#include <torch/csrc/jit/codegen/cuda/lower_predicate_elimination.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
+#include <torch/csrc/jit/codegen/cuda/lower_sync_information.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_broadcast.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
@@ -18,9 +22,12 @@
 #include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
 #include <torch/csrc/jit/codegen/cuda/partial_split_map.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <torch/csrc/jit/codegen/cuda/vectorization_info.h>
 
 #include <memory>
 #include <ostream>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
@@ -38,16 +45,22 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
  public:
   GpuLower() = delete;
 
+  // GpuLower lowers the provided fusion into a kernel which can be translated
+  // into cuda code. index_type allows to compile the kernel based on int32
+  // indexing instead of int64 for additional performance.
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  explicit GpuLower(Fusion* fusion) {
-    lower(fusion);
+  explicit GpuLower(Fusion* fusion, DataType index_type = DataType::Int) {
+    lower(fusion, index_type);
   }
 
   kir::Kernel* kernel() const;
 
-  //! Returns the currently active lowering object
-  //! (or nullptr if no lowering is in progress)
+  //! Returns the currently active lowering object.
+  //! It's an error if no lowering is in progress.
   static GpuLower* current();
+
+  //! Query if lowering is in progress
+  static bool hasCurrent();
 
   ConcretizedBroadcastDomains& concretizedBroadcastDomains() {
     return concretized_broadcast_domains_;
@@ -57,16 +70,14 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return thread_pred_map_;
   }
 
-  const ComputeAtMap& caLoopMap() const {
-    return ca_loop_map_;
+  // Returns non-const reference. Necessary to reset a predicate flag
+  // when a broadcast expression is fused into a reduction.
+  ThreadPredicateMap& threadPredMap() {
+    return thread_pred_map_;
   }
 
-  const ComputeAtMap& caIndexMap() const {
-    return ca_index_map_;
-  }
-
-  const ComputeAtMap& caParallelMap() const {
-    return ca_parallel_map_;
+  const std::unique_ptr<ComputeAtMap>& caMap() const {
+    return compute_at_map_;
   }
 
   const TrivialReductionInfo& trivialReductionInfo() const {
@@ -125,8 +136,49 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return double_buffer_info_;
   }
 
+  CommonIndexMap& commonIndexMap() {
+    return common_index_map_;
+  }
+
+  const auto& vectorizedAccesses() const {
+    return vectorized_accesses_;
+  }
+
+  auto& vectorizedAccesses() {
+    return vectorized_accesses_;
+  }
+
+  const auto& vectorizedSetInfo() const {
+    return vectorized_set_info_;
+  }
+
+  auto& vectorizedSetInfo() {
+    return vectorized_set_info_;
+  }
+
+  FusedReductionInfo& fusedReductionInfo() {
+    return fused_reduction_info_;
+  }
+
+  const SyncMap& syncMap() const {
+    return sync_map_;
+  }
+
+  // This is an interface to propagate information after expression
+  //  replacement on the kernel IR. E.g.:
+  //    for ...
+  //       c = a + b   (expr 0)
+  //  after any pass that does replacement:
+  //    for ...
+  //       c1 = a1 + b1 (expr1)
+  //  The previous analysis that was performed on expr0 might still
+  //    be valid on expr1 but that info would be lost after replacement.
+  //  This function provides an interface to manually update the info
+  //    in any pass that performs replacement.
+  void propagateExprInfo(const Expr* old_expr, const Expr* new_expr);
+
  private:
-  void lower(Fusion* fusion);
+  void lower(Fusion* fusion, DataType index_type);
 
   // Goes through the parallelized iterdomains of the used TVs and find
   //  the parallel dimensions that need to be padded to a multiples of
@@ -138,12 +190,14 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   std::unique_ptr<kir::Kernel> kernel_;
 
   // Some stateful information during lowering
+  // TODO: A lot of this information uses a define class then call build. It
+  // would be safer to wrap all of these in unique pointers and remove the build
+  // interface and default constructor. That way they couldn't be accessed
+  // without being initialized.
   ConcretizedBroadcastDomains concretized_broadcast_domains_;
   ThreadPredicateMap thread_pred_map_;
   PredicateElimination pred_elimination_;
-  ComputeAtMap ca_loop_map_;
-  ComputeAtMap ca_index_map_;
-  ComputeAtMap ca_parallel_map_;
+  std::unique_ptr<ComputeAtMap> compute_at_map_;
   TrivialReductionInfo trivial_reduction_info_;
   HaloInfo halo_info_;
   LocalAllocationInfoMap local_allocation_info_map_;
@@ -152,6 +206,16 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   PartialSplitMap partial_split_map_;
   NonDivisibleSplitInfo non_divisible_split_info_;
   DoubleBufferInfo double_buffer_info_;
+  CommonIndexMap common_index_map_;
+  FusedReductionInfo fused_reduction_info_;
+  SyncMap sync_map_;
+
+  // Track which tensor views are inputs or outputs of a vectorized operation
+  // and their maximum vectorized access size
+  // std::unordered_map<TensorView*, VectorizationInfo> vectorized_accesses_;
+  std::unordered_map<TensorView*, int> vectorized_accesses_;
+  // Info on each vectorized set op
+  std::vector<VectorizedSetInfo> vectorized_set_info_;
 
   Fusion* fusion_ = nullptr;
 };

@@ -266,6 +266,9 @@ class TORCH_CUDA_CU_API Val : public Statement {
     return definition_;
   }
 
+  // Determine if value definition matches given expression type
+  bool isDefinitionType(ExprType expression_type) const;
+
   const std::vector<Expr*>& uses() const;
 
   bool isFusionInput() const {
@@ -309,13 +312,13 @@ class TORCH_CUDA_CU_API Val : public Statement {
     definition_ = expr;
   }
 
+  void resolveIndexDtype();
+
  protected:
   friend Fusion;
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const ValType vtype_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  const DataType dtype_;
 
   // TODO: Add fusion passkey for this
   void setIsFusionInput(bool is_fusion_input) {
@@ -333,6 +336,11 @@ class TORCH_CUDA_CU_API Val : public Statement {
   }
 
  private:
+  // There's only one instance where dtype can change, and that's through
+  // resolving the index data type from nvfuser to either Int or Int32 for
+  // welford operations.
+  DataType dtype_;
+
   // Following is managed by Fusion and can change.
   bool is_fusion_input_ = false;
   bool is_fusion_output_ = false;

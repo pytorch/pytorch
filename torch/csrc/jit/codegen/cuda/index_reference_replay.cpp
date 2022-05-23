@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/index_reference_replay.h>
 
+#include <torch/csrc/jit/codegen/cuda/contiguity.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -40,14 +41,15 @@ IterDomain* IndexReferenceReplay::idCopy(IterDomain* id) {
   // reduction. All we care about are the transformations, and trying to make
   // sure we track correctly a replaying with consistent reduction/broadcast
   // domains is challenging and unnecessary.
-  auto copied_id = IrBuilder::create<IterDomain>(
+  auto copied_id = SimplifyingIrBuilder::create<IterDomain>(
       id->container(), id->start(), id->extent(), id->getParallelType());
   replayed_ids_.emplace_back(copied_id);
   return copied_id;
 }
 
 IterDomain* IndexReferenceReplay::toConcrete(IterDomain* id) {
-  return ca_map_.getConcreteMappedID(id);
+  return GpuLower::current()->caMap()->getConcreteMappedID(
+      id, IdMappingMode::EXACT);
 }
 
 void IndexReferenceReplay::handle(Split* split) {
@@ -59,13 +61,13 @@ void IndexReferenceReplay::handle(Split* split) {
   // Don't produce the same values multiple times
   auto ref_outer = concreteToRefId(toConcrete(split->outer()));
   auto ref_inner = concreteToRefId(toConcrete(split->inner()));
-  if (ref_id_produced_.find(ref_outer) != ref_id_consumed_.end() ||
-      ref_id_produced_.find(ref_inner) != ref_id_consumed_.end()) {
+  if (ref_id_produced_.find(ref_outer) != ref_id_produced_.end() ||
+      ref_id_produced_.find(ref_inner) != ref_id_produced_.end()) {
     return;
   }
 
   // Replay the provided split operation and add it to the reference DAG
-  IrBuilder::create<Split>(
+  SimplifyingIrBuilder::create<Split>(
       split->container(),
       ref_outer,
       ref_inner,
@@ -92,12 +94,13 @@ void IndexReferenceReplay::handle(Merge* merge) {
 
   // Don't produce the same values multiple times
   auto ref_out = concreteToRefId(toConcrete(merge->out()));
-  if (ref_id_produced_.find(ref_out) != ref_id_consumed_.end()) {
+  if (ref_id_produced_.find(ref_out) != ref_id_produced_.end()) {
     return;
   }
 
   // Replay the provided merge operation and add it to the reference DAG
-  IrBuilder::create<Merge>(merge->container(), ref_out, ref_outer, ref_inner);
+  SimplifyingIrBuilder::create<Merge>(
+      merge->container(), ref_out, ref_outer, ref_inner);
 
   // Mark producers and consumers
   ref_id_consumed_.emplace(ref_outer);
@@ -118,6 +121,56 @@ void IndexReferenceReplay::handle(Expr* e) {
   OptInDispatch::handle(e);
 }
 
+namespace {
+
+bool isMappedWithAny(IterDomain* id, const std::vector<Val*>& ids) {
+  return std::any_of(ids.begin(), ids.end(), [&](Val* val) {
+    return val->isA<IterDomain>() &&
+        GpuLower::current()->caMap()->areMapped(
+            id, val->as<IterDomain>(), IdMappingMode::PERMISSIVE);
+  });
+}
+
+// Get an rfactor IterDomain that is mapped with an IterDomain. If
+// multiple such IDs exist, select one whose input IDs are mapped with
+// the consumer IDs. This is to ensure the path from the leaf
+// IterDomains to the root matches with the consumer tensor.
+IterDomain* getRfactorIDToTraverse(
+    IterDomain* id,
+    const std::vector<Val*>& consumer_all_ids) {
+  const auto& rfactor_ids =
+      GpuLower::current()->caMap()->getViewRfactorDomainsOfIdGroup(
+          id, IdMappingMode::PERMISSIVE);
+
+  if (rfactor_ids.empty()) {
+    return nullptr;
+  }
+
+  for (auto rfactor_id : rfactor_ids) {
+    auto def = rfactor_id->definition();
+    if (def == nullptr) {
+      continue;
+    }
+
+    auto rfactor_id_inputs = ir_utils::filterByType<IterDomain>(def->inputs());
+    if (std::all_of(
+            rfactor_id_inputs.begin(),
+            rfactor_id_inputs.end(),
+            [&](IterDomain* rfactor_id_input) {
+              return isMappedWithAny(rfactor_id_input, consumer_all_ids);
+            })) {
+      return rfactor_id;
+    }
+  }
+
+  // No mapped ID found, which means the consumer is a post-view
+  // tensor. In that case, it shouldn't matter which view path to
+  // traverse, so just return the first one.
+  return rfactor_ids.at(0);
+}
+
+} // namespace
+
 TensorDomain* IndexReferenceReplay::computeReplay() {
   // Throw an error when two loops are mapped with each other, which
   // violates an assumption that unique mappings between concrete
@@ -135,7 +188,10 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
        ++it_i) {
     for (auto it_j = it_i + 1; it_j != loop_structure_.end(); ++it_j) {
       TORCH_INTERNAL_ASSERT(
-          !ca_map_.areMapped((*it_i)->iter_domain(), (*it_j)->iter_domain()),
+          !GpuLower::current()->caMap()->areMapped(
+              (*it_i)->iter_domain(),
+              (*it_j)->iter_domain(),
+              IdMappingMode::EXACT),
           "Unsupported loop structure. Two loops are mapped together.");
     }
   }
@@ -147,6 +203,12 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
       std::back_inserter(domain_ids),
       [](kir::ForLoop* fl) { return fl->iter_domain(); });
 
+  const auto consumer_all_ids = DependencyCheck::getAllValsBetween(
+      {consumer_tv_->getRootDomain().begin(),
+       consumer_tv_->getRootDomain().end()},
+      {consumer_tv_->domain()->domain().begin(),
+       consumer_tv_->domain()->domain().end()});
+
   // IterVisitor based traversals don't work because we don't have all outputs.
   // backward traversal's traverseFrom(domain_ids) will throw "Invalid backward
   // traversal found. Some output paths were not provided". Therefore manaully
@@ -157,12 +219,20 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
   // so their broadcast dimensions are "more" resolved than those towards the
   // inner most loops.
   std::deque<IterDomain*> to_visit(domain_ids.begin(), domain_ids.end());
-  std::unordered_set<Expr*> visited;
+  std::unordered_set<Expr*> visited_exprs;
+  std::unordered_set<IterDomain*> visited_ids;
   while (!to_visit.empty()) {
     auto out_id = to_visit.front();
     to_visit.pop_front();
 
+    if (!visited_ids.emplace(out_id).second) {
+      continue;
+    }
     auto expr = out_id->definition();
+
+    if (auto rfactor_id = getRfactorIDToTraverse(out_id, consumer_all_ids)) {
+      to_visit.emplace_front(rfactor_id);
+    }
 
     // ID's will be copied for the reference as we replay transformations. If
     // there was no transformations on an iteration domain, a copy of the
@@ -175,7 +245,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
       continue;
     }
 
-    if (!visited.emplace(expr).second) {
+    if (!visited_exprs.emplace(expr).second) {
       continue;
     }
 
@@ -196,8 +266,8 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
     auto ref_id_it = std::find_if(
         replayed_ids_.begin(), replayed_ids_.end(), [&](IterDomain* ref_id) {
           return ref_id->uses().empty() &&
-              GpuLower::current()->caLoopMap().areMapped(
-                  refIdToConcrete(ref_id), loop_id);
+              GpuLower::current()->caMap()->areMapped(
+                  refIdToConcrete(ref_id), loop_id, IdMappingMode::PERMISSIVE);
         });
 
     TORCH_INTERNAL_ASSERT(
@@ -212,16 +282,16 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
     ref_id->parallelize(loop_id->getParallelType());
   }
 
+  TensorDomain* domain = nullptr;
   // If no domains were replayed to make the reference, just return the root
   // domain.
   if (std::none_of(
           loops_replayed_domain.begin(),
           loops_replayed_domain.end(),
           [](IterDomain* id) { return id->definition() != nullptr; })) {
-    auto domain = IrBuilder::create<TensorDomain>(
+    domain = SimplifyingIrBuilder::create<TensorDomain>(
         // If there was no replay only return a domain with a root domain.
         loops_replayed_domain);
-    return domain;
   } else {
     // Construct the root domain as the inputs of the replayed domain
     auto loops_replayed_domain_vals =
@@ -253,11 +323,48 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
     }
 
     // Create and return the reference.
-    auto domain = IrBuilder::create<TensorDomain>(
+    domain = SimplifyingIrBuilder::create<TensorDomain>(
         std::vector<IterDomain*>(
             root_domain_ids.begin(), root_domain_ids.end()),
         loops_replayed_domain);
-    return domain;
+  }
+
+  cleanUpMappingsOfUnusedDomains(domain);
+  return domain;
+}
+
+void IndexReferenceReplay::cleanUpMappingsOfUnusedDomains(
+    TensorDomain* ref_domain) {
+  // The ref-to-concrete and concrete-to-ref maps can have mappings of
+  // domains that do not end up being used in the final reference
+  // domain. Drop them as they are not really part of reference
+  // tensor.
+
+  const auto all_vals = DependencyCheck::getAllValsBetween(
+      {ref_domain->getRootDomain().begin(), ref_domain->getRootDomain().end()},
+      {ref_domain->domain().begin(), ref_domain->domain().end()});
+
+  const std::unordered_set<IterDomain*> all_id_set(
+      ir_utils::filterByType<IterDomain>(all_vals).begin(),
+      ir_utils::filterByType<IterDomain>(all_vals).end());
+  for (auto it = ref_id_to_concrete_.begin();
+       it != ref_id_to_concrete_.end();) {
+    IterDomain* ref_id = it->first;
+    if (all_id_set.find(ref_id) == all_id_set.end()) {
+      it = ref_id_to_concrete_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  for (auto it = concrete_to_ref_id_.begin();
+       it != concrete_to_ref_id_.end();) {
+    IterDomain* ref_id = it->second;
+    if (all_id_set.find(ref_id) == all_id_set.end()) {
+      it = concrete_to_ref_id_.erase(it);
+    } else {
+      ++it;
+    }
   }
 }
 
@@ -276,17 +383,23 @@ IndexCompute getReferenceIndexing(
     auto loop = loop_structure[loop_i];
     auto ind = loop->index();
 
-    initial_index_map[ref_axis] = ind;
-    if (loop->vectorize()) {
-      initial_index_map[ref_axis] = GpuLower::current()->kernel()->zeroVal();
-    } else if (double_buffer_loop == loop) {
+    // If the loop is trivial, only the start value is used
+    if (loop->isTrivial()) {
+      initial_index_map[ref_axis] = loop->start();
+    } else {
+      initial_index_map[ref_axis] = ind;
+    }
+
+    if (double_buffer_loop == loop) {
+      TORCH_INTERNAL_ASSERT(
+          !loop->isTrivial(), "The double buffer loop must be materialized");
       // This version of getReferenceIndexing is only used for
       // indexing global tensors. When indexing global producers, the
       // index for a double buffered loop needs to be incremented. The
       // parameter double_buffer_loop should be nullptr when indexing
       // global consumers tensors.
-      initial_index_map[ref_axis] =
-          IrBuilder::addExpr(ind, GpuLower::current()->kernel()->oneVal());
+      initial_index_map[ref_axis] = SimplifyingIrBuilder::addExpr(
+          initial_index_map[ref_axis], GpuLower::current()->kernel()->oneVal());
     }
 
     if (Index::protectWithMagicZero(loop, ref_axis, ind)) {
@@ -297,7 +410,7 @@ IndexCompute getReferenceIndexing(
   // Add magic zero to a fairly inner most index
   if (magic_zero_loop >= 0) {
     auto ref_id = reference_tensor->axis(magic_zero_loop);
-    initial_index_map[ref_id] = IrBuilder::addExpr(
+    initial_index_map[ref_id] = SimplifyingIrBuilder::addExpr(
         initial_index_map[ref_id], FusionGuard::getCurFusion()->magicZeroVal());
   }
 
@@ -340,6 +453,14 @@ IndexCompute getReferenceIndexing(
   //   }
   // }
 
+  // No contig indexing is done in reference indexing
+  ContigIDs contig_finder(
+      reference_tensor->domain(),
+      reference_tensor->getMaybeRFactorDomain(),
+      std::vector<bool>(
+          reference_tensor->getMaybeRFactorDomain().size(), false),
+      {});
+
   IndexCompute compute(
       reference_tensor,
       index_map, // NOLINT
@@ -348,7 +469,7 @@ IndexCompute getReferenceIndexing(
       {},
       zero_domains,
       std::unordered_set<IterDomain*>(),
-      reference_tensor->contiguity(),
+      contig_finder,
       preferred_paths,
       halo_extent_map);
 

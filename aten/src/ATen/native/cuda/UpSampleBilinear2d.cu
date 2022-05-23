@@ -1,9 +1,10 @@
 // Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
-#include <ATen/ATen.h>
-#include <ATen/ceil_div.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -11,6 +12,20 @@
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/LaunchUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_upsample_bicubic2d_aa_backward_native.h>
+#include <ATen/ops/_upsample_bicubic2d_aa_native.h>
+#include <ATen/ops/_upsample_bilinear2d_aa_backward_native.h>
+#include <ATen/ops/_upsample_bilinear2d_aa_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/upsample_bilinear2d_backward_native.h>
+#include <ATen/ops/upsample_bilinear2d_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at {
 namespace native {

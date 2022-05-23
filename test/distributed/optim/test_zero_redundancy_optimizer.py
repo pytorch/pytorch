@@ -1355,10 +1355,15 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         self.dist_init(self.rank, self.world_size, backend)
         hook_constructor = hook_with_zero_step if not use_interleaved_hook \
             else hook_with_zero_step_interleaved
-        self._test_ddp_zero_overlap(
-            device, hook_constructor, gradient_as_bucket_view, static_graph,
-            shard_buckets=shard_buckets,
-        )
+
+        # Disable DDP + ReplicatedTensor since ZeroRedundancyOptimizer
+        # modifies the model parameters in place.
+        from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
+        with _ddp_replicated_tensor(False):
+            self._test_ddp_zero_overlap(
+                device, hook_constructor, gradient_as_bucket_view, static_graph,
+                shard_buckets=shard_buckets,
+            )
 
 
 instantiate_parametrized_tests(TestZeroRedundancyOptimizerSingleRank)

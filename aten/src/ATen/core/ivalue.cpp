@@ -91,6 +91,8 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
         return ComplexType::get();
       case Tag::Int:
         return IntType::get();
+      case Tag::SymInt:
+        return c10::SymIntType::get();
       case Tag::Bool:
         return BoolType::get();
       case Tag::String:
@@ -271,8 +273,8 @@ bool operator==(const IValue& lhs, const IValue& rhs) {
 }
 
 bool IValue::ptrEqual(const IValue& lhs, const IValue& rhs) {
-  TORCH_INTERNAL_ASSERT(lhs.is_intrusive_ptr);
-  TORCH_INTERNAL_ASSERT(rhs.is_intrusive_ptr);
+  TORCH_INTERNAL_ASSERT(lhs.isIntrusivePtr());
+  TORCH_INTERNAL_ASSERT(rhs.isIntrusivePtr());
   return lhs.tag == rhs.tag &&
       lhs.payload.u.as_intrusive_ptr == rhs.payload.u.as_intrusive_ptr;
 }
@@ -298,6 +300,8 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isComplexDouble() && lhs.toComplexDouble() == rhs.toComplexDouble();
     case Tag::Int:
       return rhs.isInt() && lhs.toInt() == rhs.toInt();
+    case Tag::SymInt:
+      return rhs.isSymInt() && lhs.toSymInt() == rhs.toSymInt();
     case Tag::Bool:
       return rhs.isBool() && lhs.toBool() == rhs.toBool();
     case Tag::String:
@@ -349,6 +353,8 @@ size_t IValue::hash(const IValue& v) {
       return c10::get_hash(v.payload.u.as_int);
     case Tag::Int:
       return c10::get_hash(v.payload.u.as_int);
+    case Tag::SymInt:
+      return c10::get_hash(v.payload.u.as_int);
     case Tag::String:
       return c10::get_hash(v.toStringRef());
     case Tag::Tuple:
@@ -398,8 +404,8 @@ bool IValue::is(const IValue& rhs) const {
     return rhs.isTensor() && lhs.toTensor().is_same(rhs.toTensor());
   }
 
-  if (lhs.is_intrusive_ptr) {
-    return rhs.is_intrusive_ptr && ptrEqual(lhs, rhs);
+  if (lhs.isIntrusivePtr()) {
+    return rhs.isIntrusivePtr() && ptrEqual(lhs, rhs);
   }
   return lhs == rhs;
 }
@@ -427,6 +433,15 @@ bool IValue::isComplexDoubleList() const {
 
 bool IValue::isTensorList() const {
   return isListOf<c10::TensorType>();
+}
+
+bool IValue::isOptionalTensorList() const {
+  if (!isList()) {
+    return false;
+  }
+  const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
+  const auto expected_ty = c10::getTypePtr<c10::optional<at::Tensor>>();
+  return expected_ty == ty;
 }
 
 bool IValue::isIntList() const {
@@ -567,6 +582,8 @@ std::ostream& IValue::repr(
     }
     case IValue::Tag::Int:
       return out << v.toInt();
+    case IValue::Tag::SymInt:
+      return out << v.toSymInt();
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
@@ -753,6 +770,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printComplex(out, v);
     } case IValue::Tag::Int:
       return out << v.toInt();
+    case IValue::Tag::SymInt:
+      return out << v.toSymInt();
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
@@ -886,6 +905,7 @@ IValue IValue::deepcopy(
     case IValue::Tag::None:
     case IValue::Tag::Double:
     case IValue::Tag::Int:
+    case IValue::Tag::SymInt:
     case IValue::Tag::Bool:
     case IValue::Tag::Device:
     case IValue::Tag::Uninitialized: {
@@ -1159,5 +1179,4 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
   }
   return ctx->dstFuture;
 }
-
 } // namespace c10

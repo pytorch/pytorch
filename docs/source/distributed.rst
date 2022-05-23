@@ -123,14 +123,24 @@ It is imperative that all processes specify the same number of interfaces in thi
 Other NCCL environment variables
 """"""""""""""""""""""""""""""""
 
-NCCL has also provided a number of environment variables for fine-tuning purposes.
+**Debugging** - in case of NCCL failure, you can set ``NCCL_DEBUG=INFO`` to print an explicit
+warning message as well as basic NCCL initialization information.
 
-Commonly used ones include the following for debugging purposes:
+You may also use ``NCCL_DEBUG_SUBSYS`` to get more details about a specific
+aspect of NCCL. For example, ``NCCL_DEBUG_SUBSYS=COLL`` would print logs of
+collective calls, which may be helpful when debugging hangs, especially those
+caused by collective type or message size mismatch. In case of topology
+detection failure, it would be helpful to set ``NCCL_DEBUG_SUBSYS=GRAPH``
+to inspect the detailed detection result and save as reference if further help
+from NCCL team is needed.
 
-- ``export NCCL_DEBUG=INFO``
-- ``export NCCL_DEBUG_SUBSYS=ALL``
+**Performance tuning** - NCCL performs automatic tuning based on its topology detection to save users'
+tuning effort. On some socket-based systems, users may still try tuning
+``NCCL_SOCKET_NTHREADS`` and ``NCCL_NSOCKS_PERTHREAD`` to increase socket
+network bandwidth. These two environment variables have been pre-tuned by NCCL
+for some cloud providers, such as AWS or GCP.
 
-For the full list of NCCL environment variables, please refer to
+For a full list of NCCL environment variables, please refer to
 `NVIDIA NCCL's official documentation <https://docs.nvidia.com/deeplearning/sdk/nccl-developer-guide/docs/env.html>`_
 
 
@@ -619,7 +629,7 @@ The following error message is produced on rank 0, allowing the user to determin
 ``TORCH_DISTRIBUTED_DEBUG``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Next, the environment variable ``TORCH_DISTRIBUTED_DEBUG``  can be used to trigger additional useful logging and collective synchronization checks to ensure all ranks
+With ``TORCH_CPP_LOG_LEVEL=INFO``, the environment variable ``TORCH_DISTRIBUTED_DEBUG``  can be used to trigger additional useful logging and collective synchronization checks to ensure all ranks
 are synchronized appropriately. ``TORCH_DISTRIBUTED_DEBUG`` can be set to either ``OFF`` (default), ``INFO``, or ``DETAIL`` depending on the debugging level
 required. Please note that the most verbose option, ``DETAIL`` may impact the application performance and thus should only be used when debugging issues.
 
@@ -668,6 +678,7 @@ include data such as forward time, backward time, gradient communication time, e
     if __name__ == "__main__":
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "29501"
+        os.environ["TORCH_CPP_LOG_LEVEL"]="INFO"
         os.environ[
             "TORCH_DISTRIBUTED_DEBUG"
         ] = "DETAIL"  # set to DETAIL for runtime logging.
@@ -768,6 +779,7 @@ application crashes, rather than a hang or uninformative error message. As an ex
     if __name__ == "__main__":
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "29501"
+        os.environ["TORCH_CPP_LOG_LEVEL"]="INFO"
         os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
         mp.spawn(worker, nprocs=2, args=())
 
@@ -808,3 +820,21 @@ following matrix shows how the log level can be adjusted via the combination of 
 +-------------------------+-----------------------------+------------------------+
 | ``INFO``                | ``DETAIL``                  | Trace (a.k.a. All)     |
 +-------------------------+-----------------------------+------------------------+
+
+
+.. Distributed modules that are missing specific entries.
+.. Adding them here for tracking purposes until they are more permanently fixed.
+.. py:module:: torch.distributed.algorithms
+.. py:module:: torch.distributed.algorithms.ddp_comm_hooks
+.. py:module:: torch.distributed.algorithms.model_averaging
+.. py:module:: torch.distributed.elastic
+.. py:module:: torch.distributed.elastic.utils
+.. py:module:: torch.distributed.elastic.utils.data
+.. py:module:: torch.distributed.launcher
+.. py:module:: torch.distributed.nn
+.. py:module:: torch.distributed.nn.api
+.. py:module:: torch.distributed.nn.jit
+.. py:module:: torch.distributed.nn.jit.templates
+.. py:module:: torch.distributed.pipeline
+.. py:module:: torch.distributed.pipeline.sync
+.. py:module:: torch.distributed.pipeline.sync.skip

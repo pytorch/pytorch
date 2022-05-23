@@ -137,7 +137,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               "join",
               &RpcAgent::join,
               py::call_guard<py::gil_scoped_release>(),
-              py::arg("shutdown") = false)
+              py::arg("shutdown") = false,
+              py::arg("timeout") = 0)
           .def(
               "sync", &RpcAgent::sync, py::call_guard<py::gil_scoped_release>())
           .def(
@@ -576,7 +577,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               [](const c10::intrusive_ptr<::c10d::Store>& store,
                  std::string selfName,
                  worker_id_t selfId,
-                 int worldSize,
+                 optional<int> worldSize,
                  TensorPipeRpcBackendOptions opts,
                  std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
                  std::vector<c10::Device> devices) {
@@ -603,7 +604,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "join",
           &TensorPipeAgent::join,
           py::call_guard<py::gil_scoped_release>(),
-          py::arg("shutdown") = false)
+          py::arg("shutdown") = false,
+          py::arg("timeout") = 0)
       .def(
           "shutdown",
           &TensorPipeAgent::shutdown,
@@ -632,7 +634,17 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "_get_device_map",
           (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst) const) &
               TensorPipeAgent::getDeviceMap,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_backend_options",
+          &TensorPipeAgent::getBackendOptions,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_update_group_membership",
+          &TensorPipeAgent::updateGroupMembership,
+          py::call_guard<py::gil_scoped_release>())
+      .def_readonly("is_static_group", &TensorPipeAgent::isStaticGroup_)
+      .def_property_readonly("store", &TensorPipeAgent::getStore);
 
 #endif // USE_TENSORPIPE
 

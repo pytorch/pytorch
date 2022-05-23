@@ -66,7 +66,7 @@ class Embedding(nn.Embedding):
     def to_float(self):
         embedding_bag = torch.nn.Embedding(self.num_embeddings, self.embedding_dim, self.padding_idx,
                                            self.max_norm, self.norm_type, self.scale_grad_by_freq,
-                                           self.sparse, None, self.device, self.dtype)
+                                           self.sparse, None)
         embedding_bag.weight = torch.nn.Parameter(self.weight.detach())
         embedding_bag.train(self.training)
         return embedding_bag
@@ -136,8 +136,7 @@ class EmbeddingBag(nn.EmbeddingBag):
     def to_float(self):
         embedding_bag = torch.nn.EmbeddingBag(self.num_embeddings, self.embedding_dim, self.max_norm,
                                               self.norm_type, self.scale_grad_by_freq, self.mode, self.sparse,
-                                              None, self.include_last_offset, self.padding_idx,
-                                              self.device, self.dtype)
+                                              None, self.include_last_offset, self.padding_idx)
         embedding_bag.weight = torch.nn.Parameter(self.weight.detach())
         embedding_bag.train(self.training)
         return embedding_bag

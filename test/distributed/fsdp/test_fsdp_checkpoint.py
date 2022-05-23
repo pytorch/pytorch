@@ -115,7 +115,7 @@ class TestFSDPCheckpoint(FSDPTest):
 
         models = [ckpt_sequential_wrapped_fsdp, inner_ckpt, baseline]
 
-        offload_to_cpu_event = "Memcpy DtoH"
+        offload_to_cpu_event = "Memcpy DtoH" if torch.version.cuda else "CopyDeviceToHost"
 
         for i in range(2):
             losses = []
@@ -177,7 +177,7 @@ class TestFSDPCheckpoint(FSDPTest):
             fsdp_call_checkpoint,
         ]
 
-        offload_to_cpu_event = "Memcpy DtoH"
+        offload_to_cpu_event = "Memcpy DtoH" if torch.version.cuda else "CopyDeviceToHost"
 
         for i in range(6):
             losses = []

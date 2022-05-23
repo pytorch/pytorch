@@ -17,7 +17,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import suppress_warnings, \
     skipIfCompiledWithoutNumpy, enable_profiling_mode_for_profiling_tests, \
-    IS_SANDCASTLE, TemporaryFileName
+    IS_SANDCASTLE, TemporaryFileName, skipIfCrossRef
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, \
     _tmp_donotuse_dont_inline_everything, _trace, RUN_CUDA, \
     RUN_CUDA_MULTI_GPU, make_global
@@ -377,6 +377,17 @@ class TestTracer(JitTestCase):
     def test_trace_size_with_grad(self):
         self.do_trace_size(True)
 
+    def test_trace_numel(self):
+        def fn(x):
+            return x.numel()
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(4, 5, 6)
+
+        traced_fn = torch.jit.trace(fn, x)
+        self.assertEqual(traced_fn(y), fn(y))
+        self.assertEqual(traced_fn(x), fn(x))
+
     def do_trace_arange(self, requires_grad):
         def arange(x):
             return torch.arange(x.shape[0])
@@ -500,6 +511,7 @@ class TestTracer(JitTestCase):
         self.assertEqual(to_tensor_trace(x, y), to_tensor(x, y))
 
     @skipIfCompiledWithoutNumpy
+    @skipIfCrossRef
     def test_trace_warn(self):
         def fn(x):
             int(x)  # Warning 1.
@@ -836,7 +848,7 @@ class TestTracer(JitTestCase):
     def test_trace_c10_ops(self):
         try:
             _ = torch.ops._caffe2.GenerateProposals
-        except RuntimeError:
+        except AttributeError:
             self.skipTest("Skip the test since c2 ops are not registered.")
 
         class MyModel(torch.nn.Module):
@@ -1768,6 +1780,7 @@ class TestTracer(JitTestCase):
 
         torch.jit.trace(Mod(), (torch.rand(3, 4),))
 
+    @skipIfCrossRef
     def test_trace_records_names(self):
         def foo(bar, baz):
             baz = bar + 3

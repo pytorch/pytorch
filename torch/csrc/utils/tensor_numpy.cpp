@@ -371,7 +371,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   {
     PyObject *py_strides = PyDict_GetItemString(cuda_dict, "strides");
     if (py_strides != nullptr && py_strides != Py_None) {
-      if (PySequence_Length(py_strides) == -1 || PySequence_Length(py_strides) != sizes.size()) {
+      if (PySequence_Length(py_strides) == -1 || static_cast<size_t>(PySequence_Length(py_strides)) != sizes.size()) {
         throw TypeError("strides must be a sequence of the same length as shape");
       }
       strides = seq_to_aten_shape(py_strides);

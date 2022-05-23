@@ -8,7 +8,6 @@
 #include <set>
 #include <string>
 #include <vector>
-
 #include <ATen/Tensor.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/int128.h>
@@ -68,8 +67,28 @@ hash_t Hash(const T& value) {
   return DataHash(&value, sizeof(value));
 }
 
+// added because on macos builds the vector<bool> specialization
+// breaks falling through to the templated arithmetic types above
+hash_t TORCH_API Hash(const std::vector<bool>& value);
+
 // Specialiazed implementations for proprietary types
 static inline hash_t Hash(const c10::ScalarType& value) {
+  return DataHash(&value, sizeof(value));
+}
+
+static inline hash_t Hash(const c10::MemoryFormat& value) {
+  return DataHash(&value, sizeof(value));
+}
+
+static inline hash_t Hash(const c10::DeviceType& value) {
+  return DataHash(&value, sizeof(value));
+}
+
+static inline hash_t Hash(const c10::Device& value) {
+  return HashCombine(Hash(value.type()), Hash(value.index()));
+}
+
+static inline hash_t Hash(const c10::Layout& value) {
   return DataHash(&value, sizeof(value));
 }
 

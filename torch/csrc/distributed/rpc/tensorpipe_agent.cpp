@@ -342,9 +342,15 @@ void TensorPipeAgent::removeFromTimeoutMap(uint64_t messageId) {
   }
 }
 
-void TensorPipeAgent::prepareNames() {
-  auto nameToId = collectNames(
-      rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
+void TensorPipeAgent::prepareNames(bool isStaticGroup) {
+  std::unordered_map<std::string, worker_id_t> nameToId;
+  if (isStaticGroup) {
+    nameToId = collectNames(
+        rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
+  } else {
+    nameToId = collectCurrentNames(
+        rankToNameStore_, workerInfo_.id_, workerInfo_.name_);
+  }
 
   for (const auto& entry : nameToId) {
     const auto& workerName = entry.first;
@@ -354,11 +360,35 @@ void TensorPipeAgent::prepareNames() {
   }
 }
 
+void TensorPipeAgent::checkAndSetStaticGroup(
+    const c10::intrusive_ptr<::c10d::Store>& store) {
+  std::string isStaticGroupKey("rpcIsStaticGroup");
+
+  std::string isStaticGroupStr = isStaticGroup_ ? "true" : "false";
+  std::vector<uint8_t> isStaticGroupVec(
+      (uint8_t*)isStaticGroupStr.c_str(),
+      (uint8_t*)isStaticGroupStr.c_str() + isStaticGroupStr.length());
+  std::vector<uint8_t> returnedVec;
+  returnedVec = store->compareSet(
+      isStaticGroupKey, std::vector<uint8_t>(), isStaticGroupVec);
+  std::string returnedVal = std::string(returnedVec.begin(), returnedVec.end());
+  // In both cases, the returned value should be the value of isStaticGroupStr,
+  // otherwise there is a discrepency with initialization among one of the
+  // members
+  TORCH_CHECK(
+      returnedVal == isStaticGroupStr,
+      fmt::format(
+          "RPC group mixes statically and dynamically initialized members which is not supported. ",
+          "Static group property is initialized as {} and is trying to be set as {} ",
+          isStaticGroup_,
+          returnedVal));
+}
+
 TensorPipeAgent::TensorPipeAgent(
     const c10::intrusive_ptr<::c10d::Store>& store,
     std::string selfName,
     worker_id_t selfId,
-    int worldSize,
+    optional<int> worldSize,
     TensorPipeRpcBackendOptions opts,
     std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
     std::vector<c10::Device> devices,
@@ -368,6 +398,8 @@ TensorPipeAgent::TensorPipeAgent(
           std::move(cb),
           std::chrono::milliseconds(
               (long)(opts.rpcTimeoutSeconds * kSecToMsConversion))),
+      isStaticGroup_(worldSize.has_value()),
+      store_(store),
       opts_(std::move(opts)),
       reverseDeviceMaps_(std::move(reverseDeviceMaps)),
       devices_(std::move(devices)),
@@ -376,10 +408,16 @@ TensorPipeAgent::TensorPipeAgent(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
       rankToNameStore_("names", store),
       nameToAddressStore_("addrs", store),
-      shutdownStore_("shutdown", store),
-      worldSize_(worldSize) {
+      shutdownStore_("shutdown", store) {
+  if (isStaticGroup_) {
+    worldSize_ = worldSize.value();
+  }
+
+  // check the static group attribute against store
+  checkAndSetStaticGroup(store);
+
   // collect worker names
-  prepareNames();
+  prepareNames(isStaticGroup_);
 
   // Initialize the time-series metrics tracking map
   timeSeriesMetrics_.emplace(kGilAverageWaitTime, TimeSeriesMetricsTracker());
@@ -524,7 +562,11 @@ void TensorPipeAgent::pipeRead(
       return;
     }
 
-    std::vector<c10::Stream> streams = getStreamsFromPoolForDevices(devices_);
+    std::vector<c10::Stream> streams;
+    {
+      GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+      streams = getStreamsFromPoolForDevices(devices_);
+    }
     tensorpipe::Allocation tpAllocation;
     TensorpipeReadBuffers tpBuffers;
     std::tie(tpAllocation, tpBuffers) =
@@ -604,24 +646,26 @@ void TensorPipeAgent::sendCompletedResponseMessage(
 
     for (const auto& tensor : responseMessage->tensors()) {
       const auto device = tensor.device();
-      if (!device.is_cpu() &&
-          std::find(devices_.begin(), devices_.end(), device) ==
-              devices_.end()) {
-        std::ostringstream oss;
-        std::copy(
-            devices_.begin(),
-            devices_.end(),
-            std::ostream_iterator<c10::Device>(oss, ", "));
-        responseMessage = createExceptionResponse(
-            c10::str(
-                "RPC detected that a user-function output tensor on device ",
-                device,
-                ". This device is not one of the input tensor devices: ",
-                oss.str(),
-                "which is not yet supported. Please file a feature request "
-                "issue in PyTorch GitHub repo."),
-            messageId);
-        break;
+      if (!device.is_cpu()) {
+        GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+        if (std::find(devices_.begin(), devices_.end(), device) ==
+            devices_.end()) {
+          std::ostringstream oss;
+          std::copy(
+              devices_.begin(),
+              devices_.end(),
+              std::ostream_iterator<c10::Device>(oss, ", "));
+          responseMessage = createExceptionResponse(
+              c10::str(
+                  "RPC detected that a user-function output tensor on device ",
+                  device,
+                  ". This device is not one of the input tensor devices: ",
+                  oss.str(),
+                  "which is not yet supported. Please file a feature request "
+                  "issue in PyTorch GitHub repo."),
+              messageId);
+          break;
+        }
       }
     }
 
@@ -784,7 +828,12 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
   }
   ClientPipe& clientPipe = it->second;
 
-  auto futureResponseMessage = std::make_shared<AtomicJitFuture>(devices_);
+  std::shared_ptr<torch::distributed::rpc::TensorPipeAgent::AtomicJitFuture>
+      futureResponseMessage;
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+    futureResponseMessage = std::make_shared<AtomicJitFuture>(devices_);
+  }
   uint64_t messageId = nextMessageID_++;
   requestMessage->setId(messageId);
 
@@ -844,7 +893,11 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is sending request #"
           << messageId << " to " << clientPipe.pipe_->getRemoteName();
 
-  std::vector<c10::Stream> streams = getStreamsFromPoolForDevices(devices_);
+  std::vector<c10::Stream> streams;
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+    streams = getStreamsFromPoolForDevices(devices_);
+  }
   makeStreamsWaitOnOthers(
       streams,
       getCurrentStreamsForDevices(
@@ -1011,9 +1064,27 @@ void TensorPipeAgent::pollTimeoutRpcs() {
   }
 }
 
+void TensorPipeAgent::leaveGroup() {
+  std::unique_lock<std::mutex> lock(callCountMutex_);
+  // local worker ActiveCallCount is 0 at this point and we will shutdown
+  // (any future calls will be dropped)
+  callCountCV_.wait(lock, [this] { return clientActiveCalls_ == 0; });
+
+  // Remove this agent's WorkerInfo from store
+  removeCurrentName(rankToNameStore_, workerInfo_.id_, workerInfo_.name_);
+
+  // Set internal variable to be used during destructor
+  shuttingDown_ = true;
+}
+
 // TODO: Remove join()
-void TensorPipeAgent::join(bool shutdown) {
+void TensorPipeAgent::join(bool shutdown, float /* unused */) {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is joining";
+  if (!isStaticGroup_) {
+    leaveGroup();
+    return;
+  }
+
   // This method behaves like a barrier, as it can only return once all workers
   // have no more requests pending, including "nested" requests (triggered from
   // within the remote code of another call) and "follow-up" requests (triggered
@@ -1024,6 +1095,7 @@ void TensorPipeAgent::join(bool shutdown) {
       // It is enough to wait for there to be no more active client calls, since
       // each server call corresponds to a client call for some other worker.
       callCountCV_.wait(lock, [this] { return clientActiveCalls_ == 0; });
+
       // We'd like to immediately proceed with the allreduce, but it's a call
       // that may block for some time, as it waits for other workers to also
       // complete all their active client calls. While we call allreduce we must
@@ -1096,16 +1168,34 @@ void TensorPipeAgent::shutdownImpl() {
 
 const WorkerInfo& TensorPipeAgent::getWorkerInfo(
     const std::string& workerName) const {
-  const auto& it = workerNameToInfo_.find(workerName);
+  std::unordered_map<std::string, WorkerInfo>::const_iterator it;
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+    it = workerNameToInfo_.find(workerName);
+  }
   TORCH_CHECK(
-      it != workerNameToInfo_.end(), "Unknown destination worker ", workerName);
+      it != workerNameToInfo_.end(),
+      fmt::format(
+          "name:{},rank:{} could not find destination name {}",
+          workerInfo_.name_,
+          workerInfo_.id_,
+          workerName));
   return it->second;
 }
 
 const WorkerInfo& TensorPipeAgent::getWorkerInfo(worker_id_t workerId) const {
-  const auto& it = workerIdToInfo_.find(workerId);
+  std::unordered_map<worker_id_t, WorkerInfo>::const_iterator it;
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+    it = workerIdToInfo_.find(workerId);
+  }
   TORCH_CHECK(
-      it != workerIdToInfo_.end(), "Unknown destination worker ", workerId);
+      it != workerIdToInfo_.end(),
+      fmt::format(
+          "name:{},rank:{} could not find destination id {}",
+          workerInfo_.name_,
+          workerInfo_.id_,
+          workerId));
   return it->second;
 }
 
@@ -1119,12 +1209,74 @@ std::vector<WorkerInfo> TensorPipeAgent::getWorkerInfos() const {
 
 const std::string& TensorPipeAgent::findWorkerURL(
     const WorkerInfo& worker) const {
-  const auto it = workerNameToURL_.find(worker.name_);
+  std::unordered_map<std::string, std::string>::const_iterator it;
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+    it = workerNameToURL_.find(worker.name_);
+  }
   TORCH_CHECK(
-      it != workerNameToURL_.end(), "Unknown worker name: ", worker.name_);
+      it != workerNameToURL_.end(),
+      fmt::format(
+          "name:{},rank:{} could not find destination url for name {}",
+          workerInfo_.name_,
+          workerInfo_.id_,
+          worker.name_));
   return it->second;
 }
 
+void TensorPipeAgent::updateGroupMembership(
+    const WorkerInfo& workerInfo,
+    const std::vector<c10::Device> devices,
+    const std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
+    bool isJoin) {
+  std::string name = workerInfo.name_;
+  worker_id_t id = workerInfo.id_;
+  // Rank with workerInfo is joining the group, update internal mappings
+  if (isJoin) {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+    workerIdToInfo_.emplace(id, workerInfo);
+    workerNameToInfo_.emplace(name, workerInfo);
+
+    // TODO: we should get nodeAddrStr in the joining process, then pass in as
+    // an argument rather than getting from store each time
+    auto nodeAddrData = nameToAddressStore_.get(name);
+    auto nodeAddrStr =
+        std::string((const char*)nodeAddrData.data(), nodeAddrData.size());
+    workerNameToURL_.insert({name, nodeAddrStr});
+
+    for (const auto& it : reverseDeviceMaps) {
+      if (reverseDeviceMaps_.find(it.first) == reverseDeviceMaps_.end()) {
+        reverseDeviceMaps_[it.first] = it.second;
+      }
+    }
+    // TODO: clean up mutex for devices_ usage
+    // Add devices that have not been added yet
+    for (const auto& it : devices) {
+      if (std::find(devices_.begin(), devices_.end(), it) == devices_.end()) {
+        devices_.push_back(it);
+      }
+    }
+  } else {
+    workerIdToInfo_.erase(id);
+    workerNameToInfo_.erase(name);
+    workerNameToURL_.erase(name);
+
+    for (const auto& it : reverseDeviceMaps_) {
+      if (reverseDeviceMaps.find(it.first) == reverseDeviceMaps.end()) {
+        reverseDeviceMaps_.erase(it.first);
+      }
+    }
+
+    auto iter = devices_.begin();
+    while (iter != devices_.end()) {
+      if (std::find(devices.begin(), devices.end(), *iter) == devices.end()) {
+        iter = devices_.erase(iter);
+      } else {
+        iter++;
+      }
+    }
+  }
+}
 std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
   metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
@@ -1252,8 +1404,11 @@ void TensorPipeAgent::markFutureWithError(
 std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
     const std::string& remoteName,
     const Message& message) const {
-  const auto& deviceMaps =
-      message.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
+  std::unordered_map<std::string, DeviceMap> deviceMaps;
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+    deviceMaps = message.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
+  }
 
   const auto errStr = c10::str(
       "TensorPipe RPC backend only supports CPU tensors by default, please "
@@ -1287,7 +1442,16 @@ DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dst) const {
   return it->second;
 }
 
+const c10::intrusive_ptr<::c10d::Store> TensorPipeAgent::getStore() const {
+  return store_;
+}
+
+TensorPipeRpcBackendOptions TensorPipeAgent::getBackendOptions() const {
+  return opts_;
+}
+
 const std::vector<c10::Device>& TensorPipeAgent::getDevices() const {
+  GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
   return devices_;
 }
 

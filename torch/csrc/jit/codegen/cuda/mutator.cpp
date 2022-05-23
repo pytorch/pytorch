@@ -51,6 +51,8 @@ void OptOutMutator::mutate(Double* d) {}
 
 void OptOutMutator::mutate(Int* i) {}
 
+void OptOutMutator::mutate(ComplexDouble* c) {}
+
 void OptOutMutator::mutate(NamedScalar* ns) {}
 
 void OptOutMutator::mutate(IterDomain* id) {
@@ -181,7 +183,43 @@ void OptOutMutator::mutate(ReductionOp* rop) {
   auto container = rop->container();
   auto rop_type = rop->getReductionOpType();
   container->removeExpr(rop);
-  IrBuilder::create<ReductionOp>(container, rop_type, init, out, in);
+  IrBuilder::create<ReductionOp>(
+      container, rop_type, init, out, in, rop->isAllreduce());
+}
+
+void OptOutMutator::mutate(GroupedReductionOp* rop) {
+  bool is_same = true;
+
+  std::vector<Val*> outputs;
+  for (auto out : rop->outputs()) {
+    auto maybe_mutated = maybeMutated(out);
+    is_same = is_same && maybe_mutated->sameAs(out);
+    outputs.push_back(maybe_mutated);
+  }
+
+  std::vector<Val*> inputs;
+  for (auto in : rop->inputs()) {
+    auto maybe_mutated = maybeMutated(in);
+    is_same = is_same && maybe_mutated->sameAs(in);
+    inputs.push_back(maybe_mutated);
+  }
+
+  std::vector<Val*> init_vals;
+  for (auto init : rop->initVals()) {
+    auto maybe_mutated = maybeMutated(init);
+    is_same = is_same && maybe_mutated->sameAs(init);
+    init_vals.push_back(maybe_mutated);
+  }
+
+  if (is_same) {
+    return;
+  }
+
+  auto container = rop->container();
+  const auto& rop_types = rop->getReductionOpTypes();
+  container->removeExpr(rop);
+  IrBuilder::create<GroupedReductionOp>(
+      container, rop_types, init_vals, outputs, inputs, rop->isAllreduce());
 }
 
 namespace {
@@ -230,7 +268,26 @@ void OptOutMutator::mutate(WelfordOp* wop) {
       init_N,
       in_avg,
       in_var,
-      in_N);
+      in_N,
+      wop->isAllreduce());
+}
+
+void OptOutMutator::mutate(MmaOp* mma) {
+  Val* out = maybeMutated(mma->out());
+  Val* in_a = maybeMutated(mma->inA());
+  Val* in_b = maybeMutated(mma->inB());
+  Val* init = mma->init();
+
+  if (out->sameAs(mma->out()) && in_a->sameAs(mma->inA()) &&
+      in_b->sameAs(mma->inB())) {
+    return;
+  }
+
+  auto container = mma->container();
+  auto options = mma->options();
+  container->removeExpr(mma);
+  C10_UNUSED auto new_mma =
+      IrBuilder::create<MmaOp>(container, out, in_a, in_b, init, options);
 }
 
 void OptOutMutator::mutate(BroadcastOp* bop) {
@@ -291,6 +348,20 @@ void OptOutMutator::mutate(GatherOp* op) {
   IrBuilder::create<GatherOp>(container, out, in, window_shape, pad_width);
 }
 
+void OptOutMutator::mutate(ViewAsScalar* vop) {
+  TensorView* out = maybeMutated(vop->out())->as<TensorView>();
+  TensorView* in = maybeMutated(vop->in())->as<TensorView>();
+
+  if (out->sameAs(vop->out()) && in->sameAs(vop->in())) {
+    return;
+  }
+
+  auto container = vop->container();
+  container->removeExpr(vop);
+  IrBuilder::create<ViewAsScalar>(
+      container, out, in, vop->vector_id(), vop->index());
+}
+
 void OptOutMutator::mutate(ViewOp* vop) {
   TensorView* out = maybeMutated(vop->out())->as<TensorView>();
   TensorView* in = maybeMutated(vop->in())->as<TensorView>();
@@ -322,7 +393,7 @@ void OptOutMutator::mutate(Split* s) {
   auto container = s->container();
   auto inner_split = s->innerSplit();
   container->removeExpr(s);
-  auto new_node = IrBuilder::create<Split>(
+  C10_UNUSED auto new_node = IrBuilder::create<Split>(
       container, ot, inr, in, fact, inner_split, start_offset, stop_offset);
 }
 
@@ -338,13 +409,16 @@ void OptOutMutator::mutate(Merge* m) {
 
   auto container = m->container();
   container->removeExpr(m);
-  auto new_node = IrBuilder::create<Merge>(container, ot, otr, in);
+  C10_UNUSED auto new_node = IrBuilder::create<Merge>(container, ot, otr, in);
 }
 
 void OptOutMutator::mutate(kir::Allocate*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
-void OptOutMutator::mutate(kir::Sync*) {
+void OptOutMutator::mutate(kir::BlockSync*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::GridSync*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::InitMagicZero*) {
@@ -362,10 +436,16 @@ void OptOutMutator::mutate(kir::IfThenElse*) {
 void OptOutMutator::mutate(kir::GridReduction*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
+void OptOutMutator::mutate(kir::GroupedGridReduction*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
 void OptOutMutator::mutate(kir::GridBroadcast*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::GridWelford*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::AllocateFusedReduction*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 

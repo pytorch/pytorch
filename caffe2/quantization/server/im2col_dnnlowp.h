@@ -216,7 +216,7 @@ static void Im2ColNHWC(
     T* data_col_temp =
         data_col + h * width_col * kernel_h * kernel_w * channels;
     int w_pad = -pad_l;
-    for (const auto w : c10::irange(width_col)) {
+    for (C10_UNUSED const auto w : c10::irange(width_col)) {
       int r = 0;
       for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h, ++r) {
         int s = 0;

@@ -1,4 +1,4 @@
-ir_version: 4
+ir_version: 7
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -34,23 +34,33 @@ graph {
     }
   }
   node {
-    input: "onnx::Unsqueeze_3"
-    output: "onnx::Concat_7"
-    name: "Unsqueeze_3"
-    op_type: "Unsqueeze"
+    output: "onnx::Unsqueeze_7"
+    name: "Constant_3"
+    op_type: "Constant"
     attribute {
-      name: "axes"
-      ints: 0
-      type: INTS
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
     }
   }
   node {
-    input: "onnx::Concat_7"
-    input: "onnx::Concat_21"
-    input: "onnx::Concat_22"
-    input: "onnx::Concat_23"
-    output: "onnx::Reshape_11"
-    name: "Concat_4"
+    input: "onnx::Unsqueeze_3"
+    input: "onnx::Unsqueeze_7"
+    output: "onnx::Concat_8"
+    name: "Unsqueeze_4"
+    op_type: "Unsqueeze"
+  }
+  node {
+    input: "onnx::Concat_8"
+    input: "onnx::Concat_26"
+    input: "onnx::Concat_27"
+    input: "onnx::Concat_28"
+    output: "onnx::Reshape_15"
+    name: "Concat_5"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -60,66 +70,62 @@ graph {
   }
   node {
     input: "x"
-    input: "onnx::Reshape_11"
-    output: "onnx::Transpose_12"
-    name: "Reshape_5"
+    input: "onnx::Reshape_15"
+    output: "onnx::Transpose_16"
+    name: "Reshape_6"
     op_type: "Reshape"
   }
   node {
-    input: "onnx::Transpose_12"
-    output: "onnx::Softmax_13"
-    name: "Transpose_6"
+    input: "onnx::Transpose_16"
+    output: "x.1"
+    name: "Transpose_7"
     op_type: "Transpose"
     attribute {
       name: "perm"
       ints: 0
-      ints: 3
-      ints: 1
       ints: 2
+      ints: 1
+      ints: 3
       type: INTS
     }
   }
   node {
-    input: "onnx::Softmax_13"
-    output: "onnx::Transpose_14"
-    name: "Softmax_7"
+    input: "x.1"
+    output: "onnx::Reshape_18"
+    name: "Softmax_8"
     op_type: "Softmax"
     attribute {
       name: "axis"
-      i: 3
+      i: 1
       type: INT
     }
   }
   node {
-    input: "onnx::Transpose_14"
-    output: "onnx::Reshape_15"
-    name: "Transpose_8"
-    op_type: "Transpose"
+    output: "onnx::Unsqueeze_20"
+    name: "Constant_9"
+    op_type: "Constant"
     attribute {
-      name: "perm"
-      ints: 0
-      ints: 3
-      ints: 2
-      ints: 1
-      type: INTS
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
     }
   }
   node {
     input: "onnx::Unsqueeze_3"
-    output: "onnx::Concat_17"
-    name: "Unsqueeze_9"
+    input: "onnx::Unsqueeze_20"
+    output: "onnx::Concat_21"
+    name: "Unsqueeze_10"
     op_type: "Unsqueeze"
-    attribute {
-      name: "axes"
-      ints: 0
-      type: INTS
-    }
   }
   node {
-    input: "onnx::Concat_17"
-    input: "onnx::Concat_24"
-    output: "onnx::Reshape_19"
-    name: "Concat_10"
+    input: "onnx::Concat_21"
+    input: "onnx::Concat_29"
+    output: "onnx::Reshape_24"
+    name: "Concat_11"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -128,35 +134,35 @@ graph {
     }
   }
   node {
-    input: "onnx::Reshape_15"
-    input: "onnx::Reshape_19"
-    output: "20"
-    name: "Reshape_11"
+    input: "onnx::Reshape_18"
+    input: "onnx::Reshape_24"
+    output: "25"
+    name: "Reshape_12"
     op_type: "Reshape"
   }
   name: "torch_jit"
   initializer {
     dims: 1
     data_type: 7
-    name: "onnx::Concat_21"
+    name: "onnx::Concat_26"
     raw_data: "\001\000\000\000\000\000\000\000"
   }
   initializer {
     dims: 1
     data_type: 7
-    name: "onnx::Concat_22"
+    name: "onnx::Concat_27"
     raw_data: "\002\000\000\000\000\000\000\000"
   }
   initializer {
     dims: 1
     data_type: 7
-    name: "onnx::Concat_23"
+    name: "onnx::Concat_28"
     raw_data: "\377\377\377\377\377\377\377\377"
   }
   initializer {
     dims: 1
     data_type: 7
-    name: "onnx::Concat_24"
+    name: "onnx::Concat_29"
     raw_data: "\377\377\377\377\377\377\377\377"
   }
   input {
@@ -182,7 +188,7 @@ graph {
     }
   }
   output {
-    name: "20"
+    name: "25"
     type {
       tensor_type {
         elem_type: 1
@@ -199,5 +205,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }

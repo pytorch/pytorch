@@ -1,10 +1,19 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/EmptyTensor.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh> //for MAX_DIMS
 #include <ATen/cuda/cub.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/nonzero_native.h>
+#endif
 
 
 namespace at {

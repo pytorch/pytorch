@@ -1,17 +1,28 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/layer_norm.h>
 
 #include <type_traits>
 
 #include <thrust/tuple.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/cuda/thread_constants.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/native_layer_norm_native.h>
+#include <ATen/ops/native_layer_norm_backward_native.h>
+#include <ATen/ops/zeros_like_native.h>
+#endif
 
 #include <c10/cuda/CUDAMathCompat.h>
 
@@ -934,6 +945,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
+REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
 
 } // namespace native
 } // namespace at

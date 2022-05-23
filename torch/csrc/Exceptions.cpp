@@ -43,26 +43,6 @@ could not be completed because the input matrix is singular.", PyExc_RuntimeErro
 
 namespace torch {
 
-static bool compute_cpp_stack_traces_enabled() {
-  auto envar = std::getenv("TORCH_SHOW_CPP_STACKTRACES");
-  if (envar) {
-    if (strcmp(envar, "0") == 0) {
-      return false;
-    }
-    if (strcmp(envar, "1") == 0) {
-      return true;
-    }
-    TORCH_WARN("ignoring invalid value for TORCH_SHOW_CPP_STACKTRACES: ", envar,
-               " valid values are 0 or 1.");
-  }
-  return false;
-}
-
-bool get_cpp_stacktraces_enabled() {
-  static bool enabled = compute_cpp_stack_traces_enabled();
-  return enabled;
-}
-
 void replaceAll(std::string & str,
     const std::string & old_str,
     const std::string & new_str) {

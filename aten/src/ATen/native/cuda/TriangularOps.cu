@@ -11,6 +11,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/diag.h>
+#include <ATen/ops/diag_native.h>
 #include <ATen/ops/trace_native.h>
 #include <ATen/ops/tril_native.h>
 #include <ATen/ops/triu_native.h>

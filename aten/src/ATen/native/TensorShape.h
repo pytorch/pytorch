@@ -1,8 +1,12 @@
-#include <ATen/ATen.h>
+#pragma once
+#include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 
 namespace at {
 namespace native {
+inline bool cat_should_skip_tensor(const Tensor& t) {
+  return t.numel() == 0 && t.dim() == 1;
+}
 
  // Check to see if the shape of tensors is compatible
  // for being concatenated along a given dimension.
@@ -46,5 +50,12 @@ inline int64_t get_num_splits(const Tensor& self, int64_t split_size, int64_t di
   }
   return num_splits;
 }
+
+///
+/// For more information, see
+/// https://pytorch.org/docs/master/generated/torch.Tensor.unfold.html#torch.Tensor.unfold
+///
+
+Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step);
 
 }} // namespace at::native

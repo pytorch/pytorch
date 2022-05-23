@@ -55,7 +55,7 @@ enum class OpType : std::uint8_t {
 TORCH_API std::string opTypeToString(OpType opType);
 
 // Whether or not an OP is an p2p op (SEND, RECV, RECVANYSOURCE)
-TORCH_API bool isP2POp(OpType opType);
+TORCH_API bool isP2POp(OpType opType, bool batchP2P = false);
 
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.

@@ -55,31 +55,10 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -96,9 +75,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -163,7 +139,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
           name: libtorch-cpu-shared-with-deps-cxx11-abi
           retention-days: 14
@@ -204,31 +180,10 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -245,10 +200,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-with-deps-cxx11-abi
@@ -348,31 +300,10 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -389,12 +320,9 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-with-deps-cxx11-abi
@@ -465,31 +393,10 @@ jobs:
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -506,9 +413,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -573,7 +477,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
           name: libtorch-cpu-shared-without-deps-cxx11-abi
           retention-days: 14
@@ -614,31 +518,10 @@ jobs:
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -655,10 +538,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-without-deps-cxx11-abi
@@ -758,31 +638,10 @@ jobs:
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -799,12 +658,9 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-without-deps-cxx11-abi
@@ -875,31 +731,10 @@ jobs:
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -916,9 +751,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -983,7 +815,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
           name: libtorch-cpu-static-with-deps-cxx11-abi
           retention-days: 14
@@ -1024,31 +856,10 @@ jobs:
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -1065,10 +876,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-with-deps-cxx11-abi
@@ -1168,31 +976,10 @@ jobs:
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -1209,12 +996,9 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-with-deps-cxx11-abi
@@ -1285,31 +1069,10 @@ jobs:
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -1326,9 +1089,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -1393,7 +1153,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
           name: libtorch-cpu-static-without-deps-cxx11-abi
           retention-days: 14
@@ -1434,31 +1194,10 @@ jobs:
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -1475,10 +1214,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-without-deps-cxx11-abi
@@ -1578,31 +1314,10 @@ jobs:
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -1619,12 +1334,9 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-without-deps-cxx11-abi
@@ -1696,31 +1408,10 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -1737,9 +1428,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -1804,7 +1492,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
           name: libtorch-cuda10_2-shared-with-deps-cxx11-abi
           retention-days: 14
@@ -1846,31 +1534,10 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -1887,10 +1554,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-shared-with-deps-cxx11-abi
@@ -2002,31 +1666,10 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -2043,12 +1686,9 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-shared-with-deps-cxx11-abi
@@ -2120,31 +1760,10 @@ jobs:
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -2161,9 +1780,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -2228,7 +1844,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
           name: libtorch-cuda10_2-shared-without-deps-cxx11-abi
           retention-days: 14
@@ -2270,31 +1886,10 @@ jobs:
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -2311,10 +1906,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-shared-without-deps-cxx11-abi
@@ -2426,31 +2018,10 @@ jobs:
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -2467,12 +2038,9 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-shared-without-deps-cxx11-abi
@@ -2544,31 +2112,10 @@ jobs:
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -2585,9 +2132,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -2652,7 +2196,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
           name: libtorch-cuda10_2-static-with-deps-cxx11-abi
           retention-days: 14
@@ -2694,31 +2238,10 @@ jobs:
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -2735,10 +2258,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-static-with-deps-cxx11-abi
@@ -2850,31 +2370,10 @@ jobs:
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -2891,12 +2390,9 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-static-with-deps-cxx11-abi
@@ -2968,31 +2464,10 @@ jobs:
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -3009,9 +2484,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -3076,7 +2548,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
           name: libtorch-cuda10_2-static-without-deps-cxx11-abi
           retention-days: 14
@@ -3118,31 +2590,10 @@ jobs:
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -3159,10 +2610,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-static-without-deps-cxx11-abi
@@ -3274,31 +2722,10 @@ jobs:
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -3315,12 +2742,9 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-static-without-deps-cxx11-abi
@@ -3392,31 +2816,10 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -3433,9 +2836,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -3503,7 +2903,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
           name: libtorch-cuda11_3-shared-with-deps-cxx11-abi
           retention-days: 14
@@ -3545,31 +2945,10 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -3586,10 +2965,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-with-deps-cxx11-abi
@@ -3701,31 +3077,10 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -3742,12 +3097,9 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-with-deps-cxx11-abi
@@ -3819,31 +3171,10 @@ jobs:
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -3860,9 +3191,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -3930,7 +3258,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
           name: libtorch-cuda11_3-shared-without-deps-cxx11-abi
           retention-days: 14
@@ -3972,31 +3300,10 @@ jobs:
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -4013,10 +3320,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-without-deps-cxx11-abi
@@ -4128,31 +3432,10 @@ jobs:
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -4169,12 +3452,9 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-without-deps-cxx11-abi
@@ -4246,31 +3526,10 @@ jobs:
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -4287,9 +3546,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -4357,7 +3613,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
           name: libtorch-cuda11_3-static-with-deps-cxx11-abi
           retention-days: 14
@@ -4399,31 +3655,10 @@ jobs:
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -4440,10 +3675,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-with-deps-cxx11-abi
@@ -4555,31 +3787,10 @@ jobs:
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -4596,12 +3807,9 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-with-deps-cxx11-abi
@@ -4673,31 +3881,10 @@ jobs:
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -4714,9 +3901,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -4784,7 +3968,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
           name: libtorch-cuda11_3-static-without-deps-cxx11-abi
           retention-days: 14
@@ -4826,31 +4010,10 @@ jobs:
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -4867,10 +4030,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-without-deps-cxx11-abi
@@ -4982,31 +4142,10 @@ jobs:
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -5023,12 +4162,9 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-without-deps-cxx11-abi
@@ -5084,7 +4220,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-shared-with-deps-cxx11-abi-build:
+  libtorch-cuda11_6-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
     timeout-minutes: 240
@@ -5092,39 +4228,18 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu115
-      GPU_ARCH_VERSION: 11.5
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -5141,9 +4256,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -5211,9 +4323,9 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
-          name: libtorch-cuda11_5-shared-with-deps-cxx11-abi
+          name: libtorch-cuda11_6-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -5236,48 +4348,27 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-shared-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_6-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-shared-with-deps-cxx11-abi-build
+    needs: libtorch-cuda11_6-shared-with-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu115
-      GPU_ARCH_VERSION: 11.5
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -5294,13 +4385,10 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-shared-with-deps-cxx11-abi
+          name: libtorch-cuda11_6-shared-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -5393,47 +4481,26 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-shared-with-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cuda11_6-shared-with-deps-cxx11-abi-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-shared-with-deps-cxx11-abi-test
+    needs: libtorch-cuda11_6-shared-with-deps-cxx11-abi-test
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu115
-      GPU_ARCH_VERSION: 11.5
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -5450,15 +4517,12 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-shared-with-deps-cxx11-abi
+          name: libtorch-cuda11_6-shared-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -5511,7 +4575,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-shared-without-deps-cxx11-abi-build:
+  libtorch-cuda11_6-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
     timeout-minutes: 240
@@ -5519,39 +4583,18 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu115
-      GPU_ARCH_VERSION: 11.5
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -5568,9 +4611,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -5638,9 +4678,9 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
-          name: libtorch-cuda11_5-shared-without-deps-cxx11-abi
+          name: libtorch-cuda11_6-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -5663,48 +4703,27 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-shared-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_6-shared-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-shared-without-deps-cxx11-abi-build
+    needs: libtorch-cuda11_6-shared-without-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu115
-      GPU_ARCH_VERSION: 11.5
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -5721,13 +4740,10 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-shared-without-deps-cxx11-abi
+          name: libtorch-cuda11_6-shared-without-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -5820,47 +4836,26 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-shared-without-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cuda11_6-shared-without-deps-cxx11-abi-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-shared-without-deps-cxx11-abi-test
+    needs: libtorch-cuda11_6-shared-without-deps-cxx11-abi-test
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu115
-      GPU_ARCH_VERSION: 11.5
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -5877,15 +4872,12 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-shared-without-deps-cxx11-abi
+          name: libtorch-cuda11_6-shared-without-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -5938,7 +4930,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-static-with-deps-cxx11-abi-build:
+  libtorch-cuda11_6-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
     timeout-minutes: 240
@@ -5946,39 +4938,18 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu115
-      GPU_ARCH_VERSION: 11.5
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -5995,9 +4966,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -6065,9 +5033,9 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
-          name: libtorch-cuda11_5-static-with-deps-cxx11-abi
+          name: libtorch-cuda11_6-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -6090,48 +5058,27 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-static-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_6-static-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-static-with-deps-cxx11-abi-build
+    needs: libtorch-cuda11_6-static-with-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu115
-      GPU_ARCH_VERSION: 11.5
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -6148,13 +5095,10 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-static-with-deps-cxx11-abi
+          name: libtorch-cuda11_6-static-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -6247,47 +5191,26 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-static-with-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cuda11_6-static-with-deps-cxx11-abi-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-static-with-deps-cxx11-abi-test
+    needs: libtorch-cuda11_6-static-with-deps-cxx11-abi-test
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu115
-      GPU_ARCH_VERSION: 11.5
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -6304,15 +5227,12 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-static-with-deps-cxx11-abi
+          name: libtorch-cuda11_6-static-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -6365,7 +5285,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-static-without-deps-cxx11-abi-build:
+  libtorch-cuda11_6-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
     timeout-minutes: 240
@@ -6373,39 +5293,18 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu115
-      GPU_ARCH_VERSION: 11.5
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -6422,9 +5321,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -6492,9 +5388,9 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
-          name: libtorch-cuda11_5-static-without-deps-cxx11-abi
+          name: libtorch-cuda11_6-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path:
@@ -6517,48 +5413,27 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-static-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_6-static-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-static-without-deps-cxx11-abi-build
+    needs: libtorch-cuda11_6-static-without-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu115
-      GPU_ARCH_VERSION: 11.5
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -6575,13 +5450,10 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-static-without-deps-cxx11-abi
+          name: libtorch-cuda11_6-static-without-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -6674,47 +5546,26 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-static-without-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cuda11_6-static-without-deps-cxx11-abi-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-static-without-deps-cxx11-abi-test
+    needs: libtorch-cuda11_6-static-without-deps-cxx11-abi-test
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu115
-      GPU_ARCH_VERSION: 11.5
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -6731,15 +5582,1412 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - uses: seemethere/download-artifact-s3@v3
+        name: Download Build Artifacts
+        with:
+          name: libtorch-cuda11_6-static-without-deps-cxx11-abi
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Set DRY_RUN (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        run: |
+          # reference ends with an RC suffix
+          if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
+          fi
+      - name: Upload binaries
+        env:
+          PKG_DIR: "${{ runner.temp }}/artifacts"
+          UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
+          # When running these on pull_request events these should be blank
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+          ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+        run: |
+          docker run --rm -i \
+            -e ANACONDA_API_TOKEN \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  libtorch-rocm5_0-shared-with-deps-cxx11-abi-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: linux.4xlarge
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.0
+      GPU_ARCH_VERSION: 5.0
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e IS_GHA \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - uses: seemethere/upload-artifact-s3@v4
+        with:
+          name: libtorch-rocm5_0-shared-with-deps-cxx11-abi
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            ${{ runner.temp }}/artifacts/*
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        working-directory: pytorch/
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  libtorch-rocm5_0-shared-with-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-rocm5_0-shared-with-deps-cxx11-abi-build
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.0
+      GPU_ARCH_VERSION: 5.0
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+    steps:
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: Set DOCKER_HOST
+        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
+      - name: Runner health check system info
+        if: always()
+        run: |
+          cat /etc/os-release || true
+          cat /etc/apt/sources.list.d/rocm.list || true
+          cat /opt/rocm/.info/version || true
+          whoami
+      - name: Runner health check rocm-smi
+        if: always()
+        run: |
+          rocm-smi
+      - name: Runner health check rocminfo
+        if: always()
+        run: |
+          rocminfo
+      - name: Runner health check GPU count
+        if: always()
+        run: |
+          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
+          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
+              echo "Failed to detect GPUs on the runner"
+              exit 1
+          fi
+      - name: Runner health check disconnect on failure
+        if: ${{ failure() }}
+        run: |
+          killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-static-without-deps-cxx11-abi
+          name: libtorch-rocm5_0-shared-with-deps-cxx11-abi
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Test PyTorch binary
+        run: |
+          set -x
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e IS_GHA \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
+          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  libtorch-rocm5_0-shared-with-deps-cxx11-abi-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-rocm5_0-shared-with-deps-cxx11-abi-test
+    env:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.0
+      GPU_ARCH_VERSION: 5.0
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - uses: seemethere/download-artifact-s3@v3
+        name: Download Build Artifacts
+        with:
+          name: libtorch-rocm5_0-shared-with-deps-cxx11-abi
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Set DRY_RUN (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        run: |
+          # reference ends with an RC suffix
+          if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
+          fi
+      - name: Upload binaries
+        env:
+          PKG_DIR: "${{ runner.temp }}/artifacts"
+          UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
+          # When running these on pull_request events these should be blank
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+          ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+        run: |
+          docker run --rm -i \
+            -e ANACONDA_API_TOKEN \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  libtorch-rocm5_0-static-with-deps-cxx11-abi-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: linux.4xlarge
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.0
+      GPU_ARCH_VERSION: 5.0
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e IS_GHA \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - uses: seemethere/upload-artifact-s3@v4
+        with:
+          name: libtorch-rocm5_0-static-with-deps-cxx11-abi
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            ${{ runner.temp }}/artifacts/*
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        working-directory: pytorch/
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  libtorch-rocm5_0-static-with-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-rocm5_0-static-with-deps-cxx11-abi-build
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.0
+      GPU_ARCH_VERSION: 5.0
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+    steps:
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: Set DOCKER_HOST
+        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
+      - name: Runner health check system info
+        if: always()
+        run: |
+          cat /etc/os-release || true
+          cat /etc/apt/sources.list.d/rocm.list || true
+          cat /opt/rocm/.info/version || true
+          whoami
+      - name: Runner health check rocm-smi
+        if: always()
+        run: |
+          rocm-smi
+      - name: Runner health check rocminfo
+        if: always()
+        run: |
+          rocminfo
+      - name: Runner health check GPU count
+        if: always()
+        run: |
+          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
+          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
+              echo "Failed to detect GPUs on the runner"
+              exit 1
+          fi
+      - name: Runner health check disconnect on failure
+        if: ${{ failure() }}
+        run: |
+          killall runsvc.sh
+      - name: Preserve github env variables for use in docker
+        run: |
+          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+      - uses: seemethere/download-artifact-s3@v3
+        name: Download Build Artifacts
+        with:
+          name: libtorch-rocm5_0-static-with-deps-cxx11-abi
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Test PyTorch binary
+        run: |
+          set -x
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e IS_GHA \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
+          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  libtorch-rocm5_0-static-with-deps-cxx11-abi-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-rocm5_0-static-with-deps-cxx11-abi-test
+    env:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.0
+      GPU_ARCH_VERSION: 5.0
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - uses: seemethere/download-artifact-s3@v3
+        name: Download Build Artifacts
+        with:
+          name: libtorch-rocm5_0-static-with-deps-cxx11-abi
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Set DRY_RUN (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        run: |
+          # reference ends with an RC suffix
+          if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
+          fi
+      - name: Upload binaries
+        env:
+          PKG_DIR: "${{ runner.temp }}/artifacts"
+          UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
+          # When running these on pull_request events these should be blank
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+          ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+        run: |
+          docker run --rm -i \
+            -e ANACONDA_API_TOKEN \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  libtorch-rocm5_1_1-shared-with-deps-cxx11-abi-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: linux.4xlarge
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.1.1
+      GPU_ARCH_VERSION: 5.1.1
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e IS_GHA \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - uses: seemethere/upload-artifact-s3@v4
+        with:
+          name: libtorch-rocm5_1_1-shared-with-deps-cxx11-abi
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            ${{ runner.temp }}/artifacts/*
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        working-directory: pytorch/
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  libtorch-rocm5_1_1-shared-with-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-rocm5_1_1-shared-with-deps-cxx11-abi-build
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.1.1
+      GPU_ARCH_VERSION: 5.1.1
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+    steps:
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: Set DOCKER_HOST
+        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
+      - name: Runner health check system info
+        if: always()
+        run: |
+          cat /etc/os-release || true
+          cat /etc/apt/sources.list.d/rocm.list || true
+          cat /opt/rocm/.info/version || true
+          whoami
+      - name: Runner health check rocm-smi
+        if: always()
+        run: |
+          rocm-smi
+      - name: Runner health check rocminfo
+        if: always()
+        run: |
+          rocminfo
+      - name: Runner health check GPU count
+        if: always()
+        run: |
+          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
+          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
+              echo "Failed to detect GPUs on the runner"
+              exit 1
+          fi
+      - name: Runner health check disconnect on failure
+        if: ${{ failure() }}
+        run: |
+          killall runsvc.sh
+      - name: Preserve github env variables for use in docker
+        run: |
+          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+      - uses: seemethere/download-artifact-s3@v3
+        name: Download Build Artifacts
+        with:
+          name: libtorch-rocm5_1_1-shared-with-deps-cxx11-abi
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Test PyTorch binary
+        run: |
+          set -x
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e IS_GHA \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
+          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  libtorch-rocm5_1_1-shared-with-deps-cxx11-abi-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-rocm5_1_1-shared-with-deps-cxx11-abi-test
+    env:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.1.1
+      GPU_ARCH_VERSION: 5.1.1
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - uses: seemethere/download-artifact-s3@v3
+        name: Download Build Artifacts
+        with:
+          name: libtorch-rocm5_1_1-shared-with-deps-cxx11-abi
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Set DRY_RUN (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        run: |
+          # reference ends with an RC suffix
+          if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
+          fi
+      - name: Upload binaries
+        env:
+          PKG_DIR: "${{ runner.temp }}/artifacts"
+          UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
+          # When running these on pull_request events these should be blank
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+          ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+        run: |
+          docker run --rm -i \
+            -e ANACONDA_API_TOKEN \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  libtorch-rocm5_1_1-static-with-deps-cxx11-abi-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: linux.4xlarge
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.1.1
+      GPU_ARCH_VERSION: 5.1.1
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e IS_GHA \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - uses: seemethere/upload-artifact-s3@v4
+        with:
+          name: libtorch-rocm5_1_1-static-with-deps-cxx11-abi
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            ${{ runner.temp }}/artifacts/*
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        working-directory: pytorch/
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  libtorch-rocm5_1_1-static-with-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-rocm5_1_1-static-with-deps-cxx11-abi-build
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.1.1
+      GPU_ARCH_VERSION: 5.1.1
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+    steps:
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: Set DOCKER_HOST
+        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
+      - name: Runner health check system info
+        if: always()
+        run: |
+          cat /etc/os-release || true
+          cat /etc/apt/sources.list.d/rocm.list || true
+          cat /opt/rocm/.info/version || true
+          whoami
+      - name: Runner health check rocm-smi
+        if: always()
+        run: |
+          rocm-smi
+      - name: Runner health check rocminfo
+        if: always()
+        run: |
+          rocminfo
+      - name: Runner health check GPU count
+        if: always()
+        run: |
+          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
+          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
+              echo "Failed to detect GPUs on the runner"
+              exit 1
+          fi
+      - name: Runner health check disconnect on failure
+        if: ${{ failure() }}
+        run: |
+          killall runsvc.sh
+      - name: Preserve github env variables for use in docker
+        run: |
+          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+      - uses: seemethere/download-artifact-s3@v3
+        name: Download Build Artifacts
+        with:
+          name: libtorch-rocm5_1_1-static-with-deps-cxx11-abi
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Test PyTorch binary
+        run: |
+          set -x
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e IS_GHA \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
+          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  libtorch-rocm5_1_1-static-with-deps-cxx11-abi-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-rocm5_1_1-static-with-deps-cxx11-abi-test
+    env:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.1.1
+      GPU_ARCH_VERSION: 5.1.1
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - uses: seemethere/download-artifact-s3@v3
+        name: Download Build Artifacts
+        with:
+          name: libtorch-rocm5_1_1-static-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}

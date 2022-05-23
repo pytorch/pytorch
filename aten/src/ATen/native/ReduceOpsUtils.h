@@ -6,6 +6,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/NonEmptyUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -167,7 +168,7 @@ static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask,
 
 static TensorIterator make_reduction(
     const char* name, Tensor& result, const Tensor& self,
-    c10::optional<IntArrayRef> dim_opt,
+    at::OptionalIntArrayRef dim_opt,
     bool keepdim, ScalarType in_dtype, ScalarType out_dtype) {
   // check that result type and dtype match if provided
   TORCH_CHECK(
@@ -192,20 +193,22 @@ static TensorIterator make_reduction(
 
 static C10_UNUSED TensorIterator make_reduction(
     const char* name, Tensor& result, const Tensor& self,
-    c10::optional<IntArrayRef> dim, bool keepdim, ScalarType out_dtype) {
+    at::OptionalIntArrayRef dim, bool keepdim, ScalarType out_dtype) {
   // special case for type promotion in mixed precision, improves computational
   // efficiency.
   // not generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
   const bool gpu_lowp_to_f32 = (
     self.is_cuda() && (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) && out_dtype == kFloat);
-  auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type() : out_dtype;
+  auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type()
+                   : self.is_complex() ? c10::toComplexType(out_dtype)
+                                       : out_dtype;
   return make_reduction(name, result, self, dim, keepdim, in_dtype, out_dtype);
 }
 
 static TensorIterator make_reduction(
     const char* name, Tensor& result1, Tensor& result2, const Tensor& self,
-    c10::optional<IntArrayRef> dim_opt, bool keepdim, ScalarType dtype1,
+    at::OptionalIntArrayRef dim_opt, bool keepdim, ScalarType dtype1,
     ScalarType dtype2) {
   // check that result type and dtype match if provided
   TORCH_CHECK(
@@ -242,7 +245,7 @@ static TensorIterator make_reduction(
 
 static C10_UNUSED TensorIterator make_reduction(
     const char* name, Tensor& result1, Tensor& result2, const Tensor& self,
-    c10::optional<IntArrayRef> dim, bool keepdim, ScalarType dtype) {
+    at::OptionalIntArrayRef dim, bool keepdim, ScalarType dtype) {
   return make_reduction(name, result1, result2, self, dim, keepdim, dtype, dtype);
 }
 
@@ -257,7 +260,11 @@ static void zero_numel_check_dims(const Tensor& self, const int64_t dim, const c
   }
 }
 
-static C10_UNUSED void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, const char *fn_name) {
+static void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, const char *fn_name) {
+  TORCH_CHECK(
+    !dim.empty(),
+      fn_name, ": Expected reduction dim to be specified for input.numel() == 0. ",
+        "Specify the reduction dim with the 'dim' argument.");
   for (const int64_t d : dim) {
     zero_numel_check_dims(self, d, fn_name);
   }
@@ -319,7 +326,7 @@ static void resize_reduction(
   DimVector dims_(dims);
   maybe_wrap_dims(dims_, self.dim());
   auto shape = get_reduction_shape(self, dims_, keepdim);
-  meta.set_output(shape, self.options().dtype(out_dtype));
+  meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
   namedinference::propagate_names_for_reduction(
       meta.maybe_get_output(), self, dims_, keepdim);
 }
@@ -333,8 +340,8 @@ static void resize_reduction_with_indices(
   DimVector dims_(dims);
   maybe_wrap_dims(dims_, self.dim());
   auto shape = get_reduction_shape(self, dims_, keepdim);
-  meta.set_output(0, shape, self.options().dtype(out_dtype));
-  meta.set_output(1, shape, self.options().dtype(kLong));
+  meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
+  meta.set_output_raw_strided(1, shape, {}, self.options().dtype(kLong));
   namedinference::propagate_names_for_reduction(
       meta.maybe_get_output(0), self, dims_, keepdim);
   namedinference::propagate_names_for_reduction(

@@ -533,8 +533,7 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
         upgrader_function.function.append_operator(
             op.name,
             op.overload_name,
-            op.num_specified_args,
-            caffe2::serialize::kMaxSupportedFileFormatVersion);
+            op.num_specified_args);
       }
     }
     return upgrader_function_list;

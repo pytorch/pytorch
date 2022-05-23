@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/mobile/train/export_data.h>
 
+#include <torch/csrc/jit/mobile/import_export_common.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/pickler.h>
@@ -7,7 +8,14 @@
 
 #include <caffe2/serialize/inline_container.h>
 
+#include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
+
+#if defined(ENABLE_FLATBUFFER)
+#include <flatbuffers/flatbuffers.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
+#endif // defined(ENABLE_FLATBUFFER)
+
 #include <string>
 #include <vector>
 
@@ -19,12 +27,15 @@ char const* toString(OpCode op);
 
 namespace {
 
-class ScriptModuleSerializer {
+/**
+ * Serializes an IValue using Pickle, and puts it in a file named "data.pkl"
+ * in a ZIP wrapper.
+ */
+class IValuePickler final {
  public:
-  explicit ScriptModuleSerializer(const std::string& filename)
-      : writer_(filename) {}
+  explicit IValuePickler(const std::string& filename) : writer_(filename) {}
 
-  explicit ScriptModuleSerializer(
+  explicit IValuePickler(
       const std::function<size_t(const void*, size_t)>& writer_func)
       : writer_(writer_func) {}
 
@@ -33,6 +44,7 @@ class ScriptModuleSerializer {
     writeArchive("data", object);
   }
 
+ private:
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
     // Vector to capture the run-time class types during pickling the IValues
@@ -65,32 +77,105 @@ class ScriptModuleSerializer {
 };
 
 } // namespace
+
+/**
+ * Converts a map of named tensors to a c10::Dict.
+ */
+c10::Dict<std::string, at::Tensor> tensor_map_to_dict(
+    const std::map<std::string, at::Tensor>& map) {
+  c10::Dict<std::string, at::Tensor> dict;
+  for (const auto& e : map) {
+    dict.insert(e.first, e.second);
+  }
+  return dict;
+}
+
+/**
+ * Returns a Module with a single attribute, with the attribute name specified
+ * by #internal::kSavedParametersAttributeName, whose value is the provided
+ * dict.
+ */
+mobile::Module tensor_dict_to_mobile(
+    const c10::Dict<std::string, at::Tensor>& dict) {
+  // Create an Object to back the Module, with an attribute to hold the dict.
+  auto cu = std::make_shared<torch::jit::CompilationUnit>();
+  // Note that the name doesn't really matter, but it must begin with
+  // "__torch__." to be treated as a valid class when being imported.
+  auto cls = c10::ClassType::create(
+      "__torch__.SavedParameters", cu, /*is_module=*/true);
+  cls->addAttribute(
+      internal::kSavedParametersAttributeName,
+      c10::DictType::create(dict.keyType(), dict.valueType()));
+  auto object = c10::ivalue::Object::create(
+      c10::StrongTypePtr(std::move(cu), std::move(cls)), /*numSlots=*/1);
+
+  // Add the dict as an attribute.
+  object->setAttr(internal::kSavedParametersAttributeName, dict);
+
+  // Wrap the Object in a Module.
+  auto mcu = std::make_shared<mobile::CompilationUnit>();
+  return mobile::Module(object, mcu);
+}
+
 } // namespace mobile
 
 void _save_parameters(
     const std::map<std::string, at::Tensor>& map,
-    std::ostream& out) {
-  mobile::ScriptModuleSerializer serializer(
-      [&](const void* buf, size_t nbytes) -> size_t {
-        out.write(static_cast<const char*>(buf), nbytes);
-        return !out ? 0 : nbytes;
-      });
-  c10::Dict<std::string, at::Tensor> dict;
-  for (const auto& e : map) {
-    dict.insert(e.first, e.second);
+    std::ostream& out,
+    bool use_flatbuffer) {
+  auto dict = mobile::tensor_map_to_dict(map);
+
+  if (use_flatbuffer) {
+#if defined(ENABLE_FLATBUFFER)
+    // For Flatbuffer, we serialize an entire, mostly-empty module containing
+    // the dict as an attribute.
+    flatbuffers::DetachedBuffer bytes = torch::jit::save_mobile_module_to_bytes(
+        mobile::tensor_dict_to_mobile(dict));
+    out.write(
+        reinterpret_cast<char*>(bytes.data()),
+        static_cast<std::streamsize>(bytes.size()));
+#else // !defined(ENABLE_FLATBUFFER)
+    TORCH_CHECK(
+        false,
+        "Trying to export as flatbuffer file but "
+        "the build hasn't enabled flatbuffer");
+#endif // !defined(ENABLE_FLATBUFFER)
+  } else {
+    // For Pickle, we only serialize the dict itself.
+    mobile::IValuePickler pickler(
+        [&](const void* buf, size_t nbytes) -> size_t {
+          out.write(
+              static_cast<const char*>(buf),
+              static_cast<std::streamsize>(nbytes));
+          return !out ? 0 : nbytes;
+        });
+    pickler.serialize(dict);
   }
-  serializer.serialize(dict);
 }
 
 void _save_parameters(
     const std::map<std::string, at::Tensor>& map,
-    const std::string& filename) {
-  mobile::ScriptModuleSerializer serializer(filename);
-  c10::Dict<std::string, at::Tensor> dict;
-  for (const auto& e : map) {
-    dict.insert(e.first, e.second);
+    const std::string& filename,
+    bool use_flatbuffer) {
+  auto dict = mobile::tensor_map_to_dict(map);
+
+  if (use_flatbuffer) {
+#if defined(ENABLE_FLATBUFFER)
+    // For Flatbuffer, we serialize an entire, mostly-empty module containing
+    // the dict as an attribute.
+    torch::jit::save_mobile_module(
+        mobile::tensor_dict_to_mobile(dict), filename);
+#else // !defined(ENABLE_FLATBUFFER)
+    TORCH_CHECK(
+        false,
+        "Trying to export as flatbuffer file but "
+        "the build hasn't enabled flatbuffer");
+#endif // !defined(ENABLE_FLATBUFFER)
+  } else {
+    // For Pickle, we only serialize the dict itself.
+    mobile::IValuePickler pickler(filename);
+    pickler.serialize(dict);
   }
-  serializer.serialize(dict);
 }
 
 } // namespace jit

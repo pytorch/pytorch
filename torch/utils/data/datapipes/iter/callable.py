@@ -1,7 +1,14 @@
 from typing import Callable, Iterator, Sized, TypeVar
 
-from torch.utils.data import IterDataPipe, _utils, functional_datapipe
-from torch.utils.data.datapipes.utils.common import check_lambda_fn
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data._utils.collate import default_collate
+from torch.utils.data.datapipes.datapipe import IterDataPipe
+from torch.utils.data.datapipes.utils.common import _check_lambda_fn
+
+__all__ = [
+    "CollatorIterDataPipe",
+    "MapperIterDataPipe",
+]
 
 T_co = TypeVar("T_co", covariant=True)
 
@@ -57,7 +64,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         super().__init__()
         self.datapipe = datapipe
 
-        check_lambda_fn(fn)
+        _check_lambda_fn(fn)
         self.fn = fn  # type: ignore[assignment]
 
         self.input_col = input_col
@@ -159,6 +166,6 @@ class CollatorIterDataPipe(MapperIterDataPipe):
     def __init__(
         self,
         datapipe: IterDataPipe,
-        collate_fn: Callable = _utils.collate.default_collate,
+        collate_fn: Callable = default_collate,
     ) -> None:
         super().__init__(datapipe, fn=collate_fn)

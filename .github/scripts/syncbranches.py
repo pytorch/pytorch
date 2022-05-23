@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from gitutils import get_git_repo_dir, GitRepo
+from gitutils import get_git_repo_dir, get_git_remote_name, GitRepo
 from typing import Any
 
 
@@ -16,7 +16,7 @@ def parse_args() -> Any:
 
 def main() -> None:
     args = parse_args()
-    repo = GitRepo(get_git_repo_dir(), debug=args.debug)
+    repo = GitRepo(get_git_repo_dir(), get_git_remote_name(), debug=args.debug)
     repo.cherry_pick_commits(args.sync_branch, args.default_branch)
     repo.push(args.default_branch, args.dry_run)
 

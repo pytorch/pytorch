@@ -6,9 +6,8 @@
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
 
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/xnnpack_utils.h>
+#include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/utils/Factory.h>
 
 #include <utility>

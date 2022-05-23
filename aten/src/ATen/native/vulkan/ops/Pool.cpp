@@ -1,3 +1,4 @@
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/Pool.h>
 #include <torch/library.h>
@@ -36,6 +37,8 @@ Tensor adaptive_avg_pool2d(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), "aten::_adaptive_avg_pool2d");
+
     if C10_LIKELY(v_self.has_image()) {
       const uvec3 v_output_size = v_output.extents();
       const uvec3 v_self_size = v_self.extents();
@@ -101,7 +104,8 @@ Tensor pool2d(
     const IntArrayRef padding_arg,
     const IntArrayRef dilation_arg,
     const bool ceil_mode,
-    const api::Shader::Descriptor& shader_descriptor) {
+    const api::Shader::Descriptor& shader_descriptor,
+    const std::string& op_name) {
   if (stride_arg.empty()) {
     stride_arg = kernel_arg;
   }
@@ -175,6 +179,8 @@ Tensor pool2d(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     if C10_LIKELY(v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
@@ -257,7 +263,8 @@ Tensor avg_pool2d(
     padding_arg,
     {1,1},
     ceil_mode,
-    VK_KERNEL(avg_pool2d)
+    VK_KERNEL(avg_pool2d),
+    "aten::avg_pool2d"
   );
 }
 
@@ -275,7 +282,8 @@ Tensor max_pool2d(
     padding_arg,
     dilation_arg,
     ceil_mode,
-    VK_KERNEL(max_pool2d)
+    VK_KERNEL(max_pool2d),
+    "aten::max_pool2d"
   );
 }
 

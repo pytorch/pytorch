@@ -44,6 +44,8 @@ TORCH_CUDA_CU_API bool isElementWiseNode(const Node* node);
 TORCH_CUDA_CU_API bool isNodeParsible(const Node* node);
 TORCH_CUDA_CU_API bool shouldProfileNode(const Node* node);
 
+TORCH_CUDA_CU_API bool skipNodeKind(const std::string& symbol_str, bool flip);
+
 void InsertProfileNodes(ProfilingRecord* pr);
 
 // lowers PyTorch jit graph to `Fusion`.

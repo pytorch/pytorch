@@ -7,6 +7,13 @@ import torch
 from . import is_initialized, _get_device_index, _lazy_init
 from torch.types import Device
 
+__all__ = ["caching_allocator_alloc", "caching_allocator_delete", "set_per_process_memory_fraction",
+           "empty_cache", "memory_stats", "memory_stats_as_nested_dict", "reset_accumulated_memory_stats",
+           "reset_peak_memory_stats", "reset_max_memory_allocated", "reset_max_memory_cached",
+           "memory_allocated", "max_memory_allocated", "memory_reserved", "max_memory_reserved",
+           "memory_cached", "max_memory_cached", "memory_snapshot", "memory_summary", "list_gpu_processes",
+           "mem_get_info"]
+
 def _host_allocator():
     _lazy_init()
     return torch._C._cuda_cudaHostAllocator()

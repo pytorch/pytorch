@@ -508,6 +508,7 @@ void Node::lint() const {
       break;
     case prim::FusionGroup:
     case prim::CudaFusionGroup:
+    case prim::oneDNNFusionGroup:
       checkSameDevice(this);
       // TODO: Typecheck the parameters
       g(attr::Subgraph)->lint();
@@ -2285,10 +2286,7 @@ const Symbol ProfileOp::Kind = ::c10::prim::profile;
 const Symbol ProfileIValueOp::Kind = ::c10::prim::profile_ivalue;
 
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
-  for (const char* sig : sig_literals) {
-    auto op = getOperatorForLiteral(sig);
-    ops[Symbol::fromQualString(op->schema().name())].push_back(op);
-  }
+  insert(sig_literals);
 }
 
 std::vector<std::shared_ptr<Operator>> OperatorSet::getOps() const {
@@ -2298,6 +2296,13 @@ std::vector<std::shared_ptr<Operator>> OperatorSet::getOps() const {
     result.insert(result.end(), ops_for_symbol.begin(), ops_for_symbol.end());
   }
   return result;
+}
+
+void OperatorSet::insert(std::initializer_list<const char*> sig_literals) {
+  for (const char* sig : sig_literals) {
+    auto op = getOperatorForLiteral(sig);
+    ops[Symbol::fromQualString(op->schema().name())].push_back(op);
+  }
 }
 
 bool Node::isMemberOf(const OperatorSet& os) const {
