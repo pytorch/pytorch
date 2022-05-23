@@ -156,6 +156,9 @@ __all__ = [
     #
     # View & Shape Ops
     #
+    "atleast_1d",
+    "atleast_2d",
+    "atleast_3d",
     "as_strided",
     "broadcast_tensors",
     "cat",
@@ -1290,6 +1293,21 @@ def var_mean(
     v = var(a, dim, unbiased, keepdim, correction=correction)
     m = mean(a, dim, keepdim)
     return v, m
+
+
+def atleast_1d(*args: TensorLikeType) -> List[TensorLikeType]:
+    """Reference implementation of :func:`torch.atleast_1d`."""
+    return [a if a.ndim >= 1 else unsqueeze(a, 0) for a in args]
+
+
+def atleast_2d(*args: TensorLikeType) -> List[TensorLikeType]:
+    """Reference implementation of :func:`torch.atleast_2d`."""
+    return [a if a.ndim >= 2 else unsqueeze(atleast_1d(a), 0) for a in args]
+
+
+def atleast_3d(*args: TensorLikeType) -> List[TensorLikeType]:
+    """Reference implementation of :func:`torch.atleast_3d`."""
+    return [a if a.ndim >= 3 else unsqueeze(atleast_2d(a), 0) for a in args]
 
 
 def as_strided(
