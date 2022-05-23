@@ -127,24 +127,39 @@ std::atomic<uint32_t> queue_id_{0};
 thread_local SubQueueThreadCache sub_queue_cache_{0, nullptr};
 } // namespace
 
-std::string Result::name() const {
-  return c10::visit([](auto& e){ return e.name_; }, event_);
-}
+#define OUT_T(method_name) decltype(std::declval<Result>().method_name())
+#define DEFINE_VISITOR(method_name, torch_op_field, backend_field)   \
+  OUT_T(method_name) Result::method_name() const {                   \
+    using out_t = OUT_T(method_name);                                \
+    return c10::visit(                                               \
+        c10::overloaded(                                             \
+            [&](const ExtraFields<EventType::TorchOp>& e) -> out_t { \
+              (void)e;                                               \
+              return torch_op_field;                                 \
+            },                                                       \
+            [&](const ExtraFields<EventType::Backend>& e) -> out_t { \
+              (void)e;                                               \
+              return backend_field;                                  \
+            }),                                                      \
+        extra_fields_);                                              \
+  }
 
-torch::profiler::impl::kineto::KinetoActivityType Result::kinetoType() const {
-  auto record_function_scope = static_cast<at::RecordScope>(
-      c10::visit([](auto& e) { return e.record_function_scope_; }, event_));
-  return record_function_scope == at::RecordScope::USER_SCOPE
-      ? torch::profiler::impl::kineto::KinetoActivityType::USER_ANNOTATION
-      : torch::profiler::impl::kineto::KinetoActivityType::CPU_OP;
+using torch::profiler::impl::kineto::KinetoActivityType;
+namespace {
+KinetoActivityType scopeToType(at::RecordScope scope) {
+  return scope == at::RecordScope::USER_SCOPE
+      ? KinetoActivityType::USER_ANNOTATION
+      : KinetoActivityType::CPU_OP;
 }
+} // namespace
 
-uint64_t Result::correlation_id() const {
-  return c10::visit(c10::overloaded(
-      [](const OpEvent& e){ return e.correlation_id_; },
-      [](const BackendEvent& e) { return std::numeric_limits<uint64_t>::max(); }
-  ), event_);
-}
+DEFINE_VISITOR(name, e.name_, e.name_);
+DEFINE_VISITOR(kinetoType, scopeToType(e.scope_), scopeToType(e.scope_));
+DEFINE_VISITOR(correlationID, e.correlation_id_, 0);
+DEFINE_VISITOR(endTimeUS, e.end_time_us_, e.end_time_us_);
+DEFINE_VISITOR(endTID, e.end_tid_, start_tid_);
+#undef DEFINE_VISITOR
+#undef OUT_T
 
 ThreadLocalSubqueue::ThreadLocalSubqueue(
     const uint64_t tid,
@@ -158,7 +173,6 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     uint64_t correlation_id) {
   auto event = op_events_.emplace_back(
       correlation_id,
-      fn.threadId(),
       fn.seqNr(),
       fn.forwardThreadId(),
       fn.scope(),
@@ -251,14 +265,14 @@ std::deque<Result> RecordQueue::getRecords(
   for (auto& subqueue_it : sub_queues_) {
     auto& queue = *subqueue_it.second;
     for (auto& i : queue.backend_events_) {
-      Result r;
-      r.start_time_us_ = i.start_time_us_;
-      r.end_time_us_ = i.end_time_us_;
-      r.start_tid_ = queue.tid();
-      r.kineto_info_ = queue.kineto_info();
-      r.event_ = std::move(i);
-      out.push_back(std::move(r));
+      auto start_time = i.start_time_us_;
+      out.emplace_back(
+          start_time,
+          /*start_tid_=*/queue.tid(),
+          /*kineto_info_=*/queue.kineto_info(),
+          /*extra_fields_=*/std::move(i));
     }
+    queue.backend_events_.clear();
 
     auto input_getter = queue.inputs_outputs_.getNextShapesAndDtypes();
     auto jit_stack_it = queue.jit_stack_.begin();
@@ -266,19 +280,20 @@ std::deque<Result> RecordQueue::getRecords(
     auto extra_args_it = queue.extra_args_.begin();
     auto gpu_fallback_it = queue.gpu_fallback_.begin();
     for (auto& i : queue.op_events_) {
-      Result r;
-      r.start_time_us_ = converter(i.start_time_);
-      r.end_time_us_ = converter(i.end_time_);
-      r.start_tid_ = queue.tid();
-      r.kineto_info_ = queue.kineto_info();
-      r.event_ = std::move(i);
-      r.inputs_ = input_getter();
-      r.jit_stack_ = steal_or_default(jit_stack_it);
-      r.jit_modules_ = steal_or_default(jit_module_it);
-      r.extra_args_ = steal_or_default(extra_args_it);
-      r.gpu_fallback_ = steal_or_default(gpu_fallback_it);
-
-      out.push_back(std::move(r));
+      auto start_time = converter(i.start_time_);
+      out.emplace_back(
+          start_time,
+          /*start_tid_=*/queue.tid(),
+          /*kineto_info_=*/queue.kineto_info(),
+          /*extra_fields_=*/
+          ExtraFields<EventType::TorchOp>(
+              std::move(i.basic_fields_),
+              converter(i.end_time_),
+              input_getter(),
+              steal_or_default(jit_stack_it),
+              steal_or_default(jit_module_it),
+              steal_or_default(extra_args_it),
+              steal_or_default(gpu_fallback_it)));
     }
     queue.op_events_.clear();
     queue.inputs_outputs_.clear();
