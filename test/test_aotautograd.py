@@ -123,7 +123,7 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-        print(func_overload.__name__)
+        print(f"!!!!!@@@@@@@ {func_overload.__name__}")
         try:
             args = args if args else ()
             def get_proxy(x): return x.proxy if isinstance(x, ProxyTensor) else x
@@ -138,11 +138,13 @@ class ProxyTensor(torch.Tensor):
             tree_map(get_tracer, (args, kwargs))
             assert len(tracer) > 0
             tracer = tracer[0]
+            print(type(args[0]).__name__)
             output_proxy = tracer.graph.call_function(func_overload, tree_map(get_proxy, args), tree_map(get_proxy, kwargs))
             with no_dispatch():
                 # TODO: we will use a FakeTensor or MetaTensor to compute metadata 
                 out = func_overload(*tree_map(get_fake, args), **tree_map(get_fake, kwargs))
                 assert not isinstance(out, ProxyTensor)
+
 
 
             # this should be producing SymInts
@@ -164,6 +166,9 @@ class PySymInt(object):
     def __getattr__(self, name):
         print(f"Missing attribute {name}")
         exit(0)
+
+    def wrap(self, num):
+        return PySymInt(sympy.Integer(1), self.tracer)
 
     def __bool__(self):
         return bool(self.tracer.evaluate_expr(self.expr))
@@ -256,21 +261,26 @@ def dynamic_trace(f, args):
 #pt = ProxyTensor(torch.rand(6), None, )
 
 def f(a, b):
-    return a + b
-tracer = dynamic_trace(f, [torch.rand(4), torch.rand(4)])
-print(tracer.graph)
-
-exit(0)
-
-def f(a, b):
-    c = torch.add(a, b)
-    if c.shape[0] > 3:
-        return torch.add(c, c)
+    if a.size()[0] + 0 < 10 and a.size()[0] + 0 == a.size()[0] * 1:
+        return a + b
     else:
-        return torch.sub(c, c)
-
+        return a + a
 tracer = dynamic_trace(f, [torch.rand(4), torch.rand(4)])
 print(tracer.graph)
-print(tracer.guards)
-assert tracer.evaluate_guards(torch.rand(6), torch.rand(6))
-assert not tracer.evaluate_guards(torch.rand(3), torch.rand(3))
+print("done")
+
+# def f(a, b):
+#     c = torch.add(a, b)
+#     if c.size()[0] == b.size()[0]:
+#         return torch.add(c, c)
+#     else:
+#         return torch.sub(c, c)
+
+# def f(a):
+#     return a.narrow_copy(0, 0, a.size()[0])
+
+
+
+# print(tracer.guards)
+# assert tracer.evaluate_guards(torch.rand(6), torch.rand(6))
+#assert not tracer.evaluate_guards(torch.rand(3), torch.rand(3))
