@@ -10285,7 +10285,8 @@ op_db: List[OpInfo] = [
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    decorators=[
                        DecorateInfo(
@@ -18959,14 +18960,14 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sin",
         torch_opinfo_name="sin",
-        skips=(
+        #skips=(
             # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,)),
+        #    DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+        #                 dtypes=(torch.chalf,)),
             # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-                         dtypes=(torch.chalf,)),
-        )
+        #    DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
+        #                 dtypes=(torch.chalf,)),
+        #)
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sinh",
