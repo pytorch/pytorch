@@ -18930,6 +18930,10 @@ python_ref_db = [
         supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.i0",
+        torch_opinfo_name="i0",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.lgamma",
         torch_opinfo_name="lgamma",
     ),
@@ -18995,6 +18999,10 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i0e",
         torch_opinfo_name="special.i0e",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.i1",
+        torch_opinfo_name="special.i1",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i1e",
@@ -19189,6 +19197,14 @@ python_ref_db = [
         torch_opinfo_name="true_divide",
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
+        supports_one_python_scalar=True,
+    ),
+    #
+    # Elementwise Binary Special OpInfos
+    #
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.special.zeta",
+        torch_opinfo_name="special.zeta",
         supports_one_python_scalar=True,
     ),
     #
