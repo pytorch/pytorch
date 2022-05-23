@@ -13127,6 +13127,10 @@ op_db: List[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
+               # Ref: https://github.com/pytorch/pytorch/issues/78077
+               DecorateInfo(unittest.expectedFailure, 'TestExpandedWeightFunctional',
+                            'test_expanded_weight_per_sample_grad',
+                            dtypes=(torch.float64,)),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
@@ -13161,6 +13165,10 @@ op_db: List[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
+               # Ref: https://github.com/pytorch/pytorch/issues/78077
+               DecorateInfo(unittest.expectedFailure, 'TestExpandedWeightFunctional',
+                            'test_expanded_weight_per_sample_grad',
+                            dtypes=(torch.float64,)),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
