@@ -683,6 +683,9 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::IntType::get());
   }
+  if (torch::is_symint_node(py::handle(args[i]))) {
+    return py::handle(args[i]).cast<c10::SymbolicIntNode*>()->toSymInt();
+  }
   return c10::SymInt(THPUtils_unpackLong(args[i]));
 }
 
