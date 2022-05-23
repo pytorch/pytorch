@@ -2166,7 +2166,10 @@ class TestSparseCSR(TestCase):
             # TODO: Remove this once support has been enabled
             return
 
-        def _test_matrix(dense, layout, pt_matrix):
+        for shape in [(6, 10), (0, 10), (6, 0), (6, 10), (0, 0)]:
+            dense = make_tensor(shape, dtype=torch.float, device=device)
+            dense = dense.relu()  # Introduce some sparsity
+            pt_matrix = self._convert_to_layout(dense, layout)
             sp_matrix = self._construct_sp_matrix(dense, layout)
 
             compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[layout]
@@ -2177,28 +2180,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
             self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 
-        for shape in [(6, 10), (0, 10), (6, 0), (6, 10), (0, 0)]:
-            dense = make_tensor(shape, dtype=torch.float, device=device)
-            dense = dense.relu()  # Introduce some sparsity
-            pt_matrix = self._convert_to_layout(dense, layout)
             _test_matrix(dense, layout, pt_matrix)
-
-            self.assertEqual(dense, pt_matrix.to_dense())
-
-        if layout in [torch.sparse_bsr, torch.sparse_csc]:
-            # TODO: Remove this once support has been enabled
-            return
-
-        for shape in [(3, 6, 10)]:
-            dense = make_tensor((shape[1], shape[2]), dtype=torch.float, device=device)
-            dense = dense.relu()  # Introduce some sparsity
-            dense = torch.stack([dense for _ in range(shape[0])])
-            pt_matrix = self._convert_to_layout(dense, layout)
-
-
-            if dense.dim() == 3:
-                for i in range(dense.size(0)):
-                    _test_matrix(dense[i], layout, pt_matrix[i])
 
             self.assertEqual(dense, pt_matrix.to_dense())
 
@@ -2252,7 +2234,6 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(sp_matrix.indptr, dtype=torch.int64), compressed_indices_mth(pt_matrix))
             self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
             self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
-            return
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
