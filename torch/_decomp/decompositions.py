@@ -667,18 +667,7 @@ def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     return grad_output * (mask.type_as(grad_output) * scale)
 
 
-@register_decomposition(aten.logit)
-@pw_cast_for_int_to_real
-def logit(self: Tensor, eps: Optional[float] = None) -> Tensor:
-    if eps is None:
-        eps = -1.0
-    lo = eps
-    hi = 1 - eps
-    self = torch.clamp(self, lo, hi)
-    return (self / (1 - self)).log()
-
-
-@register_decomposition(aten.logit_backward)
+@register_decomposition(aten.logit_backward.default)
 @pw_cast_for_opmath
 def logit_backward(
     grad_output: Tensor, self: Tensor, eps: Optional[float] = None
@@ -866,7 +855,7 @@ def normalize(input, norm_dims, eps):
     return out, mean, rstd
 
 
-@register_decomposition(aten.native_layer_norm)
+@register_decomposition(aten.native_layer_norm.default)
 def native_layer_norm(
     input: Tensor,
     normalized_shape: List[int],
@@ -897,12 +886,45 @@ def native_layer_norm(
         rstd = rstd.to(dtype=input.dtype)
     return (out, mean, rstd)
 
+
+@register_decomposition(aten.native_group_norm.default, disable_meta=True)
+def native_group_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    N: int,
+    C: int,
+    HxW: int,
+    group: int,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    orig_shape = input.shape
+    input = input.view(N, group, C // group, HxW)
+    reduction_dims = [2, 3]
+    out, mean, rstd = normalize(input, reduction_dims, eps)
+    mean = _squeeze_multiple(mean, reduction_dims)
+    rstd = _squeeze_multiple(rstd, reduction_dims)
+    out = out.view(orig_shape)
+    if weight is not None:
+        weight = _unsqueeze_to_dim(weight, out.dim() - 1)
+        out = out * weight
+    if bias is not None:
+        bias = _unsqueeze_to_dim(bias, out.dim() - 1)
+        out = out + bias
+
+    out = out.to(dtype=input.dtype)
+    mean = mean.to(dtype=input.dtype)
+    rstd = rstd.to(dtype=input.dtype)
+    return (out, mean, rstd)
+
+
 def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
     if x is not None:
         return x.to(dtype)
     return x
 
-# TODO: Correct the type promotion semantics
+
+# TODO: Take a closer look at the type promotion semantics
 @register_decomposition(aten.native_layer_norm_backward)
 def native_layer_norm_backward(
     grad_out: Tensor,
@@ -1012,7 +1034,7 @@ def native_batch_norm(
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
         # Very annoying inconsistency where CPU and CUDA give different shapes
-        if input.device.type == "cuda":
+        if input.device.type != "cpu":
             save_mean = running_mean
             save_rstd = invstd
         else:
