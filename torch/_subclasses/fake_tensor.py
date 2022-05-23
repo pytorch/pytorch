@@ -1,6 +1,5 @@
 import torch
 
-from torch._subclasses import BaseTensor
 from torch.utils._pytree import tree_map
 from functools import partial
 from torch.fx.operator_schemas import normalize_function
@@ -28,12 +27,12 @@ _device_not_kwarg_ops = (
 # which tracks devices that would have been used.
 
 
-class FakeTensor(BaseTensor):
+class FakeTensor(torch.Tensor):
     fake_device: torch.device
 
     @staticmethod
     def __new__(cls, elem, device):
-        return super().__new__(cls, elem, dispatch_device=True)
+        return torch.Tensor._make_subclass(cls, elem, elem.requires_grad, dispatch_device=True)
 
     def __init__(self, elem, device: Union[torch.device, str]):
         # elem does not need to be recorded, because FakeTensor *is a* elem
@@ -158,3 +157,5 @@ class FakeTensor(BaseTensor):
         assert common_device is not None, f"Could not find common device for {func}"
 
         return common_device
+
+    __torch_function__ = torch._C._disabled_torch_function_impl
