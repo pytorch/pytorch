@@ -48,6 +48,7 @@ jobs:
           ORIGINAL_COMMIT: ${{ steps.update-file.outputs.original_commit }}
           NEW_COMMIT: ${{ steps.update-file.outputs.new_commit }}
         with:
+          github-token: ${{ secrets.MERGEBOT_TOKEN }}
           script: |
             const { repo, owner } = context.repo;
             const { NEW_BRANCH_NAME, NEW_COMMIT, ORIGINAL_COMMIT } = process.env
