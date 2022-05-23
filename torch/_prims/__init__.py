@@ -134,6 +134,7 @@ __all__ = [
     "clone",
     "convert_element_type",
     "device_put",
+    "item",
     "to_dtype",
     #
     # Inplace prims
@@ -144,10 +145,8 @@ __all__ = [
     #
     # Reduction prims
     #
-    "all",
     "amax",
     "amin",
-    "any",
     "prod",
     "sum",
     "var",
@@ -1709,11 +1708,16 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
 
 
 def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
-    # TODO: update meta objects so this can be acquired directly
-    try:
-        requires_grad = a.requires_grad
-    except Exception as e:
+
+    # Propagates requires grad when possible
+    if not utils.is_grad_dtype(dtype):
         requires_grad = False
+    else:
+        # TODO: update meta objects so this can be acquired directly
+        try:
+            requires_grad = a.requires_grad
+        except Exception as e:
+            requires_grad = False
 
     result = torch.empty_like(
         a, device=a.device, dtype=dtype, requires_grad=requires_grad
@@ -1764,6 +1768,28 @@ device_put = _make_prim(
     impl_aten=_device_put_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_device_put_doc,
+)
+
+# NOTE: need to model meta scalars
+# See https://github.com/pytorch/pytorch/issues/78070
+def _item_meta(a: TensorLikeType) -> TensorMeta:
+    number_type = utils.dtype_to_type(a.dtype)
+    return TensorMeta(number_type(-1))
+
+
+_item_doc = """
+    Converts a tensor with one element to a Python number.
+"""
+
+# TODO: create a new return type for scalars?
+# FIXME: currently returns integers for boolean tensors
+# https://github.com/pytorch/pytorch/issues/78071
+item = _make_prim(
+    schema="item(Tensor a) -> Scalar",
+    meta=_item_meta,
+    impl_aten=torch.Tensor.item,
+    return_type=RETURN_TYPE.NEW,
+    doc=_item_doc,
 )
 
 # TODO: FIXME: strides are incorrect
@@ -1875,10 +1901,6 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
     )
 
 
-def _bool_return_reduction_meta(inp, dims):
-    return _reduction_meta(inp, dims, output_dtype=torch.bool)
-
-
 def _var_reduction_meta(inp, dims, *, correction):
     if utils.is_complex_dtype(inp.dtype):
         output_dtype = utils.corresponding_real_dtype(inp.dtype)
@@ -1930,17 +1952,6 @@ def _make_var_reduction_prim(name: str, impl_aten, doc):
     )
 
 
-def _make_bool_reduction_prim(name: str, impl_aten, doc):
-    """Creates a reduction prim that reduces to bool."""
-    return _make_prim(
-        schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType? output_dtype=None) -> Tensor",
-        meta=_bool_return_reduction_meta,
-        impl_aten=impl_aten,
-        return_type=RETURN_TYPE.NEW,
-        doc=doc,
-    )
-
-
 sum = _make_reduction_prim(
     name="sum",
     impl_aten=torch.sum,
@@ -1969,18 +1980,6 @@ amin = _make_reduction_prim(
     name="amin",
     impl_aten=torch.amin,
     doc=_amin_doc,
-)
-
-all = _make_bool_reduction_prim(
-    name="all",
-    impl_aten=torch.all,
-    doc="",
-)
-
-any = _make_bool_reduction_prim(
-    name="any",
-    impl_aten=torch.any,
-    doc="",
 )
 
 # TODO: layout, pin_memory, memory_format
