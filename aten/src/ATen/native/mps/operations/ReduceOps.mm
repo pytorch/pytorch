@@ -173,18 +173,30 @@ void reduction_out_mps
 
           MPSGraphTensor* castOutputTensor = nil;
 
-          if(reduction_type == "sum")
+          if(reduction_type == "sum") {
             castOutputTensor = [mpsGraph reductionSumWithTensor:castInputTensor
                                                            axes:axes
                                                            name:nil];
-          else if(reduction_type == "prod")
+          } else if(reduction_type == "prod") {
             castOutputTensor = [mpsGraph reductionProductWithTensor:castInputTensor
                                                                axes:axes
                                                                name:nil];
-          else if(reduction_type == "mean")
+          } else if(reduction_type == "mean") {
             castOutputTensor = [mpsGraph meanOfTensor:inputTensor
                                                  axes:axes
                                                  name:nil];
+          } else if(reduction_type == "count_nonzero") {
+            MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0
+                                                        dataType:MPSDataTypeFloat32];
+
+            MPSGraphTensor* nonZeros = [mpsGraph notEqualWithPrimaryTensor:castInputTensor
+                                                           secondaryTensor:zeros
+                                                                      name:nil];
+
+            castOutputTensor = [mpsGraph reductionSumWithTensor:nonZeros
+                                                           axes:axes
+                                                           name:nil];
+          }
 
           MPSGraphTensor* outputTensor = nil;
 
@@ -291,7 +303,7 @@ Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims){
                       c10::nullopt,
                       c10::nullopt);
 
-  reduction_out_mps(self, dims, false, self.scalar_type(), const_cast<Tensor&>(output_t), "sum", "count_nonzero_mps");
+  reduction_out_mps(self, dims, false, self.scalar_type(), const_cast<Tensor&>(output_t), "count_nonzero", "count_nonzero_mps");
 
   return output_t;
 }
