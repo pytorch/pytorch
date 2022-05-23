@@ -414,24 +414,41 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_,
   auto dst_byte_offset = dst.storage_offset() * dst.itemsize();
   id<MTLBuffer> destBuffer = __builtin_bit_cast(id<MTLBuffer>, dst.storage().data());
 
-  dispatch_sync(stream->queue(), ^() {
-    @autoreleasepool {
-      id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
-      id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
-
-      [blitEncoder copyFromBuffer:sourceBuffer
-                     sourceOffset:src_byte_offset
-                         toBuffer:destBuffer
-                destinationOffset:dst_byte_offset
-                             size:size];
-      [blitEncoder endEncoding];
-      if (non_blocking) {
-        stream->commit(true);
-      } else {
+  auto srcDType = getMPSDataType(src.scalar_type());
+  auto dstDType = getMPSDataType(dst.scalar_type());
+  auto srcShape = getMPSShape(src);
+  auto dstShape = getMPSShape(dst);
+  if (srcDType == dstDType) {
+    dispatch_sync(stream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
+        id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
+        [blitEncoder copyFromBuffer:sourceBuffer
+                      sourceOffset:0
+                          toBuffer:destBuffer
+                 destinationOffset:0
+                              size:size];
+        [blitEncoder endEncoding];
         stream->commitAndWait();
       }
+    });
+  } else {
+    @autoreleasepool {
+      id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
+      MPSGraph* mpsGraph = make_mps_graph();
+      MPSGraphTensor* srcTensor = at::native::mps::mpsGraphRankedPlaceHolder(mpsGraph, src);
+      MPSGraphTensorData* srcData = [[[MPSGraphTensorData alloc]
+                                      initWithMTLBuffer:sourceBuffer shape:srcShape dataType:srcDType]
+                                     autorelease];
+      MPSGraphTensorData* dstData = [[[MPSGraphTensorData alloc]
+                                      initWithMTLBuffer:destBuffer shape:dstShape dataType:dstDType]
+                                     autorelease];
+      MPSGraphTensor *resultTensor = [mpsGraph castTensor:srcTensor toType:dstDType name:@"cast"];
+      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{srcTensor: srcData};
+      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{resultTensor: dstData};
+      runMPSGraph(stream, mpsGraph, feeds, results);
     }
-  });
+  }
   return dst;
 }
 
