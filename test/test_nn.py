@@ -7962,6 +7962,9 @@ class TestNN(NNTestCase):
             mask[0, 1] = 1
             mask[1, 3] = 1
             mask[1, 4] = 1
+            # If mask is not left aligned
+            # We disable nested tensor
+            model.enable_nested_tensor = False
             result = model(encoder_input, src_key_padding_mask=mask)
             ref_output = perm_fn(torch.tensor([[[2.429026, 0.020793, -0.601741, -0.085642],
                                                 [2.428811, 0.021445, -0.601912, -0.084252]],
@@ -7978,7 +7981,7 @@ class TestNN(NNTestCase):
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
             # test case 2, multiple layers no norm
-            model = nn.TransformerEncoder(encoder_layer, 2).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 2, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -7996,7 +7999,7 @@ class TestNN(NNTestCase):
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
-            model = nn.TransformerEncoder(encoder_layer, 6).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 6, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -8017,7 +8020,7 @@ class TestNN(NNTestCase):
             # test case 3, multiple layers with norm
             # d_model = 4
             norm = nn.LayerNorm(4)
-            model = nn.TransformerEncoder(encoder_layer, 2, norm=norm).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 2, norm=norm, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -8035,7 +8038,7 @@ class TestNN(NNTestCase):
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
-            model = nn.TransformerEncoder(encoder_layer, 6, norm=norm).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 6, norm=norm, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
