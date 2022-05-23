@@ -603,6 +603,11 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
           inferAndAlloc(tv, alloc->shape(), expr_eval, options_, false));
       global_buffers.zero_init.push_back(false);
     }
+    // Remember the tensor buffer used for storing kernel profile
+    if (isEnabled(EnableOption::KernelProfile) &&
+        tv == kernel->profile().getBuffer()) {
+      global_buffers.profile_buffer = global_buffers.buffers.back();
+    }
   }
 
   return global_buffers;
@@ -1033,6 +1038,10 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       std::cout << "kernel" << fusion_id_ << " run in " << kernel_time_ms_
                 << " ms, achieved: " << gb_per_s << " GB/s" << std::endl;
     }
+  }
+
+  if (isEnabled(EnableOption::KernelProfile)) {
+    std::cout << kernel()->profile().toString(global_buffers.profile_buffer);
   }
 
   return allocated_outputs;

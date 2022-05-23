@@ -695,6 +695,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/lower_index.cpp",
     "torch/csrc/jit/codegen/cuda/lower_index_hoist.cpp",
     "torch/csrc/jit/codegen/cuda/lower_insert_syncs.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_instrument.cpp",
     "torch/csrc/jit/codegen/cuda/lower_loops.cpp",
     "torch/csrc/jit/codegen/cuda/lower_magic_zero.cpp",
     "torch/csrc/jit/codegen/cuda/lower_misaligned_vectorization.cpp",

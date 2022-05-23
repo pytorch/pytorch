@@ -964,6 +964,10 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   args.push_back("-DNDEBUG");
 #endif
 
+  if (isEnabled(EnableOption::KernelProfile)) {
+    args.push_back("-DPYTORCH_NVFUSER_PROFILE_KERNEL");
+  }
+
   const char* ptxas_opt_level = getenv("PYTORCH_NVFUSER_JIT_OPT_LEVEL");
   std::string jit_opt_level = "-O";
 

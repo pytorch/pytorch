@@ -336,6 +336,8 @@ static const char* expr_type2string(ExprType t) {
       return "IfThenElse";
     case ExprType::GridReduction:
       return "GridReduction";
+    case ExprType::GroupedGridReduction:
+      return "GroupedGridReduction";
     case ExprType::GridBroadcast:
       return "GridBroadcast";
     case ExprType::GridWelford:

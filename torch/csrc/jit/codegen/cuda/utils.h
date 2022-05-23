@@ -70,6 +70,7 @@ TORCH_CUDA_CU_API bool isDisabled(DisableOption option);
 //!
 enum class EnableOption {
   Complex, //! Enable complex support on python
+  KernelProfile //! Enable intra-kernel performance profiling
 };
 
 TORCH_CUDA_CU_API bool isEnabled(EnableOption option);

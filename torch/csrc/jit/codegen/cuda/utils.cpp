@@ -152,7 +152,7 @@ auto parseDisableOptions() {
 
 auto parseEnableOptions() {
   std::unordered_map<EnableOption, bool> options_map = {
-      {EnableOption::Complex, false}};
+      {EnableOption::Complex, false}, {EnableOption::KernelProfile, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_ENABLE")) {
     c10::string_view options_view(dump_options);
@@ -161,13 +161,15 @@ auto parseEnableOptions() {
       const auto token = options_view.substr(0, end_pos);
       if (token == "complex") {
         options_map[EnableOption::Complex] = true;
+      } else if (token == "kernel_profile") {
+        options_map[EnableOption::KernelProfile] = true;
       } else {
         TORCH_CHECK(
             false,
             "Invalid disable option: '",
             token,
             "'\nAvailable options:\n",
-            "\tcomplex");
+            "\tcomplex, kernel_profile");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)

@@ -1288,6 +1288,19 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     return flags.str();
   }
 
+  void addProfileArguments(ArgumentBuilder& func_args, const Expr* expr) {
+    if (isEnabled(EnableOption::KernelProfile) &&
+        kernel_->profile().isProfiled(expr)) {
+      const auto& buffer_indices =
+          kernel_->profile().getIndicesInProfileBuffer(expr);
+      auto buffer = kernel_->profile().getBuffer();
+      TORCH_INTERNAL_ASSERT(buffer != nullptr);
+      for (const auto& index : buffer_indices) {
+        func_args.arg(varName(buffer)).append("[").append(index).append("]");
+      }
+    }
+  }
+
   void handle(const kir::GridReduction* grop) final {
     TORCH_INTERNAL_ASSERT(grop->out()->isA<kir::TensorIndex>());
 
@@ -1344,6 +1357,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     func_args.arg(genCall(data_type, genInline(grop->init())));
     func_args.arg(genInline(grop->entrance_index()));
     func_args.arg(genInline(grop->entrances()));
+
+    addProfileArguments(func_args, grop);
 
     indent() << "reduction::gridReduce<" << template_args << ">(\n";
     indent() << kTab << func_args << ");\n";
@@ -1411,6 +1426,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     func_args.arg(genCall("LocalTuple", data_type, genInline(grop->init())));
     // reduction_op
     func_args.arg(genReductionOp(op_type, out->dtype()));
+
+    addProfileArguments(func_args, grop);
 
     indent() << kTab << func_args << ");\n";
   }
@@ -1483,6 +1500,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       func_args.arg(read_pred);
     }
 
+    addProfileArguments(func_args, grouped_grop);
+
     indent() << "reduction::gridReduceGroup<" << template_args << ">(\n";
     indent() << kTab << func_args << ");\n";
   }
@@ -1542,6 +1561,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     } else {
       func_args.arg(read_pred);
     }
+
+    addProfileArguments(func_args, grouped_grop);
 
     indent() << genFusedReductionName(ir_utils::getTvOutput(grouped_grop))
              << ".reduceGroup(\n";
