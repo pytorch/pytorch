@@ -1901,10 +1901,6 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
     )
 
 
-def _bool_return_reduction_meta(inp, dims):
-    return _reduction_meta(inp, dims, output_dtype=torch.bool)
-
-
 def _var_reduction_meta(inp, dims, *, correction):
     if utils.is_complex_dtype(inp.dtype):
         output_dtype = utils.corresponding_real_dtype(inp.dtype)
@@ -1956,17 +1952,6 @@ def _make_var_reduction_prim(name: str, impl_aten, doc):
     )
 
 
-def _make_bool_reduction_prim(name: str, impl_aten, doc):
-    """Creates a reduction prim that reduces to bool."""
-    return _make_prim(
-        schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType? output_dtype=None) -> Tensor",
-        meta=_bool_return_reduction_meta,
-        impl_aten=impl_aten,
-        return_type=RETURN_TYPE.NEW,
-        doc=doc,
-    )
-
-
 sum = _make_reduction_prim(
     name="sum",
     impl_aten=torch.sum,
@@ -1995,12 +1980,6 @@ amin = _make_reduction_prim(
     name="amin",
     impl_aten=torch.amin,
     doc=_amin_doc,
-)
-
-any = _make_bool_reduction_prim(
-    name="any",
-    impl_aten=torch.any,
-    doc="",
 )
 
 # TODO: layout, pin_memory, memory_format
