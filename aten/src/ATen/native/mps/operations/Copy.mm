@@ -317,6 +317,10 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_,
     src = src_.to(dst_.dtype()).expand_as(dst_).contiguous();
   } else {
     src = src_;
+    if (src.dtype() != dst_.dtype()) {
+      // Do datatype conversion on source device
+      src = src.to(dst_.dtype());
+    }
   }
 
   if (!dst_.is_contiguous()) {
