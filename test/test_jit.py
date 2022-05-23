@@ -1,136 +1,12 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["oncall: jit"]
 
-import torch
-
-# This is how we include tests located in test/jit/...
-# They are included here so that they are invoked when you call `test_jit.py`,
-# do not run these test files directly.
-from jit.test_tracer import TestTracer, TestMixTracingScripting  # noqa: F401
-from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
-from jit.test_type_sharing import TestTypeSharing  # noqa: F401
-from jit.test_logging import TestLogging  # noqa: F401
-from jit.test_backends import TestBackends, TestBackendsWithCompiler  # noqa: F401
-from jit.test_backend_nnapi import TestNnapiBackend  # noqa: F401
-from jit.test_list_dict import TestList, TestDict, TestNamedTuple, TestScriptDict, TestScriptList  # noqa: F401
-from jit.test_async import TestAsync  # noqa: F401
-from jit.test_data_parallel import TestDataParallel  # noqa: F401
-from jit.test_models import TestModels  # noqa: F401
-from jit.test_modules import TestModules  # noqa: F401
-from jit.test_autodiff import TestAutodiffJit  # noqa: F401
-from jit.test_autodiff_subgraph_slicing import TestAutodiffSubgraphSlicing  # noqa: F401
-from jit.test_custom_operators import TestCustomOperators  # noqa: F401
-from jit.test_export_modes import TestExportModes  # noqa: F401
-from jit.test_graph_rewrite_passes import TestGraphRewritePasses  # noqa: F401
-from jit.test_class_type import TestClassType  # noqa: F401
-from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
-from jit.test_ignore_context_manager import TestIgnoreContextManager  # noqa: F401
-from jit.test_symbolic_shape_analysis import TestSymbolicShapeAnalysis  # noqa: F401
-from jit.test_op_decompositions import TestOpDecompositions  # noqa: F401
-from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
-from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
-from jit.test_peephole import TestPeephole  # noqa: F401
-from jit.test_alias_analysis import TestAliasAnalysis  # noqa: F401
-from jit.test_save_load import TestSaveLoad, TestSaveLoadFlatbuffer  # noqa: F401
-from jit.test_save_load_for_op_version import TestSaveLoadForOpVersion  # noqa: F401
-from jit.test_module_containers import TestModuleContainers  # noqa: F401
-from jit.test_python_bindings import TestPythonBindings  # noqa: F401
-from jit.test_python_ir import TestPythonIr  # noqa: F401
-from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
-from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
-from jit.test_torchbind import TestTorchbind  # noqa: F401
-from jit.test_module_interface import TestModuleInterface  # noqa: F401
-from jit.test_onnx_export import TestONNXExport  # noqa: F401
-from jit.test_with import TestWith  # noqa: F401
-from jit.test_enum import TestEnum  # noqa: F401
-from jit.test_string_formatting import TestStringFormatting  # noqa: F401
-from jit.test_profiler import TestProfiler  # noqa: F401
-from jit.test_slice import TestSlice  # noqa: F401
-from jit.test_ignorable_args import TestIgnorableArgs  # noqa: F401
-from jit.test_hooks import TestHooks  # noqa: F401
-from jit.test_warn import TestWarn  # noqa: F401
-from jit.test_isinstance import TestIsinstance  # noqa: F401
-from jit.test_cuda import TestCUDA  # noqa: F401
-from jit.test_python_builtins import TestPythonBuiltinOP  # noqa: F401
-from jit.test_typing import TestTyping  # noqa: F401
-from jit.test_hash import TestHash  # noqa: F401
-from jit.test_complex import TestComplex  # noqa: F401
-from jit.test_jit_utils import TestJitUtils  # noqa: F401
-from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
-from jit.test_types import TestTypesAndAnnotation  # noqa: F401
-from jit.test_misc import TestMisc  # noqa: F401
-from jit.test_upgraders import TestUpgraders  # noqa: F401
-from jit.test_pdt import TestPDT  # noqa: F401
-from jit.test_tensor_creation_ops import TestTensorCreationOps  # noqa: F401
-from jit.test_module_apis import TestModuleAPIs  # noqa: F401
-from jit.test_script_profile import TestScriptProfile  # noqa: F401
-from jit.test_convert_activation import TestFunctionalToInplaceActivation, TestInplaceToFunctionalActivation  # noqa: F401
-from jit.test_parametrization import TestParametrization  # noqa: F401
-from jit.test_attr import TestGetDefaultAttr  # noqa: F401
-from jit.test_aten_pow import TestAtenPow  # noqa: F401
-from jit.test_optimize_for_mobile_preserve_debug_info import TestOptimizeForMobilePreserveDebugInfo  # noqa: F401
-from jit.test_union import TestUnion  # noqa: F401
-from jit.test_legacy_upgraders import TestLegacyUpgraders  # noqa: F401
-from jit.test_models import MnistNet
-from jit.test_batch_mm import TestBatchMM  # noqa: F401
-from jit.test_dtype_analysis import TestDtypeAnalysis, TestDtypeCustomRulesCPU  # noqa: F401
-from jit.test_device_analysis import TestDeviceAnalysis  # noqa: F401
-from jit.test_dce import TestDCE  # noqa: F401
-from jit.test_sparse import TestSparse  # noqa: F401
-from jit.test_tensor_methods import TestTensorMethods  # noqa: F401
-
-# Torch
-from torch import Tensor
-from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
-from torch.autograd import Variable
-from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
-from torch.nn.utils.rnn import PackedSequence
-from torch.testing import FileCheck, make_tensor
-import torch.autograd.profiler
-import torch.cuda
-import torch.jit
-import torch.jit._logging
-import torch.jit.frontend
-import torch.nn as nn
-import torch.nn.functional as F
-
-# Testing utils
-from torch.testing._internal import jit_utils
-from torch.testing._internal.common_jit import check_against_reference
-from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
-    suppress_warnings, BUILD_WITH_CAFFE2, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
-    freeze_rng_state, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
-    enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
-    skipIfCrossRef, IS_MACOS
-from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
-    _trace, do_input_map, get_execution_plan, make_global, \
-    execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
-    RUN_CUDA
-from torch.testing._internal.jit_metaprogramming_utils import (
-    get_script_args,
-    create_input, unpack_variables,
-    additional_module_tests, EXCLUDE_SCRIPT_MODULES,
-    get_nn_module_name_from_kwargs, get_nn_mod_test_name, script_method_template)
-
-from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
-
-# For testing truediv in python 2
-from torch.testing._internal.test_module.future_div import div_int_future, div_float_future
-from torch.testing._internal.test_module.no_future_div import div_int_nofuture, div_float_nofuture
-
-# Standard library
-from collections import defaultdict, namedtuple, OrderedDict
-from copy import deepcopy
-from itertools import product
-from textwrap import dedent
-from typing import List, Dict, NamedTuple, Optional, Tuple, Union
 import copy
 import functools
 import inspect
 import io
 import itertools
 import math
-import numpy as np
 import os
 import pickle
 import pickletools
@@ -145,6 +21,194 @@ import typing
 import unittest
 import warnings
 import zipfile
+
+# Standard library
+from collections import OrderedDict, defaultdict, namedtuple
+from copy import deepcopy
+from itertools import product
+from textwrap import dedent
+from typing import Dict, List, NamedTuple, Optional, Tuple, Union
+
+import numpy as np
+from jit.test_alias_analysis import TestAliasAnalysis  # noqa: F401
+from jit.test_async import TestAsync  # noqa: F401
+from jit.test_aten_pow import TestAtenPow  # noqa: F401
+from jit.test_attr import TestGetDefaultAttr  # noqa: F401
+from jit.test_autodiff import TestAutodiffJit  # noqa: F401
+from jit.test_autodiff_subgraph_slicing import TestAutodiffSubgraphSlicing  # noqa: F401
+from jit.test_backend_nnapi import TestNnapiBackend  # noqa: F401
+from jit.test_backends import TestBackends, TestBackendsWithCompiler  # noqa: F401
+from jit.test_batch_mm import TestBatchMM  # noqa: F401
+from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
+from jit.test_class_type import TestClassType  # noqa: F401
+from jit.test_complex import TestComplex  # noqa: F401
+from jit.test_convert_activation import (  # noqa: F401
+    TestFunctionalToInplaceActivation,
+    TestInplaceToFunctionalActivation,
+)
+from jit.test_cuda import TestCUDA  # noqa: F401
+from jit.test_custom_operators import TestCustomOperators  # noqa: F401
+from jit.test_data_parallel import TestDataParallel  # noqa: F401
+from jit.test_dce import TestDCE  # noqa: F401
+from jit.test_device_analysis import TestDeviceAnalysis  # noqa: F401
+from jit.test_dtype_analysis import (  # noqa: F401
+    TestDtypeAnalysis,
+    TestDtypeCustomRulesCPU,
+)
+from jit.test_enum import TestEnum  # noqa: F401
+from jit.test_export_modes import TestExportModes  # noqa: F401
+from jit.test_freezing import (  # noqa: F401
+    TestFreezing,
+    TestFrozenOptimizations,
+    TestMKLDNNReinplacing,
+)
+from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
+from jit.test_graph_rewrite_passes import TestGraphRewritePasses  # noqa: F401
+from jit.test_hash import TestHash  # noqa: F401
+from jit.test_hooks import TestHooks  # noqa: F401
+from jit.test_ignorable_args import TestIgnorableArgs  # noqa: F401
+from jit.test_ignore_context_manager import TestIgnoreContextManager  # noqa: F401
+from jit.test_isinstance import TestIsinstance  # noqa: F401
+from jit.test_jit_utils import TestJitUtils  # noqa: F401
+from jit.test_legacy_upgraders import TestLegacyUpgraders  # noqa: F401
+from jit.test_list_dict import (  # noqa: F401
+    TestDict,
+    TestList,
+    TestNamedTuple,
+    TestScriptDict,
+    TestScriptList,
+)
+from jit.test_logging import TestLogging  # noqa: F401
+from jit.test_misc import TestMisc  # noqa: F401
+from jit.test_models import TestModels  # noqa: F401
+from jit.test_models import MnistNet
+from jit.test_module_apis import TestModuleAPIs  # noqa: F401
+from jit.test_module_containers import TestModuleContainers  # noqa: F401
+from jit.test_module_interface import TestModuleInterface  # noqa: F401  # noqa: F401
+from jit.test_modules import TestModules  # noqa: F401
+from jit.test_op_decompositions import TestOpDecompositions  # noqa: F401
+from jit.test_optimize_for_mobile_preserve_debug_info import (  # noqa: F401
+    TestOptimizeForMobilePreserveDebugInfo,
+)
+from jit.test_parametrization import TestParametrization  # noqa: F401
+from jit.test_pdt import TestPDT  # noqa: F401
+from jit.test_peephole import TestPeephole  # noqa: F401
+from jit.test_profiler import TestProfiler  # noqa: F401
+from jit.test_python_bindings import TestPythonBindings  # noqa: F401
+from jit.test_python_builtins import TestPythonBuiltinOP  # noqa: F401
+from jit.test_python_ir import TestPythonIr  # noqa: F401
+from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
+from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
+from jit.test_save_load import TestSaveLoad, TestSaveLoadFlatbuffer  # noqa: F401
+from jit.test_save_load_for_op_version import TestSaveLoadForOpVersion  # noqa: F401
+from jit.test_script_profile import TestScriptProfile  # noqa: F401
+from jit.test_scriptmod_ann import (  # noqa: F401
+    TestScriptModuleInstanceAttributeTypeAnnotation,
+)
+from jit.test_slice import TestSlice  # noqa: F401
+from jit.test_sparse import TestSparse  # noqa: F401
+from jit.test_string_formatting import TestStringFormatting  # noqa: F401
+from jit.test_symbolic_shape_analysis import TestSymbolicShapeAnalysis  # noqa: F401
+from jit.test_tensor_creation_ops import TestTensorCreationOps  # noqa: F401
+from jit.test_tensor_methods import TestTensorMethods  # noqa: F401
+from jit.test_torchbind import TestTorchbind  # noqa: F401
+
+# This is how we include tests located in test/jit/...
+# They are included here so that they are invoked when you call `test_jit.py`,
+# do not run these test files directly.
+from jit.test_tracer import TestMixTracingScripting, TestTracer  # noqa: F401
+from jit.test_type_sharing import TestTypeSharing  # noqa: F401
+from jit.test_types import TestTypesAndAnnotation  # noqa: F401
+from jit.test_typing import TestTyping  # noqa: F401
+from jit.test_union import TestUnion  # noqa: F401
+from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
+from jit.test_upgraders import TestUpgraders  # noqa: F401
+from jit.test_warn import TestWarn  # noqa: F401
+from jit.test_with import TestWith  # noqa: F401
+
+import torch
+import torch.autograd.profiler
+import torch.cuda
+import torch.jit
+import torch.jit._logging
+import torch.jit.frontend
+import torch.nn as nn
+import torch.nn.functional as F
+
+# Torch
+from torch import Tensor
+from torch._C import BoolType, TensorType, _propagate_shapes, parse_ir
+from torch.autograd import Variable
+from torch.jit.annotations import (  # noqa: F401
+    Any,
+    BroadcastingList2,
+    BroadcastingList3,
+)
+from torch.nn.utils.rnn import PackedSequence
+from torch.testing import FileCheck, make_tensor
+
+# Testing utils
+from torch.testing._internal import jit_utils
+from torch.testing._internal.common_jit import check_against_reference
+from torch.testing._internal.common_nn import (
+    criterion_tests,
+    module_tests,
+    new_module_tests,
+)
+from torch.testing._internal.common_utils import (
+    BUILD_WITH_CAFFE2,
+    GRAPH_EXECUTOR,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
+    TEST_MKL,
+    TEST_WITH_UBSAN,
+    ProfilingMode,
+    TemporaryFileName,
+    TestCase,
+    enable_profiling_mode_for_profiling_tests,
+    freeze_rng_state,
+    num_profiled_runs,
+    run_tests,
+    set_default_dtype,
+    skipIfCompiledWithoutNumpy,
+    skipIfCrossRef,
+    slowTest,
+    suppress_warnings,
+)
+from torch.testing._internal.jit_metaprogramming_utils import (
+    EXCLUDE_SCRIPT_MODULES,
+    additional_module_tests,
+    create_input,
+    get_nn_mod_test_name,
+    get_nn_module_name_from_kwargs,
+    get_script_args,
+    script_method_template,
+    unpack_variables,
+)
+from torch.testing._internal.jit_utils import (
+    RUN_CUDA,
+    JitTestCase,
+    _inline_everything,
+    _tmp_donotuse_dont_inline_everything,
+    _trace,
+    disable_autodiff_subgraph_inlining,
+    do_input_map,
+    enable_cpu_fuser,
+    execWrapper,
+    get_execution_plan,
+    make_global,
+)
+
+# For testing truediv in python 2
+from torch.testing._internal.test_module.future_div import (
+    div_float_future,
+    div_int_future,
+)
+from torch.testing._internal.test_module.no_future_div import (
+    div_float_nofuture,
+    div_int_nofuture,
+)
 
 
 def canonical(graph):
@@ -3904,6 +3968,7 @@ def foo(x):
 
     def test_interpreter_fuzz(self):
         import builtins
+
         # This test generates random tree-like programs to fuzz test
         # that the interpreter does not have a bug in its stack manipulation
         # code. An assert in that code ensures individual operators are
@@ -9836,7 +9901,7 @@ dedent """
             self.checkModule(lstm, [torch.ones(2, 2)])
 
     def test_script_pad_sequence_pack_sequence(self):
-        from torch.nn.utils.rnn import pad_sequence, pack_sequence, pad_packed_sequence
+        from torch.nn.utils.rnn import pack_sequence, pad_packed_sequence, pad_sequence
 
         def pad_sequence_func(tensor_list, batch_first=False, padding_value=0.0):
             # type: (List[Tensor], bool, float) -> Tensor
@@ -10253,7 +10318,7 @@ dedent """
         self.assertEqual(out, [1, 1])
 
     def test_ntuple_builtins(self):
-        from torch.nn.modules.utils import _single, _pair, _triple, _quadruple
+        from torch.nn.modules.utils import _pair, _quadruple, _single, _triple
 
         def test_ints():
             return _single(1), _pair(2), _triple(3), _quadruple(4)
@@ -16442,8 +16507,9 @@ for test in criterion_tests:
 
 if __name__ == '__main__':
     run_tests()
-    import test_jit_py3
+    # Below this line are not actually run
     import jit.test_module_interface
+    import test_jit_py3
     suite = unittest.findTestCases(test_jit_py3)
     unittest.TextTestRunner().run(suite)
     suite = unittest.findTestCases(jit.test_module_interface)
