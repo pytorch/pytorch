@@ -21,7 +21,7 @@ namespace at {
 #else
                 AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "beta_cuda", [&]() {
                     gpu_kernel_with_scalars(iterator, []GPU_LAMBDA(scalar_t x, scalar_t y) -> scalar_t {
-                        return beta_forward<scalar_t, true>(x, y);
+                        return beta<scalar_t, true>(x, y);
                     });
                 });
 #endif

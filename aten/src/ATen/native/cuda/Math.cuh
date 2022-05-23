@@ -1266,7 +1266,7 @@ const auto erfcx_string = jiterator_stringify(
 ); // erfcx_string
 
 const auto beta_string = jiterator_stringify(
-    template<typename T> T beta_forward(T x, T y);
+    template<typename T> T beta(T x, T y);
     template<typename T> T beta_negative(int x, T y);
     template<typename T> T gamma_forward(T x);
     template<typename T> T ln_beta_asymptotic_expansion(T x, T y, int *sign);
@@ -1281,7 +1281,7 @@ const auto beta_string = jiterator_stringify(
      *  See NOTICE for license.
      */
     template<typename T>
-    T beta_forward(T x, T y) {
+    T beta(T x, T y) {
         int sign = 1;
 
         if (x <= T(0.0)) {
@@ -1356,7 +1356,7 @@ const auto beta_string = jiterator_stringify(
      */
     template<typename T>
     T beta_negative(int x, T y) {
-        if (y == int(y) && 1 - x - y > 0) return (int(y) % 2 == 0 ? 1 : -1) * beta_forward(1 - x - y, y);
+        if (y == int(y) && 1 - x - y > 0) return (int(y) % 2 == 0 ? 1 : -1) * beta(1 - x - y, y);
 
         return INFINITY;
     }
