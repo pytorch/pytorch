@@ -108,12 +108,19 @@ bool cudaArchGuardShouldSkip(int required_major, int required_minor) {
                  << REQUIRED_MINOR << " to run.\n";                           \
   }
 
+#define NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(                    \
+    REQUIRED_MAJOR, REQUIRED_MINOR, COMPILE_FUSION)              \
+  if (cudaArchGuardShouldSkip(REQUIRED_MAJOR, REQUIRED_MINOR)) { \
+    ASSERT_ANY_THROW(COMPILE_FUSION);                            \
+    return;                                                      \
+  } else {                                                       \
+    COMPILE_FUSION;                                              \
+  }
+
 } // namespace
 
 // MMA unit test for a single instruction tile. VoltaTT
 TEST_F(NVFuserTest, FusionVoltaMMATT_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(7, 0);
-
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -195,7 +202,8 @@ TEST_F(NVFuserTest, FusionVoltaMMATT_CUDA) {
   auto t1 = at::randn({4, 16}, options);
 
   FusionExecutor fe;
-  fe.compileFusion(&fusion, {t0, t1});
+  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+      7, 0, fe.compileFusion(&fusion, {t0, t1}));
   auto cg_outputs = fe.runFusion({t0, t1});
 
   auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat));
@@ -205,8 +213,6 @@ TEST_F(NVFuserTest, FusionVoltaMMATT_CUDA) {
 
 // MMA unit test for a single instruction tile. VoltaTN
 TEST_F(NVFuserTest, FusionVoltaMMATN_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(7, 0);
-
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -261,7 +267,8 @@ TEST_F(NVFuserTest, FusionVoltaMMATN_CUDA) {
   auto t1 = at::randn({16, 4}, options);
 
   FusionExecutor fe;
-  fe.compileFusion(&fusion, {t0, t1});
+  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+      7, 0, fe.compileFusion(&fusion, {t0, t1}));
   auto cg_outputs = fe.runFusion({t0, t1});
   auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
   testValidate(&fusion, cg_outputs, {t0, t1}, {tref}, __LINE__, __FILE__);
@@ -269,7 +276,6 @@ TEST_F(NVFuserTest, FusionVoltaMMATN_CUDA) {
 
 // MMA unit test for a single instruction tile. VoltaNT
 TEST_F(NVFuserTest, FusionVoltaMMANT_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(7, 0);
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -328,7 +334,8 @@ TEST_F(NVFuserTest, FusionVoltaMMANT_CUDA) {
   auto t1 = at::randn({4, 16}, options);
 
   FusionExecutor fe;
-  fe.compileFusion(&fusion, {t0, t1});
+  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+      7, 0, fe.compileFusion(&fusion, {t0, t1}));
   auto cg_outputs = fe.runFusion({t0, t1});
   auto tref = t0.t().to(at::kFloat).matmul(t1.to(at::kFloat));
   testValidate(&fusion, cg_outputs, {t0, t1}, {tref}, __LINE__, __FILE__);
@@ -338,8 +345,6 @@ TEST_F(NVFuserTest, FusionVoltaMMANT_CUDA) {
 //  This is the only example that is fully manual,
 //    the rest of them are facilitated by gemm utils.
 TEST_F(NVFuserTest, FusionVoltaMatMulTT_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(7, 0);
-
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -579,7 +584,8 @@ TEST_F(NVFuserTest, FusionVoltaMatMulTT_CUDA) {
   auto t1 = at::randn({K, N}, options);
 
   FusionExecutor fe;
-  fe.compileFusion(&fusion, {t0, t1});
+  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+      7, 0, fe.compileFusion(&fusion, {t0, t1}));
   auto cg_outputs = fe.runFusion({t0, t1});
   auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat));
 
@@ -588,8 +594,6 @@ TEST_F(NVFuserTest, FusionVoltaMatMulTT_CUDA) {
 
 // Gemm test for Volta MMA: TN
 TEST_F(NVFuserTest, FusionVoltaMatMulTN_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(7, 0);
-
   Fusion fusion;
   FusionGuard fg(&fusion);
   int M = 120, N = 264, K = 56;
@@ -729,7 +733,8 @@ TEST_F(NVFuserTest, FusionVoltaMatMulTN_CUDA) {
   auto t1 = at::randn({N, K}, options);
 
   FusionExecutor fe;
-  fe.compileFusion(&fusion, {t0, t1});
+  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+      7, 0, fe.compileFusion(&fusion, {t0, t1}));
   auto cg_outputs = fe.runFusion({t0, t1});
   auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat).t());
   TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
@@ -737,8 +742,6 @@ TEST_F(NVFuserTest, FusionVoltaMatMulTN_CUDA) {
 
 // Gemm test for Volta MMA: NT
 TEST_F(NVFuserTest, FusionVoltaMatMulNT_CUDA) {
-  NVFUSER_TEST_CUDA_ARCH_GUARD(7, 0);
-
   Fusion fusion;
   FusionGuard fg(&fusion);
   int M = 240, N = 320, K = 136;
@@ -883,7 +886,8 @@ TEST_F(NVFuserTest, FusionVoltaMatMulNT_CUDA) {
   auto t1 = at::randn({K, N}, options);
 
   FusionExecutor fe;
-  fe.compileFusion(&fusion, {t0, t1});
+  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+      7, 0, fe.compileFusion(&fusion, {t0, t1}));
   auto cg_outputs = fe.runFusion({t0, t1});
   auto tref = t0.to(at::kFloat).t().matmul(t1.to(at::kFloat));
 

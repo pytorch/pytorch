@@ -888,6 +888,11 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
     int id,
     c10::optional<int> opt_block_size) {
   FUSER_PERF_SCOPE("executor_utils::NVRTC");
+  if (isDisabled(DisableOption::ArchCheck)) {
+    TORCH_WARN(
+        "NVFuser Compile: arch check disabled, should not compile any kernel");
+  }
+
   initializeCudaContext();
 
   std::stringstream ptxas_log;
@@ -1212,6 +1217,10 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
       &(compiled_kernel_.function),
       compiled_kernel_.module,
       lowered_kernel_name));
+
+  TORCH_CHECK(
+      !isDisabled(DisableOption::ArchCheck),
+      "NVFuser Compile: arch check disabled, should not return any compiled kernel");
 
   return {compiled_kernel_, ptxas_log.str()};
 }

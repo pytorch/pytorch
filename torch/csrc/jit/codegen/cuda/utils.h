@@ -53,6 +53,7 @@ TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
 //! These can be set through the `PYTORCH_NVFUSER_DISABLE` environment variable
 //!
 enum class DisableOption {
+  ArchCheck, //! Disable hardware-specific checks to enable cross arch debug
   Fallback, //! Disable fallback
   Fma, //! Disable FMA instructions
   IndexHoist, //! Disable index hoisting

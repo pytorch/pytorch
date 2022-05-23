@@ -105,6 +105,7 @@ auto parseDebugDumpOptions() {
 
 auto parseDisableOptions() {
   std::unordered_map<DisableOption, bool> options_map = {
+      {DisableOption::ArchCheck, false},
       {DisableOption::Fallback, false},
       {DisableOption::Fma, false},
       {DisableOption::IndexHoist, false},
@@ -117,7 +118,9 @@ auto parseDisableOptions() {
     while (!options_view.empty()) {
       const auto end_pos = options_view.find_first_of(',');
       const auto token = options_view.substr(0, end_pos);
-      if (token == "fallback") {
+      if (token == "arch_check") {
+        options_map[DisableOption::ArchCheck] = true;
+      } else if (token == "fallback") {
         options_map[DisableOption::Fallback] = true;
       } else if (token == "fma") {
         options_map[DisableOption::Fma] = true;
@@ -135,7 +138,7 @@ auto parseDisableOptions() {
             "Invalid disable option: '",
             token,
             "'\nAvailable options:\n",
-            "\tfallback, fma, index_hoist, nvtx, predicate_elimination\n",
+            "\tarch_check, fallback, fma, index_hoist, nvtx, predicate_elimination\n",
             "unroll_with_rng");
       }
       options_view = (end_pos != c10::string_view::npos)
