@@ -434,9 +434,9 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_,
     });
   } else {
     @autoreleasepool {
-      id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
+      stream->commandBuffer();
       MPSGraph* mpsGraph = make_mps_graph();
-      MPSGraphTensor* srcTensor = at::native::mps::mpsGraphRankedPlaceHolder(mpsGraph, src);
+      MPSGraphTensor* srcTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, src);
       MPSGraphTensorData* srcData = [[[MPSGraphTensorData alloc]
                                       initWithMTLBuffer:sourceBuffer shape:srcShape dataType:srcDType]
                                      autorelease];
