@@ -47,7 +47,8 @@ def _is_tensor_constructor(func: OpOverload):
 
 # Similar to `MetaConverter`, this is a class for converting
 # multiple tensors into fake tensors which share the same view/storage
-# structure.
+# structure. Like `MetaConverter`, it will keep alive all
+# tensors that are converted to FakeTensors.
 class FakeTensorConverter(MetaConverter):
     def __init__(self):
         self.tensor_memo = {}
@@ -65,17 +66,19 @@ class FakeTensorConverter(MetaConverter):
         return self.fake_tensor(t, device)
 
 
-# We keep one instantiation of  `fale+te`
-# with torch_enable_mode(FakeTensorMode)
+# We keep one instantiation of `fake_tensor_converter` active
+# for the duration of `with torch_enable_mode(FakeTensorMode)`.
+# This allows accurate storage aliasing across invocation of
+# different operators. While this will keep all freshly allocated
+# tensors alive during `FakeTensorMode`, there will no be no
+# new allocations of Tensors which have non-meta storage so
+# memory should not significantly incraese.
 fake_tensor_converter = None
-# if someone invokes `FakeTensorMode`
-# multiple times, we should only clear the fake tensor converter
-# when the last one clears
+
+# if someone invokes `FakeTensorMode` multiple times, we should
+# only clear the fake tensor converter when all modes are done
 active_fake_tensor_modes = 0
 
-def get_tensor_converter():
-    global fake_tensor_converter
-    return fake_tensor_converter
 
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
