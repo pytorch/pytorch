@@ -559,6 +559,14 @@ void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
       });
 }
 
+static void gamma_kernel(TensorIteratorBase& iterator) {
+    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iterator.common_dtype(), "gamma_cpu", [&]() {
+        cpu_kernel(iterator, [=](scalar_t self) -> scalar_t {
+            return std::tgamma(self);
+        });
+    });
+}
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
