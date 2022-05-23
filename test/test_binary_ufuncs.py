@@ -1759,7 +1759,7 @@ class TestBinaryUfuncs(TestCase):
             # NOTE: pow has fast-path when base is 1 which supports
             # ComplexHalf
             will_raise_error = torch.device(device).type == 'cpu' and \
-                                dtype is torch.half and base != (1 + 0j)
+                               dtype is torch.half and base != (1 + 0j)
             if will_raise_error:
                 with self.assertRaisesRegex(RuntimeError, "not implemented for 'ComplexHalf'"):
                     self._test_pow(base, first_exp)
