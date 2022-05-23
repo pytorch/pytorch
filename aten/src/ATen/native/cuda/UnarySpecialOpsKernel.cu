@@ -374,6 +374,22 @@ void entr_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
+const char gamma_name[] = "gamma";
+
+void gamma_kernel_cuda(TensorIteratorBase& iterator) {
+#if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "gamma_cuda", [&]() {
+        jitted_gpu_kernel<gamma_name, scalar_t, scalar_t, 1>(iterator, gamma_string);
+    });
+#else
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "gamma_cuda", [&]() {
+        gpu_kernel(iterator, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
+            return std::tgamma(a);
+        });
+    });
+#endif
+}
+
 REGISTER_DISPATCH(exp2_stub, &exp2_kernel_cuda);
 REGISTER_DISPATCH(i0_stub, &i0_kernel_cuda);
 REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel_cuda);
@@ -390,6 +406,7 @@ REGISTER_DISPATCH(special_entr_stub, &entr_kernel_cuda);
 REGISTER_DISPATCH(special_ndtri_stub, &ndtri_kernel_cuda);
 REGISTER_DISPATCH(special_log_ndtr_stub, &log_ndtr_kernel_cuda);
 REGISTER_DISPATCH(special_erfcx_stub, &erfcx_kernel_cuda);
+REGISTER_DISPATCH(special_gamma_stub, &gamma_kernel_cuda);
 
 } // namespace native
 } // namespace at
