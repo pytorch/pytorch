@@ -16,9 +16,6 @@ from functools import reduce, partial
 from operator import mul
 from collections import OrderedDict
 from tempfile import NamedTemporaryFile
-import sys
-import os
-import subprocess
 
 import torch
 
@@ -46,8 +43,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMps,\
     suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
-    parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype, IS_WINDOWS, \
-    slowTest
+    parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
@@ -15093,65 +15089,6 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(inp.grad, torch.zeros_like(inp))
         self.assertEqual(unpool_out, torch.zeros_like(unpool_out))
-
-    @slowTest
-    @onlyNativeDeviceTypes
-    @parametrize_test("module_name,module_size,output_size,test_index,should_error", [
-        subtest(('MaxUnpool2d', (2, 2), (1, 3, 4, 5), -1, True), name='case1'),
-        subtest(('MaxUnpool2d', (2, 2), (1, 3, 4, 5), 2 * 2 * 4 * 5, True), name='case2'),
-        subtest(('MaxUnpool2d', (2, 2), (1, 3, 4, 5), (2 * 2 * 4 * 5) - 1, False), name='case3'),
-        subtest(('MaxUnpool2d', (2, 3), (2, 1, 4, 2), 2 * 3 * 4 * 2, True), name='case4'),
-        subtest(('MaxUnpool2d', (2, 3), (2, 1, 4, 2), (2 * 3 * 4 * 2) - 1, False), name='case5'),
-
-        subtest(('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), -1, True), name='case6'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), 2 * 2 * 2 * 3 * 4 * 5, True), name='case7'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), (2 * 2 * 2 * 3 * 4 * 5) - 1, False), name='case8'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), 2 * 2 * 2 * 3 * 4 * 1, True), name='case9'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), (2 * 2 * 2 * 3 * 4 * 1) - 1, False), name='case10'),
-    ])
-    def test_MaxUnpool_index_errors(self, device, module_name, module_size, output_size, test_index, should_error):
-        # NOTE: CUDA tests need to be run in a subprocess because they cause device asserts
-        if torch.device(device).type == 'cuda':
-            error_msgs = {
-                'MaxUnpool2d': b'Assertion `maxind >= 0 && maxind < outputImageSize` failed',
-                'MaxUnpool3d': b'Assertion `index >= 0 && index < outputImageSize` failed'}
-
-            script = f'''
-import torch
-unpool = torch.nn.{module_name}({module_size}).to('{device}')
-output = torch.rand({output_size}, dtype=torch.float32, device='{device}')
-indices = torch.zeros({output_size}, dtype=torch.int64, device='{device}')
-indices.flatten()[0] = {test_index}
-
-unpool(output, indices)
-'''
-            p = subprocess.run(
-                [sys.executable, '-c', script],
-                cwd=os.path.dirname(os.path.realpath(__file__)),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-
-            if should_error:
-                self.assertIn(
-                    error_msgs[module_name],
-                    p.stderr)
-            else:
-                self.assertNotIn(
-                    error_msgs[module_name],
-                    p.stderr)
-        else:
-            module_class = getattr(torch.nn, module_name)
-            unpool = module_class(module_size).to(device)
-            output = torch.rand(output_size, dtype=torch.float32, device=device)
-            indices = torch.zeros(output_size, dtype=torch.int64, device=device)
-            indices.flatten()[0] = test_index
-
-            if should_error:
-                with self.assertRaisesRegex(RuntimeError, r'Found an invalid max index:'):
-                    unpool(output, indices)
-            else:
-                unpool(output, indices)
 
     @onlyNativeDeviceTypes
     def test_AdaptiveMaxPool_zero_batch_dim(self, device):
