@@ -810,14 +810,6 @@ class TestSparseCSR(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"size \(16, 16\) with block size \(5, 5\)"):
                 block_t = t.to_sparse_bsr((5, 5))
 
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_sparse_csr_from_dense_convert_error(self, device, dtype):
-        size = (4, 2, 4)
-        dense = make_tensor(size, dtype=dtype, device=device)
-
-        with self.assertRaisesRegex(RuntimeError, "Only 2D"):
-            sparse = dense.to_sparse_csr()
-
     # TODO: Support auto generation of device check for sparse tensors
     # See: https://github.com/pytorch/pytorch/issues/59058
     @onlyCUDA
@@ -2176,17 +2168,12 @@ class TestSparseCSR(TestCase):
 
         def _test_matrix(dense, layout, pt_matrix):
             sp_matrix = self._construct_sp_matrix(dense, layout)
-            print("dense: ", dense, " layout: ", layout, " pt_matrix: ", pt_matrix, " sp_matrix: ", sp_matrix)
 
             compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[layout]
 
             self.assertEqual(layout, pt_matrix.layout)
             self.assertEqual(sp_matrix.shape, pt_matrix.shape)
-            print("compressed_indices_mth(pt_matrix): ", compressed_indices_mth(pt_matrix))
-            print("sp_matrix.indptr: ", sp_matrix.indptr)
             self.assertEqual(torch.tensor(sp_matrix.indptr, dtype=torch.int64), compressed_indices_mth(pt_matrix))
-            print("plain_indices_mth(pt_matrix): ", plain_indices_mth(pt_matrix))
-            print("sp_matrix.indices: ", torch.tensor(sp_matrix.indices, dtype=torch.int64))
             self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
             self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 
@@ -2196,11 +2183,9 @@ class TestSparseCSR(TestCase):
             pt_matrix = self._convert_to_layout(dense, layout)
             _test_matrix(dense, layout, pt_matrix)
 
-            print("dense: ", dense, " pt_matrix: ", pt_matrix, " pt_matrix.to_dense(): ", pt_matrix.to_dense())
             self.assertEqual(dense, pt_matrix.to_dense())
-            import sys; sys.exit(1)
 
-        if layout is torch.sparse_bsr:
+        if layout in [torch.sparse_bsr, torch.sparse_csc]:
             # TODO: Remove this once support has been enabled
             return
 
@@ -2240,9 +2225,6 @@ class TestSparseCSR(TestCase):
             nnz = shape[0] * shape[1] // 2
             dense = torch.randn(shape).relu()
             sparse = dense.to_sparse_csr()
-            print("dense: ", dense)
-            print("sparse: ", sparse)
-            import sys; sys.exit(1)
             # sparse, _, _ = self.genSparseTensor(shape, sparse_dim, nnz, coalesced, device, dtype)
             sp_matrix = self._construct_sp_matrix(sparse, layout)
             pt_matrix = self._convert_to_layout(sparse, layout)

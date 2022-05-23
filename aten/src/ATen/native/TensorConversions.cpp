@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <iostream>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Optional.h>
 #include <ATen/quantized/Quantizer.h>
@@ -626,7 +625,6 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   auto not_mask = _tile_tensor((self != 0), blocksize);
   // Find tiles that have at least 1 non-zero value in them.
   not_mask = not_mask.any(-1).any(-1);
-  std::cout << "not_mask: " << not_mask << std::endl;
   Tensor col_indices;
   Tensor row_indices;
   std::tie(col_indices, row_indices) = _not_mask_to_col_row_indices(not_mask);
@@ -713,8 +711,6 @@ Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
 
 Tensor coo_to_sparse_csr(const Tensor& self) {
   auto coalesced_self = self.coalesce();
-  std::cout << "coalesced_self.indices().sizes(): " << 
-    coalesced_self.indices().sizes() << std::endl;
   auto row_indices = coalesced_self.indices()[0];
   bool out_int32 = (row_indices.scalar_type() == at::kInt);
   auto crow_indices = at::_convert_indices_from_coo_to_csr(
@@ -763,9 +759,6 @@ void convert_indices_from_coo_to_csr_cpu(
     const Tensor& result,
     const Tensor& input,
     const int64_t size) {
-  std::cout << "result.sizes(): " << result.sizes() << std::endl;
-  std::cout << "input.sizes(): " << input.sizes() << std::endl;
-  std::cout << "size: " << size << std::endl;
   int64_t numel = input.numel();
   const input_t* data_in = input.data_ptr<input_t>();
   output_t* data_out = result.data_ptr<output_t>();
