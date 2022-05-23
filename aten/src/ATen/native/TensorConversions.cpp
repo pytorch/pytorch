@@ -327,22 +327,25 @@ Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
   if (tensor.layout() == c10::kSparse) {
     return tensor._to_dense(dtype);
   }
-  if (tensor.layout() == c10::kSparseCsr || tensor.layout() == c10::kSparseCsc || tensor.layout() == c10::kSparseBsr) {
+  if (tensor.layout() == c10::kSparseCsr ||
+      tensor.layout() == c10::kSparseCsc ||
+      tensor.layout() == c10::kSparseBsr) {
     return tensor._to_dense(dtype);
   }
   if (tensor.layout() == c10::kMkldnn) {
     return tensor._to_dense(dtype);
   }
-  TORCH_CHECK(tensor.layout() == c10::kStrided, "to_dense does not support layout ", tensor.layout());
+  TORCH_CHECK(
+      tensor.layout() == c10::kStrided,
+      "to_dense does not support layout ",
+      tensor.layout());
   if (dtype) {
     return tensor.to(*dtype);
   }
   return tensor;
 }
 
-Tensor sparse_to_dense(
-    const Tensor& self,
-    c10::optional<ScalarType> dtype) {
+Tensor sparse_to_dense(const Tensor& self, c10::optional<ScalarType> dtype) {
   TORCH_CHECK(
       !dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
   Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
@@ -353,7 +356,8 @@ Tensor sparse_compressed_to_dense(
     const Tensor& self,
     c10::optional<ScalarType> dtype) {
   TORCH_CHECK(
-      !dtype.has_value(), "dtype argument is not supported by sparse_csr_to_dense");
+      !dtype.has_value(),
+      "dtype argument is not supported by sparse_csr_to_dense");
   if (self.layout() == kSparseCsr) {
     Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
     return dst.add_(self);
@@ -364,10 +368,16 @@ Tensor sparse_compressed_to_dense(
         self.crow_indices(), self.col_indices(), false, false);
     auto values = self.values();
     int64_t blocksize[2] = {values.size(-2), values.size(-1)};
-    IntArrayRef expanded_size({self.size(0) / blocksize[0], self.size(1) / blocksize[1], blocksize[0], blocksize[1]});
-    // We make use of COO dense dimensions here to use the COO to dense format conversion.
-    auto self_coo = at::native::_sparse_coo_tensor_unsafe(
-               indices, values, expanded_size).coalesce();
+    IntArrayRef expanded_size(
+        {self.size(0) / blocksize[0],
+         self.size(1) / blocksize[1],
+         blocksize[0],
+         blocksize[1]});
+    // We make use of COO dense dimensions here to use the COO to dense format
+    // conversion.
+    auto self_coo =
+        at::native::_sparse_coo_tensor_unsafe(indices, values, expanded_size)
+            .coalesce();
     auto dense = self_coo.to_dense();
     dense = dense.transpose(1, 2);
     dense = dense.reshape({self.size(0), self.size(1)});
@@ -497,7 +507,8 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
 
 // Sparse layout conversions Start
 
-std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(Tensor not_zero_mask) {
+std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
+    Tensor not_zero_mask) {
   auto col_indices = (not_zero_mask *
                       at::native::arange(not_zero_mask.size(-1))
                           .view({1, not_zero_mask.size(-1)})
@@ -517,7 +528,8 @@ Tensor dense_to_sparse_csr(const Tensor& self) {
   auto values = self.masked_select(not_zero_mask);
   Tensor col_indices;
   Tensor row_indices;
-  std::tie(col_indices, row_indices) = _not_zero_mask_to_col_row_indices(not_zero_mask);
+  std::tie(col_indices, row_indices) =
+      _not_zero_mask_to_col_row_indices(not_zero_mask);
   Tensor crow_indices = at::_convert_indices_from_coo_to_csr(
       row_indices.view({-1}), self.size(-2), false /* out_int32 */);
   return at::native::_sparse_csr_tensor_unsafe(
@@ -537,16 +549,31 @@ Tensor dense_to_sparse_csc(const Tensor& self) {
 Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
   auto block_size_0 = self.size(0) / blocksize[0];
   auto block_size_1 = self.size(1) / blocksize[1];
-  auto values = self.reshape({self.size(0) / blocksize[0], blocksize[0], self.size(1) / blocksize[1], blocksize[1]});
+  auto values = self.reshape(
+      {self.size(0) / blocksize[0],
+       blocksize[0],
+       self.size(1) / blocksize[1],
+       blocksize[1]});
   values = values.transpose(1, 2);
-  values = values.reshape({block_size_0, block_size_1, blocksize[0], blocksize[1]});
+  values =
+      values.reshape({block_size_0, block_size_1, blocksize[0], blocksize[1]});
   return values;
 }
 
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   TORCH_CHECK(self.dim() == 2, "Can only covert 2D Tensor to BSR.");
-  TORCH_CHECK(self.size(0) % blocksize[0] == 0, "Tensor size(0) ", self.size(0), " needs to be divisible by blocksize[0] ", blocksize[0]);
-  TORCH_CHECK(self.size(1) % blocksize[1] == 0, "Tensor size(1) ", self.size(1), " needs to be divisible by blocksize[1] ", blocksize[1]);
+  TORCH_CHECK(
+      self.size(0) % blocksize[0] == 0,
+      "Tensor size(0) ",
+      self.size(0),
+      " needs to be divisible by blocksize[0] ",
+      blocksize[0]);
+  TORCH_CHECK(
+      self.size(1) % blocksize[1] == 0,
+      "Tensor size(1) ",
+      self.size(1),
+      " needs to be divisible by blocksize[1] ",
+      blocksize[1]);
   auto block_size_0 = self.size(0) / blocksize[0];
 
   auto values = _tile_tensor(self, blocksize);
@@ -555,7 +582,8 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   not_zero_mask = not_zero_mask.any(-1).any(-1);
   Tensor col_indices;
   Tensor row_indices;
-  std::tie(col_indices, row_indices) = _not_zero_mask_to_col_row_indices(not_zero_mask);
+  std::tie(col_indices, row_indices) =
+      _not_zero_mask_to_col_row_indices(not_zero_mask);
   Tensor crow_indices = at::_convert_indices_from_coo_to_csr(
       row_indices.view({-1}), block_size_0, false /* out_int32 */);
   values = values.reshape({-1, values.size(-2), values.size(-1)});
@@ -563,7 +591,9 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   // TODO: masked_select does not support some form of broadcasting, so we're
   // using the mask to construct indices that are then passed into index_select.
   // This isn't ideal.
-  values = values.index_select(0, at::native::arange(not_zero_mask.numel()).masked_select(not_zero_mask));
+  values = values.index_select(
+      0,
+      at::native::arange(not_zero_mask.numel()).masked_select(not_zero_mask));
 
   return at::native::_sparse_bsr_tensor_unsafe(
       crow_indices,
