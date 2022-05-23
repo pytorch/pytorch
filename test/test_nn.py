@@ -10,8 +10,6 @@ import unittest.mock as mock
 import itertools
 import warnings
 import pickle
-import gc
-import weakref
 from copy import deepcopy
 from itertools import repeat, product
 from functools import reduce, partial
@@ -5822,6 +5820,32 @@ class TestNN(NNTestCase):
             # output_2d in shape of [T, 1, D]
             self.assertEqual(output_3d[i].unsqueeze(0).transpose(0, 1), output_2d)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_self_attn_TxT_attn_mask(self):
+        embed_dim = 16
+        num_heads = 4
+        batch_size = 10
+        tgt_len = 16
+
+        query = torch.rand(batch_size, tgt_len, embed_dim, device="cuda")  # [N, T, D]
+        attn_mask = torch.randint(0, 2, (tgt_len, tgt_len)).cuda().float()  # [T, T]
+        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, float(0.0))
+
+        attn_mask_4d = attn_mask.expand(batch_size, num_heads, tgt_len, tgt_len)
+
+        mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True).cuda()
+        mta_model.eval()
+
+        # Generate 3D results
+        with torch.inference_mode():
+            output_mask_4d = mta_model(query, query, query, attn_mask=attn_mask_4d)[0]
+            output_mask_4d = output_mask_4d.transpose(0, 1)  # [N, T, D]
+
+            output_mask_TxT = mta_model(query, query, query, attn_mask=attn_mask)[0]
+            output_mask_TxT = output_mask_TxT.transpose(0, 1)  # [N, T, D]
+
+            self.assertEqual(output_mask_4d, output_mask_TxT)
+
     def test_multihead_attn_no_bias(self):
         embed_dim = 8
         num_heads = 4
@@ -6810,6 +6834,7 @@ class TestNN(NNTestCase):
 
     # For https://github.com/pytorch/pytorch/pull/1273
     # Almost identical to the above `test_Conv2d_naive_groups`
+    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_Conv2d_groups_nobias(self):
         dev_dtypes = [("cpu", torch.float)]
         if TEST_CUDA:
@@ -6847,6 +6872,7 @@ class TestNN(NNTestCase):
     # Covering special case when group > 1, input-channel / group < 16 and output-channel is multiple of 16
     # See also https://github.com/pytorch/pytorch/pull/18463#issuecomment-476563686
     # and https://github.com/pytorch/pytorch/pull/18463#issuecomment-477001024
+    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_Conv2d_groups_nobias_v2(self):
         torch.manual_seed(123)
         dev_dtypes = [("cpu", torch.float)]
@@ -7938,6 +7964,9 @@ class TestNN(NNTestCase):
             mask[0, 1] = 1
             mask[1, 3] = 1
             mask[1, 4] = 1
+            # If mask is not left aligned
+            # We disable nested tensor
+            model.enable_nested_tensor = False
             result = model(encoder_input, src_key_padding_mask=mask)
             ref_output = perm_fn(torch.tensor([[[2.429026, 0.020793, -0.601741, -0.085642],
                                                 [2.428811, 0.021445, -0.601912, -0.084252]],
@@ -7954,7 +7983,7 @@ class TestNN(NNTestCase):
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
             # test case 2, multiple layers no norm
-            model = nn.TransformerEncoder(encoder_layer, 2).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 2, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -7972,7 +8001,7 @@ class TestNN(NNTestCase):
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
-            model = nn.TransformerEncoder(encoder_layer, 6).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 6, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -7993,7 +8022,7 @@ class TestNN(NNTestCase):
             # test case 3, multiple layers with norm
             # d_model = 4
             norm = nn.LayerNorm(4)
-            model = nn.TransformerEncoder(encoder_layer, 2, norm=norm).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 2, norm=norm, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -8011,7 +8040,7 @@ class TestNN(NNTestCase):
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
-            model = nn.TransformerEncoder(encoder_layer, 6, norm=norm).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 6, norm=norm, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -9419,6 +9448,28 @@ class TestNN(NNTestCase):
         test_pixel_shuffle_unshuffle_4D()
         test_pixel_shuffle_unshuffle_5D()
 
+    def test_pixel_shuffle_nhwc_cpu(self):
+        input = torch.randn(3, 18, 4, 4, device='cpu')
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+        grad = torch.randn(3, 18, 4, 4, device='cpu')
+        ps = torch.nn.PixelShuffle(3)
+        pus = torch.nn.PixelUnshuffle(3)
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_ps = torch.nn.PixelShuffle(3)
+        ref_pus = torch.nn.PixelUnshuffle(3)
+
+        out = pus(ps(input))
+        out.backward(grad)
+        ref_out = ref_pus(ref_ps(ref_input))
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(input.grad, ref_input.grad)
+
     # These tests should be OpInfo'd
     def test_elu_inplace_on_view(self):
         v = torch.tensor([1.0, -1.0, 1.0, -1.0], requires_grad=True)
@@ -9954,22 +10005,6 @@ class TestNN(NNTestCase):
             output = torch.pdist(x, p=2)
             # just run a single backward, as gradcheck/gradgradcheck is expensive here
             output.sum().backward()
-
-    def test_binary_cross_entropy_grads(self):
-        import torch.nn.functional as F
-        for device in device_():
-            input = torch.rand(3, 3, dtype=torch.double, device=device, requires_grad=True)
-            target = torch.rand(3, 3, dtype=torch.double, device=device)
-
-            gradcheck(F.binary_cross_entropy, [input, target])
-            gradgradcheck(F.binary_cross_entropy, [input, target])
-
-            # now with diffentiable target
-            target.requires_grad_(True)
-            gradcheck(F.binary_cross_entropy, [input, target], check_batched_grad=False)
-            # no double backward for target yet
-            with self.assertRaisesRegex(RuntimeError, "not implemented"):
-                gradgradcheck(F.binary_cross_entropy, [input, target], check_batched_grad=False)
 
     def test_cosine_embedding_loss_with_diff_type(self):
         for device in device_():
@@ -13482,6 +13517,7 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float, torch.double, torch.half)
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
+    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_Conv2d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
             m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to(device, dtype)
@@ -13523,6 +13559,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypes(torch.float, torch.double, torch.half)
     @tf32_on_and_off(0.005)
+    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_Conv3d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
             m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to(device, dtype)
@@ -13680,6 +13717,7 @@ class TestNNDeviceType(NNTestCase):
                                                no_weight)
 
     @dtypes(torch.float, torch.cfloat)
+    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_conv1d_same_padding(self, device, dtype):
         # Test padding='same' outputs the correct shape
         test_args = [
@@ -16845,6 +16883,26 @@ class TestNNDeviceType(NNTestCase):
         pt_res = self._slow_masked_softmax(input, mask)
         self.assertEqual(pt_res, native_res, exact_dtype=True)
 
+    @onlyCUDA
+    def test_masked_softmax_TxT_layout(self, device):
+        B = 211
+        num_heads = 16
+        L = 42
+        input = torch.randn((B, num_heads, L, L))
+        dim = input.dim() - 1
+        mask = torch.randint(0, 2, (L, L))
+        if (self.device_type == "cuda"):
+            input = input.cuda()
+            mask = mask.cuda()
+        mask = mask.bool()
+        native_res = torch._masked_softmax(input, mask, dim)
+        mask = mask.expand(B, num_heads, L, L)
+        mask = ~mask
+        mask = mask.float()
+
+        pt_res = self._slow_masked_softmax(input, mask)
+        self.assertEqual(pt_res, native_res, exact_dtype=True)
+
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypes(torch.float)
     def test_softmax_results(self, device, dtype):
@@ -18286,6 +18344,7 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypesIfCUDA(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     @dtypes(torch.float)
+    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_Conv2d_naive_groups(self, device, dtype):
         # Check that grouped convolutions matches two half convolutions
         m = nn.Conv2d(4, 4, kernel_size=3, groups=2).to(device, dtype)
@@ -19683,6 +19742,20 @@ class TestNNDeviceType(NNTestCase):
                 output_unit = m_unit(input, target)
                 self.assertEqual(output, output_unit)
 
+    @parametrize_test('reduction', ['none', 'mean', 'sum'])
+    @parametrize_test('weighted', [False, True])
+    def test_cross_entropy_loss_prob_target_no_batch_dim(self, device, reduction, weighted):
+        C = 5
+        input = torch.randn(C, device=device).log_softmax(dim=-1)
+        target = torch.randn(C, device=device).softmax(dim=-1)
+        weight = torch.randn(C, device=device) if weighted else None
+        m = nn.CrossEntropyLoss(reduction=reduction, weight=weight)
+        loss_no_batch = m(input, target)
+        loss_batch = m(input.unsqueeze(0), target.unsqueeze(0))
+        if reduction == 'none':
+            loss_batch = loss_batch.squeeze(0)
+        self.assertEqual(loss_no_batch, loss_batch)
+
     def test_cross_entropy_loss_index_target_unit_weights(self, device):
         # Test with k-dimensional loss.
         for k in range(5):
@@ -20486,6 +20559,24 @@ class TestNNDeviceType(NNTestCase):
         mha.in_proj_bias = torch.nn.Parameter(mha.in_proj_bias.to(torch.half).to(device))
         query = torch.randn(3, 3, 3, dtype=dtype, device=device)
         mha(query, query, query)
+
+    @dtypes(torch.double)
+    @torch.no_grad()
+    def test_multihead_attn_in_proj_bias_none(self, device, dtype):
+        mha = torch.nn.MultiheadAttention(1, 1, bias=False, dtype=dtype, device=device)
+        query = torch.rand(3, 2, 1, dtype=dtype, device=device)
+        mha(query, query, query)
+
+    @dtypes(torch.double)
+    @torch.no_grad()
+    def test_multihead_attn_in_proj_weight_none(self, device, dtype):
+        # Setting kdim == vdim == 2 means that vdim != embed_dim
+        # will cause the logic to use per-input project weights, thereby
+        # forcing self.in_proj_weight = None
+        mha = torch.nn.MultiheadAttention(4, 4, vdim=2, kdim=2, dtype=dtype, device=device)
+        query = torch.rand(4, 4, 4, dtype=dtype, device=device)
+        key = torch.rand(4, 4, 2, dtype=dtype, device=device)
+        mha(query, key, key)
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
@@ -21498,23 +21589,6 @@ class TestStateDictHooks(TestCase):
         m_load._register_load_state_dict_pre_hook(hook_with_module, True)
         m_load.load_state_dict(m_state_dict)
         self.assertEqual(2, hook_called)
-
-    def test_no_extra_ref_to_module(self):
-        try:
-            gc.disable()
-            m = nn.Linear(10, 10)
-
-            def hook_with_module(*args, **kwargs):
-                pass
-
-            m._register_load_state_dict_pre_hook(hook_with_module, True)
-            weak_m = weakref.ref(m)
-            del m
-
-            self.assertEqual(weak_m(), None)
-        finally:
-            gc.enable()
-
 
     def test_load_state_dict_module_pre_hook(self):
         hook_called = 0

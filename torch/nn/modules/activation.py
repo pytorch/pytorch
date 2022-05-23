@@ -955,7 +955,7 @@ class MultiheadAttention(Module):
         self.head_dim = embed_dim // num_heads
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
 
-        if self._qkv_same_embed_dim is False:
+        if not self._qkv_same_embed_dim:
             self.q_proj_weight = Parameter(torch.empty((embed_dim, embed_dim), **factory_kwargs))
             self.k_proj_weight = Parameter(torch.empty((embed_dim, self.kdim), **factory_kwargs))
             self.v_proj_weight = Parameter(torch.empty((embed_dim, self.vdim), **factory_kwargs))
@@ -1066,9 +1066,9 @@ class MultiheadAttention(Module):
             # enforce that the dtypes all match or test cases where
             # they don't!
             why_not_fast_path = "non-self attention was used (query, key, and value are not the same Tensor)"
-        elif query.dtype != self.in_proj_bias.dtype:
+        elif self.in_proj_bias is not None and query.dtype != self.in_proj_bias.dtype:
             why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_bias ({self.in_proj_bias.dtype}) don't match"
-        elif query.dtype != self.in_proj_weight.dtype:
+        elif self.in_proj_weight is not None and query.dtype != self.in_proj_weight.dtype:
             # this case will fail anyway, but at least they'll get a useful error message.
             why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_weight ({self.in_proj_weight.dtype}) don't match"
         elif self.training:
