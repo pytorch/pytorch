@@ -2177,7 +2177,7 @@ static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
   }
 }
 
-template<typename T, bool is_cuda=false>
+template<typename T, bool is_cuda>
 static inline C10_HOST_DEVICE T beta_forward(T x, T y);
 
 template<typename T>
