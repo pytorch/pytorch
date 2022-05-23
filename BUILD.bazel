@@ -1800,25 +1800,3 @@ test_suite(
         "//c10/test:tests",
     ],
 )
-
-# An internal genrule that we are converging with refers to these file
-# as if they are from this package, so we alias them for
-# compatibility.
-
-[
-    alias(
-        name = paths.basename(path),
-        actual = path,
-    )
-    for path in [
-        "aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp",
-        "aten/src/ATen/templates/DispatchKeyNativeFunctions.h",
-        "aten/src/ATen/templates/LazyIr.h",
-        "aten/src/ATen/templates/RegisterDispatchKey.cpp",
-        "aten/src/ATen/native/native_functions.yaml",
-        "aten/src/ATen/native/tags.yaml",
-        "aten/src/ATen/native/ts_native_functions.yaml",
-        "torch/csrc/lazy/core/shape_inference.h",
-        "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
-    ]
-]

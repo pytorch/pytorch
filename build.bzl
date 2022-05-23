@@ -94,22 +94,22 @@ def define_targets(rules):
     rules.genrule(
         name = "generate-code",
         srcs = [
-            ":DispatchKeyNativeFunctions.cpp",
-            ":DispatchKeyNativeFunctions.h",
-            ":LazyIr.h",
-            ":RegisterDispatchKey.cpp",
-            ":native_functions.yaml",
-            ":shape_inference.h",
-            ":tags.yaml",
-            ":ts_native_functions.cpp",
-            ":ts_native_functions.yaml",
+            ":aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp",
+            ":aten/src/ATen/templates/DispatchKeyNativeFunctions.h",
+            ":aten/src/ATen/templates/LazyIr.h",
+            ":aten/src/ATen/templates/RegisterDispatchKey.cpp",
+            ":aten/src/ATen/native/native_functions.yaml",
+            ":aten/src/ATen/native/tags.yaml",
+            ":aten/src/ATen/native/ts_native_functions.yaml",
+            ":torch/csrc/lazy/core/shape_inference.h",
+            ":torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
         ],
         tools = ["//tools/setup_helpers:generate_code"],
         outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY,
         cmd = "$(location //tools/setup_helpers:generate_code) " +
               "--gen-dir=$(RULEDIR) " +
-              "--native-functions-path $(location :native_functions.yaml) " +
-              "--tags-path=$(location :tags.yaml) " +
+              "--native-functions-path $(location :aten/src/ATen/native/native_functions.yaml) " +
+              "--tags-path=$(location :aten/src/ATen/native/tags.yaml) " +
               "--gen_lazy_ts_backend",
     )
 
