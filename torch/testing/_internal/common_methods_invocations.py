@@ -19372,6 +19372,10 @@ python_ref_db = [
         torch_opinfo_name="where",
         op=lambda self, condition, other: refs.where(condition, self, other),
     ),
+    PythonRefInfo(
+        "_refs.masked_fill",
+        torch_opinfo_name="masked_fill",
+    ),
 ]
 
 # Common operator groupings

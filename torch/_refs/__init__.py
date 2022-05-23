@@ -137,6 +137,7 @@ __all__ = [
     # Conditional references
     #
     "where",  # TODO: add opinfo
+    "masked_fill",
     #
     # Data conversion and movement references
     #
@@ -1789,3 +1790,10 @@ def uniform(
     device = utils.canonicalize_device(device)
 
     return prims.uniform(shape, low=low, high=high, dtype=dtype, device=device)
+
+
+def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: float):
+    result = where(mask, value, a)
+    if utils.is_boolean_dtype(a.dtype):
+        return prims.to_dtype(result, torch.bool)
+    return result
