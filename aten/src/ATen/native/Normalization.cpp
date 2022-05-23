@@ -301,8 +301,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cpu_impl(
   parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
     TensorIterator reduce_iter_local(reduce_iter);
     for (const auto f : c10::irange(b_begin, b_end)) {
-      param_t w = weight.defined() ? weight_a[f] : (param_t)1;
-
       param_t mean, invstd;
       mean = mean_a[f];
       invstd = invstd_a[f];
@@ -396,7 +394,6 @@ Tensor batch_norm_backward_elemt_cpu_impl(
   auto sum_dy_xmu_a = conditional_accessor_1d<param_t>(sum_dy_xmu);
   auto count_data = count.data_ptr<int>();
   int64_t n_input = input.size(1);
-  int64_t n = input.numel() / n_input;
   int64_t n_with_count = 0;
   for (int i = 0; i < count.numel(); i++) {
     n_with_count += count_data[i];
