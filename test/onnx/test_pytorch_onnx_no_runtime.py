@@ -164,8 +164,7 @@ class TestONNXExport(TestCase):
                 return x + x
 
         mte = ModuleToExport()
-        torch.onnx.export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), verbose=False)
+        torch.onnx.export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), verbose=False)
 
     @suppress_warnings
     def test_onnx_export_func_with_warnings(self):
@@ -182,7 +181,8 @@ class TestONNXExport(TestCase):
 
         # no exception
         torch.onnx.export_to_pretty_string(
-            WarningTest(), torch.randn(42), verbose=False)
+            WarningTest(), torch.randn(42), verbose=False
+        )
 
     def test_onnx_export_script_python_fail(self):
         class PythonModule(torch.jit.ScriptModule):
@@ -227,8 +227,7 @@ class TestONNXExport(TestCase):
                 return y + y
 
         mte = ModuleToExport()
-        torch.onnx.export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), verbose=False)
+        torch.onnx.export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), verbose=False)
 
     def test_onnx_export_script_inline_script(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -250,8 +249,7 @@ class TestONNXExport(TestCase):
                 return y + y
 
         mte = ModuleToExport()
-        torch.onnx.export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), verbose=False)
+        torch.onnx.export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), verbose=False)
 
     def test_onnx_export_script_module_loop(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -268,8 +266,7 @@ class TestONNXExport(TestCase):
                 return x
 
         mte = ModuleToExport()
-        torch.onnx.export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), verbose=False)
+        torch.onnx.export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), verbose=False)
 
     @suppress_warnings
     def test_onnx_export_script_truediv(self):
@@ -285,7 +282,8 @@ class TestONNXExport(TestCase):
         mte = ModuleToExport()
 
         torch.onnx.export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3, dtype=torch.float),), verbose=False)
+            mte, (torch.zeros(1, 2, 3, dtype=torch.float),), verbose=False
+        )
 
     def test_onnx_export_script_non_alpha_add_sub(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -298,8 +296,7 @@ class TestONNXExport(TestCase):
                 return bs - 1
 
         mte = ModuleToExport()
-        torch.onnx.export_to_pretty_string(
-            mte, (torch.rand(3, 4),), verbose=False)
+        torch.onnx.export_to_pretty_string(mte, (torch.rand(3, 4),), verbose=False)
 
     def test_onnx_export_script_module_if(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -313,8 +310,7 @@ class TestONNXExport(TestCase):
                 return x
 
         mte = ModuleToExport()
-        torch.onnx.export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), verbose=False)
+        torch.onnx.export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), verbose=False)
 
     def test_onnx_export_script_inline_params(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -340,13 +336,13 @@ class TestONNXExport(TestCase):
 
         mte = ModuleToExport()
         result = mte(torch.zeros(2, 3))
-        reference = torch.mm(torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4))
+        reference = torch.mm(
+            torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4)
+        )
         self.assertEqual(result, reference)
-        torch.onnx.export_to_pretty_string(
-            mte, (torch.ones(2, 3),), verbose=False)
+        torch.onnx.export_to_pretty_string(mte, (torch.ones(2, 3),), verbose=False)
 
     def test_onnx_export_speculate(self):
-
         class Foo(torch.jit.ScriptModule):
             def __init__(self, m):
                 super(Foo, self).__init__()
@@ -368,7 +364,9 @@ class TestONNXExport(TestCase):
                     y = self.m(x)
                 return y
 
-        linear = torch.jit.trace(torch.nn.Linear(10, 20).float(), torch.zeros(1, 10, dtype=torch.float))
+        linear = torch.jit.trace(
+            torch.nn.Linear(10, 20).float(), torch.zeros(1, 10, dtype=torch.float)
+        )
 
         @torch.jit.script
         def transpose(x):
@@ -377,17 +375,14 @@ class TestONNXExport(TestCase):
         f1 = Foo(transpose)
         f2 = Foo(linear)
 
-        torch.onnx.export_to_pretty_string(
-            f1,
-            (torch.ones(1, 10, dtype=torch.float), ))
-        torch.onnx.export_to_pretty_string(
-            f2,
-            (torch.ones(1, 10, dtype=torch.float), ))
+        torch.onnx.export_to_pretty_string(f1, (torch.ones(1, 10, dtype=torch.float),))
+        torch.onnx.export_to_pretty_string(f2, (torch.ones(1, 10, dtype=torch.float),))
 
     def test_onnx_export_shape_reshape(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 import torch.onnx.operators
+
                 x = x.repeat(5, 1, 1)
                 shape = torch.onnx.operators.shape_as_tensor(x)
                 reshaped = torch.onnx.operators.reshape_from_tensor_shape(x, shape)
@@ -403,11 +398,12 @@ class TestONNXExport(TestCase):
                 return x[mask]
 
         torch.onnx.export_to_pretty_string(
-            FooMod(), (torch.rand(3, 4),),
+            FooMod(),
+            (torch.rand(3, 4),),
             add_node_names=False,
             do_constant_folding=False,
-            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
-
+            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK,
+        )
 
     def test_export_dynamic_slice(self):
         class DynamicSliceExportMod(torch.jit.ScriptModule):
@@ -423,7 +419,8 @@ class TestONNXExport(TestCase):
         input = torch.rand(3, 4, 5)
 
         torch.onnx.export_to_pretty_string(
-            DynamicSliceExportMod(), (input,), opset_version=10)
+            DynamicSliceExportMod(), (input,), opset_version=10
+        )
 
     def test_export_dict(self):
         class DictModule(torch.nn.Module):
@@ -437,8 +434,7 @@ class TestONNXExport(TestCase):
         torch.onnx.export_to_pretty_string(mod, (x_in,))
 
         with self.assertRaisesRegex(RuntimeError, r"DictConstruct.+is not supported."):
-            torch.onnx.export_to_pretty_string(
-                torch.jit.script(mod), (x_in,))
+            torch.onnx.export_to_pretty_string(torch.jit.script(mod), (x_in,))
 
     def test_source_range_propagation(self):
         class ExpandingModule(torch.nn.Module):
@@ -453,12 +449,13 @@ class TestONNXExport(TestCase):
         mod = ExpandingModule()
 
         graph, _, _ = utils._model_to_graph(
-            mod, (torch.zeros(1),),
-            operator_export_type=OperatorExportTypes.ONNX)
+            mod, (torch.zeros(1),), operator_export_type=OperatorExportTypes.ONNX
+        )
 
         # Ensure that every node in the graph has a valid source range
         for node in graph.nodes():
             self.assertTrue(node.sourceRange())
+
 
 # parametrized tests
 instantiate_parametrized_tests(TestOptionalOutput)
