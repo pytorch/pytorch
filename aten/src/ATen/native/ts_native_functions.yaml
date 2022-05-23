@@ -24,7 +24,6 @@ full_codegen:
   - binary_cross_entropy_backward
   - bitwise_and.Tensor
   - bitwise_or.Tensor
-  - block_diag
   - bmm
   - cat
   - clamp
@@ -98,7 +97,6 @@ full_codegen:
   - native_layer_norm_backward
   - ne.Scalar
   - ne.Tensor
-  - new_empty_strided
   - neg
   - nll_loss_backward
   - nll_loss_forward
@@ -187,5 +185,20 @@ supported:
   - _to_copy
   - _unsafe_view
   - lift
+  # Below are all operators that are "composite" in core,
+  # but require us to explicitly re-enable functionalization in order to use them.
+  # Why? These operators are all CompositeExplicitAutograd, which mean that they run
+  # after functionalization,
+  # but their implementations call view operators (which we need to functionalize away).
+  - block_diag
+  - new_empty_strided
+  - narrow_copy
+  - pixel_shuffle
+  - pixel_unshuffle
+  - select_backward
+  - _trilinear
+  - linalg_inv_ex
+  - linalg_pinv.atol_rtol_tensor
+  - logsumexp.out
 autograd:
   - max_pool3d

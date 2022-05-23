@@ -447,24 +447,6 @@ class CPUTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
-lazy_ts_backend_init = False
-class LazyTestBase(DeviceTypeTestBase):
-    device_type = 'lazy'
-
-    def _should_stop_test_suite(self):
-        return False
-
-    @classmethod
-    def setUpClass(cls):
-        import torch._lazy
-        import torch._lazy.metrics
-        import torch._lazy.ts_backend
-        global lazy_ts_backend_init
-        if not lazy_ts_backend_init:
-            # Nead to connect the TS backend to lazy key before running tests
-            torch._lazy.ts_backend.init()
-            lazy_ts_backend_init = True
-
 class CUDATestBase(DeviceTypeTestBase):
     device_type = 'cuda'
     _do_cuda_memory_leak_check = True
@@ -527,7 +509,6 @@ def get_device_type_test_bases():
             test_bases.append(CPUTestBase)
     else:
         test_bases.append(CPUTestBase)
-        test_bases.append(LazyTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
         # Disable MPS testing in generic device testing temporarily while we're

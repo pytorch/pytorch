@@ -2,6 +2,7 @@
 #include <ATen/Functions.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/MetaFunctions.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUFallback.h>
 #include <torch/csrc/lazy/core/helpers.h>
@@ -382,6 +383,55 @@ at::Tensor LazyNativeFunctions::_unsafe_view(const at::Tensor& self,
 at::Tensor LazyNativeFunctions::lift(const at::Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(tensor));
   return at::functionalization::impl::to_functional_tensor(tensor);
+}
+
+// All of the below ops correspond to CompositeExplicitAutograd kernels from core
+// that call into view operators internally.
+// These are all composite ops that LTC can technically re-use / get for free,
+// but we need to "functionalize" them to remove the view ops before we can use them.
+at::Tensor LazyNativeFunctions::block_diag(at::TensorList tensors) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(block_diag)>::call(tensors);
+}
+at::Tensor LazyNativeFunctions::new_empty_strided(const at::Tensor& self, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(new_empty_strided)>::call(self, size, stride, dtype, layout, device, pin_memory);
+}
+
+at::Tensor LazyNativeFunctions::narrow_copy(const at::Tensor& self, int64_t dim, int64_t start, int64_t length) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(narrow_copy)>::call(self, dim, start, length);
+}
+at::Tensor LazyNativeFunctions::pixel_shuffle(const at::Tensor & self, int64_t upscale_factor) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(pixel_shuffle)>::call(self, upscale_factor);
+}
+at::Tensor LazyNativeFunctions::pixel_unshuffle(const at::Tensor & self, int64_t downscale_factor) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(pixel_unshuffle)>::call(self, downscale_factor);
+}
+at::Tensor LazyNativeFunctions::select_backward(const at::Tensor & grad_output, at::IntArrayRef input_sizes, int64_t dim, int64_t index) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(select_backward)>::call(grad_output, input_sizes, dim, index);
+}
+at::Tensor LazyNativeFunctions::_trilinear(const at::Tensor & i1, const at::Tensor & i2, const at::Tensor & i3, at::IntArrayRef expand1, at::IntArrayRef expand2, at::IntArrayRef expand3, at::IntArrayRef sumdim, int64_t unroll_dim) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(_trilinear)>::call(i1, i2, i3, expand1, expand2, expand3, sumdim, unroll_dim);
+}
+::std::tuple<at::Tensor,at::Tensor> LazyNativeFunctions::linalg_inv_ex(const at::Tensor & self, bool check_errors) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(linalg_inv_ex)>::call(self, check_errors);
+}
+at::Tensor LazyNativeFunctions::linalg_pinv(const at::Tensor & self, const c10::optional<at::Tensor> & atol, const c10::optional<at::Tensor> & rtol, bool hermitian) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP2(linalg_pinv, atol_rtol_tensor)>::call(self, atol, rtol, hermitian);
+}
+
+// functionalize_aten_op can't handle out= ops directly.
+// Instead, we can call the composite kernel from core, and copy and mutations back to the inputs.
+at::Tensor & LazyNativeFunctions::logsumexp_out(const at::Tensor & self, at::IntArrayRef dim, bool keepdim, at::Tensor& out) {
+  auto self_wrapped = at::functionalization::impl::to_functional_tensor(self);
+  auto out_wrapped = at::functionalization::impl::to_functional_tensor(out);
+  // directly call the composite kernel from core.
+  // Make sure to re-enable functionalization first.
+  at::functionalization::ReenableFunctionalize guard;
+  at::native::logsumexp_out(self_wrapped, dim, keepdim, out_wrapped);
+  auto out_unwrapped = at::functionalization::impl::from_functional_tensor(out_wrapped);
+  // propagate mutations back to the inputs (including resizing)
+  out.resize_(out_unwrapped.sizes());
+  out.copy_(out_unwrapped);
+  return out;
 }
 
 void InitializeAtenBindings() {}

@@ -2,6 +2,8 @@
 #pragma once
 
 #include <ATen/ArrayRef.h>
+#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/List.h>
 #include <ATen/FunctionalStorageImpl.h>
 
@@ -203,5 +205,70 @@ class TORCH_API FunctionalizationReapplyViewsGuard {
 };
 
 } // namespace impl
+
+// Helper RAII guard
+// This guard expects the passed in dispatch key to already be in the exclude set,
+// and will *remove that key from the exclude set while the guard is active.
+// Useful for re-entrant functionalization within a single dispatch chain.
+class C10_API _RemoveExcludeDispatchKeyGuard {
+ public:
+  _RemoveExcludeDispatchKeyGuard(DispatchKey k) {
+    // This guard expects the key to already be excluded, and will temporary remove it from the exclude set.
+    key_ = k;
+    TORCH_INTERNAL_ASSERT(c10::impl::tls_is_dispatch_key_excluded(key_));
+    c10::impl::tls_set_dispatch_key_excluded(key_, false);
+  }
+
+  _RemoveExcludeDispatchKeyGuard(const _RemoveExcludeDispatchKeyGuard&) = delete;
+  _RemoveExcludeDispatchKeyGuard operator=(const _RemoveExcludeDispatchKeyGuard&) = delete;
+  _RemoveExcludeDispatchKeyGuard(_RemoveExcludeDispatchKeyGuard&&) = delete;
+  _RemoveExcludeDispatchKeyGuard operator=(_RemoveExcludeDispatchKeyGuard&&) = delete;
+
+  ~_RemoveExcludeDispatchKeyGuard() {
+    c10::impl::tls_set_dispatch_key_excluded(key_, true);
+  }
+ private:
+  c10::DispatchKey key_;
+};
+
+struct ReenableFunctionalize {
+  ReenableFunctionalize() :
+    remove_exclude_guard_(c10::DispatchKey::Functionalize) {
+  }
+  _RemoveExcludeDispatchKeyGuard remove_exclude_guard_;
+};
+
+
+// Helper function to call an out-of-place composite aten kernel that may use
+// mutations / views internally, and functionalize them.
+TORCH_API void functionalize_op_helper(const c10::OperatorHandle& op, torch::jit::Stack* stack);
+
+template<class Op, class ReturnType, class... ParameterTypes>
+struct _functionalize_aten_op final {};
+
+template<class Op, class ReturnType, class... ParameterTypes>
+struct _functionalize_aten_op<Op, ReturnType(ParameterTypes...)> final {
+
+    static ReturnType call(ParameterTypes... args) {
+        auto op = c10::Dispatcher::singleton()
+            .findSchemaOrThrow((const char*) Op::name, (const char*) Op::overload_name)
+            .typed<ReturnType (ParameterTypes...)>();
+
+        return c10::impl::BoxedKernelWrapper<ReturnType (ParameterTypes...)>::call(
+            c10::KernelFunction::make_boxed_function<functionalize_op_helper>,
+            nullptr,
+            op,
+            c10::DispatchKeySet(), // we know that the cpu_fallback doesn't use the dispatch keyset.
+            //std::forward<ParameterTypes...>(args...)
+            // TODO: get std::forward<> to work
+            args...
+            );
+    }
+};
+
+template<class Op>
+using functionalize_aten_op = _functionalize_aten_op<Op, typename Op::schema>;
+
+
 } // namespace functionalization
 } // namespace at

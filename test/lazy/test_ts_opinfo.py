@@ -53,10 +53,25 @@ def init_lists():
         'pow',  # incorrect results
         'addcdiv',  # incorrect results (on CI not locally?)
     ])
+    # The following ops all show up directly in ts_native_functions.yaml,
+    # but run functionalized versions of the composite kernels in core.
+    # This means that we don't expect the ops to show directly in the LTC metrics.
+    FUNCTIONAL_DECOMPOSE_LIST = set([
+        'block_diag',
+        'new_empty_strided',
+        'narrow_copy',
+        'pixel_shuffle',
+        'pixel_unshuffle',
+        'select_backward',
+        '_trilinear',
+        'linalg_inv_ex',
+        'linalg_pinv.atol_rtol_tensor',
+        'logsumexp',
+    ])
 
-    return (LAZY_OPS_LIST, FALLBACK_LIST, SKIP_RUNTIME_ERROR_LIST, SKIP_INCORRECT_RESULTS_LIST)
+    return (LAZY_OPS_LIST, FALLBACK_LIST, SKIP_RUNTIME_ERROR_LIST, SKIP_INCORRECT_RESULTS_LIST, FUNCTIONAL_DECOMPOSE_LIST)
 
-(LAZY_OPS_LIST, FALLBACK_LIST, SKIP_RUNTIME_ERROR_LIST, SKIP_INCORRECT_RESULTS_LIST) = init_lists()
+(LAZY_OPS_LIST, FALLBACK_LIST, SKIP_RUNTIME_ERROR_LIST, SKIP_INCORRECT_RESULTS_LIST, FUNCTIONAL_DECOMPOSE_LIST) = init_lists()
 
 torch.manual_seed(42)
 
@@ -123,7 +138,7 @@ class TestLazyTensor(JitTestCase):
 
 class TestLazyOpInfo(TestCase):
 
-    @ops([op for op in op_db if op.name in LAZY_OPS_LIST and op.name not in SKIP_RUNTIME_ERROR_LIST], allowed_dtypes=(torch.float,))
+    @ops([op for op in op_db if op.name in LAZY_OPS_LIST and op.name not in SKIP_RUNTIME_ERROR_LIST and op.name not in FUNCTIONAL_DECOMPOSE_LIST], allowed_dtypes=(torch.float,))
     def test_dispatched_to_lazy(self, device, dtype, op):
         def get_name(op):
             l = [op.name]

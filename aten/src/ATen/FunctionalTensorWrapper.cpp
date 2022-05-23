@@ -585,5 +585,82 @@ void setFunctionalizationReapplyViewsTLS(bool reapply_views) {
 }
 
 } // namespace impl
+
+
+void functionalize_op_helper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  const auto& schema = op.schema();
+  const auto num_arguments = schema.arguments().size();
+  const auto arguments_begin = stack->size() - num_arguments;
+  auto arguments = torch::jit::last(stack, num_arguments);
+
+  // Wrap all tensor-like inputs into FunctionalTensorWrappers.
+  // When we re-invoke the dispatcher, this will automatically enable the functionalization pass.
+  for (uint64_t idx = 0; idx < num_arguments; ++idx) {
+    const auto& ivalue = arguments[idx];
+    if (ivalue.isTensor()) {
+      auto t = ivalue.toTensor();
+      if (t.defined()) {
+        TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t),
+          "The composite op functionalization fallback expects its inputs all not to be functional tensors");
+        auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(t));
+        (*stack)[arguments_begin + idx] = t_new;
+      }
+    } else if (ivalue.isTensorList()) {
+      auto tensors = ivalue.toTensorList();
+      TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(tensors),
+        "The composite op functionalization fallback expects its inputs all not to be functional tensors");
+      auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(tensors));
+      (*stack)[arguments_begin + idx] = t_new;
+    } else if (ivalue.isOptionalTensorList()) {
+      auto opt_tensors = ivalue.toOptionalTensorList();
+      TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(opt_tensors),
+        "The composite op functionalization fallback expects its inputs all not to be functional tensors");
+      auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(opt_tensors));
+      (*stack)[arguments_begin + idx] = t_new;
+    }
+  }
+
+  {
+    // Today when you call at::empty(device=lazy), the lazy backend decides whether or not to wrap
+    // the output in a functional tensor based on TLS.
+    // In this code, we're re-entrantly entering functionalization in the same call-stack,
+    // so we need to manually fix up TLS as if it hadn't already been called.
+    ReenableFunctionalize guard;
+    // So, we should probably provide a way to directly call a kernel registered to
+    // the `CompositeExplicitAutograd` key.
+    // We can't do that today, so this should be a reasonably good proxy
+    // (It won't work in cases where an op has both a CompositeExplicitAutograd kernel
+    // AND a dedicated meta kernel, but that probably shouldn't ever happen).
+    op.redispatchBoxed(c10::DispatchKeySet(c10::DispatchKey::Meta), stack);
+  }
+
+  const auto num_returns = schema.returns().size();
+  const auto returns_begin = stack->size() - num_returns;
+  auto returns = torch::jit::last(stack, num_returns);
+
+  for (const auto idx : c10::irange(num_returns)) {
+    const auto& ivalue = returns[idx];
+    if (ivalue.isTensor()) {
+      auto t = ivalue.toTensor();
+      if (!t.defined()) continue;
+      at::functionalization::impl::sync(t);
+      auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(t));
+      (*stack)[returns_begin + idx] = t_new;
+    } else if (ivalue.isTensorList()) {
+      auto tensors = ivalue.toTensorList();
+      at::functionalization::impl::sync(tensors);
+      auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(tensors));
+      (*stack)[returns_begin + idx] = t_new;
+    } else if (ivalue.isOptionalTensorList()) {
+      auto opt_tensors = ivalue.toOptionalTensorList();
+      at::functionalization::impl::sync(opt_tensors);
+      auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(opt_tensors));
+      (*stack)[returns_begin + idx] = t_new;
+    }
+  }
+}
+
+
+
 } // namespace functionalization
 } // namespace at
