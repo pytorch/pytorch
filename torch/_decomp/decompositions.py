@@ -182,12 +182,6 @@ def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
     return torch.where(self <= threshold, grad_output.new_zeros(()), grad_output)
 
 
-@register_decomposition(aten.leaky_relu)
-@pw_cast_for_opmath
-def leaky_relu(self: Tensor, negative_slope: float = 0.01) -> Tensor:
-    return torch.where(self > 0, self, self * negative_slope)
-
-
 @register_decomposition(aten.leaky_relu_backward)
 @pw_cast_for_opmath
 def leaky_relu_backward(
