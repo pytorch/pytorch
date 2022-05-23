@@ -116,6 +116,8 @@ const char pow_name[] = "pow_kernel";
 void pow_chalf_tensor_tensor_or_scalar_exp_kernel(TensorIteratorBase& iter) {
   using scalar_t = c10::complex<at::Half>;
   using opmath_t = at::opmath_type<scalar_t>;
+  // if exp is cpu scalar
+  // or both exp and base are tensor
   TORCH_INTERNAL_ASSERT(
       iter.is_cpu_scalar(2) ||
       (!iter.is_cpu_scalar(1) && !iter.is_cpu_scalar(2)));
@@ -168,7 +170,7 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
       pow_scalar_tensor_impl(iter, base);
     } else {
       // if exp is cpu scalar
-      // or both exp and scalar are tensor
+      // or both exp and base are tensor
       pow_chalf_tensor_tensor_or_scalar_exp_kernel(iter);
     }
   } else {
