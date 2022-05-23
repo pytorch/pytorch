@@ -29,8 +29,12 @@ class Stream(torch._C._CudaStreamBase):
     """
 
     def __new__(cls, device=None, priority=0, **kwargs):
-        with torch.cuda.device(device):
+        # setting device manager is expensive, so we avoid it unless necessary
+        if device is None or "_cdata" in kwargs:
             return super(Stream, cls).__new__(cls, priority=priority, **kwargs)
+        else:
+            with torch.cuda.device(device):
+                return super(Stream, cls).__new__(cls, priority=priority, **kwargs)
 
     def wait_event(self, event):
         r"""Makes all future work submitted to the stream wait for an event.
