@@ -19,6 +19,7 @@ from torch._refs import (
     _make_elementwise_binary_reference,
 )
 
+
 __all__ = [
     "i1",
     "i0e",
@@ -53,13 +54,13 @@ i1e = _make_elementwise_unary_reference(
     type_promoting_args=("self",),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
-def logit(self: Tensor, eps: Optional[float] = None) -> Tensor:
+def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
     if eps is None:
         eps = -1.0
     lo = eps
     hi = 1 - eps
-    self = torch.clamp(self, lo, hi)
-    return (self / (1 - self)).log()
+    self = refs.clamp(self, lo, hi)
+    return refs.log(refs.true_divide(self, refs.sub(1, self)))
 
 
 def _xlog1py(
@@ -67,8 +68,6 @@ def _xlog1py(
 ):
     assert isinstance(a, TensorLike) or isinstance(b, TensorLike)
 
-    # torch.xlog1py supports scalar inputs but torch.log does not.
-    # TODO Add support for scalar inputs to refs.log (and other elementwise unary ops)
     if isinstance(a, TensorLike):
         if isinstance(b, Number):
             b = prims.scalar_tensor(b, dtype=a.dtype, device=a.device)
@@ -80,7 +79,6 @@ def _xlog1py(
         elif utils.is_cpu_scalar_tensor(a):
             a = prims.device_put(a, device=b.device)
 
-    # TODO use refs.where after resolving issue #78050
     rhs = refs.where(refs.eq(a, 0), 0, refs.mul(a, refs.log1p(b)))
     return refs.where(refs.isnan(b), float("nan"), rhs)
 

@@ -8,6 +8,8 @@ from torch._prims.utils import (
     StrideType,
     TensorLike,
     TensorLikeType,
+    DeviceLikeType,
+    TensorOrNumberLikeType,
     DimsSequenceType,
     TensorSequenceType,
     Number,
@@ -20,6 +22,7 @@ from torch._prims.wrappers import (
     out_wrapper,
     _maybe_convert_to_dtype,
     _maybe_resize_out,
+    elementwise_unary_scalar_wrapper,
     _safe_copy_out,
 )
 
@@ -54,6 +57,7 @@ __all__ = [
     "exp",
     "expm1",
     "exp2",
+    "fill",
     "floor",
     "frac",
     "isfinite",
@@ -123,6 +127,10 @@ __all__ = [
     "true_divide",
     "xlogy",
     #
+    # Elementwise Ternary References
+    #
+    "clamp",
+    #
     # Conditional references
     #
     "where",  # TODO: add opinfo
@@ -145,6 +153,7 @@ __all__ = [
     # View & Shape Ops
     #
     "as_strided",
+    "broadcast_tensors",
     "cat",
     "chunk",
     "flatten",
@@ -166,11 +175,18 @@ __all__ = [
     #
     "empty",
     "empty_like",
+    "empty_strided",
     "full",
     "full_like",
+    "ones",
     "ones_like",
     "scalar_tensor",
+    "zeros",
     "zeros_like",
+    #
+    # Randomness References
+    #
+    "uniform",
 ]
 
 Tensor = torch.Tensor
@@ -258,6 +274,7 @@ def _make_elementwise_unary_reference(
     extra_meta=None,
 ) -> Callable:
     @out_wrapper
+    @elementwise_unary_scalar_wrapper
     @elementwise_type_promotion_wrapper(
         type_promoting_args=("a",),
         type_promotion_kind=type_promotion_kind,
@@ -361,6 +378,27 @@ exp2 = _make_elementwise_unary_reference(
     prims.exp2,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
+
+# Fill has its own implementation because it has a value parameter
+@out_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a,"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+)
+def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
+
+    assert isinstance(a, TensorLike)
+    assert isinstance(value, Number)
+
+    python_type = utils.dtype_to_type(a.dtype)
+    if not utils.is_weakly_lesser_type(type(value), python_type):
+        msg = "value argument of type {0} cannot be safely cast to type {1}!".format(
+            type(value), python_type
+        )
+        raise ValueError(msg)
+
+    return prims.fill(a, value)
+
 
 floor = _make_elementwise_unary_reference(
     prims.floor,
@@ -899,8 +937,6 @@ true_divide = _make_elementwise_binary_reference(
 def _xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]):
     assert isinstance(a, TensorLike) or isinstance(b, TensorLike)
 
-    # torch.xlogy supports scalar inputs but torch.log does not.
-    # TODO Add support for scalar inputs to refs.log (and other elementwise unary ops)
     if isinstance(a, TensorLike):
         if isinstance(b, Number):
             b = scalar_tensor(b, dtype=a.dtype, device=a.device)
@@ -912,7 +948,6 @@ def _xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, Number
         elif utils.is_cpu_scalar_tensor(a):
             a = prims.device_put(a, device=b.device)
 
-    # TODO use refs.where after resolving issue #78050
     rhs = where(eq(a, 0), 0, mul(a, log(b)))
     return where(isnan(b), float("nan"), rhs)
 
@@ -923,6 +958,34 @@ xlogy = _make_elementwise_binary_reference(
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=None,  # Defined in torch/_decomp/decompositions.py
 )
+
+#
+# Elementwise Ternary References
+#
+
+
+@out_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a", "min", "max"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def clamp(
+    a: TensorLikeType,
+    min: Optional[TensorOrNumberLikeType] = None,
+    max: Optional[TensorOrNumberLikeType] = None,
+) -> TensorLikeType:
+    a, min, max = _maybe_broadcast(a, min, max)
+
+    if min is not None and max is not None:
+        return minimum(maximum(a, min), max)
+    if min is not None:
+        return maximum(a, min)
+    if max is not None:
+        return minimum(a, max)
+
+    msg = "clamp called but both min and max are none!"
+    raise ValueError(msg)
+
 
 #
 # Conditional references
@@ -946,8 +1009,11 @@ def where(
     if a is None or b is None:
         raise NotImplementedError
 
+    utils.check_same_device(pred, a, b, allow_cpu_scalar_tensors=True)
+    assert pred.dtype is torch.bool
+
     pred, a, b = _maybe_broadcast(pred, a, b)
-    return prims.select(pred, a, b)
+    return prims.where(pred, a, b)
 
 
 #
@@ -1259,14 +1325,42 @@ def as_strided(
     return prims.as_strided(a, size, stride, storage_offset)
 
 
+def broadcast_tensors(*tensors) -> List[TensorLikeType]:
+    return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
+
+
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("tensors",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
-    _dim = utils.canonicalize_dims(tensors[0].ndim, dim)
-    return prims.concatenate(tensors, _dim)
+    if len(tensors) == 0:
+        msg = "cat expects at least one tensor, but received zero!"
+        raise ValueError(msg)
+
+    for tensor in tensors:
+        assert isinstance(tensor, TensorLike)
+
+    utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
+
+    dim = utils.canonicalize_dim(tensors[0].ndim, dim)
+    utils.validate_idx(tensors[0].ndim, dim)
+
+    # Filters tensors with one dimension of length zero
+    filtered = tuple(x for x in tensors if not (x.ndim == 1 and x.numel() == 0))
+    if len(filtered) == 0:
+        t = tensors[0]
+
+        # TODO: fix this to work with meta tensors
+        try:
+            requires_grad = any(x.requires_grad for x in tensors)
+        except Exception:
+            requires_grad = False
+
+        return empty((0,), dtype=t.dtype, device=t.device, requires_grad=requires_grad)
+
+    return prims.cat(filtered, dim)
 
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
@@ -1624,13 +1718,11 @@ def empty(
     device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    dtype = torch.get_default_dtype() if dtype is None else dtype
-    device = torch.device("cpu") if device is None else device
-    if len(shape) > 0 and isinstance(shape[0], tuple):
-        return prims.empty(
-            *shape, dtype=dtype, device=device, requires_grad=requires_grad
-        )
-    return prims.empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+    shape = utils.extract_shape_from_varargs(shape)
+    strides = utils.make_contiguous_strides_for(shape)
+    return empty_strided(
+        shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
+    )
 
 
 def empty_like(
@@ -1640,9 +1732,38 @@ def empty_like(
     device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> TensorLikeType:
+
     dtype = a.dtype if dtype is None else dtype
     device = a.device if device is None else device
-    return prims.empty_like(a, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    strides: Tuple[int, ...]
+    if a.numel() == 0:
+        strides = a.stride()
+    else:
+        strides = utils.compute_elementwise_output_strides(a)
+
+    return empty_strided(
+        a.shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
+    )
+
+
+# NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
+def empty_strided(
+    shape: Union[ShapeType, Tuple[ShapeType]],
+    strides: StrideType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+
+    shape = utils.extract_shape_from_varargs(shape)
+    dtype = torch.get_default_dtype() if dtype is None else dtype
+    device = torch.device("cpu") if device is None else device
+
+    return prims.empty_strided(
+        shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
+    )
 
 
 @out_wrapper
@@ -1654,11 +1775,8 @@ def full(
     device: torch.device,
     requires_grad: bool,
 ) -> TensorLikeType:
-    dtype = torch.get_default_dtype() if dtype is None else dtype
-    device = torch.device("cpu") if device is None else device
-    return prims.full(
-        shape, fill_value, dtype=dtype, device=device, requires_grad=requires_grad
-    )
+    e = empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+    return fill(e, fill_value)
 
 
 def full_like(
@@ -1669,32 +1787,17 @@ def full_like(
     device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    dtype = a.dtype if dtype is None else dtype
-    device = a.device if device is None else device
-    return prims.full_like(
-        a, fill_value, dtype=dtype, device=device, requires_grad=requires_grad
-    )
+    e = empty_like(a, dtype=dtype, device=device, requires_grad=requires_grad)
+    return fill(e, fill_value)
 
 
-def ones_like(
-    a: TensorLikeType,
-    *,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
-    requires_grad: bool = False,
-) -> TensorLikeType:
-    return full_like(a, 1, dtype=dtype, device=device, requires_grad=requires_grad)
+ones = partial(full, fill_value=True)
 
+ones_like = partial(full_like, fill_value=True)
 
-def zeros_like(
-    a: TensorLikeType,
-    *,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
-    requires_grad: bool = False,
-) -> TensorLikeType:
-    return full_like(a, 0, dtype=dtype, device=device, requires_grad=requires_grad)
+zeros = partial(full, fill_value=False)
 
+zeros_like = partial(full_like, fill_value=False)
 
 def scalar_tensor(
     a: NumberType,
@@ -1703,3 +1806,23 @@ def scalar_tensor(
     device: Optional[torch.device] = None,
 ) -> TensorLikeType:
     return prims.scalar_tensor(a, dtype=dtype, device=device)
+
+def uniform(
+    shape: ShapeType,
+    low: Union[bool, int, float] = 0.0,
+    high: Union[bool, int, float] = 1.0,
+    *,
+    dtype: torch.dtype,
+    device: DeviceLikeType,
+) -> TensorLikeType:
+    utils.validate_shape(shape)
+
+    assert isinstance(low, (bool, int, float))
+    assert isinstance(high, (bool, int, float))
+    low = float(low)
+    high = float(high)
+
+    assert isinstance(dtype, torch.dtype)
+    device = utils.canonicalize_device(device)
+
+    return prims.uniform(shape, low=low, high=high, dtype=dtype, device=device)
