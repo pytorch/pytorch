@@ -9,18 +9,11 @@ class BaseTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, elem, *, requires_grad=None):
         if requires_grad is None:
-            return super().__new__(cls, elem)  # type: ignore
+            return super().__new__(cls, elem)  # type: ignore[call-arg]
         else:
             return cls._make_subclass(cls, elem, requires_grad)
-
-    # To ensure constructors can cooperate with one another, must accept and
-    # ignore element tensor (TODO: is this right???)
-    def __init__(self, elem):
-        super().__init__()
 
     # If __torch_dispatch__ is defined (which it will be for all our examples)
     # the default torch function implementation (which preserves subclasses)
     # typically must be disabled
     __torch_function__ = torch._C._disabled_torch_function_impl
-
-__all__ = ["BaseTensor"]

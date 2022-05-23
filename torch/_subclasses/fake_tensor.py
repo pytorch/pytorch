@@ -16,6 +16,8 @@ _device_not_kwarg_ops = (
     aten.to.device,
     aten.to.prim_Device,
     aten._pin_memory.default,
+    aten._resize_output.functional,
+    aten._resize_output.out,
 )
 
 # Meta tensors give you the ability to run PyTorch code without having to
