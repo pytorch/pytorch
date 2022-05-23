@@ -6,6 +6,7 @@ import itertools
 from torch.testing._internal.jit_utils import RUN_CUDA
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
+from torch.testing._internal.logging_tensor import LoggingTensorMode
 from torch._ops import OpOverload
 import unittest
 
@@ -80,6 +81,18 @@ class FakeTensorTest(TestCase):
         self.assertEqual(torch._C._storage_id(y), torch._C._storage_id(z))
         self.assertTrue(isinstance(y, FakeTensor))
         self.assertTrue(isinstance(z, FakeTensor))
+
+    def test_nesting_modes(self):
+        x = torch.rand([4, 4])
+        with enable_torch_dispatch_mode(FakeTensorMode):
+            with enable_torch_dispatch_mode(LoggingTensorMode, ignore_preexisting=True):
+                with enable_torch_dispatch_mode(FakeTensorMode, ignore_preexisting=True):
+                    y = x[0]
+            z = x[1]
+        self.assertEqual(torch._C._storage_id(y), torch._C._storage_id(z))
+        with enable_torch_dispatch_mode(FakeTensorMode):
+            a = x[1]
+        self.assertNotEqual(torch._C._storage_id(a), torch._C._storage_id(y))
 
 
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
