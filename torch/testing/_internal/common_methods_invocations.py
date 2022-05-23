@@ -19233,6 +19233,10 @@ python_ref_db = [
         torch_opinfo_name="rot90",
     ),
     PythonRefInfo(
+        "_refs.roll",
+        torch_opinfo_name="roll",
+    ),
+    PythonRefInfo(
         "_refs.stack",
         torch_opinfo_name="stack",
         skips=(

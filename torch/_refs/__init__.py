@@ -1596,12 +1596,12 @@ def rot90(a: TensorLikeType, k: int = 1, dims: DimsType = (0, 1)) -> TensorLikeT
         return clone(a)
 
 
-def roll(a: TensorLikeType, shifts: DimsType, dims: Optional[DimsType] = None) -> TensorLikeType:
+def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
     # ATen has int[1] type which expands intgers to tuples of length 1
     if not isinstance(shifts, Iterable):
         shifts = (shifts,)
-    if dims is not None and not isinstance(dims, Iterable):
+    if not isinstance(dims, Iterable):
         dims = (dims,)
 
     len_shifts = len(shifts)
@@ -1610,7 +1610,7 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: Optional[DimsType] = None) -
         if len_shifts == 0:
             raise ValueError("`shifts` required")
         if len_dims == 0 and len_shifts == 1:
-            return view(roll(flatten(a), shifts, 0), a.shape)
+            return clone(view(roll(flatten(a), shifts, 0), a.shape))
 
         if len_shifts != len_dims:
             raise ValueError(f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}")
