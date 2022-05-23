@@ -21,7 +21,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.logging_tensor import no_dispatch
 from torch.testing._internal.common_methods_invocations import op_db
-import torch._prims as prims
 
 import atexit
 import re
@@ -315,11 +314,10 @@ def assert_ref_meta_equal(test_case, meta_rs, rs, msg_callable):
         test_assert(isinstance(meta_r, torch.Tensor), f"but real {i}th result is Tensor")
         test_assert(meta_r.dtype == r.dtype, f"but real dtype was {r.dtype}")
         test_assert(meta_r.shape == r.shape, f"but real shape was {r.shape}")
-        # NOTE: this helper is used instead of a direct stride comparison
-        # because strides of tensors with no elements and dimensions of
-        # length 1 are not computed consistently
-        same_strides, _ = prims.utils.check_significant_strides(meta_r, r)
-        test_assert(same_strides, f"but real stride was {r.stride()}")
+        # NOTE: stride checking is currently disabled
+        # See https://github.com/pytorch/pytorch/issues/78050
+        # same_strides, _ = prims.utils.check_significant_strides(meta_r, r)
+        # test_assert(same_strides, f"but real stride was {r.stride()}")
         test_assert(
             meta_r.storage_offset() == r.storage_offset(),
             f"but real storage_offset was {r.storage_offset()}")
@@ -697,8 +695,8 @@ meta_function_device_expected_failures['cuda'] = {
     torch.multinomial: {f16},  # aten::multinomial, aten::multinomial.out
     torch.mvlgamma: {f16},  # aten::_local_scalar_dense, aten::mvlgamma.out
     torch.nanmedian: {f16},  # aten::nanmedian, aten::nanmedian.dim_values
-    torch.nn.functional.conv1d: {f16},
-    torch.nn.functional.conv2d: {f16},
+    torch.nn.functional.conv1d: {f16, c32},
+    torch.nn.functional.conv2d: {f16, c32},
     torch.nn.functional.conv_transpose1d: {bf16, f16},
     torch.nn.functional.conv_transpose2d: {bf16, f16},
     torch.nn.functional.conv_transpose3d: {bf16, f16},
@@ -932,7 +930,7 @@ meta_dispatch_device_skips = defaultdict(dict)
 
 meta_dispatch_device_expected_failures['cuda'] = {
     aten._conj_physical.default: {f16},  # aten::conj_physical.out
-    aten._convolution.default: {f16},
+    aten._convolution.default: {f16, c32},
     aten._embedding_bag_forward_only.default: {bf16},  # aten::_embedding_bag_forward_only
     aten._fft_c2c.default: {c32, f16},  # aten::_fft_c2c
     aten._fft_c2c.out: {c32, f16},  # aten::_fft_c2c.out
@@ -945,7 +943,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten._use_cudnn_ctc_loss.default: {f32, f64},  # aten::_use_cudnn_ctc_loss
     aten.addbmm.default: {f16},  # aten::addbmm
     aten.addbmm.out: {f16},  # aten::addbmm.out
-    aten.convolution.default: {f16},
+    aten.convolution.default: {f16, c32},
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
     aten.diag.default: {f16},  # aten::diag.out
     aten.diag.out: {bf16, f16},  # aten::diag.out
