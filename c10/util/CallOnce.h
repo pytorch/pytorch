@@ -13,14 +13,14 @@ namespace c10 {
 // The implementation here is a simplified version from folly and likely much
 // much higher memory footprint.
 template <typename Flag, typename F, typename... Args>
-C10_API inline void call_once(Flag& flag, F&& f, Args&&... args) {
+inline void call_once(Flag& flag, F&& f, Args&&... args) {
   if (C10_LIKELY(flag.test_once())) {
     return;
   }
   flag.call_once_slow(std::forward<F>(f), std::forward<Args>(args)...);
 }
 
-class C10_API once_flag {
+class once_flag {
  public:
   constexpr once_flag() noexcept = default;
   once_flag(const once_flag&) = delete;
