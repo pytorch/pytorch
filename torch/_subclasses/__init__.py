@@ -6,6 +6,6 @@ from torch._subclasses.fake_tensor import FakeTensor, _device_not_kwarg_ops, _is
 _all__ = [
   "BaseTensor",
   "FakeTensor",
-  "_device_not_kwarg_ops"
-  "_is_tensor_constructor"
+  "_device_not_kwarg_ops",
+  "_is_tensor_constructor",
 ]
