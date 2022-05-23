@@ -13114,6 +13114,10 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=1e-2)}),
                    'TestCommon', 'test_complex_half_reference_testing'
                ),
+               DecorateInfo(
+                   toleranceOverride({torch.chalf: tol(atol=1e-3, rtol=1e-3)}),
+                   'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
+               ),
            ),
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
