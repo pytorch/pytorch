@@ -114,7 +114,7 @@ __all__ = [
     "nextafter",
     # 'polar',  # abs, cos, sin
     "pow",
-    "remainder",
+    # 'remainder',
     # 'rsub', # unblocked
     # # special.xlog1py
     # # special.zeta

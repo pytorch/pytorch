@@ -19068,16 +19068,6 @@ python_ref_db = [
         torch_opinfo_name="pow",
     ),
     ElementwiseBinaryPythonRefInfo(
-        "_refs.remainder",
-        torch_opinfo_name="remainder",
-        supports_one_python_scalar=True,
-        rhs_make_tensor_kwargs={'exclude_zero': True},
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.bfloat16,), device_type='cpu', active_if=(not TEST_WITH_ROCM)),
-        ),
-    ),
-    ElementwiseBinaryPythonRefInfo(
         "_refs.sub",
         torch_opinfo_name="sub",
         # https://github.com/pytorch/pytorch/issues/76944

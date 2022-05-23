@@ -100,7 +100,6 @@ __all__ = [
     "nextafter",
     "pow",
     "rsqrt",
-    "remainder",
     "shift_left",
     "shift_right_arithmetic",
     "shift_right_logical",  # not implemented
