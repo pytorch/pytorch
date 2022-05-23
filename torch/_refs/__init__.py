@@ -136,22 +136,25 @@ __all__ = [
     #
     # Conditional references
     #
-    "where",  # TODO: add opinfo
+    "where",
     #
     # Data conversion and movement references
     #
     "clone",
-    "copy_to",  # TODO: add opinfo
+    "copy_to",  # TODO: add OpInfo (or implement .to)
+    "item",  # TODO: add OpInfo
     #
     # Reduction ops
     #
-    "sum",
+    "all",
     "amax",
     "amin",
-    "var",
+    "any",
     "mean",
     "std_mean",
     "std_var",
+    "sum",
+    "var",
     #
     # View & Shape Ops
     #
@@ -188,7 +191,11 @@ __all__ = [
     #
     # Randomness References
     #
-    "uniform",
+    "uniform",  # TODO: add OpInfo -- and testing for randomness?
+    #
+    # Test-related functions
+    #
+    "equal",  # TODO: add OpInfo
 ]
 
 Tensor = torch.Tensor
@@ -1006,6 +1013,17 @@ def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
     return prims.copy_to(a, b)
 
 
+def item(a: TensorLikeType) -> NumberType:
+    if a.numel() != 1:
+        msg = f"Can't convert a tensor with {a.numel()} elements to a number!"
+        raise ValueError(msg)
+
+    # NOTE: explicit conversion is necessary for bool!
+    # See https://github.com/pytorch/pytorch/issues/78071
+    number_type = utils.dtype_to_type(a.dtype)
+    return number_type(prims.item(a))
+
+
 #
 # Reduction references
 #
@@ -1046,7 +1064,7 @@ def _reduction(
         dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
-        valid_shape = a.ndim == 0 or all(a.shape[i] for i in dims)
+        valid_shape = a.ndim == 0 or py_all(a.shape[i] for i in dims)
         if not valid_shape:
             raise RuntimeError(
                 "reducing over zero-size dimension for reduction operation without identity"
@@ -1072,6 +1090,48 @@ def _reduction(
 
     if result.dtype != result_dtype and result_dtype is not None:
         result = prims.convert_element_type(result, result_dtype)
+
+    return result
+
+
+# Saves Python all
+py_all = all
+
+
+@out_wrapper
+def all(
+    a: TensorLikeType,
+    dim: Optional[DimsType] = None,
+    keepdim: bool = False,
+) -> TensorLikeType:
+    # Computes nelem
+    if isinstance(dim, int):
+        dim = (dim,)  # type: ignore[assignment]
+    dims = utils.reduction_dims(a.shape, dim)  # type: ignore[arg-type]
+    nelem = 1 if a.ndim == 0 else reduce(operator.mul, (a.shape[i] for i in dims), 1)
+
+    a_ = _maybe_convert_to_dtype(a, torch.bool)
+    result = eq(sum(a_, dim=dim, keepdim=keepdim), nelem)  # type: ignore[arg-type]
+
+    # Preserves uint8 -- probably a legacy mask thing
+    if a.dtype is torch.uint8:
+        return prims.convert_element_type(result, torch.uint8)
+
+    return result
+
+
+@out_wrapper
+def any(
+    a: TensorLikeType,
+    dim: Optional[DimsType] = None,
+    keepdim: bool = False,
+) -> TensorLikeType:
+    a_ = _maybe_convert_to_dtype(a, torch.bool)
+    result = ne(sum(a_, dim=dim, keepdim=keepdim), False)  # type: ignore[arg-type]
+
+    # Preserves uint8 -- probably a legacy mask thing
+    if a.dtype is torch.uint8:
+        return prims.convert_element_type(result, torch.uint8)
 
     return result
 
@@ -1789,3 +1849,23 @@ def uniform(
     device = utils.canonicalize_device(device)
 
     return prims.uniform(shape, low=low, high=high, dtype=dtype, device=device)
+
+
+# TODO: add OpInfo for torch.equal and refs.equal
+def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
+    utils.check_same_device(a, b, allow_cpu_scalar_tensors=False)
+    utils.check_same_dtype(a, b)
+
+    # Shape check
+    if a.ndim != b.ndim:
+        return False
+
+    for x, y in zip(a.shape, b.shape):
+        if x != y:
+            return False
+
+    # Short-circuits if there are no elements to validate
+    if a.numel() == 0:
+        return True
+
+    return item(all(eq(a, b)))  # type: ignore[return-value]
