@@ -281,6 +281,21 @@ Tensor prod_mps(const Tensor &self, c10::optional<ScalarType> opt_dtype) {
   return output_t;
 }
 
+
+Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims){
+  Tensor output_t = at::native::empty_mps(
+                      {},
+                      self.scalar_type(),
+                      c10::nullopt,
+                      kMPS,
+                      c10::nullopt,
+                      c10::nullopt);
+
+  reduction_out_mps(self, dims, false, self.scalar_type(), const_cast<Tensor&>(output_t), "sum", "count_nonzero_mps");
+
+  return output_t;
+}
+
 TORCH_IMPL_FUNC(mean_out_mps)
    (const Tensor& input_t,
     IntArrayRef dim,
