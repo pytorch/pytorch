@@ -110,11 +110,9 @@ class FakeTensor(BaseTensor):
     def setup_mode():
         global fake_tensor_converter
         global active_fake_tensor_modes
+        assert (fake_tensor_converter is None) == (active_fake_tensor_modes == 0)
         if active_fake_tensor_modes == 0:
-            assert fake_tensor_converter is None
             fake_tensor_converter = FakeTensorConverter()
-        else:
-            assert fake_tensor_converter is not None
         active_fake_tensor_modes += 1
 
     @staticmethod
