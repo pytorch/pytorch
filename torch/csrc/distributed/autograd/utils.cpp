@@ -53,7 +53,7 @@ ContextPtr addRecvRpcBackward(
     const AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors,
     rpc::worker_id_t fromWorkerId,
-    const std::unordered_map<c10::Device, c10::Device>& deviceMap) {
+    const rpc::DeviceMap& deviceMap) {
   // Initialize autograd context if necessary.
   auto& autogradContainer = DistAutogradContainer::getInstance();
   auto autogradContext =
@@ -105,7 +105,7 @@ c10::intrusive_ptr<Message> getMessageWithAutograd(
     c10::intrusive_ptr<torch::distributed::rpc::Message> wrappedRpcMsg,
     MessageType msgType,
     bool forceGradRecording,
-    const std::unordered_map<c10::Device, c10::Device>& deviceMap) {
+    const rpc::DeviceMap& deviceMap) {
   auto& autogradContainer = DistAutogradContainer::getInstance();
 
   // If there is no valid context and no tensor requires grads, send original
@@ -156,22 +156,31 @@ c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
       forceGradRecording,
       agent.getDeviceMap(dst));
 
-  c10::intrusive_ptr<JitFuture> fut;
   // If profiler is enabled, wrap this message with profiling metadata that will
   // tell the remote end to process this request with the profiler enabled.
-  if (!forceDisableProfiling && torch::autograd::profiler::profilerEnabled()) {
-    auto profilerConfig = torch::autograd::profiler::getProfilerConfig();
-    auto msgWithProfiling = getMessageWithProfiling(
-        std::move(msg),
-        rpc::MessageType::RUN_WITH_PROFILING_REQ,
-        // NOLINTNEXTLINE(performance-move-const-arg)
-        std::move(profilerConfig));
-    fut = agent.send(dst, std::move(msgWithProfiling), rpcTimeoutSeconds);
-  } else {
-    fut = agent.send(dst, std::move(msg), rpcTimeoutSeconds);
+  if (!forceDisableProfiling) {
+    switch (torch::profiler::impl::profilerType()) {
+      case torch::profiler::impl::ActiveProfilerType::LEGACY:
+        {
+          auto profilerConfig = torch::autograd::profiler::getProfilerConfig();
+          auto msgWithProfiling = getMessageWithProfiling(
+            std::move(msg),
+            rpc::MessageType::RUN_WITH_PROFILING_REQ,
+            // NOLINTNEXTLINE(performance-move-const-arg)
+            std::move(profilerConfig));
+          return agent.send(dst, std::move(msgWithProfiling), rpcTimeoutSeconds);
+        }
+      case torch::profiler::impl::ActiveProfilerType::KINETO:
+        TORCH_WARN_ONCE(
+          "Profiling a distributed call with the Kineto profiler will profile "
+          "the caller, but not the worker.");
+        break;
+      default:
+        break;
+    }
   }
 
-  return fut;
+  return agent.send(dst, std::move(msg), rpcTimeoutSeconds);;
 }
 
 } // namespace autograd

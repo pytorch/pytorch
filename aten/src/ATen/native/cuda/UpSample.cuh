@@ -1,7 +1,11 @@
-#include <ATen/ATen.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <THC/THCAtomics.cuh>
+#pragma once
+#include <ATen/core/TensorAccessor.h>
+#include <ATen/cuda/Atomic.cuh>
+
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Optional.h>
+#include <c10/util/SmallVector.h>
+#include <c10/util/OptionalArrayRef.h>
 
 #include <math.h>
 
@@ -12,7 +16,7 @@ namespace upsample {
 // TODO: Remove duplicate declaration.
 TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
     c10::IntArrayRef input_size,  // Full input tensor size.
-    c10::optional<c10::IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     c10::optional<c10::ArrayRef<double>> scale_factors);
 } // namespace upsample
 
@@ -130,8 +134,25 @@ __device__ __forceinline__ static int nearest_neighbor_compute_source_index(
     const float scale,
     int dst_index,
     int input_size) {
+  // index_f32 = (output_index) * scale
+  // input_index = round(index_f32)
+  // Same as a buggy OpenCV INTER_NEAREST
+  // We keep this method for BC and consider as deprecated.
+  // See nearest_neighbor_exact_compute_source_index as replacement
   const int src_index =
-      min(static_cast<int>(floorf(dst_index * scale)), input_size - 1);
+      min(static_cast<int>(floorf((dst_index) * scale)), input_size - 1);
+  return src_index;
+}
+
+__device__ __forceinline__ static int nearest_neighbor_exact_compute_source_index(
+    const float scale,
+    int dst_index,
+    int input_size) {
+  // index_f32 = (output_index + 0.5) * scale - 0.5
+  // input_index = round(index_f32)
+  // Same as Pillow and Scikit-Image/Scipy ndi.zoom
+  const int src_index =
+      min(static_cast<int>(floorf((dst_index + static_cast<float>(0.5)) * scale)), input_size - 1);
   return src_index;
 }
 
@@ -140,8 +161,22 @@ __device__ __forceinline__ static int nearest_neighbor_bw_compute_source_index(
     const float scale,
     int dst_index,
     int output_size) {
+  // Equivalent to buggy OpenCV INTER_NEAREST
+  // We keep this method for BC and consider as deprecated.
+  // See nearest_neighbor_exact_bw_compute_source_index as replacement
   const int src_index =
       min(static_cast<int>(ceilf(dst_index * scale)), output_size);
+  return src_index;
+}
+
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
+__device__ __forceinline__ static int nearest_neighbor_exact_bw_compute_source_index(
+    const float scale,
+    int dst_index,
+    int output_size) {
+  // Equivalent to Pillow and Scikit-Image/Scipy ndi.zoom
+  const int src_index =
+      min(static_cast<int>(ceilf(dst_index * scale - static_cast<float>(0.5))), output_size);
   return src_index;
 }
 
@@ -223,6 +258,112 @@ __device__ __forceinline__ static accscalar_t cubic_interp1d(
   get_cubic_upsampling_coefficients<accscalar_t>(coeffs, t);
 
   return x0 * coeffs[0] + x1 * coeffs[1] + x2 * coeffs[2] + x3 * coeffs[3];
+}
+
+namespace upsample_antialias {
+
+// taken from
+// https://github.com/python-pillow/Pillow/blob/6812205f18ca4ef54372e87e1a13ce4a859434df/
+// src/libImaging/Resample.c#L20-L29
+struct BilinearFilterFunctor {
+
+  template <typename accscalar_t>
+  __device__ accscalar_t operator()(accscalar_t x) const {
+    if (x < 0) {
+      x = -x;
+    }
+    if (x < 1) {
+      return 1 - x;
+    }
+    return 0;
+  }
+
+  static const int size = 2;
+};
+
+// taken from
+// https://github.com/python-pillow/Pillow/blob/6812205f18ca4ef54372e87e1a13ce4a859434df/
+// src/libImaging/Resample.c#L46-L62
+struct BicubicFilterFunctor {
+
+  template <typename accscalar_t>
+  __device__ accscalar_t operator()(accscalar_t x) const {
+    // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
+    const accscalar_t a = -0.5;
+    if (x < 0) {
+      x = -x;
+    }
+    if (x < 1) {
+      return ((a + 2) * x - (a + 3)) * x * x + 1;
+    }
+    if (x < 2) {
+      return (((x - 5) * x + 8) * x - 4) * a;
+    }
+    return 0;
+  }
+
+  static const int size = 4;
+};
+
+template <typename accscalar_t>
+__device__ __forceinline__ static void _compute_weights_span(
+    const int i,
+    const int input_size,
+    const accscalar_t scale,
+    const accscalar_t support,
+    int& xmin,
+    int& xsize,
+    accscalar_t& center) {
+  center = scale * (i + static_cast<accscalar_t>(0.5));
+  xmin = max(static_cast<int>(center - support + static_cast<accscalar_t>(0.5)), static_cast<int>(0));
+  xsize = min(static_cast<int>(center + support + static_cast<accscalar_t>(0.5)), input_size) - xmin;
+}
+
+template <typename scalar_t, typename accscalar_t, typename interp_filter_t>
+__device__ __forceinline__ static void _compute_weights(
+    scalar_t* wt_ptr,
+    const accscalar_t scale,
+    int interp_size,
+    const interp_filter_t& interp_filter,
+    accscalar_t xmin_m_center,
+    int xsize) {
+
+  accscalar_t invscale = (scale >= 1.0) ? 1.0 / scale : 1.0;
+  accscalar_t total_w = 0.0;
+  int j = 0;
+  for (j = 0; j < xsize; j++) {
+    accscalar_t w = interp_filter((j + xmin_m_center + static_cast<accscalar_t>(0.5)) * invscale);
+    wt_ptr[j] = static_cast<scalar_t>(w);
+    total_w += w;
+  }
+  for (j = 0; j < xsize; j++) {
+    if (total_w != 0.0) {
+      wt_ptr[j] /= total_w;
+    }
+  }
+  for (; j < interp_size; j++) {
+    wt_ptr[j] = static_cast<scalar_t>(0.0);
+  }
+}
+
+template <typename scalar_t, typename accscalar_t>
+__device__ __forceinline__ static accscalar_t interpolate_aa_single_dim(
+    const scalar_t* src,
+    const scalar_t* weights,
+    int size) {
+  scalar_t t = static_cast<accscalar_t>(*src);
+  scalar_t wts = static_cast<accscalar_t>(weights[0]);
+  accscalar_t output = t * wts;
+
+  int j = 1;
+  for (; j < size; j++) {
+    wts = static_cast<accscalar_t>(weights[j]);
+    t = static_cast<accscalar_t>(*(src + j));
+    output += t * wts;
+  }
+  return output;
+}
+
 }
 
 } // namespace native

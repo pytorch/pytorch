@@ -73,7 +73,7 @@ TORCH_API ExportedStatMap toMap(const ExportedStatList& stats);
  * int main() {
  *   MyCaffeClass a("first");
  *   MyCaffeClass b("second");
- *   for (int i = 0; i < 10; ++i) {
+ *   for (const auto i : c10::irange(10)) {
  *     a.run(10);
  *     b.run(5);
  *   }
@@ -348,6 +348,7 @@ _ScopeGuard<T> ScopeGuard(T f) {
         stats.field.groupName.c_str(),                              \
         __caffe_event_value_,                                       \
         ##__VA_ARGS__);                                             \
+    (void)__caffe_event_value_;                                     \
   }
 
 #define CAFFE_DURATION(stats, field, ...)                        \

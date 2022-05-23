@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/mobile/debug_info.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 
@@ -12,6 +13,12 @@ namespace torch {
 namespace jit {
 
 namespace {
+
+C10_ALWAYS_INLINE std::string debugHandlesNotFoundMessage(
+    const std::string& debug_handles_string) {
+  return "Debug info for handle(s): " + debug_handles_string +
+      ", was not found.";
+}
 
 std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy(
     const DebugInfoTuple& source_callstack,
@@ -115,21 +122,34 @@ MobileDebugTable::MobileDebugTable(
       at::DataPtr debug_data;
       size_t debug_size{0};
       std::tie(debug_data, debug_size) = reader->getRecord(record_name);
-      auto ivalues =
-          jit::unpickle(
-              reinterpret_cast<const char*>(debug_data.get()), debug_size)
-              .toTuple()
-              ->elements();
-      SourceRangeDeserializer deserializer;
-      for (auto& val : ivalues) {
-        auto tup_elems = val.toTuple()->elements();
+      auto ivalueTuple = jit::unpickle(
+          reinterpret_cast<const char*>(debug_data.get()),
+          debug_size,
+          nullptr,
+          {},
+          c10::parseType);
+      const auto& ivalues = ivalueTuple.toTuple()->elements();
+      IValue lines;
+      std::unique_ptr<SourceRangeDeserializer> deserializer;
+      if (ivalues.size() == 3 && ivalues[0].isString() &&
+          kFormatWithStringTable == ivalues[0].toStringRef()) {
+        // new format
+        deserializer = std::make_unique<SourceRangeDeserializer>(ivalues[1]);
+        lines = ivalues[2];
+      } else {
+        deserializer = std::make_unique<SourceRangeDeserializer>();
+        lines = ivalueTuple;
+      }
+
+      for (auto& val : lines.toTuple()->elements()) {
+        auto tup_elems = std::move(*std::move(val).toTuple()).elements();
         // For BC we decode only tuples with 3 elements
         // assuming it contains
         // byte_offset, debug_handle (=source range tag), source range
         if (tup_elems.size() == 3) {
           int64_t debug_handle = tup_elems[kSourceRangeTagIndex].toInt();
           auto source_range =
-              deserializer.deserialize(tup_elems[kSourceRangeIndex]);
+              deserializer->deserialize(tup_elems[kSourceRangeIndex]);
           source_range_map.emplace(debug_handle, std::move(source_range));
         }
       }
@@ -152,8 +172,7 @@ std::string MobileDebugTable::getModuleHierarchyInfo(
     const std::string& top_module_type_name) const {
   const auto it = callstack_ptr_map_.find(debug_handle);
   if (it == callstack_ptr_map_.end()) {
-    return "Module info for handle, " + std::to_string(debug_handle) +
-        ", not found.";
+    return debugHandlesNotFoundMessage(std::to_string(debug_handle));
   }
   return (getStackTraceWithModuleHierarchy(
               {it->second}, "top", top_module_type_name))
@@ -172,8 +191,7 @@ std::string MobileDebugTable::getSourceDebugString(
     const std::string& top_module_type_name) const {
   const auto it = callstack_ptr_map_.find(debug_handle);
   if (it == callstack_ptr_map_.end()) {
-    return "Debug info for handle, " + std::to_string(debug_handle) +
-        ", not found.";
+    return debugHandlesNotFoundMessage(std::to_string(debug_handle));
   }
   return (getStackTraceWithModuleHierarchy(
               {it->second}, "top", top_module_type_name))
@@ -208,8 +226,7 @@ std::pair<std::string, std::string> MobileDebugTable::
       debug_handles_string += std::to_string(debug_handle);
     }
     debug_handles_string += "}";
-    debug_handles_string =
-        "Debug info for handles: " + debug_handles_string + ", was not found.";
+    debug_handles_string = debugHandlesNotFoundMessage(debug_handles_string);
     return {debug_handles_string, debug_handles_string};
   }
   return (getStackTraceWithModuleHierarchy(

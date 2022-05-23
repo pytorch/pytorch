@@ -20,7 +20,7 @@ def _symeig_backward_complete_eigenspace(D_grad, U_grad, A, D, U):
     F.pow_(-1)
 
     # A.grad = U (D.grad + (U^T U.grad * F)) U^T
-    Ut = U.transpose(-1, -2).contiguous()
+    Ut = U.mT.contiguous()
     res = torch.matmul(
         U,
         torch.matmul(
@@ -139,7 +139,7 @@ def _vector_polynomial_value(poly, x, zero_power=None):
 def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     # compute a projection operator onto an orthogonal subspace spanned by the
     # columns of U defined as (I - UU^T)
-    Ut = U.transpose(-2, -1).contiguous()
+    Ut = U.mT.contiguous()
     proj_U_ortho = -U.matmul(Ut)
     proj_U_ortho.diagonal(dim1=-2, dim2=-1).add_(1)
 
@@ -159,7 +159,7 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
             generator=gen
         )
     )
-    U_ortho_t = U_ortho.transpose(-2, -1).contiguous()
+    U_ortho_t = U_ortho.mT.contiguous()
 
     # compute the coefficients of the characteristic polynomial of the tensor D.
     # Note that D is diagonal, so the diagonal elements are exactly the roots
@@ -291,7 +291,8 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
             ortho_iparams, ortho_fparams, ortho_bparams
         )
 
-        ctx.save_for_backward(A, B, D, U, largest)
+        ctx.save_for_backward(A, B, D, U)
+        ctx.largest = largest
 
         return D, U
 
@@ -300,7 +301,8 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         A_grad = B_grad = None
         grads = [None] * 14
 
-        A, B, D, U, largest = ctx.saved_tensors
+        A, B, D, U = ctx.saved_tensors
+        largest = ctx.largest
 
         # lobpcg.backward has some limitations. Checks for unsupported input
         if A.is_sparse or (B is not None and B.is_sparse and ctx.needs_input_grad[2]):
@@ -352,7 +354,7 @@ def lobpcg(A: Tensor,
            ) -> Tuple[Tensor, Tensor]:
 
     """Find the k largest (or smallest) eigenvalues and the corresponding
-    eigenvectors of a symmetric positive defined generalized
+    eigenvectors of a symmetric positive definite generalized
     eigenvalue problem using matrix-free LOBPCG methods.
 
     This function is a front-end to the following LOBPCG algorithms
@@ -514,8 +516,8 @@ def lobpcg(A: Tensor,
             # The symmetrization is important for first-order optimization methods,
             # so that (A - alpha * A_grad) is still a symmetric matrix.
             # Same holds for `B`.
-            A_sym = (A + A.transpose(-2, -1)) / 2
-            B_sym = (B + B.transpose(-2, -1)) / 2 if (B is not None) else None
+            A_sym = (A + A.mT) / 2
+            B_sym = (B + B.mT) / 2 if (B is not None) else None
 
             return LOBPCGAutogradFunction.apply(
                 A_sym, k, B_sym, X, n, iK, niter, tol, largest,
@@ -650,17 +652,16 @@ class LOBPCG(object):
     """
 
     def __init__(self,
-                 A,        # type: Optional[Tensor]
-                 B,        # type: Optional[Tensor]
-                 X,        # type: Tensor
-                 iK,       # type: Optional[Tensor]
-                 iparams,  # type: Dict[str, int]
-                 fparams,  # type: Dict[str, float]
-                 bparams,  # type: Dict[str, bool]
-                 method,   # type: str
-                 tracker   # type: None
-                 ):
-        # type: (...) -> None
+                 A: Optional[Tensor],
+                 B: Optional[Tensor],
+                 X: Tensor,
+                 iK: Optional[Tensor],
+                 iparams: Dict[str, int],
+                 fparams: Dict[str, float],
+                 bparams: Dict[str, bool],
+                 method: str,
+                 tracker: None
+                 ) -> None:
 
         # constant parameters
         self.A = A
@@ -679,10 +680,10 @@ class LOBPCG(object):
         self.E = torch.zeros((n, ), dtype=X.dtype, device=X.device)
         self.R = torch.zeros((m, n), dtype=X.dtype, device=X.device)
         self.S = torch.zeros((m, 3 * n), dtype=X.dtype, device=X.device)
-        self.tvars = {}               # type: Dict[str, Tensor]
-        self.ivars = {'istep': 0}     # type: Dict[str, int]
-        self.fvars = {'_': 0.0}       # type: Dict[str, float]
-        self.bvars = {'_': False}     # type: Dict[str, bool]
+        self.tvars: Dict[str, Tensor] = {}
+        self.ivars: Dict[str, int] = {'istep': 0}
+        self.fvars: Dict[str, float] = {'_': 0.0}
+        self.bvars: Dict[str, bool] = {'_': False}
 
     def __str__(self):
         lines = ['LOPBCG:']
@@ -939,18 +940,15 @@ class LOBPCG(object):
         SBS = _utils.qform(B, S)
         d_row = SBS.diagonal(0, -2, -1) ** -0.5
         d_col = d_row.reshape(d_row.shape[0], 1)
-        # TODO: Consider reordering the operations to work with lower-triangular matrices
-        R = torch.linalg.cholesky(((SBS * d_row) * d_col).transpose(-2, -1).conj()).transpose(-2, -1).conj()
-        # TODO: could use LAPACK ?trtri as R is upper-triangular
-        Rinv = torch.inverse(R)
-        return Rinv * d_col
+        # TODO use torch.linalg.cholesky_solve once it is implemented
+        R = torch.linalg.cholesky((SBS * d_row) * d_col, upper=True)
+        return torch.linalg.solve_triangular(R, d_row.diag_embed(), upper=True, left=False)
 
     def _get_svqb(self,
-                  U,     # Tensor
-                  drop,  # bool
-                  tau    # float
-                  ):
-        # type: (Tensor, bool, float) -> Tensor
+                  U: Tensor,     # Tensor
+                  drop: bool,  # bool
+                  tau: float    # float
+                  ) -> Tensor:
         """Return B-orthonormal U.
 
         .. note:: When `drop` is `False` then `svqb` is based on the

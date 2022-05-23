@@ -32,15 +32,11 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
 
   CUDAEvent(
       DeviceIndex device_index, const cudaIpcEventHandle_t* handle) {
-    #ifndef __HIP_PLATFORM_HCC__
       device_index_ = device_index;
       CUDAGuard guard(device_index_);
 
       AT_CUDA_CHECK(cudaIpcOpenEventHandle(&event_, *handle));
       is_created_ = true;
-    #else
-      AT_ERROR("cuIpcOpenEventHandle with HIP is not supported");
-    #endif
   }
 
   // Note: event destruction done on creating device to avoid creating a
@@ -148,7 +144,6 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
 
   // Note: cudaIpcGetEventHandle must be called on the same device as the event
   void ipc_handle(cudaIpcEventHandle_t * handle) {
-    #ifndef __HIP_PLATFORM_HCC__
       if (!is_created_) {
         // this CUDAEvent object was initially constructed from flags but event_
         // is not created yet.
@@ -156,9 +151,6 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       }
       CUDAGuard guard(device_index_);
       AT_CUDA_CHECK(cudaIpcGetEventHandle(handle, event_));
-    #else
-      AT_ERROR("cuIpcGetEventHandle with HIP is not supported");
-    #endif
   }
 
 private:

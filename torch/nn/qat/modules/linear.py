@@ -2,6 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.intrinsic import LinearReLU
+from torch.nn.utils.parametrize import (
+    is_parametrized,
+    type_before_parametrizations,
+    transfer_parametrizations_and_params,
+)
 
 class Linear(nn.Linear):
     r"""
@@ -34,21 +39,33 @@ class Linear(nn.Linear):
     @classmethod
     def from_float(cls, mod):
         r"""Create a qat module from a float module or qparams_dict
-
-            Args: `mod` a float module, either produced by torch.quantization utilities
+            Args: `mod` a float module, either produced by torch.ao.quantization utilities
             or directly from user
         """
-        assert type(mod) == cls._FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
-            cls._FLOAT_MODULE.__name__
-        assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-        assert mod.qconfig, 'Input float module must have a valid qconfig'
-        if type(mod) == LinearReLU:
+        assert type_before_parametrizations(mod) == cls._FLOAT_MODULE, (
+            " qat."
+            + cls.__name__
+            + ".from_float only works for "
+            + cls._FLOAT_MODULE.__name__
+        )
+        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
+        assert mod.qconfig, "Input float module must have a valid qconfig"
+        if type_before_parametrizations(mod) == LinearReLU:
             mod = mod[0]
 
         qconfig = mod.qconfig
         qat_linear = cls(mod.in_features, mod.out_features, bias=mod.bias is not None, qconfig=qconfig)
-        qat_linear.weight = mod.weight
-        qat_linear.bias = mod.bias
+
+        if is_parametrized(mod, "weight"):
+            transfer_parametrizations_and_params(mod, qat_linear, "weight")
+        else:
+            qat_linear.weight = mod.weight
+
+        if is_parametrized(mod, "bias"):
+            transfer_parametrizations_and_params(mod, qat_linear, "bias")
+        else:
+            qat_linear.bias = mod.bias
+
         return qat_linear
 
     def to_float(self):

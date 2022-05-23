@@ -126,13 +126,13 @@ class CollectiveTest {
       int num,
       bool delayed = false) {
     std::vector<CollectiveTest> tests;
-    for (const auto i : c10::irange(num)) {
-      tests.push_back(CollectiveTest(path));
+    for (C10_UNUSED const auto i : c10::irange(num)) {
+      tests.emplace_back(CollectiveTest(path));
     }
 
     std::vector<std::thread> threads;
     for (const auto i : c10::irange(num)) {
-      threads.push_back(std::thread(
+      threads.emplace_back(std::thread(
           [i, &tests, delayed] { tests[i].start(i, tests.size(), delayed); }));
     }
     for (auto& thread : threads) {
@@ -142,7 +142,7 @@ class CollectiveTest {
     return tests;
   }
 
-  CollectiveTest(const std::string& path) : path_(path) {}
+  CollectiveTest(std::string path) : path_(std::move(path)) {}
 
   CollectiveTest(CollectiveTest&& other) {
     path_ = std::move(other.path_);
@@ -242,7 +242,7 @@ void checkProfiledEvents(
       auto match = !strcmp(evt.name(), expected_profile_str);
       if (verify_shapes && match) {
         auto shapesVec = evt.shapes();
-        for (int i = 0; i < expected_count; i++) {
+        for (const auto i : c10::irange(expected_count)) {
           // Assumptions: no two expected shapes are the same
           if (shapesVec[0] == expected_shapes[i]) {
             matched_shapes[i] = true;

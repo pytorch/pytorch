@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 namespace at {
   namespace native {
@@ -20,7 +21,7 @@ namespace at {
         func(self_data, values_data, indices_data, self_dim_size, self_stride, values_stride, indices_stride);
         if(ndims == 1)
            break;
-        for(int dim_i = 0; dim_i < ndims; dim_i++) {
+        for (const auto dim_i : c10::irange(ndims)) {
           if(dim_i == dim) {
             if(dim_i == (ndims - 1)) {
               tensor_dim_apply_has_finished = 1;

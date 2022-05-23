@@ -50,7 +50,7 @@ static void Im2ColNCHW(
       auto* dst = data_col + nip * (kernel_h * kernel_w * output_h * output_w) +
           kh * (kernel_w * output_h * output_w) + kw * (output_h * output_w);
       const auto* src = data_im + nip * (height * width);
-      for (auto y = 0; y < output_h; y++) {
+      for (const auto y : c10::irange(output_h)) {
         const auto iy = y * stride_h + kh;
         const auto ix = kw;
         if (stride_w == 1) {
@@ -59,7 +59,7 @@ static void Im2ColNCHW(
               src + (iy * width + ix),
               sizeof(T) * output_w);
         } else {
-          for (auto x = 0; x < output_w; x++) {
+          for (const auto x : c10::irange(output_w)) {
             memcpy(
                 dst + (y * output_w + x),
                 src + (iy * width + ix + x * stride_w),
@@ -78,8 +78,8 @@ static void Im2ColNCHW(
     const int pad_w = pad_l;
     const int channel_size = height * width;
     for (int channel = channels; channel--; data_im += channel_size) {
-      for (int kernel_row = 0; kernel_row < kernel_h; kernel_row++) {
-        for (int kernel_col = 0; kernel_col < kernel_w; kernel_col++) {
+      for (const auto kernel_row : c10::irange(kernel_h)) {
+        for (const auto kernel_col : c10::irange(kernel_w)) {
           int input_row = -pad_h + kernel_row * dilation_h;
           for (int output_rows = output_h; output_rows; output_rows--) {
             if (!utils::IsAGeZeroAndALtB(input_row, height)) {
@@ -113,12 +113,12 @@ static void Im2ColNCHW(
   int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
 
   int channels_col = channels * kernel_h * kernel_w;
-  for (int c = 0; c < channels_col; ++c) {
+  for (const auto c : c10::irange(channels_col)) {
     int w_offset = c % kernel_w;
     int h_offset = (c / kernel_w) % kernel_h;
     int c_im = c / kernel_h / kernel_w;
-    for (int h = 0; h < height_col; ++h) {
-      for (int w = 0; w < width_col; ++w) {
+    for (const auto h : c10::irange(height_col)) {
+      for (const auto w : c10::irange(width_col)) {
         int h_pad = h * stride_h - pad_t + h_offset * dilation_h;
         int w_pad = w * stride_w - pad_l + w_offset * dilation_w;
         if (h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width)
@@ -152,20 +152,20 @@ static void Im2ColNdNCHW(
       kernel_shape, kernel_shape + N, 1, std::multiplies<int>());
   std::vector<int> d_offset(N, 0);
   std::vector<int> d_iter(N, 0);
-  for (int i = 0; i < outer_size; ++i) {
+  for (const auto i : c10::irange(outer_size)) {
     // Loop over spatial axes in reverse order to compute a per-axis offset.
     int offset = i;
     for (int d_i = N - 1; d_i >= 0; --d_i) {
       d_offset[d_i] = offset % kernel_shape[d_i];
       offset /= kernel_shape[d_i];
     }
-    for (int j = 0; j < inner_size; ++j) {
+    for (const auto j : c10::irange(inner_size)) {
       // Loop over spatial axes in forward order to compute the indices in the
       // image and column, and whether the index lies in the padding.
       const int col_index = i * inner_size + j;
       int img_index = i / kernel_size;
       bool is_padding = false;
-      for (int d_i = 0; d_i < N; ++d_i) {
+      for (const auto d_i : c10::irange(N)) {
         const int d_img = d_iter[d_i] * stride[d_i] - pad[d_i] +
             d_offset[d_i] * dilation[d_i];
         is_padding |= d_img < 0 || d_img >= img_shape[d_i + 1];
@@ -216,13 +216,13 @@ static void Im2ColNHWC(
     T* data_col_temp =
         data_col + h * width_col * kernel_h * kernel_w * channels;
     int w_pad = -pad_l;
-    for (int w = 0; w < width_col; ++w) {
+    for (C10_UNUSED const auto w : c10::irange(width_col)) {
       int r = 0;
       for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h, ++r) {
         int s = 0;
         for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w, ++s) {
           if (ih >= 0 && ih < height && iw >= 0 && iw < width) {
-            for (int g = 0; g < groups; ++g) {
+            for (const auto g : c10::irange(groups)) {
               memcpy(
                   data_col_temp +
                       ((g * kernel_h + r) * kernel_w + s) * (channels / groups),
@@ -232,7 +232,7 @@ static void Im2ColNHWC(
             }
           } else {
             // This should be simply padded with zero.
-            for (int g = 0; g < groups; ++g) {
+            for (const auto g : c10::irange(groups)) {
               for (int i = 0; i < channels / groups; ++i) {
                 data_col_temp
                     [(((g * kernel_h + r) * kernel_w) + s) *
@@ -293,12 +293,12 @@ static void Im2Col3DNHWC(
 #endif
   for (int t = 0; t < frame_col; ++t) {
     int t_pad = -pad_p + t * stride_t;
-    for (int h = 0; h < height_col; ++h) {
+    for (const auto h : c10::irange(height_col)) {
       int h_pad = -pad_t + h * stride_h;
       T* data_col_temp = data_col +
           (t * height_col + h) * width_col * kernel_t * kernel_h * kernel_w *
               channels;
-      for (int w = 0; w < width_col; ++w) {
+      for (const auto w : c10::irange(width_col)) {
         int w_pad = -pad_l + w * stride_w;
         int q = 0;
         for (int it = t_pad; it < t_pad + dkernel_t; it += dilation_t, ++q) {
@@ -309,7 +309,7 @@ static void Im2Col3DNHWC(
                  iw += dilation_w, ++s) {
               if (it >= 0 && it < num_frames && ih >= 0 && ih < height &&
                   iw >= 0 && iw < width) {
-                for (int g = 0; g < groups; ++g) {
+                for (const auto g : c10::irange(groups)) {
                   memcpy(
                       data_col_temp +
                           (((g * kernel_t + q) * kernel_h + r) * kernel_w + s) *
@@ -320,7 +320,7 @@ static void Im2Col3DNHWC(
                 }
               } else {
                 // This should be simply padded with zero.
-                for (int g = 0; g < groups; ++g) {
+                for (const auto g : c10::irange(groups)) {
                   for (int i = 0; i < channels / groups; ++i) {
                     data_col_temp
                         [((((g * kernel_t + q) * kernel_h + r) * kernel_w) +

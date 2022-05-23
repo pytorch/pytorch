@@ -32,7 +32,7 @@ def _quantize_tensor(tensor, qtype):
     if (qtype == DQuantType.FP16):
         return _fp32_to_fp16_with_clamp(tensor)
     elif (qtype == DQuantType.BFP16):
-        return torch.ops.q._FloatToBfloat16Quantized(tensor)
+        return torch.ops.quantization._FloatToBfloat16Quantized(tensor)
     else:
         raise RuntimeError(
             f'Quantization type {qtype} is not supported'
@@ -68,7 +68,7 @@ def _dequantize_tensor(tensor, qtype, quant_loss=None):
                 f"tensor dtype is {tensor.dtype} while expected to be FP16."
             )
         else:
-            return torch.ops.q._Bfloat16QuantizedToFloat(tensor)
+            return torch.ops.quantization._Bfloat16QuantizedToFloat(tensor)
     else:
         raise RuntimeError(
             f'Quantization type {qtype} is not supported'

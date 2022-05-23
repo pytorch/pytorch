@@ -5,15 +5,20 @@ import os
 import sys
 import tempfile
 import threading
+import subprocess
 import time
 import traceback
 import types
 import unittest
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
-from functools import partial, reduce
-from functools import wraps
+from functools import (
+    partial,
+    reduce,
+    wraps
+)
 from io import StringIO
 from typing import NamedTuple, Optional, Union
 
@@ -23,6 +28,7 @@ import torch.distributed as c10d
 from torch.testing._internal.common_utils import (
     TestCase,
     TEST_WITH_ROCM,
+    TEST_WITH_TSAN,
     FILE_SCHEMA,
     find_free_port,
     retry_on_connect_failures,
@@ -31,6 +37,7 @@ from torch.testing._internal.common_utils import (
     sandcastle_skip,
 )
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -44,6 +51,7 @@ TEST_SKIPS = {
         72, "Skipped because distributed backend is not available."
     ),
     "small_worldsize": TestSkip(73, "Skipped due to small world size."),
+    "odd_worldsize": TestSkip(87, "Skipped due to odd world size."),
     "no_cuda": TestSkip(74, "CUDA is not available."),
     "multi-gpu-1": TestSkip(75, "Need at least 1 CUDA device"),
     "multi-gpu-2": TestSkip(77, "Need at least 2 CUDA devices"),
@@ -61,10 +69,27 @@ TEST_SKIPS = {
     ),
 }
 
+@dataclass
+class DistTestCases:
+    # Backends that do not support a specific collective
+    skip_collective = {}
+    skip_collective["allgather_coalesced"] = {"nccl", "mpi"}
+    skip_collective["reduce"] = set()
+    skip_collective["sendrecv anysource"] = {"nccl"}
+    skip_collective["cpu barrier"] = {"nccl"}
+
+    # Sets showing that something is implemented
+    backend_feature = {}
+    backend_feature["gpu"] = {"nccl", "gloo"}
+    backend_feature["cuda"] = {"nccl", "gloo"}
+    backend_feature["ddp"] = {"nccl", "gloo"}
+    backend_feature["subgroup"] = {"nccl", "gloo"}
+    backend_feature["plugin"] = set()
+
 
 def skip_if_no_gpu(func):
-    """Nccl multigpu tests require at least 2 GPUS. Skip if this is not met"""
-
+    """Skips if the world size exceeds the number of GPUs, ensuring that if the
+    test is run, each rank has its own GPU via ``torch.cuda.device(rank)``."""
     @wraps(func)
     def wrapper(*args, **kwargs):
         if not torch.cuda.is_available():
@@ -88,6 +113,15 @@ def skip_if_small_worldsize(func):
 
     return wrapper
 
+def skip_if_odd_worldsize(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) % 2 == 1:
+            sys.exit(TEST_SKIPS["odd_worldsize"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
 
 def require_n_gpus_for_nccl_backend(n, backend):
     def decorator(func):
@@ -135,9 +169,16 @@ def nccl_skip_if_lt_x_gpu(backend, x):
 def verify_ddp_error_logged(model_DDP, err_substr):
     # Verify error was logged in ddp_logging_data.
     ddp_logging_data = model_DDP._get_ddp_logging_data()
+    assert "iteration" in ddp_logging_data
     assert "has_error" in ddp_logging_data
     assert "error" in ddp_logging_data
-    assert err_substr in ddp_logging_data["error"]
+    logging_err = ddp_logging_data["error"]
+    # Remove C++ stacktrace if needed.
+    actual = (
+        err_substr if err_substr.find("\nException raised from ") == -1
+        else err_substr.split("\nException raised from ")[0]
+    )
+    assert actual in logging_err, f"Did not find expected {actual} in ddp logging data error: {logging_err}"
 
 
 def with_nccl_blocking_wait(func):
@@ -197,7 +238,9 @@ def with_dist_debug_levels(levels):
             old_level = os.environ.get("TORCH_DISTRIBUTED_DEBUG", None)
             for level in levels:
                 os.environ["TORCH_DISTRIBUTED_DEBUG"] = level
+                c10d.set_debug_level_from_env()
                 ret = func(*args, **kwargs)
+                c10d.barrier()
                 if old_level is not None:
                     os.environ["TORCH_DISTRIBUTED_DEBUG"] = old_level
             # Only returns test return for last test, but since these are
@@ -289,9 +332,16 @@ def create_tcp_store(
         )
 
 
-TIMEOUT_DEFAULT = 100
+if TEST_WITH_TSAN:
+    # TSAN runs much slower.
+    TIMEOUT_DEFAULT = 500
+else:
+    TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 
+# https://github.com/pytorch/pytorch/issues/75665
+if TEST_WITH_ROCM:
+    TIMEOUT_OVERRIDE["test_join_kwargs"] = 200
 
 def create_device(interface=None):
     if sys.platform == "win32" or interface is None:
@@ -356,6 +406,39 @@ def simple_sparse_reduce_tests(rank: int, world_size: int, num_inputs: int = 1):
             partial(generate, dense_dims=3),
         ]
     ]
+
+
+# HELPER FOR MULTIGPU TESTS
+def init_multigpu_helper(world_size: int, backend: str):
+    """Multigpu tests are designed to simulate the multi nodes with multi
+    GPUs on each node. Nccl backend requires equal #GPUs in each process.
+    On a single node, all visible GPUs are evenly
+    divided to subsets, each process only uses a subset.
+    """
+    nGPUs = torch.cuda.device_count()
+    visible_devices = range(nGPUs)
+
+    if backend == "nccl":
+        # This is a hack for a known NCCL issue using multiprocess
+        # in conjunction with multiple threads to manage different GPUs which
+        # may cause ncclCommInitRank to fail.
+        # http://docs.nvidia.com/deeplearning/sdk/nccl-release-notes/rel_2.1.4.html#rel_2.1.4
+        # It slows down the performance of collective operations.
+        # Without this setting NCCL might throw unhandled error.
+        os.environ["NCCL_MAX_NRINGS"] = "1"
+
+    # If rank is less than or equal to number of available GPU's
+    # then each rank can be mapped to corresponding GPU.
+    nGPUs_per_process = 1
+    if world_size > nGPUs:
+        nGPUs_per_process = nGPUs // world_size
+    rank_to_GPU = {
+        i: list(
+            visible_devices[i * nGPUs_per_process : (i + 1) * nGPUs_per_process]
+        )
+        for i in range(world_size)
+    }
+    return rank_to_GPU
 
 
 tmp_dir: Optional[tempfile.TemporaryDirectory] = None
@@ -476,7 +559,7 @@ class MultiProcessTestCase(TestCase):
 
     @staticmethod
     def _event_listener(parent_pipe, signal_pipe, rank: int):
-        logger.info(f"Starting event listener thread for {rank}")
+        logger.info(f"Starting event listener thread for rank {rank}")
         while True:
             ready_pipes = multiprocessing.connection.wait([parent_pipe, signal_pipe])
 
@@ -507,28 +590,31 @@ class MultiProcessTestCase(TestCase):
 
     @classmethod
     def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+        # Enable DDP + ReplicatedTensor
+        from torch.nn.parallel._replicated_tensor_ddp_utils import _set_ddp_with_replicated_tensor
+        _set_ddp_with_replicated_tensor(True)
+
         self = cls(test_name)
 
+        self.rank = rank
+        self.file_name = file_name
+        self.run_test(test_name, parent_pipe)
+
+    def run_test(self, test_name: str, parent_pipe) -> None:
         # Start event listener thread.
         signal_recv_pipe, signal_send_pipe = torch.multiprocessing.Pipe(duplex=False)
         event_listener_thread = threading.Thread(
             target=MultiProcessTestCase._event_listener,
-            args=(parent_pipe, signal_recv_pipe, rank),
+            args=(parent_pipe, signal_recv_pipe, self.rank),
             daemon=True,
         )
         event_listener_thread.start()
-
-        self.rank = rank
-        self.file_name = file_name
-        self.run_test(test_name, parent_pipe, signal_send_pipe, event_listener_thread)
-
-    def run_test(
-        self, test_name: str, parent_pipe, signal_pipe=None, event_listener_thread=None
-    ) -> None:
         if sys.platform != "win32" and sys.platform != "darwin":
             # Register signal handler to dump stack traces on FATALs.
             # Windows and MacOS do not support the signal handlers.
             torch._C._set_print_stack_traces_on_fatal_signal(True)
+        # Show full C++ stacktraces when a Python error originating from C++ is raised.
+        os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.
@@ -548,10 +634,11 @@ class MultiProcessTestCase(TestCase):
             parent_pipe.send(traceback.format_exc())
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
         finally:
-            if signal_pipe is not None:
-                signal_pipe.send(None)
-            if event_listener_thread is not None:
-                event_listener_thread.join()
+            if signal_send_pipe is not None:
+                signal_send_pipe.send(None)
+
+            assert event_listener_thread is not None
+            event_listener_thread.join()
             # Close pipe after done with test.
             parent_pipe.close()
 
@@ -718,3 +805,32 @@ class MultiProcessTestCase(TestCase):
     @property
     def is_master(self) -> bool:
         return self.rank == 0
+
+# Cannot use functools.cache as it requires python 3.9
+EFA_PROBE_RESULT = None
+
+def has_efa() -> bool:
+    """
+    If shell command `fi_info -p efa -t FI_EP_RDM` returns exit code 0 then we assume that the machine has
+    Libfabric EFA interfaces and EFA software components installed,
+    see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-start.html.
+    """
+    global EFA_PROBE_RESULT
+    if EFA_PROBE_RESULT is not None:
+        return EFA_PROBE_RESULT
+
+    try:
+        EFA_PROBE_RESULT = subprocess.run(["fi_info", "-p", "efa", "-t", "FI_EP_RDM"]).returncode == 0
+    except FileNotFoundError:
+        EFA_PROBE_RESULT = False
+    return EFA_PROBE_RESULT
+
+
+def tp_transports():
+    """
+    If the machine has Libfabric EFA interfaces and EFA software components installed it may cause
+    'RuntimeError: In operator() at tensorpipe/common/ibv.h:172 "": Operation not supported' if tensorpipe
+    uses InfiniBand transport, so we exclude it from tensorpipe transports,
+    see https://github.com/pytorch/pytorch/issues/73885 and https://github.com/pytorch/pytorch/issues/65022
+    """
+    return ["shm", "uv"] if has_efa() else None

@@ -77,11 +77,11 @@ class Linear(nnq.Linear):
         r"""Create a dynamic quantized module from a float module or qparams_dict
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by the user
         """
         float_modules = [torch.nn.Linear, torch.nn.modules.linear.NonDynamicallyQuantizableLinear,
-                         torch.nn.intrinsic.modules.fused.LinearReLU]
+                         torch.nn.intrinsic.modules.fused.LinearReLU, torch.nn.qat.dynamic.Linear]
 
         assert type(mod) in float_modules, \
             'nn.quantized.dynamic.Linear.from_float only works for one of' + \
@@ -95,7 +95,7 @@ class Linear(nnq.Linear):
             # We have the circular import issues if we import the qconfig in the beginning of this file:
             # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
             # import until we need it.
-            from torch.quantization.qconfig import default_dynamic_qconfig
+            from torch.ao.quantization.qconfig import default_dynamic_qconfig
             weight_observer = default_dynamic_qconfig.weight()
         dtype = weight_observer.dtype
         assert dtype in [torch.qint8, torch.float16], "The only supported dtypes for " \
@@ -109,4 +109,18 @@ class Linear(nnq.Linear):
             raise RuntimeError('Unsupported dtype specified for dynamic quantized Linear!')
         qlinear = cls(mod.in_features, mod.out_features, dtype=dtype)
         qlinear.set_weight_bias(qweight, mod.bias)
+        return qlinear
+
+    @classmethod
+    def from_reference(cls, ref_qlinear):
+        """ Create a (fbgemm/qnnpack) dynamic quantized module from a reference quantized
+        module
+        Args:
+            ref_qlinear (Module): a reference quantized  module, either produced by
+            torch.ao.quantization functions or provided by the user
+        """
+        qlinear = cls(ref_qlinear.in_features, ref_qlinear.out_features, dtype=ref_qlinear.weight_dtype)
+        qweight = ref_qlinear.get_quantized_weight()
+        bias = ref_qlinear.bias
+        qlinear.set_weight_bias(qweight, bias)
         return qlinear

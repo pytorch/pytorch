@@ -1,7 +1,7 @@
 #pragma once
 
 #include "caffe2/operators/concat_split_op.h"
-#include "dnnlowp_op.h"
+#include "caffe2/quantization/server/dnnlowp_op.h"
 
 namespace caffe2 {
 

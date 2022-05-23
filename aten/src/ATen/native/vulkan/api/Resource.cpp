@@ -48,9 +48,7 @@ VmaAllocator create_allocator(
 VmaAllocationCreateInfo create_allocation_create_info(
     const Resource::Memory::Descriptor& descriptor) {
   return VmaAllocationCreateInfo{
-    VMA_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT |
-        /* VMA_ALLOCATION_CREATE_MAPPED_BIT - MoltenVK Issue #175 */
-        0,
+    VMA_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT,
     descriptor.usage,
     descriptor.required,
     descriptor.preferred,
@@ -60,6 +58,8 @@ VmaAllocationCreateInfo create_allocation_create_info(
     0.5f,
   };
 }
+
+} // namespace
 
 void release_buffer(const Resource::Buffer& buffer) {
   // Safe to pass null as buffer or allocation.
@@ -84,8 +84,6 @@ void release_image(const Resource::Image& image) {
       image.object.handle,
       image.memory.allocation);
 }
-
-} // namespace
 
 void* map(
     const Resource::Memory& memory,
@@ -366,8 +364,8 @@ Resource::Pool::Pool(
   : device_(gpu.device),
     allocator_(
         create_allocator(
-            gpu.adapter->runtime->instance(),
-            gpu.adapter->handle,
+            gpu.instance,
+            gpu.adapter->physical_handle(),
             device_),
         vmaDestroyAllocator),
     memory_{
@@ -425,7 +423,7 @@ Resource::Pool::~Pool() {
   }
 }
 
-Resource::Buffer Resource::Pool::buffer(
+Resource::Buffer Resource::Pool::create_buffer(
     const Buffer::Descriptor& descriptor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && allocator_,
@@ -487,24 +485,24 @@ Resource::Buffer Resource::Pool::buffer(
       allocation,
       buffer));
 
-  buffer_.pool.emplace_back(
-      Buffer{
-        Buffer::Object{
-          buffer,
-          0u,
-          descriptor.size,
-        },
-        Memory{
-          allocator_.get(),
-          allocation,
-        },
-      },
-      &release_buffer);
-
-  return buffer_.pool.back().get();
+  return Buffer{
+    Buffer::Object{
+      buffer,
+      0u,
+      descriptor.size,
+    },
+    Memory{
+      allocator_.get(),
+      allocation,
+    },
+  };
 }
 
-Resource::Image Resource::Pool::image(
+void Resource::Pool::register_buffer_cleanup(const Resource::Buffer& buffer) {
+  buffer_.pool.emplace_back(buffer, &release_buffer);
+}
+
+Resource::Image Resource::Pool::create_image(
     const Image::Descriptor& descriptor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && allocator_,
@@ -606,22 +604,22 @@ Resource::Image Resource::Pool::image(
       view,
       "Invalid Vulkan image view!");
 
-  image_.pool.emplace_back(
-      Image{
-        Image::Object{
-          image,
-          VK_IMAGE_LAYOUT_UNDEFINED,
-          view,
-          image_.sampler.cache.retrieve(descriptor.sampler),
-        },
-        Memory{
-          allocator_.get(),
-          allocation,
-        },
-      },
-      &release_image);
+  return Image{
+    Image::Object{
+      image,
+      VK_IMAGE_LAYOUT_UNDEFINED,
+      view,
+      image_.sampler.cache.retrieve(descriptor.sampler),
+    },
+    Memory{
+      allocator_.get(),
+      allocation,
+    },
+  };
+}
 
-  return image_.pool.back().get();
+void Resource::Pool::register_image_cleanup(const Resource::Image& image) {
+  image_.pool.emplace_back(image, &release_image);
 }
 
 Resource::Fence Resource::Pool::fence() {

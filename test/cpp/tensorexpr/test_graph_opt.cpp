@@ -3,6 +3,8 @@
 #include <test/cpp/tensorexpr/test_base.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/tensorexpr/graph_opt.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/torch.h>
@@ -297,6 +299,21 @@ TEST_F(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp2) {
       ->check_not("aten::add")
       ->run(*kernel.graph());
 #endif
+}
+
+TEST_F(GraphOpt, AOTGraphPrepPasses) {
+  const auto graph_string = R"IR(
+    graph(%x, %y, %z, %i : int):
+      %xyz_list : Tensor[] = prim::ListConstruct(%x, %y, %z)
+      return (%xyz_list, %i))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  removeGraphOutput(g, 1);
+  replaceListOutputWithTuple(g);
+  LowerAllTuples(g);
+
+  testing::FileCheck().check("return (%x, %y, %z)")->run(*g);
 }
 
 } // namespace jit

@@ -157,7 +157,7 @@ def _svd_lowrank(A: Tensor, q: Optional[int] = 6, niter: Optional[int] = 2,
         assert B_t.shape[-1] == q, (B_t.shape, q)
         assert B_t.shape[-1] <= B_t.shape[-2], B_t.shape
         U, S, Vh = torch.linalg.svd(B_t, full_matrices=False)
-        V = Vh.conj().transpose(-2, -1)
+        V = Vh.mH
         V = Q.matmul(V)
     else:
         Q = get_approximate_basis(A, q, niter=niter, M=M)
@@ -171,7 +171,7 @@ def _svd_lowrank(A: Tensor, q: Optional[int] = 6, niter: Optional[int] = 2,
         assert B_t.shape[-1] == n, (B_t.shape, n)
         assert B_t.shape[-1] <= B_t.shape[-2], B_t.shape
         U, S, Vh = torch.linalg.svd(B_t, full_matrices=False)
-        V = Vh.conj().transpose(-2, -1)
+        V = Vh.mH
         U = Q.matmul(U)
 
     return U, S, V

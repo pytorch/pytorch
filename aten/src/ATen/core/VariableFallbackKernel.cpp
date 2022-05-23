@@ -56,13 +56,17 @@ TORCH_LIBRARY_IMPL(_, AutogradLazy, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
 
-TORCH_LIBRARY_IMPL(_, AutogradMLC, m) {
+TORCH_LIBRARY_IMPL(_, AutogradMPS, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
 
 // see Note [ADInplaceOrView key]
 TORCH_LIBRARY_IMPL(_, ADInplaceOrView, m) {
       m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(_, AutogradHPU, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
 }
 
 }

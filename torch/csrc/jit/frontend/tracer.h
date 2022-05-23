@@ -1,12 +1,13 @@
 #pragma once
 
 #include <ATen/core/Dimname.h>
+#include <ATen/core/class_type.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
-#include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/utils/variadic.h>
 
@@ -69,6 +70,9 @@ struct TORCH_API TracingState
   Value* getValue(const IValue& var);
   Value* getOutput(const IValue& var, size_t i);
   bool hasValue(const IValue& var) const;
+
+  Node* createNode(c10::Symbol op_name, size_t num_outputs);
+  void insertNode(Node* node);
 
  private:
   using WeakIValue = at::WeakIValue;
@@ -190,10 +194,12 @@ struct TORCH_API NoWarn {
 };
 
 struct WithNestedTracingFrame {
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   WithNestedTracingFrame() {
     getTracingState()->enterFrame();
   }
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~WithNestedTracingFrame() {
     getTracingState()->leaveFrame();
   }
@@ -229,6 +235,7 @@ TORCH_API void abandon();
 // NB: those serve both as an intermediate steps in addInputs below,
 // as well as the overloads that terminate template recursion
 TORCH_API void addInputs(Node* n, const char* name, int64_t value);
+TORCH_API void addInputs(Node* n, const char* name, c10::SymInt value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
@@ -254,10 +261,15 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<at::Tensor>& value);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<int64_t> value);
+TORCH_API void addInputs(Node* n, const char* name, c10::SymIntArrayRef value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
     const c10::optional<ArrayRef<int64_t>>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const at::OptionalIntArrayRef& opt_value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
@@ -271,7 +283,7 @@ TORCH_API void addInputs(
     Node* n,
     const char* name,
     ArrayRef<c10::intrusive_ptr<c10::ivalue::Object>> value,
-    const ClassTypePtr& class_type);
+    const c10::ClassTypePtr& class_type);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<double> value);
 TORCH_API void addInputs(
     Node* n,
@@ -378,6 +390,8 @@ TORCH_API void addOutput(
 TORCH_API autograd::Variable getSizeOf(
     const autograd::Variable& var,
     int64_t dim);
+
+TORCH_API autograd::Variable getNumelOf(const autograd::Variable& var);
 
 } // namespace tracer
 } // namespace jit

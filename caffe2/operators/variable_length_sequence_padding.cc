@@ -19,7 +19,7 @@ N = maximum sequence length
 B = batch size
 M = hidden size
 
-set each element of INPUT to zero if it is is past the end of the
+set each element of INPUT to zero if it is past the end of the
 corresponding sequence (i.e. if LENS[j] > i for an index (i,j,k)).
 
 )DOC");

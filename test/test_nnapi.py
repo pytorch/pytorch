@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: mobile"]
+
 import os
 import ctypes
 import torch
@@ -284,6 +286,10 @@ class TestNNAPI(TestCase):
                             return torch.sigmoid(arg)
                         raise Exception("Bad op")
                 self.check(UnaryModule(), torch.tensor([-1.0, 1.0]))
+                self.check(
+                    UnaryModule(),
+                    qpt(torch.tensor([-1.0, 1.0]), 1. / 256, 0),
+                )
 
     def test_pointwise_binary(self):
         for op in ["add", "sub", "mul", "div"]:
@@ -514,10 +520,10 @@ class TestNNAPI(TestCase):
                     if "quant" in kind:
                         model = torch.nn.Sequential(model)
                         model.eval()
-                        model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
-                        model = torch.quantization.prepare(model)
+                        model.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
+                        model = torch.ao.quantization.prepare(model)
                         model(inp)
-                        model = torch.quantization.convert(model)
+                        model = torch.ao.quantization.convert(model)
                         inp = qpt(inp, 1.0 / 16, 128)
                         # I've seen numerical differences between QNNPACK and NNAPI,
                         # but never more than 1 quantum, and never more than ~1% of
@@ -540,13 +546,14 @@ class TestNNAPI(TestCase):
                     )
 
     def test_conv2d_transpose(self):
+        torch.manual_seed(29)
         in_ch, out_ch, kernel = (5, 7, (2, 2))
         input_dim = (4, 5, 3, 3)
-        inp = torch.randn(input_dim)
         convert_dims = input_dim[:2] + (0, 0)
 
         for kind in ["float", "float-nhwc", "quant", "quant-nhwc"]:
             with self.subTest(kind):
+                inp = torch.randn(input_dim)
                 model = torch.nn.ConvTranspose2d(in_ch, out_ch, kernel)
                 output_size = model(inp).numel()
                 atol_rtol = (0.0002, 0)
@@ -554,20 +561,14 @@ class TestNNAPI(TestCase):
                 convert_arg = torch.zeros(*convert_dims)
 
                 if "quant" in kind:
-                    # FIXME 'aten::slow_conv_transpose2d' with arguments from the 'QuantizedCPU' backend
-                    continue
-                    model = torch.nn.Sequential(model)
-                    model.eval()
-                    model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
-                    model = torch.quantization.prepare(model)
-                    model(inp)
-                    model = torch.quantization.convert(model)
+                    model = torch.nn.quantized.ConvTranspose2d(in_ch, out_ch, kernel)
+                    model.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
                     inp = qpt(inp, 1.0 / 16, 128)
                     # I've seen numerical differences between QNNPACK and NNAPI,
-                    # but never more than 1 quantum, and never more than ~1% of
+                    # but never more than 1 quantum, and never more than ~10% of
                     # the output in this test.
                     atol_rtol = (1, 0)
-                    limit = output_size * 0.03
+                    limit = output_size * 0.1
                     convert_arg = qpt(convert_arg, 1.0 / 16, 128)
 
                 if "nhwc" in kind:
@@ -597,7 +598,11 @@ class TestNNAPI(TestCase):
             def forward(self, lhs, rhs):
                 return func.add_relu(lhs, rhs)
 
-        for (name, mod) in [("add", AddMod), ("add_relu", AddReluMod)]:
+        class MulMod(torch.nn.Module):
+            def forward(self, lhs, rhs):
+                return func.mul(lhs, rhs)
+
+        for (name, mod) in [("add", AddMod), ("add_relu", AddReluMod), ("mul", MulMod)]:
             with self.subTest(name):
                 self.check(
                     mod(),

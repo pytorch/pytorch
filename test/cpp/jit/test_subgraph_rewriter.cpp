@@ -244,5 +244,67 @@ graph(%a, %b):
     FileCheck().check_not("db::fused")->run(*g);
   }
 }
+
+TEST(SubgraphRewriterTest, OutputType) {
+  std::string pattern = R"IR(
+graph(%a, %b):
+  %c = c::ccc(%a, %b)
+  return (%c))IR";
+  Graph pattern_graph;
+  std::unordered_map<std::string, Value*> vmap;
+
+  parseIR(pattern, &pattern_graph, vmap);
+
+  auto b_is_constant = [](const Match& match,
+                          const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto b_node = match_vmap.at(vmap.at("b"))->node();
+    return b_node->kind() == prim::Constant;
+  };
+
+  std::string replacement = R"IR(
+graph(%a, %b):
+  %d = d::ddd(%a, %b)
+  return (%d))IR";
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(pattern, replacement);
+  {
+    auto graph = std::make_shared<Graph>();
+
+    parseIR(
+        R"IR(
+  graph(%0):
+    %a : Float(10, 20) = a::aaa(%0)
+    %b : int = prim::Constant[value=1]()
+    %c : Float(10, 20) = c::ccc(%a, %b)
+    return (%c))IR",
+        graph.get());
+
+    // output has shape info.
+    rewriter.runOnGraph(graph, b_is_constant);
+    FileCheck()
+        .check("Float(10, 20) = d::ddd")
+        ->check_not("c::ccc")
+        ->run(*graph);
+  }
+  {
+    auto graph = std::make_shared<Graph>();
+
+    parseIR(
+        R"IR(
+  graph(%0):
+    %a = a::aaa(%0)
+    %b : int = prim::Constant[value=1]()
+    %c = c::ccc(%a, %b)
+    return (%c))IR",
+        graph.get());
+
+    // output has not shape info.
+    rewriter.runOnGraph(graph, b_is_constant);
+    FileCheck().check("Tensor = d::ddd")->check_not("c::ccc")->run(*graph);
+  }
+}
+
 } // namespace jit
 } // namespace torch

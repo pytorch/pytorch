@@ -26,8 +26,6 @@ using GraphPass = std::function<void(std::shared_ptr<Graph>&)>;
 // Since Passes are std::functions, we associate a UUID to each pass, this way
 // if we want to deregister a pass, we have something to reference it by.
 using GraphPassNameType = unsigned int;
-// Start UUID at 1
-static GraphPassNameType graphPassID = 1;
 
 // Graph pass entries have a name associated with them
 using GraphPassEntry = std::pair<GraphPass, GraphPassNameType>;
@@ -70,7 +68,7 @@ using RegisterPass = RegisterPostPass;
  * types.
  */
 template <typename DerivedType>
-struct C10_EXPORT PassManager {
+struct TORCH_API PassManager {
  private:
   // We want this class to be abstract because it's
   virtual void abstract() = 0;

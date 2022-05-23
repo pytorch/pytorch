@@ -1,3 +1,5 @@
+# Owner(s): ["module: typing"]
+
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY, load_tests
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -61,6 +63,7 @@ class TestDTypeInfo(TestCase):
         self.assertEqual(xinfo.min, -3.38953e+38)
         self.assertEqual(xinfo.eps, 0.0078125)
         self.assertEqual(xinfo.tiny, 1.17549e-38)
+        self.assertEqual(xinfo.tiny, xinfo.smallest_normal)
         self.assertEqual(xinfo.resolution, 0.01)
         self.assertEqual(xinfo.dtype, "bfloat16")
         torch.set_default_dtype(x.dtype)

@@ -348,11 +348,31 @@ macro(torch_cuda_based_add_library cuda_target)
   if(USE_ROCM)
     hip_add_library(${cuda_target} ${ARGN})
   elseif(USE_CUDA)
-    cuda_add_library(${cuda_target} ${ARGN})
+    add_library(${cuda_target} ${ARGN})
   else()
   endif()
 endmacro()
 
+##############################################################################
+# Get the HIP arch flags specified by PYTORCH_ROCM_ARCH.
+# Usage:
+#   torch_hip_get_arch_list(variable_to_store_flags)
+#
+macro(torch_hip_get_arch_list store_var)
+  if(DEFINED ENV{PYTORCH_ROCM_ARCH})
+    set(_TMP $ENV{PYTORCH_ROCM_ARCH})
+  else()
+    # Use arch of installed GPUs as default
+    execute_process(COMMAND "rocm_agent_enumerator" COMMAND bash "-c" "grep -v gfx000 | sort -u | xargs | tr -d '\n'"
+                    RESULT_VARIABLE ROCM_AGENT_ENUMERATOR_RESULT
+                    OUTPUT_VARIABLE ROCM_ARCH_INSTALLED)
+    if(NOT ROCM_AGENT_ENUMERATOR_RESULT EQUAL 0)
+      message(FATAL_ERROR " Could not detect ROCm arch for GPUs on machine. Result: '${ROCM_AGENT_ENUMERATOR_RESULT}'")
+    endif()
+    set(_TMP ${ROCM_ARCH_INSTALLED})
+  endif()
+  string(REPLACE " " ";" ${store_var} "${_TMP}")
+endmacro()
 
 ##############################################################################
 # Get the NVCC arch flags specified by TORCH_CUDA_ARCH_LIST and CUDA_ARCH_NAME.
@@ -388,10 +408,11 @@ endmacro()
 #   torch_compile_options(lib_name)
 function(torch_compile_options libname)
   set_property(TARGET ${libname} PROPERTY CXX_STANDARD 14)
+  set(private_compile_options "")
 
   # ---[ Check if warnings should be errors.
   if(WERROR)
-    target_compile_options(${libname} PRIVATE -Werror)
+    list(APPEND private_compile_options -Werror)
   endif()
 
   if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
@@ -405,38 +426,51 @@ function(torch_compile_options libname)
       endif()
 
       target_compile_options(${libname} PUBLIC
-        ${MSVC_RUNTIME_LIBRARY_OPTION}
-        $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
-        /EHsc
-        /DNOMINMAX
-        /wd4267
-        /wd4251
-        /wd4522
-        /wd4522
-        /wd4838
-        /wd4305
-        /wd4244
-        /wd4190
-        /wd4101
-        /wd4996
-        /wd4275
-        /bigobj
+        $<$<COMPILE_LANGUAGE:CXX>:
+          ${MSVC_RUNTIME_LIBRARY_OPTION}
+          $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
+          /EHsc
+          /DNOMINMAX
+          /wd4267
+          /wd4251
+          /wd4522
+          /wd4522
+          /wd4838
+          /wd4305
+          /wd4244
+          /wd4190
+          /wd4101
+          /wd4996
+          /wd4275
+          /bigobj>
         )
     else()
-      target_compile_options(${libname} PRIVATE
+      list(APPEND private_compile_options
         -Wall
         -Wextra
         -Wno-unused-parameter
+        -Wno-unused-function
+        -Wno-unused-result
+        -Wno-unused-local-typedefs
         -Wno-missing-field-initializers
         -Wno-write-strings
         -Wno-unknown-pragmas
+        -Wno-type-limits
+        -Wno-array-bounds
+        -Wno-unknown-pragmas
+        -Wno-sign-compare
+        -Wno-strict-overflow
+        -Wno-strict-aliasing
+        -Wno-error=deprecated-declarations
         # Clang has an unfixed bug leading to spurious missing braces
         # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
         -Wno-missing-braces
         )
-
-      if(NOT APPLE)
-        target_compile_options(${libname} PRIVATE
+      if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+        list(APPEND private_compile_options
+          -Wno-range-loop-analysis)
+      else()
+        list(APPEND private_compile_options
           # Considered to be flaky.  See the discussion at
           # https://github.com/pytorch/pytorch/pull/9608
           -Wno-maybe-uninitialized)
@@ -446,8 +480,21 @@ function(torch_compile_options libname)
 
     if(MSVC)
     elseif(WERROR)
-      target_compile_options(${libname} PRIVATE -Wno-strict-overflow)
+      list(APPEND private_compile_options -Wno-strict-overflow)
     endif()
+  endif()
+
+  target_compile_options(${libname} PRIVATE
+      $<$<COMPILE_LANGUAGE:CXX>:${private_compile_options}>)
+  if(USE_CUDA)
+    string(FIND "${private_compile_options}" " " space_position)
+    if(NOT space_position EQUAL -1)
+      message(FATAL_ERROR "Found spaces in private_compile_options='${private_compile_options}'")
+    endif()
+    # Convert CMake list to comma-separated list
+    string(REPLACE ";" "," private_compile_options "${private_compile_options}")
+    target_compile_options(${libname} PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${private_compile_options}>)
   endif()
 
   if(NOT WIN32 AND NOT USE_ASAN)
@@ -458,11 +505,13 @@ function(torch_compile_options libname)
     # Unfortunately, hidden visibility messes up some ubsan warnings because
     # templated classes crossing library boundary get duplicated (but identical)
     # definitions. It's easier to just disable it.
-    target_compile_options(${libname} PRIVATE "-fvisibility=hidden")
+    target_compile_options(${libname} PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=hidden>)
   endif()
 
   # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
-  target_compile_options(${libname} PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
+  target_compile_options(${libname} PRIVATE
+      $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O2>)
 
 endfunction()
 
@@ -482,5 +531,42 @@ function(torch_set_target_props libname)
     set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_RELWITHDEBINFO "/NODEFAULTLIB:${VCOMP_LIB}")
     set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
     set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}d")
+  endif()
+endfunction()
+
+
+##############################################################################
+# Set old-style FindCuda.cmake compile flags from modern CMake cuda flags.
+# Usage:
+#   torch_update_find_cuda_flags()
+function(torch_update_find_cuda_flags)
+  # Convert -O2 -Xcompiler="-O2 -Wall" to "-O2;-Xcompiler=-O2,-Wall"
+  if(USE_CUDA)
+    separate_arguments(FLAGS UNIX_COMMAND "${CMAKE_CUDA_FLAGS}")
+    string(REPLACE " " "," FLAGS "${FLAGS}")
+    set(CUDA_NVCC_FLAGS ${FLAGS} PARENT_SCOPE)
+
+    separate_arguments(FLAGS_DEBUG UNIX_COMMAND "${CMAKE_CUDA_FLAGS_DEBUG}")
+    string(REPLACE " " "," FLAGS_DEBUG "${FLAGS_DEBUG}")
+    set(CUDA_NVCC_FLAGS_DEBUG "${FLAGS_DEBUG}" PARENT_SCOPE)
+
+    separate_arguments(FLAGS_RELEASE UNIX_COMMAND "${CMAKE_CUDA_FLAGS_RELEASE}")
+    string(REPLACE " " "," FLAGS_RELEASE "${FLAGS_RELEASE}")
+    set(CUDA_NVCC_FLAGS_RELEASE "${FLAGS_RELEASE}" PARENT_SCOPE)
+
+    separate_arguments(FLAGS_MINSIZEREL UNIX_COMMAND "${CMAKE_CUDA_FLAGS_MINSIZEREL}")
+    string(REPLACE " " "," FLAGS_MINSIZEREL "${FLAGS_MINSIZEREL}")
+    set(CUDA_NVCC_FLAGS_MINSIZEREL "${FLAGS_MINSIZEREL}" PARENT_SCOPE)
+
+    separate_arguments(FLAGS_RELWITHDEBINFO UNIX_COMMAND "${CMAKE_CUDA_FLAGS_RELWITHDEBINFO}")
+    string(REPLACE " " "," FLAGS_RELWITHDEBINFO "${FLAGS_RELWITHDEBINFO}")
+    set(CUDA_NVCC_FLAGS_RELWITHDEBINFO "${FLAGS_RELWITHDEBINFO}" PARENT_SCOPE)
+
+    message(STATUS "Converting CMAKE_CUDA_FLAGS to CUDA_NVCC_FLAGS:\n"
+                    "    CUDA_NVCC_FLAGS                = ${FLAGS}\n"
+                    "    CUDA_NVCC_FLAGS_DEBUG          = ${FLAGS_DEBUG}\n"
+                    "    CUDA_NVCC_FLAGS_RELEASE        = ${FLAGS_RELEASE}\n"
+                    "    CUDA_NVCC_FLAGS_RELWITHDEBINFO = ${FLAGS_RELWITHDEBINFO}\n"
+                    "    CUDA_NVCC_FLAGS_MINSIZEREL     = ${FLAGS_MINSIZEREL}")
   endif()
 endfunction()

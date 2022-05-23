@@ -1,3 +1,5 @@
+# Owner(s): ["module: unknown"]
+
 import collections
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -102,8 +104,9 @@ class TestAutocastCPU(TestCase):
             self._run_autocast_outofplace(op, args, torch.bfloat16, add_kwargs=maybe_kwargs)
 
     def test_autocast_nn_bf16(self):
-        for op, args in self.autocast_lists.nn_bf16:
-            self._run_autocast_outofplace(op, args, torch.bfloat16, module=torch._C._nn)
+        for op_with_args in self.autocast_lists.nn_bf16:
+            op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
+            self._run_autocast_outofplace(op, args, torch.bfloat16, module=torch._C._nn, add_kwargs=maybe_kwargs)
 
     def test_autocast_torch_fp32(self):
         for op_with_args in self.autocast_lists.torch_fp32:
@@ -118,6 +121,14 @@ class TestAutocastCPU(TestCase):
     def test_autocast_torch_need_autocast_promote(self):
         for op, args in self.autocast_lists.torch_need_autocast_promote:
             self._run_autocast_outofplace(op, args, torch.float32)
+
+class TestTorchAutocast(TestCase):
+    def test_autocast_fast_dtype(self):
+        gpu_fast_dtype = torch.get_autocast_gpu_dtype()
+        cpu_fast_dtype = torch.get_autocast_cpu_dtype()
+        self.assertEqual(gpu_fast_dtype, torch.half)
+        self.assertEqual(cpu_fast_dtype, torch.bfloat16)
+
 
 if __name__ == '__main__':
     run_tests()

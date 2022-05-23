@@ -1,5 +1,6 @@
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Mm.h>
-#include <ATen/native/vulkan/ops/Persistent.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -10,14 +11,13 @@ namespace {
 using namespace api::utils;
 
 vTensor pack_weights(
-    api::Resource::Pool& pool,
     const Tensor& weight_arg) {
   if (weight_arg.is_vulkan()) {
     return convert(weight_arg);
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   const Tensor weight = weight_arg.contiguous();
   const IntArrayRef w_sizes = weight.sizes();
@@ -34,7 +34,6 @@ vTensor pack_weights(
 
   vTensor v_weight{
       context,
-      &pool,
       {
         4,
         dst_kh_sz,
@@ -50,8 +49,8 @@ vTensor pack_weights(
   float* const dst_weight_ptr = v_weight_payload.get();
   memset(dst_weight_ptr, 0, v_weight.nbytes());
 
-  for (int64_t src_h = 0; src_h < src_kh_sz; ++src_h) {
-    for (int64_t src_w = 0; src_w < src_kw_sz; ++src_w) {
+  for (const auto src_h : c10::irange(src_kh_sz)) {
+    for (const auto src_w : c10::irange(src_kw_sz)) {
       int64_t dst_plane = 2*(src_h%2) + (src_w%2);
       int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
       memcpy(
@@ -65,7 +64,6 @@ vTensor pack_weights(
 }
 
 vTensor pack_biases(
-    api::Resource::Pool& pool,
     const Tensor& weight_arg,
     const c10::optional<Tensor>& bias_arg) {
   if (bias_arg && bias_arg->is_vulkan()) {
@@ -73,7 +71,7 @@ vTensor pack_biases(
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   using Future = vTensor::Future<float, vTensor::Access::Write>;
   if (bias_arg) {
@@ -99,7 +97,6 @@ vTensor pack_biases(
 
     vTensor v_bias{
         context,
-        &pool,
         {
           4,
           dst_kh_sz,
@@ -114,8 +111,8 @@ vTensor pack_biases(
     float* const dst_bias_ptr = v_bias_payload.get();
     memset(dst_bias_ptr, 0, v_bias.nbytes());
 
-    for (int64_t src_h = 0; src_h < src_kh_sz; ++src_h) {
-      for (int64_t src_w = 0; src_w < src_kw_sz; ++src_w) {
+    for (const auto src_h : c10::irange(src_kh_sz)) {
+      for (const auto src_w : c10::irange(src_kw_sz)) {
         int64_t dst_plane = 2*(src_h%2) + (src_w%2);
         int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
         memcpy(
@@ -130,7 +127,6 @@ vTensor pack_biases(
   else {
     vTensor v_bias{
         api::context(),
-        &pool,
         {1},
         weight_arg.options(),
     };
@@ -194,24 +190,24 @@ Tensor addmm(
     const Scalar& beta,
     const Scalar& alpha) {
   return LinearOpContext::create(
-      api::context()->resource().pool,
       weight,
       bias).run(
           input,
           alpha.to<float>(),
-          beta.to<float>());
+          beta.to<float>(),
+          "aten::addmm");
 }
 
 Tensor mm(
     const Tensor& mat1_arg,
     const Tensor& mat2_arg) {
   return LinearOpContext::create(
-      api::context()->resource().pool,
       mat2_arg,
       c10::optional<Tensor>()).run(
           mat1_arg,
           1.0f,
-          1.0f);
+          1.0f,
+          "aten::mm");
 }
 
 #ifdef USE_VULKAN_API
@@ -226,12 +222,11 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 } // namespace
 
 LinearOpContext::LinearOpContext(
-    api::Resource::Pool& pool,
     const Tensor& weight,
     const c10::optional<Tensor>& bias)
   : packed_{
-      pack_weights(pool, weight),
-      pack_biases(pool, weight, bias),
+      pack_weights(weight),
+      pack_biases(weight, bias),
     },
     unpacked_{
       weight,
@@ -240,7 +235,6 @@ LinearOpContext::LinearOpContext(
 }
 
 LinearOpContext LinearOpContext::create(
-    api::Resource::Pool& pool,
     const Tensor& weight,
     const c10::optional<Tensor>& bias) {
   TORCH_CHECK(
@@ -251,7 +245,6 @@ LinearOpContext LinearOpContext::create(
 
   // Pass in the originals
   return LinearOpContext{
-      pool,
       weight,
       bias,
   };
@@ -260,7 +253,8 @@ LinearOpContext LinearOpContext::create(
 Tensor LinearOpContext::run(
     const Tensor& input_arg,
     const float alpha,
-    const float beta) const {
+    const float beta,
+    const std::string& op_name) const {
   api::Context* const context = api::context();
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
@@ -288,9 +282,10 @@ Tensor LinearOpContext::run(
   };
 
   api::Command::Pool& command_pool = context->command().pool;
-
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     if (v_input.has_image() &&
         packed_.v_weight.has_image() &&
         packed_.v_bias.has_image()) {
@@ -415,7 +410,6 @@ c10::intrusive_ptr<LinearOpContext> linear_prepack(
     c10::optional<Tensor>&& bias) {
   return c10::make_intrusive<LinearOpContext>(
       LinearOpContext::create(
-          persistent()->pool,
           std::move(weight),
           std::move(bias)));
 }
@@ -423,7 +417,7 @@ c10::intrusive_ptr<LinearOpContext> linear_prepack(
 Tensor linear_run(
     const Tensor& input,
     const c10::intrusive_ptr<LinearOpContext>& context) {
-  return context->run(input, 1.0, 1.0);
+  return context->run(input, 1.0, 1.0, "prepacked::linear_clamp_run");
 }
 
 } // namespace ops

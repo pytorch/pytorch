@@ -24,7 +24,7 @@ from torch._jit_internal import _qualified_name, is_scripting, get_callable_argu
 from torch.autograd import function
 from torch.nn import Module
 
-from torch.testing._asserts import _get_default_rtol_and_atol
+from torch.testing._comparison import default_tolerances
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -489,13 +489,22 @@ def _check_trace(
                         orig = orig.to_dense()
                     if ref.is_mkldnn:
                         ref = ref.to_dense()
-                    torch.testing.assert_close(
-                        orig.double(),
-                        ref.double(),
-                        rtol=check_tolerance,
-                        atol=_get_default_rtol_and_atol(orig, ref)[1],
-                        equal_nan=True,
-                    )
+                    if ref.is_complex() or orig.is_complex():
+                        torch.testing.assert_close(
+                            orig.to(torch.cdouble),
+                            ref.to(torch.cdouble),
+                            rtol=check_tolerance,
+                            atol=default_tolerances(orig, ref)[1],
+                            equal_nan=True,
+                        )
+                    else:
+                        torch.testing.assert_close(
+                            orig.double(),
+                            ref.double(),
+                            rtol=check_tolerance,
+                            atol=default_tolerances(orig, ref)[1],
+                            equal_nan=True,
+                        )
                 except AssertionError as e:
                     maybe_warn_nondeterministic()
                     warnings.warn(

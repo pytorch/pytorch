@@ -5,9 +5,11 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 
 from . import (
+    debugging_hooks as debugging,
     default_hooks as default,
     powerSGD_hook as powerSGD,
     quantization_hooks as quantization,
+    optimizer_overlap_hooks as optimizer_overlap,
 )
 
 
@@ -20,7 +22,7 @@ def _powerSGD_comm_hook_wrapper(
     model,
     state,
     matrix_approximation_rank,
-    start_powerSGD_iter,
+    start_powerSGD_iter=1_000,
 ):
     """
     To be consistent with the wrappers of other DDP comm hooks, the input state only needs to be a process group,
@@ -77,6 +79,9 @@ class DDPCommHookType(Enum):
         _powerSGD_comm_hook_wrapper,
         comm_hook=powerSGD.batched_powerSGD_hook,
         matrix_approximation_rank=2,
+    )
+    NOOP = partial(
+        _ddp_comm_hook_wrapper, comm_hook=debugging.noop_hook,
     )
 
 

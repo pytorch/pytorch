@@ -149,7 +149,7 @@ void dispatch_binary_op(std::ostream& os, const BinaryOpNode<Op>* v) {
   case ScalarType::Name:                                           \
     visit_binary_op<Type>(os, v->lhs(), v->rhs(), v->expr_type()); \
     break;
-    AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
     default:
       throw unsupported_dtype();
@@ -210,12 +210,14 @@ void CppPrinter::visit(FreePtr v) {
 }
 
 void CppPrinter::visit(LoadPtr v) {
-  auto flat_idx = flatten_index(v->buf()->dims(), v->indices());
+  auto flat_idx =
+      flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());
   os() << *v->base_handle() << "[" << *flat_idx << "]";
 }
 
 void CppPrinter::visit(StorePtr v) {
-  auto flat_idx = flatten_index(v->buf()->dims(), v->indices());
+  auto flat_idx =
+      flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());
   const int lanes = v->value()->dtype().lanes();
   for (int lane = 0; lane < lanes; lane++) {
     lane_ = lane;
@@ -336,10 +338,10 @@ void CppPrinter::visit(ExternalCallPtr v) {
 }
 
 void CppPrinter::visit(LetPtr v) {
-  if (v->dtype().lanes() == 1) {
+  if (v->var()->dtype().lanes() == 1) {
     emitIndent();
-    os() << v->dtype().ToCppString() << " " << *v->var() << " = " << *v->value()
-         << ";" << std::endl;
+    os() << v->var()->dtype().ToCppString() << " " << *v->var() << " = "
+         << *v->value() << ";" << std::endl;
   } else {
     vector_vars_[v->var()] = v->value();
   }

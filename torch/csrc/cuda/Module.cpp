@@ -1,10 +1,13 @@
-#include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/cuda/CachingHostAllocator.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <ATen/cuda/Sleep.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
+#include <ATen/cuda/jiterator.h>
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
 #endif
@@ -32,7 +35,6 @@
 
 using namespace torch;
 
-THCState *state = nullptr;
 static bool in_bad_fork = false;  // True for children forked after cuda init
 
 #ifndef WIN32
@@ -40,7 +42,6 @@ static bool in_bad_fork = false;  // True for children forked after cuda init
 static void forked_child() {
   in_bad_fork = true;
   torch::utils::set_run_yet_variable_to_false();
-  state = nullptr;
 }
 #endif
 
@@ -181,13 +182,17 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
 
 PyObject * THCPModule_getCompiledVersion(PyObject *self, PyObject *noargs)
 {
+#if defined(USE_ROCM)
+  return THPUtils_packInt64((int64_t) ROCM_VERSION);
+#else
   return THPUtils_packInt64((int64_t) CUDA_VERSION);
+#endif
 }
 
 PyObject * THCPModule_cudaHostAllocator(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  c10::Allocator* allocator = THCState_getCudaHostAllocator(state);
+  c10::Allocator* allocator = at::cuda::getCachingHostAllocator();
   return PyLong_FromVoidPtr(allocator);
   END_HANDLE_TH_ERRORS
 }
@@ -205,12 +210,77 @@ PyObject * THCPModule_cudaCachingAllocator_raw_alloc(PyObject *_unused, PyObject
         "(ssize_t size, intptr_t stream);");
     return nullptr;
   }
-  ssize_t size = PyLong_AsSsize_t(size_o);
+  auto size = PyLong_AsSsize_t(size_o);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void* mem = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
   return PyLong_FromVoidPtr(mem);
+  END_HANDLE_TH_ERRORS
+}
+
+// Unpack a PyObject to at::Scalar, throw an exception if it fails
+at::Scalar as_scalar(PyObject* arg) {
+  // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
+  // handle most NumPy scalar types except np.float64.
+  if (THPVariable_Check(arg)) {
+    return THPVariable_Unpack(arg).item();
+  }
+
+  if (THPUtils_checkLong(arg)) {
+    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(arg)));
+  }
+
+  if (PyBool_Check(arg)) {
+    return at::Scalar(THPUtils_unpackBool(arg));
+  }
+
+  if (PyComplex_Check(arg)) {
+    return at::Scalar(THPUtils_unpackComplexDouble(arg));
+  }
+  return at::Scalar(THPUtils_unpackDouble(arg));
+}
+
+// Entrypoint for the callable created by torch.cuda.jiterator
+// See jiterator.py for more details
+PyObject * THCPModule_cudaJiteratorCompileAndLaunchKernel(PyObject *_unused, PyObject *args){
+  HANDLE_TH_ERRORS
+
+  PyObject* code_string_o = nullptr;
+  PyObject* kernel_name_o = nullptr;
+  PyObject* tensors_o = nullptr;
+  PyObject* kwargs_o = nullptr;
+  if(!PyArg_ParseTuple(args, "OOO|O", &code_string_o, &kernel_name_o, &tensors_o, &kwargs_o)) {
+    return nullptr;
+  }
+
+  std::string code_string = THPUtils_unpackString(code_string_o);
+  std::string kernel_name = THPUtils_unpackString(kernel_name_o);
+
+  THPUtils_assert(PyTuple_Check(tensors_o), "tensors argument is expected to "
+      "be a tuple, but got %s", THPUtils_typename(tensors_o));
+  Py_ssize_t num_tensors = PyTuple_GET_SIZE(tensors_o);
+
+  std::vector<at::Tensor> tensors;
+  for(const auto i : c10::irange(num_tensors)) {
+    PyObject *_tensor = PyTuple_GET_ITEM(tensors_o, i);
+    THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
+        "tuple is not a Tensor", i);
+
+    tensors.emplace_back(THPVariable_Unpack(_tensor));
+  }
+
+  std::vector<at::Scalar> extra_args;
+  PyObject *key = nullptr;
+  PyObject *value  = nullptr;
+  Py_ssize_t pos = 0;
+  while (PyDict_Next(kwargs_o, &pos, &key, &value)) {
+    extra_args.emplace_back(as_scalar(value));
+  }
+
+  at::Tensor output = at::cuda::CompileAndLaunchKernel(code_string, kernel_name, tensors, extra_args);
+
+  return THPVariable_Wrap(output);
   END_HANDLE_TH_ERRORS
 }
 
@@ -242,7 +312,7 @@ PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(cycles), "torch.cuda._sleep(): expected 'int'");
-  THC_sleep(LIBRARY_STATE THPUtils_unpackLong(cycles));
+  at::cuda::sleep(THPUtils_unpackLong(cycles));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -516,24 +586,10 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   HANDLE_TH_ERRORS
   TORCH_INTERNAL_ASSERT(!in_bad_fork);  // Handled at python level
   poison_fork();
-  state = at::globalContext().lazyInitCUDA();
+  at::globalContext().lazyInitCUDA();
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
   if (!m) throw python_error();
-
-  // Register Storage Python objects with DynamicTypes.cpp
-  THCPDoubleStorage_postInit(m);
-  THCPFloatStorage_postInit(m);
-  THCPHalfStorage_postInit(m);
-  THCPLongStorage_postInit(m);
-  THCPIntStorage_postInit(m);
-  THCPShortStorage_postInit(m);
-  THCPCharStorage_postInit(m);
-  THCPByteStorage_postInit(m);
-  THCPBoolStorage_postInit(m);
-  THCPBFloat16Storage_postInit(m);
-  THCPComplexDoubleStorage_postInit(m);
-  THCPComplexFloatStorage_postInit(m);
 
   bool has_half = true;
 
@@ -546,10 +602,6 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 
   set_module_attr("has_magma", at::hasMAGMA() ? Py_True : Py_False);
   set_module_attr("has_half", has_half ? Py_True : Py_False);
-
-  auto _state_cdata = THPObjectPtr(PyLong_FromVoidPtr(state));
-  if (!_state_cdata) throw python_error();
-  set_module_attr("_state_cdata", _state_cdata.get());
 
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
@@ -576,6 +628,35 @@ PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self, PyObject *noargs
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_rocm_is_backward_pass(PyObject *_unused, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+#if USE_ROCM
+  if (at::ROCmBackwardPassGuard::is_backward_pass()) {
+    Py_RETURN_TRUE;
+  }
+  else {
+    Py_RETURN_FALSE;
+  }
+#else
+  Py_RETURN_FALSE;
+#endif
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THCPModule_isCurrentStreamCapturing_wrap(PyObject *self, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+  // If there's no cuda context, at::cuda::currentStreamCaptureStatus returns
+  // CaptureStatus::None without initializing a context.
+  if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
+    Py_RETURN_FALSE;
+  } else {
+    Py_RETURN_TRUE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(modernize-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, cppcoreguidelines-avoid-c-arrays)
 static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_init",        THCPModule_initExtension,    METH_NOARGS,  nullptr},
@@ -590,6 +671,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_getDefaultStream",
     THCPModule_getDefaultStream_wrap, METH_O, nullptr},
   {"_cuda_getCurrentBlasHandle", THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, nullptr},
+  {"_cuda_isCurrentStreamCapturing", THCPModule_isCurrentStreamCapturing_wrap, METH_NOARGS, nullptr},
   {"_cuda_setStream",    THCPModule_setStream_wrap,  METH_O, nullptr},
   {"_cuda_getCompiledVersion", THCPModule_getCompiledVersion, METH_NOARGS, nullptr},
   {"_cuda_hasPrimaryContext", THCPModule_hasPrimaryContext,  METH_O,  nullptr},
@@ -609,6 +691,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},
   {"_cuda_set_sync_debug_mode", THCPModule_cudaSetSyncDebugMode, METH_O, nullptr},
   {"_cuda_get_sync_debug_mode", THCPModule_cudaGetSyncDebugMode, METH_NOARGS, nullptr},
+  {"_cuda_jiterator_compile_and_launch_kernel", THCPModule_cudaJiteratorCompileAndLaunchKernel, METH_VARARGS, nullptr},
 #ifdef USE_NCCL
   {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
   {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},
@@ -619,6 +702,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_nccl_all_gather", THCPModule_nccl_all_gather, METH_VARARGS, nullptr},
   {"_nccl_reduce_scatter", THCPModule_nccl_reduce_scatter, METH_VARARGS, nullptr},
 #endif
+  {"_rocm_is_backward_pass", THCPModule_rocm_is_backward_pass, METH_NOARGS, nullptr},
   {nullptr}
 };
 
@@ -632,7 +716,7 @@ namespace shared {
 
 void initCudartBindings(PyObject* module);
 void initNvtxBindings(PyObject* module);
-#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_CUDNN) || defined(USE_ROCM)
 void initCudnnBindings(PyObject* module);
 #endif
 
@@ -644,7 +728,7 @@ void initModule(PyObject *module) {
   // so this condition might not always be true...
   shared::initCudartBindings(module);
   shared::initNvtxBindings(module);
-#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_CUDNN) || defined(USE_ROCM)
   shared::initCudnnBindings(module);
 #endif
   registerCudaDeviceProperties(module);

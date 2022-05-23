@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -11,7 +12,7 @@ import signal
 import unittest
 import uuid
 from typing import Any, Dict
-from unittest.mock import call, patch
+from unittest.mock import call, patch, MagicMock
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic.agent.server.api import (
@@ -496,8 +497,8 @@ class SimpleElasticAgentTest(unittest.TestCase):
         )
         self.assertEqual(expected_role_ranks, [worker.role_rank for worker in workers])
 
-    @patch("torch.distributed.elastic.utils.store.get_all")
-    def test_share_and_gather(self, store_mock):
+    @patch("torch.distributed.elastic.utils.store.synchronize")
+    def test_share_and_gather(self, sync_mock):
         # when the state is unknown we exit immediately; no retries
         spec = self._get_worker_spec(max_restarts=100, monitor_interval=0.1)
         agent = TestAgent(spec)
@@ -507,54 +508,43 @@ class SimpleElasticAgentTest(unittest.TestCase):
             _RoleInstanceInfo("validator", 2, 10),
         ]
 
-        store_mock.return_value = [obj.serialize() for obj in expected_agent_infos]
+        sync_mock.return_value = [obj.serialize() for obj in expected_agent_infos]
+        result = agent._share_and_gather(MagicMock(), 1, 3, spec)
+        sync_mock.assert_called_once()
+        for expected_role_info, actual_role_info in zip(expected_agent_infos, result):
+            self.assertEqual(expected_role_info.role, actual_role_info.role)
+            self.assertEqual(expected_role_info.rank, actual_role_info.rank)
+            self.assertEqual(
+                expected_role_info.local_world_size, actual_role_info.local_world_size
+            )
 
-        class DummyStore:
-            def __init__(self):
-                self.key = None
-                self.value = None
-
-            def set(self, key, value):
-                self.key = key
-                self.value = value
-
-            def set_timeout(self, timeout):
-                pass
-
-        store = DummyStore()
-        agent._share_and_gather(store, 1, 3, spec)
-        self.assertEquals("torchelastic/role_info1", store.key)
-        expected_info = _RoleInstanceInfo(spec.role, 1, spec.local_world_size)
-        self.assertEquals(expected_info.serialize(), store.value)
-        store_mock.assert_called_once()
-
-    def test_get_agent_status_event(self):
+    def test_get_event(self):
         spec = self._get_worker_spec(max_restarts=1)
         agent = TestAgent(spec)
-        actual_event = agent.get_agent_status_event(state=WorkerState.SUCCEEDED)
-        self.assertEqual("AGENT", actual_event.source)
-        self.assertEqual("static", actual_event.metadata["rdzv_backend"])
-        self.assertEqual(WorkerState.SUCCEEDED.value, actual_event.metadata["state"])
-        self.assertEqual(spec.role, actual_event.metadata["role"])
+        event = agent.get_event_succeeded()
+        self.assertEqual("AGENT", event.source)
+        self.assertEqual("static", event.metadata["rdzv_backend"])
+        self.assertEqual("SUCCEEDED", event.metadata["state"])
+        self.assertEqual(spec.role, event.metadata["role"])
 
     def test_get_worker_status_event(self):
         spec = self._get_worker_spec(max_restarts=4)
         agent = TestAgent(spec)
         agent._remaining_restarts = spec.max_restarts - 2
         actual_event = agent._construct_event(
-            state=WorkerState.SUCCEEDED.value,
+            state="SUCCEEDED",
             source="WORKER",
             worker=agent._worker_group.workers[0],
         )
         self.assertEqual("WORKER", actual_event.source)
         self.assertEqual("static", actual_event.metadata["rdzv_backend"])
-        self.assertEqual(WorkerState.SUCCEEDED.value, actual_event.metadata["state"])
+        self.assertEqual("SUCCEEDED", actual_event.metadata["state"])
         self.assertEqual(spec.role, actual_event.metadata["role"])
         self.assertEqual(2, actual_event.metadata["agent_restarts"])
 
     @patch("torch.distributed.elastic.agent.server.api.put_metric")
     @patch.object(TestAgent, "_invoke_run")
-    def test_agent_process_signal_exception(self, invoke_run, put_metric_mock):
+    def test_agent_process_signal_exception(self, invoke_run, _):
         spec = self._get_worker_spec(max_restarts=0)
         agent = TestAgent(spec)
         invoke_run.side_effect = SignalException(

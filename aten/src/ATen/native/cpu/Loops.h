@@ -28,6 +28,7 @@
 
 #include <stdint.h>
 #include <c10/util/C++17.h>
+#include <c10/util/irange.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
@@ -39,7 +40,7 @@
 #pragma GCC diagnostic ignored "-Wunused-but-set-parameter"
 #endif
 
-namespace at { namespace native { namespace {
+namespace at { namespace native { inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 
@@ -120,7 +121,7 @@ basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_
   // Copying strides to temporary array helps auto vectorization in older GCC
   // versions.
   int64_t strides[ntensors];
-  for (int arg = 0; arg < ntensors; arg++) {
+  for (const auto arg : c10::irange(ntensors)) {
     strides[arg] = strides_[arg];
   }
 
@@ -178,7 +179,7 @@ multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_
   // Copying strides to temporary array helps auto vectorization in older GCC
   // versions.
   int64_t strides[ntensors];
-  for (int arg = 0; arg < ntensors; arg++) {
+  for (const auto arg : c10::irange(ntensors)) {
     strides[arg] = strides_[arg];
   }
 
@@ -204,7 +205,7 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
   constexpr int ntensors = traits::arity + 1;
 
   char* C10_RESTRICT data[ntensors];
-  for (int arg = 0; arg < ntensors; arg++) {
+  for (const auto arg : c10::irange(ntensors)) {
     data[arg] = data_[arg];
   }
 
@@ -220,7 +221,7 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
   }
   if (i < n) {
     int64_t strides[ntensors];
-    for (int arg = 0; arg < ntensors; arg++) {
+    for (const auto arg : c10::irange(ntensors)) {
       strides[arg] = (S > 0 && arg == S) ? 0 : sizeof(scalar_t);
     }
     basic_loop(data, strides, i, n, std::forward<func_t>(op));
@@ -230,7 +231,7 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
 
 template <typename traits, typename cb_t>
 static inline void unroll_contiguous_scalar_checks(
-    const int64_t* strides,
+    const int64_t* /*strides*/,
     std::index_sequence<>,
     cb_t&& cb) {
   cb(0);
@@ -246,6 +247,62 @@ static inline void unroll_contiguous_scalar_checks(
   } else {
     unroll_contiguous_scalar_checks<traits>(strides, std::index_sequence<INDEX...>{}, std::forward<cb_t>(cb));
   }
+}
+
+template <typename op_t, typename vop_t>
+struct VectorizedLoop2d {
+  op_t op;
+  vop_t vop;
+
+  using traits = function_traits<op_t>;
+  static constexpr int ntensors = traits::arity + 1;
+  using data_t = std::array<char*, ntensors>;
+
+  VectorizedLoop2d(const op_t &op, const vop_t &vop):
+    op(op), vop(vop) {}
+
+  static void advance(data_t &data, const int64_t *outer_strides) {
+    for (const auto arg : c10::irange(data.size())) {
+      data[arg] += outer_strides[arg];
+    }
+  }
+
+  void operator()(char** base, const int64_t *strides, int64_t size0, int64_t size1) {
+    data_t data;
+    std::copy_n(base, ntensors, data.data());
+    const int64_t *outer_strides = &strides[ntensors];
+
+    if (is_contiguous<traits>(strides)) {
+      for (const auto i : c10::irange(size1)) {
+        (void)i;
+        vectorized_loop(data.data(), size0, 0, op, vop);
+        advance(data, outer_strides);
+      }
+    } else {
+      using Indices = std::make_index_sequence<traits::arity>;
+      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
+        if (idx) {
+          for (const auto i : c10::irange(size1)) {
+            (void)i;
+            vectorized_loop(data.data(), size0, idx, op, vop);
+            advance(data, outer_strides);
+          }
+        } else {
+          for (const auto i : c10::irange(size1)) {
+            (void)i;
+            basic_loop(data.data(), strides, 0, size0, op);
+            advance(data, outer_strides);
+          }
+        }
+      });
+    }
+  }
+};
+
+template <typename op_t, typename vop_t>
+VectorizedLoop2d<op_t, vop_t> make_vectorized_loop2d(
+    const op_t &op, const vop_t &vop) {
+  return VectorizedLoop2d<op_t, vop_t>(op, vop);
 }
 
 template <typename func_t>
@@ -297,20 +354,7 @@ void cpu_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop, int
     TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
   });
 
-  iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
-    if (is_contiguous<traits>(strides)) {
-      vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
-    } else {
-      using Indices = std::make_index_sequence<traits::arity>;
-      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
-        if (idx) {
-          vectorized_loop(data, n, idx, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
-        } else {
-          basic_loop(data, strides, 0, n, std::forward<func_t>(op));
-        }
-      });
-    }
-  }, grain_size);
+  iter.for_each(make_vectorized_loop2d(op, vop), grain_size);
   iter.cast_outputs();
 }
 
@@ -343,20 +387,7 @@ void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& v
   // dynamic casting not currently supported on CPU
   TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
-  iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
-    if (is_contiguous<traits>(strides)) {
-      vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
-    } else {
-      using Indices = std::make_index_sequence<traits::arity>;
-      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
-        if (idx) {
-          vectorized_loop(data, n, idx, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
-        } else {
-          basic_loop(data, strides, 0, n, std::forward<func_t>(op));
-        }
-      });
-    }
-  }, range);
+  iter.serial_for_each(make_vectorized_loop2d(op, vop), range);
   iter.cast_outputs();
 }
 

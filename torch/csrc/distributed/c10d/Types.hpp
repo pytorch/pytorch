@@ -7,6 +7,7 @@ namespace c10d {
 
 enum class ReduceOp : std::uint8_t {
   SUM = 0,
+  AVG,
   PRODUCT,
   MIN,
   MAX,

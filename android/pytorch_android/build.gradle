@@ -50,7 +50,17 @@ android {
         }
         androidTest {
             java {
-                exclude 'org/pytorch/PytorchHostTests.java'
+                if(System.env.BUILD_LITE_INTERPRETER == '0') {
+                    println 'Build test for full jit (pytorch_jni)'
+                    exclude 'org/pytorch/PytorchHostTests.java'
+                    exclude 'org/pytorch/PytorchLiteInstrumentedTests.java'
+                    exclude 'org/pytorch/suite/PytorchLiteInstrumentedTestSuite.java'
+                } else {
+                    println 'Build test for lite interpreter (pytorch_jni_lite)'
+                    exclude 'org/pytorch/PytorchHostTests.java'
+                    exclude 'org/pytorch/PytorchInstrumentedTests.java'
+                    exclude 'org/pytorch/suite/PytorchInstrumentedTestSuite.java'
+                }
             }
         }
     }

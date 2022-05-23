@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/backends/backend_exception.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <exception>
 
@@ -19,13 +20,20 @@ void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
   methods_.emplace_back(std::move(fn));
 }
 
-Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
+const Function* CompilationUnit::find_function(
+    const c10::QualifiedName& qn) const {
   for (auto& fn : methods_) {
     if (fn->qualname() == qn) {
       return fn.get();
     }
   }
   return nullptr;
+}
+
+Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
+  // NOLINTNEXTLINE
+  return const_cast<Function*>(
+      static_cast<const CompilationUnit*>(this)->find_function(qn));
 }
 
 Method Module::get_method(const std::string& name) const {
@@ -36,7 +44,7 @@ Method Module::get_method(const std::string& name) const {
 }
 
 c10::optional<Method> Module::find_method(const std::string& basename) const {
-  for (auto& fn : cu_->methods()) {
+  for (const auto& fn : cu_->methods()) {
     if (fn->name() == basename) {
       return c10::make_optional<Method>(Method(this, fn.get()));
     }
@@ -51,7 +59,10 @@ void set_train_recurse(
   if (auto slot = obj->type()->findAttributeSlot("training")) {
     obj->setSlot(*slot, on);
   } else {
-    TORCH_INTERNAL_ASSERT(false, "'training' attribute not found");
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "'training' attribute not found. Did you accidentally "
+        "call .eval() before saving your model?");
   }
   for (const auto& slot : obj->slots()) {
     if (slot.isObject()) {
@@ -145,8 +156,7 @@ std::string Module::getCallStack(const int64_t debug_handle) const {
 // We really need to change this part, so in the next step for profiling support
 // for delegates, the first thing will be to rewrite how profiling is done
 // for lite interpreter.
-std::string Module::get_forward_method_debug_info(size_t pc) const {
-  auto debug_handle = find_method("forward")->get_debug_handle(pc);
+std::string Module::get_forward_method_debug_info(int64_t debug_handle) const {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   return getDebugTable().getModuleHierarchyInfo(
       debug_handle, getTopModuleTypeName(*this));
@@ -187,8 +197,7 @@ void Method::run(Stack& stack) const {
       owner_->getMetadata();
 
   if (observer) {
-    observer->onEnterRunMethod(
-        copied_metadata, instance_key, function_->name());
+    observer->onEnterRunMethod(instance_key);
   }
 
   auto debug_info = std::make_shared<MobileDebugInfo>();
@@ -206,11 +215,13 @@ void Method::run(Stack& stack) const {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     if (error_message.empty()) {
       error_message = owner_->getDebugTable().getSourceDebugString(
-          function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
+          function_->getExceptionDebugHandles(), getTopModuleTypeName(*owner_));
     }
 #endif
 
     observer->onFailRunMethod(
+        copied_metadata,
+        function_->name(),
         instance_key,
         error_message.empty() ? "Unknown exception" : error_message.c_str());
   });
@@ -219,13 +230,16 @@ void Method::run(Stack& stack) const {
     stack.insert(stack.begin(), owner_->_ivalue()); // self
     function_->run(stack);
     if (observer) {
-      observer->onExitRunMethod(instance_key);
+      observer->onExitRunMethod(
+          copied_metadata, function_->name(), instance_key);
     }
     failure_guard.release();
     // This exception must be caught first as it derived from c10::Error
   } catch (c10::BackendRuntimeException& e) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
-    e.pushDebugHandle(function_->getExceptionDebugHandle());
+    for (auto handle : function_->getExceptionDebugHandles()) {
+      e.pushDebugHandle(handle);
+    }
     // symbolicate all handles
     auto debug_string = owner_->getDebugTable().getSourceDebugString(
         e.getDebugHandles(), getTopModuleTypeName(*owner_));
@@ -236,7 +250,7 @@ void Method::run(Stack& stack) const {
   } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     auto debug_string = owner_->getDebugTable().getSourceDebugString(
-        function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
+        function_->getExceptionDebugHandles(), getTopModuleTypeName(*owner_));
     error.add_context(debug_string);
 #endif
     error_message = error.what();
@@ -248,6 +262,40 @@ c10::IValue Method::operator()(std::vector<c10::IValue> stack) const {
   run(stack);
   TORCH_INTERNAL_ASSERT(!stack.empty());
   return stack.front();
+}
+
+c10::optional<std::string> print_type(const c10::Type& t) {
+  auto namedType = t.cast<c10::NamedType>();
+  if (namedType && namedType->name()) {
+    return namedType->name().value().qualifiedName();
+  }
+  if (auto dyn = t.castRaw<c10::DynamicType>()) {
+    return dyn->fallback()->annotation_str();
+  }
+  return c10::nullopt;
+}
+
+TORCH_API ModuleInfo get_module_info(const mobile::Module& module) {
+  ModuleInfo minfo;
+  minfo.operator_version = module.min_operator_version();
+  minfo.bytecode_version = module.bytecode_version();
+  std::vector<std::string> type_name_list;
+  for (const auto& func_ptr : module.compilation_unit().methods()) {
+    const auto& function = *func_ptr;
+    for (int i = 0; i < function.get_code().op_names_.size(); i++) {
+      const auto& op = function.get_code().op_names_[i];
+      minfo.opname_to_num_args[mobile::operator_str(op)] =
+          function.get_code().operator_input_sizes_[i];
+    }
+    for (const c10::TypePtr& tp : function.get_code().types_) {
+      type_name_list.push_back(tp->annotation_str(print_type));
+    }
+    minfo.function_names.insert(function.qualname().qualifiedName());
+  }
+  c10::TypeParser parser(type_name_list);
+  parser.parseList();
+  minfo.type_names = parser.getContainedTypes();
+  return minfo;
 }
 
 } // namespace mobile

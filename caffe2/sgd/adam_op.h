@@ -21,7 +21,7 @@ void adam_update(
     float correction,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
@@ -45,7 +45,7 @@ void adam_compute(
     float correction,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
@@ -74,7 +74,7 @@ void adam_compute_smart_decay(
     Context* /*context*/) {
   float k = (float)(t - lastSeenIn[0]);
   lastSeenOut[0] = t;
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     // The number of steps since this param was last seen.
     // We don't need integer precision for k.  Float is fine and it's faster to convert here.
@@ -107,7 +107,7 @@ void adam_compute_output_grad(
     float correction,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
@@ -135,7 +135,7 @@ void radam_update(
     float r_correction,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
@@ -169,7 +169,7 @@ void radam_compute(
     float r_correction,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
@@ -204,7 +204,7 @@ void radam_compute_output_grad(
     float r_correction,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
@@ -350,7 +350,7 @@ class SparseAdamOp final : public Operator<Context> {
     auto* moment2Out = Output(OUTPUT_MOMENT_2)->template mutable_data<T>();
 
     if (OutputSize() == 3) {
-      for (auto i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         auto idx = indices[i];
 
         if (block_size == 1) {
@@ -444,7 +444,7 @@ class SparseAdamOp final : public Operator<Context> {
     } else {
       Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
       auto* gradOut = Output(OUTPUT_GRAD)->template mutable_data<T>();
-      for (auto i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         auto idx = indices[i];
 
         if (block_size == 1) {
@@ -593,7 +593,7 @@ class SmartDecaySparseAdamOp final : public Operator<Context> {
     auto* moment2Out = Output(OUTPUT_MOMENT_2)->template mutable_data<T>();
     int64_t* lastSeenOut = Output(OUTPUT_LAST_SEEN)->template mutable_data<int64_t>();
 
-    for (auto i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
         auto idx = indices[i];
         auto offsetI = i * block_size;
         auto offsetIdx = idx * block_size;
@@ -673,7 +673,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
     auto* moment2Out = Output(OUTPUT_MOMENT_2)->template mutable_data<T>();
 
     if (OutputSize() == 3) {
-      for (auto i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         auto idx = indices[i];
 
         if (block_size == 1) {
@@ -719,13 +719,13 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
           float* nm2 = moment2Out + idx;
 
           float m2_sum = 0.;
-          for (auto j = 0; j < block_size; ++j) {
+          for (const auto j : c10::irange(block_size)) {
             float gj = g[j];
             m2_sum += gj * gj;
           }
           float vi = nm2[0] =
               m2[0] * beta2_ + (m2_sum / block_size) * (1 - beta2_);
-          for (auto j = 0; j < block_size; ++j) {
+          for (const auto j : c10::irange(block_size)) {
             float mi = nm1[j] = m1[j] * beta1_ + g[j] * (1 - beta1_);
             nw[j] = w[j] + lr[0] * correction * mi / (std::sqrt(vi) + epsilon_);
           }
@@ -734,7 +734,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
     } else {
       Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
       auto* gradOut = Output(OUTPUT_GRAD)->template mutable_data<T>();
-      for (auto i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         auto idx = indices[i];
 
         if (block_size == 1) {
@@ -781,13 +781,13 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
           float* ng = gradOut + offsetI;
 
           float m2_sum = 0.;
-          for (auto j = 0; j < block_size; ++j) {
+          for (const auto j : c10::irange(block_size)) {
             float gj = g[j];
             m2_sum += gj * gj;
           }
           float vi = nm2[0] =
               m2[0] * beta2_ + (m2_sum / block_size) * (1 - beta2_);
-          for (auto j = 0; j < block_size; ++j) {
+          for (const auto j : c10::irange(block_size)) {
             float mi = nm1[j] = m1[j] * beta1_ + g[j] * (1 - beta1_);
             float ngi = ng[j] = correction * mi / (std::sqrt(vi) + epsilon_);
             nw[j] = w[j] + lr[0] * ngi;

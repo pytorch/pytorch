@@ -1,12 +1,23 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ceil_div.h>
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
 #include <ATen/MemoryOverlap.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/Resize.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/diag.h>
+#include <ATen/ops/diag_native.h>
+#include <ATen/ops/trace_native.h>
+#include <ATen/ops/tril_native.h>
+#include <ATen/ops/triu_native.h>
+#endif
+
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/cuda/detail/IndexUtils.cuh>
 
 namespace at {
 namespace native {
@@ -55,7 +66,7 @@ __global__ void triu_tril_kernel(
 }
 
 template <bool upper>
-Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, const char* name) {
+void triu_tril_cuda_template(const Tensor& result, const Tensor& self, int64_t k, const char* name) {
   int64_t N = self.numel();
   dim3 dim_block = cuda::getApplyBlock();
   dim3 dim_grid((N + dim_block.x - 1) / dim_block.x);
@@ -76,31 +87,18 @@ Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, c
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   });
-  return result;
 }
 
-Tensor& tril_cuda_(Tensor &self, int64_t k) {
-  return tril_cuda_out(self, k, self);
-}
-
-Tensor& tril_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
-  at::native::resize_output(result, self.sizes());
-  if (self.numel() == 0) {
-    return result;
+TORCH_IMPL_FUNC(tril_cuda)(const Tensor& self, int64_t k, const Tensor &result) {
+  if (self.numel() != 0) {
+    triu_tril_cuda_template<false>(result, self, k, "tril");
   }
-  return triu_tril_cuda_template<false>(result, self, k, "tril");
 }
 
-Tensor& triu_cuda_(Tensor &self, int64_t k) {
-  return triu_cuda_out(self, k, self);
-}
-
-Tensor& triu_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
-  at::native::resize_output(result, self.sizes());
-  if (self.numel() == 0) {
-    return result;
+TORCH_IMPL_FUNC(triu_cuda)(const Tensor& self, int64_t k, const Tensor &result) {
+  if (self.numel() != 0) {
+    triu_tril_cuda_template<true>(result, self, k, "triu");
   }
-  return triu_tril_cuda_template<true>(result, self, k, "triu");
 }
 
 // Copy the kth diagonal of a matrix B to a vector A.
@@ -169,7 +167,7 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
           int(sz),
           int(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock)));
       const dim3 grid(
-          std::min(int(1024), cuda::ATenCeilDiv(int(sz), int(threads.x))));
+          std::min(int(1024), ceil_div(int(sz), int(threads.x))));
       auto start =
           (dimension >= 0 ? dimension * self_stride_1
                           : -dimension * self_stride_0);
@@ -198,7 +196,7 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
       const dim3 threads(std::min(
           int(sz), at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock));
       const dim3 grid(
-          std::min(int(1024), cuda::ATenCeilDiv(int(sz), int(threads.x))));
+          std::min(int(1024), ceil_div(int(sz), int(threads.x))));
       auto start =
           (dimension >= 0 ? dimension * result_stride_1
                           : -dimension * result_stride_0);

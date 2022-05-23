@@ -119,7 +119,7 @@ ExprPtr IRCloner::mutate(CompareSelectPtr v) {
   ExprPtr IRCloner::mutate(Name##ImmPtr v) { \
     return v;                                \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DEFINE);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DEFINE);
 #undef IMM_MUTATE_DEFINE
 
 ExprPtr IRCloner::mutate(CastPtr v) {
@@ -319,6 +319,28 @@ StmtPtr IRCloner::mutate(ExternalCallPtr v) {
   }
 
   return alloc<ExternalCall>(buf_new, v->func_name(), buf_args_new, args_new);
+}
+
+StmtPtr IRCloner::mutate(ExternalCallWithAllocPtr v) {
+  std::vector<BufPtr> buf_out_args_new;
+  buf_out_args_new.reserve(v->buf_out_args().size());
+  for (const auto& buf_out_arg : v->buf_out_args()) {
+    buf_out_args_new.push_back(to<Buf>(buf_out_arg->accept_mutator(this)));
+  }
+
+  std::vector<BufPtr> buf_args_new;
+  buf_args_new.reserve(v->buf_args().size());
+  for (const auto& buf_arg : v->buf_args()) {
+    buf_args_new.push_back(to<Buf>(buf_arg->accept_mutator(this)));
+  }
+  std::vector<ExprPtr> args_new;
+  args_new.reserve(v->args().size());
+  for (const auto& arg : v->args()) {
+    args_new.push_back(arg->accept_mutator(this));
+  }
+
+  return alloc<ExternalCallWithAlloc>(
+      v->func_name(), buf_out_args_new, buf_args_new, args_new);
 }
 
 StmtPtr IRCloner::mutate(LetPtr v) {

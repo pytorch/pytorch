@@ -458,8 +458,6 @@ bool HuffmanTreeHierarchyOp<T, Context>::RunOnDevice() {
   std::vector<int> labelIndices;
   labelIndices.resize(num_classes_);
 
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  int current_node_index = 0;
   for (int i = 0; i < num_classes_; ++i) {
     Node node(i, labelCounts[i]);
     nodes.push(node);

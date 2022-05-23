@@ -1,4 +1,5 @@
 #pragma once
+#include <iostream>
 
 // note: windows build doesn't find symbols in operator files unless
 // this is a header file
@@ -16,7 +17,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   out << "(";
 
   bool seen_kwarg_only = false;
-  for(size_t i = 0; i < schema.arguments().size(); ++i) {
+  for (const auto i : c10::irange(schema.arguments().size())) {
     if (i > 0) out << ", ";
     if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
       out << "*, ";
@@ -35,7 +36,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
 
   const auto& returns = schema.returns();
   out << "(";
-  for(size_t i = 0; i < returns.size(); ++i) {
+  for (const auto i : c10::irange(returns.size())) {
     if (i > 0) {
       out << ", ";
     }
@@ -53,7 +54,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
 
 inline size_t findFirstOutArg(const std::vector<Argument>& args) {
   // find the start of out args in the schema
-  for (size_t out_start_idx = 0; out_start_idx < args.size(); out_start_idx++) {
+  for (const auto out_start_idx : c10::irange(args.size())) {
     if (args.at(out_start_idx).is_out()) {
       return out_start_idx;
     }
@@ -68,13 +69,15 @@ inline bool Argument::isBackwardCompatibleWith(
     const Argument* rhs = &old;
     if (!(lhs->name() == rhs->name()
         && lhs->N() == rhs->N()
-        && lhs->alias_info() == rhs->alias_info())) {
+          && (lhs->alias_info() == rhs->alias_info()
+              || (lhs->alias_info() != nullptr && rhs->alias_info() != nullptr
+                  && *lhs->alias_info() == *rhs->alias_info())))) {
       return false;
     }
     if (lhs->kwarg_only() && !rhs->kwarg_only()) {
       return false;
     }
-    if (!rhs->type()->isSubtypeOfExt(lhs->type(), why_not)) {
+    if (!rhs->type()->isSubtypeOfExt(*lhs->type(), why_not)) {
       return false;
     }
     if (rhs->default_value().has_value() &&
@@ -82,6 +85,34 @@ inline bool Argument::isBackwardCompatibleWith(
       return false;
     }
     return true;
+}
+
+inline bool Argument::isForwardCompatibleWith(
+    const Argument& old,
+    std::ostream* why_not) const {
+  const Argument* lhs = this;
+  const Argument* rhs = &old;
+  if (!(lhs->name() == rhs->name()
+      && lhs->N() == rhs->N()
+        && (lhs->alias_info() == rhs->alias_info()
+            || (lhs->alias_info() != nullptr && rhs->alias_info() != nullptr
+                && *lhs->alias_info() == *rhs->alias_info())))) {
+    return false;
+  }
+  if (lhs->kwarg_only() && !rhs->kwarg_only()) {
+    return false;
+  }
+  if (!lhs->type()->isSubtypeOfExt(rhs->type(), why_not)) {
+    return false;
+  }
+  if (rhs->default_value().has_value() &&
+      lhs->default_value() != rhs->default_value()) {
+    return false;
+  }
+  if (lhs->default_value().has_value() && !rhs->default_value().has_value()) {
+    return false;
+  }
+  return true;
 }
 
 inline std::string FunctionSchema::formatTypeMismatchMsg(
@@ -120,7 +151,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
         && arguments().size() >= old.arguments().size())) {
     return false;
   }
-  for (size_t i = 0; i < returns().size(); ++i) {
+  for (const auto i : c10::irange(returns().size())) {
     // Backwards compatibility requires covariance on argument types
     // (i.e. more generic), and contravariance on return types (i.e.
     //  more specific).
@@ -131,20 +162,20 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
     }
   }
 
-  // we want to test both out and default args seperately
+  // we want to test both out and default args separately
   size_t old_out_start_idx = findFirstOutArg(old.arguments());
   size_t new_out_start_idx = findFirstOutArg(arguments());
 
   // make sure among the default args, they are backward compatible
-  for (size_t i = 0; i < old_out_start_idx; i++) {
+  for (const auto i : c10::irange(old_out_start_idx)) {
     if (!arguments().at(i).isBackwardCompatibleWith(
           old.arguments().at(i), why_not)) {
       return false;
     }
   }
 
-  // // Validate that all new arguments provided has a default value
-  for (size_t i = old_out_start_idx; i < new_out_start_idx; ++i) {
+  // Validate that all new arguments provided has a default value
+  for (const auto i : c10::irange(old_out_start_idx, new_out_start_idx)) {
     if (!arguments().at(i).default_value()) {
       if (why_not) {
         *why_not
@@ -158,7 +189,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
   }
 
   // now compare the out args
-  for (size_t i = old_out_start_idx; i < old.arguments().size(); i++) {
+  for (const auto i : c10::irange(old_out_start_idx, old.arguments().size())) {
     if (!arguments()
              .at(i - old_out_start_idx + new_out_start_idx)
              .isBackwardCompatibleWith(old.arguments().at(i), why_not)) {
@@ -169,6 +200,87 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
   return true;
 }
 
+inline bool FunctionSchema::isForwardCompatibleWith(
+    const FunctionSchema& old,
+    std::ostringstream& why_not) const {
+  if (!(name() == old.name() &&
+        overload_name() == old.overload_name()
+        // we are conservative on is_vararg and is_varret,
+        // since they are only used by internal operators
+        && is_vararg() == old.is_vararg() && is_varret() == old.is_varret() &&
+        returns().size() == old.returns().size())) {
+    return false;
+  }
+
+  // we want to test both out and default args separately
+  size_t old_out_start_idx = findFirstOutArg(old.arguments());
+  size_t new_out_start_idx = findFirstOutArg(arguments());
+
+  if (old.arguments().size() - old_out_start_idx !=
+      arguments().size() - new_out_start_idx) {
+    if (why_not) {
+      why_not << "Function schema should have the "
+              << "same number of out arguments";
+    }
+    return false;
+  }
+
+  // make sure among the default args, they are forward compatible
+  for (size_t i = 0; i < std::min(old_out_start_idx, new_out_start_idx); i++) {
+    if (!arguments().at(i).isForwardCompatibleWith(old.arguments().at(i))) {
+      if (why_not) {
+        why_not
+            << "'" << arguments().at(i).name() << "'"
+            << " is not forward compatible with the older version of the schema";
+      }
+      return false;
+    }
+  }
+
+  // Validate that all new arguments provided has a default value
+  for (size_t i = old_out_start_idx; i < new_out_start_idx; ++i) {
+    if (!arguments().at(i).default_value()) {
+      if (why_not) {
+        why_not
+            << "Function schema is not forward compatible since the new argument '"
+            << arguments().at(i).name() << "' of type "
+            << arguments().at(i).type()->str()
+            << " did not provide a default value.";
+      }
+      return false;
+    }
+
+    auto default_val = arguments().at(i).default_value().value();
+    if (default_val.isList() || default_val.isGenericDict()) {
+      if (why_not) {
+        why_not
+            << "Function schema is not forward compatible since the new argument '"
+            << arguments().at(i).name() << "' of type "
+            << arguments().at(i).type()->str() << " has a container type "
+            << "as its default value.";
+      }
+      return false;
+    }
+  }
+
+  // now compare the out args
+  for (size_t i = old_out_start_idx; i < old.arguments().size(); i++) {
+    if (!arguments()
+             .at(i - old_out_start_idx + new_out_start_idx)
+             .isForwardCompatibleWith(old.arguments().at(i))) {
+      if (why_not) {
+        why_not << "Out argument '"
+                << "'" << arguments().at(i).name()
+                << " is not FC with the older version of the schema";
+      }
+      return false;
+    }
+  }
+
+  return true;
+}
+
+template<typename T>
 inline void FunctionSchema::checkArg(
     const IValue& value,
     const Argument& argument,
@@ -177,11 +289,11 @@ inline void FunctionSchema::checkArg(
     // Fast-path for the common case
     return;
   }
-  if (!value.type()->isSubtypeOf(argument.type())) {
+  if (!value.type<T>()->isSubtypeOf(*argument.type())) {
     TORCH_CHECK(
         false,
         formatTypeMismatchMsg(
-            argument, value.type()->repr_str(), pos));
+            argument, value.type<T>()->repr_str(), pos));
   }
 }
 
@@ -220,6 +332,7 @@ inline std::string FunctionSchema::findErrorInKwargs(const std::vector<std::stri
   return "";
 }
 
+template <typename T>
 inline void FunctionSchema::checkAndNormalizeInputs(
     std::vector<IValue>& inputs,
     const std::unordered_map<std::string, IValue>& kwargs) const {
@@ -236,15 +349,15 @@ inline void FunctionSchema::checkAndNormalizeInputs(
       *this);
 
   size_t consumed_kwargs = 0;
-  for (size_t pos = 0; pos < arguments().size(); ++pos) {
+  for (const auto pos : c10::irange(arguments().size())) {
     const auto& argument = arguments()[pos];
     if (pos < inputs.size()) {
-      checkArg(inputs[pos], argument, pos);
+      checkArg<T>(inputs[pos], argument, pos);
       continue;
     }
     auto it = kwargs.find(argument.name());
     if (it != kwargs.end()) {
-      checkArg(it->second, argument, nullopt);
+      checkArg<T>(it->second, argument, nullopt);
       inputs.push_back(it->second);
       consumed_kwargs++;
       continue;
@@ -296,13 +409,13 @@ inline bool isSubtypeOfList(
   if (child.size() != parent.size()) {
     return false;
   }
-  for (size_t i = 0; i < child.size(); ++i) {
+  for (const auto i : c10::irange(child.size())) {
     const Argument& c = child[i];
     const Argument& p = parent[i];
     if (c.name() != p.name()) {
       return false;
     }
-    if (!c.type()->isSubtypeOfExt(p.type(), why_not)) {
+    if (!c.type()->isSubtypeOfExt(*p.type(), why_not)) {
       return false;
     }
   }

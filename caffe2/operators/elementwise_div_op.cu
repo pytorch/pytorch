@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <functional>
 
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_reduce.cuh>
-#include <cub/cub.cuh>
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/elementwise_ops_utils.h"

@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import io
 import os
 import sys
@@ -1420,7 +1422,7 @@ class TestClassType(JitTestCase):
         Test that the error message displayed when convering a class type
         to an IValue that has an attribute of the wrong type.
         """
-        @torch.jit.script
+        @torch.jit.script  # noqa: B903
         class ValHolder(object):  # noqa: B903
             def __init__(self, val):
                 self.val = val
@@ -1428,8 +1430,8 @@ class TestClassType(JitTestCase):
         class Mod(nn.Module):
             def __init__(self):
                 super(Mod, self).__init__()
-                self.mod1 = ValHolder(1)
-                self.mod2 = ValHolder(2)
+                self.mod1 = ValHolder("1")
+                self.mod2 = ValHolder("2")
 
             def forward(self, cond: bool):
                 if cond:

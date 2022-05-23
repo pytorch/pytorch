@@ -9,6 +9,15 @@
 
 namespace torch { namespace utils {
 
+#define REGISTER_LAYOUT(layout, LAYOUT)                          \
+    PyObject* layout##_layout =                                  \
+      THPLayout_New(at::Layout::LAYOUT, "torch." # layout);      \
+    Py_INCREF(layout##_layout);                                         \
+    if (PyModule_AddObject(torch_module, "" # layout, layout##_layout) != 0) { \
+      throw python_error();                                             \
+    }                                                                   \
+    registerLayoutObject((THPLayout*)layout##_layout, at::Layout::LAYOUT);
+
 void initializeLayouts() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!torch_module) throw python_error();
@@ -27,13 +36,10 @@ void initializeLayouts() {
   }
   registerLayoutObject((THPLayout*)sparse_coo_layout, at::Layout::Sparse);
 
-  PyObject* sparse_csr_layout =
-      THPLayout_New(at::Layout::SparseCsr, "torch.sparse_csr");
-  Py_INCREF(sparse_csr_layout);
-  if (PyModule_AddObject(torch_module, "sparse_csr", sparse_csr_layout) != 0) {
-    throw python_error();
-  }
-  registerLayoutObject((THPLayout*)sparse_csr_layout, at::Layout::SparseCsr);
+  REGISTER_LAYOUT(sparse_csr, SparseCsr)
+  REGISTER_LAYOUT(sparse_csc, SparseCsc)
+  REGISTER_LAYOUT(sparse_bsr, SparseBsr)
+  REGISTER_LAYOUT(sparse_bsc, SparseBsc)
 
   PyObject* mkldnn_layout = THPLayout_New(at::Layout::Mkldnn, "torch._mkldnn");
   Py_INCREF(mkldnn_layout);

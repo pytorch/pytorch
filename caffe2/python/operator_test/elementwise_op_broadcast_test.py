@@ -64,7 +64,7 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
             caffe2_op: A string. Name of the caffe operator to test.
             op_function: an actual python operator (e.g. operator.add)
         path_prefix: A string. Optional param used to construct db name or path
-            where checkpoint files are are stored.
+            where checkpoint files are stored.
         """
 
         for X, Y, op_args, X_out, Y_out in self.__generate_test_cases(allow_broadcast_fastpath):

@@ -5,8 +5,8 @@
 
 namespace c10 {
 
-template<class T> TypePtr getTypePtr();
-std::string toString(TypePtr typePtr);
+template<class T> decltype(auto) getTypePtr();
+std::string toString(const Type& type);
 
 template<class T>
 List<T>::List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements)
@@ -63,8 +63,8 @@ List<T> toTypedList(impl::GenericList list) {
   // as List<Tensor> before we changed that argument to be List<optional<Tensor>>. When deserializing, we
   // have list.use_count() == 1 and can deserialize the List<Tensor> directly as List<optional<Tensor>>.
   TORCH_CHECK(*list.impl_->elementType == *getTypePtr<T>()
-    || (list.use_count() == 1 && list.impl_->elementType->isSubtypeOf(getTypePtr<T>()))
-    , "Tried to cast a List<", toString(list.impl_->elementType), "> to a List<", toString(getTypePtr<T>()), ">. Types mismatch.");
+    || (list.use_count() == 1 && list.impl_->elementType->isSubtypeOf(*getTypePtr<T>()))
+    , "Tried to cast a List<", toString(*list.impl_->elementType), "> to a List<", toString(*getTypePtr<T>()), ">. Types mismatch.");
   return List<T>(std::move(list.impl_));
 }
 
@@ -76,18 +76,6 @@ template<class T>
 impl::GenericList toList(const List<T>& list) {
   return GenericList(list.impl_);
 }
-}
-
-template<class T>
-List<T>::List(List&& rhs) noexcept: impl_(std::move(rhs.impl_)) {
-  rhs.impl_ = make_intrusive<c10::detail::ListImpl>(std::vector<IValue>{}, impl_->elementType);
-}
-
-template<class T>
-List<T>& List<T>::operator=(List&& rhs) noexcept {
-  impl_ = std::move(rhs.impl_);
-  rhs.impl_ = make_intrusive<c10::detail::ListImpl>(std::vector<IValue>{}, impl_->elementType);
-  return *this;
 }
 
 template<class T>
@@ -358,5 +346,3 @@ void List<T>::unsafeSetElementType(TypePtr t) {
   impl_->elementType = std::move(t);
 }
 }
-
-#include <ATen/core/jit_type.h>

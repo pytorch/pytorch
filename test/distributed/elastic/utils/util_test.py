@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -6,53 +7,80 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import unittest
+from unittest import mock
 
 import torch.distributed.elastic.utils.store as store_util
 from torch.distributed.elastic.utils.logging import get_logger
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class TestStore:
-    def get(self, key: str):
-        return f"retrieved:{key}"
+class StoreUtilTest(TestCase):
+    def test_get_all_rank_0(self):
+        store = mock.MagicMock()
+        world_size = 3
+        store_util.get_all(store, 0, "test/store", world_size)
+        # omit empty kwargs, get only key
+        actual_set_call_args = [
+            call_args[0][0] for call_args in store.set.call_args_list
+        ]
+        self.assertListEqual(["test/store0.FIN"], actual_set_call_args)
 
+        actual_get_call_args = [call_args[0] for call_args in store.get.call_args_list]
+        expected_get_call_args = [
+            ("test/store0",),
+            ("test/store1",),
+            ("test/store2",),
+            ("test/store0.FIN",),
+            ("test/store1.FIN",),
+            ("test/store2.FIN",),
+        ]
+        self.assertListEqual(expected_get_call_args, actual_get_call_args)
 
-class StoreUtilTest(unittest.TestCase):
-    def test_get_data(self):
-        store = TestStore()
-        data = store_util.get_all(store, "test/store", 10)
-        for idx in range(0, 10):
-            self.assertEqual(f"retrieved:test/store{idx}", data[idx])
+    def test_get_all_rank_n(self):
+        store = mock.MagicMock()
+        world_size = 3
+        store_util.get_all(store, 1, "test/store", world_size)
+        # omit empty kwargs, get only key
+        actual_set_call_args = [
+            call_args[0][0] for call_args in store.set.call_args_list
+        ]
+        self.assertListEqual(["test/store1.FIN"], actual_set_call_args)
+
+        actual_get_call_args = [call_args[0] for call_args in store.get.call_args_list]
+        expected_get_call_args = [
+            ("test/store0",),
+            ("test/store1",),
+            ("test/store2",),
+        ]
+        self.assertListEqual(expected_get_call_args, actual_get_call_args)
 
     def test_synchronize(self):
-        class DummyStore:
-            def __init__(self):
-                self._data = {
-                    "torchelastic/test0": "data0".encode(encoding="UTF-8"),
-                    "torchelastic/test1": "data1".encode(encoding="UTF-8"),
-                    "torchelastic/test2": "data2".encode(encoding="UTF-8"),
-                }
-
-            def set(self, key, value):
-                self._data[key] = value
-
-            def get(self, key):
-                return self._data[key]
-
-            def set_timeout(self, timeout):
-                pass
-
+        store_mock = mock.MagicMock()
         data = "data0".encode(encoding="UTF-8")
-        store = DummyStore()
-        res = store_util.synchronize(store, data, 0, 3, key_prefix="torchelastic/test")
-        self.assertEqual(3, len(res))
-        for idx, res_data in enumerate(res):
-            actual_str = res_data.decode(encoding="UTF-8")
-            self.assertEqual(f"data{idx}", actual_str)
+        store_util.synchronize(store_mock, data, 0, 3, key_prefix="torchelastic/test")
+        actual_set_call_args = store_mock.set.call_args_list
+        # omit empty kwargs
+        actual_set_call_args = [call_args[0] for call_args in actual_set_call_args]
+        expected_set_call_args = [
+            ("torchelastic/test0", b"data0"),
+            ("torchelastic/test0.FIN", b"FIN"),
+        ]
+        self.assertListEqual(expected_set_call_args, actual_set_call_args)
+
+        expected_get_call_args = [
+            ("torchelastic/test0",),
+            ("torchelastic/test1",),
+            ("torchelastic/test2",),
+            ("torchelastic/test0.FIN",),
+            ("torchelastic/test1.FIN",),
+            ("torchelastic/test2.FIN",),
+        ]
+        actual_get_call_args = store_mock.get.call_args_list
+        actual_get_call_args = [call_args[0] for call_args in actual_get_call_args]
+        self.assertListEqual(expected_get_call_args, actual_get_call_args)
 
 
-class UtilTest(unittest.TestCase):
+class UtilTest(TestCase):
     def test_get_logger_different(self):
         logger1 = get_logger("name1")
         logger2 = get_logger("name2")

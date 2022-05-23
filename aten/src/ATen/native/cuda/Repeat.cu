@@ -1,6 +1,14 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/Repeat.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/repeat_interleave_native.h>
+#endif
 
 template <typename index_t>
 __global__ static void compute_cuda_kernel(
@@ -33,7 +41,7 @@ static void compute_cuda(
     int64_t size,
     int64_t result_size) {
   int64_t block = 512;
-  int64_t warps_per_block = block / C10_WARP_SIZE;
+  int64_t warps_per_block = block / at::cuda::warp_size();
   int64_t grid =
       std::min<int64_t>((size + warps_per_block - 1) / warps_per_block, 2048L);
 
