@@ -16226,6 +16226,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.bfloat16, torch.half),
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
            supports_out=True,
+           supports_autograd=False,
            sample_inputs_func=sample_inputs_normal_tensor_first,
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
@@ -16235,8 +16236,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # NotImplementedError not raised
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
                # Computed gradient is incorrect -- would be an exfail but gradgrad somehow passes
                DecorateInfo(unittest.skip("Gradients are incorrect!"), 'TestGradients'),)),
     OpInfo('normal',
@@ -16249,15 +16248,13 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.bfloat16, torch.half),
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
            supports_out=True,
+           supports_autograd=False,
            sample_inputs_func=sample_inputs_normal_tensor_second,
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # NotImplementedError not raised
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-               # Computed gradient is incorrect -- would be an exfail but gradgrad somehow passes
-               DecorateInfo(unittest.skip("Gradients are incorrect!"), 'TestGradients'),)),
+               )),
     OpInfo('bernoulli',
            op=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.bernoulli, inp, *args, **kwargs),
@@ -16268,12 +16265,9 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
            supports_out=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
+           supports_autograd=False,
            sample_inputs_func=sample_inputs_bernoulli,
            skips=(
-               # vmap: We do not yet support calling random operations inside of vmap
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
