@@ -2180,8 +2180,6 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
             self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 
-            _test_matrix(dense, layout, pt_matrix)
-
             self.assertEqual(dense, pt_matrix.to_dense())
 
     @skipMeta
