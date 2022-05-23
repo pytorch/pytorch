@@ -19375,6 +19375,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.masked_fill",
         torch_opinfo_name="masked_fill",
+        skips=(
+            # This will fail till where supports `chalf`
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_dtypes"),
+        )
     ),
 ]
 
