@@ -1579,7 +1579,7 @@ def reshape(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=True)
 
 
-def rot90(a: TensorLikeType, k: int = 1, dims: DimsType = (0, 1)) -> TensorLikeType:
+def rot90(a: TensorLikeType, k: int = 1, dims: DimsSequenceType = (0, 1)) -> TensorLikeType:
     """Reference implementation of :func:`torch.rot90`."""
     if len(dims) != 2:
         raise ValueError(f"expected total rotation dims == 2, but got dims = {len(dims)}")
