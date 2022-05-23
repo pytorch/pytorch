@@ -575,7 +575,6 @@ class TestOperators(TestCase):
 
     vmapvjp_fail = vjp_fail.union({
         # The following are not bugs and are expected behavior
-        xfail('fill_'),  # Not possible, wontfix
         xfail('masked_select'),  # Not possible due to dynamic shapes
         skip('bernoulli'),  # randomness
         skip('normal', ''),  # randomness
@@ -665,7 +664,6 @@ class TestOperators(TestCase):
 
         # Try to in-place batched tensor into non-batched tensor
         xfail('matrix_exp'),
-        xfail('fill_'),
         xfail('block_diag'),  # TODO: We expect this to fail in core, but it doesn't
 
         # Apprently these support forward AD, but we get "Trying to use forward AD..."
@@ -763,7 +761,6 @@ class TestOperators(TestCase):
         xfail('quantile'),
         xfail('var_mean'),
         xfail('as_strided'),
-        xfail('fill_'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('std_mean'),
         xfail('block_diag'),
@@ -917,7 +914,6 @@ class TestOperators(TestCase):
         xfail('fmin'),
         xfail('fmax'),
         xfail('special.log_ndtr'),
-        xfail('fill_'),
         xfail('index_copy'),
         xfail('index_fill'),
         xfail('linalg.cholesky'),
@@ -1040,7 +1036,6 @@ class TestOperators(TestCase):
         # All of the following are bugs and need to be fixed
         xfail('__getitem__', ''),
         xfail('clamp', ''),
-        xfail('fill_'),
         xfail('index_put', ''),
         xfail('matrix_exp'),
         xfail('view_as_complex'),
