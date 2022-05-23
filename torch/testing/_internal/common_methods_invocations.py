@@ -18856,14 +18856,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
         torch_opinfo_name="atan",
-        skips=(
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,)),
-            # same reason as above
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-                         dtypes=(torch.chalf,)),
-        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.bitwise_not",
@@ -18992,14 +18984,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.tan",
         torch_opinfo_name="tan",
-        skips=(
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,)),
-            # same reason as above
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-                         dtypes=(torch.chalf,)),
-        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.tanh",

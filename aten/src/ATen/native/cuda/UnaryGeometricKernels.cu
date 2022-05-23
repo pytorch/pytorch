@@ -32,14 +32,14 @@ void asin_kernel_cuda(TensorIteratorBase& iter) {
       });
 }
 
-const char atan_name[] = "atan_kernel";
+const char atan_name[] = "atan";
 void atan_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
 #if AT_USE_JITERATOR
   static const auto atan_string = jiterator_stringify(
     template <typename T>
-    T atan_kernel(T a) {
+    T atan(T a) {
         return std::atan(a);
     }
   );
@@ -158,14 +158,14 @@ void atanh_kernel_cuda(TensorIteratorBase& iter) {
       });
 }
 
-const char tan_name[] = "tan_kernel";
+const char tan_name[] = "tan";
 void tan_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
 #if AT_USE_JITERATOR
   static const auto tan_string = jiterator_stringify(
     template <typename T>
-    T tan_kernel(T a) {
+    T tan(T a) {
         return std::tan(a);
     }
   );
