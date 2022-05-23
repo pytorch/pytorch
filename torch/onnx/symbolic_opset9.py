@@ -5009,11 +5009,11 @@ class Prim:
     def device(ctx: torch.onnx.SymbolicContext, g, *inputs, **kwargs):
         n = ctx.cur_node
 
-        if n.output().type().kind() == "_C.DeviceObjType":
+        if n.output().type().kind() == "DeviceObjType":
             return None
 
         return symbolic_helper._unimplemented(
-            "prim::device", "output type is not `_C.DeviceObjType`."
+            "prim::device", "output type is not `DeviceObjType`."
         )
 
     @staticmethod
