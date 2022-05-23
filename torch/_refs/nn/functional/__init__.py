@@ -18,11 +18,11 @@ __all__ = [
     "celu",
     "dropout",
     "elu",
+    "hinge_embedding_loss",
     "mish",
+    "margin_ranking_loss",
     "selu",
     "softplus",
-    "margin_ranking_loss",
-    "hinge_embedding_loss",
 ]
 
 # celu is implemented specially because it has an alpha argument
@@ -195,8 +195,8 @@ def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeTyp
     if reduction == "sum":
         return refs.sum(loss)
     elif reduction == "mean":
-        return refs.true_divide(refs.sum(loss), loss.numel())
-    else:
+        return refs.mean(loss)
+    else:  # reduction == "none"
         return loss
 
 
@@ -209,9 +209,10 @@ def margin_ranking_loss(
     input1: TensorLikeType,
     input2: TensorLikeType,
     target: TensorLikeType,
-    margin=0.0,
-    reduction="mean",
+    margin: float = 0.0,
+    reduction: str = "mean",
 ) -> TensorLikeType:
+    # Formula of loss (implementation gets confusing with all the refs.foo)
     # loss_without_reduction = max(0, −target * (input1 − input2) + margin)
     if input1.ndim != input2.ndim or input1.ndim != target.ndim:
         raise RuntimeError(
@@ -232,8 +233,12 @@ def margin_ranking_loss(
 
 
 def hinge_embedding_loss(
-    input: TensorLikeType, target: TensorLikeType, margin=1.0, reduction="mean"
+    input: TensorLikeType,
+    target: TensorLikeType,
+    margin: float = 1.0,
+    reduction: str = "mean",
 ) -> TensorLikeType:
+    # Formula of loss (implementation gets confusing with all the refs.foo)
     # loss_without_reduction = input if y == 1
     #                        = max(0, margin - input) if y == -1
     _check_reduction_value(reduction)

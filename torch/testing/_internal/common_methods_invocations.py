@@ -3323,8 +3323,10 @@ def sample_inputs_margin_ranking_loss(op_info, device, dtype, requires_grad, **k
 
 def error_inputs_margin_ranking_loss(op, device, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=torch.float32)
+    # invalid reduction value.
     yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4), make_input(5, 4),), kwargs={'reduction': 'abc'}),
                      error_type=ValueError, error_regex='is not a valid value')
+    # invalid input shapes
     yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4), make_input(5,),)),
                      error_regex='margin_ranking_loss : All input tensors should')
 
@@ -9029,15 +9031,15 @@ def _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwa
 def sample_inputs_hinge_embedding_loss(op_info, device, dtype, requires_grad, **kwargs):
     for input, target, d in _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwargs):
         # target should contain either 1 or -1 as per docs
-        with torch.no_grad():
-            mask = torch.rand_like(target) > 0.5
-            target[mask] = 1
-            target[~mask] = -1
+        mask = torch.rand_like(target) > 0.5
+        target[mask] = 1
+        target[~mask] = -1
         d['margin'] = random.uniform(-9, 9)
         yield SampleInput(input, args=(target, ), kwargs=d)
 
 def error_inputs_hinge_embedding_loss(op, device, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=torch.float32)
+    # invalid reduction value
     yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4),), kwargs={'reduction': 'abc'}),
                      error_type=ValueError, error_regex='is not a valid value')
 
@@ -19055,12 +19057,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.hinge_embedding_loss",
         torch_opinfo_name="nn.functional.hinge_embedding_loss",
-        decorators=(
-            DecorateInfo(toleranceOverride({
-                torch.bfloat16: tol(atol=1e-2, rtol=0),
-                torch.float16: tol(atol=1e-3, rtol=0)
-            }), 'TestCommon', 'test_python_reference_consistency'),
-        ),
     ),
     #
     # Elementwise Binary Reference OpInfos
