@@ -2220,12 +2220,10 @@ class TestSparseCSR(TestCase):
             # TODO: Remove this once support has been enabled
             return
 
-        for shape in [(3, 5, 10), (0, 10), (6, 0), (6, 10), (0, 0)]:
+        for shape in [(0, 10), (6, 0), (6, 10), (0, 0)]:
             sparse_dim = 2
             nnz = shape[0] * shape[1] // 2
-            dense = torch.randn(shape).relu()
-            sparse = dense.to_sparse_csr()
-            # sparse, _, _ = self.genSparseTensor(shape, sparse_dim, nnz, coalesced, device, dtype)
+            sparse, _, _ = self.genSparseTensor(shape, sparse_dim, nnz, coalesced, device, dtype)
             sp_matrix = self._construct_sp_matrix(sparse, layout)
             pt_matrix = self._convert_to_layout(sparse, layout)
 
