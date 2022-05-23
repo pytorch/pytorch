@@ -8,7 +8,7 @@ load(
 def define_targets(rules):
     rules.cc_library(
         name = "aten_core_headers",
-        hdrs = aten_core_hdrs(rules = rules),
+        hdrs = aten_core_hdrs(rules = rules) + [":" + h for h in GENERATED_H_CORE],
         strip_include_prefix = "aten/src/",
         deps = ["//c10"],
         visibility = ["//visibility:private"],
