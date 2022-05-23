@@ -133,11 +133,58 @@ public:
       pyobj_ = std::make_shared<c10::SafePyObject>(pyobj.release().ptr(), getPyInterpreter());
     };
 
-  virtual SymbolicIntNode* add(SymbolicIntNode* other) override {
-    auto pother = dynamic_cast<PythonSymbolicIntNode*>(other);
+  virtual bool bool_() {
     py::gil_scoped_acquire acquire;
-    auto r = getPyObj().attr("__add__")(pother->getPyObj());
+    return py::str(getPyObj().attr("__bool__")()).is(py::str(Py_True));
+    // TODO: test getPyObj().attr("__bool__")().is(py::object(Py_True))
+  }
+
+  virtual std::string str() {
+    py::gil_scoped_acquire acquire;
+    return py::str(getPyObj()).cast<std::string>();
+    // TODO: can we just do getPyObj().cast<string>?
+  }
+
+  virtual SymbolicIntNode* dispatch_common_(const char* fname, SymbolicIntNode* other) {
+    auto pother = dynamic_cast<PythonSymbolicIntNode*>(other);
+    TORCH_CHECK(pother);
+    auto magic_fname = std::string("__") + fname + std::string("__");
+    py::gil_scoped_acquire acquire;
+    auto r = getPyObj().attr(magic_fname.c_str())(pother->getPyObj());
     return new PythonSymbolicIntNode(r);
+  }
+
+  //TODO: FOREACH MACRO?
+  virtual SymbolicIntNode* add(SymbolicIntNode* other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+  
+  virtual SymbolicIntNode* sub(SymbolicIntNode* other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
+  virtual SymbolicIntNode* mul(SymbolicIntNode* other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
+  virtual SymbolicIntNode* div(SymbolicIntNode* other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
+  virtual SymbolicIntNode* mod(SymbolicIntNode* other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
+  virtual SymbolicIntNode* eq(SymbolicIntNode* other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
+  virtual SymbolicIntNode* gt(SymbolicIntNode* other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
+  virtual SymbolicIntNode* lt(SymbolicIntNode* other) override {
+    return dispatch_common_(__FUNCTION__, other);
   }
 
   py::handle getPyObj() { return py::handle(pyobj_.get()->ptr(getPyInterpreter())); }
@@ -1100,8 +1147,36 @@ void initJITBindings(PyObject* module) {
 
       //return false;
     })
+    // FOREACH MACRO?
     .def("__add__", [](std::shared_ptr<c10::SymbolicIntNode> a, std::shared_ptr<c10::SymbolicIntNode> b) {
       return std::shared_ptr<c10::SymbolicIntNode> (a->add(b.get()));
+    })
+    .def("__sub__", [](std::shared_ptr<c10::SymbolicIntNode> a, std::shared_ptr<c10::SymbolicIntNode> b) {
+      return std::shared_ptr<c10::SymbolicIntNode> (a->sub(b.get()));
+    })
+    .def("__mul__", [](std::shared_ptr<c10::SymbolicIntNode> a, std::shared_ptr<c10::SymbolicIntNode> b) {
+      return std::shared_ptr<c10::SymbolicIntNode> (a->mul(b.get()));
+    })
+    .def("__div__", [](std::shared_ptr<c10::SymbolicIntNode> a, std::shared_ptr<c10::SymbolicIntNode> b) {
+      return std::shared_ptr<c10::SymbolicIntNode> (a->div(b.get()));
+    })
+    .def("__mod__", [](std::shared_ptr<c10::SymbolicIntNode> a, std::shared_ptr<c10::SymbolicIntNode> b) {
+      return std::shared_ptr<c10::SymbolicIntNode> (a->mod(b.get()));
+    })
+    .def("__eq__", [](std::shared_ptr<c10::SymbolicIntNode> a, std::shared_ptr<c10::SymbolicIntNode> b) {
+      return std::shared_ptr<c10::SymbolicIntNode> (a->eq(b.get()));
+    })
+    .def("__gt__", [](std::shared_ptr<c10::SymbolicIntNode> a, std::shared_ptr<c10::SymbolicIntNode> b) {
+      return std::shared_ptr<c10::SymbolicIntNode> (a->gt(b.get()));
+    })
+    .def("__lt__", [](std::shared_ptr<c10::SymbolicIntNode> a, std::shared_ptr<c10::SymbolicIntNode> b) {
+      return std::shared_ptr<c10::SymbolicIntNode> (a->lt(b.get()));
+    })
+    .def("__bool__", [](std::shared_ptr<c10::SymbolicIntNode> a) {
+      return a->bool_();
+    })
+    .def("__str__", [](std::shared_ptr<c10::SymbolicIntNode> a) {
+      return a->str();
     });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)

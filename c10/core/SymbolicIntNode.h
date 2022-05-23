@@ -13,8 +13,19 @@ class C10_API SymbolicIntNode
  public:
   c10::SymInt toSymInt();
   virtual ~SymbolicIntNode(){};
-  virtual SymbolicIntNode* add(SymbolicIntNode* other) = 0;
+  // these could be pure virtual when we implement LTC versions
+  virtual SymbolicIntNode* add(SymbolicIntNode* other) { TORCH_CHECK(false, "NYI"); };
+  virtual SymbolicIntNode* sub(SymbolicIntNode* other) { TORCH_CHECK(false, "NYI"); };
+  virtual SymbolicIntNode* mul(SymbolicIntNode* other) { TORCH_CHECK(false, "NYI"); };
+  virtual SymbolicIntNode* div(SymbolicIntNode* other) { TORCH_CHECK(false, "NYI"); };
+  virtual SymbolicIntNode* mod(SymbolicIntNode* other) { TORCH_CHECK(false, "NYI"); };
+  virtual SymbolicIntNode* eq(SymbolicIntNode* other) { TORCH_CHECK(false, "NYI"); };
+  virtual SymbolicIntNode* gt(SymbolicIntNode* other) { TORCH_CHECK(false, "NYI"); };
+  virtual SymbolicIntNode* lt(SymbolicIntNode* other) { TORCH_CHECK(false, "NYI"); };
+  virtual bool bool_() { TORCH_CHECK(false, "NYI"); };
+  virtual std::string str() { TORCH_CHECK(false, "NYI"); };
   virtual std::ostream& operator<<(std::ostream& os) {
+    os << str();
     return os;
   };
 };

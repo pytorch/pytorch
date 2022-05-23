@@ -570,10 +570,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return strides_default();
   }
 
-  c10::SymIntArrayRef  sym_sizes() const {
-    return c10::SymIntArrayRef(reinterpret_cast<const c10::SymInt*>(sizes_and_strides_.sizes_data()), sizes_and_strides_.size());
-  }
-
   /**
    * Return the size of a tensor at some dimension, wrapping the dimension if
    * necessary.
@@ -1257,6 +1253,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   inline bool is_empty() const {
     return numel() == 0;
   }
+
+  // if we are going to use sym sizes, we should be setting sym strides at the same time,
+  // otherwise it's very easy to misuse this API 
+  virtual void set_sym_sizes_and_strides(c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides);
 
   /**
    * Change the size at some dimension.  This DOES NOT update strides;
