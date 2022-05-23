@@ -110,7 +110,6 @@ class TestOptionalOutput(TestCase):
         )
 
 
-# Below are moved from test/jit
 class TestONNXExport(TestCase):
     def test_fuse_addmm(self):
         class AddmmModel(torch.nn.Module):
@@ -457,7 +456,6 @@ class TestONNXExport(TestCase):
             self.assertTrue(node.sourceRange())
 
 
-# parametrized tests
 instantiate_parametrized_tests(TestOptionalOutput)
 
 if __name__ == "__main__":
