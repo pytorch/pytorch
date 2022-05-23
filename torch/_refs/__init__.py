@@ -940,13 +940,9 @@ def _xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, Number
     if isinstance(a, TensorLike):
         if isinstance(b, Number):
             b = scalar_tensor(b, dtype=a.dtype, device=a.device)
-        elif utils.is_cpu_scalar_tensor(b):
-            b = prims.device_put(b, device=a.device)
     elif isinstance(b, TensorLike):
         if isinstance(a, Number):
             a = scalar_tensor(a, dtype=b.dtype, device=b.device)
-        elif utils.is_cpu_scalar_tensor(a):
-            a = prims.device_put(a, device=b.device)
 
     rhs = where(eq(a, 0), 0, mul(a, log(b)))
     return where(isnan(b), float("nan"), rhs)
@@ -1799,6 +1795,7 @@ zeros = partial(full, fill_value=False)
 
 zeros_like = partial(full_like, fill_value=False)
 
+
 def scalar_tensor(
     a: NumberType,
     *,
@@ -1806,6 +1803,7 @@ def scalar_tensor(
     device: Optional[torch.device] = None,
 ) -> TensorLikeType:
     return prims.scalar_tensor(a, dtype=dtype, device=device)
+
 
 def uniform(
     shape: ShapeType,

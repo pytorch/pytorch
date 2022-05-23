@@ -2141,20 +2141,25 @@ full_like = _make_prim(
 def _scalar_tensor_meta(
     scalar: NumberType,
     *,
-    dtype: torch.dtype,
-    device: torch.device,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
 ) -> TensorLikeType:
     shape: ShapeType = []
     strides = utils.make_contiguous_strides_for(shape)
-    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
+    return TensorMeta(scalar, shape=shape, strides=strides, dtype=dtype, device=device)
+
 
 def _scalar_tensor_aten(
     scalar: NumberType,
     *,
-    dtype: torch.dtype,
-    device: torch.device,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
 ) -> Tensor:
-    if isinstance(scalar, complex) and not utils.is_complex_dtype(dtype):
+    if (
+        isinstance(scalar, complex)
+        and dtype is not None
+        and utils.is_complex_dtype(dtype)
+    ):
         raise TypeError("Complex scalar requires complex tensor dtype.")
     # Note that Mypy thinks torch.scalar can't accept a complex scalar
     return torch.scalar_tensor(scalar, dtype=dtype, device=device)  # type: ignore[arg-type]
