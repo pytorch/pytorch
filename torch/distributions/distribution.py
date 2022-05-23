@@ -122,6 +122,13 @@ class Distribution(object):
         raise NotImplementedError
 
     @property
+    def mode(self):
+        """
+        Returns the mode of the distribution.
+        """
+        raise NotImplementedError(f"{self.__class__} does not implement mode")
+
+    @property
     def variance(self):
         """
         Returns the variance of the distribution.

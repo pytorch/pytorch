@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/Export.h>
-#include <torch/csrc/jit/passes/pass_manager.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <memory>
 
 namespace torch {
@@ -28,6 +28,7 @@ TORCH_API bool texprReductionsEnabled();
 
 TORCH_API void RemoveProfileNodesAndSpecializeTypes(
     std::shared_ptr<Graph>& graph);
+TORCH_API bool hasTensorTypeSpecialization(Value* v);
 TORCH_API void RemoveTensorTypeSpecializations(std::shared_ptr<Graph>& graph);
 TORCH_API void removeTensorTypeSpecializations(Block* block);
 

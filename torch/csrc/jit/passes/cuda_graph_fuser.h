@@ -14,20 +14,17 @@ namespace jit {
 struct TORCH_API RegisterCudaFuseGraph
     : public PassManager<RegisterCudaFuseGraph> {
   static bool registerPass(bool enabled) {
-    bool old_flag = PassManager::isRegistered();
-    if (enabled) {
-      TORCH_CHECK(
-          at::globalContext().hasCUDA() && !at::globalContext().hasHIP(),
-          "Running CUDA fuser is only supported on CUDA builds.");
-      PassManager::registerPass(fuser::cuda::fuseGraph);
-    } else {
-      PassManager::clearPass();
-    }
-    return old_flag;
+    TORCH_WARN(
+        "RegisterCudaFuseGraph::registerPass() is deprecated. "
+        "Please use torch::jit::fuser::cuda::setEnabled().");
+    return fuser::cuda::setEnabled(enabled);
   }
 
   static bool isRegistered() {
-    return PassManager::isRegistered();
+    TORCH_WARN(
+        "RegisterCudaFuseGraph::isRegistered() is deprecated. "
+        "Please use torch::jit::fuser::cuda::isEnabled().");
+    return fuser::cuda::isEnabled();
   }
 };
 

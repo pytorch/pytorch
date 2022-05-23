@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
+#include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/Metaprogramming.h>
 
@@ -367,6 +368,12 @@ namespace impl {
     // to the operator. std::vector<T> is implicitly convertible to ArrayRef<T>.
     static std::vector<T> call(IValue& v) {
       return ivalue_to_arg<std::vector<T>, AllowDeprecatedTypes>::call(v);
+    }
+  };
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<c10::SymIntArrayRef, AllowDeprecatedTypes> final {
+    static std::vector<c10::SymInt> call(IValue& v) {
+      return ivalue_to_arg<std::vector<c10::SymInt>, AllowDeprecatedTypes>::call(v);
     }
   };
   template<class T, bool AllowDeprecatedTypes>

@@ -3,13 +3,15 @@ from typing import Any, Callable, Iterable, Iterator, Sized, Tuple
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import deprecation_warning
+from torch.utils.data.datapipes.utils.common import _deprecation_warning
 from torch.utils.data.datapipes.utils.decoder import (
     Decoder,
     basichandlers as decoder_basichandlers,
     imagehandler as decoder_imagehandler,
     extension_extract_fn
 )
+
+__all__ = ["RoutedDecoderIterDataPipe", ]
 
 
 @functional_datapipe('routed_decode')
@@ -41,10 +43,10 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
         if not handlers:
             handlers = (decoder_basichandlers, decoder_imagehandler('torch'))
         self.decoder = Decoder(*handlers, key_fn=key_fn)
-        deprecation_warning(
+        _deprecation_warning(
             type(self).__name__,
             deprecation_version="1.12",
-            removal_version="1.14",
+            removal_version="1.13",
             old_functional_name="routed_decode",
         )
 

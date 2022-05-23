@@ -40,6 +40,17 @@ void triangular_solve_cublas(const Tensor& A, const Tensor& B, bool left, bool u
 void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular);
 void gels_batched_cublas(const Tensor& a, Tensor& b, Tensor& infos);
 void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose);
+void ldl_factor_cusolver(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& info,
+    bool upper,
+    bool hermitian);
+void ldl_solve_cusolver(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool upper);
 
 #ifdef USE_CUSOLVER
 
@@ -71,7 +82,6 @@ namespace cuda { namespace detail {
 // This is only used for an old-style dispatches
 // Please do not add any new entires to it
 struct LinalgDispatch {
-   std::tuple<Tensor, Tensor> (*solve_helper)(const Tensor& self, const Tensor& A);
    std::tuple<Tensor, Tensor> (*symeig_helper)(const Tensor& self, bool eigenvectors, bool upper);
    std::tuple<Tensor, Tensor> (*qr_helper)(const Tensor& input, c10::string_view mode);
    Tensor (*cholesky_solve_helper)(const Tensor& self, const Tensor& A, bool upper);

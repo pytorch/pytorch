@@ -1,7 +1,7 @@
 import torch
 from torch.fx.graph import Node, Graph
 from ..utils import _parent_name
-from .quantization_types import NodePattern, Pattern
+from torch.ao.quantization.quantization_types import NodePattern, Pattern
 from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, Union, List
@@ -48,11 +48,9 @@ class DefaultFuseHandler(FuseHandler):
              fuse_custom_config_dict: Dict[str, Any],
              fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
              is_qat: bool) -> Node:
-        additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
         assert root_node.op == "call_module", "Expecting module node to be a call_module Node"
         root_module = named_modules[str(root_node.target)]
-        assert len(additional_fuser_method_mapping) == 0, "Fusion implementation is "
-        "undergoing changes, additoinal_fuser_method_mapping is not supported currently."
+
         def get_modules(pattern):
             """ Given a node pattern, extract the corresponding modules
             e.g. input: (relu_node, (bn_node, conv_node))

@@ -75,8 +75,7 @@ def _cuda(self, device=None, non_blocking=False, **kwargs):
             values = torch.Tensor._values(self).cuda(device, non_blocking)
             return new_type(indices, values, self.size())
         else:
-            new_type = getattr(torch.cuda, self.__class__.__name__)
-            return new_type(self.size()).copy_(self, non_blocking)
+            return torch._UntypedStorage(self.size(), device=torch.device('cuda')).copy_(self, non_blocking)
 
 
 def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
@@ -202,7 +201,6 @@ def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
 
 # Should not be used, only here to be able to load Tensors serialized with older versions of pytorch
 _rebuild_xla_tensor = _rebuild_device_tensor_from_numpy
-_rebuild_mlc_tensor = _rebuild_device_tensor_from_numpy
 
 
 def _rebuild_meta_tensor_no_storage(dtype, size, stride, requires_grad):

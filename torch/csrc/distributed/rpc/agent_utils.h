@@ -26,6 +26,14 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
     const worker_id_t selfId,
     const std::string& selfName);
 
+// Remove name frmo Store, used in dynamic RPC groups.
+// NOTE: This needs to be called with the Dynamic RPC group
+// membership management token held.
+void removeCurrentName(
+    ::c10d::PrefixStore store,
+    const worker_id_t selfId,
+    const std::string& selfName);
+
 // This performs a synchronization of all call counts by using store.
 // All RPC peers wait for others to join to exit at the same time.
 int syncCallCount(

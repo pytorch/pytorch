@@ -3,6 +3,7 @@
 
 #include <c10/macros/Export.h>
 
+#include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
@@ -65,24 +66,33 @@ std::vector<IterDomain*> iterDomainInputsOfOrderedAs(
 // Returns if Val is a TensorView or TensorIndex
 bool isTV(const Val* const);
 
-// Returns is Expr is a TensorView or TensorIndex Expr.
+// Returns if Expr is a TensorView or TensorIndex Expr.
 TORCH_CUDA_CU_API bool isTvOp(const Expr*);
 
 // Returns the first output of Expr that is a TensorView
 TensorView* getTvOutput(const Expr*);
 
+// Returns if Expr is a reduction op
+TORCH_CUDA_CU_API bool isReductionOp(const Expr*);
+
+// Returns if Expr is a reduction op with TensorView or TensorIndex
+TORCH_CUDA_CU_API bool isReductionTvOp(const Expr*);
+
 bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map);
 
-//! Returns the Fuser iterdomain that maps to the thread dimension grouped
+//! Returns the iterdomain that maps to the thread dimension grouped
 //!  to warps. Returns nullopt if the reduction is not to be lowered to
 //!  a warp reduction.
-c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node);
+c10::optional<IterDomain*> getMaybeWarpReductionDim(
+    const Val* output,
+    const Val* input);
 
 bool isScalarOp(const Expr*);
 
 //! Get TensorView potentially via kir::TensorIndex. Returns nullptr if
 //! cast fails.
 TensorView* getTv(Val*);
+const TensorView* getTv(const Val*);
 
 //! Get only TensorView potentially via kir::TensorIndex.
 std::vector<TensorView*> getTvs(const std::vector<Val*>& vals);
@@ -92,7 +102,14 @@ std::vector<TensorView*> getTvs(const std::vector<Val*>& vals);
 bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis);
 
 std::unordered_map<ParallelType, IterDomain*, TypeHash> getParallelDomains(
-    Val* val);
+    const Val* val);
+
+// Allocate global buffer for a grid communication calls, i.e. grid reduce, grid
+// welford reduce, grid broadcast.
+kir::Allocate* allocGlobalBufferForGridComm(
+    Val* buffer_size,
+    DataType dtype,
+    bool zero_init);
 
 } // namespace ir_utils
 
@@ -139,6 +156,64 @@ std::vector<Expr*> replaceInputsInExpr(
 
 // True if an IterDomain does not materialize a loop
 bool isTrivialIterDomain(IterDomain* id);
+
+// Go through all expressions and compute a local ordering of loops. operator<
+// is implemented based on the concrete_id_dependencies analysis done. If
+// there's no dependency between two IDs then order doesn't mater, otherwise we
+// can tell which is inner most by checking if there's any dependency
+// relationships.
+//
+// Dependency relationships in concrete_id_dependencies has a "global" view in
+// the fusion, so it can resolve ordering by only looking at id's and the
+// dependency map.
+//
+// For example two expressions may have domains: [I0], [I1] Yet we
+// won't know the ordering unless we see a domain with: [I0, I1]. This happened
+// in advancedIndexing9 (also see AdvancedLowering6) test when merging T5 with
+// the group containing T10 (cache of T5, which is post broadcasted output) and
+// T6(pre broadcasted output).
+// T5 had the domain [0, 1, 2, 3, 4] produce at 3
+// T6 had the domain [0, 3, 4] compute at 3
+// Merging [0, 1, 2] and [0, 3, 4] resulted in the domain [0, 3, 4, 1, 2]
+//
+// If ID's are not in filter, we don't care about their ordering and ignore
+// them. This is because we're only focused on loops we will have to merge
+// across groups. If the domain is not in a produce at position in the producer
+// edges, or a compute at position in the consumer edges, the expressions we
+// look at may not have a unique ordering.
+
+struct TORCH_CUDA_CU_API IterDomainDependencySorter {
+  IterDomainDependencySorter(
+      const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
+          concrete_id_dependencies,
+      const std::unique_ptr<ComputeAtMap>& compute_at_map)
+      : concrete_id_dependencies_(concrete_id_dependencies),
+        compute_at_map_(compute_at_map) {}
+
+  // Return true if id0 should be before id1
+  // Orders such that if x maps to {y}, x comes before y in final ordering.
+  inline bool operator()(IterDomain* id0, IterDomain* id1) {
+    auto concrete_id_0 =
+        compute_at_map_->getConcreteMappedID(id0, IdMappingMode::LOOP);
+    auto concrete_id_1 =
+        compute_at_map_->getConcreteMappedID(id1, IdMappingMode::LOOP);
+
+    if (concrete_id_dependencies_.find(concrete_id_0) !=
+        concrete_id_dependencies_.end()) {
+      const auto& dependencies_0 = concrete_id_dependencies_.at(concrete_id_0);
+      // if id0 depends on id1 it means id1 is inside id0, so id0 < id1
+      if (dependencies_0.count(concrete_id_1)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
+      concrete_id_dependencies_;
+  const std::unique_ptr<ComputeAtMap>& compute_at_map_;
+};
 
 } // namespace cuda
 } // namespace fuser

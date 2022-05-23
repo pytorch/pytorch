@@ -51,7 +51,11 @@ def run_command(args: List[str], cwd: str) -> "subprocess.CompletedProcess[bytes
     start_time = time.monotonic()
     try:
         return subprocess.run(
-            args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+            args,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
         )
     finally:
         end_time = time.monotonic()
@@ -100,8 +104,8 @@ def run_check(
     return [
         LintMessage(
             path=config_file,
-            line=1,
-            char=1,
+            line=None,
+            char=None,
             code="CIRCLECI",
             severity=LintSeverity.ERROR,
             name="config inconsistency",
@@ -117,10 +121,13 @@ def run_check(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="circleci consistency linter", fromfile_prefix_chars="@",
+        description="circleci consistency linter",
+        fromfile_prefix_chars="@",
     )
     parser.add_argument(
-        "--config-yml", required=True, help="location of config.yml",
+        "--config-yml",
+        required=True,
+        help="location of config.yml",
     )
     parser.add_argument(
         "--regen-script-working-dir",
@@ -133,7 +140,9 @@ if __name__ == "__main__":
         help="location of the config generation script, relative to --regen-script-working-dir",
     )
     parser.add_argument(
-        "--verbose", action="store_true", help="verbose logging",
+        "--verbose",
+        action="store_true",
+        help="verbose logging",
     )
 
     args = parser.parse_args()

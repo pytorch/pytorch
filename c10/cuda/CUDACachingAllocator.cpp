@@ -526,6 +526,7 @@ class DeviceCachingAllocator {
     if (!block_found) {
       // Do garbage collection if the flag is set.
       if (C10_UNLIKELY(
+              set_fraction &&
               CachingAllocatorConfig::garbage_collection_threshold() > 0.0)) {
         garbage_collect_cached_blocks();
       }
@@ -536,7 +537,8 @@ class DeviceCachingAllocator {
           || (release_available_cached_blocks(params) &&
               alloc_block(params, false))
           // Free all non-split cached blocks and retry alloc.
-          || (release_cached_blocks() && alloc_block(params, true));
+          || (C10_LIKELY(captures_underway == 0) && release_cached_blocks() &&
+              alloc_block(params, true));
     }
 
     if (!block_found) {
@@ -1128,6 +1130,7 @@ class DeviceCachingAllocator {
     BlockPool& pool = *p.pool;
 
     if (C10_UNLIKELY(
+            set_fraction &&
             CachingAllocatorConfig::garbage_collection_threshold() > 0.0)) {
       // Track block reuse interval only when garbage collection is enabled.
       for (auto& b : pool.blocks) {

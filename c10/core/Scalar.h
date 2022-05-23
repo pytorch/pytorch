@@ -74,6 +74,10 @@ class C10_API Scalar {
   template <typename T>
   T to() const = delete;
 
+  const void* data_ptr() const {
+    return static_cast<const void*>(&v);
+  }
+
 #undef DEFINE_ACCESSOR
   bool isFloatingPoint() const {
     return Tag::HAS_d == tag;

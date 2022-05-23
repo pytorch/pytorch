@@ -49,6 +49,7 @@
 - [Caffe2 notes](#caffe2-notes)
 - [CI failure tips](#ci-failure-tips)
   - [Which commit is used in CI?](#which-commit-is-used-in-ci)
+- [Dev Infra Office Hours](#dev-infra-office-hours)
 
 <!-- tocstop -->
 
@@ -194,6 +195,7 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
     ```
     remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
 * If you're a Windows contributor, please check out [Best Practices](https://github.com/pytorch/pytorch/wiki/Best-Practices-to-Edit-and-Compile-Pytorch-Source-Code-On-Windows).
+* For help with any part of the contributing process, please don’t hesitate to utilize our Zoom office hours! See details [here](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours)
 
 ## Nightly Checkout & Pull
 
@@ -341,6 +343,8 @@ python test/test_jit.py TestJit.test_Sequential
 The `expecttest` and `hypothesis` libraries must be installed to run the tests. `mypy` is
 an optional dependency, and `pytest` may help run tests more selectively.
 All these packages can be installed with `conda` or `pip`.
+
+**Weird note:** In our CI (Continuous Integration) jobs, we actually run the tests from the `test` folder and **not** the root of the repo, since there are various dependencies we set up for CI that expects the tests to be run from the test folder. As such, there may be some inconsistencies between local testing and CI testing--if you observe an inconsistency, please [file an issue](https://github.com/pytorch/pytorch/issues/new/choose).
 
 ### Better local unit tests with `pytest`
 
@@ -1308,3 +1312,6 @@ your PR branch. If you happen to have write access to this repo, you can choose
 to use `ghstack` to eliminate this nondeterminism for GitHub Actions jobs on
 your PRs, but it will still be present for the select CircleCI jobs listed
 above.
+
+## Dev Infra Office Hours
+[Dev Infra Office Hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours) are hosted every Friday to answer any questions regarding developer experience, Green HUD, and CI.

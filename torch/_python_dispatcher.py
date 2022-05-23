@@ -21,7 +21,7 @@ keys for a single example of each use case. These use cases are listed below:
 - XLA/AutogradXLA: represents out-of-tree backends which we don't have either inference or autograd
     kernel defined in pytorch core library. Backend owner is responsible for registering both
     inference & autograd kernels in their extensions(e.g. torch-xla) for the operators they support.
-    E.g. XLA, XPU, MLC
+    E.g. XLA, XPU, MPS
 - CompositeExplicitAutograd: alias key mapped to inference kernels of all backends like CPU, CUDA, XLA etc.
     Kernels registered to this key MUST work for inference for all backends.
 - Autograd: alias key mapped to autograd of all backends like AutogradCPU, AutogradXLA, AutogradOther.
@@ -66,7 +66,7 @@ class PythonDispatcher:
 
     def __init__(self):
         C._dispatch_check_invariants(self.name)  # type: ignore[attr-defined]
-        self.ref = C._dispatch_library("FRAGMENT", self.namespace, "")  # type: ignore[attr-defined]
+        self.ref = C._dispatch_library("FRAGMENT", self.namespace, "")
         self.ref.def_("foo(Tensor x) -> Tensor")
 
     """

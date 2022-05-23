@@ -9,8 +9,6 @@ namespace torch {
 namespace jit {
 namespace mobile {
 
-#if defined(ENABLE_FLATBUFFER)
-
 namespace internal {
 /**
  * The name of the mobile::Module attribute which contains saved parameters, as
@@ -19,8 +17,6 @@ namespace internal {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 constexpr char kSavedParametersAttributeName[] = "data";
 } // namespace internal
-
-#endif // defined(ENABLE_FLATBUFFER)
 
 } // namespace mobile
 } // namespace jit

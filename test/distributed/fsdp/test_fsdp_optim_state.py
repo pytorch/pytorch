@@ -1,13 +1,14 @@
 # Owner(s): ["oncall: distributed"]
 
+import bisect
 import sys
-from typing import Any, Dict, List, Type
+from enum import Enum, auto
+from typing import Any, Dict, List, Tuple, Type
 
 import torch
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    OPTIM_TARGET_RANK,
     OptimStateKeyType,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -29,6 +30,12 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+
+class _OSDCommMethod(Enum):
+    """Method for communicating the optimizer state dict for internal tests."""
+    BROADCAST_OBJECT_LIST = auto()
+    SCATTER_FULL_OSD = auto()
 
 
 class Bias(torch.nn.Module):
@@ -153,6 +160,54 @@ class NestedModel(torch.nn.Module):
         model.block0 = FSDP(model.block0, process_group=group)
         return model
 
+    @staticmethod
+    def wrap_with_unmanaged_params(
+        model,
+        add_to_fsdp_module: bool,
+        group=None,
+    ) -> Tuple[torch.nn.Module, List[torch.nn.Parameter]]:
+        """Registers unmanaged parameters before wrapping with :meth:`wrap`."""
+        device = next(model.parameters()).device
+        unmanaged_param = torch.nn.Parameter(torch.randn(5, 5, device=device))
+        # Either register the parameter to a module to be wrapped with FSDP
+        # (`model.block2[2]`) or a module not to be wrapped with FSDP (`model`)
+        register_module = model.block2[2] if add_to_fsdp_module else model
+        register_module.register_parameter(
+            "unmanaged_param", unmanaged_param,
+        )
+        # For simplicity, we only add a single unmanaged parameter, but should
+        # be easy to generalize if needed
+        return NestedModel.wrap(model, group), [unmanaged_param]
+
+    @staticmethod
+    def add_unmanaged_param_entry(osd, unmanaged_param, step) -> None:
+        """Adds an entry for the unmanaged parameter ``unmanaged_param``
+        assuming Adam optimizer and a single parameter group."""
+        # The unmanaged parameters should be passed to this method in
+        # `model.parameters()` order since their parameter IDs will be assigned
+        # in order of the skipped IDs
+        # Assign a parameter ID to the unmanaged parameter
+        unmanaged_param_id = -1
+        param_ids = osd["param_groups"][0]["params"]
+        for i in range(1, len(param_ids)):
+            diff = param_ids[i] - param_ids[i - 1]
+            if diff != 1:
+                assert diff > 1, f"Invalid IDs: {param_ids[i - 1]} {param_ids[i]}"
+                unmanaged_param_id = param_ids[i - 1] + 1
+                break
+        if unmanaged_param_id == -1:
+            unmanaged_param_id = len(param_ids)  # last ID skipped
+        assert unmanaged_param_id >= 0, "One parameter ID should be skipped"
+        # Add a state entry for the unmanaged parameter
+        state_device = next(iter(next(iter(osd["state"].values())).values())).device
+        osd["state"][unmanaged_param_id] = {
+            "step": torch.tensor(float(step), device=state_device),
+            "exp_avg": torch.randn(unmanaged_param.shape, device=state_device),
+            "exp_avg_sq": torch.randn(unmanaged_param.shape, device=state_device),
+        }
+        # Insert the ID into the parameter group in order
+        bisect.insort(osd["param_groups"][0]["params"], unmanaged_param_id)
+
     # NOTE: We exclude `self.bias` from either parameter group to test the
     # case where the optimizer input does not include all model parameters
     def param_group0(self) -> List[torch.nn.Parameter]:
@@ -235,7 +290,7 @@ class TestFSDPOptimState(FSDPTest):
         ``torch.save()`` and ``torch.load()`` so that all ranks can have it."""
         obj_list = [full_osd]
         dist.broadcast_object_list(
-            obj_list, src=OPTIM_TARGET_RANK, group=group,
+            obj_list, src=0, group=group,
         )
         full_osd = obj_list[0]
         return full_osd
@@ -332,11 +387,24 @@ class TestFSDPOptimState(FSDPTest):
                         continue
                     self.assertEqual(full_osd_value, ref_osd_pg[name])
 
+    def _check_state_device(self, osd: Dict[str, Any], on_gpu: bool):
+        """Checks that all tensors in ``osd["state"]`` are on GPU if
+        ``on_gpu=True`` and on CPU if ``on_gpu=False``."""
+        for param_state in osd["state"].values():
+            for value in param_state.values():
+                if torch.is_tensor(value):
+                    if on_gpu:
+                        self.assertTrue(value.is_cuda)
+                    else:
+                        self.assertFalse(value.is_cuda)
+
     @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])
+    @parametrize("rank0_only", [False, True])
     def test_full_optim_state_dict_nested(
         self,
         use_multiple_param_groups: bool,
+        rank0_only: bool,
     ) -> None:
         """
         Tests :meth:`full_optim_state_dict` by comparing the returned dict for
@@ -352,8 +420,12 @@ class TestFSDPOptimState(FSDPTest):
             wrap=True, use_multiple_param_groups=use_multiple_param_groups,
         )
         losses1 = self._step_model(model1, optim1, num_iters=NUM_ITERS)
-        full_osd = FSDP.full_optim_state_dict(model1, optim1, optim_input)
-        if self.rank != OPTIM_TARGET_RANK:
+        full_osd = FSDP.full_optim_state_dict(
+            model1, optim1, optim_input, rank0_only=rank0_only,
+        )
+        # Non-target ranks get an empty state dict
+        if rank0_only and self.rank != 0:
+            self.assertEqual(len(full_osd), 0)
             return
         model2, optim2, _ = self._init_nested_model(
             wrap=False, use_multiple_param_groups=use_multiple_param_groups,
@@ -391,6 +463,7 @@ class TestFSDPOptimState(FSDPTest):
             model_class="nested",
             use_multiple_param_groups=use_multiple_param_groups,
             halve_world_size=halve_world_size,
+            osd_comm_method=_OSDCommMethod.BROADCAST_OBJECT_LIST,
             wrap_alt=wrap_alt,
         )
 
@@ -402,6 +475,39 @@ class TestFSDPOptimState(FSDPTest):
         self._test_shard_full_optim_state(
             model_class="transformer", use_multiple_param_groups=False,
             halve_world_size=True,
+            osd_comm_method=_OSDCommMethod.BROADCAST_OBJECT_LIST,
+        )
+
+    # Require 4 GPUs since we test halving the world size
+    @skip_if_lt_x_gpu(4)
+    @parametrize("use_multiple_param_groups", [False, True])
+    @parametrize("wrap_alt", [False, True])
+    @parametrize("halve_world_size", [False, True])
+    def test_scatter_full_optim_state_dict_nested(
+        self,
+        use_multiple_param_groups: bool,
+        wrap_alt: bool,
+        halve_world_size: bool,
+    ):
+        """Tests :meth:`scatter_full_optim_state_dict` for a non-FSDP-root
+        model with nested FSDP instances."""
+        self._test_shard_full_optim_state(
+            model_class="nested",
+            use_multiple_param_groups=use_multiple_param_groups,
+            halve_world_size=halve_world_size,
+            osd_comm_method=_OSDCommMethod.SCATTER_FULL_OSD,
+            wrap_alt=wrap_alt,
+        )
+
+    # Require 4 GPUs since we test halving the world size
+    @skip_if_lt_x_gpu(4)
+    def test_scatter_full_optim_state_dict_transformer(self) -> None:
+        """Tests :meth:`scatter_full_optim_state_dict` for an FSDP-root
+        transformer model with shared parameters."""
+        self._test_shard_full_optim_state(
+            model_class="transformer", use_multiple_param_groups=False,
+            halve_world_size=True,
+            osd_comm_method=_OSDCommMethod.SCATTER_FULL_OSD,
         )
 
     def _test_shard_full_optim_state(
@@ -409,6 +515,7 @@ class TestFSDPOptimState(FSDPTest):
         model_class: str,
         use_multiple_param_groups: bool,
         halve_world_size: bool,
+        osd_comm_method: _OSDCommMethod,
         **new_model_kwargs,
     ):
         """
@@ -428,15 +535,12 @@ class TestFSDPOptimState(FSDPTest):
             else self._init_transformer_model if model_class == "transformer" \
             else None
         assert initializer is not None, f"Unsupported model: {model_class}"
-        # Run a wrapped model with full world size for a few iterations
+        # First, run a wrapped model with full world size for a few iterations
         model1, optim1, optim_input1 = initializer(
             wrap=True, use_multiple_param_groups=use_multiple_param_groups,
         )
         self._step_model(model1, optim1, num_iters=NUM_ITERS)
         full_osd1 = FSDP.full_optim_state_dict(model1, optim1, optim_input1)
-        # Broadcast instead of `torch.save()`/`torch.load()` so that all ranks
-        # have the full state dict
-        full_osd1 = self._broadcast_full_osd(full_osd1)
         if halve_world_size:
             # Create a new process group with halved world size
             new_group_ranks = [r for r in range(self.world_size) if r % 2 == 0]
@@ -444,8 +548,9 @@ class TestFSDPOptimState(FSDPTest):
             if self.rank not in new_group_ranks:
                 return
         else:
+            # Continue using the same group and hence world size
             new_group = dist.distributed_c10d._get_default_group()
-        # Run a wrapped model with halved world size (from scratch)
+        # Second, run a wrapped model with (possibly) halved world size
         model2, optim2, optim_input2 = initializer(
             wrap=True, group=new_group,
             use_multiple_param_groups=use_multiple_param_groups,
@@ -453,14 +558,33 @@ class TestFSDPOptimState(FSDPTest):
         )
         self._step_model(model2, optim2, num_iters=NUM_ITERS)
         full_osd2 = FSDP.full_optim_state_dict(model2, optim2, optim_input2)
-        full_osd2 = self._broadcast_full_osd(full_osd2, group=new_group)
-        # As a sanity check, check that sharding the halved-world-size model's
-        # full optimizer state dict according to itself is equivalent to its
-        # local optimizer's state dict
+        # Compute two sharded optim state dicts: (1) for the first model
+        # according to the second model and (2) for the second model according
+        # to the second model
+        if osd_comm_method == _OSDCommMethod.BROADCAST_OBJECT_LIST:
+            full_osd1 = self._broadcast_full_osd(full_osd1, group=new_group)
+            sharded_osd1 = FSDP.shard_full_optim_state_dict(
+                full_osd1, model2, optim_input2,
+            )
+            full_osd2 = self._broadcast_full_osd(full_osd2, group=new_group)
+            sharded_osd2 = FSDP.shard_full_optim_state_dict(
+                full_osd2, model2, optim_input2,
+            )
+        elif osd_comm_method == _OSDCommMethod.SCATTER_FULL_OSD:
+            sharded_osd1 = FSDP.scatter_full_optim_state_dict(
+                full_osd1 if self.rank == 0 else None, model2, optim_input2,
+                group=new_group,
+            )
+            sharded_osd2 = FSDP.scatter_full_optim_state_dict(
+                full_osd2 if self.rank == 0 else None, model2, optim_input2,
+                group=new_group,
+            )
+            self._check_state_device(sharded_osd1, on_gpu=True)
+            self._check_state_device(sharded_osd2, on_gpu=True)
+        # As a sanity check, check that sharding the second model's full
+        # optimizer state dict according to itself is equivalent to its local
+        # optimizer's state dict
         local_osd2 = optim2.state_dict()
-        sharded_osd2 = FSDP.shard_full_optim_state_dict(
-            full_osd2, model2, optim_input2,
-        )
         check_same_param_keys = True  # should all have matching parameter IDs
         self._check_same_param_groups(
             sharded_osd2, local_osd2,
@@ -470,12 +594,9 @@ class TestFSDPOptimState(FSDPTest):
             sharded_osd2, local_osd2,
             check_same_param_keys=check_same_param_keys,
         )
-        # Check that sharding the full-world-size model's full optimizer state
-        # dict according to the halved-world-size model is equivalent to the
-        # halved-world-size model's local optimizer state dict
-        sharded_osd1 = FSDP.shard_full_optim_state_dict(
-            full_osd1, model2, optim_input2,
-        )
+        # Check that sharding the first model's full optimizer state dict
+        # according to the second model is equivalent to the second model's
+        # local optimizer state dict
         self._check_same_param_groups(
             sharded_osd1, local_osd2,
             check_same_param_keys=check_same_param_keys,
@@ -487,6 +608,73 @@ class TestFSDPOptimState(FSDPTest):
         # As a sanity check, check that we can load and run a few iterations
         optim2.load_state_dict(sharded_osd1)
         self._step_model(model2, optim2, num_iters=NUM_ITERS)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("add_to_fsdp_module", [False, True])
+    def test_shard_full_optim_state_dict_unmanaged_params(
+        self,
+        add_to_fsdp_module: bool,
+    ):
+        """
+        Tests :meth:`shard_full_optim_state_dict` when there are unmanaged
+        parameters.
+          - If ``add_to_fsdp_module=True``, then the unmanaged parameters are
+          added to a module to be wrapped with FSDP, in which case there should
+          be an error since we require that all unflattened parameter
+          comprising a flattened parameter have the same scalar state (e.g.
+          Adam "step") but the added parameter is missing its entry.
+          - If ``add_to_fsdp_module=False``, then the unmanaged parameters are
+          added to a module not to be wrapped with FSDP, in which case there
+          should be no error (emulating model parallel use cases where some
+          parameters may be managed externally to FSDP).
+        We do not separately test unmanaged parameters for
+        :meth:`scatter_full_optim_state_dict` to save CI cost since it calls
+        into the same subroutine :meth:`_flatten_full_optim_state_dict`.
+        """
+        NUM_ITERS = 1
+        # Create a normal wrapped model
+        model, optim, optim_input = self._init_nested_model(wrap=True)
+        self._step_model(model, optim, num_iters=NUM_ITERS)
+        full_osd = FSDP.full_optim_state_dict(
+            model, optim, optim_input, rank0_only=False,
+        )  # save on all ranks to avoid having to broadcast from rank 0
+        # Create a new model with the same structure but additional unmanaged
+        # parameters, representing the model for which we want to load
+        device = torch.device("cuda")
+        model = NestedModel().to(device)
+        model, unmanaged_params = NestedModel.wrap_with_unmanaged_params(
+            model, add_to_fsdp_module,
+        )
+        optim_input = list(model.parameters())
+        if add_to_fsdp_module:
+            # If we add the unmanaged parameters to a module wrapped with FSDP,
+            # then the flattened parameter will be comprised of some
+            # unflattened parameters with zero-dimensional tensor state (i.e.
+            # Adam "step") and others without (i.e. the unmanaged parameters),
+            # which triggers an error that we have to ensure correctness
+            error_prefix = "^(All unflattened parameters comprising a " \
+                "single flattened parameter must have scalar state with the " \
+                "same value and dtype)"
+            with self.assertRaisesRegex(ValueError, error_prefix):
+                FSDP.shard_full_optim_state_dict(
+                    full_osd, model, optim_input,
+                )
+        else:
+            # If we add the unmanaged parameters to a module not wrapped with
+            # FSDP, then we simply ignore them without erroring to enable
+            # model parallelism use cases, where some parameters are managed
+            # externally to FSDP
+            sharded_osd = FSDP.shard_full_optim_state_dict(
+                full_osd, model, optim_input,
+            )
+            # Add entries for the unmanaged parameters to be able to load
+            for unmanaged_param in unmanaged_params:
+                NestedModel.add_unmanaged_param_entry(
+                    sharded_osd, unmanaged_param, NUM_ITERS,
+                )
+            # Check that we can load the optimizer state dict
+            optim = torch.optim.Adam(optim_input, lr=1e-3)
+            optim.load_state_dict(sharded_osd)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])

@@ -227,11 +227,13 @@ TEST(DispatchKeySet, DoubletonPerBackend) {
       if (tid1 == DispatchKey::StartOfDenseBackends ||
           tid1 == DispatchKey::StartOfSparseBackends ||
           tid1 == DispatchKey::StartOfQuantizedBackends ||
+          tid1 == DispatchKey::StartOfNestedTensorBackends ||
           tid1 == DispatchKey::StartOfAutogradBackends)
         continue;
       if (tid2 == DispatchKey::StartOfDenseBackends ||
           tid2 == DispatchKey::StartOfSparseBackends ||
           tid2 == DispatchKey::StartOfQuantizedBackends ||
+          tid2 == DispatchKey::StartOfNestedTensorBackends ||
           tid2 == DispatchKey::StartOfAutogradBackends)
         continue;
 
