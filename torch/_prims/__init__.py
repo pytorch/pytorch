@@ -873,21 +873,6 @@ rsqrt = _make_elementwise_binary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
-def _remainder_aten(a, b):
-    return torch.remainder(a, b)
-
-
-def _remainder_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
-    return fd.Ops.remainder(a, b)  # type: ignore[attr-defined]
-
-remainder = _make_elementwise_binary_prim(
-    "remainder",
-    impl_aten=_remainder_aten,
-    impl_nvfuser=_remainder_nvfuser,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-)
-
 shift_left = _make_elementwise_binary_prim(
     "shift_left",
     impl_aten=torch.bitwise_left_shift,

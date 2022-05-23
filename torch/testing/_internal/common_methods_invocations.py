@@ -10891,7 +10891,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('fmod',
                     ref=np.fmod,
                     dtypes=all_types_and(torch.float16, torch.bfloat16),
-                    dtypesIfCUDA=all_types_and(torch.float16),
+                    dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=None,

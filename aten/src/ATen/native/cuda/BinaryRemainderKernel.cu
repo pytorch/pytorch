@@ -28,7 +28,11 @@ void remainder_kernel_cuda(TensorIteratorBase& iter) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "remainder_cuda", [&]() {
       gpu_kernel_with_scalars(iter,
         []GPU_LAMBDA(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-          return ::remainder(a, b);
+          auto mod = ::fmod(a, b);
+          if (mod != 0 && c10::signs_differ(b, mod)) {
+            mod += b;
+          }
+          return mod;
         });
     });
   }

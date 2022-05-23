@@ -856,13 +856,6 @@ pow = _make_elementwise_binary_reference(
 )
 
 # TODO: add docstring
-remainder = _make_elementwise_binary_reference(
-    prims.remainder,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    aten_op=torch.ops.aten.remainder,
-)
-
-# TODO: add docstring
 # TODO: consider refactoring this with add impl
 # sub has its own implementation because it has an alpha argument
 @register_decomposition(torch.ops.aten.sub)
