@@ -83,10 +83,10 @@ __all__ = [
     "bitwise_xor",
     # 'complex',  # needs custom meta
     "div",
+    "eq",
     "fmax",
     "fmin",
     "fmod",
-    "eq",
     "ge",
     "gt",
     "igamma",
@@ -665,25 +665,17 @@ eq = _make_elementwise_binary_prim(
 )
 
 
-def _fmax_aten(a, b):
-    return torch.fmax(a, b)
-
-
 def _fmax_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
     return fd.Ops.fmax(a, b)  # type: ignore[attr-defined]
 
 
 fmax = _make_elementwise_binary_prim(
     "fmax",
-    impl_aten=_fmax_aten,
+    impl_aten=torch.fmax,
     impl_nvfuser=_fmax_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
-
-
-def _fmin_aten(a, b):
-    return torch.fmin(a, b)
 
 
 def _fmin_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
@@ -692,15 +684,11 @@ def _fmin_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
 
 fmin = _make_elementwise_binary_prim(
     "fmin",
-    impl_aten=_fmin_aten,
+    impl_aten=torch.fmin,
     impl_nvfuser=_fmin_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
-
-
-def _fmod_aten(a, b):
-    return torch.fmod(a, b)
 
 
 def _fmod_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
@@ -709,7 +697,7 @@ def _fmod_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
 
 fmod = _make_elementwise_binary_prim(
     "fmod",
-    impl_aten=_fmod_aten,
+    impl_aten=torch.fmod,
     impl_nvfuser=_fmod_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,

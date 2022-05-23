@@ -87,9 +87,9 @@ __all__ = [
     "eq",
     "float_power",
     # 'floor_divide', # requires floor
-    "fmax",  # requires where
-    "fmin",  # requires where
-    "fmod",  # requires trunc_divide
+    "fmax",
+    "fmin",
+    "fmod",
     # 'gcd',
     "ge",
     "gt",
@@ -801,7 +801,7 @@ def _logical_xor(a: TensorLikeType, b: TensorLikeType):
         b = ne(b, 0)
     return ne(a, b)
 
-
+# TODO: skip unnecessary conversion of long to float
 logical_xor = _make_elementwise_binary_reference(
     _logical_xor,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
