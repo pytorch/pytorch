@@ -7,6 +7,12 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/cuda/CUDAConfig.h>
+#if AT_CUDNN_ENABLED()
+
+#include <ATen/native/cudnn/Macros.h>
+
+#endif
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/LinalgBackend.h>
@@ -508,12 +514,6 @@ PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_benchmark_cudnn expects a bool, "
           "but got %s", THPUtils_typename(arg));
-#if defined(USE_ROCM)
-  if (arg == Py_False) {
-    TORCH_WARN_ONCE("Disabling benchmark mode for MIOpen is NOT supported. Overriding value to True");
-    arg = Py_True;
-  }
-#endif
   at::globalContext().setBenchmarkCuDNN(arg == Py_True);
   Py_RETURN_NONE;
 }
@@ -524,6 +524,29 @@ PyObject *THPModule_benchmarkCuDNN(PyObject *_unused, PyObject *noargs)
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
+}
+
+PyObject *THPModule_setBenchmarkLimitCuDNN(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(THPUtils_checkLong(arg), "set_benchmark_limit_cudnn expects an int, "
+          "but got %s", THPUtils_typename(arg));
+  auto benchmark_limit = static_cast<int>(THPUtils_unpackLong(arg));
+#if defined(USE_ROCM)
+  TORCH_WARN_ONCE("cuDNN Benchmark limit is not supported in MIOpen and will have no effect.");
+#endif
+#if AT_CUDNN_ENABLED()
+#if HAS_CUDNN_V8()
+  at::globalContext().setBenchmarkLimitCuDNN(benchmark_limit);
+#else
+  TORCH_WARN_ONCE("cuDNN Benchmark limit is not supported with cuDNN v7 API and will have no effect.");
+#endif
+#endif
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_benchmarkLimitCuDNN(PyObject *_unused, PyObject *noargs)
+{
+  return THPUtils_packInt32(at::globalContext().benchmarkLimitCuDNN());
 }
 
 PyObject *THPModule_setAllowTF32CuBLAS(PyObject *_unused, PyObject *arg)
@@ -698,6 +721,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cudnn_allow_tf32", THPModule_setAllowTF32CuDNN, METH_O,  nullptr},
   {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O,  nullptr},
+  {"_get_cudnn_benchmark_limit", THPModule_benchmarkLimitCuDNN, METH_NOARGS,     nullptr},
+  {"_set_cudnn_benchmark_limit", THPModule_setBenchmarkLimitCuDNN, METH_O,  nullptr},
   {"_get_cudnn_deterministic", THPModule_deterministicCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_deterministic", THPModule_setDeterministicCuDNN, METH_O,  nullptr},
   {"_get_deterministic_algorithms", THPModule_deterministicAlgorithms, METH_NOARGS,     nullptr},
@@ -1022,7 +1047,10 @@ Call this whenever a new thread is created in order to propagate values from
 
   ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
   ASSERT_TRUE(set_module_attr("has_mps", has_mps));
-  ASSERT_TRUE(set_module_attr("_is_mps_available", at::hasMPS() ? Py_True : Py_False));
+  py_module.def("_is_mps_available", []() {
+      return at::hasMPS();
+  });
+
 
   ASSERT_TRUE(set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 
