@@ -452,7 +452,7 @@ def get_fqn_to_example_inputs(model, example_inputs):
 
             def _patched_module_call(self, *args, **kwargs):
                 submodule_example_inputs = list(args).copy()
-                noramlized_kwargs = _normalized_kwargs(self.forward, kwargs)
+                normalized_kwargs = _normalize_kwargs(self.forward, kwargs)
                 # minus 1 to skipping counting `self`
                 num_args = _get_num_pos_args(self.forward) - 1
                 num_to_pop = num_args - len(submodule_example_inputs)
