@@ -45,8 +45,6 @@ __all__ = [
     "acosh",
     "asin",
     "atan",
-    # "bessel_i0e",  # special.i0e
-    # "bessel_i1e",  # special.i1e
     "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
@@ -74,6 +72,7 @@ __all__ = [
     "neg",
     "reciprocal",
     "round",  # TODO: model kwargs
+    "sigmoid",
     "sign",
     "sin",
     "sinh",
@@ -525,6 +524,15 @@ round = _make_elementwise_unary_reference(
     prims.round,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
+)
+
+def _sigmoid(a: TensorLikeType) -> TensorLikeType:
+    return true_divide(1, add(1, exp(neg(a))))
+
+sigmoid = _make_elementwise_unary_reference(
+    _sigmoid,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=torch.ops.aten.sigmoid,
 )
 
 sign = _make_elementwise_unary_reference(

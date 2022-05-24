@@ -19044,6 +19044,17 @@ python_ref_db = [
         torch_opinfo_name="round",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.sigmoid",
+        torch_opinfo_name="sigmoid",
+        decorators=(
+             # disable complex because of nan, inf 
+             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                          dtypes=[torch.complex64, torch.complex128]),
+             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                          dtypes=[torch.complex64, torch.complex128]),
+        ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.sign",
         torch_opinfo_name="sign",
     ),
