@@ -250,18 +250,21 @@ def _single_tensor_adamw(params: List[Tensor],
         step_t = state_steps[i]
         # update step
         step_t += 1
-        step = step_t if step_t.is_cuda else step_t.item()
+        step_is_cuda = step_t.is_cuda
+        step = step_t if step_is_cuda else step_t.item()
 
         # Perform stepweight decay
         param.mul_(1 - lr * weight_decay)
 
-        bias_correction1 = 1 - beta1 ** step
-        bias_correction2 = 1 - beta2 ** step
+        # 1 - beta1 ** step can't be captured in a CUDA graph, even if step is a CUDA tensor
+        # (incurs "RuntimeError: CUDA error: operation not permitted when stream is capturing")
+        bias_correction1 = 1 - torch.pow(beta1, step) if step_is_cuda else 1 - beta1 ** step
+        bias_correction2 = 1 - torch.pow(beta2, step) if step_is_cuda else 1 - beta2 ** step
 
         # Decay the first and second moment running average coefficient
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-        bias_correction2_sqrt = bias_correction2.sqrt() if bias_correction2.is_cuda else math.sqrt(bias_correction2)
+        bias_correction2_sqrt = bias_correction2.sqrt() if step_is_cuda else math.sqrt(bias_correction2)
         if amsgrad:
             # Maintains the maximum of all 2nd moment running avg. till now
             torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
@@ -272,7 +275,13 @@ def _single_tensor_adamw(params: List[Tensor],
 
         step_size = lr / bias_correction1
 
-        param.addcdiv_(exp_avg, denom, value=-step_size)
+        # addcdiv_ requires value is a Number, not a Tensor
+        if (step_is_cuda):
+            # incurs an extra param-set-sized read+write
+            exp_avg = step_size.neg() * exp_avg
+            param.addcdiv_(exp_avg, denom)
+        else:
+            param.addcdiv_(exp_avg, denom, value=-step_size)
 
 
 def _multi_tensor_adamw(params: List[Tensor],
@@ -318,12 +327,14 @@ def _multi_tensor_adamw(params: List[Tensor],
 
         # Use the max. for normalizing running avg. of gradient
         max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
-        bias_correction_sqrt = [(bc.sqrt() if bc.is_cuda else math.sqrt(bc)) for bc in bias_correction2]
+        bias_correction_sqrt = [bc.sqrt() if (torch.is_tensor(bc) and bc.is_cuda) else math.sqrt(bc)
+                                for bc in bias_correction2]
         torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
         denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps)
     else:
         exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
-        bias_correction_sqrt = [(bc.sqrt() if bc.is_cuda else math.sqrt(bc)) for bc in bias_correction2]
+        bias_correction_sqrt = [bc.sqrt() if (torch.is_tensor(bc) and bc.is_cuda) else math.sqrt(bc)
+                                for bc in bias_correction2]
         torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
         denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 

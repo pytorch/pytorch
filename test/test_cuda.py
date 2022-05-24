@@ -3815,47 +3815,56 @@ torch.cuda.synchronize()
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_adam_adamw(self):
-        Classes = (torch.optim.Adam, torch.optim.AdamW)
+        OptClasses = (torch.optim.Adam, torch.optim.AdamW)
         cases = []
         # Needs generalization if we want to extend this test to non-Adam-like optimizers.
-        for Class, foreach, amsgrad in product(Classes, (True, False), (True, False)):
+        for Class, foreach, amsgrad in product(OptClasses, (False, False), (True, False)):
             cases.append((Class, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach, "amsgrad": amsgrad}))
 
         steps_warmup = 3
         steps_train = 2
 
         for OptClass, kwargs in cases:
-            params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
-            params_control = [p.clone().requires_grad_() for p in params]
-            params_graphed = [p.clone().requires_grad_() for p in params]
+            for actually_do_graphs in (True, False):
+                params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
+                params_control = [p.clone().requires_grad_() for p in params]
+                params_graphed = [p.clone().requires_grad_() for p in params]
 
-            grads = [[torch.randn_like(p) for p in params] for _ in range(steps_warmup + steps_train)]
+                grads = [[torch.randn_like(p) for p in params] for _ in range(steps_warmup + steps_train)]
 
-            opt = OptClass(params_control, **kwargs)
+                opt = OptClass(params_control, **kwargs)
 
-            for i in range(steps_warmup + steps_train):
-                for j, p in enumerate(params_control):
-                    p.grad = grads[i][j]
-                opt.step()
+                for i in range(steps_warmup + steps_train):
+                    for j, p in enumerate(params_control):
+                        p.grad = grads[i][j]
+                    opt.step()
 
-            opt = OptClass(params_graphed, capturable=True, **kwargs)
+                opt = OptClass(params_graphed, capturable=True, **kwargs)
 
-            for i in range(steps_warmup):
-                for j, p in enumerate(params_graphed):
-                    p.grad = grads[i][j]
-                opt.step()
+                for i in range(steps_warmup):
+                    for j, p in enumerate(params_graphed):
+                        p.grad = grads[i][j]
+                    opt.step()
 
-            g = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g):
-                opt.step()
+                if actually_do_graphs:
+                    g = torch.cuda.CUDAGraph()
+                    with torch.cuda.graph(g):
+                        opt.step()
 
-            for i in range(steps_train):
-                for j, p in enumerate(params_graphed):
-                    p.grad.copy_(grads[i + steps_warmup])
-                opt.step()
+                for i in range(steps_train):
+                    if actually_do_graphs:
+                        for j, p in enumerate(params_graphed):
+                            p.grad.copy_(grads[i + steps_warmup][j])
+                        g.replay()
+                    else:
+                        # Passing capturable=True to the constructor and running without graphs should still be
+                        # numerically correct, even if it's not ideal for performance.
+                        for j, p in enumerate(params_graphed):
+                            p.grad = grads[i + steps_warmup][j]
+                        opt.step()
 
-            for p_control, p_graphed in zip(params_control, params_graphed):
-                self.assertEqual(p_control, p_graphed)
+                for p_control, p_graphed in zip(params_control, params_graphed):
+                    self.assertEqual(p_control, p_graphed)
 
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
