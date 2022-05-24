@@ -1328,7 +1328,7 @@ const auto beta_string = jiterator_stringify(
             sign = sign * sign_gamma;
 
             // TODO: std::log(std::numeric_limit<T>::max())
-            if (z > T(709.783) return sign * INFINITY;
+            if (z > T(709.783)) return sign * INFINITY;
 
             return sign * std::exp(z);
         }
