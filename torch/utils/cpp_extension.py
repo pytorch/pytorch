@@ -584,7 +584,7 @@ class BuildExtension(build_ext, object):
                 cuda_post_cflags = [shlex.quote(f) for f in cuda_post_cflags]
 
             if isinstance(extra_postargs, dict) and 'nvcc_dlink' in extra_postargs:
-                cuda_dlink_post_cflags = unix_cuda_flags(extra_postargs.get['nvcc_dlink'])
+                cuda_dlink_post_cflags = unix_cuda_flags(extra_postargs['nvcc_dlink'])
             else:
                 cuda_dlink_post_cflags = None
             _write_ninja_file_and_compile_objects(
