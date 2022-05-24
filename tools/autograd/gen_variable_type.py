@@ -438,7 +438,9 @@ if (!torch_dispatch_set()) AT_ASSERT(${tensor_name}.use_count() <= 1, "function:
 
 ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE = CodeTemplate(
     """\
-if (${tensor_name}.has_storage() && !torch_dispatch_set()) AT_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
+if (${tensor_name}.has_storage() && !torch_dispatch_set()) {
+  AT_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
+}
 """
 )
 

@@ -98,14 +98,14 @@ def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting
             f'The argument passed to enable_{mode_info.mode_name}_mode must implement {required_fn}'
         )
     if hasattr(mode, "setup_mode"):
-        mode.setup_mode()
+        mode.setup_mode()  # type: ignore[attr-defined]
     mode_info.set_mode(mode)
     try:
         yield
     finally:
         mode_info.set_mode(old)
         if hasattr(mode, "cleanup_mode"):
-            mode.cleanup_mode()
+            mode.cleanup_mode()  # type: ignore[attr-defined]
 
 
 # shared version of push_torch_function/push_torch_dispatch_mode in order to deduplicate the code.
