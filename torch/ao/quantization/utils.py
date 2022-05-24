@@ -7,6 +7,9 @@ import torch
 from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
 from typing import Tuple, Any, Union, Callable
 from torch.nn.utils.parametrize import is_parametrized
+from collections import OrderedDict
+from inspect import signature
+from inspect import getfullargspec
 
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
@@ -370,3 +373,105 @@ def has_no_children_ignoring_parametrizations(module):
         return len(module._modules) == 1 and 'parametrizations' in module._modules
     else:
         return False
+
+def _get_path_of_module(root, submodule):
+    """ Get the path (fully qualified name) of a submodule
+    """
+    for n, p in root.named_modules():
+        if submodule is p:
+            return n
+
+def _get_signature_locals(f, loc):
+    """ Get local keyword arguments
+    """
+    return {k: v for k, v in loc.items() if k in signature(f).parameters}
+
+def _get_default_kwargs(f):
+    """ Get all default keyword arguments from function signature
+    """
+    kwargs = {}
+    for name, param in signature(f).parameters.items():
+        if param.default is not param.empty:
+            kwargs[name] = param.default
+        elif param.kind is param.VAR_POSITIONAL:
+            kwargs[name] = ()
+        elif param.kind is param.VAR_KEYWORD:
+            kwargs[name] = {}
+    return OrderedDict(kwargs)
+
+def _normalize_kwargs(func, loc):
+    """ Given a function and local function arguments, normalize the keyword
+    arguments by filling in default arguments from function signature
+    """
+    default_kwargs = _get_default_kwargs(func)
+    local_kwargs = _get_signature_locals(func, loc)
+    normalized_kwargs = default_kwargs.copy()
+    for attr, val in local_kwargs.items():
+        if attr in normalized_kwargs:
+            # override the default keyword arguments
+            normalized_kwargs[attr] = val
+    return normalized_kwargs
+
+def _get_num_pos_args(f):
+    """ Get number of positional args for a function
+    """
+    return len(getfullargspec(f).args)
+
+def get_fqn_to_example_inputs(model, example_inputs):
+    """ Given a model and its example inputs, return a dictionary from
+    fully qualified name of submodules to example_inputs for that submodule,
+    e.g. {"linear1": (tensor1,), "linear2": (tensor2,), "sub": (tensor3,),
+          "sub.linear1": (tensor4,), ...}
+
+    Used to make quantizing submodules easier now that FX Graph Mode Quantization requries
+    example inputs.
+
+    Also works for keyword arguments with default values, we would flatten keyword
+    arguments as positional arguments and fill in the missing keyword args with default
+    values, e.g. if we have a forward function:
+    def forward(self, x, key1=3, key2=3):
+        ...
+
+    and we call it with self.submodule(x, key=6)
+    we'll get example_inputs: (x, 3, 6)
+
+    user can also override `key1` with positional arguments as well:
+    for self.submodule(x, 5, key2=6)
+    we'll get: (x, 5, 6)
+
+    variable positional arguments and variable positional keyword arguments in forward
+    function are not supported currently, so please make sure no submodules is using
+    them.
+    """
+    root = model
+    fqn_to_example_inputs = {}
+
+    class InterceptionModule(type(model)):  # type: ignore[misc]
+        def __call__(self, *args, **kwargs):
+            orig_module_call = torch.nn.Module.__call__
+
+            def _patched_module_call(self, *args, **kwargs):
+                submodule_example_inputs = list(args).copy()
+                noramlized_kwargs = _normalized_kwargs(self.forward, kwargs)
+                # minus 1 to skipping counting `self`
+                num_args = _get_num_pos_args(self.forward) - 1
+                num_to_pop = num_args - len(submodule_example_inputs)
+                while num_to_pop and normalized_kwargs:
+                    normalized_kwargs.popitem(last=False)
+                    num_to_pop -= 1
+                submodule_example_inputs.extend(normalized_kwargs.values())
+                submodule_example_inputs = tuple(submodule_example_inputs)
+                fqn = _get_path_of_module(root, self)
+                fqn_to_example_inputs[fqn] = submodule_example_inputs
+                return orig_module_call(self, *args, **kwargs)
+
+            torch.nn.Module.__call__ = _patched_module_call
+            super().__call__(*args, **kwargs)
+            torch.nn.Module.__call__ = orig_module_call
+
+    original_class = model.__class__
+    model.__class__ = InterceptionModule
+    model(*example_inputs)
+    model.__class__ = original_class
+
+    return fqn_to_example_inputs
