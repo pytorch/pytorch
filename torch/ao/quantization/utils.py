@@ -5,7 +5,7 @@ import warnings
 import functools
 import torch
 from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
-from typing import Tuple, Any, Union, Callable, Dict
+from typing import Tuple, Any, Union, Callable, Dict, OrderedDict, Optional
 from torch.nn.utils.parametrize import is_parametrized
 from collections import OrderedDict
 from inspect import signature
@@ -374,7 +374,7 @@ def has_no_children_ignoring_parametrizations(module):
     else:
         return False
 
-def _get_path_of_module(root: torch.nn.Module, submodule: torch.nn.Module) -> str:
+def _get_path_of_module(root: torch.nn.Module, submodule: torch.nn.Module) -> Optional[str]:
     """ Get the path (fully qualified name) of a submodule
 
     Example::
@@ -393,6 +393,7 @@ def _get_path_of_module(root: torch.nn.Module, submodule: torch.nn.Module) -> st
     for n, p in root.named_modules():
         if submodule is p:
             return n
+    return None
 
 def _get_signature_locals(f: Callable, loc: Dict[str, Any]) -> Dict[str, Any]:
     """ Get local keyword arguments
@@ -407,7 +408,7 @@ def _get_signature_locals(f: Callable, loc: Dict[str, Any]) -> Dict[str, Any]:
     """
     return {k: v for k, v in loc.items() if k in signature(f).parameters}
 
-def _get_default_kwargs(f: Callable) -> Dict[str, Any]:
+def _get_default_kwargs(f: Callable) -> OrderedDict[str, Any]:
     """ Get all default keyword arguments from function signature
 
     Example::
@@ -427,7 +428,7 @@ def _get_default_kwargs(f: Callable) -> Dict[str, Any]:
             kwargs[name] = {}
     return OrderedDict(kwargs)
 
-def _normalize_kwargs(func: Callable, loc: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_kwargs(func: Callable, loc: Dict[str, Any]) -> OrderedDict[str, Any]:
     """ Given a function and local function arguments, normalize the keyword
     arguments by filling in default arguments from function signature
 
@@ -506,9 +507,10 @@ def get_fqn_to_example_inputs(
                     normalized_kwargs.popitem(last=False)
                     num_to_pop -= 1
                 submodule_example_inputs.extend(normalized_kwargs.values())
-                submodule_example_inputs = tuple(submodule_example_inputs)
+                submodule_example_inputs_tuple = tuple(submodule_example_inputs)
                 fqn = _get_path_of_module(root, self)
-                fqn_to_example_inputs[fqn] = submodule_example_inputs
+                if fqn is not None:
+                    fqn_to_example_inputs[fqn] = submodule_example_inputs_tuple
                 return orig_module_call(self, *args, **kwargs)
 
             torch.nn.Module.__call__ = _patched_module_call
@@ -526,18 +528,11 @@ def get_fqn_to_example_inputs(
 __all__ = [
     "Any",
     "Callable",
-    "Dict",
-    "Graph",
-    "List",
-    "MatchAllNode",
-    "MatchResult",
-    "Node",
-    "Optional",
     "Pattern",
-    "QConfigAny",
-    "QuantizeHandler",
-    "Set",
+    "QuantType",
     "Tuple",
-    "is_observed_standalone_module",
+    "Union",
+    "is_parametrized",
+    "quant_type_to_str"
     "get_fqn_to_example_inputs",
 ]

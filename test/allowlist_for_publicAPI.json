@@ -220,6 +220,23 @@
     "QuantizedGraphModule",
     "Tuple"
   ],
+  "torch.ao.quantization.fx.match_utils": [
+    "Any",
+    "Callable",
+    "Dict",
+    "Graph",
+    "List",
+    "MatchAllNode",
+    "MatchResult",
+    "Node",
+    "Optional",
+    "Pattern",
+    "QConfigAny",
+    "QuantizeHandler",
+    "Set",
+    "Tuple",
+    "is_observed_standalone_module"
+  ],
   "torch.ao.quantization.fx.pattern_utils": [
     "Any",
     "Dict",
@@ -460,16 +477,6 @@
     "QConfig",
     "QuantType",
     "wrap_cpp_module"
-  ],
-  "torch.ao.quantization.utils": [
-    "Any",
-    "Callable",
-    "Pattern",
-    "QuantType",
-    "Tuple",
-    "Union",
-    "is_parametrized",
-    "quant_type_to_str"
   ],
   "torch.ao.sparsity.experimental.pruner.base_pruner": [
     "ActivationReconstruction",
