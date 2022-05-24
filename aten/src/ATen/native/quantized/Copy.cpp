@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/quantized/affine_quantizer.h>
 #include <c10/util/irange.h>
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -18,7 +19,9 @@ Tensor& quantized_copy_from_float_(Tensor& self, const Tensor& src) {
       src.scalar_type() == at::kFloat,
       "Quantized copy only works with kFloat as source Tensor");
   TORCH_CHECK(
-      self.is_contiguous() && src.is_contiguous(),
+      (self.is_contiguous() && src.is_contiguous()) ||
+            (self.is_contiguous(at::MemoryFormat::ChannelsLast) && src.is_contiguous(at::MemoryFormat::ChannelsLast)),
+
       "Quantized copy only works with contiguous Tensors");
   TORCH_CHECK(
       self.sizes().equals(src.sizes()),
