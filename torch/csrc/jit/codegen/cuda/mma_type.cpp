@@ -18,6 +18,7 @@ MmaBuilder::MmaBuilder(
     case MmaOptions::MacroType::Volta_16_16_4:
       option_.accumulator_stride = outer_stride * 4;
       break;
+    case MmaOptions::MacroType::Turing_16_8_16:
     case MmaOptions::MacroType::Ampere_16_8_16:
       option_.accumulator_stride = outer_stride * 2;
       break;
@@ -58,6 +59,7 @@ namespace {
 LoadStoreOpType getLdMatrixType(MmaOptions options) {
   bool transpose = false;
   switch (options.macro) {
+    case MmaOptions::MacroType::Turing_16_8_16:
     case MmaOptions::MacroType::Ampere_16_8_16:
       // Turing mma assumes TN as default
       transpose = (options.operand == MmaOptions::Operand::A &&
@@ -84,7 +86,7 @@ bool isVolta(MmaOptions::MacroType macro) {
 }
 
 bool isTuring(MmaOptions::MacroType macro) {
-  return false;
+  return macro == MmaOptions::MacroType::Turing_16_8_16;
 }
 
 bool isAmpere(MmaOptions::MacroType macro) {
@@ -96,6 +98,7 @@ int getOutputRegisterSize(MmaOptions::MacroType macro) {
     case MmaOptions::MacroType::Volta_16_16_4:
       return 8;
       break;
+    case MmaOptions::MacroType::Turing_16_8_16:
     case MmaOptions::MacroType::Ampere_16_8_16:
       return 4;
       break;
@@ -111,6 +114,7 @@ int getInputARegisterSize(MmaOptions::MacroType macro) {
     case MmaOptions::MacroType::Volta_16_16_4:
       return 4;
       break;
+    case MmaOptions::MacroType::Turing_16_8_16:
     case MmaOptions::MacroType::Ampere_16_8_16:
       return 8;
       break;
@@ -126,6 +130,7 @@ int getInputBRegisterSize(MmaOptions::MacroType macro) {
     case MmaOptions::MacroType::Volta_16_16_4:
       return 4;
       break;
+    case MmaOptions::MacroType::Turing_16_8_16:
     case MmaOptions::MacroType::Ampere_16_8_16:
       return 4;
     default:
@@ -176,6 +181,7 @@ std::string toString(MmaOptions::MacroType mt) {
     case MmaOptions::MacroType::Volta_16_16_4:
       ss << "M16N16K4";
       break;
+    case MmaOptions::MacroType::Turing_16_8_16:
     case MmaOptions::MacroType::Ampere_16_8_16:
       ss << "M16N8K16";
       break;

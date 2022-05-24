@@ -219,6 +219,7 @@ void WarpMmaSwizzler::scheduleMmaWarpOutput(
         setWarpMapped(tv, 5);
       }
       break;
+    case MmaOptions::MacroType::Turing_16_8_16:
     case MmaOptions::MacroType::Ampere_16_8_16:
       scheduleTuringM16N8K16MmaWarpOutput(tv, options);
       if (tv->definition()->isA<MmaOp>()) {
@@ -240,6 +241,7 @@ void WarpMmaSwizzler::scheduleOperandRead(TensorView* tv, MmaOptions options) {
     case MmaOptions::MacroType::Volta_16_16_4:
       scheduleVoltaOperandRead(tv, options);
       break;
+    case MmaOptions::MacroType::Turing_16_8_16:
     case MmaOptions::MacroType::Ampere_16_8_16:
       scheduleTuringOperandRead(tv, options);
       break;
@@ -415,7 +417,8 @@ void scheduleLdMatrix(TensorView* tv, MmaOptions options) {
       : isOperandTransposed(options);
   // Check mma option is supported
   TORCH_CHECK(
-      options.macro == MmaOptions::MacroType::Ampere_16_8_16,
+      options.macro == MmaOptions::MacroType::Ampere_16_8_16 ||
+          options.macro == MmaOptions::MacroType::Turing_16_8_16,
       "scheduleLdMatrix: unknown macro for ldmatrix");
 
   if (options.operand == MmaOptions::Operand::A) {

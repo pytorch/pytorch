@@ -58,6 +58,7 @@ struct MmaOptions {
     NoMMA = 0,
     Volta_16_16_4,
     Ampere_16_8_16,
+    Turing_16_8_16,
     Ampere_16_8_8 // place holder for tf32
   };
 
@@ -73,7 +74,7 @@ struct MmaOptions {
   enum class MmaInputLayout { NT = 0, TT, TN };
 
   //! Utility to annotate which input of mma this option struct describes
-  enum class Operand { NotOperand = 0, A, B };
+  enum class Operand { Accumulator = 0, A, B };
 
   //! Utility to annotate which mma macro this config uses.
   MacroType macro = MacroType::NoMMA;
@@ -117,7 +118,7 @@ class TORCH_CUDA_CU_API MmaBuilder {
   //!  Specifies which element in the mma op this builder is generating
   //!    parameters for, i.e. A or B. This is useful when generating
   //!    data swizzles for different elements of mma.
-  //!  - Operand::NotOperand means the parameters describe accumulator in mma
+  //!  - Operand::Accumulator means the parameters describe accumulator in mma
   //!  op.
   //!  - This option is ignored when configuring the mma operator itself.
   MmaBuilder& operand(MmaOptions::Operand a_or_b);

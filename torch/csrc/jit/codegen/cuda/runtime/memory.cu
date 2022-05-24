@@ -21,6 +21,40 @@ DEVICE_INLINE unsigned toSmem(const void* raw_ptr) {
   return smem_ptr_uint;
 }
 
+// LdMatrix has .x1, .x2 and .x4 options, currently we actively use .x2 and
+//  .x4. In .x2 option. the the address register of upper half warp (lane 16-31)
+//  are un-used but on Turing [sm75,sm80) architecture these un-used addresses
+//  need to be valid, in the sense that:
+//     1. The data it points to has to be within allocated shared mem buffer.
+//     2. The address needs to be aligned to 16 byte.
+//  See also:
+// https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-instructions-ldmatrix
+//  This function addresses 2. above by masking out the sub-16B component
+//    of the address in upper warp and 1. is guaranteed by ldmatrix swizzle
+//    util.
+//  This will **not** affect any functionality. This is just modification
+//    of unused pointers to satisfy the alignment requirement on Turing
+//    hardware.
+//  The alignment requirement is lifted on sm80+,
+//    so this function is a no-op on Ampere or above.
+DEVICE_INLINE void adjustPartialLdMatrixAddrInTuring(unsigned& addr_in_byte) {
+#if (__CUDA_ARCH__ < 800)
+  const unsigned thread_id = threadIdx.x;
+  // Upper half warp has 8 bytes offset from aligned in .x2 option
+  //  of ldmatrix. Currently no support for .x1 so assume always
+  //  adjust by half warp.
+  constexpr unsigned half_warp = 16;
+  // Need to adjust to 16 byte alignment, mask out un-aligned component.
+  constexpr unsigned mask_out = 16 - 1;
+  // Adjust only in upper half warp.
+  // use bit math to reduce strength
+  if (thread_id & half_warp) {
+    // mask out the bits where adjust_mask has 1.
+    addr_in_byte &= (~mask_out);
+  }
+#endif //(__CUDA_ARCH__ < 800)
+}
+
 } // namespace util
 
 // Load Matrix (per warp instruction) is to take data from SMEM to Local Memory.
@@ -36,6 +70,7 @@ DEVICE_INLINE unsigned toSmem(const void* raw_ptr) {
 DEVICE_INLINE void ldMatrix(Array<__half, 4, 4>& out, void const* ptr) {
   uint2& val = reinterpret_cast<uint2&>(out);
   unsigned addr = util::toSmem(ptr);
+  util::adjustPartialLdMatrixAddrInTuring(addr);
   asm volatile("ldmatrix.sync.aligned.x2.m8n8.shared.b16 {%0,%1}, [%2];"
                : "=r"(val.x), "=r"(val.y)
                : "r"(addr));
@@ -47,6 +82,7 @@ DEVICE_INLINE void ldMatrix(Array<__half, 4, 4>& out, void const* ptr) {
 DEVICE_INLINE void ldMatrixT(Array<__half, 4, 4>& out, void const* ptr) {
   uint2& val = reinterpret_cast<uint2&>(out);
   unsigned addr = util::toSmem(ptr);
+  util::adjustPartialLdMatrixAddrInTuring(addr);
   asm volatile("ldmatrix.sync.aligned.x2.trans.m8n8.shared.b16 {%0,%1}, [%2];"
                : "=r"(val.x), "=r"(val.y)
                : "r"(addr));

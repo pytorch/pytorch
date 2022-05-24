@@ -1055,7 +1055,7 @@ bool TensorView::isEmptyTensor() const {
 
 void TensorView::applyMmaSwizzle(MmaOptions options) {
   switch (options.operand) {
-    case MmaOptions::Operand::NotOperand:
+    case MmaOptions::Operand::Accumulator:
       mma_util::WarpMmaSwizzler::scheduleMmaWarpOutput(this, options);
       break;
     case MmaOptions::Operand::A:

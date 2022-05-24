@@ -1025,6 +1025,14 @@ void validateMma(Fusion* fusion) {
         case MmaOptions::MacroType::Volta_16_16_4:
           validateMinimumArch(7, 0);
           break;
+        case MmaOptions::MacroType::Turing_16_8_16:
+          validateMinimumArch(7, 5);
+
+          // Check that operands come from ldmatrix, can be
+          //  relaxed once swizzles can be labeled on iterdomains.
+          validateTuringMmaInput(mma->inA()->as<TensorView>());
+          validateTuringMmaInput(mma->inB()->as<TensorView>());
+          break;
         case MmaOptions::MacroType::Ampere_16_8_16:
           validateMinimumArch(8, 0);
 
