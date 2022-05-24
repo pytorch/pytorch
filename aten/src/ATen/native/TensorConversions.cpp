@@ -573,8 +573,6 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
       blocksize[1]);
   auto block_size_0 = self.size(0) / blocksize[0];
 
-  auto result_sizes = DimVector(self.sizes());
-
   auto values = _tile_tensor(self, blocksize);
   auto not_zero_mask = _tile_tensor((self != 0), blocksize);
   // Find tiles that have at least 1 non-zero value in them.
@@ -598,7 +596,7 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
       crow_indices,
       col_indices,
       values,
-      result_sizes,
+      self.sizes(),
       values.scalar_type(),
       c10::kSparseBsr,
       values.device());
