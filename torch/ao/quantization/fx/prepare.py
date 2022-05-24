@@ -1,3 +1,4 @@
+import copy
 import torch
 import operator
 import warnings
@@ -1387,7 +1388,7 @@ def save_state(
 
 def prepare(
         model: GraphModule,
-        qconfig_mapping: QConfigMapping,
+        qconfig_mapping: Union[QConfigMapping, Dict[str, Any]],
         is_qat: bool,
         node_name_to_scope: Dict[str, Tuple[str, type]],
         example_inputs: Tuple[Any, ...],
@@ -1419,6 +1420,23 @@ def prepare(
         prepare_custom_config_dict = {}
     if equalization_config is None:
         equalization_config = QConfigMapping()
+
+    if isinstance(qconfig_mapping, Dict):
+        warnings.warn(
+            "Passing a QConfig dictionary to prepare is deprecated and will not be supported "
+            "in a future version. Please pass in a QConfigMapping instead.")
+        qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping)
+
+    if isinstance(equalization_config, Dict):
+        warnings.warn(
+            "Passing a QConfig dictionary to prepare for equalization is deprecated and will not "
+            "be supported in a future version. Please pass in a QConfigMapping instead.")
+        equalization_config = QConfigMapping.from_dict(equalization_config)
+
+    assert(isinstance(qconfig_mapping, QConfigMapping))
+    assert(isinstance(equalization_config, QConfigMapping))
+    qconfig_mapping = copy.deepcopy(qconfig_mapping)
+    equalization_config = copy.deepcopy(equalization_config)
 
     # mapping from a tuple of nodes in reverse order to uninitialized
     #   QuantizeHandler subclass. For example,

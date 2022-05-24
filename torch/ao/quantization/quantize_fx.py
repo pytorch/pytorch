@@ -1,6 +1,4 @@
-import copy
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
-import warnings
 
 import torch
 from torch.fx import GraphModule
@@ -202,23 +200,6 @@ forward graph of the parent module,
         equalization_config = QConfigMapping()
 
     check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict)
-
-    if isinstance(qconfig_mapping, Dict):
-        warnings.warn(
-            "Passing a QConfig dictionary to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a QConfigMapping instead.")
-        qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping)
-
-    if isinstance(equalization_config, Dict):
-        warnings.warn(
-            "Passing a QConfig dictionary to prepare for equalization is deprecated and will not "
-            "be supported in a future version. Please pass in a QConfigMapping instead.")
-        equalization_config = QConfigMapping.from_dict(equalization_config)
-
-    assert(isinstance(qconfig_mapping, QConfigMapping))
-    assert(isinstance(equalization_config, QConfigMapping))
-    qconfig_mapping = copy.deepcopy(qconfig_mapping)
-    equalization_config = copy.deepcopy(equalization_config)
 
     skipped_module_names = prepare_custom_config_dict.get(
         "non_traceable_module_name", []
@@ -543,21 +524,13 @@ def _convert_fx(
     convert_custom_config_dict: Optional[Dict[str, Any]] = None,
     is_standalone_module: bool = False,
     _remove_qconfig: bool = True,
-    qconfig_mapping: Union[QConfigMapping, Dict[str, Any]] = None,
+    qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
     backend_config_dict: Dict[str, Any] = None,
 ) -> torch.nn.Module:
     """ `is_standalone_module`: see docs in :func:`~torch.ao.quantization.prepare_standalone_module_fx`
     """
     if convert_custom_config_dict is None:
         convert_custom_config_dict = {}
-
-    if isinstance(qconfig_mapping, Dict):
-        warnings.warn(
-            "Passing a QConfig dictionary to convert is deprecated and will not be supported "
-            "in a future version. Please pass in a QConfigMapping instead.")
-        qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping)
-    qconfig_mapping = copy.deepcopy(qconfig_mapping)
-    assert(qconfig_mapping is None or isinstance(qconfig_mapping, QConfigMapping))
 
     _check_is_graph_module(graph_module)
     check_is_valid_convert_custom_config_dict(convert_custom_config_dict)

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Set, Callable, Tuple
+from typing import Any, Dict, List, Optional, Set, Callable, Tuple, Union
 import torch
 import copy
 import warnings
@@ -535,7 +535,7 @@ def convert(
         convert_custom_config_dict: Dict[str, Any] = None,
         is_standalone_module: bool = False,
         _remove_qconfig_flag: bool = True,
-        qconfig_mapping: Optional[QConfigMapping] = None,
+        qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None) -> torch.nn.Module:
     """
     We will convert an observed model (a module with observer calls) to a reference
@@ -558,6 +558,15 @@ def convert(
     """
     if convert_custom_config_dict is None:
         convert_custom_config_dict = {}
+
+    if isinstance(qconfig_mapping, Dict):
+        warnings.warn(
+            "Passing a QConfig dictionary to convert is deprecated and will not be supported "
+            "in a future version. Please pass in a QConfigMapping instead.")
+        qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping)
+    qconfig_mapping = copy.deepcopy(qconfig_mapping)
+    assert(qconfig_mapping is None or isinstance(qconfig_mapping, QConfigMapping))
+
     node_name_to_scope, prepare_custom_config_dict, observed_node_names = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
 
