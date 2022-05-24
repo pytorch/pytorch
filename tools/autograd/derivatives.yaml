@@ -2743,3 +2743,13 @@
 - name: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
+
+- name: special_beta(Tensor x, Tensor y) -> Tensor
+  x: non_differentiable
+  y: non_differentiable
+
+- name: special_beta.x_scalar(Scalar x, Tensor y) -> Tensor
+  y: non_differentiable
+
+- name: special_beta.y_scalar(Tensor x, Scalar y) -> Tensor
+  x: non_differentiable
