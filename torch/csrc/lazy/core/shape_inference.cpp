@@ -45,10 +45,12 @@
 
 #include <torch/csrc/lazy/core/shape_inference.h>
 
+#include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/InferSize.h>
 #include <ATen/WrapDimUtils.h>
 #include <aten/src/ATen/native/ReduceOpsUtils.h>
 #include <c10/core/ScalarType.h>
@@ -627,6 +629,67 @@ std::vector<Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef
 
 std::vector<Shape> compute_shape_narrow_copy(const at::Tensor & self, int64_t dim, int64_t start, c10::SymInt length) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+
+// Non-Native Ops
+std::vector<Shape> compute_shape_scalar(const at::Scalar& value, const at::ScalarType& type) {
+  return { Shape(type, {}) };
+}
+std::vector<Shape> compute_shape_expand(const Output& input, const std::vector<int64_t>& size, const bool& is_scalar_expand) {
+  return { Shape(input.shape().scalar_type(), size) };
+}
+std::vector<Shape> compute_shape_view(const Output& input, const std::vector<int64_t>& output_sizes) {
+  const Shape& input_shape = input.shape();
+  const auto complete_output_sizes =
+      at::infer_size(output_sizes, input_shape.numel());
+  return { Shape(input_shape.scalar_type(), complete_output_sizes) };
+}
+std::vector<Shape> compute_shape_cast(const Output& input, const at::ScalarType& dtype, const c10::optional<at::ScalarType>& stype) {
+  Shape shape = input.shape();
+  shape.set_scalar_type(dtype);
+  return { shape };
+}
+
+
+// View Ops
+std::vector<Shape> compute_shape_as_strided_view_update(const Output& target, const Output& input, const std::vector<int64_t>& size, const std::vector<int64_t>& stride, const int64_t& storage_offset) {
+  return { Shape(target.shape().scalar_type(), size) };
+}
+std::vector<Shape> compute_shape_as_strided(const Output& input, const std::vector<int64_t>& size, const std::vector<int64_t>& stride, const int64_t& storage_offset) {
+  return { Shape(input.shape().scalar_type(), size) };
+}
+std::vector<Shape> compute_shape_diagonal_view_update(const Output& target, const Output& input, const int64_t& offset, const int64_t& dim1, const int64_t& dim2) {
+  return { target.shape() };
+}
+std::vector<Shape> compute_shape_diagonal(const Output& input, const int64_t& offset, const int64_t& dim1, const int64_t& dim2) {
+  return { MakeDiagonalShape(input.shape(), offset, dim1, dim2) };
+}
+std::vector<Shape> compute_shape_narrow_view_update(const Output& input, const Output& source, const std::vector<int64_t>& base_indices) {
+  return { input.shape() };
+}
+std::vector<Shape> compute_shape_narrow(const Output& input, const std::vector<int64_t>& base_indices, const std::vector<int64_t>& sizes) {
+  return { Shape(input.shape().scalar_type(), sizes) };
+}
+std::vector<Shape> compute_shape_permute(const Output& input, const std::vector<int64_t>& dims) {
+  return { MakePermuteShape(input.shape(), dims) };
+}
+std::vector<Shape> compute_shape_resize(const Output& input, const std::vector<int64_t>& size) {
+  return { Shape(input.shape().scalar_type(), size) };
+}
+std::vector<Shape> compute_shape_select_view_update(const Output& target, const Output& source, const int64_t& dim, const int64_t& start, const int64_t& end, const int64_t& stride) {
+  return { target.shape() };
+}
+std::vector<Shape> compute_shape_select(const Output& input, const int64_t& dim, const int64_t& start, const int64_t& end, const int64_t& stride) {
+  return { MakeSelectShape(input.shape(), dim, start, end, stride) };
+}
+std::vector<Shape> compute_shape_squeeze(const Output& input, const int& dim) {
+  const auto& input_shape = input.shape();
+  return { torch::lazy::Shape(input_shape.scalar_type(), BuildSqueezedDimensions(input_shape.sizes(), dim)) };
+}
+std::vector<Shape> compute_shape_unsqueeze(const Output& input, const int& dim) {
+  const auto& input_shape = input.shape();
+  return { torch::lazy::Shape(input_shape.scalar_type(), BuildUnsqueezedDimensions(input_shape.sizes(), dim)) };
 }
 
 // Restore unused-parameters warnings

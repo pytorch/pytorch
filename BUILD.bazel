@@ -1865,6 +1865,7 @@ test_suite(
         "aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp",
         "aten/src/ATen/templates/DispatchKeyNativeFunctions.h",
         "aten/src/ATen/templates/LazyIr.h",
+        "aten/src/ATen/templates/LazyNonNativeIr.h",
         "aten/src/ATen/templates/RegisterDispatchKey.cpp",
         "aten/src/ATen/native/native_functions.yaml",
         "aten/src/ATen/native/tags.yaml",

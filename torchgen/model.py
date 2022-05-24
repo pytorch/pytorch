@@ -1072,18 +1072,14 @@ class FunctionSchema:
             self.arguments.out,
         )
 
+    decl_re = re.compile(r"(?P<name>[^\(]+)\((?P<args>.*)\) -> (?P<returns>.*)")
+
     @staticmethod
     def parse(func: str) -> "FunctionSchema":
         # We should probably get a proper parser here
-        assert (
-            " -> " in func
-        ), "function schema missing return type (spaces are mandatory)"
-        last_index = func.rfind(" -> ")
-        func_decl = func[:last_index]
-        return_decl = func[last_index + len(" -> ") :]
-        ops, args = func_decl.split("(", 1)
-        assert args[-1] == ")", "Expecting closing )"
-        args = args[:-1]
+        decls = FunctionSchema.decl_re.findall(func)
+        assert len(decls) == 1, f"Invalid function schema: {func}"
+        ops, args, return_decl = decls[0]
         name = OperatorName.parse(ops)
         arguments = Arguments.parse(args)
         returns = parse_returns(return_decl)

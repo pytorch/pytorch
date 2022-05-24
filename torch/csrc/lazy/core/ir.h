@@ -214,6 +214,7 @@ struct TORCH_API Output {
       : node(node), index(index) {}
 
   hash_t hash() const;
+  hash_t shapeHash() const;
 
   bool operator==(const Output& rhs) const {
     return node == rhs.node && index == rhs.index;
