@@ -763,6 +763,10 @@ class TestFSDPOptimState(FSDPTest):
         optim1.load_state_dict(sharded_osd)
         self._step_model(model1, optim1, num_iters=NUM_ITERS)
 
+    @skip_if_lt_x_gpu(4)
+    def test_multigpu(self):
+        raise RuntimeError("4 GPU test is indeed running!")
+
 
 instantiate_parametrized_tests(TestFSDPOptimState)
 
