@@ -19,7 +19,7 @@ from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
 from operator import mul
-from functools import reduce
+from functools import reduce, partial
 import torch
 
 from torch import nn
@@ -2835,43 +2835,37 @@ class TestAutograd(TestCase):
         # expecting aten::add, aten::sum to have the sequence numbers,
         # expecting the corresponding backward nodes to have the same numbers
         # as the forward ops
-        add_seq_nr = -1
-        sum_seq_nr = -1
-        found_add = found_sum = False
-        found_bwd_add = found_bwd_sum = False
+        autograd_ops = {
+            ("aten::add", "Add"): [],
+            ("aten::sum", "Sum"): [],
+        }
+        accumulate_ops = []
         found_empty = False
         for e in p.function_events:
-            # Ignore record_function user scope.
-            if "autograd::engine::evaluate_function" in e.name:
-                continue
-            if e.name == "aten::add":
-                add_seq_nr = e.sequence_nr
-                self.assertFalse(found_add)
-                found_add = True
-            elif e.name == "aten::sum":
-                sum_seq_nr = e.sequence_nr
-                self.assertFalse(found_sum)
-                found_sum = True
-            elif "Add" in e.name and "Backward" in e.name:
-                self.assertEqual(e.sequence_nr, add_seq_nr)
-                self.assertFalse(found_bwd_add)
-                found_bwd_add = True
-            elif "Sum" in e.name and "Backward" in e.name:
-                self.assertEqual(e.sequence_nr, sum_seq_nr)
-                self.assertFalse(found_bwd_sum)
-                found_bwd_sum = True
+            for (fwd_name, bwd_name), ops in autograd_ops.items():
+                if e.name == fwd_name or (bwd_name in e.name and "Backward" in e.name):
+                    ops.append(e)
+
+            if "AccumulateGrad" in e.name:
+                accumulate_ops.append(e)
+
             # check that nested ops (e.g. empty) don't have
             # sequence number
             if e.name == "aten::empty":
                 self.assertEqual(e.sequence_nr, -1)
                 found_empty = True
-        self.assertGreaterEqual(add_seq_nr, 0)
-        self.assertGreaterEqual(sum_seq_nr, 0)
-        self.assertNotEqual(add_seq_nr, sum_seq_nr)
-        self.assertTrue(found_add)
-        self.assertTrue(found_sum)
-        self.assertTrue(found_bwd_add)
-        self.assertTrue(found_bwd_sum)
+
+        for (fwd_name, bwd_name), ops in autograd_ops.items():
+            self.assertEqual(len(ops), 3)
+            self.assertEqual(ops[0].name, fwd_name)
+            self.assertEqual(ops[1].name, f"autograd::engine::evaluate_function: {bwd_name}Backward0")
+            self.assertEqual(ops[2].name, f"{bwd_name}Backward0")
+            self.assertGreaterEqual(ops[0].sequence_nr, 0)
+            self.assertEqual(ops[1].sequence_nr, ops[0].sequence_nr)
+            self.assertEqual(ops[2].sequence_nr, ops[0].sequence_nr)
+            self.assertEqual(ops[0].fwd_thread, 0)
+            self.assertEqual(ops[1].fwd_thread, ops[0].thread)
+            self.assertEqual(ops[2].fwd_thread, ops[0].thread)
         self.assertTrue(found_empty)
 
     def test_profiler_unboxed_only(self):
@@ -4328,7 +4322,7 @@ for shape in [(1,), ()]:
         # The autograd engine creates worker threads only when GPU devices are present.
         # So make sure that we do shutdown threads when we're testing cuda and make sure
         # that there is no thread to shutdown when we're not using cuda.
-        if TEST_CUDA:
+        if TEST_CUDA or torch.backends.mps.is_available():
             self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
         else:
             self.assertNotRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
@@ -6577,6 +6571,18 @@ class TestAutogradForwardMode(TestCase):
             # as_strided runs without error
             dual.as_strided((5,), (1,), 0)
 
+    def test_metadata_check_checks_ignores_size_zero(self):
+        a = torch.ones(0).as_strided((0, 1,), (1, 1,), 0)
+        b = torch.ones(0).as_strided((0, 1,), (1, 0,), 0)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(a, b)
+            torch.diagonal(dual, offset=0)
+
+        input = torch.rand([0, 1], dtype=torch.complex128, requires_grad=True)
+        func = partial(torch.diagonal, offset=0)
+        torch.autograd.gradcheck(func, (input,), check_forward_ad=True)
+
     def test_metadata_check_when_primal_has_conj_bit(self):
         # Make sure the _has_same_storage_numel is a fallthrough, so that
         # conj bit does not materialize. If it materializes it would
@@ -7067,20 +7073,33 @@ class TestAutogradDeviceType(TestCase):
                 self.assertEqual(x.grad.sum(), 1.)
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
-    def test_scatter_reduce_prod_gradgrad_error(self, device):
+    def test_scatter_index_reduce_amin_amax_backprops_to_all_values(self, device):
+        # tests that gradients are evenly distributed when there are multiple max/min values
+        # tested here instead of adding a SampleInput as the backward for this case is non-differentiable for gradgrad
+        # as is the case for test_min_max_median_backprops_to_all_values above
+        fns = (torch.scatter_reduce, torch.index_reduce)
+        reduces = ('amin', 'amax')
+        for fn, reduction in product(fns, reduces):
+            input = torch.randn((2, 3), device=device, dtype=torch.float64, requires_grad=True)
+            src = input.clone().detach_().requires_grad_(True)
+            idx = torch.arange(2).to(dtype=torch.long, device=device)
+            if fn == torch.scatter_reduce:
+                idx = idx.unsqueeze(-1).expand((2, 3))
+
+            gradcheck(fn, (input, 0, idx, src, reduction), check_batched_grad=False)
+
+    def test_scatter_index_reduce_prod_gradgrad_error(self, device):
         # test that double backward raises an error for the case where 2 zeros in src
         # are scattered to the same position in self
         input = torch.tensor([1.], device=device, dtype=torch.float64, requires_grad=True)
         src = torch.tensor([0., 0.], device=device, dtype=torch.float64, requires_grad=True)
         idx = torch.tensor([0, 0], device=device, dtype=torch.long)
 
-        def fn(input, src):
-            return input.scatter_reduce(0, idx, src, 'prod')
-
-        # check that this case passes on gradcheck
-        gradcheck(fn, [input, src], check_batched_grad=False)
-        with self.assertRaisesRegex(RuntimeError, "Double backward is unsupported for src when"):
-            gradgradcheck(fn, [input, src])
+        for fn in (torch.scatter_reduce, torch.index_reduce):
+            # check that this case passes on gradcheck
+            gradcheck(fn, (input, 0, idx, src, 'prod'), check_batched_grad=False)
+            with self.assertRaisesRegex(RuntimeError, "Double backward is unsupported for"):
+                gradgradcheck(fn, (input, 0, idx, src, 'prod'))
 
     @skipIfMps  # the test doesn't work on MPS as double types are not supported
     def test_parameter_resize(self, device):

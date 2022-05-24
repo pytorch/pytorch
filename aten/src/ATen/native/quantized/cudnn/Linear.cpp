@@ -98,7 +98,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   auto act_scale = input.q_scale();
   auto weight_scale = orig_weight.q_scale();
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
-  at::Tensor requantize_multiplier_tensor = cudnn_utils::get_requant_multiplier_tensor(requantize_multiplier, quantized_output.dim());
+  at::Tensor requantize_multiplier_tensor = cudnn_utils::getRequantMultiplierTensor(requantize_multiplier, quantized_output.dim());
   c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> broadcasted_bias;
   if (bias_.has_value()) {

@@ -2015,7 +2015,7 @@ TEST(StaticRuntime, Transpose) {
 }
 
 TEST(StaticRuntime, Permute) {
-  const auto permute_script = R"JIT(
+  auto permute_script = R"JIT(
     def forward(self, a: Tensor, dims: List[int]):
         return torch.permute(a, dims).clone()
   )JIT";
@@ -2030,6 +2030,16 @@ TEST(StaticRuntime, Permute) {
 
   testStaticRuntime(permute_script, args_a);
   testStaticRuntime(permute_script, args_a, args_b);
+
+  permute_script = R"JIT(
+    def forward(self, a: Tensor, dims: List[int], shape: List[int]):
+        return torch.permute(a, dims).reshape(shape).clone()
+  )JIT";
+
+  a = at::randn({8, 16, 4});
+  dims_a = {0, 2, 1};
+  dims_b = {-1, 16};
+  testStaticRuntime(permute_script, {a, dims_a, dims_b});
 }
 
 TEST(StaticRuntime, Slice) {
@@ -3311,30 +3321,6 @@ TEST(StaticRuntime, NestedBlockIfReturnList) {
   std::vector<IValue> args2{
       at::randn({42, 42}), at::randn({42, 42}), true, false};
   testStaticRuntime(src, args1, args2);
-}
-
-TEST(StaticRuntime, QuantizedLinearDynamicFp16ReluFusion) {
-  const auto src = R"IR(
-    graph(%input: Tensor, %weights: Tensor):
-        %bias: None = prim::Constant()
-        %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
-        %x = quantized::linear_dynamic_fp16(%input, %packed_params)
-        %y = aten::relu(%x)
-        %ret = aten::clone(%y, %bias)
-        return (%ret)
-  )IR";
-  at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
-  at::Tensor input = torch::randn({3, 2}, torch::kFloat);
-
-  at::Tensor weight_2 = torch::randn({4, 3}, torch::kFloat);
-  at::Tensor input_2 = torch::randn({5, 3}, torch::kFloat);
-
-  testStaticRuntime(src, {input, weight}, {input_2, weight_2});
-
-  auto graph = getGraphFromIR(src);
-  QuantizedLinearReluFusion(graph);
-  EXPECT_FALSE(hasNodeWithKind(graph, "quantized::linear_dynamic_fp16"));
-  EXPECT_TRUE(hasNodeWithKind(graph, "quantized::linear_relu_dynamic_fp16"));
 }
 
 TEST(StaticRuntime, ClampNaNToNum) {
