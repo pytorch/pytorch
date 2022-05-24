@@ -8,6 +8,7 @@ import copy
 import io
 import os
 import tempfile
+import warnings
 from typing import Tuple, Union
 
 import numpy as np
@@ -192,10 +193,13 @@ def _prepare_input_for_ort(args, kwargs, remained_onnx_input_idx, flatten):
 
 
 def _try_clone_model(model):
-    """Used for preserving original model incase forward mutates model states."""
+    """Used for preserving original model in case forward mutates model states."""
     try:
         return copy.deepcopy(model)
     except Exception:
+        warnings.warn(
+            "Failed to clone model. Model state might be mutated during verification."
+        )
         return model
 
 
@@ -214,7 +218,7 @@ def _compare_ort_pytorch_model(
 
     ONNXRuntime is used for model execution backend for ONNX model.
 
-    Raise:
+    Raises:
         AssertionError: if outputs from ONNX model and PyTorch model are not
             equal up to specified precision.
     """
