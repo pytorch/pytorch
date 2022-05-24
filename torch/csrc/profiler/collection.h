@@ -213,7 +213,6 @@ exposes itself by calling `registerTracer` from `torch/csrc/autograd/init.cpp`.
 This pattern of registration for faux python dependencies in libtorch is common
 in the PyTorch codebase.
 */
-enum CallType { kPyCall = 0, kPyModuleCall, kCCall };
 
 struct TORCH_API PyTraceEvent {
   int64_t startTime_;
@@ -222,8 +221,7 @@ struct TORCH_API PyTraceEvent {
 
   uint64_t thread_id_;
   PyTraceEvent* parent_;
-  CallType call_type_;
-  size_t module_id_;  // Only set call_type_ == kPyModuleCall
+  c10::optional<size_t> module_id_;
 
   // Index in the list of raw call and return events. This allows one to
   // convert a vector of PyTraceEvents back into the constituent call and
