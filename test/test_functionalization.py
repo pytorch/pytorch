@@ -86,6 +86,7 @@ class TestFunctionalization(TestCase):
         finally:
             torch._disable_functionalization()
 
+        self.assertEqual(out_ref.size(), out_functional.size())
         # We need to sync the input tensors first, in case there are any queued mutations left.
         torch._sync(input_functional)
         torch._sync(out_functional)
@@ -272,7 +273,7 @@ $9 = torch._ops.aten.mul.Tensor($8, $8)""")
             x.transpose_(1, 0)
             y = x[0]
             y.add_(tmp)
-            return y
+            return x
         self.assert_functionalization(f, torch.ones(4, 2))
         logs = self.get_logs(f, torch.ones(4, 2))
         self.assertExpectedInline('\n'.join(logs), """\
