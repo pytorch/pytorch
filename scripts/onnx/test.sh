@@ -44,9 +44,11 @@ args+=("--cov")
 args+=("--cov-report")
 args+=("xml:test/coverage.xml")
 args+=("--cov-append")
+
+args_parallel=()
 if [[ $PARALLEL == 1 ]]; then
-  args+=("-n")
-  args+=("8")
+  args_parallel+=("-n")
+  args_parallel+=("8")
 fi
 
 # onnxruntime only support py3
@@ -66,15 +68,18 @@ if [[ "${SHARD_NUMBER}" == "1" ]]; then
     --ignore "$top_dir/test/onnx/test_pytorch_onnx_caffe2_quantized.py" \
     "${test_paths[@]}"
 
+  # Tests that cannot run in parallel.
   pytest "${args[@]}" \
+    "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py" \
+    "$top_dir/test/onnx/test_pytorch_onnx_caffe2_quantized.py"
+
+  pytest "${args[@]}" "${args_parallel[@]}" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset7" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset8" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset9" \
     "$top_dir/test/onnx/test_custom_ops.py" \
     "$top_dir/test/onnx/test_models_onnxruntime.py" \
     "$top_dir/test/onnx/test_utility_funs.py" \
-    "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py" \
-    "$top_dir/test/onnx/test_pytorch_onnx_caffe2_quantized.py" \
     "$top_dir/test/onnx/test_pytorch_onnx_shape_inference.py" \
     "$top_dir/test/onnx/test_onnx_export.py"
 fi
@@ -82,7 +87,7 @@ fi
 if [[ "${SHARD_NUMBER}" == "2" ]]; then
   # Update the loop for new opsets
   for i in $(seq 10 16); do
-    pytest "${args[@]}" \
+    pytest "${args[@]}" "${args_parallel[@]}"\
       "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset$i"
   done
 fi
