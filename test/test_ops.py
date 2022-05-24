@@ -622,6 +622,8 @@ class TestCommon(TestCase):
         )
 
         samples = op.sample_inputs(device, dtype)
+        # if op.name == 'nn.functional.layer_norm':
+        #     print("TOTAL SAMPLE: ", len(list(samples)))
         for sample in samples:
             # calls it normally to get the expected result
             expected = op(sample.input, *sample.args, **sample.kwargs)
@@ -697,10 +699,17 @@ class TestCommon(TestCase):
             def _case_zero_transform(t):
                 try:
                     info = torch.iinfo(t.dtype)
-                    return torch.full_like(t, info.max)
+                    k = torch.full_like(t, info.max)
                 except TypeError as te:
                     # for non-integer types fills with NaN
-                    return torch.full_like(t, float("nan"))
+                    k = torch.full_like(t, float("nan"))
+                if op.name == "nn.functional.layer_norm":
+                    print("-----OUT TENSOR SPEC-----")
+                    print("OUT TENSOR", k)
+                    print("OUT TENSOR SIZE", k.size())
+                    print("OUT TENSOR DEVICE", k.device)
+                    print("OUT TENSOR DTYPE", k.dtype)
+                return k
 
 
             _compare_out(_case_zero_transform)
