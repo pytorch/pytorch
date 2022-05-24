@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 1
           submodules: false
-          token: ${{ secrets.PAT }}
+          token: ${{ secrets.MERGEBOT_TOKEN }}
 
       - name: Checkout xla
         shell: bash
