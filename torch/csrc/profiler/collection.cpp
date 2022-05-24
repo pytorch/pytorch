@@ -129,6 +129,37 @@ std::atomic<uint32_t> queue_id_{0};
 thread_local SubQueueThreadCache sub_queue_cache_{0, nullptr};
 } // namespace
 
+namespace python_tracer {
+namespace {
+GetFn get_fn;
+
+struct NoOpPythonTracer : public PythonTracerBase {
+  static NoOpPythonTracer& singleton() {
+    static NoOpPythonTracer singleton_;
+    return singleton_;
+  }
+  void start() override {}
+  void stop() override {}
+  void clear() override {}
+  std::vector<std::unique_ptr<PyTraceEvent>> getEvents() override {
+    return {};
+  }
+  ~NoOpPythonTracer() = default;
+};
+} // namespace
+
+void registerTracer(GetFn get_tracer) {
+  get_fn = get_tracer;
+}
+
+PythonTracerBase& PythonTracerBase::get() {
+  if (get_fn == nullptr) {
+    return NoOpPythonTracer::singleton();
+  }
+  return get_fn();
+}
+} // namespace python_tracer
+
 #define OUT_T(method_name) decltype(std::declval<Result>().method_name())
 #define DEFINE_VISITOR(                                                 \
     method_name, torch_op_field, backend_field, allocation_field)       \
