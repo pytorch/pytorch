@@ -504,6 +504,8 @@ log10 = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
+
+# TODO replace with finfo and iinfo prims
 def _minimum_limit(dtype: torch.dtype):
     if dtype == torch.bool:
         return False
@@ -518,13 +520,15 @@ def _minimum_limit(dtype: torch.dtype):
     elif dtype == torch.int64:
         return -9223372036854775808
     elif dtype == torch.float32:
-        return -3.40282e+38
+        return -3.40282e38
     elif dtype == torch.float64:
-        return -1.7976931348623157e+308
+        return -1.7976931348623157e308
     else:
         msg = "Unknown dtype {0} for maximum limit".format(dtype)
         raise RuntimeError(msg)
 
+
+# TODO replace with finfo and iinfo prims
 def _maximum_limit(dtype: torch.dtype):
     if dtype == torch.bool:
         return True
@@ -539,12 +543,13 @@ def _maximum_limit(dtype: torch.dtype):
     elif dtype == torch.int64:
         return 9223372036854775807
     elif dtype == torch.float32:
-        return 3.40282e+38
+        return 3.40282e38
     elif dtype == torch.float64:
-        return 1.7976931348623157e+308
+        return 1.7976931348623157e308
     else:
         msg = "Unknown dtype {0} for minimum limit".format(dtype)
         raise RuntimeError(msg)
+
 
 @register_decomposition(torch.ops.aten.nan_to_num)
 @out_wrapper
@@ -552,7 +557,12 @@ def _maximum_limit(dtype: torch.dtype):
     type_promoting_args=("a,"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def nan_to_num(a: TensorLikeType, *, nan: Optional[NumberType] = 0.0, posinf: Optional[NumberType] = None, neginf: Optional[NumberType] = None
+def nan_to_num(
+    a: TensorLikeType,
+    *,
+    nan: Optional[NumberType] = 0.0,
+    posinf: Optional[NumberType] = None,
+    neginf: Optional[NumberType] = None,
 ) -> TensorLikeType:
     assert isinstance(a, TensorLike)
 
@@ -585,6 +595,7 @@ neg = _make_elementwise_unary_reference(
     extra_meta=_neg_meta,
 )
 
+
 @register_decomposition(torch.ops.aten.positive)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a,"),
@@ -593,6 +604,7 @@ neg = _make_elementwise_unary_reference(
 def positive(a: TensorLikeType) -> TensorLikeType:
     assert isinstance(a, TensorLike)
     return a
+
 
 reciprocal = _make_elementwise_unary_reference(
     prims.reciprocal,
@@ -606,8 +618,10 @@ round = _make_elementwise_unary_reference(
     aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
 )
 
+
 def _sigmoid(a: TensorLikeType) -> TensorLikeType:
     return true_divide(1, add(1, exp(neg(a))))
+
 
 sigmoid = _make_elementwise_unary_reference(
     _sigmoid,
@@ -620,8 +634,10 @@ sign = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _signbit(a: TensorLikeType) -> TensorLikeType:
-    return lt(a, 0) 
+    return lt(a, 0)
+
 
 signbit = _make_elementwise_unary_reference(
     _signbit,

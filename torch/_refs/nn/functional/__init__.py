@@ -217,6 +217,7 @@ def softplus(
 
     return refs.where(refs.gt(scaled_input, threshold), a, rhs)
 
+
 @elementwise_unary_scalar_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
