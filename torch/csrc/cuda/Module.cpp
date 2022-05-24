@@ -281,8 +281,7 @@ PyObject * THCPModule_cudaJiteratorCompileAndLaunchKernel(PyObject *_unused, PyO
   std::vector<at::Tensor> tensors;
   for(const auto i : c10::irange(num_tensors)) {
     PyObject *_tensor = PyTuple_GET_ITEM(tensors_o, i);
-    THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
-        "tuple is not a Tensor", i);
+    THPUtils_assert(THPVariable_Check(_tensor), "%d of input tensors tuple is not a Tensor", i);
 
     tensors.emplace_back(THPVariable_Unpack(_tensor));
   }

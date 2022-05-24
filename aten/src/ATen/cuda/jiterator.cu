@@ -154,7 +154,7 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
                                                f_inputs_type_str, compute_type_str, result_type_str,
                                                contiguous, dynamic_casting,
                                                at::cuda::jit::BinaryFuncVariant::NoScalar,
-                                               extra_args_types, return_by_ref);
+                                               extra_args_types, /*vectorized*/false, /*vec_size*/0, return_by_ref);
       *fn_ptr = at::cuda::jit::jit_pwise_function(code, name);
     }
   }
