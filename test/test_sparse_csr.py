@@ -2172,7 +2172,6 @@ class TestSparseCSR(TestCase):
         for shape, blocksize in itertools.product([(0, 10), (6, 0), (6, 10), (0, 0)], blocksizes):
             dense = make_tensor(shape, dtype=torch.float, device=device)
             dense = dense.relu()  # Introduce some sparsity
-            print("shape: ", shape, " blocksize: ", blocksize, " dense: ", dense)
             sp_matrix = self._construct_sp_matrix(dense, layout, blocksize=blocksize)
             pt_matrix = self._convert_to_layout(dense, layout, blocksize=blocksize)
 
