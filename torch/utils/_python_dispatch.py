@@ -2,7 +2,7 @@ import contextlib
 from typing import Iterator
 import functools
 
-from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init
+from torch.utils._mode_utils import _enable_mode, _ModeInfo, _wrap_init
 from torch._C import _get_torch_dispatch_mode, _set_torch_dispatch_mode
 from dataclasses import dataclass
 
@@ -127,7 +127,7 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
           ``NotImplemented``.
 
     Independent subclasses of :class:`TorchDispatchMode` are compositional:
-    modes can be pushed onto a stack with :func:`push_torch_dispatch_mode`.
+    modes can be pushed onto a stack using ``with MyMode():``.
     When you call functions in the PyTorch API inside your
     ``__torch_dispatch__`` implementation, by default, they will forward on to
     the next mode on the mode stack.  If you want recursively call back into
@@ -153,17 +153,9 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
     def __exit__(self, exc_type, exc_val, exc_tb):
         _set_torch_dispatch_mode(self.inner)
 
-    @classmethod
-    def push(cls, *args, **kwargs):
-        return push_torch_dispatch_mode(functools.partial(cls, *args, **kwargs))
-
 
 class BaseTorchDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
         return func(*args, **kwargs)
-
-@contextlib.contextmanager
-def push_torch_dispatch_mode(ctor) -> Iterator[object]:
-    return _push_mode(ctor, mode_info=TorchDispatchModeInfo())

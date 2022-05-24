@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, no_dispatch
 from torch.utils._pytree import tree_map
-from torch.utils._python_dispatch import enable_torch_dispatch_mode, push_torch_dispatch_mode, TorchDispatchMode
+from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 
 import logging
 from functools import partial
@@ -881,58 +881,6 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
             except RuntimeError:
                 pass
             self.assertTrue(isinstance(torch.zeros(()), A))
-
-    def test_push_torch_dispatch_mode(self) -> None:
-        class ErrorA(RuntimeError):
-            def __init__(self, msg=None):
-                return super().__init__(msg)
-
-        class A(TorchDispatchMode):
-            def __init__(self, msg=None):
-                self.msg = msg
-
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                raise ErrorA(self.msg)
-
-        x = torch.randn(3)
-        with self.assertRaises(ErrorA):
-            with push_torch_dispatch_mode(A):
-                torch.add(x, x)
-
-        with self.assertRaisesRegex(ErrorA, r"partial constructor"):
-            with push_torch_dispatch_mode(partial(A, "partial constructor")):
-                x + x
-
-    def test_torch_dispatch_mode_stack(self) -> None:
-        logs = []
-
-        class Logger(TorchDispatchMode):
-            def __init__(self, name):
-                self.name = name
-
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                if kwargs is None:
-                    kwargs = {}
-                logs.append(self.name)
-                return func(*args, **kwargs)
-
-        x = torch.randn(1)
-        with Logger.push("A"):
-            with Logger.push("B"):
-                x + x
-        self.assertEqual(logs, ["B", "A"])
-
-    def test_push_mode_instance_errors(self):
-        class A(TorchDispatchMode):
-            pass
-        with self.assertRaisesRegex(ValueError, 'instance of TorchDispatchMode'):
-            with push_torch_dispatch_mode(A(inner=None)):
-                pass
-
-    def test_push_mode_returns_unrelated(self):
-        with self.assertRaisesRegex(ValueError, 'return a TorchDispatchMode'):
-            with push_torch_dispatch_mode(lambda *, inner: None):
-                pass
 
     def test_with_mode(self):
         class ErrorA(RuntimeError):

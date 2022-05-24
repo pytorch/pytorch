@@ -33,12 +33,11 @@ class PrimContext(torch.overrides.TorchFunctionMode):
     import torch._prims.utils as utils
     from torch._prims.context import PrimContext
     from torch._prims.executor import execute
-    from torch.overrides import push_torch_function_mode
 
     a = torch.randn((2, 2))
     b = torch.randn((2, 2))
 
-    with push_torch_function_mode(PrimContext):
+    with PrimContext():
       meta_a = ctx.placeholder(utils.TensorMeta(a))
       meta_b = ctx.placeholder(utils.TensorMeta(b))
       result = torch.add(meta_a, meta_b)
