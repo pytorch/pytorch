@@ -150,6 +150,18 @@ PyObject * THCPModule_getCurrentStream_wrap(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_getCurrentStream_raw(
+    PyObject * /* unused */, PyObject *device_index) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(
+    THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
+  int64_t device = THPUtils_unpackLong(device_index);
+  return PyLong_FromVoidPtr(
+    at::cuda::getCurrentCUDAStream(device).stream());
+  END_HANDLE_TH_ERRORS
+}
+
+
 PyObject * THCPModule_getDefaultStream_wrap(
     PyObject * /* unused */, PyObject *device_index) {
   HANDLE_TH_ERRORS
@@ -668,6 +680,8 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_isInBadFork", THCPModule_isInBadFork, METH_NOARGS, nullptr},
   {"_cuda_getCurrentStream",
     THCPModule_getCurrentStream_wrap, METH_O, nullptr},
+  {"_cuda_getCurrentRawStream",
+    THCPModule_getCurrentStream_raw, METH_O, nullptr},
   {"_cuda_getDefaultStream",
     THCPModule_getDefaultStream_wrap, METH_O, nullptr},
   {"_cuda_getCurrentBlasHandle", THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, nullptr},
