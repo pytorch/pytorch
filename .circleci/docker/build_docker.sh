@@ -46,6 +46,7 @@ fi
 # Build new image
 ./build.sh ${IMAGE_NAME} -t "${image}:${tag}"
 
+# Only push if `DOCKER_SKIP_PUSH` = false
 if [ "${DOCKER_SKIP_PUSH:-true}" = "false" ]; then
   docker push "${image}:${tag}"
 fi

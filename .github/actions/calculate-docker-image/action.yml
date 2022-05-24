@@ -96,7 +96,7 @@ runs:
       env:
         IMAGE_NAME: ${{inputs.docker-image-name}}
         DOCKER_SKIP_S3_UPLOAD: "1"
-        DOCKER_SKIP_PUSH: ${{ steps.check.outputs.skip_push || "false" }}
+        DOCKER_SKIP_PUSH: ${{ steps.check.outputs.skip_push || 'false' }}
         DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker-tag }}
       working-directory: .circleci/docker
       shell: bash
