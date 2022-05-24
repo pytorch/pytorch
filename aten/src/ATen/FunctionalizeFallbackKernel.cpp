@@ -150,15 +150,15 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
   // We have to emulate this "slicing" with an as_strided call.
   auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
   at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
-    [reapply_views = reapply_views, size = size.vec(), memory_format = memory_format](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
+    [reapply_views = reapply_views, size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
       if (reapply_views) {
         return at::as_strided(base, size, compute_contiguous_strides(size));
       } else {
         return at::as_strided_copy(base, size, compute_contiguous_strides(size));
       }
     },
-    [needs_resize_storage = needs_resize_storage, reapply_views = reapply_views, size = size.vec(), memory_format = memory_format](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
-      return base.as_strided_scatter(mutated_view, mutated_view.sizes(), mutated_view.strides());
+    [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
+      return base.as_strided_scatter(mutated_view, size, compute_contiguous_strides(size));
     }
   );
   at::functionalization::impl::mutate_view_meta(self, view_meta);
