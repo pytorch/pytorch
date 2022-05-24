@@ -505,52 +505,6 @@ log10 = _make_elementwise_unary_reference(
 )
 
 
-# TODO replace with finfo and iinfo prims
-def _minimum_limit(dtype: torch.dtype):
-    if dtype == torch.bool:
-        return False
-    elif dtype == torch.uint8:
-        return 0
-    elif dtype == torch.int8:
-        return -128
-    elif dtype == torch.int16:
-        return -32768
-    elif dtype == torch.int32:
-        return -2147483648
-    elif dtype == torch.int64:
-        return -9223372036854775808
-    elif dtype == torch.float32:
-        return -3.40282e38
-    elif dtype == torch.float64:
-        return -1.7976931348623157e308
-    else:
-        msg = "Unknown dtype {0} for maximum limit".format(dtype)
-        raise RuntimeError(msg)
-
-
-# TODO replace with finfo and iinfo prims
-def _maximum_limit(dtype: torch.dtype):
-    if dtype == torch.bool:
-        return True
-    elif dtype == torch.uint8:
-        return 255
-    elif dtype == torch.int8:
-        return 127
-    elif dtype == torch.int16:
-        return 32767
-    elif dtype == torch.int32:
-        return 2147483647
-    elif dtype == torch.int64:
-        return 9223372036854775807
-    elif dtype == torch.float32:
-        return 3.40282e38
-    elif dtype == torch.float64:
-        return 1.7976931348623157e308
-    else:
-        msg = "Unknown dtype {0} for minimum limit".format(dtype)
-        raise RuntimeError(msg)
-
-
 @register_decomposition(torch.ops.aten.nan_to_num)
 @out_wrapper
 @elementwise_type_promotion_wrapper(
@@ -567,10 +521,10 @@ def nan_to_num(
     assert isinstance(a, TensorLike)
 
     if posinf is None:
-        posinf = _maximum_limit(a.dtype)
+        posinf = prims.maximum_value(a.dtype)
 
     if neginf is None:
-        neginf = _minimum_limit(a.dtype)
+        neginf = prims.minimum_value(a.dtype)
 
     result = where(isnan(a), nan, a)
 
