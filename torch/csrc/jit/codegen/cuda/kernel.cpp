@@ -134,6 +134,9 @@ class KernelIrScanner : private IrVisitor {
     summary_.has_grid_reductions = true;
     const auto dom = ir_utils::getTvOutput(grid_reduction)->domain();
     updateGridReductionInLoop(dom);
+    if (grid_reduction->isAllreduce()) {
+      summary_.has_cooperative_grid_reduction = true;
+    }
   }
 
   void handle(GridBroadcast* grid_broadcast) final {
