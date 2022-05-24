@@ -473,6 +473,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.diagonal: lambda input, offset=0, dim1=0, dim2=1: -1,
         torch.linalg.diagonal: lambda input, offset=0, dim1=-2, dim2=-1: -1,
         torch.diagonal_scatter: lambda input, src, offset=0, dim1=0, dim2=1: -1,
+        torch.as_strided_scatter: lambda self, src, size, stride, storage_offset=None: -1,
         torch.digamma: lambda input, out=None: -1,
         torch.dist: lambda input, other, p=2: -1,
         torch.div: lambda input, other, rounding_mode=None, out=None: -1,
