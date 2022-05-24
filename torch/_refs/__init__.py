@@ -75,6 +75,7 @@ __all__ = [
     "round",  # TODO: model kwargs
     "sigmoid",
     "sign",
+    "signbit",
     "sin",
     "sinh",
     "sqrt",
@@ -548,6 +549,15 @@ sigmoid = _make_elementwise_unary_reference(
 sign = _make_elementwise_unary_reference(
     prims.sign,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+def _signbit(a: TensorLikeType) -> TensorLikeType:
+    return lt(a, 0) 
+
+signbit = _make_elementwise_unary_reference(
+    _signbit,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.signbit,
 )
 
 sin = _make_elementwise_unary_reference(

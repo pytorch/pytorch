@@ -19063,6 +19063,10 @@ python_ref_db = [
         torch_opinfo_name="sign",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.signbit",
+        torch_opinfo_name="signbit",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.sin",
         torch_opinfo_name="sin",
     ),
