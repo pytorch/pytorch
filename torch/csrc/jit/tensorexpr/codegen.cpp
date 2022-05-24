@@ -8,6 +8,20 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+CodeGen::CodeGen(
+    StmtPtr stmt,
+    std::vector<BufferArg> buffer_args,
+    at::Device device,
+    std::string kernel_func_name)
+    : stmt_(std::move(stmt)),
+      buffer_args_(std::move(buffer_args)),
+      device_(device),
+      kernel_func_name_(std::move(kernel_func_name)) {
+  ExtCallMemoryReuse extCallMemoryReuse(buffer_args_);
+  apply_mutator(&extCallMemoryReuse);
+  allocIntermediateBufs();
+}
+
 RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
     FindStmtFactoryMethod(const std::string& name) {
   auto iter = stmt_factory_methods_.find(name);
@@ -105,8 +119,8 @@ c10::optional<size_t> bufSize(BufPtr buf) {
 // as "up for grabs" for future reuse.
 std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
     const std::unordered_set<BufPtr>& bufs,
-    const std::unordered_map<BufPtr, std::tuple<int32_t, int32_t>>&
-        buf_ranges) {
+    const std::unordered_map<BufPtr, std::tuple<int32_t, int32_t>>& buf_ranges,
+    const std::unordered_set<BufPtr>& bufs_external_allocs) {
   // Sort buffers by the time they appear.
   std::vector<BufPtr> bufs_sorted(bufs.begin(), bufs.end());
   auto sorting_function_by_start_time = [&buf_ranges](
@@ -135,7 +149,6 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
     }
 
     auto start = std::get<0>(buf_ranges.at(buf));
-    auto end = std::get<1>(buf_ranges.at(buf));
 
     // Release memory for buffers whose liveness range ends before the creation
     // time of this buf.
@@ -161,16 +174,18 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
     }
 
     bool allocated = false;
-    // Check whether there are free memories that this buf can reuse.
-    for (auto it = mem_up_for_grabs.begin(); it != mem_up_for_grabs.end();
-         it++) {
-      auto m = *it;
-      if (bufSize(m) >= bufSize(buf)) {
-        buf_mem_map[buf] = m;
-        buf_allocs.emplace_back(std::make_pair(buf, m));
-        allocated = true;
-        mem_up_for_grabs.erase(it);
-        break;
+    if (bufs_external_allocs.find(buf) == bufs_external_allocs.end()) {
+      // Check whether there are free memories that this buf can reuse.
+      for (auto it = mem_up_for_grabs.begin(); it != mem_up_for_grabs.end();
+           it++) {
+        auto m = *it;
+        if (bufSize(m) >= bufSize(buf)) {
+          buf_mem_map[buf] = m;
+          buf_allocs.emplace_back(buf, m);
+          allocated = true;
+          mem_up_for_grabs.erase(it);
+          break;
+        }
       }
     }
 
@@ -187,24 +202,75 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
 
 StmtPtr insertAllocFree(
     std::vector<std::pair<BufPtr, BufPtr>>& buf_allocs,
+    const std::unordered_set<BufPtr>& bufs_external_allocs,
     StmtPtr stmt) {
   BlockPtr b = to<Block>(stmt);
   if (!b) {
     b = alloc<Block>(std::vector<StmtPtr>({stmt}));
   }
 
+  std::vector<BufPtr> bufs_ext_to_free;
   // Insert allocations and frees for temporary buffers at global scope.
   for (auto rit = buf_allocs.rbegin(); rit != buf_allocs.rend(); ++rit) {
     if (rit->first == rit->second) {
       BufPtr buf = rit->first;
-      b->prepend_stmt(alloc<Allocate>(buf));
-      b->append_stmt(alloc<Free>(buf));
+      if (bufs_external_allocs.find(buf) == bufs_external_allocs.end()) {
+        b->prepend_stmt(alloc<Allocate>(buf));
+        b->append_stmt(alloc<Free>(buf));
+      } else {
+        bufs_ext_to_free.push_back(buf);
+      }
     } else {
       b->prepend_stmt(alloc<PlacementAllocate>(rit->first, rit->second));
     }
   }
 
+  b->append_stmt(alloc<FreeExt>(bufs_ext_to_free));
   return b;
+}
+
+std::unordered_map<std::string, std::string> ExtCallMemoryReuse::
+    makeExtCallFuncNameMap() {
+  return {
+      {"nnc_aten_quantize_per_tensor", "nnc_aten_quantize_per_tensor_out"},
+      {"nnc_aten_dequantize", "nnc_aten_dequantize_out"},
+      {"nnc_aten_quantized_mul", "nnc_aten_quantized_mul_out"},
+      {"nnc_aten_quantized_conv2d", "nnc_aten_quantized_conv2d_out"},
+      {"nnc_aten_quantized_conv2d_relu", "nnc_aten_quantized_conv2d_relu_out"},
+      {"nnc_aten_quantized_mul", "nnc_aten_quantized_mul_out"},
+      {"nnc_aten_quantized_sigmoid", "nnc_aten_quantized_sigmoid_out"},
+      {"nnc_aten_upsample_nearest2d", "nnc_aten_upsample_nearest2d_out"},
+      {"nnc_aten_quantized_linear", "nnc_aten_quantized_linear_out"},
+      {"nnc_aten_quantized_conv1d", "nnc_aten_quantized_conv1d_out"},
+      {"nnc_aten_quantized_mul_scalar", "nnc_aten_quantized_mul_scalar_out"},
+      {"nnc_aten_max_red", "nnc_aten_max_red_out"},
+      {"nnc_aten_conv1d", "nnc_aten_conv1d_out"},
+  };
+}
+
+const std::unordered_map<std::string, std::string>
+    ExtCallMemoryReuse::extCallFuncNameMap_ = makeExtCallFuncNameMap();
+
+ExtCallMemoryReuse::ExtCallMemoryReuse(
+    const std::vector<CodeGen::BufferArg>& bufferArgs) {
+  for (const auto& ba : bufferArgs) {
+    if (ba.buf()) {
+      bufferArgs_.insert(ba.buf());
+    }
+  }
+}
+
+StmtPtr ExtCallMemoryReuse::mutate(ExternalCallPtr v) {
+  if (extCallFuncNameMap_.count(v->func_name()) &&
+      bufferArgs_.count(v->buf()) == 0) {
+    std::vector<BufPtr> buf_out_args = {v->buf()};
+    return alloc<ExternalCallWithAlloc>(
+        extCallFuncNameMap_.at(v->func_name()),
+        buf_out_args,
+        v->buf_args(),
+        v->args());
+  }
+  return v;
 }
 
 // We allocate intermediate buffers by inserting Allocate/Free or
@@ -236,14 +302,17 @@ void CodeGen::allocIntermediateBufs() {
     }
   }
 
+  const auto bufs_external_allocs = ExternalAllocBufFinder::find(stmt_);
+
   // For each intermediate buffer, we reuse the memory of an old buffer whose
   // liveness range does not overlap with the current buffer, or allocate memory
   // if reusing buffer is impossible.
-  auto buf_allocs = AllocBufsWithMemReuse(interm_bufs, interm_buf_ranges);
+  auto buf_allocs = AllocBufsWithMemReuse(
+      interm_bufs, interm_buf_ranges, bufs_external_allocs);
 
   // Insert memory allocation/mapping nodes.
   if (buf_allocs.size() > 0) {
-    auto stmt_new = insertAllocFree(buf_allocs, stmt_);
+    auto stmt_new = insertAllocFree(buf_allocs, bufs_external_allocs, stmt_);
     set_stmt(stmt_new);
   }
 

@@ -147,44 +147,6 @@ void LoopNestGenerator::handle(Expr* expr) {
   pushFront(expr);
 }
 
-namespace {
-// Copied verbatim from lower_expr_sort EXCEPT map is parallel map, not loop
-// map, and direction is reversed
-struct LocalDomainSorter {
-  LocalDomainSorter(
-      const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
-          concrete_id_dependencies)
-      : concrete_id_dependencies_(concrete_id_dependencies) {}
-
-  // Return if id0 should be before id1
-  inline bool operator()(IterDomain* id0, IterDomain* id1) {
-    auto concrete_id_0 =
-        GpuLower::current()->caParallelMap().getConcreteMappedID(id0);
-    auto concrete_id_1 =
-        GpuLower::current()->caParallelMap().getConcreteMappedID(id1);
-
-    if (concrete_id_dependencies_.find(concrete_id_0) !=
-        concrete_id_dependencies_.end()) {
-      const auto& dependencies_0 = concrete_id_dependencies_.at(concrete_id_0);
-      // if id0 depends on id1 it means id1 is outside id0, so id1 < id0
-      return !dependencies_0.count(concrete_id_1);
-    }
-
-    if (concrete_id_dependencies_.find(concrete_id_1) !=
-        concrete_id_dependencies_.end()) {
-      const auto& dependencies_1 = concrete_id_dependencies_.at(concrete_id_1);
-      // if id1 depends on id0 it means id1 is inside id0, so id0 < id1
-      return dependencies_1.count(concrete_id_0);
-    }
-
-    return true;
-  }
-
-  const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
-      concrete_id_dependencies_;
-};
-} // namespace
-
 // Generate the loop nest structure and place it in lowered_exprs_
 void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
   TORCH_INTERNAL_ASSERT(lowered_exprs_.empty());
@@ -193,11 +155,10 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
   // for an example why see FusionAdvancedLowering6
 
   // Grab iteration domain dependencies, similar to the logic in
-  // lower_expr_sort, EXCEPT it is based on parallel map not loop map, and
-  // dependencies are in opposite order, inner loops are dependant on outer
-  // loops.
+  // lower_expr_sort, EXCEPT dependencies are in opposite order,
+  // inner loops are dependant on outer loops.
 
-  const auto& parallel_map = GpuLower::current()->caParallelMap();
+  const auto& ca_map = GpuLower::current()->caMap();
 
   std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
       concrete_id_dependencies;
@@ -205,7 +166,8 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
     std::unordered_set<IterDomain*> dependencies;
 
     for (auto tv_id : tv->domain()->domain()) {
-      auto concrete_id = parallel_map.getConcreteMappedID(tv_id);
+      auto concrete_id =
+          ca_map->getConcreteMappedID(tv_id, IdMappingMode::LOOP);
 
       if (concrete_id_dependencies.find(concrete_id) ==
           concrete_id_dependencies.end()) {
@@ -216,7 +178,7 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
       }
 
       // Loops after tv_id are dependent on tv_id
-      dependencies.emplace(parallel_map.getConcreteMappedID(tv_id));
+      dependencies.emplace(concrete_id);
     }
   }
 
@@ -274,8 +236,8 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
       continue;
     }
 
-    auto last_id_concrete =
-        parallel_map.getConcreteMappedID(tv->axis((int)(tv->nDims() - 1)));
+    auto last_id_concrete = ca_map->getConcreteMappedID(
+        tv->axis((int)(tv->nDims() - 1)), IdMappingMode::LOOP);
     auto all_loops_it = concrete_id_dependencies.find(last_id_concrete);
     TORCH_INTERNAL_ASSERT(
         all_loops_it != concrete_id_dependencies.end(),
@@ -285,10 +247,13 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
     // Dependencies of last domain doesn't include last domain, include it
     // manually
     loop_structure.emplace_back(last_id_concrete);
+    // reverse sort (rbegin & rend) since we want the reverse of the order
+    // given by IterDomainDependencySorter
     std::sort(
-        loop_structure.begin(),
-        loop_structure.end(),
-        LocalDomainSorter(concrete_id_dependencies));
+        loop_structure.rbegin(),
+        loop_structure.rend(),
+        IterDomainDependencySorter(
+            concrete_id_dependencies, GpuLower::current()->caMap()));
     loop_structures_[tv] = loop_structure;
   }
 

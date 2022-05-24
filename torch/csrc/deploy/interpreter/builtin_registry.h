@@ -22,7 +22,7 @@
  * BuiltinRegisterer object. The constructor of BuiltinRegisterer does the real
  * registration work.
  */
-#include <gtest/gtest.h>
+#include <gtest/gtest_prod.h>
 #include <cstdarg>
 #include <memory>
 #include <unordered_map>
@@ -49,7 +49,7 @@ struct BuiltinRegistryItem {
       std::vector<std::pair<const char*, void*>>&& _builtinModules);
   const char* name;
   const struct _frozen* frozenModules;
-  int numModules;
+  unsigned numModules;
   std::vector<std::pair<const char*, void*>> builtinModules;
 };
 
@@ -77,7 +77,7 @@ class BuiltinRegistry {
   static const std::vector<std::unique_ptr<BuiltinRegistryItem>>& items() {
     return get()->items_;
   }
-  static int totalNumModules();
+  static unsigned totalNumModules();
   static BuiltinRegistry* get();
   static BuiltinRegistryItem* getItem(const std::string& name);
   static std::vector<std::pair<const char*, void*>> getAllBuiltinModules();

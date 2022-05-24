@@ -223,7 +223,8 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
     } else {
       facebook::jni::throwNewJavaException(
           facebook::jni::gJavaLangIllegalArgumentException,
-          "at::Tensor scalar type is not supported on java side");
+          "at::Tensor scalar type %s is not supported on java side",
+          c10::toString(scalarType));
     }
 
     const auto& tensorShape = tensor.sizes();

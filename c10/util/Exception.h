@@ -314,13 +314,13 @@ C10_API std::string GetExceptionString(const std::exception& e);
 // (unlike assert()).
 //
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_INTERNAL_ASSERT(cond, ...)                            \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {                             \
-    ::c10::detail::torchCheckFail(                                  \
-        __func__,                                                   \
-        __FILE__,                                                   \
-        static_cast<uint32_t>(__LINE__),                            \
-        #cond "INTERNAL ASSERT FAILED at" C10_STRINGIZE(__FILE__)); \
+#define TORCH_INTERNAL_ASSERT(cond, ...)                              \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                               \
+    ::c10::detail::torchCheckFail(                                    \
+        __func__,                                                     \
+        __FILE__,                                                     \
+        static_cast<uint32_t>(__LINE__),                              \
+        #cond " INTERNAL ASSERT FAILED at " C10_STRINGIZE(__FILE__)); \
   }
 #else
 // It would be nice if we could build a combined string literal out of
@@ -328,16 +328,16 @@ C10_API std::string GetExceptionString(const std::exception& e);
 // as the first argument, but there doesn't seem to be any good way to
 // do that while still supporting having a first argument that isn't a
 // string literal.
-#define TORCH_INTERNAL_ASSERT(cond, ...)                                        \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {                                         \
-    ::c10::detail::torchInternalAssertFail(                                     \
-        __func__,                                                               \
-        __FILE__,                                                               \
-        static_cast<uint32_t>(__LINE__),                                        \
-        #cond                                                                   \
-        "INTERNAL ASSERT FAILED at " C10_STRINGIZE(__FILE__) ":" C10_STRINGIZE( \
-            __LINE__) ", please report a bug to PyTorch. ",                     \
-        c10::str(__VA_ARGS__));                                                 \
+#define TORCH_INTERNAL_ASSERT(cond, ...)                                         \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                                          \
+    ::c10::detail::torchInternalAssertFail(                                      \
+        __func__,                                                                \
+        __FILE__,                                                                \
+        static_cast<uint32_t>(__LINE__),                                         \
+        #cond                                                                    \
+        " INTERNAL ASSERT FAILED at " C10_STRINGIZE(__FILE__) ":" C10_STRINGIZE( \
+            __LINE__) ", please report a bug to PyTorch. ",                      \
+        c10::str(__VA_ARGS__));                                                  \
   }
 #endif
 
@@ -375,7 +375,7 @@ C10_API std::string GetExceptionString(const std::exception& e);
 namespace c10 {
 namespace detail {
 template <typename... Args>
-decltype(auto) torchCheckMsgImpl(const char* msg, const Args&... args) {
+decltype(auto) torchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
   return ::c10::str(args...);
 }
 inline C10_API const char* torchCheckMsgImpl(const char* msg) {
@@ -383,7 +383,7 @@ inline C10_API const char* torchCheckMsgImpl(const char* msg) {
 }
 // If there is just 1 user-provided C-string argument, use it.
 inline C10_API const char* torchCheckMsgImpl(
-    const char* msg,
+    const char* /*msg*/,
     const char* args) {
   return args;
 }
@@ -433,7 +433,7 @@ namespace detail {
     const char* file,
     uint32_t line,
     const char* condMsg,
-    ::c10::detail::CompileTimeEmptyString userMsg) {
+    ::c10::detail::CompileTimeEmptyString /*userMsg*/) {
   torchCheckFail(func, file, line, condMsg);
 }
 [[noreturn]] C10_API void torchInternalAssertFail(

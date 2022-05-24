@@ -138,6 +138,7 @@ ExprHandle dequant(
 Tensor computeQuantizePerTensor(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>&,
     at::Device) {
   std::vector<VarPtr> vars;
@@ -177,6 +178,7 @@ Tensor computeQuantizePerTensor(
 Tensor computeQuantizedAdd(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
   const BufHandle& QA = c10::get<BufHandle>(inputs[0]);
@@ -209,7 +211,8 @@ Tensor computeQuantizedAdd(
       ExprHandleVectorToExprVector(outputShape),
       out_dtype,
       nullptr,
-      c10::nullopt,
+      isChannelsLast(QA) ? make_channels_last_strides(outputShape)
+                         : make_contiguous_strides(outputShape),
       out_qscale.node(),
       out_qzero.node());
   return Tensor(buf, vars, exprHandle.node());
@@ -218,6 +221,7 @@ Tensor computeQuantizedAdd(
 Tensor computeQuantizePerTensorExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     at::Device) {
@@ -250,6 +254,7 @@ Tensor computeQuantizePerTensorExternalCall(
 Tensor computeDequantizeExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
   Dtype dtype = kFloat;
@@ -258,8 +263,6 @@ Tensor computeDequantizeExternalCall(
   }
 
   const BufHandle& qx = c10::get<BufHandle>(inputs[0]);
-  const double qscale = immQScale(qx);
-  const int64_t qzero = immQZero(qx);
   const int64_t qdtype = (int64_t)immQDType(qx);
 
   BufHandle ResultBuf("dequantize", outputShape, dtype);
@@ -276,6 +279,7 @@ Tensor computeDequantizeExternalCall(
 Tensor computeQuantizedConv2dPrepack(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
   Dtype dtype = kFloat;
@@ -324,6 +328,7 @@ Tensor computeQuantizedConv2dPrepack(
 Tensor computeQuantizedConv1d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -355,6 +360,7 @@ Tensor computeQuantizedConv1d(
 Tensor computeQuantizedConv2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -386,6 +392,7 @@ Tensor computeQuantizedConv2d(
 Tensor computeQuantizedConv2dRelu(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -417,6 +424,7 @@ Tensor computeQuantizedConv2dRelu(
 Tensor computeQuantizedLinear(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -448,6 +456,7 @@ Tensor computeQuantizedLinear(
 Tensor computeQuantizedLinearRelu(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -479,6 +488,7 @@ Tensor computeQuantizedLinearRelu(
 Tensor computeQuantizedAddExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -522,6 +532,7 @@ Tensor computeQuantizedAddExternalCall(
 Tensor computeQuantizedMul(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -552,6 +563,7 @@ Tensor computeQuantizedMul(
 Tensor computeQuantizedMulScalar(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -578,6 +590,7 @@ Tensor computeQuantizedMulScalar(
 Tensor computeQuantizedRelu(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -608,6 +621,7 @@ Tensor computeQuantizedRelu(
 Tensor computeQuantizedCat(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     // NOLINTNEXTLINE
@@ -646,6 +660,7 @@ Tensor computeQuantizedCat(
 Tensor computeDequantize(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
   Dtype dtype = kFloat;
@@ -677,6 +692,7 @@ Tensor computeDequantize(
 Tensor computeUpsampleNearest2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
   auto A = c10::get<BufHandle>(inputs[0]);
@@ -706,12 +722,14 @@ Tensor computeUpsampleNearest2d(
     return A.load(newAxes);
   };
   auto e = body_func(args);
+  auto strides = isChannelsLast(A) ? make_channels_last_strides(outputShape)
+                                   : make_contiguous_strides(outputShape);
   BufHandle buf = Buf::make(
-      "quantize_upsample_nearest2d",
+      "upsample_nearest2d",
       outputShape,
       Dtype(*outputType),
-      c10::nullopt,
-      c10::nullopt,
+      c10::nullopt, // initializer
+      fmap(strides, [&](ExprPtr stride) { return ExprHandle(stride); }),
       ExprHandle(A.node()->qscale()),
       ExprHandle(A.node()->qzero()));
   return Tensor(buf, args, e);
@@ -720,6 +738,7 @@ Tensor computeUpsampleNearest2d(
 Tensor computeUpsampleNearest2dExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
   Dtype dtype = kFloat;
@@ -778,6 +797,7 @@ Tensor computeUpsampleNearest2dExternalCall(
 Tensor computeQuantizedSigmoidExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const c10::optional<ScalarType>& outputType,
     at::Device) {
@@ -787,12 +807,18 @@ Tensor computeQuantizedSigmoidExternalCall(
   const double out_qscale = 1.0f / 256.0f;
   const int64_t out_qzero = (out_qdtype == ScalarType::QInt8) ? -128 : 0;
 
-  auto ResultBuf = makeQBufHandleChannelsLast(
-      "quantized_sigmoid",
-      outputShape,
-      Dtype(out_qdtype),
-      out_qscale,
-      out_qzero);
+  auto ResultBuf = isChannelsLast(qx) ? makeQBufHandleChannelsLast(
+                                            "quantized_sigmoid",
+                                            outputShape,
+                                            Dtype(out_qdtype),
+                                            out_qscale,
+                                            out_qzero)
+                                      : makeQBufHandleContiguous(
+                                            "quantized_sigmoid",
+                                            outputShape,
+                                            Dtype(out_qdtype),
+                                            out_qscale,
+                                            out_qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_sigmoid",

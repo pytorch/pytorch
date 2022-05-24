@@ -17,10 +17,12 @@ class FullyConnectedDNNLowPOp
   USE_DNNLOWP_OPERATOR_BASE_FUNCTIONS(T, FullyConnectedOp<CPUContext>);
 
  protected:
-  bool GetQuantizationParameters_();
+  bool GetQuantizationParameters_(float X_scale_=-1.0, int X_zero_point_=0);
 
   std::size_t axis_{1};
   std::size_t axis_w_{1};
+  float X_scale_{-1.0};
+  int X_zero_point_{0};
   vector<std::int64_t> Y_shape_cache_;
 
   std::vector<dnnlowp::RequantizationParams> requantization_params_;

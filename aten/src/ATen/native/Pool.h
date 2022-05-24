@@ -1,6 +1,6 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/div_rtn.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/irange.h>
 

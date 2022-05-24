@@ -15,12 +15,16 @@ class PostLocalSGDState(object):
 
     If ``process_group`` is ``None``, the global process group will be used.
     If ``subgroup`` is ``None``, the intra-node process group on each machine will be used.
+
+    Additionally, ``post_local_gradient_allreduce`` may be worth tuning,
+    because both true and false may give a faster convergence.
     """
 
     __slots__ = [
         "process_group",
         "subgroup",
         "start_localSGD_iter",
+        "post_local_gradient_allreduce",
         "iter",
     ]
 
@@ -29,6 +33,7 @@ class PostLocalSGDState(object):
         process_group,
         subgroup,
         start_localSGD_iter,
+        post_local_gradient_allreduce=True,
     ):
         logger.info(
             "Local SGD will be started after {} iterations".format(start_localSGD_iter)
@@ -39,6 +44,9 @@ class PostLocalSGDState(object):
         # The group used for all-reducing gradients locally.
         self.subgroup = subgroup
         self.start_localSGD_iter = start_localSGD_iter
+        # Allreduce gradients locally since iteration `start_localSGD_iter`.
+        # This may help with the convergence efficiency at the cost of relatively cheap intra-subgroup communication.
+        self.post_local_gradient_allreduce = post_local_gradient_allreduce
         # Iteration/step in the training loop.
         self.iter = 0
 
@@ -83,7 +91,6 @@ def post_localSGD_hook(
     global_group_to_use = (
         state.process_group if state.process_group is not None else dist.group.WORLD
     )
-    world_size = global_group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
     input_tensor = bucket.buffer()
@@ -92,6 +99,13 @@ def post_localSGD_hook(
     if state.iter < state.start_localSGD_iter:
         state.maybe_increase_iter(bucket)
         return default._allreduce_fut(global_group_to_use, input_tensor)
+
+    # If `post_local_gradient_allreduce` is not set,
+    # then no gradient synchronization after the first `start_localSGD_iter` iterations.
+    if not state.post_local_gradient_allreduce:
+        fut: torch.futures.Future[torch.Tensor] = torch.futures.Future()
+        fut.set_result(input_tensor)
+        return fut
 
     # Run allreduce using `subgroup` after the first `start_localSGD_iter` iterations.
     # Note that by default, a separate subgroup for each node is created which

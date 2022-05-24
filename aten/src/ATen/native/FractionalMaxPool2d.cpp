@@ -60,13 +60,13 @@ TORCH_META_FUNC(fractional_max_pool2d) (
     " too large relative to input width ", inputW);
 
   if (ndims == 3) {
-    set_output(0, {numPlanes, outputH, outputW}, input.options());
+    set_output_raw_strided(0, {numPlanes, outputH, outputW}, {}, input.options());
     /* indices will contain the locations for each output point */
-    set_output(1, {numPlanes, outputH, outputW}, input.options().dtype(kLong));
+    set_output_raw_strided(1, {numPlanes, outputH, outputW}, {}, input.options().dtype(kLong));
   } else {
-    set_output(0, {numBatch, numPlanes, outputH, outputW}, input.options());
+    set_output_raw_strided(0, {numBatch, numPlanes, outputH, outputW}, {}, input.options());
     /* indices will contain the locations for each output point */
-    set_output(1, {numBatch, numPlanes, outputH, outputW}, input.options().dtype(kLong));
+    set_output_raw_strided(1, {numBatch, numPlanes, outputH, outputW}, {}, input.options().dtype(kLong));
   }
 }
 
@@ -108,9 +108,9 @@ TORCH_META_FUNC(fractional_max_pool2d_backward)(
 
   /* resize */
   if (ndims == 3) {
-    set_output(0, {numPlanes, inputH, inputW}, input.options());
+    set_output_raw_strided(0, {numPlanes, inputH, inputW}, {}, input.options());
   } else {
-    set_output(0, {numBatch, numPlanes, inputH, inputW}, input.options());
+    set_output_raw_strided(0, {numBatch, numPlanes, inputH, inputW}, {}, input.options());
   }
 }
 } // namespace meta
@@ -134,8 +134,9 @@ static std::vector<int> fractional_max_pool2d_generate_intervals(
         static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
     }
   }
-  sequence[outputSize - 1] = inputSize - poolSize;
-
+  if (outputSize > 0) {
+    sequence[outputSize - 1] = inputSize - poolSize;
+  }
   return sequence;
 }
 

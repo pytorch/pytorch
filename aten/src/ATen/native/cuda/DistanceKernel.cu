@@ -1,10 +1,19 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <math.h>
 
 #include <ATen/native/Distance.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/sum.h>
+#endif
 
 #include <c10/macros/Macros.h>
 

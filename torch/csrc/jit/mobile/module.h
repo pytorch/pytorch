@@ -135,16 +135,44 @@ class TORCH_API Module {
     mem_to_delete_ = delete_mem;
   }
 
+  void set_min_operator_version(int64_t version) {
+    min_operator_version_ = version;
+  }
+
+  int64_t min_operator_version() const {
+    return min_operator_version_;
+  }
+
+  void set_bytecode_version(int64_t version) {
+    bytecode_version_ = version;
+  }
+
+  int64_t bytecode_version() const {
+    return bytecode_version_;
+  }
+
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
   MobileDebugTable debug_table_;
   bool has_debug_handles_ = false;
+  int64_t min_operator_version_ = 4;
+  int64_t bytecode_version_ = 4;
 
   // Extra handle for the module to delete when itself is deleted
   std::shared_ptr<char> mem_to_delete_;
 };
+
+struct TORCH_API ModuleInfo {
+  uint64_t bytecode_version;
+  uint64_t operator_version;
+  std::unordered_map<std::string, int> opname_to_num_args;
+  std::unordered_set<std::string> function_names;
+  std::unordered_set<std::string> type_names;
+};
+TORCH_API ModuleInfo get_module_info(const mobile::Module& module);
+
 } // namespace mobile
 } // namespace jit
 } // namespace torch

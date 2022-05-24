@@ -12,6 +12,7 @@
 
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
+#include <c10d/debug.h>
 #include <c10d/sequence_num.hpp>
 
 // *************************************************************************
@@ -54,7 +55,7 @@ enum class OpType : std::uint8_t {
 TORCH_API std::string opTypeToString(OpType opType);
 
 // Whether or not an OP is an p2p op (SEND, RECV, RECVANYSOURCE)
-TORCH_API bool isP2POp(OpType opType);
+TORCH_API bool isP2POp(OpType opType, bool batchP2P = false);
 
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
@@ -426,13 +427,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
  protected:
+  // Implementations of this interface need to call this to setup
+  // appropriate logging etc.
+  void init();
+
   const int rank_;
   const int size_;
   // Optional sequence number structure for matching collectives.
   c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
-  DistributedDebugLevel dist_debug_level_;
+  DebugLevel dist_debug_level_;
 };
 
 } // namespace c10d

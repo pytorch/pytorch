@@ -16,6 +16,7 @@ from torch.ao.quantization import (
     QuantType,
     default_dynamic_qat_qconfig,
     default_embedding_qat_qconfig,
+    default_symmetric_qnnpack_qat_qconfig,
 )
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
@@ -289,6 +290,14 @@ def skipIfNoQNNPACK(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torch.onnx._CAFFE2_ATEN_FALLBACK:
             raise unittest.SkipTest(reason)
         else:
             fn(*args, **kwargs)
@@ -855,6 +864,7 @@ class QuantizationTestCase(TestCase):
                 qconfig_dict = custom_qconfig_dict
             prepared = prepare(
                 model, qconfig_dict,
+                example_inputs=inputs,
                 prepare_custom_config_dict=prepare_custom_config_dict,
                 backend_config_dict=backend_config_dict)
             if not quant_type == QuantType.DYNAMIC:
@@ -872,8 +882,8 @@ class QuantizationTestCase(TestCase):
                 prepare_expected_node_occurrence, prepare_expected_node_list)
 
             prepared_copy = copy.deepcopy(prepared)
-            qgraph = convert_fx(prepared)
-            qgraph_reference = convert_fx(prepared_copy, is_reference=True)
+            qgraph = convert_fx(copy.deepcopy(prepared))
+            qgraph_reference = convert_fx(copy.deepcopy(prepared), is_reference=True)
             result = qgraph(*inputs)
             result_reference = qgraph_reference(*inputs)
             qgraph_copy = copy.deepcopy(qgraph)
@@ -1694,9 +1704,9 @@ class ManualConvLinearQATModel(torch.nn.Module):
     r"""A module with manually inserted `QuantStub` and `DeQuantStub`
     and contains both linear and conv modules
     """
-    def __init__(self):
+    def __init__(self, qconfig=None):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qat_qconfig("qnnpack")
+        self.qconfig = qconfig if qconfig else torch.quantization.get_default_qat_qconfig("qnnpack")
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.conv = torch.nn.Conv2d(3, 1, kernel_size=3).to(dtype=torch.float)
@@ -1710,6 +1720,13 @@ class ManualConvLinearQATModel(torch.nn.Module):
         x = self.fc1(x)
         x = self.fc2(x)
         return self.dequant(x)
+
+class ManualConvLinearSymmQATModel(ManualConvLinearQATModel):
+    r"""Same as ManualConvLinearQATModule but with Symmetric Quantization.
+    Supported only with qnnpack.
+    """
+    def __init__(self):
+        super().__init__(default_symmetric_qnnpack_qat_qconfig)
 
 class ManualEmbeddingBagLinear(nn.Module):
     def __init__(self):
@@ -1809,7 +1826,7 @@ class ModelForFusion(nn.Module):
         x = self.sub1(x)
         x = self.dequant(x)
         x = self.sub2(x)
-        x = x.view(-1, 36).contiguous()
+        x = x.reshape(-1, 36).contiguous()
         x = self.fc(x)
         y = self.conv2(y)
         y = self.relu2(y)

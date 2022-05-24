@@ -1,36 +1,44 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/batch_norm.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/utils.h>
+#include <ATen/native/cpu/mixed_data_type.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/ones.h>
+#endif
 
 namespace at { namespace native {
 namespace {
 
 using namespace vec;
 
-template<typename scalar_t>
+template<typename param_t, typename accscalar_t>
 void batch_norm_cpu_collect_linear_and_constant_terms(
-    scalar_t* alpha, scalar_t* beta, int64_t n_channel,
+    accscalar_t* alpha, accscalar_t* beta, int64_t n_channel,
     const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& save_mean, const Tensor& save_invstd,
     const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
 
-  const scalar_t* weight_data = weight.defined() ? weight.data_ptr<scalar_t>() : nullptr;
-  const scalar_t* bias_data = bias.defined() ? bias.data_ptr<scalar_t>() : nullptr;
+  const param_t* weight_data = weight.defined() ? weight.data_ptr<param_t>() : nullptr;
+  const param_t* bias_data = bias.defined() ? bias.data_ptr<param_t>() : nullptr;
 
-  auto save_mean_a = conditional_accessor_1d<scalar_t>(save_mean);
-  auto save_invstd_a = conditional_accessor_1d<scalar_t>(save_invstd);
-  auto running_mean_a = conditional_accessor_1d<scalar_t>(running_mean);
-  auto running_var_a = conditional_accessor_1d<scalar_t>(running_var);
+  auto save_mean_a = conditional_accessor_1d<param_t>(save_mean);
+  auto save_invstd_a = conditional_accessor_1d<param_t>(save_invstd);
+  auto running_mean_a = conditional_accessor_1d<param_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<param_t>(running_var);
 
   /// Collect the linear and constant terms regarding the input.
   /// output(n, c, h, w)
@@ -44,16 +52,16 @@ void batch_norm_cpu_collect_linear_and_constant_terms(
   /// Note that this is only a good idea if (input_size >> c), in degenerate
   /// cases where image_size == 1 && batch_size == 1, it is slow.
   for (const auto c : c10::irange(n_channel)) {
-    scalar_t mean, invstd;
+    accscalar_t mean, invstd;
     if (train) {
       mean = save_mean_a[c];
       invstd = save_invstd_a[c];
     } else {
       mean = running_mean_a[c];
-      invstd = 1 / std::sqrt(running_var_a[c] + static_cast<scalar_t>(eps));
+      invstd = 1 / std::sqrt(running_var_a[c] + static_cast<accscalar_t>(eps));
     }
-    scalar_t weight_v = weight_data ? weight_data[c] : 1;
-    scalar_t bias_v = bias_data ? bias_data[c] : 0;
+    param_t weight_v = weight_data ? weight_data[c] : param_t(1);
+    param_t bias_v = bias_data ? bias_data[c] : param_t(0);
     alpha[c] = invstd * weight_v;
     beta[c] = bias_v - mean * alpha[c];
   }
@@ -75,7 +83,7 @@ void batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
   scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
-  batch_norm_cpu_collect_linear_and_constant_terms<scalar_t>(
+  batch_norm_cpu_collect_linear_and_constant_terms<scalar_t, scalar_t>(
      alpha_data, beta_data, n_channel, weight, bias,
      save_mean, save_invstd, running_mean, running_var, train, eps);
 
@@ -84,62 +92,37 @@ void batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
 
   // Apply the linear terms to the input,
   // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
-  if (image_size != 1) {
-    const int64_t loop_size = image_size - (image_size % Vec::size());
-    at::parallel_for(0, n_batch * n_channel, 1, [&](int64_t begin, int64_t end) {
-      int64_t n = 0;
-      int64_t c = 0;
-      data_index_init(begin, n, n_batch, c, n_channel);
+  const int64_t loop_size = image_size - (image_size % Vec::size());
+  at::parallel_for(0, n_batch * n_channel, 1, [&](int64_t begin, int64_t end) {
+    int64_t n = 0;
+    int64_t c = 0;
+    data_index_init(begin, n, n_batch, c, n_channel);
 
-      for (const auto i : c10::irange(begin, end)) {
-        const Vec alpha_vec(alpha_data[c]);
-        const Vec beta_vec(beta_data[c]);
-        int64_t offset = i * image_size;
-        int64_t d = 0;
-        for (; d < loop_size; d += Vec::size()) {
-          Vec data_vec = Vec::loadu(input_data + offset + d);
-          Vec output_vec = data_vec * alpha_vec + beta_vec;
-          output_vec.store(output_data + offset + d);
-        }
-        if (image_size - d > 0) {
-          Vec data_vec = Vec::loadu(input_data + offset + d, image_size - d);
-          Vec output_vec = data_vec * alpha_vec + beta_vec;
-          output_vec.store(output_data + offset + d, image_size - d);
-        }
-        // move on to next index
-        data_index_step(n, n_batch, c, n_channel);
+    for (const auto i : c10::irange(begin, end)) {
+      const Vec alpha_vec(alpha_data[c]);
+      const Vec beta_vec(beta_data[c]);
+      int64_t offset = i * image_size;
+      int64_t d = 0;
+      for (; d < loop_size; d += Vec::size()) {
+        Vec data_vec = Vec::loadu(input_data + offset + d);
+        Vec output_vec = data_vec * alpha_vec + beta_vec;
+        output_vec.store(output_data + offset + d);
       }
-    });
-  } else {
-    // image_size == 1
-    const int64_t loop_size = n_channel - (n_channel % Vec::size());
-    at::parallel_for(0, n_batch, 1, [&](int64_t begin, int64_t end) {
-      for (const auto n : c10::irange(begin, end)) {
-        int64_t offset = n * n_channel;
-        int64_t d = 0;
-        for (; d < loop_size; d += Vec::size()) {
-          Vec alpha_vec = Vec::loadu(alpha_data + d);
-          Vec beta_vec = Vec::loadu(beta_data + d);
-          Vec data_vec = Vec::loadu(input_data + offset + d);
-          Vec output_vec = data_vec * alpha_vec + beta_vec;
-          output_vec.store(output_data + offset + d);
-        }
-        if (n_channel - d > 0) {
-          Vec alpha_vec = Vec::loadu(alpha_data + d, n_channel - d);
-          Vec beta_vec = Vec::loadu(beta_data + d, n_channel - d);
-          Vec data_vec = Vec::loadu(input_data + offset + d, n_channel - d);
-          Vec output_vec = data_vec * alpha_vec + beta_vec;
-          output_vec.store(output_data + offset + d, n_channel - d);
-        }
+      if (image_size - d > 0) {
+        Vec data_vec = Vec::loadu(input_data + offset + d, image_size - d);
+        Vec output_vec = data_vec * alpha_vec + beta_vec;
+        output_vec.store(output_data + offset + d, image_size - d);
       }
-    });
-  }
+      // move on to next index
+      data_index_step(n, n_batch, c, n_channel);
+    }
+  });
 }
 
 template <typename scalar_t>
 void batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
     const Tensor& weight, const Tensor& bias, const Tensor& save_mean, const Tensor& save_invstd,
-    const Tensor& running_mean, const Tensor& runnning_var, bool train, double eps) {
+    const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
 
   using Vec = Vectorized<scalar_t>;
   int64_t n_batch = input.size(0);
@@ -151,9 +134,9 @@ void batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
   scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
-  batch_norm_cpu_collect_linear_and_constant_terms<scalar_t>(
+  batch_norm_cpu_collect_linear_and_constant_terms<scalar_t, scalar_t>(
       alpha_data, beta_data, n_channel, weight, bias,
-      save_mean, save_invstd, running_mean, runnning_var, train, eps);
+      save_mean, save_invstd, running_mean, running_var, train, eps);
 
   scalar_t* output_data = output.data_ptr<scalar_t>();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
@@ -609,16 +592,660 @@ void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad
   }
 }
 
+/// bfloat16 kernels
+template<>
+void batch_norm_cpu_contiguous_impl<BFloat16>(Tensor& output, const Tensor& input,
+    const Tensor& weight, const Tensor& bias, const Tensor& save_mean, const Tensor& save_invstd,
+    const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
+
+  using bVec = Vectorized<BFloat16>;
+  using fVec = Vectorized<float>;
+  int64_t n_batch = input.size(0);
+  int64_t n_channel = input.size(1);
+  int64_t image_size = input.numel() / n_batch / n_channel;
+
+  // use float as acc type
+  Tensor alpha = at::empty({n_channel}, input.options().dtype(kFloat));
+  Tensor beta = at::empty({n_channel}, input.options().dtype(kFloat));
+  float* alpha_data = alpha.data_ptr<float>();
+  float* beta_data = beta.data_ptr<float>();
+
+  const bool mixed_type = is_mixed_type(input, weight, bias, save_mean, save_invstd, running_mean, running_var);
+  if (mixed_type) {
+    batch_norm_cpu_collect_linear_and_constant_terms<float, float>(
+        alpha_data, beta_data, n_channel, weight, bias,
+        save_mean, save_invstd, running_mean, running_var, train, eps);
+  } else {
+    batch_norm_cpu_collect_linear_and_constant_terms<BFloat16, float>(
+        alpha_data, beta_data, n_channel, weight, bias,
+        save_mean, save_invstd, running_mean, running_var, train, eps);
+  }
+
+  BFloat16* output_data = output.data_ptr<BFloat16>();
+  const BFloat16* input_data = input.data_ptr<BFloat16>();
+
+  const int64_t loop_size = image_size - (image_size % bVec::size());
+  at::parallel_for(0, n_batch * n_channel, 1, [&](int64_t begin, int64_t end) {
+    int64_t n = 0;
+    int64_t c = 0;
+    data_index_init(begin, n, n_batch, c, n_channel);
+
+    for (const auto i : c10::irange(begin, end)) {
+      const BFloat16* input_ptr = input_data + i * image_size;
+      BFloat16* output_ptr = output_data + i * image_size;
+      const float alpha_val = alpha_data[c];
+      const float beta_val = beta_data[c];
+      const fVec alpha_fvec(alpha_val);
+      const fVec beta_fvec(beta_val);
+      int64_t d = 0;
+      for (; d < loop_size; d += bVec::size()) {
+        bVec data_bvec = bVec::loadu(input_ptr + d);
+        fVec data_fvec0, data_fvec1;
+        std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+
+        fVec out_fvec0 = data_fvec0 * alpha_fvec + beta_fvec;
+        fVec out_fvec1 = data_fvec1 * alpha_fvec + beta_fvec;
+        bVec out_bvec = convert_float_bfloat16(out_fvec0, out_fvec1);
+        out_bvec.store(output_ptr + d);
+      }
+      for (; d < image_size; d++) {
+        output_ptr[d] = BFloat16(float(input_ptr[d]) * alpha_val + beta_val);
+      }
+      // move on to next index
+      data_index_step(n, n_batch, c, n_channel);
+    }
+  });
+}
+
+template <>
+void batch_norm_cpu_channels_last_impl<BFloat16>(Tensor& output, const Tensor& input,
+    const Tensor& weight, const Tensor& bias, const Tensor& save_mean, const Tensor& save_invstd,
+    const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
+
+  using bVec = Vectorized<BFloat16>;
+  using fVec = Vectorized<float>;
+  int64_t n_batch = input.size(0);
+  int64_t n_channel = input.size(1);
+  int64_t image_size = input.numel() / n_batch / n_channel;
+
+  Tensor alpha = at::empty({n_channel}, input.options().dtype(kFloat));
+  Tensor beta = at::empty({n_channel}, input.options().dtype(kFloat));
+  float* alpha_data = alpha.data_ptr<float>();
+  float* beta_data = beta.data_ptr<float>();
+
+  const bool mixed_type = is_mixed_type(input, weight, bias, save_mean, save_invstd, running_mean, running_var);
+  if (mixed_type) {
+    batch_norm_cpu_collect_linear_and_constant_terms<float, float>(
+        alpha_data, beta_data, n_channel, weight, bias,
+        save_mean, save_invstd, running_mean, running_var, train, eps);
+  } else {
+    batch_norm_cpu_collect_linear_and_constant_terms<BFloat16, float>(
+        alpha_data, beta_data, n_channel, weight, bias,
+        save_mean, save_invstd, running_mean, running_var, train, eps);
+  }
+
+  BFloat16* output_data = output.data_ptr<BFloat16>();
+  const BFloat16* input_data = input.data_ptr<BFloat16>();
+
+  const int64_t loop_size = n_channel - (n_channel % bVec::size());
+  at::parallel_for(0, n_batch * image_size, 1, [&](int64_t begin, int64_t end) {
+    for (const auto i : c10::irange(begin, end)) {
+      const BFloat16* input_ptr = input_data + i * n_channel;
+      BFloat16* output_ptr = output_data + i * n_channel;
+      int64_t d = 0;
+      for (; d < loop_size; d += bVec::size()) {
+        fVec alpha_fvec0 = fVec::loadu(alpha_data + d);
+        fVec alpha_fvec1 = fVec::loadu(alpha_data + d + fVec::size());
+        fVec beta_fvec0 = fVec::loadu(beta_data + d);
+        fVec beta_fvec1 = fVec::loadu(beta_data + d + fVec::size());
+        bVec data_bvec = bVec::loadu(input_ptr + d);
+        fVec data_fvec0, data_fvec1;
+        std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+
+        fVec out_fvec0 = data_fvec0 * alpha_fvec0 + beta_fvec0;
+        fVec out_fvec1 = data_fvec1 * alpha_fvec1 + beta_fvec1;
+        bVec out_bvec = convert_float_bfloat16(out_fvec0, out_fvec1);
+        out_bvec.store(output_ptr + d);
+      }
+      for (; d < n_channel; d++) {
+        output_ptr[d] = BFloat16(float(input_ptr[d]) * alpha_data[d] + beta_data[d]);
+      }
+    }
+  });
+}
+
+template <typename param_t>
+inline void batch_norm_cpu_collect_stats_contiguous_internal(
+    Tensor& mean, Tensor& var_sum, const Tensor& input) {
+
+  using bVec = Vectorized<BFloat16>;
+  using fVec = Vectorized<float>;
+  int64_t n_batch = input.size(0);
+  int64_t n_channel = input.size(1);
+  int64_t image_size = input.numel() / n_batch / n_channel;
+  int64_t N = input.numel() / n_channel;
+
+  const BFloat16* input_data = input.data_ptr<BFloat16>();
+  param_t* mean_data = mean.data_ptr<param_t>();
+  param_t* var_sum_data = var_sum.data_ptr<param_t>();
+
+  at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
+    for (const auto c : c10::irange(begin, end)) {
+      float sum_val = float(0);
+      fVec sum_fvec = fVec(float(0));
+      for (int64_t n = 0; n < n_batch; n++) {
+        const BFloat16* input_ptr = input_data + n * n_channel * image_size + c * image_size;
+        int64_t d = 0;
+        for (; d < image_size - (image_size % bVec::size()); d += bVec::size()) {
+          bVec data_bvec = bVec::loadu(input_ptr + d);
+          fVec data_fvec0, data_fvec1;
+          std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+          sum_fvec += data_fvec0;
+          sum_fvec += data_fvec1;
+        }
+        for (; d < image_size; d++) {
+          sum_val += float(input_ptr[d]);
+        }
+      }
+      // TODO: use fast version
+      sum_val += vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, sum_fvec, fVec::size());
+      float mean_val = sum_val / N;
+      mean_data[c] = param_t(mean_val);
+
+      float var_val = float(0);
+      fVec var_fvec = fVec(float(0));
+      fVec mean_fvec = fVec(mean_val);
+      for (int64_t n = 0; n < n_batch; n++) {
+        const BFloat16* input_ptr = input_data + n * n_channel * image_size + c * image_size;
+        int64_t d = 0;
+        for (; d < image_size - (image_size % bVec::size()); d += bVec::size()) {
+          bVec data_bvec = bVec::loadu(input_ptr + d);
+          fVec data_fvec0, data_fvec1;
+          std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+          var_fvec += (data_fvec0 - mean_fvec) * (data_fvec0 - mean_fvec);
+          var_fvec += (data_fvec1 - mean_fvec) * (data_fvec1 - mean_fvec);
+        }
+        for (; d < image_size; d++) {
+          float data_val = input_ptr[d];
+          var_val += (data_val - mean_val) * (data_val - mean_val);
+        }
+      }
+      // TODO: use fast version
+      var_val += vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, var_fvec, fVec::size());
+      var_sum_data[c] = param_t(var_val);
+    }
+  });
+}
+
+template <>
+void batch_norm_cpu_collect_stats_contiguous_impl<BFloat16>(
+    Tensor& mean, Tensor& var_sum, const Tensor& input) {
+  const bool mixed_type = is_mixed_type(input, mean, var_sum);
+  if (mixed_type) {
+    batch_norm_cpu_collect_stats_contiguous_internal<float>(mean, var_sum, input);
+  } else {
+    batch_norm_cpu_collect_stats_contiguous_internal<BFloat16>(mean, var_sum, input);
+  }
+}
+
+static inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const BFloat16* ptr) {
+  return convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr));
+}
+
+static inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr) {
+  using Vec = Vectorized<float>;
+  return std::make_tuple(Vec::loadu(ptr), Vec::loadu(ptr + Vec::size()));
+}
+
+template <typename param_t>
+inline void batch_norm_cpu_collect_stats_channels_last_internal(
+    Tensor& mean, Tensor& var_sum, const Tensor& input) {
+
+  using bVec = Vectorized<BFloat16>;
+  using fVec = Vectorized<float>;
+  int64_t n_channel = input.size(1);
+  int64_t N = input.numel() / n_channel;
+
+  const BFloat16* input_data = input.data_ptr<BFloat16>();
+  param_t* mean_data = mean.data_ptr<param_t>();
+  param_t* var_sum_data = var_sum.data_ptr<param_t>();
+
+  int num_threads = at::get_num_threads();
+  Tensor buffer = at::empty({num_threads, n_channel}, input.options().dtype(kFloat)).zero_();
+  float* buffer_data = buffer.data_ptr<float>();
+
+  at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
+    int tid = at::get_thread_num();
+    TORCH_CHECK(tid < num_threads, "expect thread id smaller than ", num_threads, ", got thread id ", tid);
+    float* buffer_ptr = buffer_data + tid * n_channel;
+    for (const auto i : c10::irange(begin, end)) {
+      const BFloat16* input_ptr = input_data + i * n_channel;
+      int64_t d = 0;
+      for (; d < n_channel - (n_channel % bVec::size()); d += bVec::size()) {
+        bVec data_bvec = bVec::loadu(input_ptr + d);
+        fVec data_fvec0, data_fvec1;
+        std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+        fVec sum_fvec0 = fVec::loadu(buffer_ptr + d) + data_fvec0;
+        fVec sum_fvec1 = fVec::loadu(buffer_ptr + d + fVec::size()) + data_fvec1;
+        sum_fvec0.store(buffer_ptr + d);
+        sum_fvec1.store(buffer_ptr + d + fVec::size());
+      }
+      for (; d < n_channel; d++) {
+        buffer_ptr[d] += input_ptr[d];
+      }
+    }
+  });
+
+  for (const auto c : c10::irange(n_channel)) {
+    float sum = 0;
+    for (const auto t : c10::irange(num_threads)) {
+      sum += buffer_data[t * n_channel + c];
+    }
+    mean_data[c] = param_t(sum / N);
+  }
+
+  buffer.zero_();
+  at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
+    int tid = at::get_thread_num();
+    TORCH_CHECK(tid < num_threads, "expect thread id smaller than ", num_threads, ", got thread id ", tid);
+    float* buffer_ptr = buffer_data + tid * n_channel;
+    for (const auto i : c10::irange(begin, end)) {
+      const BFloat16* input_ptr = input_data + i * n_channel;
+      int64_t d = 0;
+      for (; d < n_channel - (n_channel % bVec::size()); d += bVec::size()) {
+        bVec data_bvec = bVec::loadu(input_ptr + d);
+        fVec data_fvec0, data_fvec1;
+        std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+        fVec mean_fvec0, mean_fvec1;
+        std::tie(mean_fvec0, mean_fvec1) = load2f(mean_data + d);
+        fVec var_fvec0 = fVec::loadu(buffer_ptr + d);
+        fVec var_fvec1 = fVec::loadu(buffer_ptr + d + fVec::size());
+        var_fvec0 += (data_fvec0 - mean_fvec0) * (data_fvec0 - mean_fvec0);
+        var_fvec1 += (data_fvec1 - mean_fvec1) * (data_fvec1 - mean_fvec1);
+        var_fvec0.store(buffer_ptr + d);
+        var_fvec1.store(buffer_ptr + d + fVec::size());
+      }
+      for (; d < n_channel; d++) {
+        float data_val = float(input_ptr[d]);
+        float mean_val = float(mean_data[d]);
+        buffer_ptr[d] += (data_val - mean_val) * (data_val - mean_val);
+      }
+    }
+  });
+
+  for (const auto c : c10::irange(n_channel)) {
+    float _var_sum = 0;
+    for (const auto t : c10::irange(num_threads)) {
+      _var_sum += buffer_data[t * n_channel + c];
+    }
+    var_sum_data[c] = param_t(_var_sum);
+  }
+}
+
+template <>
+void batch_norm_cpu_collect_stats_channels_last_impl<BFloat16>(
+    Tensor& mean, Tensor& var_sum, const Tensor& input) {
+  const bool mixed_type = is_mixed_type(input, mean, var_sum);
+  if (mixed_type) {
+    batch_norm_cpu_collect_stats_channels_last_internal<float>(mean, var_sum, input);
+  } else {
+    batch_norm_cpu_collect_stats_channels_last_internal<BFloat16>(mean, var_sum, input);
+  }
+}
+
+template <typename param_t>
+void batch_norm_cpu_backward_contiguous_internal(Tensor& grad_input, Tensor& grad_weight, Tensor& grad_bias,
+    const Tensor& grad_output, const Tensor& input, const Tensor& weight,
+    const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_invstd,
+    bool train, double eps) {
+
+  using bVec = Vectorized<BFloat16>;
+  using fVec = Vectorized<float>;
+  int64_t n_batch = input.size(0);
+  int64_t n_channel = input.size(1);
+  int64_t image_size = input.numel() / n_batch / n_channel;
+  int64_t N = input.numel() / n_channel;
+
+  const BFloat16* grad_output_data = grad_output.data_ptr<BFloat16>();
+  const BFloat16* input_data = input.data_ptr<BFloat16>();
+
+  BFloat16* grad_input_data = grad_input.defined() ? grad_input.data_ptr<BFloat16>() : nullptr;
+  param_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<param_t>() : nullptr;
+  param_t* grad_bias_data = grad_bias.defined() ? grad_bias.data_ptr<param_t>() : nullptr;
+  const bool grad_input_null = grad_input_data == nullptr;
+  const bool grad_weight_null = grad_weight_data == nullptr;
+  const bool grad_bias_null = grad_bias_data == nullptr;
+
+  auto weight_a = conditional_accessor_1d<param_t>(weight);
+  auto save_mean_a = conditional_accessor_1d<param_t>(save_mean);
+  auto save_invstd_a = conditional_accessor_1d<param_t>(save_invstd);
+  auto running_mean_a = conditional_accessor_1d<param_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<param_t>(running_var);
+
+  // parallel dim reduce on 'channel'
+  at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
+    for (const auto c : c10::irange(begin, end)) {
+      float w = weight.defined() ? float(weight_a[c]) : 1;
+
+      float mean, invstd;
+      if (train) {
+        mean = save_mean_a[c];
+        invstd = save_invstd_a[c];
+      } else {
+        mean = running_mean_a[c];
+        invstd = 1 / std::sqrt(running_var_a[c] + eps);
+      }
+
+      // compute 1) sum; 2) dot product of Q(X) and dY.
+      float sum{0}, dotp{0};
+      fVec sum_fvec{0}, dotp_fvec{0};
+      for (const auto n : c10::irange(n_batch)) {
+        const BFloat16* x_ptr = input_data + n * n_channel * image_size + c * image_size;
+        const BFloat16* dy_ptr = grad_output_data + n * n_channel * image_size + c * image_size;
+
+        int64_t d = 0;
+        for (; d < image_size - (image_size % bVec::size()); d += bVec::size()) {
+          bVec dy_bvec = bVec::loadu(dy_ptr + d);
+          fVec dy_fvec0, dy_fvec1;
+          std::tie(dy_fvec0, dy_fvec1) = convert_bfloat16_float(dy_bvec);
+          sum_fvec += dy_fvec0;
+          sum_fvec += dy_fvec1;
+
+          bVec x_bvec = bVec::loadu(x_ptr + d);
+          fVec x_fvec0, x_fvec1;
+          std::tie(x_fvec0, x_fvec1) = convert_bfloat16_float(x_bvec);
+          dotp_fvec += (x_fvec0 - fVec(mean)) * dy_fvec0;
+          dotp_fvec += (x_fvec1 - fVec(mean)) * dy_fvec1;
+        }
+        for (; d < image_size; d++) {
+          sum += float(dy_ptr[d]);
+          dotp += (float(x_ptr[d]) - mean) * float(dy_ptr[d]);
+        }
+      }
+      // TODO: use fast version
+      sum += vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, sum_fvec, fVec::size());
+      dotp += vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, dotp_fvec, fVec::size());
+
+      if (!grad_input_null) {
+        if (train) {
+          float k = (float) dotp * invstd * invstd / N;
+          float grad_mean = sum / N;
+          for (const auto n : c10::irange(n_batch)) {
+            const BFloat16* x_ptr = input_data + n * n_channel * image_size + c * image_size;
+            BFloat16* dx_ptr = grad_input_data + n * n_channel * image_size + c * image_size;
+            const BFloat16* dy_ptr = grad_output_data + n * n_channel * image_size + c * image_size;
+            vec::map2(
+                [=](fVec x, fVec dy) {
+                  fVec dx = (x - fVec(mean)) * fVec(k);
+                  return (dy - fVec(grad_mean) - dx) * fVec(invstd) * fVec(w);
+                },
+                dx_ptr, x_ptr, dy_ptr, image_size);
+          }
+        } else { // evaluation mode
+          for (const auto n : c10::irange(n_batch)) {
+            BFloat16* dx_ptr = grad_input_data + n * n_channel * image_size + c * image_size;
+            const BFloat16* dy_ptr = grad_output_data + n * n_channel * image_size + c * image_size;
+            vec::map(
+                [=](fVec dy) { return dy * fVec(invstd) * fVec(w); },
+                dx_ptr, dy_ptr, image_size);
+          }
+        }
+      }
+
+      if (!grad_weight_null) {
+        grad_weight_data[c] = param_t(dotp * invstd);
+      }
+
+      if (!grad_bias_null) {
+        grad_bias_data[c] = param_t(sum);
+      }
+    }
+  });
+}
+
+template <>
+void batch_norm_cpu_backward_contiguous_impl<BFloat16>(Tensor& grad_input, Tensor& grad_weight, Tensor& grad_bias,
+    const Tensor& grad_output, const Tensor& input, const Tensor& weight,
+    const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_invstd,
+    bool train, double eps) {
+  const bool mixed_type = is_mixed_type(input, weight, running_mean, running_var, save_mean, save_invstd);
+  if (mixed_type) {
+    batch_norm_cpu_backward_contiguous_internal<float>(grad_input, grad_weight, grad_bias,
+        grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
+  } else {
+    batch_norm_cpu_backward_contiguous_internal<BFloat16>(grad_input, grad_weight, grad_bias,
+        grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
+  }
+}
+
+template <typename param_t>
+void batch_norm_cpu_backward_channels_last_internal(Tensor& grad_input, Tensor& grad_weight, Tensor& grad_bias,
+    const Tensor& grad_output, const Tensor& input, const Tensor& weight,
+    const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_invstd,
+    bool train, double eps) {
+
+  using bVec = Vectorized<BFloat16>;
+  using fVec = Vectorized<float>;
+  int64_t n_channel = input.size(1);
+  int64_t N = input.numel() / n_channel;
+
+  const BFloat16* grad_output_data = grad_output.data_ptr<BFloat16>();
+  const BFloat16* input_data = input.data_ptr<BFloat16>();
+
+  BFloat16* grad_input_data = grad_input.defined() ? grad_input.data_ptr<BFloat16>() : nullptr;
+  param_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<param_t>() : nullptr;
+  param_t* grad_bias_data = grad_bias.defined() ? grad_bias.data_ptr<param_t>() : nullptr;
+
+  auto weight_a = conditional_accessor_1d<param_t>(weight);
+  auto save_mean_a = conditional_accessor_1d<param_t>(save_mean);
+  auto save_invstd_a = conditional_accessor_1d<param_t>(save_invstd);
+  auto running_mean_a = conditional_accessor_1d<param_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<param_t>(running_var);
+
+  // use float as acc type
+  bool weight_defined = weight.defined();
+  Tensor weight_f = at::empty({n_channel}, input.options().dtype(kFloat));
+  Tensor mean = at::empty({n_channel}, input.options().dtype(kFloat));
+  Tensor invstd = at::empty({n_channel}, input.options().dtype(kFloat));
+  float* weight_data = weight_f.data_ptr<float>();
+  float* mean_data = mean.data_ptr<float>();
+  float* invstd_data = invstd.data_ptr<float>();
+
+  for (const auto c : c10::irange(n_channel)) {
+    weight_data[c] = weight_defined ? float(weight_a[c]) : 1;
+
+    if (train) {
+      mean_data[c] = save_mean_a[c];
+      invstd_data[c] = save_invstd_a[c];
+    } else {
+      mean_data[c] = running_mean_a[c];
+      invstd_data[c] = 1 / std::sqrt(running_var_a[c] + eps);
+    }
+  }
+
+  int num_threads = at::get_num_threads();
+  Tensor buffer = at::empty({2, num_threads, n_channel}, input.options().dtype(kFloat)).zero_();
+  float* sum_data = buffer.data_ptr<float>();
+  float* dotp_data = sum_data + num_threads * n_channel;
+
+  at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
+    int tid = at::get_thread_num();
+    TORCH_CHECK(tid < num_threads, "expect thread id smaller than ", num_threads, ", got thread id ", tid);
+    float* sum_ptr = sum_data + tid * n_channel;
+    float* dotp_ptr = dotp_data + tid * n_channel;
+    for (const auto i : c10::irange(begin, end)) {
+      const BFloat16* x_ptr = input_data + i * n_channel;
+      const BFloat16* dy_ptr = grad_output_data + i * n_channel;
+
+      int64_t d = 0;
+      for(; d < n_channel - (n_channel % bVec::size()); d += bVec::size()) {
+        bVec dy_bvec = bVec::loadu(dy_ptr + d);
+        fVec dy_fvec0, dy_fvec1;
+        std::tie(dy_fvec0, dy_fvec1) = convert_bfloat16_float(dy_bvec);
+        fVec sum_fvec0 = dy_fvec0 + fVec::loadu(sum_ptr + d);
+        fVec sum_fvec1 = dy_fvec1 + fVec::loadu(sum_ptr + d + fVec::size());
+        sum_fvec0.store(sum_ptr + d);
+        sum_fvec1.store(sum_ptr + d + fVec::size());
+
+        bVec x_bvec = bVec::loadu(x_ptr + d);
+        fVec x_fvec0, x_fvec1;
+        std::tie(x_fvec0, x_fvec1) = convert_bfloat16_float(x_bvec);
+        fVec mean_fvec0 = fVec::loadu(mean_data + d);
+        fVec mean_fvec1 = fVec::loadu(mean_data + d + fVec::size());
+        fVec dotp_fvec0 = fVec::loadu(dotp_ptr + d);
+        fVec dotp_fvec1 = fVec::loadu(dotp_ptr + d + fVec::size());
+        dotp_fvec0 += (x_fvec0 - mean_fvec0) * dy_fvec0;
+        dotp_fvec1 += (x_fvec1 - mean_fvec1) * dy_fvec1;
+        dotp_fvec0.store(dotp_ptr + d);
+        dotp_fvec1.store(dotp_ptr + d + fVec::size());
+      }
+      for (; d < n_channel; d++) {
+        float dy_val = dy_ptr[d];
+        float x_val = x_ptr[d];
+        float mean_val = mean_data[d];
+        sum_ptr[d] += dy_val;
+        dotp_ptr[d] += (x_val - mean_val) * dy_val;
+      }
+    }
+  });
+
+  at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
+    for (const auto c : c10::irange(begin, end)) {
+      // store the final result of sum and dotp in the 1st lane of immediate buffer,
+      // so that we won't need to allocate anther buffer to store the temp values.
+      float _sum = 0;
+      for (const auto t : c10::irange(num_threads)) {
+        _sum += sum_data[t * n_channel + c];
+      }
+      sum_data[/* 0 * n_channel + */c] = _sum;
+
+      float _dotp = 0;
+      for (const auto t : c10::irange(num_threads)) {
+        _dotp += dotp_data[t * n_channel + c];
+      }
+      dotp_data[/* 0 * n_channel + */c] = _dotp;
+    }
+  });
+
+  // compute grad_input
+  if (grad_input.defined()) {
+    at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
+      for (const auto i : c10::irange(begin, end)) {
+        BFloat16* dx_ptr = grad_input_data + i * n_channel;
+        const BFloat16* x_ptr = input_data + i * n_channel;
+        const BFloat16* dy_ptr = grad_output_data + i * n_channel;
+        if (train) {
+          int64_t d = 0;
+          for (; d < n_channel - (n_channel % bVec::size()); d += bVec::size()) {
+            bVec x_bvec = bVec::loadu(x_ptr + d);
+            fVec x_fvec0, x_fvec1;
+            std::tie(x_fvec0, x_fvec1) = convert_bfloat16_float(x_bvec);
+            fVec mean_fvec0 = fVec::loadu(mean_data + d);
+            fVec mean_fvec1 = fVec::loadu(mean_data + d + fVec::size());
+            fVec dotp_fvec0 = fVec::loadu(dotp_data + d);
+            fVec dotp_fvec1 = fVec::loadu(dotp_data + d + fVec::size());
+            fVec invstd_fvec0 = fVec::loadu(invstd_data + d);
+            fVec invstd_fvec1 = fVec::loadu(invstd_data + d + fVec::size());
+            fVec k_fvec0 = dotp_fvec0 * invstd_fvec0 * invstd_fvec0 / fVec(N);
+            fVec k_fvec1 = dotp_fvec1 * invstd_fvec1 * invstd_fvec1 / fVec(N);
+            fVec dx_fvec0 = (x_fvec0 - mean_fvec0) * k_fvec0;
+            fVec dx_fvec1 = (x_fvec1 - mean_fvec1) * k_fvec1;
+            bVec dy_bvec = bVec::loadu(dy_ptr + d);
+            fVec dy_fvec0, dy_fvec1;
+            std::tie(dy_fvec0, dy_fvec1) = convert_bfloat16_float(dy_bvec);
+            fVec grad_mean_fvec0 = fVec::loadu(sum_data + d) / fVec(N);
+            fVec grad_mean_fvec1 = fVec::loadu(sum_data + d + fVec::size()) / fVec(N);
+            fVec w_fvec0 = fVec::loadu(weight_data + d);
+            fVec w_fvec1 = fVec::loadu(weight_data + d + fVec::size());
+            dx_fvec0 = (dy_fvec0 - grad_mean_fvec0 - dx_fvec0) * invstd_fvec0 * w_fvec0;
+            dx_fvec1 = (dy_fvec1 - grad_mean_fvec1 - dx_fvec1) * invstd_fvec1 * w_fvec1;
+            bVec dx_bvec = convert_float_bfloat16(dx_fvec0, dx_fvec1);
+            dx_bvec.store(dx_ptr + d);
+          }
+          for (; d < n_channel; d++) {
+            float x_val = x_ptr[d];
+            float mean_val = mean_data[d];
+            float dotp_val = dotp_data[d];
+            float invstd_val = invstd_data[d];
+            float k_val = dotp_val * invstd_val * invstd_val / N;
+            float dx_val = (x_val - mean_val) * k_val;
+            float dy_val = dy_ptr[d];
+            float grad_mean_val = sum_data[d] / N;
+            float w_val = weight_data[d];
+            dx_val = (dy_val - grad_mean_val - dx_val) * invstd_val * w_val;
+            dx_ptr[d] = BFloat16(dx_val);
+          }
+        } else { // evaluation mode
+          int64_t d = 0;
+          for (; d < n_channel - (n_channel % bVec::size()); d += bVec::size()) {
+            bVec dy_bvec = bVec::loadu(dy_ptr + d);
+            fVec dy_fvec0, dy_fvec1;
+            std::tie(dy_fvec0, dy_fvec1) = convert_bfloat16_float(dy_bvec);
+            fVec invstd_fvec0 = fVec::loadu(invstd_data + d);
+            fVec invstd_fvec1 = fVec::loadu(invstd_data + d + fVec::size());
+            fVec w_fvec0 = fVec::loadu(weight_data + d);
+            fVec w_fvec1 = fVec::loadu(weight_data + d + fVec::size());
+            fVec dx_fvec0 = dy_fvec0 * invstd_fvec0 * w_fvec0;
+            fVec dx_fvec1 = dy_fvec1 * invstd_fvec1 * w_fvec1;
+            bVec dx_bvec = convert_float_bfloat16(dx_fvec0, dx_fvec1);
+            dx_bvec.store(dx_ptr + d);
+          }
+          for (; d < n_channel; d++) {
+            float dy_val = dy_ptr[d];
+            float invstd_val = invstd_data[d];
+            float w_val = weight_data[d];
+            float dx_val = dy_val * invstd_val * w_val;
+            dx_ptr[d] = BFloat16(dx_val);
+          }
+        }
+      }
+    });
+  }
+
+  if (grad_weight.defined()) {
+    for (const auto c : c10::irange(n_channel)) {
+      grad_weight_data[c] = param_t(dotp_data[c] * invstd_data[c]);
+    }
+  }
+
+  if (grad_bias.defined()) {
+    for (const auto c : c10::irange(n_channel)) {
+      grad_bias_data[c] = param_t(sum_data[c]);
+    }
+  }
+}
+
+template <>
+void batch_norm_cpu_backward_channels_last_impl<BFloat16>(Tensor& grad_input, Tensor& grad_weight, Tensor& grad_bias,
+    const Tensor& grad_output, const Tensor& input, const Tensor& weight,
+    const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_invstd,
+    bool train, double eps) {
+  const bool mixed_type = is_mixed_type(input, weight, running_mean, running_var, save_mean, save_invstd);
+  if (mixed_type) {
+    batch_norm_cpu_backward_channels_last_internal<float>(grad_input, grad_weight, grad_bias,
+        grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
+  } else {
+    batch_norm_cpu_backward_channels_last_internal<BFloat16>(grad_input, grad_weight, grad_bias,
+        grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
+  }
+}
+
 void batch_norm_cpu_kernel(Tensor& output, const Tensor& input,
     const Tensor& weight, const Tensor& bias, const Tensor& save_mean,  const Tensor& save_invstd,
     const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
-  if (input.is_contiguous()) {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "batch_norm_cpu_contiguous", [&] {
-      batch_norm_cpu_contiguous_impl<scalar_t>(output, input, weight, bias,
-          save_mean, save_invstd, running_mean, running_var, train, eps);
+  int64_t image_size = input.numel() / input.size(0) / input.size(1);
+  if (input.is_contiguous()) { // NC11 is also channels last
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_contiguous", [&] {
+      if (image_size == 1) {
+        batch_norm_cpu_channels_last_impl<scalar_t>(output, input, weight, bias,
+            save_mean, save_invstd, running_mean, running_var, train, eps);
+      } else {
+        batch_norm_cpu_contiguous_impl<scalar_t>(output, input, weight, bias,
+            save_mean, save_invstd, running_mean, running_var, train, eps);
+      }
     });
   } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "batch_norm_cpu_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_channels_last", [&] {
       batch_norm_cpu_channels_last_impl<scalar_t>(output, input, weight, bias,
           save_mean, save_invstd, running_mean, running_var, train, eps);
     });
@@ -631,7 +1258,7 @@ void batch_norm_cpu_collect_stats_kernel(
     Tensor& mean, Tensor& var_sum, const Tensor& input) {
   int64_t image_size = input.numel() / input.size(0) / input.size(1);
   if (input.is_contiguous()) {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "batch_norm_cpu_collect_stats_contiguous", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_collect_stats_contiguous", [&] {
       if (image_size == 1) { // NC11 is also channels last
         batch_norm_cpu_collect_stats_channels_last_impl<scalar_t>(mean, var_sum, input);
       } else {
@@ -639,7 +1266,7 @@ void batch_norm_cpu_collect_stats_kernel(
       }
     });
   } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "batch_norm_cpu_collect_stats_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_collect_stats_channels_last", [&] {
       batch_norm_cpu_collect_stats_channels_last_impl<scalar_t>(mean, var_sum, input);
     });
   } else {
@@ -653,7 +1280,7 @@ void batch_norm_cpu_backward_kernel(Tensor& grad_input, Tensor& grad_weight, Ten
     bool train, double eps) {
   int64_t image_size = input.numel() / input.size(0) / input.size(1);
   if (input.is_contiguous()) {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "batch_norm_cpu_backward_contiguous", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_backward_contiguous", [&] {
       if (image_size == 1) { // NC11 is also channels last
         batch_norm_cpu_backward_channels_last_impl<scalar_t>(grad_input, grad_weight, grad_bias,
             grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
@@ -663,7 +1290,7 @@ void batch_norm_cpu_backward_kernel(Tensor& grad_input, Tensor& grad_weight, Ten
       }
     });
   } else if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "batch_norm_cpu_backward_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "batch_norm_cpu_backward_channels_last", [&] {
       batch_norm_cpu_backward_channels_last_impl<scalar_t>(grad_input, grad_weight, grad_bias,
           grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
     });

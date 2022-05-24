@@ -118,9 +118,9 @@ def attach_scale_zp_values_to_model(
     if hasattr(module, '_auto_quant_state'):
         qstate: AutoQuantizationState = module._auto_quant_state  # type: ignore[assignment]
         for tensor_id, observer in qstate.tensor_id_to_observer.items():
-            activation_int8_quantized = \
-                observer.dtype in [torch.quint8, torch.qint8]
-            if activation_int8_quantized:
+            activation_int8_or_int32_quantized = \
+                observer.dtype in [torch.quint8, torch.qint8, torch.qint32]
+            if activation_int8_or_int32_quantized:
                 scale, zp = observer.calculate_qparams()
                 # tensor_id_to_observer is a ModuleDict which has to have string keys
                 # tensor_id_to_scale_zp is a normal dict which can have int keys

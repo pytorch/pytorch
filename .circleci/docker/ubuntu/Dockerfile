@@ -30,14 +30,16 @@ RUN bash ./install_user.sh && rm install_user.sh
 
 # Install katex
 ARG KATEX
-ADD ./common/install_katex.sh install_katex.sh
-RUN bash ./install_katex.sh && rm install_katex.sh
+ADD ./common/install_docs_reqs.sh install_docs_reqs.sh
+RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
+ADD requirements-ci.txt /opt/conda/requirements-ci.txt
 ADD ./common/install_conda.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
+RUN rm /opt/conda/requirements-ci.txt
 
 # Install gcc
 ARG GCC_VERSION

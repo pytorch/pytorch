@@ -13,10 +13,14 @@ struct TORCH_API GraphFunction : public Function {
   GraphFunction(
       c10::QualifiedName name,
       std::shared_ptr<Graph> graph,
-      std::function<void(GraphFunction&)> function_creator)
+      std::function<void(GraphFunction&)> function_creator,
+      c10::optional<ExecutorExecutionMode> executor_execution_mode =
+          c10::nullopt)
       : name_(std::move(name)),
         graph_(std::move(graph)),
-        function_creator_(std::move(function_creator)) {}
+        function_creator_(std::move(function_creator)) {
+    executor_execution_mode_ = executor_execution_mode;
+  }
 
   bool isGraphFunction() const override {
     return true;
@@ -44,13 +48,26 @@ struct TORCH_API GraphFunction : public Function {
     }
     optimized_graph = graph_->copy();
     if (getGraphExecutorOptimize()) {
-      preoptimizeGraph(*optimized_graph);
+      preoptimizeGraph(*optimized_graph, force_no_amp_);
     }
     return *optimized_graph;
   }
 
   const c10::QualifiedName& qualname() const override {
     return name_;
+  }
+
+  // private/unstable api. sets the initial execution mode
+  // will not affect executor if there is an existing executor
+  // created for this function
+  void _set_initial_executor_execution_mode(ExecutorExecutionMode mode) {
+    executor_execution_mode_ = mode;
+  }
+  // private/unstable api. sets flag of whether or not to ignore amp.
+  // will not affect executor if there is an existing executor
+  // created for this function
+  void _set_ignore_amp(bool ignore_amp) {
+    force_no_amp_ = ignore_amp;
   }
 
   // if this isn't yet defined, run its method_creator function
@@ -92,14 +109,20 @@ struct TORCH_API GraphFunction : public Function {
       return *executor;
     }
     check_single_output();
-    executor = GraphExecutor(optimized_graph(), name_.name());
+    const std::string& name = name_.name();
+    std::shared_ptr<Graph> opt_graph = optimized_graph();
+    if (!executor_execution_mode_) {
+      executor = GraphExecutor(opt_graph, name);
+    } else {
+      executor = GraphExecutor(opt_graph, name, *executor_execution_mode_);
+    }
     return *executor;
   }
 
   using Function::call;
   bool call(
       Stack& stack,
-      size_t bailOut,
+      c10::optional<size_t> bailOut,
       c10::function_ref<void(const Code&)> f) override {
     f(get_executor().getPlanFor(stack, bailOut).code);
     return true;
@@ -128,6 +151,13 @@ struct TORCH_API GraphFunction : public Function {
   // The original, non-optimized graph
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
 
+  // allows users to specify Simple/Profiling Executor for function
+  // TODO: add more executors
+  mutable c10::optional<ExecutorExecutionMode> executor_execution_mode_;
+
+  // if invoked on a graph that has already traced through amp
+  // don't invoke amp pass
+  mutable bool force_no_amp_ = false;
   // Optimized graph, computed lazily. Used for inlining.
   mutable std::array<
       c10::optional<std::shared_ptr<Graph>>,

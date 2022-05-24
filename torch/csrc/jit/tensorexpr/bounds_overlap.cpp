@@ -1,10 +1,86 @@
 #include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
+#include <torch/csrc/jit/tensorexpr/stmt.h>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 namespace analysis {
+
+// Returns true if the given expression is guaranteed to be positive.
+bool mustBePositive(ExprPtr e) {
+  if (e->isConstant()) {
+    int e_val = immediateAs<int>(e);
+    return e_val > 0;
+  }
+  return false;
+}
+
+// Returns true if the given expression is guaranteed to be negative.
+bool mustBeNegative(ExprPtr e) {
+  if (e->isConstant()) {
+    int e_val = immediateAs<int>(e);
+    return e_val < 0;
+  }
+  return false;
+}
+
+// Returns true if the given expression is guaranteed to be zero.
+bool mustBeZero(ExprPtr e) {
+  if (e->isConstant()) {
+    int e_val = immediateAs<int>(e);
+    return e_val == 0;
+  }
+  return false;
+}
+
+void Bound::print() const {
+  std::cout << "(" << *start << ", " << *end << ")";
+}
+
+bool Bound::equals(const Bound& other) const {
+  return exprEquals(start, other.start) && exprEquals(end, other.end);
+}
+
+bool Bound::operator==(const Bound& other) const {
+  if (equals(other)) {
+    auto ret_expr = IRSimplifier::simplify(alloc<Sub>(start, end));
+    return mustBeZero(ret_expr);
+  }
+
+  return false;
+}
+
+bool Bound::operator!=(const Bound& other) const {
+  return (*this < other) || (*this > other);
+}
+
+bool Bound::operator>=(const Bound& other) const {
+  if (*this == other) {
+    return true;
+  }
+  auto ret_expr = IRSimplifier::simplify(alloc<Sub>(start, other.end));
+  return mustBePositive(ret_expr) || mustBeZero(ret_expr);
+}
+
+bool Bound::operator>(const Bound& other) const {
+  auto ret_expr = IRSimplifier::simplify(alloc<Sub>(start, other.end));
+  return mustBePositive(ret_expr);
+}
+
+bool Bound::operator<=(const Bound& other) const {
+  if (*this == other) {
+    return true;
+  }
+  auto ret_expr = IRSimplifier::simplify(alloc<Sub>(end, other.start));
+  return mustBeNegative(ret_expr) || mustBeZero(ret_expr);
+}
+
+bool Bound::operator<(const Bound& other) const {
+  auto ret_expr = IRSimplifier::simplify(alloc<Sub>(end, other.start));
+  return mustBeNegative(ret_expr);
+}
 
 OverlapKind boundOverlap(Bound a, Bound b) {
   // If they're equal they're equal.
@@ -14,16 +90,30 @@ OverlapKind boundOverlap(Bound a, Bound b) {
     return ContainedOrEqual;
   }
 
+  // We have to figure out if the bounds fall under the following 2 cases:
+  // 1. a is before b
+  //      a.start ... a.end ... b.start ... b.end
+  // 2. b is before a
+  //      b.start ... b.end ... a.start ... a.end
+  //
+  // So, we compute "a.start - b.end" and "b.start - a.end". If even one of
+  // those is positive, then it is guaranteed that the bounds do not overlap.
+  //
+  // If the diff is a constant, then we can directly check if the constant is
+  // positive. If the diff is not a constant, then it will be made of
+  // variables that correspond to the bounds of buffers involved. These buffer
+  // bounds can never be negative. So, we check if the given expression is
+  // guaranteed to be positive under the assumption that the variables involved
+  // are never negative.
+
   ExprPtr lowDiff = IRSimplifier::simplify(alloc<Sub>(a.start, b.end));
   ExprPtr highDiff = IRSimplifier::simplify(alloc<Sub>(b.start, a.end));
 
-  if (lowDiff->isConstant() && highDiff->isConstant()) {
-    int low = immediateAs<int>(lowDiff);
-    int high = immediateAs<int>(highDiff);
-    // No overlap.
-    if (low > 0 || high > 0) {
-      return NoOverlap;
-    }
+  if (mustBePositive(lowDiff)) {
+    return NoOverlap;
+  }
+  if (mustBePositive(highDiff)) {
+    return NoOverlap;
   }
 
   ExprPtr diff_start = IRSimplifier::simplify(alloc<Sub>(b.start, a.start));
@@ -46,6 +136,27 @@ OverlapKind boundOverlap(Bound a, Bound b) {
   // We can't be sure there's no overlap so the conservative answer is
   // partial.
   return PartialOverlap;
+}
+
+CmpEvalResult TORCH_API compareBound(
+    const Bound& a,
+    const Bound& b,
+    const CompareSelectOperation& cmp_op) {
+  switch (cmp_op) {
+    case CompareSelectOperation::kGT:
+      return (a > b) ? TRUE : (a <= b ? FALSE : NOT_DETERMINED);
+    case CompareSelectOperation::kGE:
+      return (a >= b) ? TRUE : (a < b ? FALSE : NOT_DETERMINED);
+    case CompareSelectOperation::kLT:
+      return (a < b) ? TRUE : (a >= b ? FALSE : NOT_DETERMINED);
+    case CompareSelectOperation::kLE:
+      return (a <= b) ? TRUE : (a > b ? FALSE : NOT_DETERMINED);
+    case CompareSelectOperation::kNE:
+      return (a != b) ? TRUE : (a == b ? FALSE : NOT_DETERMINED);
+    default:
+      TORCH_INTERNAL_ASSERT(cmp_op == CompareSelectOperation::kEQ)
+      return (a == b) ? TRUE : (a != b ? FALSE : NOT_DETERMINED);
+  }
 }
 
 bool indexBoundsEquals(const IndexBounds& A, const IndexBounds& B) {
@@ -113,7 +224,15 @@ OverlapKind overlaps(const IndexBounds& a, const IndexBounds& b) {
   return overlap;
 }
 
-std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
+std::vector<Bound> subtractBound(Bound a, Bound b) {
+  OverlapKind overlap = boundOverlap(a, b);
+  if (overlap == NoOverlap) {
+    return {a};
+  }
+  if (overlap == ContainedOrEqual) {
+    return {};
+  }
+
   // The bounds must overlap.
   std::vector<Bound> res;
 
@@ -170,18 +289,6 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
   return res;
 }
 
-std::vector<Bound> subtractBound(Bound a, Bound b) {
-  OverlapKind overlap = boundOverlap(a, b);
-  if (overlap == NoOverlap) {
-    return {a};
-  }
-  if (overlap == ContainedOrEqual) {
-    return {};
-  }
-
-  return subtractBound(a, b, overlap);
-}
-
 std::vector<IndexBounds> subtractIndicesBounds(
     const IndexBounds& A,
     const IndexBounds& B,
@@ -225,8 +332,14 @@ std::vector<IndexBounds> subtractIndicesBounds(
         remaining = A[i];
       } else {
         auto remainingSlices = subtractBound(remaining, slice);
-        TORCH_INTERNAL_ASSERT(remainingSlices.size() == 1, buildErrorMessage());
-        remaining = remainingSlices[0];
+        // In some cases, we might end up with empty remainingSlices due to the
+        // optimization done in subtraction while handling diff expressions
+        // that have a single variable in `subtractBound()`.
+        if (!remainingSlices.empty()) {
+          TORCH_INTERNAL_ASSERT(
+              remainingSlices.size() == 1, buildErrorMessage());
+          remaining = remainingSlices[0];
+        }
       }
     }
 

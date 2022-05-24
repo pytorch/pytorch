@@ -9,6 +9,14 @@ namespace {
 
 using scope_list = std::vector<ScopePtr>;
 
+// Annotated attributes retrieved from module by inspecting module annotations.
+// These attributes are not used inside the subgraph of ONNX local function
+// because they are not created by PyTorch JIT tracing, but they may be used by
+// consumers to determine whether or not to replace the function with a
+// particular fused kernel.
+static std::unordered_map<ScopePtr, Node*> scope_attr_map_;
+static std::shared_ptr<Graph> scope_attr_graph_ = std::make_shared<Graph>();
+
 static bool HasSameAttribute(
     const Node* a,
     const Node* b,
@@ -49,7 +57,6 @@ struct FunctionExtractor {
         scope_ctx_map& scope_ctxs);
     void DebugPrint() const;
     void SetAttrName(Node* ref_n, Symbol attr, const std::string& name);
-    void SetAttrName(Node* ref_const_n, const std::string& name);
     c10::optional<std::string> FindAttrName(Node* ref_n, Symbol attr);
     c10::optional<std::string> FindAttrName(Node* ref_const_n);
 
@@ -487,12 +494,51 @@ Node* FunctionExtractor::CreateFunctionDefNode(
     auto* n = n_it.first;
     for (const auto& attr_it : n_it.second) {
       const auto& attr = attr_it.first;
-      auto attr_name =
-          std::string(n->kind().toUnqualString()) + '_' + attr.toUnqualString();
+      // Add prefix "inferred::" to name of inferred attribute.
+      // This is to differentiate from annotated attributes picked up
+      // from python module annotation.
+      auto attr_name = "inferred::" + std::string(n->kind().toUnqualString()) +
+          '_' + attr.toUnqualString();
       auto final_attr_name = adjust_attr_name(attr_name);
       final_attr_names.emplace_back(final_attr_name);
       func_ctx.SetAttrName(n, attr, final_attr_name);
     }
+  }
+
+  // Set annotated attributes
+  std::unordered_set<Symbol> annotated_attr_names;
+  bool first_iteration = true;
+  for (const auto& it : func_ctx.scope_ctxs_) {
+    auto scope = it.first;
+    auto annotated_attr_node = scope_attr_map_.find(scope);
+    if (annotated_attr_node != scope_attr_map_.end()) {
+      auto names = annotated_attr_node->second->attributeNames();
+      if (first_iteration) {
+        std::copy(
+            names.begin(),
+            names.end(),
+            std::inserter(annotated_attr_names, annotated_attr_names.end()));
+        first_iteration = false;
+      } else {
+        auto unseen_attr_name = std::find_if(
+            names.begin(),
+            names.end(),
+            [&annotated_attr_names](const Symbol& name) {
+              return annotated_attr_names.find(name) ==
+                  annotated_attr_names.end();
+            });
+        TORCH_CHECK(
+            unseen_attr_name == names.end(),
+            "Found outstanding annotated attribute ",
+            *unseen_attr_name,
+            " from module ",
+            scope->name(),
+            ". Please ensure module instances of the same class have the same set of annotated attributes.");
+      }
+    }
+  }
+  for (auto attr_name : annotated_attr_names) {
+    final_attr_names.emplace_back(attr_name.toUnqualString());
   }
 
   func_def_n->ss_(Symbol::attr("attributes"), final_attr_names);
@@ -572,6 +618,16 @@ Node* FunctionExtractor::CreateFunctionNode(
           break;
         }
       }
+    }
+  }
+
+  // annotated attributes
+  auto scope = scope_ctx.scope_;
+  auto annotated_attr_node = scope_attr_map_.find(scope);
+  if (annotated_attr_node != scope_attr_map_.end()) {
+    auto node = annotated_attr_node->second;
+    for (auto attr : node->attributeNames()) {
+      copy_attr(node, func_n, attr, attr.toUnqualString());
     }
   }
 
@@ -1020,6 +1076,29 @@ NodeAttrNameMap FunctionExtractor::run() {
   return node_attr_to_name;
 }
 
+// Retrieves the node representing the most recent
+// ScopePtr. This function should only be invoked from module forward hook. At
+// this point, module forward call is completed, and the most recent ScopePtr
+// is popped from TracingState.
+// This function inspects the node, and its subblock, to find
+// the node associated with the most recent ScopePtr.
+Node* NodeOfMostRecentScope(Node* forward_node) {
+  TORCH_INTERNAL_ASSERT(
+      forward_node->kind() == prim::TracedModuleForward,
+      "forward_node got kind: ",
+      forward_node->kind().toDisplayString());
+  auto* block = forward_node->blocks()[0];
+  for (auto* node : block->nodes().reverse()) {
+    if (node->kind() == prim::TracedModuleForward) {
+      Node* target_node = NodeOfMostRecentScope(node);
+      if (scope_attr_map_.find(node->scope()) == scope_attr_map_.end()) {
+        return target_node;
+      }
+    }
+  }
+  return forward_node;
+}
+
 } // namespace
 
 // FunctionExtractor runs in the following steps. Updates are made inplace to
@@ -1043,6 +1122,62 @@ NodeAttrNameMap ONNXFunctionExtraction(
       std::vector<std::string>{module_names.begin(), module_names.end()});
   FunctionExtractor fe(graph, module_names, param_names);
   return fe.run();
+}
+
+Node* ONNXGetPreviousScope(std::shared_ptr<Graph>& graph) {
+  auto* last_node = graph->nodes().back()->prev();
+  auto* scope_node = NodeOfMostRecentScope(last_node);
+  auto* attr_node = scope_attr_graph_->create(prim::TracedModuleForward);
+  attr_node->setScope(scope_node->scope());
+  TORCH_INTERNAL_ASSERT(
+      scope_attr_map_.find(scope_node->scope()) == scope_attr_map_.end(),
+      "Found duplicated scope. Scope ",
+      scope_node->scope()->namesFromRoot(),
+      " already processed.");
+  scope_attr_map_[scope_node->scope()] = attr_node;
+  return attr_node;
+}
+
+void ONNXClearScopeRecords() {
+  scope_attr_map_.clear();
+  scope_attr_graph_ = std::make_shared<Graph>();
+}
+
+void ONNXTrackScopeAttributes(
+    std::shared_ptr<Graph>& graph,
+    std::map<std::string, IValue>& attributes) {
+  // Skip the "real" last node which is `return_node`.
+  auto* last_node = graph->nodes().back()->prev();
+  auto* scope_node = NodeOfMostRecentScope(last_node);
+  auto* attr_node = scope_attr_graph_->create(prim::TracedModuleForward);
+  attr_node->setScope(scope_node->scope());
+  TORCH_INTERNAL_ASSERT(
+      scope_attr_map_.find(scope_node->scope()) == scope_attr_map_.end());
+  scope_attr_map_[scope_node->scope()] = attr_node;
+
+  for (const auto& it : attributes) {
+    auto k = Symbol::attr(it.first);
+    auto v = it.second;
+    if (v.isTensor()) {
+      attr_node->t_(k, v.toTensor());
+    } else if (v.isInt()) {
+      attr_node->i_(k, v.toInt());
+    } else if (v.isDouble()) {
+      attr_node->f_(k, v.toDouble());
+    } else if (v.isBool()) {
+      attr_node->i_(k, v.toBool());
+    } else if (v.isString()) {
+      attr_node->s_(k, v.toString()->string());
+    } else if (v.isIntList()) {
+      attr_node->is_(k, v.toIntList().vec());
+    } else if (v.isBoolList()) {
+      auto bool_list = v.toBoolList();
+      attr_node->is_(
+          k, std::vector<int64_t>(bool_list.begin(), bool_list.end()));
+    } else if (v.isDoubleList()) {
+      attr_node->fs_(k, v.toDoubleList().vec());
+    }
+  }
 }
 
 } // namespace onnx

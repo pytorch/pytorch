@@ -147,7 +147,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
       return c10::nullopt;
     }
     auto axes_a = inputTensorValues[3].accessor<int64_t, 1>();
-    axes.reserve(inputTensorValues[3].sizes()[0]);
+    axes.resize(inputTensorValues[3].sizes()[0]);
     // ONNX slice accepts negative axis, fix this for aten op
     for (const auto i : c10::irange(inputTensorValues[3].sizes()[0])) {
       axes[i] = axes_a[i] < 0 ? axes_a[i] + inputTensorValues[0].sizes().size()
@@ -447,6 +447,26 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     int p = node->kind() == onnx::ReduceL1 ? 1 : 2;
     updated_val = at::norm(
         inputTensorValues[0], p, node->is(attr::axes), node->i(attr::keepdims));
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::ReduceProd) {
+    int64_t rank = inputTensorValues[0].sizes().size();
+    std::vector<int64_t> axes;
+    if (!node->hasAttributeS("axes")) {
+      axes = std::vector<int64_t>(rank);
+      std::iota(axes.rbegin(), axes.rend(), 0);
+    } else {
+      for (const auto& axis : node->is(attr::axes)) {
+        axes.emplace_back(axis < 0 ? axis + rank : axis);
+      }
+      std::sort(axes.begin(), axes.end(), std::greater<>());
+    }
+
+    bool keepdims =
+        node->hasAttributeS("keepdims") ? node->i(attr::keepdims) : true;
+    updated_val = inputTensorValues[0];
+    for (const auto& axis : axes) {
+      updated_val = at::prod(updated_val, axis, keepdims);
+    }
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Gather) {
     assert(inputTensorValues.size() == 2);

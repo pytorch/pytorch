@@ -71,13 +71,13 @@ TORCH_PRECOMPUTE_META_FUNC(fractional_max_pool3d)(
 
   if (ndims == 4) {
     /* resize output */
-    set_output(0, {numPlanes, outputT, outputH, outputW}, input_.options());
+    set_output_raw_strided(0, {numPlanes, outputT, outputH, outputW}, {}, input_.options());
     /* indices will contain the locations for each output point */
-    set_output(1, {numPlanes, outputT, outputH, outputW}, input_.options().dtype(kLong));
+    set_output_raw_strided(1, {numPlanes, outputT, outputH, outputW}, {}, input_.options().dtype(kLong));
   } else {
-    set_output(0, {numBatch, numPlanes, outputT, outputH, outputW}, input_.options());
+    set_output_raw_strided(0, {numBatch, numPlanes, outputT, outputH, outputW}, {}, input_.options());
     /* indices will contain the locations for each output point */
-    set_output(1, {numBatch, numPlanes, outputT, outputH, outputW}, input_.options().dtype(kLong));
+    set_output_raw_strided(1, {numBatch, numPlanes, outputT, outputH, outputW}, {}, input_.options().dtype(kLong));
   }
 
   return TORCH_PRECOMPUTE_STRUCT(fractional_max_pool3d)().set_numBatch(numBatch).set_numPlanes(numPlanes).set_inputT(inputT).set_inputH(inputH).set_inputW(inputW)
@@ -106,8 +106,9 @@ static std::vector<int> generate_intervals(
         static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
     }
   }
-  sequence[outputSize - 1] = inputSize - poolSize;
-
+  if (outputSize > 0) {
+    sequence[outputSize - 1] = inputSize - poolSize;
+  }
   return sequence;
 }
 
@@ -238,7 +239,6 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
   int64_t inputW,
   const at::Tensor& output,
   const at::Tensor& indices) {
-
   /* get contiguous input */
   auto input = input_.contiguous();
 

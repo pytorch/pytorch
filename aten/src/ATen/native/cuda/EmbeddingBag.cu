@@ -1,12 +1,26 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
 
-#include <ATen/AccumulateType.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/_embedding_bag_native.h>
+#include <ATen/ops/_embedding_bag_forward_only_native.h>
+#include <ATen/ops/_embedding_bag_dense_backward_native.h>
+#include <ATen/ops/_embedding_bag_per_sample_weights_backward_native.h>
+#endif
 
 #include <ATen/cuda/cub.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
@@ -53,7 +67,7 @@ __global__ void EmbeddingBag_updateOutputKernel_max(
     index_t *offset2bag, int64_t numIndices, int64_t numBags,
     int64_t featureSize, int64_t weight_stride0, int64_t weight_stride1,
     index_t *bag_size, index_t *max_indices,
-    index_t padding_idx, int64_t vocab_size) {
+    index_t padding_idx) {
 
   // the strategy here is that each bag x feature is handled by a single thread
 
@@ -74,7 +88,6 @@ __global__ void EmbeddingBag_updateOutputKernel_max(
       int64_t bag_size_ = 0;
       int64_t maxWord = -1;
       for (int64_t emb = begin; emb < end; emb++) {
-        CUDA_KERNEL_ASSERT(input[emb] >= 0 && input[emb] < vocab_size);
         bool pad = (input[emb] == padding_idx);
         const int64_t weightRow = input[emb] * weight_stride0;
         scalar_t weightValue = weightFeat[weightRow];
@@ -104,7 +117,7 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
     int64_t featureSize, int64_t weight_stride0, int64_t weight_stride1,
     int mode, index_t *bag_size,
     scalar_t* per_sample_weights, int64_t per_sample_weights_stride,
-    index_t padding_idx, int64_t vocab_size) {
+    index_t padding_idx) {
 
   // the strategy here is that each bag x feature is handled by a single thread
 
@@ -125,7 +138,6 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
       accscalar_t weightFeatSum = 0;
       int64_t bag_size_ = 0;
       for (int64_t emb = begin; emb < end; emb++) {
-        CUDA_KERNEL_ASSERT(input[emb] >= 0 && input[emb] < vocab_size);
         bool pad = (input[emb] == padding_idx);
         const int64_t weightRow = input[emb] * weight_stride0;
         scalar_t weightValue = weightFeat[weightRow];
@@ -350,7 +362,6 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
     numBags -= 1;
   }
   int64_t featureSize = weight.size(1);
-  int64_t vocabSize = weight.size(0);
 
   auto bag_size = at::empty(offsets.sizes(), indices.options());
   auto offset2bag =
@@ -384,7 +395,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
             offset2bag.data_ptr<index_t>(), numIndices, numBags, featureSize,
             weight.stride(0), weight.stride(1), bag_size.data_ptr<index_t>(),
             max_indices.data_ptr<index_t>(),
-            padding_idx, vocabSize);
+            padding_idx);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         EmbeddingBag_updateOutputKernel_sum_mean<scalar_t, index_t><<<grid, block, 0, stream>>>(
@@ -394,7 +405,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
             weight.stride(0), weight.stride(1), mode, bag_size.data_ptr<index_t>(),
             per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
             per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
-            padding_idx, vocabSize);
+            padding_idx);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     });
@@ -515,7 +526,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
   AT_ASSERT(weight.size(1) == embedding_features);
 
   const int threads_per_block = 512;
-  const int warps_per_block = threads_per_block / C10_WARP_SIZE;
+  const int warps_per_block = threads_per_block / at::cuda::warp_size();
 
   dim3 block(threads_per_block);
   dim3 grid((num_samples + warps_per_block - 1) / warps_per_block);

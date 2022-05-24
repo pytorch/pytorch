@@ -398,7 +398,7 @@ template <
         index<std::tuple_size<HeadTuple>::value, int> = 0> decltype(auto)
         extract_tuple_element_by_index(
             HeadTuple&& head_tuple,
-            TailTuples&&... tail_tuples) {
+            TailTuples&&... /*tail_tuples*/) {
   // TODO if constexpr instead of enable_if
   return std::get<index>(std::forward<HeadTuple>(head_tuple));
 }
@@ -409,7 +409,7 @@ template <
     class... TailTuples,
     std::enable_if_t<index >= std::tuple_size<HeadTuple>::value, int> = 0>
 decltype(auto) extract_tuple_element_by_index(
-    HeadTuple&& head_tuple,
+    HeadTuple&& /*head_tuple*/,
     TailTuples&&... tail_tuples) {
   // TODO if constexpr instead of enable_if
   return extract_tuple_element_by_index<

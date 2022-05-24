@@ -354,8 +354,6 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
             this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER);
         column_offset_ptr = packed_filter.column_offsets.get();
       } else {
-        vector<TensorQuantizationParams> temp_qparams;
-        temp_qparams.push_back(in_qparams_[1]);
         column_offset_temp.resize(M);
         ComputeColumnOffsets<T_signed>(
             KernelDim_(),
@@ -367,7 +365,7 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
       }
       for (int i = 0; i < M; ++i) {
         (*b_quantized_)[i] -=
-            in_qparams_[0].zero_point * (*column_offset_ptr)[i];
+            in_qparams_[INPUT].zero_point * (*column_offset_ptr)[i];
       }
     }
   }
@@ -387,8 +385,6 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
           this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER);
       column_offset_ptr = packed_filter.column_offsets.get();
     } else {
-      vector<TensorQuantizationParams> temp_qparams;
-      temp_qparams.push_back(in_qparams_[1]);
       column_offset_temp.resize(M);
       ComputeColumnOffsets<T_signed>(
           KernelDim_(),
@@ -399,7 +395,7 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
       column_offset_ptr = &column_offset_temp;
     }
     for (int i = 0; i < M; ++i) {
-      (*b_quantized_)[i] -= in_qparams_[0].zero_point * (*column_offset_ptr)[i];
+      (*b_quantized_)[i] -= in_qparams_[INPUT].zero_point * (*column_offset_ptr)[i];
     }
   }
 }

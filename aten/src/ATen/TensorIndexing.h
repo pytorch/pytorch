@@ -217,7 +217,7 @@ static inline Tensor applySelect(
     int64_t dim,
     int64_t index,
     int64_t real_dim,
-    const at::Device& self_device,
+    const at::Device& /*self_device*/,
     const IntArrayRef& self_sizes) {
   TORCH_CHECK_INDEX(
     !(index == 0 && dim == 0 && self_sizes.size() == 0),
@@ -272,7 +272,7 @@ static inline void recordTensorIndex(const Tensor& tensor, std::vector<Tensor>& 
   (*dim_ptr)++;
 };
 
-static inline c10::List<c10::optional<Tensor>> typeConvertIndices(const Tensor& self, std::vector<Tensor>&& indices) {
+static inline c10::List<c10::optional<Tensor>> typeConvertIndices(const Tensor& /*self*/, std::vector<Tensor>&& indices) {
   c10::List<c10::optional<Tensor>> converted_inds;
   converted_inds.reserve(indices.size());
   for (const auto &i: indices){

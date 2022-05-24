@@ -1,6 +1,9 @@
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@rules_cc//cc:defs.bzl", "cc_library")
-load("//tools/config:defs.bzl", "if_cuda")
+load("//:tools/bazel.bzl", "rules")
+load(":build.bzl", "define_targets")
+
+define_targets(rules = rules)
 
 # The bool_flag targets allow configuring the build from the
 # command-line, e.g. --//c10:use_gflags or --no//c10:use_gflags to
@@ -45,29 +48,5 @@ cc_library(
         ":using_glog": ["@com_github_glog//:glog"],
         "//conditions:default": [],
     }),
-    visibility = ["//:__pkg__"],
-)
-
-cc_library(
-    name = "c10",
-    deps = [
-        "//c10/core:CPUAllocator",
-        "//c10/core:ScalarType",
-        "//c10/core:alignment",
-        "//c10/core:alloc_cpu",
-        "//c10/core:base",
-        "//c10/macros",
-        "//c10/mobile:CPUCachingAllocator",
-        "//c10/mobile:CPUProfilingAllocator",
-        "//c10/util:TypeCast",
-        "//c10/util:base",
-        "//c10/util:typeid",
-    ] + if_cuda(
-        [
-            "//c10/cuda",
-            "//c10/cuda:Macros",
-        ],
-        [],
-    ),
     visibility = ["//:__pkg__"],
 )

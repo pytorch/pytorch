@@ -66,6 +66,7 @@ class TORCH_CUDA_CU_API FusionGuard {
   ~FusionGuard();
 
   static Fusion* getCurFusion();
+  static void setCurFusion(Fusion* fusion);
 };
 
 //! Fusion is mutable but unique. Nodes cannot be copied in any way from one
@@ -135,7 +136,7 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
   void printTransforms();
 
   //! Lower the fusion and print a kernel
-  void printKernel();
+  void printKernel(DataType index_type = DataType::Int);
 
   //! Return a list of topologically sorted expressions. This only includes
   //! exprs required to genereate registered outputs.

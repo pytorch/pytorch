@@ -326,8 +326,6 @@ void HaloInfo::insertToInheritanceMap(
 void HaloInfo::initializeFromRootAxisInfo(IterDomain* id) {
   TORCH_INTERNAL_ASSERT(hasRootAxisInfo(id));
 
-  auto gpu_lower = GpuLower::current();
-
   const auto& halo_info = getRootAxisInfo(id);
   auto halo_width = halo_info.width();
 
@@ -350,8 +348,6 @@ void HaloInfo::setHaloWidth(IterDomain* id, int halo_width) {
 
 // Propagate extent information from root axes to descendants
 void HaloInfo::build(TensorDomain* td) {
-  auto gpu_lower = GpuLower::current();
-
   auto exprs = DependencyCheck::getAllExprsBetween(
       {td->getMaybeRFactorDomain().begin(), td->getMaybeRFactorDomain().end()},
       {td->domain().begin(), td->domain().end()});
@@ -473,12 +469,11 @@ void HaloInfo::build(TensorDomain* td) {
 //! vectorization. Vectorization should be eventually supported but
 //! needs further work.
 void HaloInfo::validate(TensorView* tv) const {
-  const auto& par_map = GpuLower::current()->caParallelMap();
-  const auto& loop_map = GpuLower::current()->caLoopMap();
   const auto mem_type = tv->getMemoryType();
 
   for (auto axis : tv->domain()->domain()) {
-    auto concrete_id = par_map.getConcreteMappedID(axis);
+    auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
+        axis, IdMappingMode::LOOP);
 
     // The extent is assumed to be the same
     TORCH_INTERNAL_ASSERT(
@@ -525,7 +520,8 @@ void HaloInfo::validate(TensorView* tv) const {
           consumer->domain()->domain().begin(),
           consumer->domain()->domain().end(),
           [&](IterDomain* consumer_axis) {
-            return loop_map.areMapped(axis, consumer_axis);
+            return GpuLower::current()->caMap()->areMapped(
+                axis, consumer_axis, IdMappingMode::PERMISSIVE);
           });
       if (it == consumer->domain()->domain().end()) {
         continue;
@@ -627,7 +623,8 @@ bool extentCompare(
     Cmp cmp) {
   auto gpu_lower = GpuLower::current();
   TORCH_INTERNAL_ASSERT(
-      gpu_lower->caLoopMap().areMapped(id1, id2), "Invalid axes to compare");
+      gpu_lower->caMap()->areMapped(id1, id2, IdMappingMode::PERMISSIVE),
+      "Invalid axes to compare");
 
   // It's invalid to compare two axes and when only either of them has
   // halo.

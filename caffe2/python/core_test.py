@@ -308,7 +308,7 @@ class TestCreateOperator(test_util.TestCase):
         self.assertTrue(op.HasField('device_option'))
         self.assertEqual(op.device_option.device_type, workspace.GpuDeviceType)
         self.assertEqual(op.device_option.device_id, 1)
-        self.assertTrue(len(op.arg), 3)
+        self.assertEqual(len(op.arg), 3)
 
         # can't guarantee ordering of kwargs, so generate a set of args
         # to test with

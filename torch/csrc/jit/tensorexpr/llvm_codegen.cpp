@@ -212,6 +212,9 @@ class LLVMCodeGenImpl : public IRVisitor {
 
   std::unordered_map<VarPtr, int> varToArg_;
   std::unordered_map<VarPtr, llvm::Value*> varToVal_;
+  std::unordered_set<BufPtr> bufsExtAlloc_;
+  std::unordered_map<VarPtr, llvm::Value*> bufsExtToFreeVal_;
+  std::unordered_multimap<BufPtr, BufPtr> bufsExtAllocReuse_;
   std::unordered_map<BlockPtr, std::vector<VarPtr>> scopeToVar_;
   BlockPtr scope_;
 
@@ -245,6 +248,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   llvm::Value* packFuncArgs(const std::vector<llvm::Value*>& func_args);
   std::vector<llvm::Value*> unpackFuncArgs(llvm::Value* packed, int arg_count);
   void processParallelFor(ForPtr v);
+  void handleBufReuse(BufPtr buf, BufPtr buf_to_reuse);
 
  public:
   LLVMCodeGenImpl(
@@ -292,10 +296,12 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(IntrinsicsPtr v) override;
   void visit(AllocatePtr v) override;
   void visit(FreePtr v) override;
+  void visit(FreeExtPtr v) override;
   void visit(PlacementAllocatePtr v) override;
   void visit(LetPtr v) override;
   void visit(CondPtr v) override;
   void visit(ExternalCallPtr v) override;
+  void visit(ExternalCallWithAllocPtr v) override;
 
   void emitIsNan(IntrinsicsPtr v);
 
@@ -432,7 +438,8 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
     c10::optional<std::string> attrs)
     : context_(std::make_unique<llvm::LLVMContext>()),
       irb_(getContext()),
-      kernel_func_name_(std::move(kernel_func_name)) {
+      kernel_func_name_(std::move(kernel_func_name)),
+      bufsExtAlloc_(ExternalAllocBufFinder::find(stmt)) {
   if (!triple) {
     triple = LLVMTargetTriple();
   }
@@ -1902,6 +1909,14 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
   }
 }
 
+void LLVMCodeGenImpl::handleBufReuse(BufPtr buf, BufPtr buf_to_reuse) {
+  llvm::Value* ptr = varToVal_.at(buf_to_reuse->base_handle());
+  if (buf_to_reuse->dtype().scalar_type() != buf->dtype().scalar_type()) {
+    ptr = irb_.CreatePointerCast(ptr, dtypeToLLVMPtr(buf->dtype()));
+  }
+  varToVal_[buf->base_handle()] = ptr;
+}
+
 void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
   auto& func_registry = getNNCFunctionRegistry();
   if (!func_registry.count(v->func_name())) {
@@ -2030,6 +2045,172 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
   value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
+void LLVMCodeGenImpl::visit(ExternalCallWithAllocPtr v) {
+  auto& func_registry = getNNCFunctionRegistry();
+  if (!func_registry.count(v->func_name())) {
+    throw unimplemented_lowering(v);
+  }
+
+  const auto& bufs_out = v->buf_out_args();
+  const auto& bufs_in = v->buf_args();
+
+  const auto bufs_in_size = bufs_in.size();
+  const auto bufs_out_size = bufs_out.size();
+  const auto args_num = v->args().size();
+
+  // Count the size of dims array - it consists of dimension of all bufs
+  // concatenated together.
+  size_t dims_num = 0;
+  for (const auto& b : bufs_in) {
+    dims_num += b->dims().size();
+  }
+
+  // bufs_out_size for out tensors data pointers
+  // bufs_in_size for input pointers
+  // bufs_out_size for out tensors TensorImpl* to pass to nnc_aten_free to
+  // release out tensors
+  llvm::Value* buf_ptrs = irb_.CreateAlloca(
+      Int8PtrTy_,
+      llvm::ConstantInt::getSigned(IntTy_, bufs_in_size + 2 * bufs_out_size));
+  // @lint-ignore CLANGTIDY
+  llvm::Value* buf_ranks = irb_.CreateAlloca(
+      LongTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_in_size));
+  llvm::Value* buf_dims = irb_.CreateAlloca(
+      LongTy_, llvm::ConstantInt::getSigned(IntTy_, dims_num));
+  llvm::Value* buf_strides = irb_.CreateAlloca(
+      LongTy_, llvm::ConstantInt::getSigned(IntTy_, dims_num));
+  llvm::Value* buf_dtypes = irb_.CreateAlloca(
+      ByteTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_in_size));
+  // @lint-ignore CLANGTIDY
+  llvm::Value* extra_args = irb_.CreateAlloca(
+      LongTy_, llvm::ConstantInt::getSigned(IntTy_, args_num));
+
+  int i = 0;
+  int dim_idx = 0;
+  int stride_idx = 0;
+  for (const auto& b : bufs_in) {
+    // Store value for buf pointer
+    llvm::Value* gep = irb_.CreateInBoundsGEP(
+        Int8PtrTy_,
+        buf_ptrs,
+        // @lint-ignore CLANGTIDY
+        llvm::ConstantInt::getSigned(IntTy_, bufs_out_size + i));
+    b->base_handle()->accept(this);
+    auto buf_ptr = this->value_;
+    auto buf_void_ptr = irb_.CreatePointerCast(buf_ptr, Int8PtrTy_);
+    irb_.CreateStore(buf_void_ptr, gep);
+
+    // Store dtype of the buf
+    gep = irb_.CreateInBoundsGEP(
+        ByteTy_, buf_dtypes, llvm::ConstantInt::getSigned(IntTy_, i));
+    irb_.CreateStore(
+        llvm::ConstantInt::getSigned(ByteTy_, (int8_t)b->dtype().scalar_type()),
+        gep);
+
+    // Store rank of the buf
+    // @lint-ignore CLANGTIDY
+    gep = irb_.CreateInBoundsGEP(
+        LongTy_, buf_ranks, llvm::ConstantInt::getSigned(IntTy_, i));
+    irb_.CreateStore(
+        llvm::ConstantInt::getSigned(LongTy_, b->dims().size()), gep);
+
+    // Store dims of the buf
+    for (const auto dim : c10::irange(b->dims().size())) {
+      gep = irb_.CreateInBoundsGEP(
+          LongTy_, buf_dims, llvm::ConstantInt::getSigned(IntTy_, dim_idx));
+      b->dims()[dim]->accept(this);
+      auto dim_val = this->value_;
+      irb_.CreateStore(irb_.CreateZExt(dim_val, LongTy_), gep);
+      dim_idx++;
+    }
+
+    // Store strides of the buf
+    for (const auto dim : c10::irange(b->dims().size())) {
+      gep = irb_.CreateInBoundsGEP(
+          LongTy_,
+          buf_strides,
+          llvm::ConstantInt::getSigned(IntTy_, stride_idx));
+      b->strides()[dim]->accept(this);
+      auto stride_val = this->value_;
+      irb_.CreateStore(irb_.CreateZExt(stride_val, LongTy_), gep);
+      stride_idx++;
+    }
+
+    i++;
+  }
+
+  i = 0;
+  for (const ExprPtr& arg : v->args()) {
+    auto gep = irb_.CreateInBoundsGEP(
+        LongTy_, extra_args, llvm::ConstantInt::getSigned(IntTy_, i));
+    arg->accept(this);
+    irb_.CreateStore(irb_.CreateZExtOrBitCast(this->value_, LongTy_), gep);
+    i++;
+  }
+
+  // Generate the call itself
+  std::string fname = v->func_name();
+  FunctionCallee callee = module_->getOrInsertFunction(
+      fname,
+      llvm::FunctionType::get(
+          llvm::Type::getVoidTy(getContext()), // return type
+          {LongTy_, // int64_t bufs_in_size
+           Int8PtrTy_->getPointerTo(), // void** buf_data
+           LongTy_->getPointerTo(), // int64_t* buf_ranks
+           LongTy_->getPointerTo(), // int64_t* buf_dims
+           LongTy_->getPointerTo(), // int64_t* buf_strides
+           ByteTy_->getPointerTo(), // int64_t* buf_dtypes
+           LongTy_, // int64_t args_num
+           LongTy_->getPointerTo()}, // int64_t* extra_args
+          false)); // is var_arg
+
+  auto call_ty = callee.getFunctionType();
+  auto call_fn = callee.getCallee();
+  llvm::cast<llvm::Function>(call_fn)->addFnAttr(llvm::Attribute::NoUnwind);
+
+  irb_.CreateCall(
+      call_ty,
+      call_fn,
+      // @lint-ignore CLANGTIDY
+      {llvm::ConstantInt::getSigned(LongTy_, bufs_in_size),
+       buf_ptrs,
+       buf_ranks,
+       buf_dims,
+       buf_strides,
+       buf_dtypes,
+       // @lint-ignore CLANGTIDY
+       llvm::ConstantInt::getSigned(LongTy_, args_num),
+       extra_args});
+
+  // @lint-ignore CLANGTIDY
+  for (const auto i : c10::irange(bufs_out_size)) {
+    const auto& buf_out = bufs_out[i];
+    auto gep = irb_.CreateInBoundsGEP(
+        Int8PtrTy_, buf_ptrs, llvm::ConstantInt::getSigned(IntTy_, i));
+    llvm::Value* ptr = irb_.CreatePointerCast(
+        irb_.CreateLoad(Int8PtrTy_, gep), dtypeToLLVMPtr(buf_out->dtype()));
+    varToVal_[buf_out->base_handle()] = ptr;
+
+    for (auto it = bufsExtAllocReuse_.find(buf_out);
+         it != bufsExtAllocReuse_.end();
+         it++) {
+      auto buf = it->second;
+      handleBufReuse(buf, buf_out);
+    }
+    bufsExtAllocReuse_.erase(buf_out);
+
+    gep = irb_.CreateInBoundsGEP(
+        Int8PtrTy_,
+        buf_ptrs,
+        // @lint-ignore CLANGTIDY
+        llvm::ConstantInt::getSigned(IntTy_, bufs_out_size + bufs_in_size + i));
+    bufsExtToFreeVal_[buf_out->base_handle()] =
+        irb_.CreateLoad(Int8PtrTy_, gep);
+  }
+
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
+}
+
 void LLVMCodeGenImpl::visit(AllocatePtr v) {
   llvm::Value* size =
       llvm::ConstantInt::getSigned(LongTy_, v->dtype().byte_size());
@@ -2063,16 +2244,64 @@ void LLVMCodeGenImpl::visit(AllocatePtr v) {
 }
 
 void LLVMCodeGenImpl::visit(PlacementAllocatePtr v) {
-  llvm::Value* ptr = varToVal_.at(v->buf_to_reuse()->base_handle());
-  varToVal_[v->buf()->base_handle()] = ptr;
+  auto buf_to_reuse = v->buf_to_reuse();
+  auto buf = v->buf();
+
+  if (bufsExtAlloc_.count(buf_to_reuse)) {
+    bufsExtAllocReuse_.insert({buf_to_reuse, buf});
+    return;
+  }
+
+  handleBufReuse(buf, buf_to_reuse);
 }
 
 void LLVMCodeGenImpl::visit(FreePtr v) {
   value_ = llvm::ConstantInt::get(IntTy_, 0);
-  llvm::Value* ptr = varToVal_.at(v->buffer_var());
+
+  llvm::Value* ptr = bufsExtToFreeVal_.count(v->buffer_var())
+      ? bufsExtToFreeVal_.at(v->buffer_var())
+      : varToVal_.at(v->buffer_var());
+
   if (!llvm::isa<llvm::AllocaInst>(ptr)) {
     irb_.Insert(llvm::CallInst::CreateFree(ptr, irb_.GetInsertBlock()));
   }
+}
+
+void LLVMCodeGenImpl::visit(FreeExtPtr v) {
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
+  const auto& bufs = v->bufs();
+  const auto bufs_num = bufs.size();
+
+  llvm::Value* ptrs = irb_.CreateAlloca(
+      Int8PtrTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
+  for (const auto i : c10::irange(bufs_num)) {
+    const auto& buf = bufs[i];
+    llvm::Value* gep = irb_.CreateInBoundsGEP(
+        Int8PtrTy_, ptrs, llvm::ConstantInt::getSigned(IntTy_, i));
+    auto ptr = bufsExtToFreeVal_[buf->base_handle()];
+    irb_.CreateStore(ptr, gep);
+  }
+
+  FunctionCallee callee = module_->getOrInsertFunction(
+      "nnc_aten_free",
+      llvm::FunctionType::get(
+          llvm::Type::getVoidTy(getContext()), // return type
+          {
+              LongTy_, // int64_t bufs_num
+              Int8PtrTy_->getPointerTo(), // void** ptrs
+          },
+          false)); // is var_arg
+
+  auto call_ty = callee.getFunctionType();
+  auto call_fn = callee.getCallee();
+  llvm::cast<llvm::Function>(call_fn)->addFnAttr(llvm::Attribute::NoUnwind);
+
+  irb_.CreateCall(
+      call_ty,
+      call_fn,
+      {llvm::ConstantInt::getSigned(LongTy_, bufs_num), ptrs});
+
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
 void LLVMCodeGenImpl::visit(LetPtr v) {

@@ -1,7 +1,8 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
+#include <c10/core/ScalarType.h>
+#include <cstdint>
 
 namespace at { namespace native {
 
@@ -19,7 +20,8 @@ using unfold2d_fn = void (*)(
     int64_t input_height,
     int64_t input_width,
     int64_t output_height,
-    int64_t output_width
+    int64_t output_width,
+    bool is_channels_last
 );
 
 DECLARE_DISPATCH(unfold2d_fn, unfolded2d_copy_stub);

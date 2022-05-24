@@ -6,8 +6,8 @@
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
 
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/quantized/cpu/xnnpack_utils.h>
+#include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/utils/Factory.h>
 
 #include <utility>
@@ -40,6 +40,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
         orig_weight(std::move(orig_weight)),
         bias_(at::native::mobile::allocate_padded_contiguous_if_needed(
             bias, bias.suggest_memory_format())),
+        per_channel_(this->orig_weight.qscheme() == at::kPerChannelAffine),
         input_scale(std::move(input_scale)),
         w_scales(w_scales),
         w_zero_points(std::move(w_zps)) {}
@@ -47,6 +48,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
   std::unique_ptr<qnnpack::PackBMatrix> w;
   at::Tensor orig_weight;
   at::Tensor bias_;
+  bool per_channel_;
   c10::optional<double> input_scale;
   at::Tensor w_scales;
   std::vector<uint8_t> w_zero_points;
@@ -74,8 +76,23 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
       at::Tensor weight,
       c10::optional<at::Tensor> bias);
 
+  bool per_channel() const {
+    return per_channel_;
+  }
+
  private:
   std::mutex qnnp_mutex_;
+
+#ifdef USE_XNNPACK
+  xnnpack_operator xnnp_linear_op;
+
+  template <typename scalar_t, bool kReluFused>
+  at::Tensor apply_impl_xnnp(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point);
+#endif // USE_XNNPACK
+
   template <bool ReluFused>
   at::Tensor apply_impl(
       at::Tensor input,
@@ -112,6 +129,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
         dilation_(std::move(dilation)),
         groups_(groups),
         transpose_(transpose),
+        is_per_channel_(is_per_channel),
         input_scale(input_scale),
         kernel_(std::move(kernel)),
         w_scales(w_scale),
@@ -200,7 +218,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
     convolution->input_padding_height = padding_[kSpatialDim - 2];
     convolution->input_padding_width = padding_[kSpatialDim - 1];
     convolution->input_padding_depth = kSpatialDim == 3 ? padding_[0] : 0;
-    convolution->per_channel = is_per_channel;
+    convolution->per_channel = is_per_channel_;
     convolution->transpose = transpose_;
 
     const uint32_t kr = pytorch_qnnp_params.q8conv.kr;
@@ -260,6 +278,9 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   }
 
   std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter> convolution_op;
+  #ifdef USE_XNNPACK
+  xnnpack_operator xnnp_convolution_op;
+  #endif  // USE_XNNPACK
   std::unique_ptr<qnnpack::PrePackConvWeights> w;
   at::Tensor orig_weight;
   at::Tensor bias;
@@ -269,6 +290,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   torch::List<int64_t> dilation_;
   int64_t groups_;
   bool transpose_;
+  bool is_per_channel_;
   c10::optional<double> input_scale;
   std::vector<int64_t> kernel_;
   at::Tensor w_scales;
@@ -326,6 +348,10 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
     return transpose_;
   }
 
+  bool per_channel() const {
+    return is_per_channel_;
+  }
+
  private:
   std::mutex qnnp_mutex_;
   template <bool ReluFused>
@@ -333,6 +359,14 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       const at::Tensor& input,
       double output_scale,
       int64_t output_zero_point);
+
+#ifdef USE_XNNPACK
+  template <typename scalar_t, bool ReluFused>
+  at::Tensor apply_impl_xnnp(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point);
+#endif // USE_XNNPACK
 };
 
 enum class Activation : uint8_t { NONE = 0, RELU = 1 };

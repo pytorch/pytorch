@@ -19,6 +19,12 @@ class TracerBase:
     check_mutable_operations : bool = False
     # Feature flag for assert tracing
     trace_asserts : bool = False
+    # Feature flag for proxying accesses to buffer values
+    proxy_buffer_attributes : bool = False
+
+    # Name of the function to be traced. It will only be used when
+    # ``root`` is an instance of ``nn.Module``
+    traced_func_name: str = "forward"
 
     @compatibility(is_backward_compatible=True)
     def create_node(self, kind : str, target : Target,

@@ -1,9 +1,14 @@
+# Owner(s): ["oncall: distributed"]
+
 import sys
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
     NestedWrappedModule,
@@ -11,9 +16,6 @@ from torch.testing._internal.common_fsdp import (
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     run_tests,
-)
-from torch.testing._internal.common_distributed import (
-    skip_if_lt_x_gpu,
 )
 
 if not dist.is_available():
@@ -44,25 +46,27 @@ class TestApply(FSDPTest):
         return dist.distributed_c10d._get_default_group()
 
     def check_weights(self, fsdp, expected_tensor_fn, check):
-        with fsdp._summon_full_params(recurse=True):
+        with fsdp.summon_full_params(fsdp, recurse=True):
             linear_modules = [
                 module for module in fsdp.modules() if type(module) == nn.Linear
             ]
             for module in linear_modules:
                 for param in module.parameters():
                     expected = expected_tensor_fn(param)
-                    check(param, expected)
+                    check(param, expected, f"Got {param} but expected {expected}")
 
     def _check_apply(self, fsdp):
         # Assert linear weights are not all 1.0
         self.check_weights(
-            fsdp, lambda param: torch.ones_like(param), self.assertNotEqual
+            fsdp, lambda param: torch.empty_like(param).fill_(1.0), self.assertNotEqual
         )
 
         fsdp.apply(self._init_linear_weights)
 
         # Ensure all weights are 1.0
-        self.check_weights(fsdp, lambda param: torch.ones_like(param), self.assertEqual)
+        self.check_weights(
+            fsdp, lambda param: torch.empty_like(param).fill_(1.0), self.assertEqual
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_nested_module_apply(self):
@@ -78,19 +82,11 @@ class TestApply(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_transformer_module_apply(self):
         """
-        Checks apply() modifiees weights appropriately on a wrapped Transformer
+        Checks apply() modifies weights appropriately on a wrapped Transformer
         module.
         """
         transformer = self._get_wrapped_model(group=self.process_group).cuda(self.rank)
-        # Assert linear weights are not all 1.0
-        self.check_weights(
-            transformer, lambda param: torch.ones_like(param), self.assertNotEqual
-        )
-        transformer.apply(self._init_linear_weights)
-        # Assert all weights are 1.0
-        self.check_weights(
-            transformer, lambda param: torch.ones_like(param), self.assertEqual
-        )
+        self._check_apply(transformer)
 
     @skip_if_lt_x_gpu(2)
     def test_apply_in_summon_raises_error(self):
@@ -99,7 +95,7 @@ class TestApply(FSDPTest):
         summon context, appropriate error is raised.
         """
         transformer = self._get_wrapped_model(group=self.process_group).cuda(self.rank)
-        with transformer._summon_full_params(recurse=True):
+        with transformer.summon_full_params(transformer, recurse=True):
             with self.assertRaisesRegex(ValueError, "expected to be in states"):
                 transformer.apply(self._init_linear_weights)
 

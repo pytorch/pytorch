@@ -5,6 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
 #include <c10/macros/Macros.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
@@ -189,7 +190,7 @@ struct KthValueLauncher {
     }
 
     dim3 block(std::min(
-        round_up(slice_size, (int64_t)C10_WARP_SIZE), (int64_t)1024));
+        round_up(slice_size, (int64_t)at::cuda::warp_size()), (int64_t)1024));
     auto stream = at::cuda::getCurrentCUDAStream();
     gatherKthValue<scalar_t, index_t, all_dims><<<grid, block, 0, stream>>>(
         self_info,
@@ -228,7 +229,7 @@ struct MedianLauncher {
     }
 
     dim3 block(std::min(
-        round_up(slice_size, (int64_t)C10_WARP_SIZE), (int64_t)1024));
+        round_up(slice_size, (int64_t)at::cuda::warp_size()), (int64_t)1024));
     auto stream = at::cuda::getCurrentCUDAStream();
     gatherMedian<scalar_t, index_t, all_dims><<<grid, block, 0, stream>>>(
         values_info,

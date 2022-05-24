@@ -41,14 +41,15 @@ class TORCH_CUDA_CU_API IrVisitor : public OptOutDispatch {
  protected:
   std::vector<ForLoop*> for_loops_;
   std::vector<Scope*> scope_;
+  std::vector<Expr*> scope_exprs_;
   std::vector<Expr*> exprs_;
 };
 
 // Base Expr Mutator class that visits all nodes with IrVisitor, and then
-// inserts new expressions or replaces expressions based on insertion/replace
-// maps provided. These replacement maps are expected to accumulate during an
-// initial traversal, then runs an insertion based on them after the overloaded
-// traversal.
+// inserts new expressions, replaces expressions based on insertion/replace
+// maps provided or removes existing expressions. These replacement
+// maps are expected to accumulate during an initial traversal, then
+// runs an insertion based on them after the overloaded traversal.
 //
 // Order of mutations may be important, mutations are ordered according to the
 // following rules:
@@ -60,6 +61,8 @@ class TORCH_CUDA_CU_API IrVisitor : public OptOutDispatch {
 //
 //   Before/After insertions are done before Expr replacements, so reference for
 //   insertions must be on pre-replaced Exprs
+//
+//   Removal of expressions is done after replacements.
 //
 // To place in a scope that is empty, simply provide a nullptr reference
 // Since insertions are done in order, it's possible to insert an expression in
@@ -79,6 +82,7 @@ class ExprMutator : public IrVisitor {
   void registerInsertBefore(Expr* reference, Expr* new_expr, Scope* scope);
   void registerInsertAfter(Expr* reference, Expr* new_expr, Scope* scope);
   void registerReplace(Expr* reference, Expr* new_expr, Scope* scope);
+  void registerRemove(Expr* expr_to_remove, Scope* scope);
 
   // Registration function which need to be called "in place" during visiting.
   // I.E.
@@ -87,9 +91,10 @@ class ExprMutator : public IrVisitor {
   void registerInsertBefore(Expr* reference, Expr* new_expr);
   void registerInsertAfter(Expr* reference, Expr* new_expr);
   void registerReplace(Expr* reference, Expr* new_expr);
+  void registerRemove(Expr* expr_to_remove);
 
  private:
-  enum class MutationMode { BEFORE, AFTER, REPLACE };
+  enum class MutationMode { BEFORE, AFTER, REPLACE, REMOVE };
 
   void registerMutation(
       Expr* ref,
@@ -109,6 +114,9 @@ class ExprMutator : public IrVisitor {
 
   // Track replacements as they're registered
   std::vector<MutationInformation> replacements_;
+
+  // Track removal as they're registered
+  std::vector<MutationInformation> removal_;
 };
 
 } // namespace kir

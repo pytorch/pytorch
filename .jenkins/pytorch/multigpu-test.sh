@@ -13,7 +13,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 echo "Testing pytorch (distributed only)"
 if [ -n "${IN_CI}" ]; then
   # TODO move this to docker
-  pip_install unittest-xml-reporting
+  # Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
+  pip_install "unittest-xml-reporting<=3.2.0,>=2.0.0"
 fi
 
 # Disabling tests to see if they solve timeout issues; see https://github.com/pytorch/pytorch/issues/70015
@@ -27,4 +28,24 @@ time python test/run_test.py --verbose -i distributed/test_c10d_spawn_nccl
 time python test/run_test.py --verbose -i distributed/test_store
 time python test/run_test.py --verbose -i distributed/test_pg_wrapper
 time python test/run_test.py --verbose -i distributed/rpc/cuda/test_tensorpipe_agent
+time python test/run_test.py --verbose -i distributed/_shard/checkpoint/test_checkpoint
+time python test/run_test.py --verbose -i distributed/_shard/checkpoint/test_file_system_checkpoint
+time python test/run_test.py --verbose -i distributed/_shard/sharding_spec/test_sharding_spec
+time python test/run_test.py --verbose -i distributed/_shard/sharding_plan/test_sharding_plan
+time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test_megatron_prototype
+time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test_sharded_tensor
+time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test_sharded_tensor_reshard
+time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_chunk
+time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_elementwise_ops
+time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_embedding
+time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_embedding_bag
+time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_binary_cmp
+time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_init
+time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_linear
+time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_math_ops
+time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_matrix_ops
+time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_softmax
+time python test/run_test.py --verbose -i distributed/_shard/sharded_optim/test_sharded_optim
+time python test/run_test.py --verbose -i distributed/_shard/test_partial_tensor
+time python test/run_test.py --verbose -i distributed/_shard/test_replicated_tensor
 assert_git_not_dirty

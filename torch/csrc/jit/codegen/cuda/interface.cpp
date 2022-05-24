@@ -24,6 +24,126 @@ namespace cuda {
 
 static std::atomic<bool> cuda_fusion_guard_mode{true};
 
+// There are 3 sources of information on whether to enable nvfuser:
+// 1. assigned value from setEnabled() - takes precendence if it has been set
+// 2. value from environment variable - only used if setEnabled() is unset
+// 3. default value - used if both 1 and 2 are unset.
+//
+// If 1 or 2 tries to enable nvfuser when it cannot be enabled (e.g. cuda not
+// available), then an error will be thrown. The default will not error.
+class NVFuserEnabler {
+ private:
+  c10::optional<bool> runtime_assigned_fuser_enabled_ = c10::nullopt;
+  std::once_flag enabled_check_flag_;
+  std::mutex mutex_;
+
+  static bool nvfuserCanBeEnabled() {
+#ifdef USE_ROCM
+    return false;
+#else
+    return at::globalContext().hasCUDA() &&
+        NVFuserPassManager::isRegistered() && getExecutorMode();
+#endif
+  }
+
+  static void assertFuserCanBeEnabled(bool is_enabled) {
+    if (!is_enabled) {
+      return;
+    }
+    TORCH_CHECK(
+        nvfuserCanBeEnabled(),
+        "Running CUDA fuser is only supported on CUDA builds.");
+  }
+
+  static c10::optional<bool> getFuserEnabledEnvVar() {
+    static const char* enable_c_str = std::getenv("PYTORCH_JIT_ENABLE_NVFUSER");
+    if (!enable_c_str) {
+      return c10::nullopt;
+    }
+    std::string enable(enable_c_str);
+    if (enable == "0" || enable == "OFF") {
+      return false;
+    }
+    return true;
+  }
+
+  static c10::optional<bool> getCachedFuserEnabledEnvVar() {
+    static c10::optional<bool> default_enabled = getFuserEnabledEnvVar();
+    return default_enabled;
+  }
+
+  static bool getNNCNotNVFuser() {
+    static const char* env_c_str =
+        std::getenv("PYTORCH_JIT_USE_NNC_NOT_NVFUSER");
+    if (!env_c_str) {
+      return false;
+    }
+    std::string env(env_c_str);
+    if (env == "1" || env == "ON") {
+      return true;
+    }
+    return false;
+  }
+
+  static bool getCachedNNCNotNVFuser() {
+    static bool force_disable = getNNCNotNVFuser();
+    return force_disable;
+  }
+
+  bool isEnabledImpl() {
+    // 0. opportunity to force disable NVFuser
+    if (getCachedNNCNotNVFuser()) {
+      return false;
+    }
+    std::call_once(enabled_check_flag_, [&]() {
+      // if environment variable is setting the value, we must
+      if (!runtime_assigned_fuser_enabled_.has_value() &&
+          getCachedFuserEnabledEnvVar().has_value()) {
+        assertFuserCanBeEnabled(*getCachedFuserEnabledEnvVar());
+      }
+    });
+    // 1. if user has explicitly assigned fuser value, that value takes
+    // precedence.
+    if (runtime_assigned_fuser_enabled_.has_value()) {
+      return *runtime_assigned_fuser_enabled_;
+    }
+    // 2. next precedence is any value assigned by
+    if (getCachedFuserEnabledEnvVar().has_value()) {
+      return *getCachedFuserEnabledEnvVar();
+    }
+    // 3. default value
+#ifdef FBCODE_CAFFE2
+    return false;
+#else
+    return nvfuserCanBeEnabled();
+#endif
+  }
+
+ public:
+  bool setEnabled(bool is_enabled) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    assertFuserCanBeEnabled(is_enabled);
+    bool old_value = isEnabledImpl();
+    runtime_assigned_fuser_enabled_ = is_enabled;
+    return old_value;
+  }
+
+  bool isEnabled() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return isEnabledImpl();
+  }
+};
+
+static NVFuserEnabler nvfuser_enabler;
+
+bool isEnabled() {
+  return nvfuser_enabler.isEnabled();
+}
+
+bool setEnabled(bool is_enabled) {
+  return nvfuser_enabler.setEnabled(is_enabled);
+}
+
 bool getSingletonFusion() {
   return FLAGS_torch_jit_nvfuser_singleton_fusion;
 }
@@ -68,6 +188,10 @@ void runFusionGroup(const Node* fusion_node, Stack& stack) {
 }
 
 void fuseGraph(std::shared_ptr<Graph>& graph) {
+  if (!isEnabled()) {
+    return;
+  }
+
   TORCH_CHECK(
       getFuserInterface()->fn_fuse_graph != nullptr,
       "Running the CUDA fuser requires a CUDA build.");
@@ -88,6 +212,11 @@ void InsertProfileNodesForCUDAFuser(ProfilingRecord* pr) {
 bool profileNode(const Node* node) {
   return getFuserInterface()->fn_profile_n != nullptr &&
       getFuserInterface()->fn_profile_n(node);
+}
+
+bool skipNode(const std::string& symbol_str, bool flip) {
+  return getFuserInterface()->fn_skip_n != nullptr &&
+      getFuserInterface()->fn_skip_n(symbol_str, flip);
 }
 
 //! [ Note -- type guard logic in CudaFusionGuard ]
@@ -117,11 +246,15 @@ bool profileNode(const Node* node) {
 //!             extra attention should be paid to contiguity across size-1
 //!             dimensions.
 //!   c. size check:
+//!        c.1 broadcast check:
 //!        making sure that broadcast semantics are identical. So we want to
 //!        make sure a given dimension either are both size-1 for `tensor` &
 //!        `guard_tensor_type`, or are both non-size-1.
 //!        This is due to the fact that we specialize size-1 dimension as
 //!        broadcasted dimension while translating PyTorch tensor to Fusion IR.
+//!        c.1 size-0 check:
+//!        we don't specialize this on codegen, but we do specialize fusion
+//!        logic for size-0 on reductoins, hence the check
 //!
 bool complyWith(
     const at::Tensor& tensor,
@@ -133,13 +266,19 @@ bool complyWith(
   // check a. if num_dimension check fails or scalar type check fails
   if (*guard_tensor_type->dim() != static_cast<size_t>(tensor.ndimension()) ||
       (guard_tensor_type->scalarType().has_value() &&
-       (guard_tensor_type->scalarType().value() != tensor.scalar_type()))) {
+       (guard_tensor_type->scalarType().value() != tensor.scalar_type())) ||
+      (guard_tensor_type->device().has_value() &&
+       (guard_tensor_type->device().value() != tensor.device())) ||
+      (guard_tensor_type->requiresGrad().has_value() &&
+       guard_tensor_type->requiresGrad().value() !=
+           (tensor.requires_grad() && at::GradMode::is_enabled()))) {
     return false;
   }
 
   // TODO: should we get symbolic_size instead and check for size
   // consistency across tensors as well?
   const auto& sizes = guard_tensor_type->sizes();
+  // see [ Note -- stirde_properties in tensor type ]
   const auto& stride_properties = guard_tensor_type->stride_properties();
 
   const auto& t_sizes = tensor.sizes();
@@ -207,10 +346,16 @@ bool complyWith(
       }
     }
 
-    // check c, we go along semantic ordered dimensions
+    // check c.1, we go along semantic ordered dimensions
     // check broadcast / size-1:
     bool guard_bcast = sizes[j].has_value() && sizes[j].value() == 1;
     if (guard_bcast != (t_sizes[j] == 1)) {
+      return false;
+    }
+
+    // check c.2, check for size-0
+    bool guard_size_0 = sizes[j].has_value() && sizes[j].value() == 0;
+    if (guard_size_0 != (t_sizes[j] == 0)) {
       return false;
     }
   }
@@ -543,6 +688,24 @@ RegisterOperators view_guard({
         aliasAnalysisFromSchema()),
 });
 
+RegisterOperators ivalue_guard({
+    Operator(
+        "prim::CudaFusionIvalGuard(...) -> bool",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::ArrayRef<IValue> inputs = last(stack, 2);
+            drop(stack, 2);
+            if (!fuser::cuda::getCudaFusionGuardMode()) {
+              push(stack, IValue(true));
+              return;
+            }
+            push(stack, inputs[0].equals(inputs[1]));
+            return;
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_add_optional({
     Operator(
@@ -574,6 +737,27 @@ RegisterOperators reg_view_copy({
             IValue self, size;
             pop(stack, self, size);
             push(stack, at::native::view(self.toTensor(), size.toIntVector()));
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators reg_flatten_copy({
+    Operator(
+        "prim::flatten_copy(Tensor self, int start_dim, int end_dim) -> Tensor",
+        [](const Node* node) -> Operation {
+          return [node](Stack& stack) {
+            TORCH_CHECK(
+                node->s(attr::name) == "CudaFusionGroup",
+                "flatten_copy is only used by nvfuser to identify non-mutating ",
+                "alias ops, should be restored after fusion pass!");
+            IValue self, start_dim, end_dim;
+            pop(stack, self, start_dim, end_dim);
+            push(
+                stack,
+                at::native::flatten(
+                    self.toTensor(), start_dim.toInt(), end_dim.toInt()));
           };
         },
         aliasAnalysisFromSchema()),
@@ -675,7 +859,7 @@ RegisterOperators reg_infer_unsqueeze_size({
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_infer_squeeze_dim_size({
     Operator(
-        "prim::infer_squeeze_size(int[] a, int dim) -> int[]",
+        "prim::infer_squeeze_size.dim(int[] a, int dim) -> int[]",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto dim = pop(stack).toInt();
@@ -696,7 +880,7 @@ RegisterOperators reg_infer_squeeze_dim_size({
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_infer_squeeze_size({
     Operator(
-        "prim::infer_squeeze_size.dim(int[] a) -> int[]",
+        "prim::infer_squeeze_size(int[] a) -> int[]",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto size = pop(stack).toIntVector();

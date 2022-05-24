@@ -1,3 +1,5 @@
+.. automodule:: torch.sparse
+
 .. currentmodule:: torch
 
 .. _sparse-docs:

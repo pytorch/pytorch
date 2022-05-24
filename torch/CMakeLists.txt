@@ -14,7 +14,7 @@ if(NOT BUILD_PYTHON)
 endif()
 
 if(USE_TBB)
-include_directories(${TBB_INCLUDE_DIR})
+  include_directories(${TBB_INCLUDE_DIR})
 endif()
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -43,6 +43,9 @@ set(TORCH_PYTHON_SRCS
     ${GENERATED_CXX_PYTHON}
     )
 append_filelist("libtorch_python_core_sources" TORCH_PYTHON_SRCS)
+
+list(APPEND TORCH_PYTHON_SRCS
+    ${TORCH_SRC_DIR}/csrc/init_flatbuffer_module.cpp)
 
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
@@ -139,6 +142,10 @@ if(USE_ROCM)
     list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${roctracer_INCLUDE_DIRS})
 endif()
 
+if(USE_EXPERIMENTAL_CUDNN_V8_API)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_EXPERIMENTAL_CUDNN_V8_API)
+endif()
+
 if(USE_CUDNN OR USE_ROCM)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
@@ -151,8 +158,8 @@ if(USE_CUDNN OR USE_ROCM)
     endif()
 endif()
 
-if(USE_MLCOMPUTE)
-    list(APPEND TORCH_PYTHON_SRCS ${MLC_PYTHON_SRCS})
+if(USE_MPS)
+    list(APPEND TORCH_PYTHON_SRCS ${MPS_PYTHON_SRCS})
 endif()
 
 if(USE_VALGRIND AND NOT WIN32)
@@ -190,6 +197,7 @@ add_custom_target(torch_python_stubs DEPENDS
     "${TORCH_SRC_DIR}/_C/__init__.pyi"
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
+    "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
 )
 add_custom_command(
     OUTPUT
@@ -199,6 +207,7 @@ add_custom_command(
     COMMAND
     "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
       --native-functions-path "aten/src/ATen/native/native_functions.yaml"
+      --tags-path "aten/src/ATen/native/tags.yaml"
       --deprecated-functions-path "tools/autograd/deprecated.yaml"
     DEPENDS
     "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
@@ -206,7 +215,20 @@ add_custom_command(
     "${TORCH_SRC_DIR}/nn/functional.pyi.in"
     "${TOOLS_PATH}/pyi/gen_pyi.py"
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+    "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
     "${TORCH_ROOT}/tools/autograd/deprecated.yaml"
+    WORKING_DIRECTORY
+    "${TORCH_ROOT}"
+)
+file(GLOB_RECURSE datapipe_files "${TORCH_SRC_DIR}/utils/data/datapipes/*.py")
+add_custom_command(
+    OUTPUT
+    "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
+    COMMAND
+    "${PYTHON_EXECUTABLE}" ${TORCH_SRC_DIR}/utils/data/datapipes/gen_pyi.py
+    DEPENDS
+    "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi.in"
+    ${datapipe_files}
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
 )
@@ -346,7 +368,6 @@ if(USE_NUMPY)
   target_compile_definitions(torch_python PRIVATE USE_NUMPY)
 endif()
 
-list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS BUILD_CAFFE2)
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -376,6 +397,9 @@ set_source_files_properties(
 # Disable certain warnings for GCC-9.X
 if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/Module.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+  set_source_files_properties(
+    ${TORCH_SRC_DIR}/csrc/init_flatbuffer_module.cpp
+    PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
 endif()
 
@@ -403,6 +427,10 @@ target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
 target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
 
+if(BUILD_ONEDNN_GRAPH)
+  target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
+  target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
+endif()
 
 if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
     set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})

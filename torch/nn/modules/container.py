@@ -497,7 +497,9 @@ class ParameterList(Module):
         return self.extend(parameters)
 
     def __dir__(self):
-        return list(range(self._size))
+        keys = super(ParameterList, self).__dir__()
+        keys = [key for key in keys if not key.isdigit()]
+        return keys
 
     def append(self, value: Any) -> 'ParameterList':
         """Appends a given value at the end of the list.

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/native/DispatchStub.h>
+#include <cstdint>
 
 namespace at {
 class TensorBase;
@@ -17,7 +18,7 @@ enum class QUANTILE_INTERPOLATION_MODE : uint8_t {
   NEAREST
 };
 
-using sort_fn = void(*)(const TensorBase &values, const TensorBase &indices, int64_t dim, bool descending, bool stable);
+using sort_fn = void(*)(const TensorBase&, const TensorBase&, const TensorBase&, int64_t, bool, bool);
 using topk_fn = void(*)(const TensorBase&, const TensorBase&, const TensorBase&, int64_t, int64_t, bool, bool);
 
 DECLARE_DISPATCH(sort_fn, sort_stub);

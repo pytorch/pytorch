@@ -1,4 +1,5 @@
-#include <ATen/Functions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CachingHostAllocator.h>
@@ -9,6 +10,12 @@
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#endif
 
 namespace at {
 namespace native {
@@ -24,8 +31,8 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-        kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        kHalf, kBool, kBFloat16, kComplexHalf, dtype, "copy_", [&] {
           gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
   }
