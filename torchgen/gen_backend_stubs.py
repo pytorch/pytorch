@@ -402,6 +402,7 @@ def gen_dispatcher_registrations(
                 cpp_namespace=cpp_namespace,
                 class_method_name=f"{class_name}",
                 skip_dispatcher_op_registration=False,
+                call_scope=None,
             ),
             grouped_native_functions,
         )
@@ -461,6 +462,7 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
                         cpp_namespace=cpp_namespace,
                         class_method_name=f"{class_name}",
                         skip_dispatcher_op_registration=False,
+                        call_scope=None,
                     ),
                     grouped_native_functions,
                 )

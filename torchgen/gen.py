@@ -1494,6 +1494,7 @@ def gen_aggregated_headers(
                                 cpp_namespace="at::native",
                                 class_method_name=None,
                                 skip_dispatcher_op_registration=False,
+                                call_scope=None,
                             ),
                             grouped_native_functions,
                         )
@@ -1654,6 +1655,7 @@ def gen_per_operator_headers(
                         cpp_namespace="at::native",
                         class_method_name=None,
                         skip_dispatcher_op_registration=False,
+                        call_scope=None,
                     ),
                     grouped_functions,
                 )
@@ -1938,6 +1940,7 @@ def gen_source_files(
                             cpp_namespace="at::native",
                             class_method_name=None,
                             skip_dispatcher_op_registration=skip_dispatcher_op_registration,
+                            call_scope=None,
                         ),
                         grouped_native_functions,
                     )
@@ -1980,6 +1983,7 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                             cpp_namespace="at::native",
                             class_method_name=None,
                             skip_dispatcher_op_registration=skip_dispatcher_op_registration,
+                            call_scope=None,
                         ),
                         grouped_native_functions,
                     )
@@ -1994,6 +1998,7 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                             cpp_namespace="at::native",
                             class_method_name=None,
                             skip_dispatcher_op_registration=skip_dispatcher_op_registration,
+                            call_scope=None,
                         ),
                         grouped_native_functions,
                     )

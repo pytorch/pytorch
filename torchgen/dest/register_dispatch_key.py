@@ -246,6 +246,8 @@ class RegisterDispatchKey:
     # operators into JIT op registry, thus we need to avoid generating code to register into the dispatcher.
     skip_dispatcher_op_registration: bool
 
+    call_scope: Optional[str]
+
     @staticmethod
     def gen_device_check(
         type: DeviceCheckType, args: List[Argument], method_name: str
@@ -351,6 +353,7 @@ class RegisterDispatchKey:
             self.cpp_namespace,
             self.class_method_name,
             self.skip_dispatcher_op_registration,
+            self.call_scope,
             g,
         )
         return list(mapMaybe(structured_gen.gen_one, g.functions()))
@@ -503,6 +506,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                         if device_of is not None:
                             device_guard = f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
 
+
+                call_scope = "" if self.call_scope is None else self.call_scope
                 return f"""\
 namespace {{
 
@@ -510,6 +515,9 @@ namespace {{
   {device_check}
 
   {device_guard}
+
+  {call_scope}
+
   return {impl_name}({args_exprs_str});
 }}
 
@@ -616,10 +624,6 @@ check_inplace(out, sizes, options);
 const auto& out = outputs_[output_idx].get();
 resize_out(out, sizes, strides, options);
 {create_proxy}"""
-        elif k is SchemaKind.mutable:
-            raise AssertionError(
-                "SchemaKind.mutable structured operators are currently not supported"
-            )
         else:
             assert_never(k)
 
@@ -635,10 +639,6 @@ resize_out(out, sizes, strides, options);
             out_args = ", ".join(f"Tensor& out{i}" for i in range(returns))
             out_refs = ", ".join(f"std::ref(out{i})" for i in range(returns))
             return f"{class_name}({out_args}) : outputs_{{ {out_refs} }} {{}}"
-        elif k is SchemaKind.mutable:
-            raise AssertionError(
-                "SchemaKind.mutable structured operators are currently not supported"
-            )
         else:
             assert_never(k)
 
