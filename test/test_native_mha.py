@@ -54,11 +54,12 @@ class TestMHADeviceType(TestCase):
                     def simple_transform_bias_rescale_qkv(qkv, bias):
                         (q, k, v) = torch.split(qkv, embed_dim, dim=-1)
                         (q_bias, k_bias, v_bias) = torch.split(bias, embed_dim, dim=-1)
+
                         def embiggen(x):
                             if not use_nt:
                                 return x
                             b, t, d = x.size()
-                            t = t + (8 - t % 8)  % 8
+                            t = t + (8 - t % 8) % 8
                             newsize = (b, t, d)
                             new_x = torch.zeros(newsize, device=device, dtype=dtype)
                             new_x[:x.size()[0], :x.size()[1], :x.size()[2]] = x
