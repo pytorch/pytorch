@@ -334,6 +334,7 @@ cc_library(
     srcs = [":aten_cuda_cpp_srcs"] + GENERATED_H_CUDA + GENERATED_CPP_CUDA,
     hdrs = [":aten_src_ATen_cuda_config"],
     copts = ATEN_COPTS,
+    strip_include_prefix = "aten/src/",
     visibility = ["//visibility:public"],
     deps = [
         ":aten",
