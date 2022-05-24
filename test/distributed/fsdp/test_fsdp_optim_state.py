@@ -446,8 +446,7 @@ class TestFSDPOptimState(FSDPTest):
             full_osd, ref_osd, check_same_param_keys=check_same_param_keys,
         )
 
-    # Require 4 GPUs since we test halving the world size
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])
     @parametrize("wrap_alt", [False, True])
     @parametrize("halve_world_size", [False, True])
@@ -467,8 +466,7 @@ class TestFSDPOptimState(FSDPTest):
             wrap_alt=wrap_alt,
         )
 
-    # Require 4 GPUs since we test halving the world size
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     def test_shard_full_optim_state_dict_transformer(self) -> None:
         """Tests :meth:`shard_full_optim_state_dict` for an FSDP-root
         transformer model with shared parameters."""
@@ -478,8 +476,7 @@ class TestFSDPOptimState(FSDPTest):
             osd_comm_method=_OSDCommMethod.BROADCAST_OBJECT_LIST,
         )
 
-    # Require 4 GPUs since we test halving the world size
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])
     @parametrize("wrap_alt", [False, True])
     @parametrize("halve_world_size", [False, True])
@@ -499,8 +496,7 @@ class TestFSDPOptimState(FSDPTest):
             wrap_alt=wrap_alt,
         )
 
-    # Require 4 GPUs since we test halving the world size
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     def test_scatter_full_optim_state_dict_transformer(self) -> None:
         """Tests :meth:`scatter_full_optim_state_dict` for an FSDP-root
         transformer model with shared parameters."""

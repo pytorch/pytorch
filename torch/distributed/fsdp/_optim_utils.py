@@ -487,7 +487,9 @@ def _flatten_tensor_optim_state(
                 "Tensor optimizer state does not have same shape as its "
                 f"parameter: {tensor.shape} {shape}"
             )
-    # Flatten the tensor states
+    # Flatten the tensor states: we do not need to add any padding since the
+    # flattened optimizer state tensor sharded via `_get_shard()`, which pads
+    # the shard as needed (just like for the flattened parameter)
     cpu_device = torch.device("cpu")
     tensors = [
         torch.flatten(state_value.to(cpu_device)) if state_value is not None
@@ -497,26 +499,11 @@ def _flatten_tensor_optim_state(
         for state_value, shape
         in zip(pos_dim_tensors, unflat_param_shapes)
     ]
-    padding = flat_param.num_padded
-    if padding > 0:
-        tensors.append(torch.zeros(padding, dtype=dtype, device=cpu_device))
     flat_tensor = torch.cat(tensors)
-    # `flat_tensor`'s shape should be 1D and less than or equal to the
-    # flattened parameter's shape (where the inequality is strict for positive
-    # padding)
-    if not flat_param._is_sharded:  # currently, only when world size is 1
-        # If the parameter is not sharded, then `_full_param_padded` is not
-        # used, so we skip the shape check
-        return flat_tensor
-    full_padded_dim = flat_param._full_param_padded.dim()  # type: ignore[attr-defined]
-    full_padded_shape = flat_param._full_param_padded.shape  # type: ignore[attr-defined]
-    assert flat_tensor.dim() == 1, \
-        f"`flat_tensor` should be 1D but got {flat_tensor.dim()} dims"
-    assert full_padded_dim == 1, \
-        f"`_full_param_padded` should be 1D but got {full_padded_dim} dims"
-    assert flat_tensor.shape[0] <= full_padded_shape[0], \
+    flat_param_shape = flat_param._orig_size  # type: ignore[attr-defined]
+    assert flat_tensor.shape == flat_param_shape, \
         f"tensor optim state: {flat_tensor.shape} " \
-        f"parameter: {full_padded_shape}"
+        f"flattened parameter: {flat_param_shape}"
     return flat_tensor
 
 
