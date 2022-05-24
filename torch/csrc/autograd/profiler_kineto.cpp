@@ -587,26 +587,46 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
   post_process_t event_post_process_cb_;
 };
 
-static std::unique_ptr<KinetoThreadLocalState> globalStatePtr;
-
-template<typename... Args>
-static void initGlobalState(Args... args) {
-  if (globalStatePtr) {
-    LOG(WARNING) << "GlobalStatePtr already exists!";
-  } else {
-    globalStatePtr = std::make_unique<KinetoThreadLocalState>(std::forward<Args>(args)...);
+class GlobalStateManager {
+ public:
+  static GlobalStateManager& singleton() {
+    static GlobalStateManager singleton_;
+    return singleton_;
   }
-}
 
-static void resetGlobalState() {
-  TORCH_INTERNAL_ASSERT(globalStatePtr != nullptr, "Global state ptr cannot be null before resetting");
-  globalStatePtr.reset();
-}
+  template <typename... Args>
+  static void init(Args... args) {
+    if (singleton().state_) {
+      LOG(WARNING) << "GlobalStatePtr already exists!";
+    } else {
+      singleton().state_ =
+          std::make_shared<KinetoThreadLocalState>(std::forward<Args>(args)...);
+    }
+  }
+
+  static auto* get() {
+    return singleton().state_.get();
+  }
+
+  static std::shared_ptr<c10::DebugInfoBase> pop() {
+    TORCH_INTERNAL_ASSERT(
+        singleton().state_ != nullptr,
+        "Global state ptr cannot be null before resetting");
+    auto out = singleton().state_;
+    singleton().state_.reset();
+    return out;
+  }
+
+ private:
+  GlobalStateManager() = default;
+
+  std::shared_ptr<KinetoThreadLocalState> state_;
+};
 
 template<bool use_global>
 static KinetoThreadLocalState* getStatePtr() {
   return c10::guts::if_constexpr<use_global>(
-      [] { return globalStatePtr.get(); },
+      [] { return GlobalStateManager::get(); },
       [] { return KinetoThreadLocalState::getTLS(); });
 }
 
@@ -683,7 +703,9 @@ void reportBackendEventToActiveKinetoProfiler(
     const at::RecordScope scope,
     const std::string& event_name,
     const std::string& backend_name) {
-  TORCH_INTERNAL_ASSERT(globalStatePtr == nullptr, "On-demand profiling does not support post processing callback");
+  TORCH_INTERNAL_ASSERT(
+      GlobalStateManager::get() == nullptr,
+      "On-demand profiling does not support post processing callback");
 
   auto state_ptr = KinetoThreadLocalState::getTLS();
   if (!state_ptr) {
@@ -728,7 +750,9 @@ void enableProfilerWithEventPostProcess(
   TORCH_CHECK(
       config.state != ProfilerState::NVTX,
       "NVTX does not support post processing callback.");
-  TORCH_INTERNAL_ASSERT(globalStatePtr == nullptr, "On-demand profiling does not support post processing callback");
+  TORCH_INTERNAL_ASSERT(
+      GlobalStateManager::get() == nullptr,
+      "On-demand profiling does not support post processing callback");
 
   enableProfiler(config, activities, scopes);
   auto state_ptr = KinetoThreadLocalState::getTLS();
@@ -768,7 +792,7 @@ void enableProfiler(
   }
 
   if (config.state == ProfilerState::KINETO_ONDEMAND) {
-    initGlobalState(config, activities);
+    GlobalStateManager::init(config, activities);
 
     TORCH_INTERNAL_ASSERT(activities.count(ActivityType::CPU), "Ondemand profiling must enable CPU tracing");
     pushProfilingCallbacks<true>(scopes);
@@ -776,8 +800,11 @@ void enableProfiler(
 }
 
 std::unique_ptr<ProfilerResult> disableProfiler() {
-  auto state_ptr = static_cast<ProfilerThreadLocalStateBase*>(
-      (globalStatePtr == nullptr) ? getStatePtr<false>() : getStatePtr<true>());
+  auto state_ptr = std::static_pointer_cast<
+      torch::profiler::impl::ProfilerThreadLocalStateBase>(
+      GlobalStateManager::get() == nullptr
+          ? c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE)
+          : GlobalStateManager::pop());
 
   const auto& config = state_ptr->config();
   TORCH_CHECK(
@@ -794,9 +821,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 
   // Traces are converged via libkineto automatically for ondemand flow
   if (state_ptr->config().state == ProfilerState::KINETO_ONDEMAND) {
-    auto kineto_state_ptr = static_cast<KinetoThreadLocalState*>(state_ptr);
-    auto trace = kineto_state_ptr->finalizeTrace();
-    resetGlobalState();
+    (void)std::static_pointer_cast<KinetoThreadLocalState>(state_ptr)->finalizeTrace();
     return std::make_unique<ProfilerResult>();
   }
 
@@ -808,7 +833,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 
   if (config.state == ProfilerState::KINETO ||
       config.state == ProfilerState::KINETO_GPU_FALLBACK) {
-    auto kineto_state_ptr = static_cast<KinetoThreadLocalState*>(state_ptr);
+    auto kineto_state_ptr = std::static_pointer_cast<KinetoThreadLocalState>(state_ptr);
     if (kineto_state_ptr->tracePython()) {
       python_tracer::PythonTracerBase::get().stop();
     }
@@ -825,9 +850,6 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
         std::move(kineto_state_ptr->event_tree_));
   }
 
-  // Disable thread-local profiler. We can't pop until the very end as it would invalidate
-  // the `state_ptr` reference which we need to process the traces.
-  (void)c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
   return result;
 }
 
