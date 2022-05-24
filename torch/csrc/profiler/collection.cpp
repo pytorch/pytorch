@@ -128,20 +128,25 @@ thread_local SubQueueThreadCache sub_queue_cache_{0, nullptr};
 } // namespace
 
 #define OUT_T(method_name) decltype(std::declval<Result>().method_name())
-#define DEFINE_VISITOR(method_name, torch_op_field, backend_field)   \
-  OUT_T(method_name) Result::method_name() const {                   \
-    using out_t = OUT_T(method_name);                                \
-    return c10::visit(                                               \
-        c10::overloaded(                                             \
-            [&](const ExtraFields<EventType::TorchOp>& e) -> out_t { \
-              (void)e;                                               \
-              return torch_op_field;                                 \
-            },                                                       \
-            [&](const ExtraFields<EventType::Backend>& e) -> out_t { \
-              (void)e;                                               \
-              return backend_field;                                  \
-            }),                                                      \
-        extra_fields_);                                              \
+#define DEFINE_VISITOR(                                                 \
+    method_name, torch_op_field, backend_field, allocation_field)       \
+  OUT_T(method_name) Result::method_name() const {                      \
+    using out_t = OUT_T(method_name);                                   \
+    return c10::visit(                                                  \
+        c10::overloaded(                                                \
+            [&](const ExtraFields<EventType::TorchOp>& e) -> out_t {    \
+              (void)e;                                                  \
+              return torch_op_field;                                    \
+            },                                                          \
+            [&](const ExtraFields<EventType::Backend>& e) -> out_t {    \
+              (void)e;                                                  \
+              return backend_field;                                     \
+            },                                                          \
+            [&](const ExtraFields<EventType::Allocation>& e) -> out_t { \
+              (void)e;                                                  \
+              return allocation_field;                                  \
+            }),                                                         \
+        extra_fields_);                                                 \
   }
 
 using torch::profiler::impl::kineto::KinetoActivityType;
@@ -153,11 +158,20 @@ KinetoActivityType scopeToType(at::RecordScope scope) {
 }
 } // namespace
 
-DEFINE_VISITOR(name, e.name_, e.name_);
-DEFINE_VISITOR(kinetoType, scopeToType(e.scope_), scopeToType(e.scope_));
-DEFINE_VISITOR(correlationID, e.correlation_id_, 0);
-DEFINE_VISITOR(endTimeUS, e.end_time_us_, e.end_time_us_);
-DEFINE_VISITOR(endTID, e.end_tid_, start_tid_);
+DEFINE_VISITOR(name, e.name_, e.name_, "[memory]");
+DEFINE_VISITOR(
+    kinetoType,
+    scopeToType(e.scope_),
+    scopeToType(e.scope_),
+    KinetoActivityType::CPU_INSTANT_EVENT);
+DEFINE_VISITOR(correlationID, e.correlation_id_, 0, 0);
+DEFINE_VISITOR(endTimeNS, e.end_time_ns_, e.end_time_us_ * 1000, start_time_ns_);
+DEFINE_VISITOR(endTID, e.end_tid_, start_tid_, start_tid_);
+DEFINE_VISITOR(
+    deviceType,
+    c10::DeviceType::CPU,
+    c10::DeviceType::CPU,
+    e.device_type_);
 #undef DEFINE_VISITOR
 #undef OUT_T
 
@@ -243,6 +257,7 @@ ThreadLocalSubqueue* RecordQueue::getSubqueue() {
   return it->second.get();
 }
 
+namespace {
 template <typename T>
 auto steal_or_default(T& it) {
   if (it.exhausted()) {
@@ -254,23 +269,52 @@ auto steal_or_default(T& it) {
   }
 }
 
-std::deque<Result> RecordQueue::getRecords(
+struct EvaluateFunctionVisitor {
+  void operator()(
+      ExtraFields<EventType::TorchOp>& first,
+      ExtraFields<EventType::TorchOp>& second) {
+    if (first.scope_ == at::RecordScope::FUNCTION &&
+        second.scope_ == at::RecordScope::BACKWARD_FUNCTION &&
+        first.name_.rfind("autograd::engine::evaluate_function: ", 0) == 0) {
+      first.sequence_number_ = second.sequence_number_;
+      first.forward_tid_ = second.forward_tid_;
+    }
+  }
+
+  template <typename T0, typename T1>
+  void operator()(T0&, T1&) {}
+};
+
+void set_autograd_evaluate(std::vector<std::shared_ptr<Result>>& results) {
+  auto end = results.size() > 2 ? results.end() - 1 : results.begin();
+  for (auto it = results.begin(); it < end; ++it) {
+    if ((*it)->start_tid_ == (*(it + 1))->start_tid_) {
+      c10::visit(
+          EvaluateFunctionVisitor(),
+          (*it)->extra_fields_,
+          (*(it + 1))->extra_fields_);
+    }
+  }
+}
+} // namespace
+
+std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
     std::function<time_t(approx_time_t)> time_converter) {
   auto converter = [&](approx_time_t t) {
     return t == std::numeric_limits<approx_time_t>::min()
         ? std::numeric_limits<int64_t>::min()
-        : time_converter(t) / 1000; // ns to ms
+        : time_converter(t);
   };
-  std::deque<Result> out;
+  std::vector<std::shared_ptr<Result>> out;
   for (auto& subqueue_it : sub_queues_) {
     auto& queue = *subqueue_it.second;
     for (auto& i : queue.backend_events_) {
       auto start_time = i.start_time_us_;
-      out.emplace_back(
-          start_time,
+      out.emplace_back(Result::create(
+          /*start_time_ns_=*/start_time * 1000,
           /*start_tid_=*/queue.tid(),
           /*kineto_info_=*/queue.kineto_info(),
-          /*extra_fields_=*/std::move(i));
+          /*extra_fields_=*/std::move(i)));
     }
     queue.backend_events_.clear();
 
@@ -281,7 +325,7 @@ std::deque<Result> RecordQueue::getRecords(
     auto gpu_fallback_it = queue.gpu_fallback_.begin();
     for (auto& i : queue.op_events_) {
       auto start_time = converter(i.start_time_);
-      out.emplace_back(
+      out.emplace_back(Result::create(
           start_time,
           /*start_tid_=*/queue.tid(),
           /*kineto_info_=*/queue.kineto_info(),
@@ -293,7 +337,7 @@ std::deque<Result> RecordQueue::getRecords(
               steal_or_default(jit_stack_it),
               steal_or_default(jit_module_it),
               steal_or_default(extra_args_it),
-              steal_or_default(gpu_fallback_it)));
+              steal_or_default(gpu_fallback_it))));
     }
     queue.op_events_.clear();
     queue.inputs_outputs_.clear();
@@ -301,10 +345,21 @@ std::deque<Result> RecordQueue::getRecords(
     queue.jit_modules_.clear();
     queue.extra_args_.clear();
     queue.gpu_fallback_.clear();
+
+    for (auto& i : queue.allocations_) {
+      auto start_time = converter(i.start_time_);
+      out.emplace_back(Result::create(
+          start_time,
+          /*start_tid_=*/queue.tid(),
+          /*kineto_info_=*/queue.kineto_info(),
+          /*extra_fields_=*/std::move(i)));
+    }
+    queue.allocations_.clear();
   }
 
+  set_autograd_evaluate(out);
   std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-    return a.start_time_us_ < b.start_time_us_;
+    return a->start_time_ns_ < b->start_time_ns_;
   });
   return out;
 }
