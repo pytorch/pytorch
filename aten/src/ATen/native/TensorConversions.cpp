@@ -363,7 +363,7 @@ Tensor sparse_compressed_to_dense(
     return dst.add_(self);
   }
   if (self.layout() == kSparseBsr) {
-    TORCH_CHECK(self.dim() == 2, "Can only convert 2D SparseBsr to dense.");
+    TORCH_CHECK(self.dim() == 2, "Can only convert 2D SparseBsr to Strided.");
     Tensor indices = at::_convert_indices_from_csr_to_coo(
         self.crow_indices(), self.col_indices(), false, false);
     auto values = self.values();
@@ -553,9 +553,12 @@ std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
   return std::pair<Tensor, Tensor>(col_indices, row_indices);
 }
 
-
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   TORCH_CHECK(self.dim() == 2, "Can only covert 2D Tensor to BSR.");
+  TORCH_CHECK(
+      blocksize[0] > 0 && blocksize[1] > 0,
+      "blocksize needs to be non zero, but got ",
+      blocksize);
   TORCH_CHECK(
       self.size(0) % blocksize[0] == 0,
       "Tensor size(0) ",
