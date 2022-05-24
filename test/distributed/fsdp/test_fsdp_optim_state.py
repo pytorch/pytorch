@@ -763,6 +763,24 @@ class TestFSDPOptimState(FSDPTest):
         optim1.load_state_dict(sharded_osd)
         self._step_model(model1, optim1, num_iters=NUM_ITERS)
 
+    @skip_if_lt_x_gpu(2)
+    def test_check_optim_state_dict_shapes(self):
+        from torch.distributed.fsdp._optim_utils import _check_optim_state_dict_shapes
+        model, optim, optim_input = self._init_nested_model(True)
+        self._step_model(model, optim)
+        osd = optim.state_dict()
+        # Change some entries' shapes to be wrong -> error
+        osd["state"][0]["exp_avg"] = torch.zeros(1, 1).cuda()
+        osd["state"][2]["exp_avg"] = torch.zeros(1, 1).cuda()
+        # Remove some state -> warning
+        osd["state"].pop(1, None)
+        warn_regex = "^(Missing entries from the optim state dict:)"
+        error_regex = "^(Tensor optimizer state shape and parameter shape mismatches:)"
+        with self.assertRaisesRegex(ValueError, error_regex), self.assertWarnsRegex(
+            expected_warning=UserWarning, expected_regex=warn_regex,
+        ):
+            _check_optim_state_dict_shapes(osd, model, optim_input)
+
 
 instantiate_parametrized_tests(TestFSDPOptimState)
 
