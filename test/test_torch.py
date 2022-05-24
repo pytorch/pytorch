@@ -3748,15 +3748,17 @@ else:
         self.assertEqual(c, c.index_select(0, ind_empty))
         w = torch.randn((0, 3), device=device)
         self.assertEqual((0, 2), w.index_select(1, ind_01).shape)
-        with self.assertRaises(RuntimeError):
-            torch.index_select(w, 0, ind_01)
-        with self.assertRaises(RuntimeError):
-            ind_05 = torch.tensor([0, 5], dtype=torch.int64, device=device)
-            torch.index_select(w, 1, ind_05)
         w = torch.randn((3, 0), device=device)
         self.assertEqual((2, 0), w.index_select(0, ind_01).shape)
         ind_01_int32 = torch.tensor([0, 1], dtype=torch.int32, device=device)
         self.assertEqual((2, 0), w.index_select(0, ind_01_int32).shape)
+        if device == 'cpu':
+            w = torch.randn((0, 3), device=device)
+            with self.assertRaisesRegex(RuntimeError, "self indexing axis dim should be positive"):
+                torch.index_select(w, 0, ind_01)
+            ind_05 = torch.tensor([0, 5], dtype=torch.int64, device=device)
+            with self.assertRaisesRegex(RuntimeError, "INDICES element is out of DATA bounds"):
+                torch.index_select(w, 1, ind_05)
 
     # FIXME: find a test suite for the pdist operator
     def _brute_pdist(self, inp, p=2):
