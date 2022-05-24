@@ -385,6 +385,7 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
     }
   };
 
+  // Stack replay loop.
   for (auto& event : events) {
     while (!end_events_.empty() &&
            end_events_.top()->endTimeNS() < event->start_time_ns_) {
@@ -392,6 +393,12 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
       end_events_.pop();
     }
     push_event(event);
+  }
+
+  // Cleanup remaining exit events.
+  while (!end_events_.empty()) {
+    pop_event(end_events_.top());
+    end_events_.pop();
   }
 }
 } // namespace
