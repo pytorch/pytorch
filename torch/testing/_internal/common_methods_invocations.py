@@ -3183,7 +3183,8 @@ def sample_inputs_addr(op_info, device, dtype, requires_grad, **kwargs):
         kwargs=dict(beta=beta, alpha=alpha),
         broadcasts_input=True)
 
-    if dtype.is_floating_point:
+    # These samples fail gradcheck
+    if dtype.is_floating_point and not requires_grad:
         yield SampleInput(
             torch.tensor([[math.nan]], device=device, requires_grad=requires_grad),
             args=(
