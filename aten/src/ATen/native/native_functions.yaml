@@ -12387,3 +12387,40 @@
   variants: function
   dispatch:
     CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: native_multi_head_attention
+
+- func: special_beta(Tensor x, Tensor y) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  structured_delegate: special_beta.out
+  variants: function
+
+- func: special_beta.x_scalar(Scalar x, Tensor y) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_beta.y_scalar(Tensor x, Scalar y) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_beta.out(Tensor x, Tensor y, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_beta_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_beta.x_scalar_out(Scalar x, Tensor y, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_beta.y_scalar_out(Tensor x, Scalar y, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_beta_out
+  device_check: NoCheck
+  python_module: special
+  variants: function

@@ -565,4 +565,40 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
   return torch::special_softmax(self, dim, dtype);
 }
 
+/// Euler beta function.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.beta.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto y = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::beta(x, y);
+/// ```
+inline Tensor beta(const Tensor& x, const Tensor& y) {
+  return torch::special_beta(x, y);
+}
+
+inline Tensor beta(const Scalar& x, const Tensor& y) {
+  return torch::special_beta(x, y);
+}
+
+inline Tensor beta(const Tensor& x, const Scalar& y) {
+  return torch::special_beta(x, y);
+}
+
+inline Tensor& beta_out(Tensor& output, const Tensor& x, const Tensor& y) {
+  return torch::special_beta_out(output, x, y);
+}
+
+inline Tensor& beta_out(Tensor& output, const Scalar& x, const Tensor& y) {
+  return torch::special_beta_out(output, x, y);
+}
+
+inline Tensor& beta_out(Tensor& output, const Tensor& x, const Scalar& y) {
+  return torch::special_beta_out(output, x, y);
+}
+
 }} // torch::special
