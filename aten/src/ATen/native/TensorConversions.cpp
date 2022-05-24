@@ -379,6 +379,7 @@ Tensor sparse_compressed_to_dense(
         at::native::_sparse_coo_tensor_unsafe(indices, values, expanded_size)
             .coalesce();
     auto dense = self_coo.to_dense();
+    // Here we are untiling the result.
     dense = dense.transpose(1, 2);
     dense = dense.reshape({self.size(0), self.size(1)});
     return dense;
@@ -547,6 +548,19 @@ Tensor dense_to_sparse_csc(const Tensor& self) {
 }
 
 Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
+  // This code turns a matrix into a sequence of blocks
+  // using blocksize a length two int array.
+  //
+  //  1  2  3  4
+  //  5  6  7  8
+  //  9 10 11 12
+  // 14 15 16 17
+  //
+  // will yield the following 2 by 2 blocks
+  //
+  //  1  2 |  3  4 |  9 10 | 11 12
+  //  5  6 |  7  8 | 14 15 | 16 17
+  //
   auto block_size_0 = self.size(0) / blocksize[0];
   auto block_size_1 = self.size(1) / blocksize[1];
   auto values = self.reshape(
