@@ -816,11 +816,6 @@ class NativeFunctionsGroup:
                     f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
                 )
         assert self.functional.func.kind() == SchemaKind.functional
-        assert not self.functional.is_view_op, (
-            "View operator shouldn't be grouped into NativeFunctionsGroup objects."
-            f"This is likely because you tried to add an out= variant for '{f.func.name}', which is an existing view operator."
-            "out= variants of view operators are not valid. Please reach out to to the core team if you have questions."
-        )
         assert self.out.func.kind() == SchemaKind.out
 
         if self.inplace is not None:
