@@ -371,6 +371,7 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
                 TORCH_INTERNAL_ASSERT(
                     i.scope_ == at::RecordScope::USER_SCOPE, (int)i.scope_);
               },
+              [](const ExtraFields<EventType::Backend>& i){},
               [](const auto&) { TORCH_INTERNAL_ASSERT(false); }),
           frame->extra_fields_);
       frame->finished_ = true;

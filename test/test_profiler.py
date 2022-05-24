@@ -120,6 +120,12 @@ class IcicleNode:
             self.width += self.children[-1].width
 
         self.name = f"{event.name()} "
+
+        # torch::autograd::Node relies on c10::demangle to generate names, and
+        # Windows demangles to include `struct` in the name.
+        if IS_WINDOWS:
+            self.name = self.name.replace('struct torch::autograd::AccumulateGrad', 'torch::autograd::AccumulateGrad')
+
         self.width = max(self.width, len(self.name) + self.PAD_LENGTH)
 
     def materialize(self) -> typing.List[str]:
