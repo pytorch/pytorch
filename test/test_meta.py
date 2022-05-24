@@ -627,7 +627,6 @@ meta_function_skips = {
     torch.index_add: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.inner: {bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.logical_not: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
-    torch.logical_xor: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.logit: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.nn.functional.cross_entropy: {bf16, f32, f64},
     torch.nn.functional.interpolate: {bf16, f32, f64, u8},
