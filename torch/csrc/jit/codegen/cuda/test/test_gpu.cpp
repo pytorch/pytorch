@@ -19824,6 +19824,40 @@ TEST_F(NVFuserTest, FusionRfactorPredication2_CUDA) {
       &fusion, cg_outputs, {at_t0, at_t3}, {at_t2, at_t4}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionRfactorIndirectRoot_CUDA) {
+  // https://github.com/csarofeen/pytorch/issues/1692
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(3);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1, 2});
+  fusion.addOutput(tv1);
+
+  tv1->split(2, 4);
+  tv1->split(1, 3);
+  tv1->merge(2, 3);
+  auto rf = tv1->rFactor({-1});
+
+  tv1->split(0, 256);
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+  rf->computeAt(tv1, -1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  auto at_in = at::randn({6, 6, 6}, options);
+  auto at_out = at_in.sum({1, 2});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {at_in});
+  auto cg_outputs = fe.runFusion({at_in});
+
+  testValidate(&fusion, cg_outputs, {at_in}, {at_out}, __LINE__, __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionNonDivisibleSplit1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

@@ -1081,8 +1081,7 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
       outer->container()->zeroVal(),
       merged_id_size->as<Int>(),
       outer->getParallelType(),
-      itype,
-      outer->isRFactorProduct() || inner->isRFactorProduct());
+      itype);
 
   IrBuilder::create<Merge>(outer->container(), merged_id, outer, inner);
 
@@ -1135,8 +1134,7 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
       in->container()->zeroVal(),
       inner_split ? remainder->as<Int>() : factor,
       in->getParallelType(),
-      in->getIterType(),
-      in->isRFactorProduct());
+      in->getIterType());
 
   // inner loop IterDomain
   IterDomain* idi = IrBuilder::create<IterDomain>(
@@ -1144,8 +1142,7 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
       in->container()->zeroVal(),
       inner_split ? factor : remainder->as<Int>(),
       in->getParallelType(),
-      in->getIterType(),
-      in->isRFactorProduct());
+      in->getIterType());
 
   IrBuilder::create<Split>(
       in->container(),
@@ -1766,48 +1763,7 @@ TensorDomain* TensorDomain::flatten(int64_t start_dim, int64_t end_dim) {
 // pair is in order where second is the consumer of first
 std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
     const std::vector<int>& axes_) {
-  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to rFactor a 0-dim domain");
-
-  std::vector<int> axes(axes_.size());
-
-  auto ndims = nDims();
-  std::transform(axes_.begin(), axes_.end(), axes.begin(), [ndims](int i) {
-    return i < 0 ? i + ndims : i;
-  });
-
-  TORCH_CHECK(
-      std::none_of(
-          axes.begin(),
-          axes.end(),
-          [ndims](int i) { return i < 0 || (unsigned int)i >= ndims; }),
-      "RFactor axes less than 0 or >= ndims.");
-
-  // We might be able to lift this constraint in some instances, but needs more
-  // investigation.
-  TORCH_CHECK(
-      !hasRFactor(), "Cannot call rfactor on the same tensor domain twice.");
-
-  std::unordered_set<int> axes_set(axes.begin(), axes.end());
-
-  bool rfactor_found = false;
-  bool reduction_found = false;
-  for (decltype(nDims()) i{0}; i < nDims(); i++) {
-    if (axis(i)->isReduction()) {
-      if (axes_set.find(i) != axes_set.end()) {
-        rfactor_found = true;
-      } else {
-        reduction_found = true;
-      }
-    }
-  }
-
-  TORCH_CHECK(
-      rfactor_found && reduction_found,
-      "Invalid rfactor found, rfactor must be provided at least one reduction axis, but not all reduction axes.");
-
-  return std::pair<TensorDomain*, TensorDomain*>{
-      TransformRFactor::runReplay(this, axes),
-      TransformRFactor::runReplay2(this, axes)};
+  return TransformRFactor::runReplay(this, axes_);
 }
 
 Split::Split(
