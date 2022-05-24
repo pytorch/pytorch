@@ -691,17 +691,29 @@ void validate_outputs(
       // AT_ERROR(format_error(ss.str()));
       continue;
     }
-    if (!grad.sizes().equals(metadata.shape())) {
-      if (!at::is_expandable_to(metadata.shape(), grad.sizes())) {
+
+    if (metadata.is_nested_tensor()) {
+      if (!grad.nested_size_tensor().equal(metadata.nested_shape())) {
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - got ";
-        ss << grad.sizes() << " but expected shape compatible with ";
-        ss << metadata.shape();
+        ss << grad.nested_size_tensor()
+           << " but expected nested size compatible with ";
+        ss << metadata.nested_shape();
         AT_ERROR(format_error(ss.str()));
       }
-      grad = at::sum_to(std::move(grad), metadata.shape());
-    }
 
+    } else {
+      if (!grad.sizes().equals(metadata.shape())) {
+        if (!at::is_expandable_to(metadata.shape(), grad.sizes())) {
+          std::stringstream ss;
+          ss << "invalid gradient at index " << i << " - got ";
+          ss << grad.sizes() << " but expected shape compatible with ";
+          ss << metadata.shape();
+          AT_ERROR(format_error(ss.str()));
+        }
+        grad = at::sum_to(std::move(grad), metadata.shape());
+      }
+    }
     bool input_is_complex = isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));
     bool grad_is_complex = isComplexType(grad.scalar_type());
 
@@ -717,7 +729,7 @@ void validate_outputs(
     }
     if (grad.layout() != metadata.layout()) {
        // TODO: Currently we only support (*, Sparse) combination for (tensor.layout(), tensor.grad.layout())
-       // In future, there will be an oppportunity to support more combinations of layouts if they are composable
+       // In future, there will be an opportunity to support more combinations of layouts if they are composable
        // (example., operations like addition etc., are well defined between tensors of different layouts.),
        // as well as all parts of autograd like AccumulateGrad correctly handle this.
        // We allow grad to be Strided when metadata is SparseCsr

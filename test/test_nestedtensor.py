@@ -446,6 +446,56 @@ class TestNestedTensorDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             nt1.clone(memory_format=torch.channels_last)
 
+class TestNestedTensorAutograd(TestCase):
+    def _create_nested_tensor_from_mask(self, requires_grad=False):
+        return torch.nested_tensor([torch.randn(1, 2, requires_grad=requires_grad),
+                                    torch.randn(7, 8, requires_grad=requires_grad)])
+
+    def _create_nested_tensor_from_list(self, requires_grad=False):
+        data = torch.randn(2, 3, 4, requires_grad=requires_grad)
+        mask = torch.ones_like(data[:, :, 0]).bool()
+        return torch._nested_tensor_from_mask(data, mask)
+
+    def test_requires_grad(self):
+        nt = self._create_nested_tensor_from_list()
+        nt.requires_grad_()
+        assert nt.requires_grad
+
+    def test_requires_grad_from_mask(self):
+        nt = self._create_nested_tensor_from_mask()
+        nt.requires_grad_()
+        assert nt.requires_grad
+
+    def test_requires_grad_not_pass_through(self):
+        # I don't know if this is behavior is intended
+        nt = self._create_nested_tensor_from_list(True)
+        assert not nt.requires_grad
+
+    def test_requires_grad_not_pass_through_from_mask(self):
+        # I don't know if this is behavior is intended
+        nt = self._create_nested_tensor_from_mask(True)
+        assert not nt.requires_grad
+
+    def test_backward_for_add_op(self):
+        nt_1 = self._create_nested_tensor_from_mask()
+        nt_2 = self._create_nested_tensor_from_mask()
+
+        nt_1.requires_grad_()
+        c = nt_1 + nt_2
+
+        assert nt_1.requires_grad
+        assert c.requires_grad
+        upward_grad = self._create_nested_tensor_from_mask()
+        c.backward(upward_grad)
+
+        #  Grad check doesn't work with nested yet.
+        # d/dnt_1 (nt + nt_1) = 1*upward_grad
+
+        # Nested Tensor has not overloaded equal so for now lets check chunks
+        for chunk_1, chunk_2 in zip(nt_1.grad.unbind(), upward_grad.unbind()):
+            assert torch.allclose(chunk_1, chunk_2)
+
+
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 
 if __name__ == '__main__':

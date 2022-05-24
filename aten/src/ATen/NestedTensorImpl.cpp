@@ -54,9 +54,6 @@ NestedTensorImpl::NestedTensorImpl(
   TORCH_INTERNAL_ASSERT(nested_size_tensor_.is_contiguous());
   int64_t size_dim = nested_size_tensor_.dim();
   TORCH_INTERNAL_ASSERT(size_dim == 0 || size_dim == 2);
-  remove_autograd_key();
-  key_set_ =
-      key_set_ - c10::DispatchKeySet({c10::DispatchKey::ADInplaceOrView});
   refresh_dim();
   set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }

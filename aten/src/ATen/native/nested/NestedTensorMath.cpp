@@ -9,9 +9,44 @@
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorMath.h>
+#include <c10/core/TensorImpl.h>
+#include <c10/util/Exception.h>
 
 namespace at {
 namespace native {
+
+int64_t NestedTensor_size_int(const Tensor& self, int64_t d) {
+  const auto* nt_indices = get_nested_tensor_impl(self);
+  const auto opt_size_d = nt_indices->opt_size(d);
+  TORCH_CHECK(opt_size_d, "Irregular dimension ", d, " does not have a size.");
+  return *opt_size_d;
+}
+
+at::Tensor NestedTensor_nested_size_tensor(const Tensor& self){
+  const auto* nt_indices = get_nested_tensor_impl(self);
+  return nt_indices->get_nested_size_tensor();
+}
+
+std::vector<at::Tensor> nested_size(const Tensor& self) {
+  return NestedTensor_nested_size_tensor(self).unbind();
+}
+
+bool has_same_shape(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(
+      self.is_nested() == other.is_nested(),
+      "Expected both self and other to be nested or not nested. ",
+      "Self is_nested: ",
+      self.is_nested(),
+      ". Other is_nested: ",
+      other.is_nested(),
+      ".")
+  if (self.is_nested()) {
+    auto self_nt_size = NestedTensor_nested_size_tensor(self);
+    auto other_nt_size = NestedTensor_nested_size_tensor(other);
+    return at::equal(self_nt_size, other_nt_size);
+  }
+  return self.sizes() == other.sizes();
+}
 
 namespace {
 template <typename Func>
@@ -108,6 +143,16 @@ inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
 
 inline const at::Tensor& get_nested_size_tensor(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_nested_size_tensor();
+}
+
+at::Tensor NestedTensor_clone(const at::Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format){
+   TORCH_CHECK(
+      !optional_memory_format.has_value(),
+      "unsupported memory format option ",
+      optional_memory_format.value());
+    auto cloned_buffer = get_buffer(self).clone();
+    auto cloned_nested_size= get_nested_size_tensor(self).clone();
+    return wrap_buffer(cloned_buffer, cloned_nested_size);
 }
 
 // CPU only!

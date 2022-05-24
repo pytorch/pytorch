@@ -4292,6 +4292,21 @@
   device_check: NoCheck
   device_guard: False
 
+- func: nested_tensor_size(Tensor self, int dim) -> int
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_size_int
+
+- func: nested_size(Tensor self) -> Tensor[]
+  variants: method
+
+- func: nested_size_tensor(Tensor self) -> Tensor
+  variants: method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_nested_size_tensor
+
+- func: has_same_shape(Tensor self, Tensor other) -> bool
+  variants: function, method
+
 - func: slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
