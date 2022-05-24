@@ -1265,6 +1265,47 @@ const auto erfcx_string = jiterator_stringify(
   }
 ); // erfcx_string
 
+const auto chebyshev_polynomial_t_string = jiterator_stringify(
+    template<typename T>
+    T chebyshev_polynomial_t(T x, std::int64_t n) {
+        if (n < 0) {
+            return T(0.0);
+        }
+
+        if (std::abs(x) == T(1.0)) {
+            if (x > T(0.0) || n % 2 == 0) {
+                return T(1.0);
+            }
+
+            return T(-1.0);
+        }
+
+        if ((n > 6) && (std::abs(x) < T(1.0))) {
+            return std::cos(n * std::acos(x));
+        }
+
+        if (n == 0) {
+            return T(1.0);
+        }
+
+        if (n == 1) {
+            return x;
+        }
+
+        T p = T(1.0);
+        T q = x;
+        T r;
+
+        for (int k = 2; k <= n; k++) {
+            r = (x + x) * q - p;
+            p = q;
+            q = r;
+        }
+
+        return r;
+    }
+);
+
 #else // !AT_USE_JITERATOR() -- kernels must be precompiled
 
 template <typename scalar_t>
