@@ -1117,7 +1117,6 @@ class TestTorchFunctionWarning(TestCase):
                 # Function that handles torch_function in C++
                 torch.abs(a)
 
-@skipIfCrossRef
 class TestTorchFunctionMode(TestCase):
     def test_basic(self):
         class A(TorchFunctionMode):

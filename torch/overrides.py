@@ -1753,7 +1753,7 @@ def _wrap_torch_function(f):
 
 class _TorchFunctionMetaInitErrorInfo(MetaInitErrorInfo):
     def __init__(self):
-        super().__init__(mode_class_name="TorchDispatchMode", mode_name="torch_dispatch")
+        super().__init__(mode_class_name="TorchFunctionMode", mode_name="torch_function")
 
 
 class TorchFunctionModeMeta(type):
