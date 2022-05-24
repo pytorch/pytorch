@@ -19032,6 +19032,10 @@ python_ref_db = [
         torch_opinfo_name="log2",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.nan_to_num",
+        torch_opinfo_name="nan_to_num",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
         torch_opinfo_name="neg",
     ),

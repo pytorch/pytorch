@@ -69,6 +69,7 @@ __all__ = [
     "log1p",
     "log2",
     "log10",
+    "nan_to_num",
     "neg",
     "positive",
     "reciprocal",
@@ -502,6 +503,74 @@ log10 = _make_elementwise_unary_reference(
     prims.log10,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
+
+def _minimum_limit(dtype: torch.dtype):
+    if dtype == torch.bool:
+        return False
+    elif dtype == torch.uint8:
+        return 0
+    elif dtype == torch.int8:
+        return -128
+    elif dtype == torch.int16:
+        return -32768
+    elif dtype == torch.int32:
+        return -2147483648
+    elif dtype == torch.int64:
+        return -9223372036854775808
+    elif dtype == torch.float32:
+        return -3.40282e+38
+    elif dtype == torch.float64:
+        return -1.7976931348623157e+308
+    else:
+        msg = "Unknown dtype {0} for maximum limit".format(dtype)
+        raise RuntimeError(msg)
+
+def _maximum_limit(dtype: torch.dtype):
+    if dtype == torch.bool:
+        return True
+    elif dtype == torch.uint8:
+        return 255
+    elif dtype == torch.int8:
+        return 127
+    elif dtype == torch.int16:
+        return 32767
+    elif dtype == torch.int32:
+        return 2147483647
+    elif dtype == torch.int64:
+        return 9223372036854775807
+    elif dtype == torch.float32:
+        return 3.40282e+38
+    elif dtype == torch.float64:
+        return 1.7976931348623157e+308
+    else:
+        msg = "Unknown dtype {0} for minimum limit".format(dtype)
+        raise RuntimeError(msg)
+
+@register_decomposition(torch.ops.aten.nan_to_num)
+@out_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a,"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def nan_to_num(a: TensorLikeType, *, nan: Optional[NumberType] = 0.0, posinf: Optional[NumberType] = None, neginf: Optional[NumberType] = None
+) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+
+    if posinf is None:
+        posinf = _maximum_limit(a.dtype)
+
+    if neginf is None:
+        neginf = _minimum_limit(a.dtype)
+
+    result = where(isnan(a), nan, a)
+
+    is_neg = signbit(a)
+    is_neginf = bitwise_and(isinf(a), is_neg)
+    result = where(is_neginf, neginf, result)
+
+    is_posinf = bitwise_and(isinf(a), bitwise_not(is_neg))
+    result = where(is_posinf, posinf, result)
+    return result
 
 
 def _neg_meta(a: TensorLikeType):
