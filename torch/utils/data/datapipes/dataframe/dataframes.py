@@ -305,7 +305,7 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
     def __getattr__(self, attrname):  # ?
         if attrname in DATAPIPES_OPS:
             return (self.as_datapipe()).__getattr__(attrname)
-        return super().__getattr__(attrname=attrname)
+        return super().__getattr__(attrname)
 
 
 @functional_datapipe('trace_as_dataframe')

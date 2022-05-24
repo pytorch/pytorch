@@ -1,14 +1,17 @@
 name: Lint
 
 on:
+  pull_request:
   push:
     branches:
       - master
-  pull_request:
+      - main
+      - release/*
+  workflow_dispatch:
 
 jobs:
   lintrunner:
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.16x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -22,7 +25,7 @@ jobs:
           submodules: false
 
       - name: Install lintrunner
-        run: pip install lintrunner==0.6.*
+        run: pip install lintrunner==0.9.*
 
       - name: Initialize lint dependencies
         run: lintrunner init
@@ -33,41 +36,32 @@ jobs:
           python3 -m tools.generate_torch_version --is_debug=false
           python3 -m tools.pyi.gen_pyi \
             --native-functions-path aten/src/ATen/native/native_functions.yaml \
+            --tags-path aten/src/ATen/native/tags.yaml \
             --deprecated-functions-path "tools/autograd/deprecated.yaml"
 
       - name: Run lintrunner on all files
-        if: github.event_name == 'push'
-        run: lintrunner -vv --paths-cmd='git grep -Il .' --force-color
-
-      - name: Run lintrunner on PR files
-        if: github.event_name == 'pull_request'
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          lintrunner -vv --force-color --merge-base-with "${PR_BASE_SHA}"
-          echo ""
-          echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
-          echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
+          set +e
+          if ! lintrunner --verbose --force-color --all-files --tee-json=lint.json; then
+              echo ""
+              echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
+              echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
+              exit 1
+          fi
 
-      - name: Store annotatations
+      - name: Store annotations
         if: always() && github.event_name == 'pull_request'
         # Don't show this as an error; the above step will have already failed.
         continue-on-error: true
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # The easiest way to get annotations is to just run lintrunner again
-          # in JSON mode and add a GitHub problem matcher to pattern match the
-          # output.
-          echo "::add-matcher::.github/lintrunner_problem_matcher.json"
-
-          # Use jq to massage the output to look a little nicer in GitHub.
-          lintrunner --merge-base-with "${PR_BASE_SHA}" --json \
-            | jq '{file: .path, line: .line, column: .char, severity: .severity, code: .code, message: ("["+.code+"] "+ .name + ": " +.description)}' -c
+          # Use jq to massage the JSON lint output into GitHub Actions workflow commands.
+          jq --raw-output \
+            '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))' \
+            lint.json
 
   quick-checks:
     name: quick-checks
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -106,11 +100,11 @@ jobs:
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
           set -eux
-          python torch/testing/_check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
+          python torch/testing/_internal/check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
 
   workflow-checks:
     name: workflow-checks
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -154,7 +148,7 @@ jobs:
 
   toc:
     name: toc
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
     env:
       NPM_CONFIG_PREFIX: ~/.npm-global
@@ -196,7 +190,7 @@ jobs:
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -229,7 +223,7 @@ jobs:
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     strategy:
       matrix:
         with_torch: [with_torch, without_torch]

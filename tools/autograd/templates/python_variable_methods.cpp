@@ -1117,6 +1117,7 @@ static PyObject* THPVariable_set_(
           "set_(Storage source)",
           "set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride=None)",
           "set_(Tensor source)",
+          "set_(Tensor source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride=None)",
       },
       /*traceable=*/false);
 
@@ -1177,6 +1178,21 @@ static PyObject* THPVariable_set_(
         return self.set_(source);
       };
       return wrap(dispatch_set_(self, _r.tensor(0)));
+    }
+    case 4: {
+      // aten::set_.source_Tensor_storage_offset(Tensor(a!) self, Tensor
+      // source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
+      at::Tensor storage = _r.tensor(0);
+      auto dispatch_set_ = [](const Tensor& self,
+                              const Tensor& source,
+                              int64_t storage_offset,
+                              IntArrayRef size,
+                              IntArrayRef stride) -> Tensor {
+        pybind11::gil_scoped_release no_gil;
+        return self.set_(source, storage_offset, size, stride);
+      };
+      return wrap(dispatch_set_(
+          self, storage, _r.toInt64(1), _r.intlist(2), _r.intlist(3)));
     }
   }
   Py_RETURN_NONE;

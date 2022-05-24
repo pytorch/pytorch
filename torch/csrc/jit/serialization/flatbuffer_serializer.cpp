@@ -353,6 +353,22 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
   flatbuffers::Offset<flatbuffers::Vector<
       flatbuffers::Offset<mobile::serialization::StorageData>>>
       storage_data_offset = 0;
+  auto extra_files_offset = storeExtraFilesAndGetOffset(fbb, extra_files);
+
+  auto jit_source_offset = storeExtraFilesAndGetOffset(fbb, jit_sources);
+  std::vector<uint32_t> jit_constants_indexes;
+  jit_constants_indexes.reserve(jit_constants.size());
+  for (const auto& ival : jit_constants) {
+    jit_constants_indexes.emplace_back(storeIValueAndGetIndex(fbb, ival));
+  }
+  const uint32_t operator_version =
+      static_cast<uint32_t>(module.min_operator_version());
+  uint32_t bytecode_version = static_cast<uint32_t>(module.bytecode_version());
+  if (bytecode_version < kMinVersion) {
+    bytecode_version = kMinVersion;
+  }
+
+  // NOTE: saving of storage has to be the last thing to do.
   if (include_tensor_data_in_flatbuffer) {
     std::vector<flatbuffers::Offset<mobile::serialization::StorageData>>
         storage_data;
@@ -378,21 +394,6 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
       storage_data.push_back(storage_offset);
     }
     storage_data_offset = fbb.CreateVector(storage_data);
-  }
-
-  auto extra_files_offset = storeExtraFilesAndGetOffset(fbb, extra_files);
-
-  auto jit_source_offset = storeExtraFilesAndGetOffset(fbb, jit_sources);
-  std::vector<uint32_t> jit_constants_indexes;
-  jit_constants_indexes.reserve(jit_constants.size());
-  for (const auto& ival : jit_constants) {
-    jit_constants_indexes.emplace_back(storeIValueAndGetIndex(fbb, ival));
-  }
-  const uint32_t operator_version =
-      static_cast<uint32_t>(module.min_operator_version());
-  uint32_t bytecode_version = static_cast<uint32_t>(module.bytecode_version());
-  if (bytecode_version < kMinVersion) {
-    bytecode_version = kMinVersion;
   }
 
   auto mod = CreateModule(
@@ -465,10 +466,14 @@ flatbuffers::Offset<mobile::serialization::ObjectType> FlatbufferSerializer::
       flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>>
       names_offset = 0;
   c10::QualifiedName setstate_name(*class_ptr->name(), "__setstate__");
+  c10::QualifiedName getstate_name(*class_ptr->name(), "__getstate__");
   const mobile::Function* setstate = mcu_->find_function(setstate_name);
-  if (setstate != nullptr) {
+  const mobile::Function* getstate = mcu_->find_function(getstate_name);
+  if (setstate != nullptr && getstate != nullptr) {
     typetype = mobile::serialization::TypeType::CLASS_WITH_SETSTATE;
-  } else if (class_ptr->findMethod("__setstate__")) {
+  } else if (
+      class_ptr->findMethod("__setstate__") &&
+      class_ptr->findMethod("__getstate__")) {
     typetype = mobile::serialization::TypeType::CUSTOM_CLASS;
   } else {
     size_t num_attr = class_ptr->numAttributes();

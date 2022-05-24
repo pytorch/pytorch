@@ -1386,7 +1386,7 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
 TEST(TestSymIntArrayRef, BasicConversion) {
   const size_t X = 2, Y = 4, Z = 5;
   std::vector<int64_t> tgt_size_v{2, 4, 5};
-  std::vector<c10::SymInt> tgt_size({X, Y, Z});
+  std::vector<c10::SymInt> tgt_size({SymInt(X), SymInt(Y), SymInt(Z)});
   auto a = at::randn({1, 4, 1}, at::kCPU);
   auto b = a.expand(tgt_size);
   auto c = a.expand(tgt_size_v);
@@ -2987,18 +2987,9 @@ graph(%x.1 : Tensor):
 }
 
 TEST(TestFunctionExecutor, RunDecompositionTest) {
-  GraphFunction* func;
-  std::once_flag flag1;
+  static auto* func = torch::jit::GetDecompositionExecutor(
+      "aten::var(Tensor self, bool unbiased=True) -> Tensor");
   for (bool unbiased : {true, false}) {
-    std::call_once(flag1, [&]() {
-      // NB: take reference to schema here, `auto schema =` will not work
-      auto& schema = getOperatorForLiteral(
-                         "aten::var(Tensor self, bool unbiased=True) -> Tensor")
-                         ->schema();
-      auto maybe_func = GetDecompositionFunction(schema);
-      TORCH_INTERNAL_ASSERT(maybe_func);
-      func = *maybe_func;
-    });
     auto input = at::rand({4, 4});
     Stack stack = {input, unbiased};
     func->run(stack);

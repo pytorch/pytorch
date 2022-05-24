@@ -267,6 +267,7 @@ class Module:
         self._forward_pre_hooks: Dict[int, Callable] = OrderedDict()
         self._state_dict_hooks: Dict[int, Callable] = OrderedDict()
         self._load_state_dict_pre_hooks: Dict[int, Callable] = OrderedDict()
+        self._load_state_dict_post_hooks: Dict[int, Callable] = OrderedDict()
         self._modules: Dict[str, Optional['Module']] = OrderedDict()
 
     forward: Callable[..., Any] = _forward_unimplemented
@@ -1183,6 +1184,8 @@ class Module:
             self._state_dict_hooks = OrderedDict()
         if '_load_state_dict_pre_hooks' not in self.__dict__:
             self._load_state_dict_pre_hooks = OrderedDict()
+        if '_load_state_dict_post_hooks' not in self.__dict__:
+            self._load_state_dict_post_hooks = OrderedDict()
         if '_non_persistent_buffers_set' not in self.__dict__:
             self._non_persistent_buffers_set = set()
         if '_is_full_backward_hook' not in self.__dict__:
@@ -1296,47 +1299,20 @@ class Module:
         if getattr(self.__class__, "get_extra_state", Module.get_extra_state) is not Module.get_extra_state:
             destination[extra_state_key] = self.get_extra_state()
 
-    def _state_dict_impl(self, destination, prefix, keep_vars):
-        r"""Holds the actual implementation of
-        :meth:`~torch.nn.Module.state_dict`, with recursive calls for
-        descendants of this module.
-
-        In rare cases, users can call this directly to provide a custom
-        :attr:`destination`.
-
-        Args:
-            destination (dict): a dict where state will be stored
-            prefix (str): the prefix for parameters and buffers used in this
-                module
-            keep_vars (bool): whether NOT to return buffers detached from
-                autograd
-        """
-        destination._metadata[prefix[:-1]] = local_metadata = dict(version=self._version)
-        self._save_to_state_dict(destination, prefix, keep_vars)
-        for name, module in self._modules.items():
-            if module is not None:
-                module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
-        for hook in self._state_dict_hooks.values():
-            hook_result = hook(self, destination, prefix, local_metadata)
-            if hook_result is not None:
-                destination = hook_result
-        return destination
-
-    # TODO: Deprecated, destination is becoming private. Remove this signature when BC allows
-    # See https://github.com/pytorch/pytorch/issues/72778#issuecomment-1039263869
-    T_destination = TypeVar('T_destination', bound=Mapping[str, Tensor])
+    # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
+    # back that same object. But if they pass nothing, an `OrederedDict` is created and returned.
+    T_destination = TypeVar('T_destination', bound=Dict[str, Any])
 
     @overload
-    def state_dict(self, destination: T_destination, prefix: str = ..., keep_vars: bool = ...) -> T_destination:
+    def state_dict(self, *, destination: T_destination, prefix: str = ..., keep_vars: bool = ...) -> T_destination:
         ...
 
-    # TODO: Remove string escape once Python-3.7.0 is no longer supported
-    # typing.OrderedDict with generics can be used in Python-3.7.2+ or later
-    # See https://github.com/pytorch/pytorch/issues/74087
     @overload
-    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> "OrderedDict[str, Tensor]":
+    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> Dict[str, Any]:
         ...
 
+    # TODO: Change `*args` to `*` and remove the copprespinding warning in docs when BC allows.
+    # Also remove the logic for arg parsing together.
     def state_dict(self, *args, destination=None, prefix='', keep_vars=False):
         r"""Returns a dictionary containing a whole state of the module.
 
@@ -1344,30 +1320,27 @@ class Module:
         included. Keys are corresponding parameter and buffer names.
         Parameters and buffers set to ``None`` are not included.
 
-        This can be called as
-
-        .. function:: state_dict(*, prefix='', keep_vars=False)
-           :noindex:
-
-        .. function:: state_dict(destination, prefix='', keep_vars=False)
-           :noindex:
+        .. warning::
+            Currently ``state_dict()`` also accepts positional arguments for
+            ``destination``, ``prefix`` and ``keep_vars`` in order. However,
+            this is being deprecated and keyword arguments will be enforced in
+            future releases.
 
         .. warning::
-            The second signature is deprecated and should not be used. It's only
-            temporarily kept for backward compatibility and will be removed in
-            a future release. Use the first signature instead.
+            Please avoid the use of argument ``destination`` as it is not
+            designed for end-users.
 
         Args:
-            destination (dict, optional): Deprecated. This dict is returned
-                with the module state saved in it. It should also have an
-                attribute ``_metadata: dict`` to save metadata of the module
-                state. If it's not provided, an ``OrderedDict`` is created and
-                returned. Default: ``None``
+            destination (dict, optional): If provided, the state of module will
+                be updated into the dict and the same object is returned.
+                Otherwise, an ``OrderedDict`` will be created and returned.
+                Default: ``None``.
             prefix (str, optional): a prefix added to parameter and buffer
-                names to compose the keys in dict. Default: ``''``
+                names to compose the keys in state_dict. Default: ``''``.
             keep_vars (bool, optional): by default the :class:`~torch.Tensor` s
                 returned in the state dict are detached from autograd. If it's
-                set to ``True``, detaching is not performed. Default: ``False``
+                set to ``True``, detaching will not be performed.
+                Default: ``False``.
 
         Returns:
             dict:
@@ -1380,30 +1353,37 @@ class Module:
 
         """
 
-        # TODO: positional args parsing is just for BC. Remove on transition to kwargs-only
-        warn_msg = []
+        # TODO: Remove `args` and the parsing logic when BC allows.
         if len(args) > 0:
-            warn_msg.append('positional arguments')
             if destination is None:
                 destination = args[0]
             if len(args) > 1 and prefix == '':
                 prefix = args[1]
             if len(args) > 2 and keep_vars is False:
                 keep_vars = args[2]
+            # DeprecationWarning is ignored by default
+            warnings.warn(
+                "Positional args are being deprecated, use kwargs instead. Refer to "
+                "https://pytorch.org/docs/master/generated/torch.nn.Module.html#torch.nn.Module.state_dict"
+                " for details.")
 
-        if destination is not None:
-            warn_msg.append('argument "destination"')
-        else:
+        if destination is None:
             destination = OrderedDict()
             destination._metadata = OrderedDict()
 
-        if warn_msg:
-            # DeprecationWarning is ignored by default
-            warnings.warn(
-                " and ".join(warn_msg) + " are deprecated. nn.Module.state_dict will not accept them in the future. "
-                "Refer to https://pytorch.org/docs/master/generated/torch.nn.Module.html#torch.nn.Module.state_dict for details.")
+        local_metadata = dict(version=self._version)
+        if hasattr(destination, "_metadata"):
+            destination._metadata[prefix[:-1]] = local_metadata
 
-        return self._state_dict_impl(destination, prefix, keep_vars)
+        self._save_to_state_dict(destination, prefix, keep_vars)
+        for name, module in self._modules.items():
+            if module is not None:
+                module.state_dict(destination=destination, prefix=prefix + name + '.', keep_vars=keep_vars)
+        for hook in self._state_dict_hooks.values():
+            hook_result = hook(self, destination, prefix, local_metadata)
+            if hook_result is not None:
+                destination = hook_result
+        return destination
 
     def _register_load_state_dict_pre_hook(self, hook, with_module=False):
         r"""These hooks will be called with arguments: `state_dict`, `prefix`,
@@ -1425,6 +1405,37 @@ class Module:
             hook = functools.partial(hook, self)
         self._load_state_dict_pre_hooks[handle.id] = hook
         return handle
+
+    def register_load_state_dict_post_hook(self, hook):
+        r"""Registers a post hook to be run after module's ``load_state_dict``
+        is called.
+
+        It should have the following signature::
+            hook(module, incompatible_keys) -> None
+
+        The ``module`` argument is the current module that this hook is registered
+        on, and the ``incompatible_keys`` argument is a ``NamedTuple`` consisting
+        of attributes ``missing_keys`` and ``unexpected_keys``. ``missing_keys``
+        is a ``list`` of ``str`` containing the missing keys and
+        ``unexpected_keys`` is a ``list`` of ``str`` containing the unexpected keys.
+
+        The given incompatible_keys can be modified inplace if needed.
+
+        Note that the checks performed when calling :func:`load_state_dict` with
+        ``strict=True`` are affected by modifications the hook makes to
+        ``missing_keys`` or ``unexpected_keys``, as expected. Additions to either
+        set of keys will result in an error being thrown when ``strict=True``, and
+        clearning out both missing and unexpected keys will avoid an error.
+
+        Returns:
+            :class:`torch.utils.hooks.RemovableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
+        """
+        handle = hooks.RemovableHandle(self._load_state_dict_post_hooks)
+        self._load_state_dict_post_hooks[handle.id] = hook
+        return handle
+
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
@@ -1520,7 +1531,7 @@ class Module:
                     if input_name not in self._modules and input_name not in local_state:
                         unexpected_keys.append(key)
 
-    def load_state_dict(self, state_dict: 'OrderedDict[str, Tensor]',
+    def load_state_dict(self, state_dict: Mapping[str, Any],
                         strict: bool = True):
         r"""Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. If :attr:`strict` is ``True``, then
@@ -1544,13 +1555,16 @@ class Module:
             exists in :attr:`state_dict`, :meth:`load_state_dict` will raise a
             ``RuntimeError``.
         """
+        if not isinstance(state_dict, Mapping):
+            raise TypeError("Expected state_dict to be dict-like, got {}.".format(type(state_dict)))
+
         missing_keys: List[str] = []
         unexpected_keys: List[str] = []
         error_msgs: List[str] = []
 
         # copy state_dict so _load_from_state_dict can modify it
         metadata = getattr(state_dict, '_metadata', None)
-        state_dict = state_dict.copy()
+        state_dict = OrderedDict(state_dict)
         if metadata is not None:
             # mypy isn't aware that "_metadata" exists in state_dict
             state_dict._metadata = metadata  # type: ignore[attr-defined]
@@ -1562,6 +1576,16 @@ class Module:
             for name, child in module._modules.items():
                 if child is not None:
                     load(child, prefix + name + '.')
+
+            # Note that the hook can modify missing_keys and unexpected_keys.
+            incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)
+            for hook in module._load_state_dict_post_hooks.values():
+                out = hook(module, incompatible_keys)
+                assert out is None, (
+                    "Hooks registered with ``register_load_state_dict_post_hook`` are not"
+                    "expected to return new values, if incompatible_keys need to be modified,"
+                    "it should be done inplace."
+                )
 
         load(self)
         del load
@@ -1946,6 +1970,6 @@ class Module:
         replica._parameters = OrderedDict()
         replica._buffers = replica._buffers.copy()
         replica._modules = replica._modules.copy()
-        replica._is_replica = True
+        replica._is_replica = True  # type: ignore[assignment]
 
         return replica

@@ -81,6 +81,11 @@ struct C10_API Device final {
     return type_ == DeviceType::CUDA;
   }
 
+  /// Return true if the device is of MPS type.
+  bool is_mps() const noexcept {
+    return type_ == DeviceType::MPS;
+  }
+
   /// Return true if the device is of HIP type.
   bool is_hip() const noexcept {
     return type_ == DeviceType::HIP;

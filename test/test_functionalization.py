@@ -86,6 +86,7 @@ class TestFunctionalization(TestCase):
         finally:
             torch._disable_functionalization()
 
+        self.assertEqual(out_ref.size(), out_functional.size())
         # We need to sync the input tensors first, in case there are any queued mutations left.
         torch._sync(input_functional)
         torch._sync(out_functional)
@@ -146,6 +147,16 @@ $3 = torch._ops.aten.mul.Tensor($2, $2)""")
 $0 = input('input')
 $1, $2 = torch._ops.aten.aminmax.default($0, dim=0)""")
 
+    def test_tensor_ctr(self):
+        def f(x):
+            y = torch.tensor((1, 2, 3))
+            z = y.view(-1)
+            z.add_(1)
+            return y
+        self.assert_functionalization(f, torch.arange(3, dtype=torch.float32))
+        logs = self.get_logs(f, torch.arange(3, dtype=torch.float32))
+        self.assertExpectedInline('\n'.join(logs), """$0 = input('input')""")
+
     def test_inplace_on_non_view(self):
         def f(x):
             # test for the case where we functionalize an inplace op on the other tensor - not a view.
@@ -163,6 +174,29 @@ $2 = torch._ops.aten.add.Tensor($0, tensor([[1., 1.],
         [1., 1.],
         [1., 1.],
         [1., 1.]]))""")
+
+    # Some ops that are mutable are neither inplace nor out= ops.
+    # They also need special handling.
+    def test_mutable_op_not_inplace_or_other(self):
+        def f(x):
+            return torch._fused_moving_avg_obs_fq_helper(x, x, x, x, x, x, x, 1.0, 0, 1, 0)
+
+        logs = self.get_logs(f, torch.ones(1))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1, $2, $3, $4, $5, $6 = torch._ops.aten._fused_moving_avg_obs_fq_helper.functional($0, $0, $0, $0, $0, $0, $0, 1.0, 0, 1, 0)""")
+
+    def test_as_strided(self):
+        def f(x):
+            y = x.as_strided((2,), (2,), 1)
+            y.add_(1)
+            return x
+        self.assert_functionalization(f, torch.ones(9))
+        logs = self.get_logs(f, torch.ones(9))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.as_strided_copy.default($0, [2], [2], 1)
+$2 = torch._ops.aten.add.Tensor($1, 1)""")
 
     def test_tensor_list_composite(self):
         def f(x):
@@ -183,6 +217,18 @@ $3 = torch._ops.aten.slice_scatter.default(tensor([[0., 0., 0., 0.],
 $4 = torch._ops.aten.slice_copy.Tensor($3, 0, 2, 4)
 $5 = torch._ops.aten.slice_copy.Tensor($4, 1, 2, 4)
 $6 = torch._ops.aten.expand_copy.default($0, [2, 2])""")
+
+    def test_cat(self):
+        def f(x):
+            out = torch.empty(0)
+            torch.cat((x,), out=out)
+            return out
+        self.assert_functionalization(f, torch.ones(2, 2))
+        logs = self.get_logs(f, torch.ones(2, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.cat.default([LoggingTensor(tensor([[1., 1.],
+        [1., 1.]]))])""")
 
     def test_diagonal(self):
         def f(x):
@@ -239,7 +285,7 @@ $9 = torch._ops.aten.mul.Tensor($8, $8)""")
             x.transpose_(1, 0)
             y = x[0]
             y.add_(tmp)
-            return y
+            return x
         self.assert_functionalization(f, torch.ones(4, 2))
         logs = self.get_logs(f, torch.ones(4, 2))
         self.assertExpectedInline('\n'.join(logs), """\
@@ -278,9 +324,21 @@ $2 = torch._ops.aten.index_put.default($1, [tensor([0, 1, 2, 3])], tensor([0., 1
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
 $1 = torch._ops.aten.view_copy.default($0, [4, 2])
-$2 = torch._ops.aten.add.Tensor($1, tensor(1))
-$3 = torch._ops.aten.mul.Tensor($2, tensor(2))
-$4 = torch._ops.aten.div.Tensor($3, tensor(1))""")
+$2 = torch._ops.aten.add.Tensor($1, 1)
+$3 = torch._ops.aten.mul.Tensor($2, 2)
+$4 = torch._ops.aten.div.Tensor($3, 1)""")
+
+    def test_metadata_change(self):
+        def f(x):
+            # ops like ge_() are allowed to change the dtype of the input.
+            # functionalization should pick up on that.
+            return x.ge_(0)
+        self.assert_functionalization(f, torch.ones(4, 2))
+        logs = self.get_logs(f, torch.ones(4, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.ge.Scalar($0, 0)
+$2 = torch._ops.aten._to_copy.default($1, dtype=torch.float32, layout=torch.strided)""")
 
     def test_only_one_view(self):
         def f(x):
@@ -328,7 +386,7 @@ $14, $15 = torch._ops.aten.split_copy.Tensor($13, 2)
 $16 = torch._ops.aten.add.Tensor($14, tensor([[1., 1.],
         [1., 1.]]))
 $17 = torch._ops.aten.select_copy.int($3, 0, 0)
-$18 = torch._ops.aten.clone.default($16, memory_format=0)
+$18 = torch._ops.aten.clone.default($16, memory_format=torch.contiguous_format)
 $19 = torch._ops.aten._unsafe_view.default($18, [4])
 $20 = torch._ops.aten.view_copy.default($1, [8])
 $21 = torch._ops.aten._reshape_alias_copy.default($20, [2, 4], [4, 1])
@@ -421,7 +479,7 @@ $2 = torch._ops.aten.add.Tensor($1, $0)""")
         logs = self.get_logs(f, torch.ones(2, dtype=torch.long))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten._to_copy.default($0, dtype=6, layout=0, device=device(type='cpu'), pin_memory=False)
+$1 = torch._ops.aten._to_copy.default($0, dtype=torch.float32, layout=torch.strided, device=device(type='cpu'), pin_memory=False)
 $2 = torch._ops.aten.expand_copy.default($1, [2])
 $3 = torch._ops.aten.add.Tensor($2, $0)""")
 
@@ -430,9 +488,24 @@ $3 = torch._ops.aten.add.Tensor($2, $0)""")
         logs = self.get_logs(f, torch.ones(1, dtype=torch.long))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten._to_copy.default($0, dtype=6, layout=0, device=device(type='cpu'), pin_memory=False)
+$1 = torch._ops.aten._to_copy.default($0, dtype=torch.float32, layout=torch.strided, device=device(type='cpu'), pin_memory=False)
 $2 = torch._ops.aten.expand_copy.default($1, [2])
 $3 = torch._ops.aten.add.Tensor($2, $0)""")
+
+    def test_fill_(self):
+        def f(x):
+            y = x + x
+            z = y.diagonal()
+            z.fill_(0)
+            return y
+
+        self.assert_functionalization(f, torch.ones(2, 2))
+        logs = self.get_logs(f, torch.ones(2, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.add.Tensor($0, $0)
+$2 = torch._ops.aten.diagonal_copy.default($1)
+$3 = torch._ops.aten.fill.Scalar($2, 0)""")
 
     def test_nested_functions_propagate_updates(self):
         def g(x):
@@ -466,7 +539,7 @@ $3 = torch._ops.aten.add.Tensor($2, $0)""")
         # with a functional + non-functional tensor, and wrapped the output appropriately.
         self.assertExpectedInline('\n'.join(logs), """\
 $2 = torch._ops.aten.add.Tensor($0, $1)
-$3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
+$3 = torch._ops.aten.add.Tensor($2, 1)""")
 
     def test_mixed_wrappers_invalid(self):
         x1_not_functional = torch.ones(4)
@@ -493,8 +566,8 @@ $3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
 
         # Since both wrappers were unctionalized, they both log "add"
         self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.add.Tensor($0, tensor(1))
-$3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
+$1 = torch._ops.aten.add.Tensor($0, 1)
+$3 = torch._ops.aten.add.Tensor($2, 1)""")
 
         # Test 2: only the inner wrapper is "functionalized"
         x_only_inner_functional = InplaceLoggingTensor(torch._to_functional_tensor(LoggingTensor(torch.ones(4))))
@@ -504,8 +577,8 @@ $3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
 
         # Since only the inner wrapper is functionalized, then the inner (first) log is functionalized
         self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.add.Tensor($0, tensor(1))
-$3 = torch._ops.aten.add_.Tensor($2, tensor(1))""")
+$1 = torch._ops.aten.add.Tensor($0, 1)
+$3 = torch._ops.aten.add_.Tensor($2, 1)""")
 
         # Test 3: only the inner wrapper is "functionalized"
         x_only_outer_functional = torch._to_functional_tensor(InplaceLoggingTensor(LoggingTensor(torch.ones(4))))
@@ -516,8 +589,8 @@ $3 = torch._ops.aten.add_.Tensor($2, tensor(1))""")
         # Only the outer add_ is functionalized
         # Since only the outer wrapper is functionalized, then the outer (second) log is functionalized
         self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.add_.Tensor($0, tensor(1))
-$3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
+$1 = torch._ops.aten.add_.Tensor($0, 1)
+$3 = torch._ops.aten.add.Tensor($2, 1)""")
 
 if __name__ == '__main__':
     run_tests()

@@ -5,6 +5,8 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 # TODO: maybe refactor this to a separate util function
 from .native import _get_binary_op_configs
+from .native import _get_linear_configs
+from .native import _get_share_qparams_op_configs
 
 from ..fuser_method_mappings import reverse_sequential_wrapper2
 
@@ -33,20 +35,6 @@ def get_tensorrt_backend_config_dict():
     }
 
     # operator (module/functional/torch ops) configs
-    linear_module_config = {
-        # Please see README under this folder for pattern format
-        "pattern": torch.nn.Linear,
-        "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
-        "dtype_configs": [
-            weighted_op_qint8_dtype_config,
-        ],
-        # the root module for the pattern, used to query the reference quantized module
-        # e.g. for a (torch.nn.ReLU, torch.nn.Linear) pattern, the root will be torch.nn.Linear
-        "root_module": torch.nn.Linear,
-        # the corresponding reference quantized module for the root module
-        "reference_quantized_module_for_root": torch.nn.quantized._reference.Linear,
-        "qat_module": nnqat.Linear,
-    }
     linear_qat_config = {
         "pattern": nnqat.Linear,
         "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
@@ -192,21 +180,19 @@ def get_tensorrt_backend_config_dict():
             non_weighted_op_qint8_dtype_config,
         ]
     }
-    identity_config = {
-        "pattern": torch.nn.Identity,
-        "observation_type": ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
-        "dtype_configs": [
-            non_weighted_op_qint8_dtype_config,
-        ]
-    }
+    linear_dtype_configs = [
+        weighted_op_qint8_dtype_config,
+    ]
     binary_op_dtype_configs = [
         weighted_op_qint8_dtype_config,
+    ]
+    share_qparams_op_dtype_configs = [
+        non_weighted_op_qint8_dtype_config,
     ]
     return {
         # optional
         "name": "tensorrt",
         "configs": [
-            linear_module_config,
             linear_qat_config,
             linear_relu_fused_config,
             linear_relu_qat_config,
@@ -224,8 +210,9 @@ def get_tensorrt_backend_config_dict():
             # conv3d_relu_fused_config,
             addmm_config,
             cat_config,
-            identity_config,
+            *_get_linear_configs(linear_dtype_configs),
             *_get_binary_op_configs(binary_op_dtype_configs),
+            *_get_share_qparams_op_configs(share_qparams_op_dtype_configs),
         ]
     }
 
