@@ -533,6 +533,6 @@ __all__ = [
     "Tuple",
     "Union",
     "is_parametrized",
-    "quant_type_to_str"
+    "quant_type_to_str",
     "get_fqn_to_example_inputs",
 ]
