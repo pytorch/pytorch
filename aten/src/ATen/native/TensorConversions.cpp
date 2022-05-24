@@ -543,15 +543,19 @@ Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
 }
 
 std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
-    Tensor not_zero_mask) {
-  auto col_indices = at::native::arange(not_zero_mask.size(-1))
-                         .view({1, not_zero_mask.size(-1)})
-                         .expand_as(not_zero_mask)
-                         .masked_select(not_zero_mask);
-  auto row_indices = at::native::arange(not_zero_mask.size(-2))
-                         .view({not_zero_mask.size(-2), 1})
-                         .expand_as(not_zero_mask)
-                         .masked_select(not_zero_mask);
+    Tensor not_zero_mask,
+    ScalarType index_dtype,
+    Device index_device) {
+  auto col_indices =
+      at::native::arange(not_zero_mask.size(-1), index_dtype, kStrided, index_device)
+          .view({1, not_zero_mask.size(-1)})
+          .expand_as(not_zero_mask)
+          .masked_select(not_zero_mask);
+  auto row_indices =
+      at::native::arange(not_zero_mask.size(-2), index_dtype, kStrided, index_device)
+          .view({not_zero_mask.size(-2), 1})
+          .expand_as(not_zero_mask)
+          .masked_select(not_zero_mask);
   return std::pair<Tensor, Tensor>(col_indices, row_indices);
 }
 
@@ -582,7 +586,7 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   Tensor col_indices;
   Tensor row_indices;
   std::tie(col_indices, row_indices) =
-      _not_zero_mask_to_col_row_indices(not_zero_mask);
+      _not_zero_mask_to_col_row_indices(not_zero_mask, at::kLong, not_zero_mask.device());
   Tensor crow_indices = at::_convert_indices_from_coo_to_csr(
       row_indices.view({-1}), block_size_0, false /* out_int32 */);
   values = values.reshape({-1, values.size(-2), values.size(-1)});
@@ -592,7 +596,8 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   // This isn't ideal.
   values = values.index_select(
       0,
-      at::native::arange(not_zero_mask.numel()).masked_select(not_zero_mask));
+      at::native::arange(not_zero_mask.numel(), at::kLong, kStrided, not_zero_mask.device())
+          .masked_select(not_zero_mask));
 
   return at::native::_sparse_bsr_tensor_unsafe(
       crow_indices,
