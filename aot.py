@@ -63,8 +63,8 @@ def demo_basic(rank, world_size):
     #all_gather
     xs = [torch.zeros(2,3, dtype=torch.int64).to(device) for _ in range(dist.get_world_size())]
     aot_print_fn = aot_function(all_gather, fw_compiler=compiler_fn, bw_compiler=compiler_fn)
-    ress = aot_print_fn(xs, copy.deepcopy(x))
-    refs = all_gather(xs, copy.deepcopy(x))
+    ress = aot_print_fn(copy.deepcopy(xs), copy.deepcopy(x))
+    refs = all_gather(copy.deepcopy(xs), copy.deepcopy(x))
     assert all([torch.allclose(ref, res) for ref, res in zip(refs, ress)])
 
     clear_compile_cache()
