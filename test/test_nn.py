@@ -7962,6 +7962,9 @@ class TestNN(NNTestCase):
             mask[0, 1] = 1
             mask[1, 3] = 1
             mask[1, 4] = 1
+            # If mask is not left aligned
+            # We disable nested tensor
+            model.enable_nested_tensor = False
             result = model(encoder_input, src_key_padding_mask=mask)
             ref_output = perm_fn(torch.tensor([[[2.429026, 0.020793, -0.601741, -0.085642],
                                                 [2.428811, 0.021445, -0.601912, -0.084252]],
@@ -7978,7 +7981,7 @@ class TestNN(NNTestCase):
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
             # test case 2, multiple layers no norm
-            model = nn.TransformerEncoder(encoder_layer, 2).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 2, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -7996,7 +7999,7 @@ class TestNN(NNTestCase):
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
-            model = nn.TransformerEncoder(encoder_layer, 6).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 6, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -8017,7 +8020,7 @@ class TestNN(NNTestCase):
             # test case 3, multiple layers with norm
             # d_model = 4
             norm = nn.LayerNorm(4)
-            model = nn.TransformerEncoder(encoder_layer, 2, norm=norm).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 2, norm=norm, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -8035,7 +8038,7 @@ class TestNN(NNTestCase):
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
-            model = nn.TransformerEncoder(encoder_layer, 6, norm=norm).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 6, norm=norm, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -19733,6 +19736,20 @@ class TestNNDeviceType(NNTestCase):
                 output_unit = m_unit(input, target)
                 self.assertEqual(output, output_unit)
 
+    @parametrize_test('reduction', ['none', 'mean', 'sum'])
+    @parametrize_test('weighted', [False, True])
+    def test_cross_entropy_loss_prob_target_no_batch_dim(self, device, reduction, weighted):
+        C = 5
+        input = torch.randn(C, device=device).log_softmax(dim=-1)
+        target = torch.randn(C, device=device).softmax(dim=-1)
+        weight = torch.randn(C, device=device) if weighted else None
+        m = nn.CrossEntropyLoss(reduction=reduction, weight=weight)
+        loss_no_batch = m(input, target)
+        loss_batch = m(input.unsqueeze(0), target.unsqueeze(0))
+        if reduction == 'none':
+            loss_batch = loss_batch.squeeze(0)
+        self.assertEqual(loss_no_batch, loss_batch)
+
     def test_cross_entropy_loss_index_target_unit_weights(self, device):
         # Test with k-dimensional loss.
         for k in range(5):
@@ -20536,6 +20553,24 @@ class TestNNDeviceType(NNTestCase):
         mha.in_proj_bias = torch.nn.Parameter(mha.in_proj_bias.to(torch.half).to(device))
         query = torch.randn(3, 3, 3, dtype=dtype, device=device)
         mha(query, query, query)
+
+    @dtypes(torch.double)
+    @torch.no_grad()
+    def test_multihead_attn_in_proj_bias_none(self, device, dtype):
+        mha = torch.nn.MultiheadAttention(1, 1, bias=False, dtype=dtype, device=device)
+        query = torch.rand(3, 2, 1, dtype=dtype, device=device)
+        mha(query, query, query)
+
+    @dtypes(torch.double)
+    @torch.no_grad()
+    def test_multihead_attn_in_proj_weight_none(self, device, dtype):
+        # Setting kdim == vdim == 2 means that vdim != embed_dim
+        # will cause the logic to use per-input project weights, thereby
+        # forcing self.in_proj_weight = None
+        mha = torch.nn.MultiheadAttention(4, 4, vdim=2, kdim=2, dtype=dtype, device=device)
+        query = torch.rand(4, 4, 4, dtype=dtype, device=device)
+        key = torch.rand(4, 4, 2, dtype=dtype, device=device)
+        mha(query, key, key)
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
