@@ -11810,15 +11810,12 @@ class TestNN(NNTestCase):
         #   bwd: torch.batch_norm_backward_reduce, torch.batch_norm_backward_elemt
 
         def _batch_norm_stats(data):
-            mean1, std1 = torch.batch_norm_stats(data, 1e-5)
-            mean2, std2 = torch.batch_norm_stats(data.to(memory_format=torch.channels_last), 1e-5)
+            mean1, _ = torch.batch_norm_stats(data, 1e-5)
+            mean2, _ = torch.batch_norm_stats(data.to(memory_format=torch.channels_last), 1e-5)
             mean_ref = torch.mean(data, (0, 2, 3), keepdim=False)
-            std_ref = torch.var(data, (0, 2, 3), keepdim=False, unbiased=False)
 
             self.assertEqual(mean_ref, mean1)
             self.assertEqual(mean_ref, mean2)
-            self.assertEqual(std_ref, std1)
-            self.assertEqual(std_ref, std2)
 
         if torch.cuda.is_available():
             device = torch.device('cuda')
