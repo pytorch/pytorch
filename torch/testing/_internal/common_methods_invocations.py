@@ -19036,6 +19036,10 @@ python_ref_db = [
         torch_opinfo_name="neg",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.positive",
+        torch_opinfo_name="positive",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.reciprocal",
         torch_opinfo_name="reciprocal",
     ),

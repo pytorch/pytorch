@@ -70,6 +70,7 @@ __all__ = [
     "log2",
     "log10",
     "neg",
+    "positive",
     "reciprocal",
     "round",  # TODO: model kwargs
     "sigmoid",
@@ -513,6 +514,15 @@ neg = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     extra_meta=_neg_meta,
 )
+
+@register_decomposition(torch.ops.aten.positive)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a,"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+)
+def positive(a: TensorLikeType) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+    return a
 
 reciprocal = _make_elementwise_unary_reference(
     prims.reciprocal,
