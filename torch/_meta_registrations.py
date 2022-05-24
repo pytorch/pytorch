@@ -1,11 +1,8 @@
 import torch
 from torch._prims import utils
+from torch._prims.utils import check
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
-
-def check(b, s):
-    if not b:
-        raise RuntimeError(s)
 
 def toRealValueType(dtype):
     from_complex = {
