@@ -185,10 +185,16 @@ class TestCudaFuser(JitTestCase):
         jit_o = jit_op(*args)
         torch.cuda.manual_seed_all(123)
         o = op(*args)
-        self.assertEqual(o.dtype, jit_o.dtype)
-        self.assertEqual(o, jit_o)
-        if check_stride:
-            self.assertEqual(o.stride(), jit_o.stride())
+
+        if type(jit_o) is torch.Tensor:
+            jit_o = [jit_o, ]
+            o = [o, ]
+
+        for oo, jit_oo in zip(o, jit_o):
+            self.assertEqual(oo.dtype, jit_oo.dtype)
+            self.assertEqual(oo, jit_oo)
+            if check_stride:
+                self.assertEqual(oo.stride(), jit_oo.stride())
         self.assertGraphContainsExactly(jit_op.graph_for(*args), FUSION_GUARD, num_fusion, consider_subgraphs=True)
 
     def _run_training_helper(self, jit_op, op, grads, *args):
@@ -4759,6 +4765,37 @@ class TestCudaFuser(JitTestCase):
                 t_cpu_jit(x)
 
             self.assertGraphContainsExactly(t_cpu_jit.graph_for(x), FUSION_GUARD, 0)
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_scheduler_with_polymorphic_broadcast(self):
+        device = "cuda"
+        x0 = torch.randn(10, 128, device=device)
+        x1 = torch.rand_like(x0)
+        x2 = torch.randn(10, device=device)
+
+        def t(x0, x1, x2):
+            x3 = x2.unsqueeze(-1)
+            x4 = x3 + x0
+            x5 = x3 + x1
+            x6 = x5.sum(0)
+            return x4, x6
+
+        t_jit = torch.jit.script(t)
+        self._run_helper(t_jit, t, x0, x1, x2, check_stride=True)
+
+        x2 = torch.randn(128, device=device)
+
+        def t2(x0, x1, x2):
+            x3 = x2.unsqueeze(0)
+            x4 = x3 + x0
+            x5 = x3 + x1
+            x6 = x5.sum(1)
+            return x4, x6
+
+        t2_jit = torch.jit.script(t2)
+        self._run_helper(t2_jit, t2, x0, x1, x2, check_stride=True)
 
 
 class TestPassManagerCudaFuser(JitTestCase):
