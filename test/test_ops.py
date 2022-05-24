@@ -145,6 +145,7 @@ class TestCommon(TestCase):
                     op.sample_inputs(device, dtype, requires_grad=requires_grad)
                 )
             except Exception as e:
+                print(e)
                 unsupported(dtype)
                 continue
 
@@ -158,6 +159,7 @@ class TestCommon(TestCase):
                     # NOTE: some ops will fail in forward if their inputs
                     #   require grad but they don't support computing the gradient
                     #   in that type! This is a bug in the op!
+                    print(e)
                     unsupported(dtype)
                     continue
 
