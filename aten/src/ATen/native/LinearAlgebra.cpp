@@ -55,7 +55,7 @@ namespace meta {
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")"); \
  \
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self); \
-  set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
 
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   ADDMM_META();
@@ -73,7 +73,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
       self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   auto names = at::namedinference::compute_matmul_outnames(self, mat2);
-  set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output_raw_strided(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
 }
 
 TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
@@ -106,7 +106,7 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
   auto options = self.options()
                      .dtype(toRealValueType(opt_dtype.value_or(self.scalar_type())));
 
-  set_output(shape, options);
+  set_output_raw_strided(0, shape, {}, options);
 }
 
 template <typename Meta>
@@ -129,7 +129,7 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
 
   auto& result = meta.maybe_get_output(0);
   // 'set_output' does not resize for in-place calls
-  meta.set_output(output_size, batch2.options());
+  meta.set_output_raw_strided(0, output_size, {}, batch2.options());
   const auto result_sizes = result.sizes();
   // Error is raised if called from in-place overload with incorrect shape
   TORCH_CHECK(result_sizes == output_size,

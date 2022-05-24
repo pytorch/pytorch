@@ -1,14 +1,14 @@
 import torch
 import torch.distributed._shard.sharded_tensor as sharded_tensor
 from torch.distributed._shard.sharded_tensor import (
-    sharded_op_impl,
+    _sharded_op_impl,
 )
 
 def validate_param(param, param_name):
     if param is None:
         raise ValueError(f"param: {param_name} shouldn't be None!")
 
-@sharded_op_impl(torch.nn.init.uniform_)
+@_sharded_op_impl(torch.nn.init.uniform_)
 def uniform_(types, args=(), kwargs=None, pg=None):
     r"""
     Fills the Tensor in sharded_tensor.local_shards with values drawn from the uniform
@@ -30,7 +30,7 @@ def uniform_(types, args=(), kwargs=None, pg=None):
         torch.nn.init.uniform_(shard.tensor, a=a, b=b)
     return sharded_tensor
 
-@sharded_op_impl(torch.nn.init.normal_)
+@_sharded_op_impl(torch.nn.init.normal_)
 def normal_(types, args=(), kwargs=None, pg=None):
     r"""
     Fills the Tensors in sharded_tensor.local_shards with values drawn from the normal
@@ -52,7 +52,7 @@ def normal_(types, args=(), kwargs=None, pg=None):
         torch.nn.init.normal_(shard.tensor, mean=mean, std=std)
     return sharded_tensor
 
-@sharded_op_impl(torch.nn.init.kaiming_uniform_)
+@_sharded_op_impl(torch.nn.init.kaiming_uniform_)
 def kaiming_uniform_(types, args=(), kwargs=None, pg=None):
     r"""
     Fills the Tensors in sharded_tensor.local_shards with values according to the method
@@ -88,7 +88,7 @@ def kaiming_uniform_(types, args=(), kwargs=None, pg=None):
         torch.nn.init.kaiming_uniform_(shard.tensor, a=a, mode=mode, nonlinearity=nonlinearity)
     return sharded_tensor
 
-@sharded_op_impl(torch.nn.init.constant_)
+@_sharded_op_impl(torch.nn.init.constant_)
 def constant_(types, args=(), kwargs=None, pg=None):
     r"""
     Fills the input ShardedTensor with the value \text{val}val.
@@ -116,7 +116,7 @@ tensor_like_creation_op_map = {
 
 # tensor ops that behave the same as the default tensor
 def register_tensor_creation_op(op):
-    @sharded_op_impl(op)
+    @_sharded_op_impl(op)
     def tensor_creation_op(types, args=(), kwargs=None, pg=None):
         """
         Handles ``__torch_function__`` dispatch for tensor creation ops that
