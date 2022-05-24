@@ -670,6 +670,8 @@ def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn
 def _set_mkldnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledMkldnn
 def _get_cudnn_benchmark() -> _bool: ...  # THPModule_benchmarkCuDNN
 def _set_cudnn_benchmark(arg: _bool) -> None: ...  # THPModule_setBenchmarkCuDNN
+def _get_cudnn_benchmark_limit() -> _int: ...  # THPModule_benchmarkLimitCuDNN
+def _set_cudnn_benchmark_limit(arg: _int) -> None: ...  # THPModule_setBenchmarkLimitCuDNN
 def _get_cudnn_deterministic() -> _bool: ...  # THPModule_deterministicCuDNN
 def _set_cudnn_deterministic(arg: _bool) -> None: ...  # THPModule_setDeterministicCuDNN
 def _get_deterministic_algorithms() -> _bool: ...  # THPModule_deterministicAlgorithms
@@ -710,6 +712,7 @@ def _disabled_torch_function_impl(func: Callable, types: Iterable[Type], args: T
 def _disabled_torch_dispatch_impl(func: Callable, types: Iterable[Type], args: Tuple, kwargs: Dict) -> Any: ...  # THPModule_disable_dispatch_function
 def _get_linalg_preferred_backend() -> torch._C._LinalgBackend: ...
 def _set_linalg_preferred_backend(arg: torch._C._LinalgBackend): ...
+def _is_mps_available() -> _bool: ...
 class _LinalgBackend:
     Default: _LinalgBackend
     Cusolver: _LinalgBackend
@@ -723,7 +726,6 @@ def _valgrind_toggle_and_dump_stats() -> None: ...  # CALLGRIND_TOGGLE_COLLECT a
 has_openmp: _bool
 has_mkl: _bool
 has_mps: _bool
-_is_mps_available: _bool
 has_lapack: _bool
 has_cuda: _bool
 has_mkldnn: _bool
