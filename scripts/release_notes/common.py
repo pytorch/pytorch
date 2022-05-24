@@ -67,6 +67,8 @@ Features = namedtuple('Features', [
     'pr_number',
     'files_changed',
     'labels',
+    'author',
+    'accepters'
 ])
 
 
@@ -146,25 +148,41 @@ def run_query(query):
         raise Exception("Query failed to run by returning code of {}. {}".format(request.status_code, query))
 
 
-def gh_labels(pr_number):
-    query = f"""
-    {{
-      repository(owner: "pytorch", name: "pytorch") {{
-        pullRequest(number: {pr_number}) {{
-          labels(first: 10) {{
-            edges {{
-              node {{
+def github_data(pr_number):
+    query = """
+    {
+      repository(owner: "pytorch", name: "pytorch") {
+        pullRequest(number: %s ) {
+          author {
+            login
+          }
+          reviews(last: 5, states: APPROVED) {
+            nodes {
+              author {
+                login
+              }
+            }
+          }
+          labels(first: 10) {
+            edges {
+              node {
                 name
-              }}
-            }}
-          }}
-        }}
-      }}
-    }}
-    """
+              }
+            }
+          }
+        }
+      }
+    }
+    """ % pr_number
     query = run_query(query)
+
     edges = query['data']['repository']['pullRequest']['labels']['edges']
-    return [edge['node']['name'] for edge in edges]
+    labels = [edge['node']['name'] for edge in edges]
+    author = query['data']['repository']['pullRequest']['author']
+    nodes = query['data']['repository']['pullRequest']['reviews']['nodes']
+    accepters = tuple(sorted(node["author"]["login"] for node in nodes))
+
+    return labels, author, accepters
 
 
 def get_features(commit_hash, return_dict=False):
@@ -174,9 +192,11 @@ def get_features(commit_hash, return_dict=False):
         commit_files_changed(commit_hash))
     pr_number = parse_pr_number(body, commit_hash, title)
     labels = []
+    author = ""
+    accepters = tuple()
     if pr_number is not None:
-        labels = gh_labels(pr_number)
-    result = Features(title, body, pr_number, files_changed, labels)
+        labels, author, accepters = github_data(pr_number)
+    result = Features(title, body, pr_number, files_changed, labels, author, accepters)
     if return_dict:
         return features_to_dict(result)
     return result
