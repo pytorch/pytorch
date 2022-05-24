@@ -533,30 +533,22 @@ Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
   //
   //  via a 3D Tensor of shape (4, 2, 2)
   //
-  auto block_size_0 = self.size(0) / blocksize[0];
-  auto block_size_1 = self.size(1) / blocksize[1];
-  auto values = self.reshape(
-      {self.size(0) / blocksize[0],
-       blocksize[0],
-       self.size(1) / blocksize[1],
-       blocksize[1]});
-  values = values.transpose(1, 2);
-  values =
-      values.reshape({block_size_0, block_size_1, blocksize[0], blocksize[1]});
-  return values;
+  auto block_size_0 = self.size(0) == 0 ? 0 : self.size(0) / blocksize[0];
+  auto block_size_1 = self.size(1) == 0 ? 0 : self.size(1) / blocksize[1];
+  return self.reshape({block_size_0, blocksize[0], block_size_1, blocksize[1]})
+      .transpose(1, 2)
+      .contiguous();
 }
 
 std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
     Tensor not_zero_mask) {
-  auto col_indices = (not_zero_mask *
-                      at::native::arange(not_zero_mask.size(-1))
-                          .view({1, not_zero_mask.size(-1)})
-                          .expand_as(not_zero_mask))
+  auto col_indices = at::native::arange(not_zero_mask.size(-1))
+                         .view({1, not_zero_mask.size(-1)})
+                         .expand_as(not_zero_mask)
                          .masked_select(not_zero_mask);
-  auto row_indices = (not_zero_mask *
-                      at::native::arange(not_zero_mask.size(-2))
-                          .view({not_zero_mask.size(-2), 1})
-                          .expand_as(not_zero_mask))
+  auto row_indices = at::native::arange(not_zero_mask.size(-2))
+                         .view({not_zero_mask.size(-2), 1})
+                         .expand_as(not_zero_mask)
                          .masked_select(not_zero_mask);
   return std::pair<Tensor, Tensor>(col_indices, row_indices);
 }
