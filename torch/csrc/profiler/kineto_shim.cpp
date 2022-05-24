@@ -68,6 +68,8 @@ libkineto::ActivityType toActivityType(const KinetoActivityType type) {
       return libkineto::ActivityType::CPU_OP;
     case KinetoActivityType::CPU_INSTANT_EVENT:
       return libkineto::ActivityType::CPU_INSTANT_EVENT;
+    case KinetoActivityType::PYTHON_FUNCTION:
+      return libkineto::ActivityType::PYTHON_FUNCTION;
     default:
       TORCH_INTERNAL_ASSERT(
           type == KinetoActivityType::USER_ANNOTATION,
