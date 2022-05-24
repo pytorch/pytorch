@@ -830,7 +830,6 @@ meta_dispatch_expected_failures = {
     aten.logcumsumexp.out: {bf16, f64, f32},
     aten.logical_not.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.logical_not_.default: {bf16, f16, f64, f32},
-    aten.logical_xor.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.logit.out: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.masked_select.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.masked_select.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
