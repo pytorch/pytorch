@@ -6,6 +6,7 @@ import warnings
 import unittest
 import itertools
 import torch
+import contextlib
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -46,6 +47,7 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
 )
 import torch._prims as prims
+from torch._prims.context import TorchRefsMode
 
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal import composite_compliance
@@ -370,9 +372,9 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_reference_consistency(self, device, dtype, op):
-        for sample in op.reference_inputs(device, dtype, requires_grad=False):
-
-            actual = op(sample.input, *sample.args, **sample.kwargs)
+        def go(sample, ctx=contextlib.nullcontext):
+            with ctx():
+                actual = op(sample.input, *sample.args, **sample.kwargs)
             expected = op.torch_opinfo(sample.input, *sample.args, **sample.kwargs)
 
             self.assertEqual(
@@ -395,6 +397,15 @@ class TestCommon(TestCase):
                     prims.utils.compare_tensor_meta(a, b)
                     if getattr(op, 'validate_view_consistency', True):
                         self.assertEqual(a._is_view(), b._is_view())
+
+        for sample in op.reference_inputs(device, dtype, requires_grad=False):
+            # Run the test twice: once directly as written...
+            go(sample)
+            # ...and once rerouting all torch.* function calls to torch._refs.*
+            # instead (testing PrimTorch end-to-end)
+            go(sample, lambda: TorchRefsMode.push(strict=True))
+            # TODO: xfail'ing one of these will xfail both, there is no finer
+            # granularity at the moment
 
 
     @skipMeta
@@ -650,18 +661,9 @@ class TestCommon(TestCase):
     #   - Case 3: out has the correct shape and dtype, but is on a different device type
     #   - Case 4: out has the with correct shape and device, but a dtype that cannot
     #       "safely" cast to
-    @ops(_ops_and_refs, dtypes=OpDTypes.none)
-    def test_out(self, device, op):
+    @ops(_ops_and_refs, dtypes=OpDTypes.any_one)
+    def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
-        supported_dtypes = op.supported_dtypes(self.device_type)
-        if len(supported_dtypes) == 0:
-            self.skipTest("Skipped! Op has not supported dtypes on this device.")
-        dtype = (
-            torch.float32
-            if torch.float32 in supported_dtypes
-            else list(supported_dtypes)[0]
-        )
-
         samples = op.sample_inputs(device, dtype)
         for sample in samples:
             # calls it normally to get the expected result

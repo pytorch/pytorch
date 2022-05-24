@@ -220,9 +220,11 @@ BestEffortReplay::BestEffortReplay(
     const std::vector<IterDomain*>& replay_domain,
     const std::vector<IterDomain*>& target_domain,
     std::unordered_map<IterDomain*, IterDomain*> target2replay_map,
-    std::unordered_map<IterDomain*, IterDomain*> forward_id_map)
+    std::unordered_map<IterDomain*, IterDomain*> replay_forward_id_map,
+    std::unordered_map<IterDomain*, IterDomain*> target_forward_id_map)
     : target2replay_id_map_(std::move(target2replay_map)),
-      forward_id_map_(std::move(forward_id_map)) {
+      replay_forward_id_map_(std::move(replay_forward_id_map)),
+      target_forward_id_map_(std::move(target_forward_id_map)) {
   for (auto entry : target2replay_id_map_) {
     leaf_ids_[entry.second] = counter++;
   }
@@ -261,18 +263,17 @@ BestEffortReplay::BestEffortReplay(
           replay_id2expr_map.find(id) == replay_id2expr_map.end(),
           "Error trying to map rfactor root domain during replay.",
           " An IterDomain was found to be used in more than one expression.");
-      // Only want to forward rfactor in map
+
       replay_id2expr_map[id] = replay_expr;
+    }
 
-      auto out_ids = ir_utils::filterByType<IterDomain>(replay_expr->outputs());
-
-      if (std::any_of(out_ids.begin(), out_ids.end(), [](IterDomain* id) {
-            return id->isRFactorProduct();
-          })) {
-        auto inp_ids =
-            ir_utils::filterByType<IterDomain>(replay_expr->inputs());
-        replay_rfactor_ids.insert(inp_ids.begin(), inp_ids.end());
-      }
+    // Only want to forward rfactor in map
+    auto out_ids = ir_utils::filterByType<IterDomain>(replay_expr->outputs());
+    if (std::any_of(out_ids.begin(), out_ids.end(), [](IterDomain* id) {
+          return id->isRFactorProduct();
+        })) {
+      auto inp_ids = ir_utils::filterByType<IterDomain>(replay_expr->inputs());
+      replay_rfactor_ids.insert(inp_ids.begin(), inp_ids.end());
     }
   }
 
@@ -294,15 +295,15 @@ BestEffortReplay::BestEffortReplay(
             target_inps_filtered.begin(),
             target_inps_filtered.end(),
             [&](IterDomain* target_inp) {
-              return this->inForwardMap(target_inp);
+              return this->inTargetForwardMap(target_inp);
             })) {
       for (auto target_inp : target_inps_filtered) {
-        if (inForwardMap(target_inp)) {
+        if (inTargetForwardMap(target_inp)) {
           auto target2replay_it = target2replay_id_map_.find(target_inp);
           if (target2replay_it != target2replay_id_map_.end()) {
             // Replace target_inp entry in target2replay_id_map_ with forwarded
             // id
-            target2replay_id_map_[getForwardedId(target_inp)] =
+            target2replay_id_map_[getTargetForwardedId(target_inp)] =
                 target2replay_it->second;
             target2replay_id_map_.erase(target_inp);
           }
@@ -319,7 +320,9 @@ BestEffortReplay::BestEffortReplay(
         target_inps_filtered.begin(),
         target_inps_filtered.end(),
         [](IterDomain* id) { return id->isBroadcast(); });
-    any_target_expr_contains_broadcast_id |= target_expr_contains_broadcast_id;
+    any_target_expr_contains_broadcast_id =
+        any_target_expr_contains_broadcast_id ||
+        target_expr_contains_broadcast_id;
 
     std::vector<IterDomain*> replay_inps =
         std::vector<IterDomain*>(target_id_inps.size(), nullptr);
@@ -332,7 +335,7 @@ BestEffortReplay::BestEffortReplay(
       // checking).
       auto it = target2replay_id_map_.find(target_id_inps[t_i]);
       if (it != target2replay_id_map_.end()) {
-        replay_inps[t_i] = getForwardedId(it->second);
+        replay_inps[t_i] = getReplayForwardedId(it->second);
       } else {
         missing_replay_input = true;
       }
@@ -631,7 +634,125 @@ struct ConsumerForwardingInfo {
   }
 };
 
+// Maps that track information relevant to best effort replay about
+// trivial-reduction axes in producer
+//
+// For example if we have producer: T0[i0, r1, r2, i3] and consumer:
+// T1[i0, i3]
+//
+// If producer transformations are:
+// -> T[i0, r1, r2, i3]
+// -> T[i0*r1, r2, i3]
+// -> T[i0*r1*r2, i3]
+//
+// forwarding_map would forward i0->i0*r1 and i0*r1->i0*r1*r2
+// compliment_map would have the i0->r1 and i0*r1->r2
+//
+// These two maps are used similarly as ConsumerForwardingInfo. See
+// its comments as well.
+struct ProducerForwardingInfo {
+ public:
+  // Map IterDomain* axes that can safely be forwarded to their output.
+  std::unordered_map<IterDomain*, IterDomain*> forwarding_map;
+
+  // Given a forward id map id_input -> id_forwarded
+  // Track the other inputs in the expr that id_input is an input to. These will
+  // be used to adjust the replay's leaf tracking. Don't need to track one to
+  // many as currently transformations on IterDomains can only have maximum 2
+  // inputs, but maybe in the future we'll have more.
+  std::unordered_map<IterDomain*, std::vector<IterDomain*>> compliment_map;
+
+  ProducerForwardingInfo(const TensorView* producer) {
+    std::vector<Expr*> producer_history = StmtSort::getExprs(
+        FusionGuard::getCurFusion(),
+        std::vector<Val*>(
+            producer->domain()->domain().begin(),
+            producer->domain()->domain().end()));
+
+    for (auto merge : ir_utils::filterByType<Merge>(producer_history)) {
+      auto inner = merge->inner();
+      auto outer = merge->outer();
+      if ((inner->isTrivialReduction() && !outer->isReduction()) ||
+          (outer->isTrivialReduction() && !inner->isReduction())) {
+        auto compliment_id = inner->isTrivialReduction() ? inner : outer;
+        auto forwarded_id = inner->isTrivialReduction() ? outer : inner;
+        // Only allow forwarding when the trivial reduction domain is
+        // an root domain
+        if (std::find(
+                producer->getMaybeRFactorDomain().begin(),
+                producer->getMaybeRFactorDomain().end(),
+                compliment_id) == producer->getMaybeRFactorDomain().end()) {
+          continue;
+        }
+        forwarding_map.emplace(std::make_pair(forwarded_id, merge->out()));
+        compliment_map.emplace(std::make_pair(
+            forwarded_id, std::vector<IterDomain*>{compliment_id}));
+      }
+    }
+  }
+};
+
 } // namespace
+
+void BestEffortReplay::addComplimentLeafIDs(
+    const std::unordered_map<IterDomain*, IterDomain*>& forwarding_map,
+    const std::unordered_map<IterDomain*, std::vector<IterDomain*>>&
+        compliment_map) {
+  // ID's could go through more than one forward iteration in the map before it
+  // terminates. Grab every id between the forwarded id, and what it was
+  // forwarded to
+  std::function<void(IterDomain*, std::vector<IterDomain*>&)>
+      collectForwardedIds =
+          [&forwarding_map, &collectForwardedIds](
+              IterDomain* forward_id,
+              std::vector<IterDomain*>& forwarded_ids) -> void {
+    if (forwarding_map.find(forward_id) != forwarding_map.end()) {
+      forwarded_ids.emplace_back(forward_id);
+      collectForwardedIds(forwarding_map.at(forward_id), forwarded_ids);
+    }
+  };
+
+  std::vector<IterDomain*> expanded_forwarded_ids;
+  for (auto forwarded_id : forwarded_ids_) {
+    collectForwardedIds(forwarded_id, expanded_forwarded_ids);
+  }
+
+  // Grab all compliments of forwarded ids.
+  std::vector<IterDomain*> compliments;
+  for (auto forwarded_id : expanded_forwarded_ids) {
+    auto compliment_map_it = compliment_map.find(forwarded_id);
+    TORCH_INTERNAL_ASSERT(
+        compliment_map_it != compliment_map.end(),
+        "Issue tracking forwarded broadcast merges in best effort replay.");
+    compliments.insert(
+        compliments.end(),
+        compliment_map_it->second.begin(),
+        compliment_map_it->second.end());
+  }
+
+  // Grab all exprs used to make the forwarded compliments
+  auto compliment_exprs = StmtSort::getExprs(
+      FusionGuard::getCurFusion(), {compliments.begin(), compliments.end()});
+
+  // Figure out if there are any leaves in compliment_exprs that aren't
+  // the forwarded id
+  std::unordered_map<IterDomain*, size_t> leaf_ids;
+
+  for (auto expr : compliment_exprs) {
+    for (auto inp : ir_utils::filterByType<IterDomain>(expr->inputs())) {
+      leaf_ids.erase(inp);
+    }
+    for (auto out : ir_utils::filterByType<IterDomain>(expr->outputs())) {
+      // If we used the comliment for forwarded don't add to leaf nodes.
+      if (std::find(compliments.begin(), compliments.end(), out) ==
+          compliments.end()) {
+        leaf_ids.emplace(std::make_pair(out, counter++));
+      }
+    }
+  }
+
+  leaf_ids_.insert(leaf_ids.begin(), leaf_ids.end());
+}
 
 BestEffortReplay BestEffortReplay::replayCasP(
     const TensorView* consumer,
@@ -677,72 +798,18 @@ BestEffortReplay BestEffortReplay::replayCasP(
   // See FusionAdvancedComputeAt7 for an example of the forwarding logic
   ConsumerForwardingInfo consumer_forwarding_info(producer, consumer);
 
+  ProducerForwardingInfo producer_forwarding_info(producer);
+
   auto consumer_replay = BestEffortReplay(
       consumer->domain()->domain(),
       producer_CA_ids,
       p2c_root_map,
-      consumer_forwarding_info.forwarding_map);
+      consumer_forwarding_info.forwarding_map,
+      producer_forwarding_info.forwarding_map);
 
-  // Need to adjust leaf map based on forwarding before returning.
-
-  // ID's could go through more than one forward iteration in the map before it
-  // terminates. Grab every id between the forwarded id, and what it was
-  // forwarded to
-  std::function<void(IterDomain*, std::vector<IterDomain*>&)>
-      collectForwardedIds =
-          [&consumer_forwarding_info, &collectForwardedIds](
-              IterDomain* forward_id,
-              std::vector<IterDomain*>& forwarded_ids) -> void {
-    if (consumer_forwarding_info.forwarding_map.find(forward_id) !=
-        consumer_forwarding_info.forwarding_map.end()) {
-      forwarded_ids.emplace_back(forward_id);
-      collectForwardedIds(
-          consumer_forwarding_info.forwarding_map.at(forward_id),
-          forwarded_ids);
-    }
-  };
-
-  std::vector<IterDomain*> expanded_forwarded_ids;
-  for (auto forwarded_id : consumer_replay.forwarded_ids_) {
-    collectForwardedIds(forwarded_id, expanded_forwarded_ids);
-  }
-
-  // Grab all compliments of forwarded ids.
-  std::vector<IterDomain*> compliments;
-  for (auto forwarded_id : expanded_forwarded_ids) {
-    auto compliment_map_it =
-        consumer_forwarding_info.compliment_map.find(forwarded_id);
-    TORCH_INTERNAL_ASSERT(
-        compliment_map_it != consumer_forwarding_info.compliment_map.end(),
-        "Issue tracking forwarded broadcast merges in best effort replay consumer as producer.");
-    compliments.insert(
-        compliments.end(),
-        compliment_map_it->second.begin(),
-        compliment_map_it->second.end());
-  }
-
-  // Grab all exprs used to make the forwarded compliments
-  auto compliment_exprs = StmtSort::getExprs(
-      FusionGuard::getCurFusion(), {compliments.begin(), compliments.end()});
-
-  // Figure out if there are any leaves in compliment_exprs that aren't
-  // the forwarded id
-  std::unordered_map<IterDomain*, size_t> leaf_ids;
-
-  for (auto expr : compliment_exprs) {
-    for (auto inp : ir_utils::filterByType<IterDomain>(expr->inputs())) {
-      leaf_ids.erase(inp);
-    }
-    for (auto out : ir_utils::filterByType<IterDomain>(expr->outputs())) {
-      // If we used the comliment for forwarded don't add to leaf nodes.
-      if (std::find(compliments.begin(), compliments.end(), out) ==
-          compliments.end()) {
-        leaf_ids.emplace(std::make_pair(out, consumer_replay.counter++));
-      }
-    }
-  }
-
-  consumer_replay.leaf_ids_.insert(leaf_ids.begin(), leaf_ids.end());
+  consumer_replay.addComplimentLeafIDs(
+      consumer_forwarding_info.forwarding_map,
+      consumer_forwarding_info.compliment_map);
 
   return consumer_replay;
 }
@@ -782,14 +849,23 @@ BestEffortReplay BestEffortReplay::replayPasC(
 
   ConsumerForwardingInfo consumer_forwarding_info(producer, consumer);
 
+  ProducerForwardingInfo producer_forwarding_info(producer);
+
   // Instead of replaying from the root, lets try to play forward the history
   // of producer if they match ops on consumer. Enforce if we modify an
   // rfactor axis that those ops must match.
-  return BestEffortReplay(
+  auto producer_replay = BestEffortReplay(
       producer->domain()->domain(),
       consumer_CA_ids,
       c2p_root_map,
+      producer_forwarding_info.forwarding_map,
       consumer_forwarding_info.forwarding_map);
+
+  producer_replay.addComplimentLeafIDs(
+      producer_forwarding_info.forwarding_map,
+      producer_forwarding_info.compliment_map);
+
+  return producer_replay;
 }
 
 } // namespace cuda
