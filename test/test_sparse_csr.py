@@ -49,6 +49,8 @@ def _check_cusparse_sddmm_available():
     return version >= min_supported_version
 
 _sparse_csr_ops = list(filter(lambda op: op.supports_sparse_csr, op_db))
+_sparse_compressed_ops = list(filter(lambda op: (op.supports_sparse_csr or op.supports_sparse_csc
+                                                 or op.supports_sparse_bsr or op.supports_sparse_bsc), op_db))
 binary_functions_with_dense_output = ['mm', 'mv', ]
 binary_ops_with_dense_output = list(filter(lambda op: op.name in binary_functions_with_dense_output, op_db))
 
@@ -151,12 +153,40 @@ def sparse_compressed_nonblock_layouts(test_name='layout'):
         subtest(torch.sparse_csr, name='SparseCSR'),
         subtest(torch.sparse_csc, name='SparseCSC')])
 
+
 sparse_compressed_indices_methods = {
     torch.sparse_csr: (torch.Tensor.crow_indices, torch.Tensor.col_indices),
     torch.sparse_csc: (torch.Tensor.ccol_indices, torch.Tensor.row_indices),
     torch.sparse_bsr: (torch.Tensor.crow_indices, torch.Tensor.col_indices),
     torch.sparse_bsc: (torch.Tensor.ccol_indices, torch.Tensor.row_indices),
 }
+
+
+def _to_sparse_compressed(input, layout):
+    # TODO: implement torch.Tensor.to_sparse_bsr/bsc
+    if layout in {torch.sparse_csc, torch.sparse_bsc}:
+        input = input.transpose(0, 1)
+    coo = input.to_sparse(2).coalesce()
+    compressed_indices = torch._convert_indices_from_coo_to_csr(coo.indices()[0], size=input.shape[0])
+    plain_indices = coo.indices()[1]
+    values = coo.values()
+    return torch.sparse_compressed_tensor(compressed_indices, plain_indices, values,
+                                          size=coo.shape[:coo.sparse_dim()], layout=layout)
+
+
+def _to_strided(input):
+    # TODO: implement torch.Tensor.to_dense support for sparse_bsr/bsc
+    if input.layout in {torch.sparse_bsr, torch.sparse_bsc}:
+        compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[input.layout]
+        compressed_indices, plain_indices = compressed_indices_mth(input), plain_indices_mth(input)
+        indices = torch._convert_indices_from_csr_to_coo(compressed_indices, plain_indices)
+        values = input.values()
+        block_size = values.shape[1:]
+        coo = torch.sparse_coo_tensor(indices, values, size=input.shape + block_size)
+        if input.layout == torch.sparse_bsc:
+            return coo.to_dense().transpose(0, 1)
+        return coo.to_dense()
+    return input.to_dense()
 
 
 class TestSparseCompressed(TestCase):
@@ -420,6 +450,58 @@ class TestSparseCompressed(TestCase):
                 with self.assertRaisesRegex(RuntimeError,
                                             "copy of sparse compressed tensors having different block sizes is not supported"):
                     b.copy_(d)
+
+    @all_sparse_compressed_layouts()
+    @ops(_sparse_compressed_ops)
+    def test_consistency(self, layout, device, dtype, op):
+        if not (layout == torch.sparse_csr and op.supports_sparse_csr
+                or layout == torch.sparse_csc and op.supports_sparse_csc
+                or layout == torch.sparse_bsr and op.supports_sparse_bsr
+                or layout == torch.sparse_bsc and op.supports_sparse_bsc):
+            self.skipTest(f"{op.name} does not support input with {layout} layout")
+
+        require_mask = isinstance(op, ReductionOpInfo) and '_masked.' in op.name
+        if require_mask and layout in {torch.sparse_bsr, torch.sparse_bsc}:
+            self.skipTest(f"{op.name} does not support input with {layout} layout")
+
+        samples = list(op.sample_inputs(device, dtype))
+
+        # Fail early to prevent silent success with this test
+        ndims_equals_2d = (s.input.ndim == 2 for s in samples)
+        if not any(ndims_equals_2d):
+            raise ValueError("Expected at least one 2D tensor in samples.")
+
+        count = 0
+        for sample in samples:
+            assert torch.is_tensor(sample.input)
+            # Sparse CSR/CSC only supports 2D tensors as inputs
+            if sample.input.ndim != 2:
+                continue
+            if isinstance(op, ReductionOpInfo):
+                # Reductions on sparse compressed require keepdim=True
+                if not sample.kwargs.get('keepdim'):
+                    continue
+                # Reductions on sparse compressed tensors require explicit mask
+                if require_mask and sample.kwargs.get('mask') is None:
+                    continue
+            sample_input = sample.input
+            if layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                sample_input = sample_input.repeat_interleave(2).reshape(*sample_input.shape, 2, 1)
+            expected = op(sample_input, **sample.kwargs)
+            assert torch.is_tensor(expected)
+            sparse = _to_sparse_compressed(sample_input, layout)
+            assert torch.is_tensor(sparse)
+            output = op(sparse, **sample.kwargs)
+            assert torch.is_tensor(output)
+            strided_output = _to_strided(output)
+            if require_mask:
+                expected *= torch._masked._output_mask(op.op, sample_input, **sample.kwargs)
+            self.assertEqual(strided_output, expected)
+            count += 1
+
+        # Better fail late to prevent silent success with this test
+        if not count:
+            raise ValueError("Expected at least one sample with keepdim and/or explicit mask for reductions.")
 
 
 class TestSparseCSR(TestCase):
@@ -1729,30 +1811,6 @@ class TestSparseCSR(TestCase):
             coo_sparse = csr_sparse.to_sparse()
 
             self.assertEqual(coo_sparse.to_dense(), dense)
-
-    @ops(_sparse_csr_ops)
-    def test_sparse_csr_consistency(self, device, dtype, op):
-        samples = list(op.sample_inputs(device, dtype))
-
-        # Fail early to prevent silent success with this test
-        ndims_equals_2d = (s.input.ndim == 2 for s in samples)
-        if not any(ndims_equals_2d):
-            raise ValueError("Expected at least one 2D tensor in samples.")
-
-        for sample in samples:
-            assert torch.is_tensor(sample.input)
-            # Sparse CSR only supports 2D tensors as inputs
-            if sample.input.ndim != 2:
-                continue
-            # Reductions on sparse CSR require keepdim=True
-            if isinstance(op, ReductionOpInfo):
-                continue
-            expected = op(sample.input)
-            assert torch.is_tensor(expected)
-            output = op(sample.input.to_sparse_csr())
-            assert torch.is_tensor(output)
-
-            self.assertEqual(output.to_dense(), expected)
 
     # Currently, there is no rule in PyTorch for filling zeros in the outputs
     #   from operations on Sparse CSR tensors. Hence only those operators are supported
