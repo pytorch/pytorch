@@ -63,6 +63,9 @@ ContextConv create(
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   auto w = itensor_view_from_dense(weight);
+  // TODO: what if input is nhwc but w is nchw
+  bool is_channels_last =
+      weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
   ideep::tensor::desc expected_weight_desc =
       ideep::convolution_forward::expected_weights_desc(
           w.get_dims(),
@@ -75,7 +78,9 @@ ContextConv create(
           ideep::algorithm::convolution_direct,
           ideep::prop_kind::forward,
           /*x_dtype*/ w.get_data_type(),
-          {input_size_expanded.begin(), input_size_expanded.end()});
+          {input_size_expanded.begin(), input_size_expanded.end()},
+          attr,
+          is_channels_last);
 
   ideep::tensor packed_weight;
   packed_weight.init(expected_weight_desc);
@@ -102,14 +107,13 @@ void _mkldnn_convolution_out(
     IntArrayRef output_sizes,
     int64_t groups,
     const ideep::attr_t& attr = ideep::attr_t()) {
-  ideep::tensor y_blocked;
   if (b.has_value()) {
     ideep::convolution_forward::compute(
         x,
         w,
         b.value(),
         {output_sizes.cbegin(), output_sizes.cend()},
-        y_blocked,
+        y,
         {stride.begin(), stride.end()},
         {dilation.begin(), dilation.end()},
         {padding.begin(), padding.end()},
@@ -124,7 +128,7 @@ void _mkldnn_convolution_out(
         x,
         w,
         {output_sizes.cbegin(), output_sizes.cend()},
-        y_blocked,
+        y,
         {stride.begin(), stride.end()},
         {dilation.begin(), dilation.end()},
         {padding.begin(), padding.end()},
@@ -135,7 +139,6 @@ void _mkldnn_convolution_out(
         ideep::scale_t(),
         attr);
   }
-  y.feed_from(y_blocked);
 }
 
 void mkldnn_convolution_out(
@@ -214,7 +217,7 @@ void run(ContextConv& context, const Tensor& input, void* output) {
   std::vector<int64_t> output_sizes = get_output_sizes(context, input);
 
   ideep::tensor::desc o_desc = {
-      output_sizes, get_mkldnn_dtype(input.scalar_type())};
+      output_sizes, get_mkldnn_dtype(input.scalar_type()), ideep::tag::nhwc};
   ideep::tensor mkldnn_output = {o_desc, output};
 
   mkldnn_convolution_out(
