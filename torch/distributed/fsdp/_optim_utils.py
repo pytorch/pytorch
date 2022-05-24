@@ -12,6 +12,7 @@ from typing import (
     Tuple,
     Union,
 )
+import warnings
 
 import torch
 import torch.distributed as dist
@@ -983,6 +984,61 @@ def _get_unflat_to_flat_param_ids(
         unflat_to_flat_param_ids[unflat_param_id]
         for unflat_param_id in range(num_unflat_param_ids)
     ]
+
+
+def _check_optim_state_dict_shapes(
+    optim_state_dict: Dict[str, Any],
+    model: torch.nn.Module,
+    optim_input: Optional[Union[
+        List[Dict[str, Any]], Iterable[torch.nn.Parameter],
+    ]] = None,
+) -> None:
+    """
+    Checks that all positive-dimension tensor optimizer state has the same
+    shape as the corresponding parameter.
+
+    Arguments:
+        optim_state_dict (Dict[str, Any]): An optimizer state dict about to be
+            loaded into a :class:`torch.optim.Optimizer` that was constructed
+            by passing in ``optim_input`` as its first argument corresponding
+            to a model ``model``.
+        model (torch.nn.model): Root module (which may or may not be a
+            :class:`FullyShardedDataParallel` instance).
+        optim_input (Optional[Union[List[Dict[str, Any]],
+        Iterable[torch.nn.Parameter]]]): Input passed into the optimizer
+            representing either a :class:`list` of parameter groups or an
+            iterable of parameters; if ``None``, then this method assumes the
+            input was ``model.parameters()``. (Default: ``None``)
+    """
+    param_id_to_param = _get_param_id_to_param(model, optim_input)
+    param_to_unflat_param_names = FSDP._get_param_to_unflat_param_names(model)
+    optim_state = optim_state_dict["state"]
+    invalid_entries = set()
+    missing_entries = set()
+    for param_id, param in enumerate(param_id_to_param):
+        unflat_param_names = tuple(param_to_unflat_param_names[param])
+        if param_id not in optim_state:
+            missing_entries.add((param_id, unflat_param_names))
+            continue
+        for state_name, state_value in optim_state[param_id].items():
+            if torch.is_tensor(state_value) and state_value.dim() > 0 and \
+                    state_value.shape != param.shape:
+                invalid_entries.add(
+                    (param, unflat_param_names, state_name, state_value)
+                )
+    if len(missing_entries) > 0:
+        # War instead of error for missing entries since the user may still add
+        # those entries before calling `optim.load_state_dict()`
+        warn_msg = "Missing entries from the optim state dict:\n"
+        for (param_id, unflat_param_names) in missing_entries:
+            warn_msg += f"param ID: {param_id} param names: {unflat_param_names}"
+        warnings.warn(warn_msg)
+    if len(invalid_entries) > 0:
+        error_msg = "Tensor optimizer state shape and parameter shape mismatches:\n"
+        for (param, unflat_param_names, state_name, state_value) in invalid_entries:
+            error_msg += f"param: {param.shape} optim state: {state_value.shape} " \
+                f"param names: {unflat_param_names} state name: {state_name}\n"
+        raise ValueError(error_msg)
 
 
 def _is_zero_dim_tensor(x: Any) -> bool:
