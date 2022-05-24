@@ -10341,7 +10341,7 @@ op_db: List[OpInfo] = [
                    aliases=('arctan', ),
                    ref=np.arctan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -10367,6 +10367,18 @@ op_db: List[OpInfo] = [
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
+                       # RuntimeError: "nonzero_cuda" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_consistency',
+                                    dtypes=(torch.chalf,)),
+                       # same reason as above
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
+                                    dtypes=(torch.chalf,)),
+                       # same reason as above
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
+                                    dtypes=(torch.chalf,)),
+                       # RuntimeError: "add_out_op2_sparse_csr" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_zero_to_zero_correspondence_unary',
+                                    dtypes=(torch.chalf,)),
                    )),
     BinaryUfuncInfo('atan2',
                     aliases=('arctan2',),
@@ -13055,12 +13067,18 @@ op_db: List[OpInfo] = [
            aliases=('conv1d',),
            aten_name='conv1d',
            dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           decorators=(
+               DecorateInfo(
+                   toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=1e-2)}),
+                   'TestCommon', 'test_complex_half_reference_testing'
+               ),
+           ),
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
@@ -13080,12 +13098,22 @@ op_db: List[OpInfo] = [
            aliases=('conv2d',),
            aten_name='conv2d',
            dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=partial(sample_inputs_conv2d),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           decorators=(
+               DecorateInfo(
+                   toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
+                   'TestCommon', 'test_complex_half_reference_testing',
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=1e-2)}),
+                   'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
+               ),
+           ),
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
@@ -13676,10 +13704,6 @@ op_db: List[OpInfo] = [
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            supports_expanded_weight=True,
-           skips=(
-               # Problem, needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-           ),
            decorators=(
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                             'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
@@ -14983,7 +15007,8 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('tan',
                    ref=np.tan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -15007,6 +15032,18 @@ op_db: List[OpInfo] = [
                                     active_if=TEST_WITH_ROCM),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
+                       # RuntimeError: "nonzero_cuda" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_consistency',
+                                    dtypes=(torch.chalf,)),
+                       # same reason as above
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
+                                    dtypes=(torch.chalf,)),
+                       # same reason as above
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
+                                    dtypes=(torch.chalf,)),
+                       # RuntimeError: "add_out_op2_sparse_csr" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_zero_to_zero_correspondence_unary',
+                                    dtypes=(torch.chalf,)),
                    ),
                    # tan(pi/2 * odd_number) is nan
                    reference_numerics_filter=NumericsFilter(
@@ -16666,6 +16703,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_backward'),
+            DecorateInfo(unittest.skip("No fill_ op"), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("No fill_ op"), 'TestNNCOpInfo'),
         )),
     OpInfo('resize_',
            op=lambda x, shape: x.clone().resize_(shape),
@@ -18891,6 +18930,10 @@ python_ref_db = [
         supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.i0",
+        torch_opinfo_name="i0",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.lgamma",
         torch_opinfo_name="lgamma",
     ),
@@ -18958,6 +19001,10 @@ python_ref_db = [
         torch_opinfo_name="special.i0e",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.special.i1",
+        torch_opinfo_name="special.i1",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.special.i1e",
         torch_opinfo_name="special.i1e",
     ),
@@ -19002,6 +19049,14 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.elu",
         torch_opinfo_name="nn.functional.elu",
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.leaky_relu",
+        torch_opinfo_name="nn.functional.leaky_relu",
+        decorators=(
+            # Need FakeTensor support for meta coverage
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.mish",
@@ -19145,6 +19200,14 @@ python_ref_db = [
         supports_one_python_scalar=True,
     ),
     #
+    # Elementwise Binary Special OpInfos
+    #
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.special.zeta",
+        torch_opinfo_name="special.zeta",
+        supports_one_python_scalar=True,
+    ),
+    #
     # Elementwise Ternary Reference OpInfos
     #
     PythonRefInfo(
@@ -19255,27 +19318,25 @@ python_ref_db = [
     # Reduction Reference OpInfos
     #
     ReductionPythonRefInfo(
-        "_refs.sum",
-        torch_opinfo_name="sum",
-        supports_out=True,
-    ),
-    ReductionPythonRefInfo(
-        "_refs.mean",
-        torch_opinfo_name="mean",
-        supports_out=True,
-    ),
-    ReductionPythonRefInfo(
-        "_refs.amin",
-        torch_opinfo_name="amin",
+        "_refs.all",
+        torch_opinfo_name="all",
     ),
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
     ),
     ReductionPythonRefInfo(
-        "_refs.var",
-        torch_opinfo_name="var",
-        supports_out=True
+        "_refs.amin",
+        torch_opinfo_name="amin",
+    ),
+    ReductionPythonRefInfo(
+        "_refs.any",
+        torch_opinfo_name="any",
+    ),
+    ReductionPythonRefInfo(
+        "_refs.mean",
+        torch_opinfo_name="mean",
+        supports_out=True,
     ),
     ReductionPythonRefInfo(
         "_refs.std",
@@ -19287,6 +19348,16 @@ python_ref_db = [
         "_refs.std_mean",
         torch_opinfo_name="std_mean",
         validate_view_consistency=False
+    ),
+    ReductionPythonRefInfo(
+        "_refs.sum",
+        torch_opinfo_name="sum",
+        supports_out=True,
+    ),
+    ReductionPythonRefInfo(
+        "_refs.var",
+        torch_opinfo_name="var",
+        supports_out=True
     ),
     PythonRefInfo(
         "_refs.var_mean",
