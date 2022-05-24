@@ -531,7 +531,7 @@ Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
   //  1  2 |  3  4 |  9 10 | 11 12
   //  5  6 |  7  8 | 14 15 | 16 17
   //
-  //  via a 3D Tensor of shape (4, 2, 2)
+  //  via a 4D Tensor of shape (2, 2, 2, 2)
   //
   auto block_size_0 = self.size(0) == 0 ? 0 : self.size(0) / blocksize[0];
   auto block_size_1 = self.size(1) == 0 ? 0 : self.size(1) / blocksize[1];
