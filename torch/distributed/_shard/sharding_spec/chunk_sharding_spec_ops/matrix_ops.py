@@ -418,3 +418,8 @@ _register_sharded_op_on_local_tensor(
     extra_check=sharded_layer_norm_check,
     customized_func=sharded_layer_norm,
 )
+
+
+_register_sharded_op_on_local_tensor(
+    torch.nan_to_num,
+)
