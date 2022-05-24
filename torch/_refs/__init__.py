@@ -65,6 +65,7 @@ __all__ = [
     "isfinite",
     "isinf",
     "isnan",
+    "i0",
     "lgamma",
     "log",
     "log1p",
@@ -468,6 +469,12 @@ isnan = _make_elementwise_unary_reference(
     _isnan,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.isnan,  # prim/aten name mismatch
+)
+
+i0 = _make_elementwise_unary_reference(
+    prims.bessel_i0,
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=torch.ops.aten.special_i0,
 )
 
 lgamma = _make_elementwise_unary_reference(
