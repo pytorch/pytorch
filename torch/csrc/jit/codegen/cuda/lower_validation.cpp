@@ -1005,6 +1005,9 @@ void validateArchMemoryOp(LoadStoreOp* ldst) {
       validateMinimumArch(7, 5);
       validateLdMatrixOutput(ldst->out()->as<TensorView>());
       return;
+    case LoadStoreOpType::CpAsync:
+      validateMinimumArch(8, 0);
+      return;
     default:
       return;
   }

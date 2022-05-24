@@ -435,6 +435,9 @@ void OptOutMutator::mutate(kir::BlockSync*) {
 void OptOutMutator::mutate(kir::GridSync*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
+void OptOutMutator::mutate(kir::CpAsyncWait*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
 void OptOutMutator::mutate(kir::InitMagicZero*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }

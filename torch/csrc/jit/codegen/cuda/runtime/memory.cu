@@ -109,4 +109,56 @@ DEVICE_INLINE void ldMatrixT(Array<__half, 8, 8>& out, void const* ptr) {
 
 #endif // Arch 75
 
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800))
+
+namespace Ampere {
+
+// MMA instruction wrappers (sm_80+):
+
+namespace util {
+
+// Special utility for cp_async
+DEVICE_INLINE unsigned toSmem(void* ptr) {
+  unsigned smem_ptr_uint;
+
+  // Declare 64 bit register smem_ptr
+  // Convert the input to a shared memory pointer
+  // Convert to unsigned 32 bit pointer
+  asm("{ .reg .u64 smem_ptr; cvta.to.shared.u64 smem_ptr, %1; cvt.u32.u64 %0, smem_ptr; }\n"
+      : "=r"(smem_ptr_uint)
+      : "l"(ptr));
+
+  return smem_ptr_uint;
+}
+
+} // namespace util
+
+// Global to SMEM load that is asynchronous,
+// not guaranteed to be completed until cpAsyncBarrier() is called.
+template <typename dtype, int len>
+DEVICE_INLINE void cpAsync(
+    Array<dtype, len, len>* smem_ptr,
+    void const* gmem_ptr) {
+  unsigned smem_addr = util::toSmem(&(smem_ptr->array[0]));
+  constexpr int byte_size = sizeof(dtype) * len;
+
+  static_assert(
+      byte_size == 4 || byte_size == 8 || byte_size == 16,
+      "cp_async : unsupported byte size");
+
+  asm volatile(
+      "cp.async.ca.shared.global [%0], [%1], %2;\n" ::"r"(smem_addr),
+      "l"(gmem_ptr),
+      "n"(byte_size));
+}
+
+// TODO: Might have a different category of sync if we want to build out this:
+DEVICE_INLINE void cpAsyncBarrier() {
+  asm volatile("cp.async.wait_all;");
+}
+
+} // namespace Ampere
+
+#endif // Arch 80
+
 #undef DEVICE_INLINE

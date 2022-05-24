@@ -570,6 +570,10 @@ void IrPrinter::handle(const kir::BlockSync* node) {
            << ")\n";
 }
 
+void IrPrinter::handle(const kir::CpAsyncWait* node) {
+  indent() << "CPASYNC_WAIT()\n";
+}
+
 void IrPrinter::handle(const kir::GridSync* node) {
   indent() << "GRIDSYNC(" << node->syncDims().toString() << ", ";
   handle(node->syncBuffer());

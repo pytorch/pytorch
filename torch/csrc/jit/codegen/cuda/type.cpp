@@ -328,6 +328,8 @@ static const char* expr_type2string(ExprType t) {
       return "BlockSync";
     case ExprType::GridSync:
       return "GridSync";
+    case ExprType::CpAsyncWait:
+      return "CpAsyncWait";
     case ExprType::InitMagicZero:
       return "InitMagicZero";
     case ExprType::UpdateMagicZero:
@@ -756,6 +758,8 @@ static const char* load_store_type2string(LoadStoreOpType t) {
       return "LdMatrix";
     case LoadStoreOpType::LdMatrixTranspose:
       return "LdMatrixTranspose";
+    case LoadStoreOpType::CpAsync:
+      return "CpAsync";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unexpected parallel type");
   }

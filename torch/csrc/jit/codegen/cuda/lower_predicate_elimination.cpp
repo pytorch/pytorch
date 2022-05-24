@@ -193,6 +193,20 @@ class PredicateChcker : public IterVisitor {
         predicateNonDivisibleRootDomains(expr) ||
         predicateNonDivisibleSplit(expr);
 
+    // A cp.async op would need a predicate for either the global
+    //  input or its shared mem output, or both.
+    // Due to the WAR discussed in [Predicate Inversion for CpAsync],
+    //  we currently cannot support use cases where both the gmem read
+    //  and the smem write need to be predicated.
+    // Adding a check here would make the exclusion of such case as precise as
+    //  possible and avoid duplication of predicateSharedMemAccess
+    //  logic. But this part along with [Predicate Inversion for CpAsync]
+    //  should be cleaned up all together when we extend predicate/masking
+    //  logic to cover this usage.
+    TORCH_INTERNAL_ASSERT(
+        !(ir_utils::isCpAsyncOp(expr) && predicateSharedMemAccess(expr)),
+        "predicate removal: unsupported use case of cp.async");
+
     if (needs_predicate_) {
       return;
     }

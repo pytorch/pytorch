@@ -810,6 +810,11 @@ void IndexLowering::handle(const kir::GridSync* sync) {
   pushBack(const_cast<kir::GridSync*>(sync)); // NOLINT
 }
 
+void IndexLowering::handle(const kir::CpAsyncWait* wait) {
+  // TODO(kir): remove the need for const_cast
+  pushBack(const_cast<kir::CpAsyncWait*>(wait)); // NOLINT
+}
+
 void IndexLowering::generate(const std::vector<Expr*>& exprs) {
   for (auto expr : exprs) {
     OptOutConstDispatch::handle(expr);

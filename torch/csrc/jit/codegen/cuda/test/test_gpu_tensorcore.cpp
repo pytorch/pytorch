@@ -108,13 +108,14 @@ bool cudaArchGuardShouldSkip(int required_major, int required_minor) {
                  << REQUIRED_MINOR << " to run.\n";                           \
   }
 
-#define NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(                    \
-    REQUIRED_MAJOR, REQUIRED_MINOR, COMPILE_FUSION)              \
-  if (cudaArchGuardShouldSkip(REQUIRED_MAJOR, REQUIRED_MINOR)) { \
-    ASSERT_ANY_THROW(COMPILE_FUSION);                            \
-    return;                                                      \
-  } else {                                                       \
-    COMPILE_FUSION;                                              \
+#define NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(                                \
+    REQUIRED_MAJOR, REQUIRED_MINOR, COMPILE_FUSION)                          \
+  if (cudaArchGuardShouldSkip(REQUIRED_MAJOR, REQUIRED_MINOR)) {             \
+    ASSERT_ANY_THROW(COMPILE_FUSION);                                        \
+    GTEST_SKIP() << "(Lowered Only) Requires GPU capability above "          \
+                 << REQUIRED_MAJOR << "." << REQUIRED_MINOR << " to run.\n"; \
+  } else {                                                                   \
+    COMPILE_FUSION;                                                          \
   }
 
 } // namespace
@@ -2893,6 +2894,144 @@ TEST_F(NVFuserTest, FusionTuringMatmulNT_CUDA) {
   auto cg_outputs = fe.runFusion({t0, t1});
 
   auto tref = t0.t().to(at::kFloat).matmul(t1.to(at::kFloat));
+
+  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+}
+
+// Matmul test on ampere, using ampere memory ops
+TEST_F(NVFuserTest, FusionAmpereMatmulTNcpAsync_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  int M = 255, N = 511, K = 88;
+
+  // [M,K]
+  auto tv0 = makeContigTensor(2, DataType::Half);
+  // [N,K]
+  auto tv1 = makeContigTensor(2, DataType::Half);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  // [M,N,K]
+  auto tv0b = broadcast(tv0, {false, true, false});
+  auto tv1b = broadcast(tv1, {true, false, false});
+
+  // Leaving both sets of mma inputs for volta outside
+  //  currently since they need to be swizzled.
+  auto tv2 = fusedMultiplySum(tv0b, tv1b, {2});
+
+  fusion.addOutput(tv2);
+
+  MatMulTileOptions gemm_tile;
+  gemm_tile.cta_tile = GemmTile(128, 128, 32);
+  gemm_tile.warp_tile = GemmTile(64, 64, 32);
+  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
+
+  auto mma_builder =
+      MmaBuilder(MmaOptions::MacroType::Ampere_16_8_16, gemm_tile)
+          .layout(MmaOptions::MmaInputLayout::TN);
+
+  mma_builder.configureMma(tv2);
+
+  auto tv0cw = tv0->cacheAfter(LoadStoreOpType::CpAsync);
+  auto tv0cr = tv0cw->cacheAfter(LoadStoreOpType::LdMatrix);
+  auto tv1cw = tv1->cacheAfter(LoadStoreOpType::CpAsync);
+  auto tv1cr = tv1cw->cacheAfter(LoadStoreOpType::LdMatrix);
+  auto tv2c = tv2->cacheBefore();
+
+  // Make a CTA tile
+  // ------------------------------------------------------------------
+  // [M,N]
+  tv2->split(-2, gemm_tile.cta_tile.m);
+  tv2->split(-1, gemm_tile.cta_tile.n);
+
+  //  0   1    2   3
+  // [Mo,M128, No, N128]
+  tv2->reorder({{1, 2}, {2, 1}});
+
+  //  0   1    2   3
+  // [Mo,No, M128, N128]
+  tv0->computeAt(tv2, 2);
+  tv1->computeAt(tv2, 2);
+
+  // Order K
+  //  0   1    2   3     4    5
+  // [Mo,No, M128, N128, Ko, K32]
+  tv2c->split(-1, gemm_tile.cta_tile.k);
+  tv2c->reorder({{2, 3}, {3, 4}, {4, 2}});
+
+  //  0   1  2   3     4    5
+  // [Mo,No, Ko M128, N128, K32]
+  tv0cw->computeAt(tv2c, 3);
+  tv1cw->computeAt(tv2c, 3);
+
+  // Make warp tile:
+  // -------------------------------------------------------------------------
+  scheduler_utils::matmul_utils::scheduleWarpTileWithReduction(tv2c, gemm_tile);
+  scheduler_utils::matmul_utils::scheduleWarpTileWithNoReduction(
+      tv2, gemm_tile);
+  //           -8   -7  -6 -5 -4 -3 -2 -1
+  // [Mo No Ko Mwo  Nwo Kwo Mw Nw Mi Ni Ki]
+  tv0cr->computeAt(tv2c, -4);
+  tv1cr->computeAt(tv2c, -4);
+
+  // Schedule gmem read and smem write:
+  // ---------------------------------------------------------------------------
+  // [Mo,Ko,M,K]
+  tv0cw->merge(-2);
+  scheduler_utils::matmul_utils::scheduleContiguousVectorLoad(
+      tv0cw, gemm_tile, 8);
+  tv0cw->setMemoryType(MemoryType::Shared);
+  // [Mo,Ko,i,wy,wx,v]
+
+  // [No,Ko,N,K]
+  tv1cw->merge(-2);
+  // [No,Ko,i,wy,wx,v]
+  scheduler_utils::matmul_utils::scheduleContiguousVectorLoad(
+      tv1cw, gemm_tile, 8);
+  tv1cw->setMemoryType(MemoryType::Shared);
+  // Schedule mma input
+  // ---------------------------------------------------------------------------
+  tv0cr->applyMmaSwizzle(mma_builder.operand(MmaOptions::Operand::A).build());
+  // [... Mi, Ni, Ki]
+  tv0b->reorder({{-2, -3}, {-3, -2}});
+  tv0b->applyMmaSwizzle(mma_builder.operand(MmaOptions::Operand::A).build());
+
+  tv1cr->applyMmaSwizzle(mma_builder.operand(MmaOptions::Operand::B).build());
+  tv1b->applyMmaSwizzle(mma_builder.operand(MmaOptions::Operand::B).build());
+
+  // Schedule mma output
+  // ---------------------------------------------------------------------------
+  tv2c->applyMmaSwizzle(
+      mma_builder.operand(MmaOptions::Operand::Accumulator).build());
+  tv2->applyMmaSwizzle(
+      mma_builder.operand(MmaOptions::Operand::Accumulator).build());
+
+  // Parallelize
+  //  0   1  2  3    4   5  6  7  8  9  10
+  // [Mo No Ko Mwo  Nwo Kw Mw Nw (Mi Ni Ki)]
+  tv2c->axis(3)->parallelize(ParallelType::TIDz);
+  tv2c->axis(4)->parallelize(ParallelType::TIDy);
+
+  // Parallelize
+  //  0  1  2   3   4   5  6  7
+  // [Mo No Mwo Nwo Mw Nw (Mi Ni)]
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::BIDy);
+  tv2->axis(2)->parallelize(ParallelType::TIDz);
+  tv2->axis(3)->parallelize(ParallelType::TIDy);
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  auto t0 = at::randn({M, K}, options);
+  auto t1 = at::randn({N, K}, options);
+
+  FusionExecutor fe;
+  NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+      8, 0, fe.compileFusion(&fusion, {t0, t1}));
+
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
 
   TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
 }

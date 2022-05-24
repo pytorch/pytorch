@@ -121,6 +121,7 @@ enum class ExprType {
   Allocate,
   BlockSync,
   GridSync,
+  CpAsyncWait,
   InitMagicZero,
   UpdateMagicZero,
   ForLoop,
@@ -302,7 +303,7 @@ static constexpr std::array<IdMappingMode, 3> kIdMappingModes = {
     IdMappingMode::EXACT,
     IdMappingMode::LOOP};
 
-enum class LoadStoreOpType { LdMatrix, LdMatrixTranspose };
+enum class LoadStoreOpType { LdMatrix, LdMatrixTranspose, CpAsync };
 
 // Returns if function needs an f suffix on the operator when operating on a
 // float value i.e. sin->sinf

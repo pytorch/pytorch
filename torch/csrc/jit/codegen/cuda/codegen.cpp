@@ -492,6 +492,15 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     return ss.str();
   }
 
+  // Utility function to emit a cp.async intrinsic
+  void genCpAsync(const LoadStoreOp* ldst, int vec_size) {
+    auto dtype = ldst->in()->getDataType().value();
+
+    indent() << "Ampere::cpAsync("
+             << genVectorPointer(ldst->out(), dtype, vec_size) << ","
+             << genVectorPointer(ldst->in(), dtype, vec_size) << ");\n";
+  }
+
   void genLdMatrix(const LoadStoreOp* ldst, int vector_word_size) {
     auto dtype = ldst->in()->getDataType().value();
     indent() << "Turing::ldMatrix";
@@ -1195,6 +1204,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         TORCH_INTERNAL_ASSERT(
             vectorize_op, "LdMatrix: Vectorization required: ", ldst);
         genLdMatrix(ldst, vector_word_size);
+        break;
+      case LoadStoreOpType::CpAsync:
+        genCpAsync(ldst, vector_word_size);
         break;
       default:
         TORCH_INTERNAL_ASSERT(false, "LoadStoreOp: Unknown op type");
@@ -2118,6 +2130,10 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     } else {
       indent() << "__barrier_sync(0);\n";
     }
+  }
+
+  void handle(const kir::CpAsyncWait* cpasync_wait) final {
+    indent() << "Ampere::cpAsyncBarrier();\n";
   }
 
   void handle(const kir::GridSync* sync) final {

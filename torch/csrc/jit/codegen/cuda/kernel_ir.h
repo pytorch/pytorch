@@ -54,6 +54,7 @@ class TensorIndex;
 class Allocate;
 class BlockSync;
 class GridSync;
+class CpAsyncWait;
 class InitMagicZero;
 class UpdateMagicZero;
 class ForLoop;
@@ -254,6 +255,14 @@ class TORCH_CUDA_CU_API BlockSync final : public Expr {
  private:
   // TODO: war_sync_ is only used for testing/validation purposes.
   bool war_sync_ = false;
+};
+
+// CpAsyncWait represents wait intrinsics for cp.async
+// TODO: expand to support different wait modes of the intrinsic
+//  as the analysis passes build out.
+class TORCH_CUDA_CU_API CpAsyncWait final : public Expr {
+ public:
+  explicit CpAsyncWait(IrBuilderPasskey passkey);
 };
 
 // Synchronize all blocks in device, implies cooperative group launch is
