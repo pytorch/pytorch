@@ -376,7 +376,8 @@ def _copy_node_from_a_to_c(
                 node_a.op, node_a.target, (arg_copy,), {}, node_a_copy_name)
             return node_a_copy
         else:  # to
-            arg_copy = _copy_node_from_a_to_c(_get_normalized_nth_input(node_a, gm_a, 0), gm_a, gm_b, graph_c)  # type: ignore[arg-type]
+            arg_copy = _copy_node_from_a_to_c(
+                _get_normalized_nth_input(node_a, gm_a, 0), gm_a, gm_b, graph_c)  # type: ignore[arg-type]
             node_a_copy_name = \
                 get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)
             node_a_copy = graph_c.create_node(
