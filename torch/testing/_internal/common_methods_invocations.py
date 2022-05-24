@@ -9576,7 +9576,6 @@ def reference_hardsigmoid(x):
     y = np.clip(intermediate, 0, None)
     return np.where(y > 1, 1, y).astype(x.dtype)
 
-
 def reference_lgamma(x):
     # scipy.special.gammaln returns `-inf` when input is `-inf`.
     # While Pytorch, C and C++, all return `inf` when input is `-inf`.
@@ -18749,6 +18748,13 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
+    ),
+    BinaryUfuncInfo(
+        'special.beta',
+        dtypes=all_types_and(torch.bool),
+        promotes_int_to_float=True,
+        supports_one_python_scalar=True,
+        supports_autograd=False,
     ),
 ]
 
