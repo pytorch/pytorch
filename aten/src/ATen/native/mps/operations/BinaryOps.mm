@@ -27,15 +27,20 @@ void binaryOpTensor(const Tensor& self_t, const Tensor& other_t, const Tensor& o
   if (self_t.numel() == 0 || other_t.numel() == 0) {
     return;
   }
+  MPSStream* mpsStream = getCurrentMPSStream();
 
   const bool is_self_scalar = self_t.dim() == 0;
   const bool is_other_scalar = other_t.dim() == 0;
+
   Tensor self = is_self_scalar ? self_t : self_t.contiguous(at::MemoryFormat::Contiguous);
   Tensor other = is_other_scalar ? other_t : other_t.contiguous(at::MemoryFormat::Contiguous);
 
+  const MPSDataType self_dtype = getMPSScalarType((is_self_scalar && !is_other_scalar ? other_t : self_t).scalar_type());
+  const MPSDataType other_dtype = getMPSScalarType((!is_other_scalar ? other_t : self_t).scalar_type());
+
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, other});
+    string key = op_name + getTensorsStringKey({self, other}, /*use_scalar_value*/ false);
     BinaryOpCachedGraph* cachedGraph = static_cast<BinaryOpCachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
@@ -44,16 +49,8 @@ void binaryOpTensor(const Tensor& self_t, const Tensor& other_t, const Tensor& o
         @autoreleasepool {
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new BinaryOpCachedGraph(mpsGraph);
-          newCachedGraph->primaryTensor = !is_self_scalar ? mpsGraphRankedPlaceHolder(mpsGraph, self) :
-                                          mpsGraphConstantPlaceHolder(mpsGraph, getMPSScalarValue(self), getMPSShape(other),
-                                                                      // if other is scalar too, then use self's data type here and let the other
-                                                                      // have the same data type as self in the secondaryTensor
-                                                                      getMPSDataType((!is_other_scalar ? other : self).scalar_type()));
-
-          newCachedGraph->secondaryTensor = !is_other_scalar ? mpsGraphRankedPlaceHolder(mpsGraph, other) :
-                                            mpsGraphConstantPlaceHolder(mpsGraph, getMPSScalarValue(other), getMPSShape(self),
-                                                                        // regardless of self's data type, the scondaryTensor's type must match it.
-                                                                        getMPSDataType(self.scalar_type()));
+          newCachedGraph->primaryTensor   = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype , getMPSShape(self));
+          newCachedGraph->secondaryTensor = mpsGraphRankedPlaceHolder(mpsGraph, other_dtype, getMPSShape(other));
           newCachedGraph->outputTensor = binaryBlock(mpsGraph, newCachedGraph->primaryTensor, newCachedGraph->secondaryTensor);
         }
         return newCachedGraph;
@@ -62,20 +59,23 @@ void binaryOpTensor(const Tensor& self_t, const Tensor& other_t, const Tensor& o
     }
 
     NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
-    if (!is_self_scalar) {
+    if (is_self_scalar) {
+      feeds[cachedGraph->primaryTensor] = getMPSGraphTensorFromScalar(mpsStream, self.item(), self_dtype);
+    } else {
       Placeholder selfPlaceholder = Placeholder(cachedGraph->primaryTensor, self);
       feeds[selfPlaceholder.getMPSGraphTensor()] = selfPlaceholder.getMPSGraphTensorData();
     }
-    if (!is_other_scalar) {
+    if (is_other_scalar) {
+      feeds[cachedGraph->secondaryTensor] = getMPSGraphTensorFromScalar(mpsStream, other.item(), other_dtype);
+    } else {
       Placeholder otherPlaceholder = Placeholder(cachedGraph->secondaryTensor, other);
       feeds[otherPlaceholder.getMPSGraphTensor()] = otherPlaceholder.getMPSGraphTensorData();
     }
-
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
     };
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
   }
 }
 
