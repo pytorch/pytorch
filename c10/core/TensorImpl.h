@@ -548,6 +548,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return sizes_default();
   }
 
+  c10::SymIntArrayRef sym_sizes() const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+      return sym_sizes_custom();
+    }
+    return sym_sizes_default();
+  }
+
   /**
    * Return a reference to the strides of this tensor.  This reference remains
    * valid as long as the tensor is live and not restrided.
@@ -655,6 +664,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
   // sizes_strides_policy_ >= CustomSizes
   virtual IntArrayRef sizes_custom() const;
+  virtual c10::SymIntArrayRef sym_sizes_custom() const;
+  virtual Device device_custom() const;
+
   virtual int64_t dim_custom() const;
   virtual int64_t numel_custom() const;
 
@@ -675,9 +687,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   inline IntArrayRef sizes_default() const {
     return sizes_and_strides_.sizes_arrayref();
   }
+  inline c10::SymIntArrayRef sym_sizes_default() const {
+    return c10::SymIntArrayRef(
+        reinterpret_cast<const c10::SymInt*>(sizes_and_strides_.sizes_data()),
+        sizes_and_strides_.size());
+  }
   inline int64_t dim_default() const {
     return sizes_and_strides_.size();
   }
+  inline c10::Device device_default() const {
+    TORCH_CHECK(device_opt_.has_value(), "tensor does not have a device");
+    // See NOTE [c10::optional operator usage in CUDA]
+    return *device_opt_;
+  }
+
   inline int64_t numel_default() const {
 #ifdef DEBUG
     TORCH_INTERNAL_ASSERT(compute_numel() == numel_);
@@ -768,6 +791,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_meta() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom().is_meta();
+    }
     constexpr auto meta_ks = DispatchKeySet(DispatchKey::Meta);
     return key_set_.has_all(meta_ks);
   }
@@ -775,6 +801,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_cpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom().is_cpu();
+    }
     constexpr auto cpu_bits_ks = DispatchKeySet(BackendComponent::CPUBit) |
         DispatchKeySet({DispatchKey::SparseCsrCPU, DispatchKey::MkldnnCPU});
     return key_set_.has_any(cpu_bits_ks);
@@ -783,6 +812,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom().is_cuda();
+    }
     constexpr auto cuda_bits_ks = DispatchKeySet(BackendComponent::CUDABit) |
         DispatchKeySet(DispatchKey::SparseCsrCUDA);
     return key_set_.has_any(cuda_bits_ks);
@@ -791,26 +823,41 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_xpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom().is_xpu();
+    }
     constexpr auto xpu_ks = DispatchKeySet(BackendComponent::XPUBit);
     return key_set_.has_all(xpu_ks);
   }
 
   bool is_ipu() const {
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom().is_ipu();
+    }
     constexpr auto ipu_ks = DispatchKeySet(BackendComponent::IPUBit);
     return key_set_.has_all(ipu_ks);
   }
 
   bool is_xla() const {
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom().is_xla();
+    }
     constexpr auto xla_ks = DispatchKeySet(BackendComponent::XLABit);
     return key_set_.has_all(xla_ks);
   }
 
   bool is_hpu() const {
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom().is_hpu();
+    }
     constexpr auto hpu_ks = DispatchKeySet(BackendComponent::HPUBit);
     return key_set_.has_all(hpu_ks);
   }
 
   bool is_lazy() const {
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom().is_lazy();
+    }
     constexpr auto lazy_ks = DispatchKeySet(BackendComponent::LazyBit);
     return key_set_.has_all(lazy_ks);
   }
@@ -818,6 +865,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom().is_hip();
+    }
     constexpr auto hip_ks = DispatchKeySet(BackendComponent::HIPBit);
     return key_set_.has_all(hip_ks);
   }
@@ -825,6 +875,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_ve() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom().is_ve();
+    }
     constexpr auto ve_ks = DispatchKeySet(BackendComponent::VEBit);
     return key_set_.has_all(ve_ks);
   }
@@ -834,20 +887,32 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_vulkan() const {
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom().is_vulkan();
+    }
     constexpr auto vulkan_ks = DispatchKeySet(DispatchKey::Vulkan);
     return key_set_.has_all(vulkan_ks);
   }
 
   bool is_metal() const {
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom().is_metal();
+    }
     constexpr auto metal_ks = DispatchKeySet(DispatchKey::Metal);
     return key_set_.has_all(metal_ks);
   }
 
   bool is_mps() const {
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom().is_mps();
+    }
     return key_set_.has(DispatchKey::MPS);
   }
 
   bool is_ort() const {
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom().is_ort();
+    }
     constexpr auto ort_ks = DispatchKeySet(DispatchKey::ORT);
     return key_set_.has_all(ort_ks);
   }
@@ -878,15 +943,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   int64_t get_device() const {
-    TORCH_CHECK(device_opt_.has_value(), "tensor does not have a device");
-    // See NOTE [c10::optional operator usage in CUDA]
-    return (*device_opt_).index();
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom().index();
+    }
+    return device_default().index();
   }
 
   Device device() const {
-    TORCH_CHECK(device_opt_.has_value(), "tensor does not have a device");
-    // See NOTE [c10::optional operator usage in CUDA]
-    return *device_opt_;
+    if (C10_UNLIKELY(custom_device_)) {
+      return device_custom();
+    }
+    return device_default();
   }
 
   Layout layout() const {
@@ -1679,6 +1746,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return device_opt_;
   }
 
+  impl::PyInterpreter* load_pyobj_interpreter() const;
+
  public:
   /**
    * The device type of a Tensor, e.g., DeviceType::CPU or DeviceType::CUDA.
@@ -2199,7 +2268,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         reinterpret_cast<uintptr_t>(_unchecked_untagged_pyobj()) | b);
   }
 
- protected:
+ public:
   enum class SizesStridesPolicy : uint8_t {
     // Default behavior, e.g., dense tensor.
     //
@@ -2218,6 +2287,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   void set_sizes_strides_policy(SizesStridesPolicy policy) {
     sizes_strides_policy_ = static_cast<uint8_t>(policy);
+  }
+
+  void set_custom_device(bool custom_device) {
+    custom_device_ = custom_device;
   }
 
   Storage storage_;
@@ -2344,6 +2417,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     allow_tensor_metadata_change_ = true;
     reserved_ = false;
     sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::Default);
+    custom_device_ = false;
     storage_access_should_throw_ = false;
   }
 
@@ -2400,6 +2474,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Call _custom() virtual methods for
   // strides()/is_contiguous()/sizes()/dim()/numel()
   uint8_t sizes_strides_policy_ : 2;
+
+  // Whether or not sizes_and_strides_ contains a symbolic value.
+  bool has_symbolic_sizes_strides_ : 1;
+
+  // Call _custom() virtual method for device()
+  bool custom_device_ : 1;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but

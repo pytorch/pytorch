@@ -145,7 +145,11 @@ void runBenchmarkIterations(
     std::vector<c10::IValue>& aten_inputs) {
   fusion_executor_cache->runFusionWithInputs(aten_inputs);
   bool segmented =
-      fusion_executor_cache->getMostRecentKernelRuntime()->isSegmented();
+      fusion_executor_cache->getMostRecentKernelRuntime()->isSegmented() &&
+      fusion_executor_cache->getMostRecentKernelRuntime()
+              ->fusionSegments()
+              ->groups()
+              .size() > 1;
 
   if (!segmented) {
     fusion_executor_cache->profile(true);
