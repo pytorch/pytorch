@@ -310,27 +310,31 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
 
   template <int N>
   struct LoadWithCast {
-  using array_t = Array<ScalarType, N==0? 1 : N>;
-  using size_array_t = Array<uint32_t, N==0? 1: N>;
+    using array_t = Array<ScalarType, N==0? 1 : N>;
+    using size_array_t = Array<uint32_t, N==0? 1: N>;
 
-  array_t dtypes;
-  size_array_t element_sizes;
-  template <typename scalar_t>
-  __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg) {
-      void* ptr = base_ptr + element_sizes[arg] * offset;
-      return fetch_and_cast<scalar_t>(dtypes[arg], ptr);
-  }
+    array_t dtypes;
+    size_array_t element_sizes;
+    template <typename scalar_t>
+    __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg) {
+        void* ptr = base_ptr + element_sizes[arg] * offset;
+        return fetch_and_cast<scalar_t>(dtypes[arg], ptr);
+    }
   };
 
+  template <int N = 1>
   struct StoreWithCast {
-  ScalarType dtype;
-  uint32_t element_size;
-  //StoreWithCast(at::ScalarType dtype): dtype(dtype), element_size(c10::elementSize(dtype)) {}
-  template<typename scalar_t>
-  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
-      void *ptr = base_ptr + element_size * offset;
-      cast_and_store<scalar_t>(dtype, ptr, value);
-  }
+    using array_t = Array<ScalarType, N==0? 1 : N>;
+    using size_array_t = Array<uint32_t, N==0? 1: N>;
+
+    array_t dtypes;
+    size_array_t element_sizes;
+
+    template<typename scalar_t>
+    __device__ void store(scalar_t value, char *base_ptr, uint32_t offset, int arg = 0) {
+        void *ptr = base_ptr + element_sizes[arg] * offset;
+        cast_and_store<scalar_t>(dtypes[arg], ptr, value);
+    }
   };
 
 )ESCAPE";
@@ -346,7 +350,7 @@ const std::string no_dynamic_cast_support_literal = R"ESCAPE(
 
   struct StoreWithoutCast {
   template<typename scalar_t>
-  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
+  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset, int arg=0) {
     *(reinterpret_cast<scalar_t *>(base_ptr) + offset) = value;
   }
   };
@@ -810,9 +814,8 @@ std::string generate_code(
       env.s("storer", "StoreWithoutCast");
       env.s("dynamic_casting_string", no_dynamic_cast_support_literal);
     } else {
-      env.s(
-          "loader", std::string("LoadWithCast<" + std::to_string(nInputs) + ">"));
-      env.s("storer", "StoreWithCast");
+      env.s("loader", std::string("LoadWithCast<" + std::to_string(nInputs) + ">"));
+      env.s("storer", std::string("StoreWithCast<" + std::to_string(nOutputs) + ">"));
       env.s("dynamic_casting_string", dynamic_cast_support_literal);
     }
 
@@ -836,7 +839,9 @@ std::string generate_code(
     for (int i = 0; i < nOutputs; i++) {
       auto i_string = std::to_string(i);
       store_outputs << "s.store<" << result_type
-                    << ">(out" << i_string << "[j], data[" << i_string << "], output_offsets[" << i_string << "]);\n";
+                    << ">(out" << i_string << "[j], data[" << i_string
+                    << "], output_offsets[" << i_string << "], " << i_string
+                    << ");\n";
     }
     env.s("store_outputs", store_outputs.str());
 

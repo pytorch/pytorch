@@ -7,6 +7,7 @@ from torch._prims.utils import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
 import torch._refs as refs
+from torch._decomp import register_decomposition
 from torch._prims.wrappers import (
     elementwise_type_promotion_wrapper,
     out_wrapper,
@@ -16,6 +17,7 @@ from typing import Optional
 
 __all__ = [
     "celu",
+    "dropout",
     "elu",
     "mish",
     "selu",
@@ -55,6 +57,35 @@ def celu(
     return refs.where(refs.gt(a, 0), a, rhs)
 
 
+# TODO: should we allow the user to set a different dtype for the mask generation?
+def dropout(
+    a: TensorLikeType, p: float = 0.5, training: bool = True, inplace: bool = False
+) -> TensorLikeType:
+
+    if inplace:
+        raise NotImplementedError
+
+    if not training:
+        return a
+
+    assert p <= 1
+    assert p >= 0
+
+    if p == 1:
+        return refs.zeros_like(a)
+
+    if p == 0:
+        return a
+
+    p1m = 1 - p
+    scale = 1 / p1m
+    mask = refs.lt(
+        refs.uniform(a.shape, low=0.0, high=1.0, dtype=torch.float32, device=a.device),
+        p1m,
+    )
+    return refs.mul(refs.mul(a, mask), scale)
+
+
 # elu is implemented specially because it has an alpha argument
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -85,6 +116,28 @@ def elu(
         rhs = refs.expm1(a)
 
     return refs.where(refs.gt(a, 0), a, rhs)
+
+
+@register_decomposition(torch.ops.aten.leaky_relu)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def leaky_relu(
+    a: TensorLikeType, negative_slope: float = 0.01, inplace: bool = False
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.leaky_relu
+    """
+
+    if inplace:
+        raise NotImplementedError
+
+    python_type = utils.dtype_to_type(a.dtype)
+    if not utils.is_weakly_lesser_type(type(negative_slope), python_type):
+        msg = f"negative_slope argument of type {type(negative_slope)} cannot be safely cast to type {python_type}!"
+        raise ValueError(msg)
+    return torch.where(torch.gt(a, 0), a, torch.mul(a, negative_slope))
 
 
 @elementwise_type_promotion_wrapper(
