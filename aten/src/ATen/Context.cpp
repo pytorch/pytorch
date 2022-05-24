@@ -21,6 +21,10 @@
 #include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
 
+#ifdef USE_MPS
+#include <ATen/mps/MPSDevice.h>
+#endif
+
 namespace at {
 
 Context::Context() = default;
@@ -140,6 +144,14 @@ void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
 }
 
+int Context::benchmarkLimitCuDNN() const {
+  return benchmark_limit_cudnn;
+}
+
+void Context::setBenchmarkLimitCuDNN(int b) {
+  benchmark_limit_cudnn = b;
+}
+
 bool Context::allowTF32CuBLAS() const {
   static bool allow_tf32_cublas_override = c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true;
   return allow_tf32_cublas_override || float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
@@ -225,16 +237,8 @@ bool Context::hasMKLDNN() {
 }
 
 bool Context::hasMPS() {
-#if defined(__APPLE__)
-#if __is_target_os(macOS)
-  if (__builtin_available(macOS 12.3, *)) {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::MPS);
-  } else {
-    return false;
-  }
-#else
-  return false;
-#endif
+#if USE_MPS
+  return at::mps::is_available();
 #else
   return false;
 #endif
