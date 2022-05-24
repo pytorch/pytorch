@@ -17,6 +17,8 @@ if [ -n "$KATEX" ]; then
   apt-get install -y --no-install-recommends yarn
   yarn global add katex --prefix /usr/local
 
+  sudo apt-get -y install doxygen
+
   apt-get autoclean && apt-get clean
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
