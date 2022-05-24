@@ -1186,28 +1186,27 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
         #    - More steps....
         y.exp()
 
+    @staticmethod
+    def subclass_helper(cls, data, use_wrapper_subclass, **kwargs):
+        if use_wrapper_subclass:
+            kwargs["device"] = data.device
+            kwargs["dtype"] = data.dtype
+            kwargs["layout"] = data.layout
+            kwargs["requires_grad"] = True
+            return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
+        else:
+            return torch.Tensor._make_subclass(cls, data, True, **kwargs)
+
     def test_is_contiguous_slow_path(self):
         data = torch.randn(3, 3)
         contiguous_data = data.clone()
         not_contiguous_data = torch.as_strided(data.clone(), (2, 2), (1, 2))
 
-        def subclass_helper(cls, data, use_wrapper_subclass):
-            if use_wrapper_subclass:
-                kwargs = {}
-                kwargs["device"] = data.device
-                kwargs["dtype"] = data.dtype
-                kwargs["layout"] = data.layout
-                kwargs["requires_grad"] = True
-                kwargs['dispatch_strides'] = True
-                return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
-            else:
-                return torch.Tensor._make_subclass(cls, data, True, dispatch_strides=True)
-
         for use_wrapper_subclass in [True, False]:
             class ExampleTensor1(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return subclass_helper(cls, data, wrapper)
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_strides=True)
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1216,7 +1215,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
             class ExampleTensor2(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return subclass_helper(cls, data, wrapper)
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_strides=True)
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1227,7 +1226,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
             class ExampleTensor3(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return subclass_helper(cls, data, wrapper)
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_strides=True)
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1252,6 +1251,53 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
             self.assertEqual(e.is_contiguous(), False)
             with self.assertRaisesRegex(TypeError, err_msg):
                 e.contiguous()
+
+    def test_device_slowpath(self):
+        for use_wrapper_subclass in [True]:
+            class ExampleTensor1(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_device=True)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    return NotImplemented
+
+            class ExampleTensor2(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_device=True)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.prim.device:
+                        return torch.device('meta')
+                    return NotImplemented
+
+            class ExampleTensor3(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_device=True)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.prim.device:
+                        return torch.device('meta')
+                    return NotImplemented
+
+            err_msg = "no implementation found for 'torch.ops.prim.device'"
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
+                e.device()
+
+            ten = torch.rand([1])
+            e = ExampleTensor2(torch.randn(3, 3, device='cpu'), use_wrapper_subclass)
+            self.assertEqual(e.device.type, 'meta')
+            self.assertEqual(ten.type_as(e).device.type, 'meta')
+
+            e = ExampleTensor3(torch.randn(3, 3, device='cpu'), use_wrapper_subclass)
+            self.assertEqual(e.device.type, 'meta')
+            self.assertEqual(ten.type_as(e).device.type, 'meta')
 
 
 if __name__ == '__main__':
