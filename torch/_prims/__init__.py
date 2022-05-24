@@ -61,7 +61,7 @@ __all__ = [
     "exp2",
     "fill",
     "floor",
-    "is_finite",
+    "isfinite",
     "is_infinite",
     "lgamma",
     "log",
@@ -543,8 +543,8 @@ floor = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
-is_finite = _make_elementwise_unary_prim(
-    "is_finite",
+isfinite = _make_elementwise_unary_prim(
+    "isfinite",
     impl_aten=torch.isfinite,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
