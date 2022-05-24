@@ -5,7 +5,7 @@ set -ex
 UNKNOWN=()
 
 # defaults
-PARALLEL=0
+PARALLEL=1
 
 while [[ $# -gt 0 ]]
 do
@@ -46,7 +46,7 @@ args+=("xml:test/coverage.xml")
 args+=("--cov-append")
 if [[ $PARALLEL == 1 ]]; then
   args+=("-n")
-  args+=("3")
+  args+=("8")
 fi
 
 # onnxruntime only support py3
