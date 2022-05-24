@@ -360,8 +360,10 @@ def _not_impl(*args, **kwargs):
 # Elementwise unary operations
 #
 
+
 def _abs_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.abs(a)  # type: ignore[attr-defined]
+
 
 abs = _make_elementwise_unary_prim(
     "abs",
@@ -371,8 +373,10 @@ abs = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
 )
 
+
 def _acos_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.acos(a)  # type: ignore[attr-defined]
+
 
 acos = _make_elementwise_unary_prim(
     "acos",
@@ -389,8 +393,10 @@ acosh = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _asin_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.asin(a)  # type: ignore[attr-defined]
+
 
 asin = _make_elementwise_unary_prim(
     "asin",
@@ -400,8 +406,10 @@ asin = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _atan_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.atan(a)  # type: ignore[attr-defined]
+
 
 atan = _make_elementwise_unary_prim(
     "atan",
@@ -411,8 +419,10 @@ atan = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _cos_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.cos(a)  # type: ignore[attr-defined]
+
 
 cos = _make_elementwise_unary_prim(
     "cos",
@@ -422,8 +432,10 @@ cos = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _cosh_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.cosh(a)  # type: ignore[attr-defined]
+
 
 cosh = _make_elementwise_unary_prim(
     "cosh",
@@ -461,8 +473,10 @@ bessel_i1e = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _bitwise_not_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.bitwise_not(a)  # type: ignore[attr-defined]
+
 
 bitwise_not = _make_elementwise_unary_prim(
     "bitwise_not",
@@ -484,8 +498,10 @@ cbrt = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _ceil_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.ceil(a)  # type: ignore[attr-defined]
+
 
 ceil = _make_elementwise_unary_prim(
     "ceil",
@@ -502,8 +518,10 @@ digamma = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _erf_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.erf(a)  # type: ignore[attr-defined]
+
 
 erf = _make_elementwise_unary_prim(
     "erf",
@@ -520,8 +538,10 @@ erf_inv = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _erfc_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.erfc(a)  # type: ignore[attr-defined]
+
 
 erfc = _make_elementwise_unary_prim(
     "erfc",
@@ -531,8 +551,10 @@ erfc = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _exp_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.exp(a)  # type: ignore[attr-defined]
+
 
 exp = _make_elementwise_unary_prim(
     "exp",
@@ -542,8 +564,10 @@ exp = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _expm1_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.expm1(a)  # type: ignore[attr-defined]
+
 
 expm1 = _make_elementwise_unary_prim(
     "expm1",
@@ -584,8 +608,10 @@ fill = _make_prim(
     doc="",
 )
 
+
 def _floor_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.floor(a)  # type: ignore[attr-defined]
+
 
 floor = _make_elementwise_unary_prim(
     "floor",
@@ -595,8 +621,10 @@ floor = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _isfinite_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.isfinite(a)  # type: ignore[attr-defined]
+
 
 is_finite = _make_elementwise_unary_prim(
     "is_finite",
@@ -620,8 +648,10 @@ lgamma = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _log_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.log(a)  # type: ignore[attr-defined]
+
 
 log = _make_elementwise_unary_prim(
     "log",
@@ -631,8 +661,10 @@ log = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _log1p_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.log1p(a)  # type: ignore[attr-defined]
+
 
 log1p = _make_elementwise_unary_prim(
     "log1p",
@@ -642,8 +674,10 @@ log1p = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _log2_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.log2(a)  # type: ignore[attr-defined]
+
 
 log2 = _make_elementwise_unary_prim(
     "log2",
@@ -653,8 +687,10 @@ log2 = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _log10_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.log10(a)  # type: ignore[attr-defined]
+
 
 log10 = _make_elementwise_unary_prim(
     "log10",
@@ -664,8 +700,10 @@ log10 = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _reciprocal_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.reciprocal(a)  # type: ignore[attr-defined]
+
 
 reciprocal = _make_elementwise_unary_prim(
     "reciprocal",
@@ -675,8 +713,10 @@ reciprocal = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _neg_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.neg(a)  # type: ignore[attr-defined]
+
 
 neg = _make_elementwise_unary_prim(
     "neg",
@@ -686,8 +726,10 @@ neg = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _round_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.round(a)  # type: ignore[attr-defined]
+
 
 round = _make_elementwise_unary_prim(
     "round",
@@ -704,8 +746,10 @@ sign = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _sin_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.sin(a)  # type: ignore[attr-defined]
+
 
 sin = _make_elementwise_unary_prim(
     "sin",
@@ -715,8 +759,10 @@ sin = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _sinh_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.sinh(a)  # type: ignore[attr-defined]
+
 
 sinh = _make_elementwise_unary_prim(
     "sinh",
@@ -726,8 +772,10 @@ sinh = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _sqrt_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.sqrt(a)  # type: ignore[attr-defined]
+
 
 sqrt = _make_elementwise_unary_prim(
     "sqrt",
@@ -744,8 +792,10 @@ square = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _tan_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.tan(a)  # type: ignore[attr-defined]
+
 
 tan = _make_elementwise_unary_prim(
     "tan",
@@ -755,8 +805,10 @@ tan = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _tanh_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.tanh(a)  # type: ignore[attr-defined]
+
 
 tanh = _make_elementwise_unary_prim(
     "tanh",
