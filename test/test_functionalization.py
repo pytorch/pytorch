@@ -93,6 +93,18 @@ class TestFunctionalization(TestCase):
         self.assertEqual(out_ref, torch._from_functional_tensor(out_functional))
         self.assertEqual(inpt, torch._from_functional_tensor(input_functional))  # input mutations should still occur
 
+    def test_multiple_views_of_same_base(self):
+        def f(x):
+            y = x.view(-1)
+            z = x.view(-1)
+            x.add_(1)
+            # y should have been updated.
+            y2 = y + 1
+            # z should have been updated too.
+            z2 = z + 1
+            return z2
+        self.assert_functionalization(f, torch.ones(4))
+
     def test_simple(self):
         def f(x):
             # simple test: 1 view op, 1 inplace op
