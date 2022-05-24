@@ -62,7 +62,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
     // starts with a left parenthesis.
     //
     // There are 2 cases
-    // 1. something like 'aten::items.str(Dict(str, t) self) -> ((str, t)[])'.     
+    // 1. something like 'aten::items.str(Dict(str, t) self) -> ((str, t)[])'.
     // without the extra parenthesis, the c++ schem parser can not parse it.
     // 2. something like '-> ((str, str))'. Need extra parenthesis so the return
     // type is a single tuple rather than two strings.
