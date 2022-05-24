@@ -148,7 +148,7 @@ def _try_cast_integer_to_float(g, *args):
 def _cast_to_type(g, input, to_type):
     if to_type is None:
         return input
-    return getattr(opset9, "_cast_{}".format(to_type))(g, input, False)
+    return getattr(opset9, f"_cast_{to_type}")(g, input, False)
 
 
 def _comparison_operator(g, input, other, op_name):

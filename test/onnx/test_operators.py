@@ -69,7 +69,7 @@ class FuncModule(Module):
     def __init__(self, f, params=None):
         if params is None:
             params = ()
-        super(FuncModule, self).__init__()
+        super().__init__()
         self.f = f
         self.params = nn.ParameterList(list(params))
 
@@ -120,7 +120,7 @@ class TestOperators(TestCase):
                 for index, var in enumerate(flatten(args)):
                     tensor = onnx.numpy_helper.from_array(var.data.numpy())
                     with open(
-                        os.path.join(data_dir, "input_{}.pb".format(index)), "wb"
+                        os.path.join(data_dir, f"input_{index}.pb"), "wb"
                     ) as file:
                         file.write(tensor.SerializeToString())
                 outputs = m(*args)
@@ -129,7 +129,7 @@ class TestOperators(TestCase):
                 for index, var in enumerate(flatten(outputs)):
                     tensor = onnx.numpy_helper.from_array(var.data.numpy())
                     with open(
-                        os.path.join(data_dir, "output_{}.pb".format(index)), "wb"
+                        os.path.join(data_dir, f"output_{index}.pb"), "wb"
                     ) as file:
                         file.write(tensor.SerializeToString())
 
