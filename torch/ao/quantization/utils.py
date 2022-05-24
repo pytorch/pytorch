@@ -5,7 +5,7 @@ import warnings
 import functools
 import torch
 from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
-from typing import Tuple, Any, Union, Callable, Dict, OrderedDict, Optional
+from typing import Tuple, Any, Union, Callable, Dict, Optional
 from torch.nn.utils.parametrize import is_parametrized
 from collections import OrderedDict
 from inspect import signature
