@@ -573,12 +573,7 @@ static bool is_int_list(PyObject* obj, int broadcast_size) {
 }
 
 static bool is_int_or_symint(PyObject* obj) {
-  if (THPUtils_checkLong(obj)) {
-      return true;
-  }
-
-  // TODO: test if it's the Python binding for SymbolicIntNode
-  return false;
+  return THPUtils_checkLong(obj) || torch::is_symint_node(py::handle(obj));
 }
 
 static bool is_int_or_symint_list(PyObject* obj, int broadcast_size) {

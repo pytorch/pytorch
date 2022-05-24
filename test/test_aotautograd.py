@@ -33,6 +33,19 @@ def binary_func_meta(a, b, **kwargs):
             assert (a_dim == b_dim or b_dim == 1)
     return a
 
+@register_meta([aten.narrow_copy.SymInt])
+def narrow_copy_symint_meta(a, dim, start, length, **kwargs):
+
+    shape = []
+
+    for i, x in enumerate(a.shape):
+        if i == dim:
+            shape.append(length)
+        else:
+            shape.append(x)
+
+    return a.new_empty(tuple(shape))
+
 # Copied from prims
 # todo: figure out how to unify
 @register_meta(aten.cat.default)
@@ -134,6 +147,7 @@ class ProxyTensor(torch.Tensor):
                     tracer.append(x.tracer)
 
             def get_fake(x): return x.fake_elem if isinstance(x, ProxyTensor) else x
+            def get_int(x): return int(x) if isinstance(x, SYM_INT_CLASS) else x
 
             tree_map(get_tracer, (args, kwargs))
             assert len(tracer) > 0
@@ -142,7 +156,7 @@ class ProxyTensor(torch.Tensor):
             output_proxy = tracer.graph.call_function(func_overload, tree_map(get_proxy, args), tree_map(get_proxy, kwargs))
             with no_dispatch():
                 # TODO: we will use a FakeTensor or MetaTensor to compute metadata 
-                out = func_overload(*tree_map(get_fake, args), **tree_map(get_fake, kwargs))
+                out = func_overload(*tree_map(get_int, tree_map(get_fake, args)), **tree_map(get_int, tree_map(get_fake, kwargs)))
                 assert not isinstance(out, ProxyTensor)
 
 
@@ -169,6 +183,9 @@ class PySymInt(object):
 
     def wrap(self, num):
         return PySymInt(sympy.Integer(num), self.tracer)
+
+    def __int__(self):
+        return self.tracer.evaluate_expr(self.expr)
 
     def __bool__(self):
         return bool(self.tracer.evaluate_expr(self.expr))
@@ -260,27 +277,22 @@ def dynamic_trace(f, args):
 # __new__(cls, fake_elem, proxy, sym_shape, sym_strides, tracer):
 #pt = ProxyTensor(torch.rand(6), None, )
 
-def f(a, b):
-    if a.size()[0] + 0 < 10 and a.size()[0] + 0 == a.size()[0] * 1:
-        return a + b
-    else:
-        return a + a
-tracer = dynamic_trace(f, [torch.rand(4), torch.rand(4)])
+
+def f(a):
+    return a.narrow_copy(0, 0, a.size()[0])
+
+tracer = dynamic_trace(f, [torch.rand(4)])
 print(tracer.graph)
+print(tracer.guards)
 print("done")
 
 # def f(a, b):
-#     c = torch.add(a, b)
-#     if c.size()[0] == b.size()[0]:
-#         return torch.add(c, c)
+#     if a.size()[0] + 0 < 10 and a.size()[0] + 0 == a.size()[0] * 1:
+#         return a + b
 #     else:
-#         return torch.sub(c, c)
-
-# def f(a):
-#     return a.narrow_copy(0, 0, a.size()[0])
-
-
-
+#         return a + a
+# tracer = dynamic_trace(f, [torch.rand(4), torch.rand(4)])
+# print(tracer.graph)
 # print(tracer.guards)
-# assert tracer.evaluate_guards(torch.rand(6), torch.rand(6))
-#assert not tracer.evaluate_guards(torch.rand(3), torch.rand(3))
+# print("done")
+

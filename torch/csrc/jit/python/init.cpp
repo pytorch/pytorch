@@ -144,6 +144,11 @@ public:
     // TODO: test getPyObj().attr("__bool__")().is(py::object(Py_True))
   }
 
+  virtual int64_t int_() {
+    py::gil_scoped_acquire acquire;
+    return py::str(getPyObj().attr("__int__")()).is(py::str(Py_True));
+  }
+
   virtual std::string str() {
     py::gil_scoped_acquire acquire;
     return py::str(getPyObj()).cast<std::string>();
@@ -1198,6 +1203,9 @@ void initJITBindings(PyObject* module) {
     })
     .def("__bool__", [](std::shared_ptr<c10::SymbolicIntNode> a) {
       return a->bool_();
+    })
+    .def("__int__", [](std::shared_ptr<c10::SymbolicIntNode> a) {
+      return a->int_();
     })
     .def("__str__", [](std::shared_ptr<c10::SymbolicIntNode> a) {
       return a->str();
