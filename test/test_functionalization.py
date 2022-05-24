@@ -316,6 +316,18 @@ $2 = torch._ops.aten.add.Tensor($1, 1)
 $3 = torch._ops.aten.mul.Tensor($2, 2)
 $4 = torch._ops.aten.div.Tensor($3, 1)""")
 
+    def test_metadata_change(self):
+        def f(x):
+            # ops like ge_() are allowed to change the dtype of the input.
+            # functionalization should pick up on that.
+            return x.ge_(0)
+        self.assert_functionalization(f, torch.ones(4, 2))
+        logs = self.get_logs(f, torch.ones(4, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.ge.Scalar($0, 0)
+$2 = torch._ops.aten._to_copy.default($1, dtype=torch.float32, layout=torch.strided)""")
+
     def test_only_one_view(self):
         def f(x):
             # This tests that we don't have any unnecessary views in the trace.
