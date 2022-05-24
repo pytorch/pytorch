@@ -57,8 +57,8 @@ jobs:
     !{{ upload.binary_env(config) }}
     steps:
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch", checkout_pr_head=False) }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch, checkout_pr_head=False) }}
 {%- if config["gpu_arch_type"] == 'cuda' and config["gpu_arch_version"].startswith('11') %}
       - name: Set BUILD_SPLIT_CUDA
         run: |
@@ -130,8 +130,8 @@ jobs:
         with:
           name: !{{ config["build_name"] }}
           path: "${{ runner.temp }}/artifacts/"
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch", checkout_pr_head=False) }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch, checkout_pr_head=False) }}
 {%- if config["gpu_arch_type"] == "rocm" %}
       - name: ROCm set GPU_FLAG
         run: |
