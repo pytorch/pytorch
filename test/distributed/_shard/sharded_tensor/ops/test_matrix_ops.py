@@ -288,7 +288,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             ):
                 layer_norm = torch.nn.LayerNorm((35)).cuda(self.rank)
                 layer_norm(_shard_tensor(tensor, spec))
-    
+ 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
