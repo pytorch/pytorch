@@ -218,6 +218,60 @@ static bool copy_requires_temporaries(const Tensor& dst, const Tensor& src) {
   }
 }
 
+// Copy sourceBuffer into destBuffer, casting sourceBuffer to src.scalar_type().
+// The shapes and dtypes are taken from dst and src, but their storage pointers are not used.
+void copy_cast_mps(at::Tensor& dst, const at::Tensor& src,
+                   id<MTLBuffer> destBuffer, id<MTLBuffer> sourceBuffer) {
+  using namespace mps;
+
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
+
+  MPSStream* stream = getCurrentMPSStream();
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
+  MPSDataType dstDType = getMPSDataType(dst.scalar_type());
+  MPSDataType srcDType = getMPSDataType(src.scalar_type());
+  MPSShape* dstShape = getMPSShape(dst);
+  MPSShape* srcShape = getMPSShape(src);
+
+  @autoreleasepool {
+    string key = "copy_cast_mps" + getTensorsStringKey({src, dst});
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+
+    if (!cachedGraph) {
+      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+        CachedGraph *newCachedGraph = nil;
+        @autoreleasepool {
+          MPSGraph* mpsGraph = make_mps_graph();
+          newCachedGraph = new CachedGraph(mpsGraph);
+
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, src);
+          MPSGraphTensor* outputTensor = [mpsGraph castTensor:inputTensor toType:dstDType name:@"cast"];
+
+          newCachedGraph->inputTensor_ = inputTensor;
+          newCachedGraph->outputTensor_ = outputTensor;
+        }
+        return newCachedGraph;
+      });
+      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+    }
+    MPSGraphTensorData* srcData = [[[MPSGraphTensorData alloc]
+                                    initWithMTLBuffer:sourceBuffer shape:srcShape dataType:srcDType]
+                                   autorelease];
+    MPSGraphTensorData* dstData = [[[MPSGraphTensorData alloc]
+                                    initWithMTLBuffer:destBuffer shape:dstShape dataType:dstDType]
+                                   autorelease];
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{cachedGraph->inputTensor_: srcData};
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{cachedGraph->outputTensor_: dstData};
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+  }
+}
+
 static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_,
                            bool non_blocking) {
 
@@ -259,6 +313,11 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_,
 
   if (sourceBuffer == nil) return dst_;
   NSUInteger destOffset = dst.storage_offset() * dst.itemsize();
+
+  // In case of dtype change, first convert src inplace
+  if (src_.dtype() != dst_.dtype()) {
+    copy_cast_mps(dst_, src_, sourceBuffer, sourceBuffer);
+  }
 
   @autoreleasepool {
     MTLResourceOptions options = MTLResourceOptionCPUCacheModeDefault | MTLResourceStorageModeShared;
@@ -317,6 +376,10 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_,
     src = src_.to(dst_.dtype()).expand_as(dst_).contiguous();
   } else {
     src = src_;
+    if (src.dtype() != dst_.dtype()) {
+      // In case of dtype change, perform conversion on source device
+      src = src.to(dst_.dtype());
+    }
   }
 
   if (!dst_.is_contiguous()) {
@@ -386,7 +449,6 @@ void copy_blit_mps(void* dst, const void* src, size_t size) {
 
 static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_,
                             bool non_blocking) {
-  MPSStream* stream = getCurrentMPSStream();
   uint64_t size = src_.nbytes();
   auto src_byte_offset = src_.storage_offset() * src_.itemsize();
   id<MTLBuffer> sourceBuffer = __builtin_bit_cast(id<MTLBuffer>, src_.storage().data());
@@ -414,24 +476,24 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_,
   auto dst_byte_offset = dst.storage_offset() * dst.itemsize();
   id<MTLBuffer> destBuffer = __builtin_bit_cast(id<MTLBuffer>, dst.storage().data());
 
-  dispatch_sync(stream->queue(), ^() {
-    @autoreleasepool {
-      id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
-      id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
-
-      [blitEncoder copyFromBuffer:sourceBuffer
-                     sourceOffset:src_byte_offset
-                         toBuffer:destBuffer
-                destinationOffset:dst_byte_offset
-                             size:size];
-      [blitEncoder endEncoding];
-      if (non_blocking) {
-        stream->commit(true);
-      } else {
+  if (src.dtype() == dst.dtype()) {
+    MPSStream* stream = getCurrentMPSStream();
+    dispatch_sync(stream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
+        id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
+        [blitEncoder copyFromBuffer:sourceBuffer
+                      sourceOffset:0
+                          toBuffer:destBuffer
+                 destinationOffset:0
+                              size:size];
+        [blitEncoder endEncoding];
         stream->commitAndWait();
       }
-    }
-  });
+    });
+  } else {
+    copy_cast_mps(dst_, src_, destBuffer, sourceBuffer);
+  }
   return dst;
 }
 
