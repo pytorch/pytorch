@@ -120,10 +120,10 @@ def log_input(name: str, var: object):
     logging.getLogger("LoggingTensor").info("input", (name,), {}, (var,))
 
 @contextlib.contextmanager
-def capture_logs(is_dispatch_mode=False) -> Iterator[List[str]]:
+def capture_logs(is_mode=False) -> Iterator[List[str]]:
     logger = logging.getLogger("LoggingTensor")
     log_list: List[str] = []
-    handler = LoggingTensorHandler(log_list, use_shortid_for_all_tensors=is_dispatch_mode)
+    handler = LoggingTensorHandler(log_list, use_shortid_for_all_tensors=is_mode)
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.propagate = False
@@ -134,5 +134,5 @@ def capture_logs(is_dispatch_mode=False) -> Iterator[List[str]]:
 
 @contextlib.contextmanager
 def capture_logs_with_logging_tensor_mode():
-    with push_torch_dispatch_mode(LoggingTensorMode(inner=None)), capture_logs(True) as logs:
+    with push_torch_dispatch_mode(LoggingTensorMode), capture_logs(True) as logs:
         yield logs

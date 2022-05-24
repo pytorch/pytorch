@@ -5,9 +5,10 @@ import torch
 from copy import deepcopy
 from torch.library import Library
 from torch.cuda.jiterator import _create_jit_fn
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM
+import unittest
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
-    log_input, capture_logs, no_dispatch
+    log_input, capture_logs, no_dispatch, capture_logs_with_logging_tensor_mode
 from torch.utils._pytree import tree_map
 from torch.utils._python_dispatch import enable_torch_dispatch_mode, push_torch_dispatch_mode, TorchDispatchMode
 
@@ -246,6 +247,28 @@ class TestPythonRegistration(TestCase):
 
         del my_lib2
         del my_lib1
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
+    def test_alias_analysis(self):
+        def test_helper(alias_analysis=""):
+            my_lib1 = Library("foo", "DEF")
+
+            called = [0]
+
+            @torch.library.define(my_lib1, "_op() -> None", alias_analysis=alias_analysis)
+            def _op(*args, **kwargs):
+                called[0] += 1
+
+            @torch.jit.script
+            def _test():
+                torch.ops.foo._op()
+
+            assert "foo::_op" in str(_test.graph)
+
+        with self.assertRaises(AssertionError):
+            test_helper("")  # alias_analysis="FROM_SCHEMA"
+
+        test_helper("CONSERVATIVE")
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
@@ -708,21 +731,61 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
                 pass
 
     def test_enable_torch_dispatch_mode_basic(self) -> None:
-        with capture_logs(is_dispatch_mode=True) as logs:
+        with capture_logs(is_mode=True) as logs:
             with enable_torch_dispatch_mode(LoggingTensorMode(inner=None)):
                 torch.empty([])
         self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=6, device=device(type='cpu'), pin_memory=False)""")
+$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)""")
 
     def test_enable_torch_dispatch_mode_unrelated_tensors(self) -> None:
         x = torch.randn([])
         y = torch.randn([])
-        with capture_logs(is_dispatch_mode=True) as logs:
+        with capture_logs(is_mode=True) as logs:
             with enable_torch_dispatch_mode(LoggingTensorMode(inner=None)):
                 x + y
-        print('\n'.join(logs))
         self.assertExpectedInline('\n'.join(logs), """\
 $2 = torch._ops.aten.add.Tensor($0, $1)""")
+
+    def test_nested_push_logging_tensor_mode(self):
+        x = torch.randn([])
+        y = torch.randn([])
+        with capture_logs(is_mode=True) as logs:
+            with push_torch_dispatch_mode(LoggingTensorMode):
+                with push_torch_dispatch_mode(LoggingTensorMode):
+                    torch.empty([])
+                    x + y
+
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$3 = torch._ops.aten.add.Tensor($1, $2)
+$3 = torch._ops.aten.add.Tensor($1, $2)""")
+
+    def test_capture_logs_with_torch_dispatch_mode(self):
+        x = torch.randn([])
+        y = torch.randn([])
+        with capture_logs_with_logging_tensor_mode() as logs:
+            torch.empty([])
+            x + y
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$3 = torch._ops.aten.add.Tensor($1, $2)""")
+
+        x = torch.randn([])
+        y = torch.randn([])
+
+        with capture_logs_with_logging_tensor_mode() as logs1:
+            with capture_logs_with_logging_tensor_mode() as logs2:
+                torch.empty([])
+                x + y
+
+        self.assertExpectedInline('\n'.join(logs2), """\
+$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$3 = torch._ops.aten.add.Tensor($1, $2)
+$3 = torch._ops.aten.add.Tensor($1, $2)""")
+
+        self.assertEqual(logs1, logs2)
 
     def test_enable_torch_dispatch_mode_subclass_priority(self) -> None:
         class ErrorA(RuntimeError):
@@ -769,12 +832,12 @@ $2 = torch._ops.aten.add.Tensor($0, $1)""")
                 a + b
 
     def test_enable_torch_dispatch_mode_respects_no_dispatch(self) -> None:
-        with capture_logs(is_dispatch_mode=True) as logs1:
+        with capture_logs(is_mode=True) as logs1:
             with enable_torch_dispatch_mode(LoggingTensorMode(inner=None)):
                 torch.ones([2, 3])
                 with no_dispatch():
                     torch.ones([2, 3])
-        with capture_logs(is_dispatch_mode=True) as logs2:
+        with capture_logs(is_mode=True) as logs2:
             with enable_torch_dispatch_mode(LoggingTensorMode(inner=None)):
                 torch.ones([2, 3])
         self.assertEqual(logs1, logs2)
@@ -800,14 +863,21 @@ $2 = torch._ops.aten.add.Tensor($0, $1)""")
                 with enable_torch_dispatch_mode(A(inner=None)):
                     pass
 
-    def test_nesting_with_same_enable_torch_dispatch_mode(self) -> None:
-        # "nested" enable_torch_dispatch_modes are allowed if they're the same mode. It's the equivalent of
-        # a noop, so it will only write once to the log
-        x = torch.tensor([3.])
-        with capture_logs(is_dispatch_mode=True) as logs:
-            log_input("x", x)
+        # For nesting to be a noop, they need to be the same instance
+        with self.assertRaisesRegex(ValueError, "there is already an active mode"):
             with enable_torch_dispatch_mode(LoggingTensorMode(inner=None)):
                 with enable_torch_dispatch_mode(LoggingTensorMode(inner=None)):
+                    pass
+
+    def test_nesting_with_same_enable_torch_dispatch_mode(self) -> None:
+        # "nested" enable_torch_dispatch_modes are allowed if they're the same mode (same instance).
+        # It's the equivalent of a noop, so it will only write once to the log
+        x = torch.tensor([3.])
+        mode = LoggingTensorMode(inner=None)
+        with capture_logs(is_mode=True) as logs:
+            log_input("x", x)
+            with enable_torch_dispatch_mode(mode):
+                with enable_torch_dispatch_mode(mode):
                     x + x
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
@@ -816,10 +886,10 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
     def test_enable_torch_dispatch_mode_ignore_preexisting(self):
         class A(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                assert False
+                raise AssertionError
 
         x = torch.tensor([3.])
-        with capture_logs(is_dispatch_mode=True) as logs:
+        with capture_logs(is_mode=True) as logs:
             with enable_torch_dispatch_mode(A(inner=None)):
                 with enable_torch_dispatch_mode(LoggingTensorMode(inner=None), ignore_preexisting=True):
                     x + x
@@ -829,11 +899,11 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
     def test_enable_torch_dispatch_mode_replace(self):
         class A(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                assert False
+                raise AssertionError
 
         x = torch.tensor([3.])
         outer_mode = A(inner=None)
-        with capture_logs(is_dispatch_mode=True) as logs:
+        with capture_logs(is_mode=True) as logs:
             with enable_torch_dispatch_mode(outer_mode):
                 with enable_torch_dispatch_mode(LoggingTensorMode(inner=None), replace=outer_mode):
                     x + x
@@ -894,8 +964,8 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 return func(*args, **kwargs)
 
         x = torch.randn(1)
-        with push_torch_dispatch_mode(partial(Logger, "A")):
-            with push_torch_dispatch_mode(partial(Logger, "B")):
+        with Logger.push("A"):
+            with Logger.push("B"):
                 x + x
         self.assertEqual(logs, ["B", "A"])
 
@@ -1001,11 +1071,9 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             out.backward()
 
     def test_storage_can_be_converted_to_python_object(self):
-        # Is this test still relevant? We're just dealing with plain tensors now.
-        with enable_torch_dispatch_mode(LoggingTensor):
-            s = torch.Storage()
-            z = LoggingTensor(torch.empty([]))
-            z.set_(s)
+        s = torch.Storage()
+        z = LoggingTensor(torch.empty([]))
+        z.set_(s)
 
     def test_autograd_in_attr(self):
         # We want the wrapped Tensor to require gradients!
