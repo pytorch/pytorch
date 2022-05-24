@@ -67,10 +67,7 @@ jobs:
 
       - name: Create Pull Request
         uses: actions/github-script@v6
-        if: ${{ steps.update-file.outputs.new_commit }}
-        env:
-          ORIGINAL_COMMIT: ${{ steps.update-file.outputs.original_commit }}
-          NEW_COMMIT: ${{ steps.update-file.outputs.new_commit }}
+        if: ${{ !steps.already-existing.outputs.result }}
         with:
           github-token: ${{ secrets.MERGEBOT_TOKEN }}
           script: |
