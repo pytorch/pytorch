@@ -508,21 +508,6 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
 
 // Sparse layout conversions Start
 
-std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
-    Tensor not_zero_mask) {
-  auto col_indices = (not_zero_mask *
-                      at::native::arange(not_zero_mask.size(-1))
-                          .view({1, not_zero_mask.size(-1)})
-                          .expand_as(not_zero_mask))
-                         .masked_select(not_zero_mask);
-  auto row_indices = (not_zero_mask *
-                      at::native::arange(not_zero_mask.size(-2))
-                          .view({not_zero_mask.size(-2), 1})
-                          .expand_as(not_zero_mask))
-                         .masked_select(not_zero_mask);
-  return std::pair<Tensor, Tensor>(col_indices, row_indices);
-}
-
 Tensor dense_to_sparse_csr(const Tensor& self) {
   return self.to_sparse().to_sparse_csr();
 }
@@ -557,6 +542,22 @@ Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
       values.reshape({block_size_0, block_size_1, blocksize[0], blocksize[1]});
   return values;
 }
+
+std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
+    Tensor not_zero_mask) {
+  auto col_indices = (not_zero_mask *
+                      at::native::arange(not_zero_mask.size(-1))
+                          .view({1, not_zero_mask.size(-1)})
+                          .expand_as(not_zero_mask))
+                         .masked_select(not_zero_mask);
+  auto row_indices = (not_zero_mask *
+                      at::native::arange(not_zero_mask.size(-2))
+                          .view({not_zero_mask.size(-2), 1})
+                          .expand_as(not_zero_mask))
+                         .masked_select(not_zero_mask);
+  return std::pair<Tensor, Tensor>(col_indices, row_indices);
+}
+
 
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   TORCH_CHECK(self.dim() == 2, "Can only covert 2D Tensor to BSR.");
