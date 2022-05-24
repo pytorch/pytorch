@@ -710,6 +710,7 @@ def _disabled_torch_function_impl(func: Callable, types: Iterable[Type], args: T
 def _disabled_torch_dispatch_impl(func: Callable, types: Iterable[Type], args: Tuple, kwargs: Dict) -> Any: ...  # THPModule_disable_dispatch_function
 def _get_linalg_preferred_backend() -> torch._C._LinalgBackend: ...
 def _set_linalg_preferred_backend(arg: torch._C._LinalgBackend): ...
+def _is_mps_available() -> _bool: ...
 class _LinalgBackend:
     Default: _LinalgBackend
     Cusolver: _LinalgBackend
@@ -723,7 +724,6 @@ def _valgrind_toggle_and_dump_stats() -> None: ...  # CALLGRIND_TOGGLE_COLLECT a
 has_openmp: _bool
 has_mkl: _bool
 has_mps: _bool
-_is_mps_available: _bool
 has_lapack: _bool
 has_cuda: _bool
 has_mkldnn: _bool
