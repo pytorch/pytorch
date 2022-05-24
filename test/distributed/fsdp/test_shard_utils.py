@@ -11,7 +11,7 @@ from torch.distributed._shard.sharding_spec import (
     EnumerableShardingSpec,
 )
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.distributed.fsdp.shard_utils import (
+from torch.distributed.fsdp._shard_utils import (
     _offsets_to_split_sizes,
     _reshard_flatten_tensor,
 )

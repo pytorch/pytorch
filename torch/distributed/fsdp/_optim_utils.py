@@ -23,7 +23,7 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor
 )
 from torch.distributed.fsdp.flatten_params_wrapper import FlatParameter
-from torch.distributed.fsdp.shard_utils import (
+from torch.distributed.fsdp._shard_utils import (
     _distributed_chunk_tensor,
     _gather_state_dict,
 )

@@ -20,7 +20,7 @@ from torch.distributed.fsdp import (
     MixedPrecision,
 )
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel
-from torch.distributed.fsdp.shard_utils import _gather_state_dict
+from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.wrap import enable_wrap, wrap, transformer_auto_wrap_policy
 from torch.nn import Linear, Module
 from torch.nn.parallel import DistributedDataParallel

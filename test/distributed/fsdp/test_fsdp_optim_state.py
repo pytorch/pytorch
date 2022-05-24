@@ -12,7 +12,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     OptimStateKeyType,
     StateDictType
 )
-from torch.distributed.fsdp.shard_utils import _gather_state_dict
+from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (

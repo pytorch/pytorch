@@ -60,7 +60,7 @@ from .flatten_params_wrapper import (
     FlatParameter,
     FlattenParamsWrapper,
 )
-from .shard_utils import _distributed_chunk_tensor
+from ._shard_utils import _distributed_chunk_tensor
 from .wrap import _recursive_wrap, _wrap_batchnorm_individually, _or_policy
 
 if TYPE_CHECKING:
