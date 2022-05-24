@@ -1390,6 +1390,8 @@ const auto beta_string = jiterator_stringify(
                 +1.00000000000000000320e+0,
         };
 
+        static const T PI = 3.1415926535897932384626433832795028841971693993751058209749445923;
+
         int sign_gamma = 1;
 
         if (!std::isfinite(x)) return x;
@@ -1415,13 +1417,13 @@ const auto beta_string = jiterator_stringify(
                     z = q - p;
                 }
 
-                z = q * std::sin(c10::pi<T> * z);
+                z = q * std::sin(PI * z);
 
                 if (z == T(0.0)) return sign_gamma * INFINITY;
 
                 z = std::abs(z);
 
-                z = c10::pi<T> / (z * stirling_gamma_approximation(q));
+                z = PI / (z * stirling_gamma_approximation(q));
             } else {
                 z = stirling_gamma_approximation(x);
             }
@@ -1602,6 +1604,8 @@ const auto beta_string = jiterator_stringify(
                 -2.01889141433532773231e+6,
         };
 
+        static const T PI = 3.1415926535897932384626433832795028841971693993751058209749445923;
+
         T p, q, u, w, z;
         int i;
 
@@ -1626,7 +1630,7 @@ const auto beta_string = jiterator_stringify(
 
             if (z > T(0.5)) z = p + T(1.0) - q;
 
-            z = q * std::sin(c10::pi<T> * z);
+            z = q * std::sin(PI * z);
 
             if (z == T(0.0)) return INFINITY;
 
