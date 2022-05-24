@@ -1284,7 +1284,7 @@ class TestMPS(TestCase):
         self.assertEqual(cpu_x.int(), mps_x.int().cpu())
         self.assertEqual(cpu_x.bool(), mps_x.bool().cpu())
         self.assertEqual(cpu_x.float(), mps_x.float().cpu())
-        
+
         self.assertEqual(torch.tensor(1.3, device='mps').int().cpu(),
                          torch.tensor(1, dtype=torch.int32))
         self.assertEqual(torch.tensor(0.0, device='mps').bool().cpu(), torch.tensor(False))
