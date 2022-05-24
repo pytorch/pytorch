@@ -295,8 +295,45 @@ Tensor prod_mps(const Tensor &self, c10::optional<ScalarType> opt_dtype) {
 
 
 Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims){
+  IntArrayRef input_shape = self.sizes();
+
+  int64_t num_input_dims = input_shape.size();
+  int64_t num_reduce_dims = dims.size();
+  int64_t num_output_dims;
+
+  num_output_dims = num_reduce_dims == 0 ? 1 : num_input_dims;
+
+  NSMutableArray<NSNumber*> *apparent_output_shape = nil;
+  NSMutableArray<NSNumber*> *apparent_input_shape = nil;
+
+  // Reduction axes
+  NSMutableArray<NSNumber *> *axes;
+  set_axes(axes, num_reduce_dims, dims, input_shape.size());
+
+  set_apparent_shapes(apparent_output_shape,
+                      apparent_input_shape,
+                      num_reduce_dims,
+                      num_input_dims,
+                      num_output_dims,
+                      input_shape,
+                      axes);
+
+  // Squeeze
+  int64_t num_squeezed_dims = 0;
+  for(int i=0; i < num_output_dims; i++) {
+    if([apparent_output_shape[i] longValue] != 1) num_squeezed_dims++;
+  }
+
+  int64_t* output_shape = (int64_t *)malloc((num_squeezed_dims) * sizeof(int64_t));
+
+  for (int i=0,j=0; i < num_output_dims; i++) {
+    if([apparent_output_shape[i] longValue] != 1) {
+      output_shape[j++] = [apparent_output_shape[i] longValue];
+    }
+  }
+
   Tensor output_t = at::native::empty_mps(
-                      {},
+                      IntArrayRef(output_shape, num_squeezed_dims),
                       self.scalar_type(),
                       c10::nullopt,
                       kMPS,
@@ -304,6 +341,8 @@ Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims){
                       c10::nullopt);
 
   reduction_out_mps(self, dims, false, self.scalar_type(), const_cast<Tensor&>(output_t), "count_nonzero", "count_nonzero_mps");
+
+  free(output_shape);
 
   return output_t;
 }
