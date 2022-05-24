@@ -4,12 +4,14 @@
 #include <vector>
 
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/util.h>
 
 namespace torch {
 namespace autograd {
 namespace profiler {
+using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
 
 struct TORCH_API KinetoEvent {
   uint64_t startThreadId() const {
@@ -275,7 +277,8 @@ struct TORCH_API ProfilerResult {
   ProfilerResult(
       uint64_t start_time,
       std::vector<KinetoEvent> events,
-      torch::profiler::impl::kineto::ActivityTraceWrapper trace);
+      torch::profiler::impl::kineto::ActivityTraceWrapper trace,
+      std::vector<experimental_event_t>&& event_tree);
   ~ProfilerResult();
 
   uint64_t trace_start_us() const {
@@ -286,12 +289,17 @@ struct TORCH_API ProfilerResult {
     return events_;
   }
 
+  const std::vector<experimental_event_t>& event_tree() const {
+    return event_tree_;
+  }
+
   void save(const std::string& path);
 
  private:
   uint64_t trace_start_us_ = 0;
   std::vector<KinetoEvent> events_;
   torch::profiler::impl::kineto::ActivityTraceWrapper trace_;
+  std::vector<experimental_event_t> event_tree_;
 };
 
 /*
