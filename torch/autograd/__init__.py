@@ -9,7 +9,7 @@ half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdo
 import torch
 import warnings
 
-from torch.types import _TensorOrTensors
+from torch.types import _TensorOrTensors, _size
 from typing import Any, Callable, List, Optional, Sequence, Tuple, Union, cast
 
 from .variable import Variable
@@ -26,14 +26,29 @@ from .. import _vmap_internals
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
 _OptionalTensor = Optional[torch.Tensor]
+_NtSize = Union[Tuple[torch.Tensor], List[torch.Tensor]]
+_ShapeorNestedShape = Union[_NtSize, _size]
+
+def _calculate_shape(output: torch.Tensor, grad: torch.Tensor,
+                     is_grads_batched: bool) -> Tuple[_ShapeorNestedShape, _ShapeorNestedShape]:
+    if output.is_nested:
+        if is_grads_batched:
+            raise RuntimeError("Batched grads are not supported with Nested Tensor.")
+        grad_shape = grad.nested_size()
+        out_shape = output.nested_size()
+        return out_shape, grad_shape
+
+    reg_out_shape = output.shape
+    reg_grad_shape = grad.shape if not is_grads_batched else grad.shape[1:]
+    return reg_out_shape, reg_grad_shape
 
 def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor],
                 is_grads_batched: bool) -> Tuple[_OptionalTensor, ...]:
     new_grads: List[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
         if isinstance(grad, torch.Tensor):
-            grad_shape = grad.shape if not is_grads_batched else grad.shape[1:]
-            if not out.shape == grad_shape:
+            if not torch.has_same_shape(out, grad):
+                out_shape, grad_shape = _calculate_shape(out, grad, is_grads_batched)
                 if is_grads_batched:
                     raise RuntimeError("If `is_grads_batched=True`, we interpret the first "
                                        "dimension of each grad_output as the batch dimension. "
@@ -41,17 +56,17 @@ def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor
                                        "the shape of corresponding output, but a mismatch "
                                        "was detected: grad_output["
                                        + str(grads.index(grad)) + "] has a shape of "
-                                       + str(grad.shape) + " and output["
+                                       + str(grad_shape) + " and output["
                                        + str(outputs.index(out)) + "] has a shape of "
-                                       + str(out.shape) + ". "
+                                       + str(out_shape) + ". "
                                        "If you only want some tensors in `grad_output` to be considered "
                                        "batched, consider using vmap.")
                 else:
                     raise RuntimeError("Mismatch in shape: grad_output["
                                        + str(grads.index(grad)) + "] has a shape of "
-                                       + str(grad.shape) + " and output["
+                                       + str(grad_shape) + " and output["
                                        + str(outputs.index(out)) + "] has a shape of "
-                                       + str(out.shape) + ".")
+                                       + str(out_shape) + ".")
             if out.dtype.is_complex != grad.dtype.is_complex:
                 raise RuntimeError("For complex Tensors, both grad_output and output"
                                    " are required to have the same dtype."
@@ -80,7 +95,6 @@ def _tensor_or_tensors_to_tuple(tensors: Optional[_TensorOrTensors], length: int
     if isinstance(tensors, torch.Tensor):
         return (tensors, )
     return tuple(tensors)
-
 
 def backward(
     tensors: _TensorOrTensors,
@@ -166,7 +180,6 @@ def backward(
     grad_tensors_ = _make_grads(tensors, grad_tensors_, is_grads_batched=False)
     if retain_graph is None:
         retain_graph = create_graph
-
     # The reason we repeat same the comment below is that
     # some Python versions print out the first line of a multi-line function
     # calls in the traceback and some print out the last line

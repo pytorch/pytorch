@@ -4,6 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/native/nested/NestedTensorMath.h>
+#include <tuple>
 
 namespace at {
 namespace native {
