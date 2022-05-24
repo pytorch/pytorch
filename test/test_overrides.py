@@ -1206,9 +1206,6 @@ class TestTorchFunctionMode(TestCase):
             with torch.overrides.push_torch_function_mode(lambda *, inner: None):
                 pass
 
-    def test_missing_inner_mode_ctor(self):
-        self.assertRaisesRegex(TypeError, 'push_torch_function_mode', lambda: TorchFunctionMode())
-
     def test_enable_torch_function_mode_trivial(self):
         class A(TorchFunctionMode):
             def __torch_function__(self, *args, **kwargs):
@@ -1243,6 +1240,58 @@ class TestTorchFunctionMode(TestCase):
         with torch.overrides.enable_torch_function_mode(a1):
             with torch.overrides.enable_torch_function_mode(a2, ignore_preexisting=True):
                 self.assertEqual(bar(None), -41)
+
+    def test_with_mode(self):
+        class ErrorA(RuntimeError):
+            pass
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                raise ErrorA()
+
+        with self.assertRaises(ErrorA):
+            with A():
+                torch.empty([])
+
+    def test_with_mode_created_separately(self):
+        class ErrorA(RuntimeError):
+            pass
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                raise ErrorA()
+
+        x = A()
+        with self.assertRaises(ErrorA):
+            with x:
+                torch.empty([])
+
+    def test_with_nested_modes(self):
+        class ErrorA(RuntimeError):
+            def __init__(self, msg):
+                return super().__init__(msg)
+
+        class A(TorchFunctionMode):
+            def __init__(self, msg):
+                self.msg = msg
+
+            def __torch_function__(self, *args, **kwargs):
+                raise ErrorA(self.msg)
+
+        with self.assertRaisesRegex(ErrorA, "layer2"):
+            with A("layer1"):
+                with A("layer2"):
+                    torch.empty([])
+
+    def test_error_using_same_mode(self):
+        class A(TorchFunctionMode):
+            pass
+
+        x = A()
+        with x:
+            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode"):
+                with x:
+                    pass
 
     def test_reentrant_mode_idiom(self):
         log = []

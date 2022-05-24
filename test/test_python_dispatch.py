@@ -934,8 +934,57 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
             with push_torch_dispatch_mode(lambda *, inner: None):
                 pass
 
-    def test_missing_inner_mode_ctor(self):
-        self.assertRaisesRegex(TypeError, 'push_torch_dispatch_mode', lambda: TorchDispatchMode())
+    def test_with_mode(self):
+        class ErrorA(RuntimeError):
+            pass
+
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise ErrorA()
+
+        with self.assertRaises(ErrorA):
+            with A():
+                torch.empty([])
+
+    def test_with_mode_created_separately(self):
+        class ErrorA(RuntimeError):
+            pass
+
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise ErrorA()
+
+        x = A()
+        with self.assertRaises(ErrorA):
+            with x:
+                torch.empty([])
+
+    def test_with_nested_modes(self):
+        class ErrorA(RuntimeError):
+            def __init__(self, msg):
+                return super().__init__(msg)
+
+        class A(TorchDispatchMode):
+            def __init__(self, msg):
+                self.msg = msg
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise ErrorA(self.msg)
+
+        with self.assertRaisesRegex(ErrorA, "layer2"):
+            with A("layer1"):
+                with A("layer2"):
+                    torch.empty([])
+
+    def test_error_using_same_mode(self):
+        class A(TorchDispatchMode):
+            pass
+
+        x = A()
+        with x:
+            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode"):
+                with x:
+                    pass
 
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
