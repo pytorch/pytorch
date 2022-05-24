@@ -1594,9 +1594,11 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()) -> Tenso
     if len_shifts != 1 or len_dims != 1:
         if len_shifts == 0:
             raise ValueError("`shifts` required")
+        # Takes care of the case when dims is not specified (default)
+        # By default, the tensor is flattened before shifting, after which the original shape is restored
         if len_dims == 0 and len_shifts == 1:
+            # clone is used here to avoid test failures that ATen returns a tensor that is not a view
             return clone(view(roll(flatten(a), shifts, 0), a.shape))
-
         if len_shifts != len_dims:
             raise ValueError(f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}")
         assert len_dims > 1
