@@ -1,9 +1,30 @@
 load("//third_party:glog.buck.bzl", "define_glog")
-load("//third_party:xnnpack.buck.bzl", "define_xnnpack")
+load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
+load("//tools/build_defs:platform_defs.bzl", "ANDROID", "APPLE", "APPLETVOS", "CXX", "IOS", "MACOSX", "WINDOWS")
+load("//tools/build_defs:buck_cxx_library.bzl", "buck_cxx_library")
+load(":xnnpack_defs.bzl", "define_xnnpack_targets")
+
+
+def select_default(conditions):
+    return conditions["DEFAULT"]
+
+define_xnnpack_targets(
+    ANDROID = ANDROID,
+    APPLE = APPLE,
+    APPLETVOS = APPLETVOS,
+    CXX = CXX,
+    FEATURE = None,
+    IOS = IOS,
+    MACOSX = MACOSX,
+    SUPER_MODULE = None,
+    WINDOWS = WINDOWS,
+    fb_xplat_cxx_library = buck_cxx_library,
+    select = select_default,
+    subdir_glob = subdir_glob,
+    _XNNPACK_WINDOWS_AVX512F_ENABLED = False,
+)
 
 define_glog()
-
-define_xnnpack()
 
 cxx_library(
     name = "fmt",

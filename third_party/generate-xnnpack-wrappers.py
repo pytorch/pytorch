@@ -111,7 +111,7 @@ def gen_wrappers(xnnpack_path):
         for name in WRAPPER_SRC_NAMES:
             print(name + ' = [', file=wrapper_defs)
             for file_name in sources[name]:
-                print('\t"xnnpack_wrappers/{}",'.format(file_name), file=wrapper_defs)
+                print('    "xnnpack_wrappers/{}",'.format(file_name), file=wrapper_defs)
             print(']\n', file=wrapper_defs)
 
     # update xnnpack_src_defs.bzl file under the same folder
@@ -122,7 +122,7 @@ def gen_wrappers(xnnpack_path):
         for name in SRC_NAMES:
             print(name + ' = [', file=src_defs)
             for file_name in sources[name]:
-                print('\t"XNNPACK/src/{}",'.format(file_name), file=src_defs)
+                print('    "XNNPACK/src/{}",'.format(file_name), file=src_defs)
             print(']\n', file=src_defs)
 
 
