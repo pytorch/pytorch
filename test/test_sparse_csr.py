@@ -2166,13 +2166,11 @@ class TestSparseCSR(TestCase):
             # TODO: Remove this once support has been enabled
             return
 
+        shapes = [(6, 10), (0, 10), (6, 0), (0, 0)]
+
         blocksizes = [(2, 2)]
-        shapes = [(6, 10)]
-        zero_shapes = [(0, 10), (6, 0), (0, 0)]
         if layout is torch.sparse_bsr:
             blocksizes += [(3, 5), (6, 10)]
-        else:
-            shapes += zero_shapes
 
         for shape, blocksize in itertools.product(shapes, blocksizes):
             dense = make_tensor(shape, dtype=torch.float, device=device)
@@ -2189,12 +2187,6 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 
             self.assertEqual(dense, pt_matrix.to_dense())
-
-        if layout is torch.sparse_bsr:
-            for shape, blocksize in itertools.product(zero_shapes, blocksizes):
-                dense = make_tensor(shape, dtype=torch.float, device=device)
-                with self.assertRaises(RuntimeError):
-                    self._convert_to_layout(dense, layout, blocksize=blocksize)
 
     @skipMeta
     @all_sparse_compressed_layouts()

@@ -563,10 +563,6 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
       "blocksize needs to be non zero, but got ",
       blocksize);
   TORCH_CHECK(
-      blocksize[0] <= self.size(0) && blocksize[1] <= self.size(1),
-      "blocksize needs to be smaller or equal to shape, but got ",
-      blocksize, " that is larger than ", self.sizes());
-  TORCH_CHECK(
       self.size(0) % blocksize[0] == 0,
       "Tensor size(0) ",
       self.size(0),
