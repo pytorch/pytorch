@@ -128,20 +128,25 @@ thread_local SubQueueThreadCache sub_queue_cache_{0, nullptr};
 } // namespace
 
 #define OUT_T(method_name) decltype(std::declval<Result>().method_name())
-#define DEFINE_VISITOR(method_name, torch_op_field, backend_field)   \
-  OUT_T(method_name) Result::method_name() const {                   \
-    using out_t = OUT_T(method_name);                                \
-    return c10::visit(                                               \
-        c10::overloaded(                                             \
-            [&](const ExtraFields<EventType::TorchOp>& e) -> out_t { \
-              (void)e;                                               \
-              return torch_op_field;                                 \
-            },                                                       \
-            [&](const ExtraFields<EventType::Backend>& e) -> out_t { \
-              (void)e;                                               \
-              return backend_field;                                  \
-            }),                                                      \
-        extra_fields_);                                              \
+#define DEFINE_VISITOR(                                                 \
+    method_name, torch_op_field, backend_field, allocation_field)       \
+  OUT_T(method_name) Result::method_name() const {                      \
+    using out_t = OUT_T(method_name);                                   \
+    return c10::visit(                                                  \
+        c10::overloaded(                                                \
+            [&](const ExtraFields<EventType::TorchOp>& e) -> out_t {    \
+              (void)e;                                                  \
+              return torch_op_field;                                    \
+            },                                                          \
+            [&](const ExtraFields<EventType::Backend>& e) -> out_t {    \
+              (void)e;                                                  \
+              return backend_field;                                     \
+            },                                                          \
+            [&](const ExtraFields<EventType::Allocation>& e) -> out_t { \
+              (void)e;                                                  \
+              return allocation_field;                                  \
+            }),                                                         \
+        extra_fields_);                                                 \
   }
 
 using torch::profiler::impl::kineto::KinetoActivityType;
@@ -153,11 +158,20 @@ KinetoActivityType scopeToType(at::RecordScope scope) {
 }
 } // namespace
 
-DEFINE_VISITOR(name, e.name_, e.name_);
-DEFINE_VISITOR(kinetoType, scopeToType(e.scope_), scopeToType(e.scope_));
-DEFINE_VISITOR(correlationID, e.correlation_id_, 0);
-DEFINE_VISITOR(endTimeUS, e.end_time_us_, e.end_time_us_);
-DEFINE_VISITOR(endTID, e.end_tid_, start_tid_);
+DEFINE_VISITOR(name, e.name_, e.name_, "[memory]");
+DEFINE_VISITOR(
+    kinetoType,
+    scopeToType(e.scope_),
+    scopeToType(e.scope_),
+    KinetoActivityType::CPU_INSTANT_EVENT);
+DEFINE_VISITOR(correlationID, e.correlation_id_, 0, 0);
+DEFINE_VISITOR(endTimeUS, e.end_time_us_, e.end_time_us_, start_time_us_);
+DEFINE_VISITOR(endTID, e.end_tid_, start_tid_, start_tid_);
+DEFINE_VISITOR(
+    deviceType,
+    c10::DeviceType::CPU,
+    c10::DeviceType::CPU,
+    e.device_type_);
 #undef DEFINE_VISITOR
 #undef OUT_T
 
@@ -301,6 +315,16 @@ std::deque<Result> RecordQueue::getRecords(
     queue.jit_modules_.clear();
     queue.extra_args_.clear();
     queue.gpu_fallback_.clear();
+
+    for (auto& i : queue.allocations_) {
+      auto start_time = converter(i.start_time_);
+      out.emplace_back(
+          start_time,
+          /*start_tid_=*/queue.tid(),
+          /*kineto_info_=*/queue.kineto_info(),
+          /*extra_fields_=*/std::move(i));
+    }
+    queue.allocations_.clear();
   }
 
   std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
