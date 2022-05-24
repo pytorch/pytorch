@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <iostream>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Optional.h>
 #include <ATen/quantized/Quantizer.h>
@@ -368,7 +369,7 @@ Tensor sparse_compressed_to_dense(
         self.crow_indices(), self.col_indices(), false, false);
     auto values = self.values();
     int64_t blocksize[2] = {values.size(-2), values.size(-1)};
-    IntArrayRef expanded_size(
+    DimVector expanded_size(
         {self.size(0) / blocksize[0],
          self.size(1) / blocksize[1],
          blocksize[0],
