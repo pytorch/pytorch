@@ -10495,7 +10495,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-            # Default batching rule in core doesn't work for ops with TensorList args
+           # Default batching rule in core doesn't work for ops with TensorList args
            check_batched_forward_grad=False,
            skips=(
                # https://github.com/pytorch/pytorch/issues/64997
@@ -12878,7 +12878,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Works for int64, fails for everything else'), 'TestCommon', 'test_noncontiguous_samples'),  # noqa: B950
                DecorateInfo(unittest.skip('Fails in most cases, passes on LAZY for some reason'), 'TestCommon', 'test_variant_consistency_eager'),  # noqa: B950
                DecorateInfo(unittest.skip('Only fails for LAZY, passes on everything else'), 'TestCompositeCompliance', 'test_backward'),  # noqa: B950
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip('Passes on complex64 and float32 only'), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestCommonCUDA', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
