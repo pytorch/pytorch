@@ -16272,6 +16272,11 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Expected: randn_like is not comparable between dtypes"),
+                            'TestCommon', 'test_complex_half_reference_testing'),
+               # RuntimeError: "nonzero_count_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure,
+                            'TestSparseCSR', 'test_sparse_csr_consistency', dtypes=(torch.chalf,)),
            )),
     OpInfo('rand_like',
            dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex32, torch.complex64, torch.complex128),
@@ -16286,6 +16291,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+               DecorateInfo(unittest.skip("Expected: randn_like is not comparable between dtypes"),
+                            'TestCommon', 'test_complex_half_reference_testing'),
            )),
     OpInfo('randint_like',
            dtypes=all_types_and(torch.half, torch.bfloat16),
@@ -16358,6 +16365,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+               DecorateInfo(unittest.skip("Expected: new_empty is not comparable"),
+                            'TestCommon', 'test_complex_half_reference_testing'),
            ),
            supports_autograd=False),
     OpInfo('empty',
@@ -16392,6 +16401,8 @@ op_db: List[OpInfo] = [
                             'test_out_warning'),
                DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                             'TestLazyOpInfo'),
+               DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                            'TestCommon', 'test_complex_half_reference_testing'),
            )),
     OpInfo('new_full',
            op=lambda x, *args, **kwargs: x.new_full(*args, **kwargs),
