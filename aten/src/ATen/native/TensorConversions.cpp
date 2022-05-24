@@ -534,8 +534,10 @@ Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
   //
   //  via a 4D Tensor of shape (2, 2, 2, 2)
   //
-  auto block_size_0 = self.size(0) == 0 ? 0 : self.size(0) / blocksize[0];
-  auto block_size_1 = self.size(1) == 0 ? 0 : self.size(1) / blocksize[1];
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[0] > 0);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[1] > 0);
+  auto block_size_0 = self.size(0) / blocksize[0];
+  auto block_size_1 = self.size(1) / blocksize[1];
   return self.reshape({block_size_0, blocksize[0], block_size_1, blocksize[1]})
       .transpose(1, 2)
       .contiguous();
