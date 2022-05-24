@@ -218,6 +218,8 @@ static bool copy_requires_temporaries(const Tensor& dst, const Tensor& src) {
   }
 }
 
+// Copy sourceBuffer into destBuffer, casting sourceBuffer to src.scalar_type().
+// The shapes and dtypes are taken from dst and src, but their storage pointers are not used.
 void copy_cast_mps(at::Tensor& dst, const at::Tensor& src,
                    id<MTLBuffer> destBuffer, id<MTLBuffer> sourceBuffer) {
   using namespace mps;
@@ -312,9 +314,9 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_,
   if (sourceBuffer == nil) return dst_;
   NSUInteger destOffset = dst.storage_offset() * dst.itemsize();
 
-  // In case of dtype change, first convert src "inplace"
-  if (src.dtype() != dst.dtype()) {
-    copy_cast_mps(dst, src, sourceBuffer, sourceBuffer);
+  // In case of dtype change, first convert src inplace
+  if (src_.dtype() != dst_.dtype()) {
+    copy_cast_mps(dst_, src_, sourceBuffer, sourceBuffer);
   }
 
   @autoreleasepool {
@@ -490,7 +492,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_,
       }
     });
   } else {
-    copy_cast_mps(dst, src, destBuffer, sourceBuffer);
+    copy_cast_mps(dst_, src_, destBuffer, sourceBuffer);
   }
   return dst;
 }
