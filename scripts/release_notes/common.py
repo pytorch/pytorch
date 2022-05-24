@@ -78,7 +78,9 @@ def dict_to_features(dct):
         body=dct['body'],
         pr_number=dct['pr_number'],
         files_changed=dct['files_changed'],
-        labels=dct['labels'])
+        labels=dct['labels'],
+        author=dct['author'],
+        accepters=tuple(dct['accepters']))
 
 
 def features_to_dict(features):

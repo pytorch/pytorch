@@ -71,7 +71,7 @@ class CommitList:
         with open(path, 'w') as csvfile:
             writer = csv.writer(csvfile)
             for commit in rows:
-                writer.writerow(commit.as_tuple())
+                writer.writerow(dataclasses.astuple(commit))
 
     def keywordInFile(file, keywords):
         for key in keywords:
