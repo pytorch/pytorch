@@ -1319,30 +1319,35 @@ class TestMPS(TestCase):
         helper((3, 4, 5), (2, 2, 2))
 
     def test_count_nonzero(self):
-        n = [
-            [[1, 0, 2], [3, 0, 2], [7, 9, -4]],
-            [[0, 2, 3], [3, 2, 1], [2, 0, 0]],
-        ]
-        cpu_x = torch.tensor(n)
-        mps_x = torch.tensor(n).to('mps')
+        def helper(dtype):
+            n = [
+                [[1, 0, 2], [3, 0, 2], [7, 9, -4]],
+                [[0, 2, 3], [3, 2, 1], [2, 0, 0]],
+            ]
+            cpu_x = torch.tensor(n, dtype=dtype)
+            mps_x = torch.tensor(n, dtype=dtype).to('mps')
 
-        # All non-zeros
-        self.assertEqual(
-            torch.count_nonzero(cpu_x),
-            torch.count_nonzero(mps_x)
-        )
+            # All non-zeros
+            self.assertEqual(
+                torch.count_nonzero(cpu_x),
+                torch.count_nonzero(mps_x)
+            )
 
-        # dim=1
-        self.assertEqual(
-            torch.count_nonzero(cpu_x, dim=1),
-            torch.count_nonzero(mps_x, dim=1)
-        )
+            # dim=1
+            self.assertEqual(
+                torch.count_nonzero(cpu_x, dim=1),
+                torch.count_nonzero(mps_x, dim=1)
+            )
 
-        # dim=(0, 1)
-        self.assertEqual(
-            torch.count_nonzero(cpu_x, dim=(0, 1)),
-            torch.count_nonzero(mps_x, dim=(0, 1))
-        )
+            # dim=(0, 1)
+            self.assertEqual(
+                torch.count_nonzero(cpu_x, dim=(0, 1)),
+                torch.count_nonzero(mps_x, dim=(0, 1))
+            )
+        helper(torch.int32)
+        helper(torch.int64)
+        helper(torch.float16)
+        helper(torch.float32)
 
     def _test_module_empty_input(self, module, inp, check_size=True):
         inp.requires_grad_(True)

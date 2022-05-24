@@ -210,7 +210,7 @@ void reduction_out_mps
                                                  name:nil];
           } else if(reduction_type == "count_nonzero") {
             MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0
-                                                        dataType:MPSDataTypeFloat32];
+                                                        dataType:castInputTensor.dataType];
 
             MPSGraphTensor* nonZeros = [mpsGraph notEqualWithPrimaryTensor:castInputTensor
                                                            secondaryTensor:zeros
@@ -223,7 +223,7 @@ void reduction_out_mps
 
           MPSGraphTensor* outputTensor = nil;
 
-          if(input_t.scalar_type() != ScalarType::Float)
+          if(output_t.scalar_type() != ScalarType::Float)
             outputTensor = [mpsGraph castTensor:castOutputTensor
                                          toType:(native_mps::getMPSDataType(output_t.scalar_type()))
                                            name:@"outputTensor"];
@@ -332,7 +332,7 @@ Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims){
 
   Tensor output_t = at::native::empty_mps(
                       IntArrayRef(raw_output_shape, [output_shape count]),
-                      self.scalar_type(),
+                      ScalarType::Long,
                       c10::nullopt,
                       kMPS,
                       c10::nullopt,
