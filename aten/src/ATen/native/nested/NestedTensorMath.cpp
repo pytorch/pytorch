@@ -316,7 +316,17 @@ Tensor nested_from_padded_generic(
            padded.size(2),
            padded.size(1) * padded.size(3)});
   }
-  const auto target_size = NestedTensor_get_max_size_from_size_tensor(sizes);
+  auto target_size = NestedTensor_get_max_size_from_size_tensor(sizes);
+  // There may be extra padding on padded beyond the max size in the nested tensor.
+  // Make the mask size match.
+  const size_t dim = padded_transformed.dim();
+  TORCH_CHECK(dim - 1 == target_size.size(), "dim: ", dim, "target_size: ", target_size.size());
+  for (size_t ii = 0; ii < dim - 1; ++ii) {
+    const auto padded_size_i = padded_transformed.sizes()[ii + 1];
+    if (target_size[ii] < padded_size_i) {
+      target_size[ii] = padded_size_i;
+    }
+  }
   IntArrayRef target_size_arr(target_size);
   std::vector<at::Tensor> masks;
   std::vector<at::Tensor> all_sizes = sizes.unbind();
