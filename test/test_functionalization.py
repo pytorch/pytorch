@@ -186,6 +186,18 @@ $2 = torch._ops.aten.add.Tensor($0, tensor([[1., 1.],
 $0 = input('input')
 $1, $2, $3, $4, $5, $6 = torch._ops.aten._fused_moving_avg_obs_fq_helper.functional($0, $0, $0, $0, $0, $0, $0, 1.0, 0, 1, 0)""")
 
+    def test_as_strided(self):
+        def f(x):
+            y = x.as_strided((2,), (2,), 1)
+            y.add_(1)
+            return x
+        self.assert_functionalization(f, torch.ones(9))
+        logs = self.get_logs(f, torch.ones(9))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.as_strided_copy.default($0, [2], [2], 1)
+$2 = torch._ops.aten.add.Tensor($1, 1)""")
+
     def test_tensor_list_composite(self):
         def f(x):
             # Test an op with TensorList input
