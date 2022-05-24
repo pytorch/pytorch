@@ -95,7 +95,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   auto act_scale = input.q_scale();
   auto weight_scale = maybe_padded_weight_.q_scale();
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
-  at::Tensor requantize_multiplier_tensor = cudnn_utils::get_requant_multiplier_tensor(requantize_multiplier, kSpatialDim + 2);
+  at::Tensor requantize_multiplier_tensor = cudnn_utils::getRequantMultiplierTensor(requantize_multiplier, kSpatialDim + 2);
 
   c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> broadcasted_bias;

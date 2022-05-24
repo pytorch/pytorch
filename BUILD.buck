@@ -10,7 +10,7 @@ load(
     "libtorch_profiler_sources",
 )
 load(
-    "//:pt_defs.buck.bzl",
+    "//:pt_defs.oss.bzl",
     "USED_PT_BACKENDS",
     "build_aten_cpu",
     "gen_aten_files",
@@ -20,6 +20,7 @@ load(
     "get_pt_preprocessor_flags",
     "pt_operator_library",
     "get_pt_ops_deps",
+    "aten_ufunc_generated_all_cpu_sources",
     "TEMPLATE_SOURCE_LIST",
 )
 
@@ -592,14 +593,28 @@ cxx_binary(
     preprocessor_flags = [
         "-DBUILD_LITE_INTERPRETER",
     ],
-    linker_flags = [
-        "-Wl,--no-as-needed",
-        "-ldl",
-        "-pthread"
+    platform_linker_flags = [
+        (
+            "^linux.*$",
+            [
+                "-Wl,--no-as-needed",
+                "-ldl",
+                "-pthread",
+            ],
+        ),
     ],
     deps = [
         ":torch_mobile_core",
         ":torch_mobile_all_ops",
         "//c10:c10",
+    ],
+)
+
+filegroup(
+    name = "templated_selective_build_srcs",
+    # NB: no glob here, there are generated targets in this list!
+    srcs = glob(TEMPLATE_SOURCE_LIST) + aten_ufunc_generated_all_cpu_sources(":gen_aten[{}]"),
+    visibility = [
+        "PUBLIC",
     ],
 )

@@ -110,7 +110,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   at::Tensor quantized_output = at::_empty_affine_quantized(qa.sizes(), at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
                                                             output_scale, output_zero_point, memory_format);
   double requantize_multiplier = qa.q_scale() / output_scale;
-  at::Tensor requantize_multiplier_tensor = cudnn_utils::get_requant_multiplier_tensor(requantize_multiplier, quantized_output.dim());
+  at::Tensor requantize_multiplier_tensor = cudnn_utils::getRequantMultiplierTensor(requantize_multiplier, quantized_output.dim());
   at::Tensor rhs_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), memory_format);
   rhs_multiplier_tensor.fill_(qb.q_scale() / qa.q_scale());
 
