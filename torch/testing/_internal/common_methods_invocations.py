@@ -19269,27 +19269,25 @@ python_ref_db = [
     # Reduction Reference OpInfos
     #
     ReductionPythonRefInfo(
-        "_refs.sum",
-        torch_opinfo_name="sum",
-        supports_out=True,
-    ),
-    ReductionPythonRefInfo(
-        "_refs.mean",
-        torch_opinfo_name="mean",
-        supports_out=True,
-    ),
-    ReductionPythonRefInfo(
-        "_refs.amin",
-        torch_opinfo_name="amin",
+        "_refs.all",
+        torch_opinfo_name="all",
     ),
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
     ),
     ReductionPythonRefInfo(
-        "_refs.var",
-        torch_opinfo_name="var",
-        supports_out=True
+        "_refs.amin",
+        torch_opinfo_name="amin",
+    ),
+    ReductionPythonRefInfo(
+        "_refs.any",
+        torch_opinfo_name="any",
+    ),
+    ReductionPythonRefInfo(
+        "_refs.mean",
+        torch_opinfo_name="mean",
+        supports_out=True,
     ),
     ReductionPythonRefInfo(
         "_refs.std",
@@ -19301,6 +19299,16 @@ python_ref_db = [
         "_refs.std_mean",
         torch_opinfo_name="std_mean",
         validate_view_consistency=False
+    ),
+    ReductionPythonRefInfo(
+        "_refs.sum",
+        torch_opinfo_name="sum",
+        supports_out=True,
+    ),
+    ReductionPythonRefInfo(
+        "_refs.var",
+        torch_opinfo_name="var",
+        supports_out=True
     ),
     PythonRefInfo(
         "_refs.var_mean",
