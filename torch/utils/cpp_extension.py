@@ -583,9 +583,10 @@ class BuildExtension(build_ext, object):
                 cuda_cflags = [shlex.quote(f) for f in cuda_cflags]
                 cuda_post_cflags = [shlex.quote(f) for f in cuda_post_cflags]
 
-            cuda_dlink_post_cflags = extra_postargs.get('nvcc_dlink', None)
-            if cuda_dlink_post_cflags:
-                cuda_dlink_post_cflags = unix_cuda_flags(cuda_dlink_post_cflags)
+            if isinstance(extra_postargs, dict) and 'nvcc_dlink' in extra_postargs:
+                cuda_dlink_post_cflags = unix_cuda_flags(extra_postargs.get['nvcc_dlink'])
+            else:
+                cuda_dlink_post_cflags = None
             _write_ninja_file_and_compile_objects(
                 sources=sources,
                 objects=objects,
@@ -738,9 +739,10 @@ class BuildExtension(build_ext, object):
             if with_cuda:
                 cuda_cflags = _nt_quote_args(cuda_cflags)
                 cuda_post_cflags = _nt_quote_args(cuda_post_cflags)
-            cuda_dlink_post_cflags = extra_postargs.get('nvcc_dlink', None)
-            if cuda_dlink_post_cflags:
-                cuda_dlink_post_cflags = win_cuda_flags(cuda_dlink_post_cflags)
+            if isinstance(extra_postargs, dict) and 'nvcc_dlink' in extra_postargs:
+                cuda_dlink_post_cflags = win_cuda_flags(extra_postargs['nvcc_dlink'])
+            else:
+                cuda_dlink_post_cflags = None
 
             _write_ninja_file_and_compile_objects(
                 sources=sources,
