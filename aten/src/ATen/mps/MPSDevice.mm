@@ -20,12 +20,12 @@ MPSDevice::~MPSDevice() {
   _mtl_device = nil;
 }
 
-MPSDevice::MPSDevice() {
+MPSDevice::MPSDevice(): _mtl_device(nil) {
   NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0 ; i < [devices count] ; i++) {
     id<MTLDevice>  device = devices[i];
     if(![device isLowPower]) { // exclude Intel GPUs
-      _mtl_device = device;
+      _mtl_device = [device retain];
       break;
     }
   }
@@ -35,6 +35,10 @@ MPSDevice::MPSDevice() {
 at::Allocator* getMPSSharedAllocator();
 at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
   return useSharedAllocator ? getMPSSharedAllocator() : GetAllocator(DeviceType::MPS);
+}
+
+bool is_available() {
+  return MPSDevice::getInstance()->device() != nil;
 }
 
 } // namespace mps

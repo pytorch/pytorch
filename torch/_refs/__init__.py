@@ -68,6 +68,7 @@ __all__ = [
     "isfinite",
     "isinf",
     "isnan",
+    "i0",
     "lgamma",
     "log",
     "log1p",
@@ -475,6 +476,12 @@ isnan = _make_elementwise_unary_reference(
     _isnan,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.isnan,  # prim/aten name mismatch
+)
+
+i0 = _make_elementwise_unary_reference(
+    prims.bessel_i0,
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=torch.ops.aten.special_i0,
 )
 
 lgamma = _make_elementwise_unary_reference(
@@ -1380,22 +1387,29 @@ def addr(
     self = self.expand(vec1.shape[0], vec2.shape[0])
     if utils.is_boolean_dtype(self.dtype):
         # Integers are accepted for booleans
-        check(is_weakly_lesser_type(type(beta), int), f"expected bool/int beta but got {type(beta)}")
-        check(is_weakly_lesser_type(type(alpha), int), f"expected bool/int alpha but got {type(beta)}")
+        check(
+            is_weakly_lesser_type(type(beta), int),
+            f"expected bool/int beta but got {type(beta)}",
+        )
+        check(
+            is_weakly_lesser_type(type(alpha), int),
+            f"expected bool/int alpha but got {type(beta)}",
+        )
         if not beta:
             return torch.outer(vec1, vec2) if alpha else torch.full_like(self, False)
         else:
             return torch.logical_or(
-                self, torch.outer(vec1, vec2) if alpha else torch.full_like(self, False),
+                self,
+                torch.outer(vec1, vec2) if alpha else torch.full_like(self, False),
             )
     else:
         check(
             is_weakly_lesser_type(type(beta), dtype_to_type(self.dtype)),
-            f"cannot safely convert {type(beta)} to {self.dtype}"
+            f"cannot safely convert {type(beta)} to {self.dtype}",
         )
         check(
             is_weakly_lesser_type(type(alpha), dtype_to_type(self.dtype)),
-            f"cannot safely convert {type(alpha)} to {self.dtype}"
+            f"cannot safely convert {type(alpha)} to {self.dtype}",
         )
         if beta == 0:
             # This means NaNs from self are dropped if beta is zero
