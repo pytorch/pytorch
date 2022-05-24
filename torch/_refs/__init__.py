@@ -29,6 +29,7 @@ from torch._prims.wrappers import (
 from collections.abc import Iterable
 from functools import reduce, partial
 from typing import Sequence, Optional, Union, Callable, List, Tuple
+import builtins
 import operator
 import warnings
 import math
@@ -1624,7 +1625,7 @@ def rot90(
         )
     if a.ndim < 2:
         raise ValueError(f"expected total dims >= 2, but got total dims = {a.ndim}")
-    if not (dims[0] != dims[1] and (dims[0] - dims[1]).__abs__() != a.ndim):
+    if not (dims[0] != dims[1] and builtins.abs(dims[0] - dims[1]) != a.ndim):
         raise ValueError(
             f"expected rotation dims to be different, but got dim0 = {dims[0]} and dim1 = {dims[1]}"
         )
