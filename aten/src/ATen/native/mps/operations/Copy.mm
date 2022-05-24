@@ -223,7 +223,7 @@ static bool copy_requires_temporaries(const Tensor& dst, const Tensor& src) {
 void copy_cast_mps(at::Tensor& dst, const at::Tensor& src,
                    id<MTLBuffer> destBuffer, id<MTLBuffer> sourceBuffer) {
   using namespace mps;
-  
+
   struct CachedGraph : public MPSCachedGraph
   {
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
