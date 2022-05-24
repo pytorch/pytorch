@@ -32,7 +32,8 @@ std::string generate_code(
     BinaryFuncVariant scalar_pos,
     c10::SmallVector<std::string>& extra_args_typenames,
     bool vectorized=false,
-    int vec_size=0);
+    int vec_size=0,
+    bool return_by_ref=false);
 
 std::string generate_reduction_code(
     int nOutputs,
