@@ -1582,6 +1582,7 @@ def reshape(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
 
 def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
+    dims = utils.canonicalize_dims(a.ndim, dims)
     # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
     if not isinstance(shifts, Iterable):
         shifts = (shifts,)
