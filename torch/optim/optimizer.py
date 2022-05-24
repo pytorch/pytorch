@@ -85,8 +85,9 @@ class Optimizer(object):
         capturing = torch.cuda.is_current_stream_capturing()
 
         if capturing and not self.defaults['capturable']:
-            raise RuntimeError("Attempting CUDA graph capture of step(), but this instance was constructed with " +
-                               "capturable=False.")
+            raise RuntimeError("Attempting CUDA graph capture of step() for an instance of " +
+                               self.__class__.__name__ +
+                               " but this instance was constructed with capturable=False.")
 
         if (not self._warned_capturable_if_run_uncaptured) and self.defaults['capturable'] and (not capturing):
             print("Warning: This instance was constructed with capturable=True, but step() " +

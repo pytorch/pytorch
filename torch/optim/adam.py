@@ -61,7 +61,7 @@ class Adam(Optimizer):
             is used (default: None)
         maximize (bool, optional): maximize the params based on the objective, instead of
             minimizing (default: False)
-        capturable (bool, optional): whether this instance is safe to capture in a CUDA graph..
+        capturable (bool, optional): whether this instance is safe to capture in a CUDA graph.
             Passing True can impair ungraphed performance, so if you don't intend to
             graph capture this instance, leave it False (default: False)
 
@@ -136,7 +136,8 @@ class Adam(Optimizer):
                     state = self.state[p]
                     # Lazy state initialization
                     if len(state) == 0:
-                        state['step'] = torch.tensor(0.)
+                        state['step'] = torch.zeros((1,), dtype=torch.float, device=p.device) \
+                                        if self.defaults['capturable'] else torch.tensor(0.)
                         # Exponential moving average of gradient values
                         state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                         # Exponential moving average of squared gradient values
@@ -166,8 +167,7 @@ class Adam(Optimizer):
                  weight_decay=group['weight_decay'],
                  eps=group['eps'],
                  maximize=group['maximize'],
-                 foreach=group['foreach'],
-                 capturable=group['capturable'])
+                 foreach=group['foreach'])
 
         return loss
 
@@ -188,8 +188,7 @@ def adam(params: List[Tensor],
          lr: float,
          weight_decay: float,
          eps: float,
-         maximize: bool,
-         capturable: bool):
+         maximize: bool):
     r"""Functional API that performs Adam algorithm computation.
     See :class:`~torch.optim.Adam` for details.
     """
@@ -221,8 +220,7 @@ def adam(params: List[Tensor],
          lr=lr,
          weight_decay=weight_decay,
          eps=eps,
-         maximize=maximize,
-         capturable=capturable)
+         maximize=maximize)
 
 
 def _single_tensor_adam(params: List[Tensor],
@@ -238,8 +236,7 @@ def _single_tensor_adam(params: List[Tensor],
                         lr: float,
                         weight_decay: float,
                         eps: float,
-                        maximize: bool,
-                        capturable: bool):
+                        maximize: bool):
 
     for i, param in enumerate(params):
 
@@ -249,7 +246,7 @@ def _single_tensor_adam(params: List[Tensor],
         step_t = state_steps[i]
         # update step
         step_t += 1
-        step = step_t.item()
+        step = step_t if step_t.is_cuda else step_t.item()
 
         bias_correction1 = 1 - beta1 ** step
         bias_correction2 = 1 - beta2 ** step
@@ -260,15 +257,14 @@ def _single_tensor_adam(params: List[Tensor],
         # Decay the first and second moment running average coefficient
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
+        bias_correction2_sqrt = bias_correction2.sqrt() if bias_correction2.is_cuda else math.sqrt(bias_correction2)
         if amsgrad:
             # Maintains the maximum of all 2nd moment running avg. till now
             torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
             # Use the max. for normalizing running avg. of gradient
-            denom = (max_exp_avg_sqs[i].sqrt() / math.sqrt(bias_correction2)).add_(eps)
+            denom = (max_exp_avg_sqs[i].sqrt() / bias_correction2_sqrt).add_(eps)
         else:
-            denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
-
-
+            denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
 
         step_size = lr / bias_correction1
         param.addcdiv_(exp_avg, denom, value=-step_size)
@@ -287,8 +283,7 @@ def _multi_tensor_adam(params: List[Tensor],
                        lr: float,
                        weight_decay: float,
                        eps: float,
-                       maximize: bool,
-                       capturable: bool):
+                       maximize: bool):
 
     if len(params) == 0:
         return
@@ -299,8 +294,8 @@ def _multi_tensor_adam(params: List[Tensor],
     if maximize:
         grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
 
-    bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
-    bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
+    bias_correction1 = [1 - beta1 ** (step if step.is_cuda else step.item()) for step in state_steps]
+    bias_correction2 = [1 - beta2 ** (step if step.is_cuda else step.item()) for step in state_steps]
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
 
@@ -316,12 +311,12 @@ def _multi_tensor_adam(params: List[Tensor],
 
         # Use the max. for normalizing running avg. of gradient
         max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
-        bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
+        bias_correction_sqrt = [(bc.sqrt() if bc.is_cuda else math.sqrt(bc)) for bc in bias_correction2]
         torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
         denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps)
     else:
         exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
-        bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
+        bias_correction_sqrt = [(bc.sqrt() if bc.is_cuda else math.sqrt(bc)) for bc in bias_correction2]
         torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
         denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
