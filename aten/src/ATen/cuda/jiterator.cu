@@ -15,7 +15,7 @@ namespace native {
 static inline void launch_jitted_vectorized_kernel_dynamic(
   const std::string& name, TensorIteratorBase& iter,
   DeviceIndex dev_idx, int64_t N, const std::string& f, void* data_ptr,
-  const std::vector<at::Scalar>& extra_args, bool return_by_ref) {
+  const c10::SmallVector<at::Scalar>& extra_args, bool return_by_ref) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   // N is still int64_t for the computation, but it's always safe to cast result to int
   const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
@@ -119,7 +119,7 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
   const std::string& name, TensorIteratorBase& iter,
   DeviceIndex dev_idx, int64_t N, const std::string& f, void* data_ptr,
   void* ic_ptr, void* oc_ptr, void* l_ptr, void* s_ptr, bool contiguous, bool dynamic_casting,
-  const std::vector<at::Scalar>& extra_args, bool return_by_ref) {
+  const c10::SmallVector<at::Scalar>& extra_args, bool return_by_ref) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   //casting result to int is always safe, intermediate is int64 and won't overflow
@@ -186,7 +186,7 @@ void jitted_gpu_kernel_dynamic_impl(
     TensorIteratorBase& iter,
     const std::string& f,
     const bool dynamic_casting,
-    const std::vector<at::Scalar>& extra_args,
+    const c10::SmallVector<at::Scalar>& extra_args,
     bool return_by_ref) {
 
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
@@ -278,7 +278,7 @@ void jitted_gpu_kernel_dynamic(
     const std::string& kernel_name,
     TensorIteratorBase& iter,
     const std::string& f,
-    const std::vector<at::Scalar>& extra_args,
+    const c10::SmallVector<at::Scalar>& extra_args,
     bool return_by_ref) {
 
   // TODO: much of preamble is common to both jitted_gpu_kernel and gpu_kernel
@@ -318,15 +318,15 @@ void jitted_gpu_kernel_dynamic(
 
 namespace cuda {
 
-std::vector<at::Tensor> CompileAndLaunchKernel(
+c10::SmallVector<at::Tensor> CompileAndLaunchKernel(
   const std::string& code_string,
   const std::string& kernel_name,
   const int num_outputs,
-  const std::vector<at::Tensor>& tensors,
-  const std::vector<at::Scalar>& extra_args,
+  const c10::SmallVector<at::Tensor>& tensors,
+  const c10::SmallVector<at::Scalar>& extra_args,
   bool return_by_ref) {
 
-  std::vector<Tensor> outs(num_outputs);
+  c10::SmallVector<at::Tensor> outs(num_outputs);
   TensorIteratorConfig config;
   config
     .set_check_mem_overlap(true)
@@ -346,7 +346,7 @@ std::vector<at::Tensor> CompileAndLaunchKernel(
   CUDAGuard guard(iter.device());
   at::native::jitted_gpu_kernel_dynamic(kernel_name, iter, code_string, extra_args, return_by_ref);
 
-  std::vector<Tensor> outputs;
+  c10::SmallVector<at::Tensor> outputs;
   for (int i = 0; i < num_outputs; ++i) {
     outputs.emplace_back(iter.output(i));
   }

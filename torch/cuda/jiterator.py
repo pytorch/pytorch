@@ -131,7 +131,7 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
 
     """
 
-    return _JittedFunction(code_string, return_by_ref=False, num_outputs = 1, **kwargs)
+    return _JittedFunction(code_string, return_by_ref=False, num_outputs=1, **kwargs)
 
 def _create_multi_output_jit_fn(code_string: str, num_outputs: int, **kwargs) -> Callable:
     """

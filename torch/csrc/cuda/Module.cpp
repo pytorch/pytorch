@@ -278,7 +278,7 @@ PyObject * THCPModule_cudaJiteratorCompileAndLaunchKernel(PyObject *_unused, PyO
       "be a tuple, but got %s", THPUtils_typename(tensors_o));
   Py_ssize_t num_tensors = PyTuple_GET_SIZE(tensors_o);
 
-  std::vector<at::Tensor> tensors;
+  c10::SmallVector<at::Tensor> tensors;
   for(const auto i : c10::irange(num_tensors)) {
     PyObject *_tensor = PyTuple_GET_ITEM(tensors_o, i);
     THPUtils_assert(THPVariable_Check(_tensor), "%d of input tensors tuple is not a Tensor", i);
@@ -286,7 +286,7 @@ PyObject * THCPModule_cudaJiteratorCompileAndLaunchKernel(PyObject *_unused, PyO
     tensors.emplace_back(THPVariable_Unpack(_tensor));
   }
 
-  std::vector<at::Scalar> extra_args;
+  c10::SmallVector<at::Scalar> extra_args;
   PyObject *key = nullptr;
   PyObject *value  = nullptr;
   Py_ssize_t pos = 0;
@@ -294,7 +294,7 @@ PyObject * THCPModule_cudaJiteratorCompileAndLaunchKernel(PyObject *_unused, PyO
     extra_args.emplace_back(as_scalar(value));
   }
 
-  std::vector<at::Tensor> outputs =
+  c10::SmallVector<at::Tensor> outputs =
       at::cuda::CompileAndLaunchKernel(code_string, kernel_name, num_outputs, tensors, extra_args, return_by_ref);
 
   if (num_outputs == 1) {
