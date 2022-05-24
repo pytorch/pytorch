@@ -50,6 +50,7 @@ from ._optim_utils import (
     _get_param_to_param_id,
     _process_pos_dim_tensor_state,
     _unflatten_optim_state,
+    _check_optim_state_dict_shapes,
 )
 from ._utils import (
     _apply_to_modules, _apply_to_tensors,
@@ -3622,9 +3623,11 @@ class FullyShardedDataParallel(nn.Module):
             flattened parameters instead of unflattened parameters and
             restricted to only include this rank's part of the optimizer state.
         """
-        return _flatten_full_optim_state_dict(
+        sharded_osd = _flatten_full_optim_state_dict(
             full_optim_state_dict, model, True, optim_input,
         )[0]
+        _check_optim_state_dict_shapes(sharded_osd, model, optim_input)
+        return sharded_osd
 
     @staticmethod
     def scatter_full_optim_state_dict(
@@ -3725,6 +3728,7 @@ class FullyShardedDataParallel(nn.Module):
             flat_osd if rank == 0 else None, rank, world_size, group,
             broadcast_device,
         )
+        _check_optim_state_dict_shapes(sharded_osd, model, optim_input)
         return sharded_osd
 
     @staticmethod
