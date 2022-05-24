@@ -24,7 +24,7 @@ void acos_kernel_cuda(TensorIteratorBase& iter) {
 
 const char asin_name[] = "asin";
 void asin_kernel_cuda(TensorIteratorBase& iter) {
-auto common_dtype = iter.common_dtype();
+  auto common_dtype = iter.common_dtype();
   if(at::isComplexType(common_dtype)) {
 #if AT_USE_JITERATOR
   static const auto asin_string = jiterator_stringify(
@@ -49,14 +49,11 @@ auto common_dtype = iter.common_dtype();
   });
 #endif
   } else {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::Half, ScalarType::BFloat16,
-      common_dtype, "asin_cuda",
-      [&]() {
-        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return ::asin(a);
-        });
-      });
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, common_dtype, "asin_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return ::asin(a);
+    });
+  });
   }
 }
 
