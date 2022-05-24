@@ -51,7 +51,9 @@ class TestUtils(TestCase):
         example_inputs = (torch.rand(1, 5),)
         self._test_get_fqn_to_example_inputs(M, example_inputs, expected_fqn_to_dim)
 
-    def test_get_fqn_to_example_inputs_kwargs(self):
+    def test_get_fqn_to_example_inputs_default_kwargs(self):
+        """ Test that we can get example inputs for functions with default keyword arguments
+        """
         class Sub(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -89,3 +91,38 @@ class TestUtils(TestCase):
         }
         example_inputs = (torch.rand(1, 5),)
         self._test_get_fqn_to_example_inputs(M, example_inputs, expected_fqn_to_dim)
+
+    def test_get_fqn_to_example_inputs_complex_args(self):
+        """ Test that we can record complex example inputs such as lists and dicts
+        """
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(5, 5)
+                self.linear2 = torch.nn.Linear(5, 5)
+
+            def forward(self, x, list_arg, dict_arg):
+                x = self.linear1(x)
+                x = self.linear2(x)
+                return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(5, 5)
+                self.linear2 = torch.nn.Linear(5, 5)
+                self.sub = Sub()
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.linear2(x)
+                x = self.sub(x, [x], {"3": x})
+                return x
+
+        example_inputs = (torch.rand(1, 5),)
+        m = M().eval()
+        fqn_to_example_inputs = get_fqn_to_example_inputs(m, example_inputs)
+        assert "sub" in fqn_to_example_inputs
+        assert isinstance(fqn_to_example_inputs["sub"][1], list)
+        assert isinstance(fqn_to_example_inputs["sub"][2], dict) and \
+            "3" in fqn_to_example_inputs["sub"][2]

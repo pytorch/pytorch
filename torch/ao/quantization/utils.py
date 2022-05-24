@@ -5,7 +5,7 @@ import warnings
 import functools
 import torch
 from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
-from typing import Tuple, Any, Union, Callable
+from typing import Tuple, Any, Union, Callable, Dict
 from torch.nn.utils.parametrize import is_parametrized
 from collections import OrderedDict
 from inspect import signature
@@ -374,20 +374,48 @@ def has_no_children_ignoring_parametrizations(module):
     else:
         return False
 
-def _get_path_of_module(root, submodule):
+def _get_path_of_module(root: torch.nn.Module, submodule: torch.nn.Module) -> str:
     """ Get the path (fully qualified name) of a submodule
+
+    Example::
+
+    >> class M(torch.nn.Module):
+           def __init__(self):
+               self.linear = torch.nn.Linear(5, 5)
+           def forward(self, x):
+               return self.linear(x)
+
+    >> m = M()
+    >> l = m.linear
+    >> _get_path_of_module(m, l)
+    "linear"
     """
     for n, p in root.named_modules():
         if submodule is p:
             return n
 
-def _get_signature_locals(f, loc):
+def _get_signature_locals(f: Callable, loc: Dict[str, Any]) -> Dict[str, Any]:
     """ Get local keyword arguments
+
+    Example::
+
+    >> def f(self, a, b=9):
+           pass
+    >> loc = {"a": 6, "c": 7}
+    >> _get_signature_locals(f, loc)
+    {"a": 6}
     """
     return {k: v for k, v in loc.items() if k in signature(f).parameters}
 
-def _get_default_kwargs(f):
+def _get_default_kwargs(f: Callable) -> Dict[str, Any]:
     """ Get all default keyword arguments from function signature
+
+    Example::
+
+    >> def f(self, a, b=9):
+           pass
+    >> _get_default_kwargs(f)
+    {"b": 9}
     """
     kwargs = {}
     for name, param in signature(f).parameters.items():
@@ -399,9 +427,17 @@ def _get_default_kwargs(f):
             kwargs[name] = {}
     return OrderedDict(kwargs)
 
-def _normalize_kwargs(func, loc):
+def _normalize_kwargs(func: Callable, loc: Dict[str, Any]) -> Dict[str, Any]:
     """ Given a function and local function arguments, normalize the keyword
     arguments by filling in default arguments from function signature
+
+    Example::
+
+    >> def f(self, key1=3, key2=3):
+           pass
+    >> loc = {"key2": 6}
+    >> _normalize_kwargs(f, loc)
+    {"key1": 3, "key2": 6}
     """
     default_kwargs = _get_default_kwargs(func)
     local_kwargs = _get_signature_locals(func, loc)
@@ -412,12 +448,22 @@ def _normalize_kwargs(func, loc):
             normalized_kwargs[attr] = val
     return normalized_kwargs
 
-def _get_num_pos_args(f):
+def _get_num_pos_args(f: Callable) -> int:
     """ Get number of positional args for a function
+
+    Example::
+
+    >> def f(self, key1=3, key2=3):
+           pass
+    >> _get_num_pos_args(f)
+    3
     """
     return len(getfullargspec(f).args)
 
-def get_fqn_to_example_inputs(model, example_inputs):
+def get_fqn_to_example_inputs(
+    model: torch.nn.Module,
+    example_inputs: Tuple[Any, ...]
+) -> Dict[str, Tuple[Any, ...]]:
     """ Given a model and its example inputs, return a dictionary from
     fully qualified name of submodules to example_inputs for that submodule,
     e.g. {"linear1": (tensor1,), "linear2": (tensor2,), "sub": (tensor3,),
@@ -432,7 +478,7 @@ def get_fqn_to_example_inputs(model, example_inputs):
     def forward(self, x, key1=3, key2=3):
         ...
 
-    and we call it with self.submodule(x, key=6)
+    and we call it with self.submodule(x, key2=6)
     we'll get example_inputs: (x, 3, 6)
 
     user can also override `key1` with positional arguments as well:
@@ -475,3 +521,23 @@ def get_fqn_to_example_inputs(model, example_inputs):
     model.__class__ = original_class
 
     return fqn_to_example_inputs
+
+
+__all__ = [
+    "Any",
+    "Callable",
+    "Dict",
+    "Graph",
+    "List",
+    "MatchAllNode",
+    "MatchResult",
+    "Node",
+    "Optional",
+    "Pattern",
+    "QConfigAny",
+    "QuantizeHandler",
+    "Set",
+    "Tuple",
+    "is_observed_standalone_module",
+    "get_fqn_to_example_inputs",
+]
