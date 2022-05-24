@@ -21,11 +21,13 @@ c10::VaryingShape<int64_t> getSizesOf(Node* n, size_t idx) {
 void insertPrePackedConvOpForNode(Node* n) {
   constexpr int POS_INPUT = 0;
   constexpr int POS_WEIGHT = 1;
-  if (!tensorexpr::isContiguous(n->input(POS_INPUT))) {
+  if (!tensorexpr::isContiguous(
+          n->input(POS_INPUT), at::MemoryFormat::ChannelsLast)) {
     return;
   }
 
-  if (!tensorexpr::isContiguous(n->input(POS_WEIGHT))) {
+  if (!tensorexpr::isContiguous(
+          n->input(POS_WEIGHT), at::MemoryFormat::ChannelsLast)) {
     return;
   }
 

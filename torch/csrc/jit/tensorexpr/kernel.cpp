@@ -294,8 +294,9 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
     return false;
   }
 
-  // All inputs should be contiguous so no transposition is required.
-  if (!isContiguous(node->input(0)) || !isContiguous(node->input(1))) {
+  // Input and weight should be NHWC contiguous.
+  if (!(isContiguous(node->input(0), at::MemoryFormat::ChannelsLast) &&
+        isContiguous(node->input(1), at::MemoryFormat::ChannelsLast))) {
     GRAPH_DEBUG("conv2dIsSupported: some inputs are not contiguous");
     return false;
   }
