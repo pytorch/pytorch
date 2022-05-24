@@ -1195,7 +1195,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/cpu/Linear.cpp",
     "aten/src/ATen/native/quantized/cpu/LinearDynamic.cpp",
     "aten/src/ATen/native/quantized/cpu/qconv_dynamic.cpp",
-    "aten/src/ATen/native/quantized/cpu/LinearPrepack.cpp",
+    "aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp",
     "aten/src/ATen/native/quantized/cpu/LinearUnpackImpl.cpp",
     "aten/src/ATen/native/quantized/cpu/qmatmul.cpp",
     "aten/src/ATen/native/quantized/cpu/qmul.cpp",
