@@ -143,7 +143,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorListRef tensors, int64_t dim) {
         .memory_format(memory_format);
   }
 
-  set_output(0, sizes, {}, options, maybe_outnames);
+  set_output_raw_strided(0, sizes, {}, options, maybe_outnames);
   // Checks for overlaps between the inputs and the output tensor.
   if (is_out_defined && found_valid_tensor) {
     at::assert_no_internal_overlap(result);
@@ -843,7 +843,7 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
 }
 
 Tensor expand_symint(const Tensor& self, c10::SymIntArrayRef packed_size, bool implicit) {
-  auto size = asIntArrayRefSlow(packed_size);
+  auto size = expectIntArrayRef(packed_size);
   return expand(self, size, implicit);
 }
 

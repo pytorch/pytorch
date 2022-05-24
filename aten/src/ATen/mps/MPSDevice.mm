@@ -20,7 +20,7 @@ MPSDevice::~MPSDevice() {
   _mtl_device = nil;
 }
 
-MPSDevice::MPSDevice() {
+MPSDevice::MPSDevice(): _mtl_device(nil) {
   NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0 ; i < [devices count] ; i++) {
     id<MTLDevice>  device = devices[i];
