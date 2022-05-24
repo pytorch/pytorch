@@ -63,6 +63,7 @@ jobs:
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
+          force_push: true
 
       - name: Pull docker image
         uses: ./.github/actions/pull-docker-image
