@@ -1201,16 +1201,9 @@ See :func:`torch.diagonal`
 
 add_docstr_all('diagonal_scatter',
                r"""
-diagonal_scatter(src, offset=0, dim1=0, dim2=1) -> Tensor
+diagonal(src, offset=0, dim1=0, dim2=1) -> Tensor
 
 See :func:`torch.diagonal_scatter`
-""")
-
-add_docstr_all('as_strided_scatter',
-               r"""
-as_strided_scatter(src, size, stride, storage_offset=0) -> Tensor
-
-See :func:`torch.as_strided_scatter`
 """)
 
 add_docstr_all('fill_diagonal_',
