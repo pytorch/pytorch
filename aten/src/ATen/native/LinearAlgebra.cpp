@@ -2410,18 +2410,21 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   auto dim = opt_dim.value_or(IntArrayRef{});
   // No need to handle opt_dtype explicitly as it is already encoded in the dtype of result
 
-  // Issue arising from the difference between vectorized and non-vectorized implementation on CPU
+  // https://github.com/pytorch/pytorch/issues/52648
+  // Reductions always use `std::abs` to compute the absolute value. In the backward of this
+  // function, we need to locate the index that was selected as the largest value. To do so
+  // we do self.abs() == result to locate the index of the largest element.
+  // Now, self.abs() may dispatch to a vectorized implementation which gives sliiightly different
+  // results to the std::abs(std::complex<T>) implementation.
+  // As such, to be able to compute the correct index in the backward, we need to use self.abs()
+  // both in the forward and in the backward
   Tensor self_;
-  if (self.device().type() == c10::kCPU &&
-      isComplexType(self.scalar_type()) &&
-      std::abs(ord) == INFINITY) {
-    // TODO: This at::abs() call is used so that the at::abs() call in the
-    // backward function produces an identical result for complex inputs.
-    // However, it would be ideal if we could incorporate this into
-    // linalg_vector_norm_stub. See issue:
-    // https://github.com/pytorch/pytorch/issues/52648
-    auto in_dtype = opt_dtype.value_or(self.scalar_type());
-    self_ = self.to(in_dtype).abs();
+  if (self.is_cpu() && self.is_complex() && std::abs(ord) == INFINITY) {
+    if (opt_dtype.has_value()) {
+      self_ = self.to(*opt_dtype).abs();
+    } else {
+      self_ = self.abs();
+    }
   } else {
     self_ = self;
   }
