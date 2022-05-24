@@ -19,7 +19,7 @@ from torch.distributed._shard.api import (
     _reshard_output,
 )
 from torch.distributed._shard.sharded_tensor import (
-    sharded_op_impl,
+    custom_sharded_op_impl,
     pre_load_state_dict_hook,
     state_dict_hook,
     ShardedTensor,
@@ -174,7 +174,7 @@ class TestShardParameter(ShardedTensorTestBase):
         with self.assertRaisesRegex(ValueError, 'does not match with src_rank'):
             shard_parameter(fc, 'weight', spec, src_rank=self.rank)
 
-        with self.assertRaisesRegex(AttributeError, 'Linear have no attribute'):
+        with self.assertRaisesRegex(AttributeError, 'has no attribute'):
             shard_parameter(fc, 'foo', spec)
 
         with self.assertRaisesRegex(ValueError, 'Expected Linear.bias to be a Tensor, but found str'):
@@ -403,6 +403,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         st = sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
         st_metadata = st.metadata()
         self.assertEqual(torch.Size([10, 20]), st_metadata.size)
+        self.assertEqual(torch.Size([10, 20]), st.size())
         self.assertEqual(torch.float, st.dtype)
         self.assertEqual(torch.strided, st.layout)
         self.assertEqual(False, st.requires_grad)
@@ -431,7 +432,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         # test read only properties, they're read only as we can't simply change
         # the global metadata without changing the underlying shard's properties
-        with self.assertRaisesRegex(AttributeError, "can't set attribute"):
+        with self.assertRaisesRegex(RuntimeError, "torch function '__set__'"):
             st.requires_grad = True
 
     @with_comms
@@ -951,7 +952,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         with self.assertRaisesRegex(ValueError, 'Only torch.strided layout is currently supported'):
-            sharded_tensor.empty(spec, 10, 20, layout=torch.sparse)
+            sharded_tensor.empty(spec, 10, 20, layout=torch.sparse_coo)
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         with self.assertRaisesRegex(ValueError, 'Only torch.contiguous_format memory_format is currently supported'):
@@ -1068,11 +1069,19 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
         self.assertEqual(st.size(1), 20)
 
+        # Test with negative indexed size
+        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        self.assertEqual(st.size(-1), 20)
+
+        # Test with dim/ndim
+        self.assertEqual(st.dim(), 2)
+        self.assertEqual(st.ndim, 2)
+
         # Test with invalid input
         st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
-        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[-2, 2\\)'):
+        with self.assertRaisesRegex(IndexError, 'Dimension out of range'):
             st.size(-3)
-        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[-2, 2\\)'):
+        with self.assertRaisesRegex(IndexError, 'Dimension out of range'):
             st.size(2)
 
         with self.assertRaises(TypeError):
@@ -1536,7 +1545,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         # CPU sharded tensor should return the same instance (no copy)
         st_cpu = sharded_tensor.zeros(cpu_spec, h, w, process_group=gloo_pg)
         new_st_cpu = st_cpu.cpu()
-        self.assertEqual(st_cpu, new_st_cpu)
+        self.assertTrue(st_cpu is new_st_cpu)
 
         # GPU sharded tensor to cpu
         st = sharded_tensor.zeros(spec, h, w)
@@ -1544,7 +1553,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         spec_before_move = st.sharding_spec()
         new_st = st.cpu(process_group=gloo_pg)
         # return a copy of orginal st
-        self.assertNotEqual(st, new_st)
+        self.assertFalse(st is new_st)
         # check the spec is still ChunkShardingSpec
         spec_after_move = new_st.sharding_spec()
         self.assertIsInstance(spec_after_move, ChunkShardingSpec)
@@ -1577,7 +1586,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         st = sharded_tensor.zeros(mixed_spec, h, w, process_group=gloo_pg)
         new_st = st.cpu()
         # return a copy of orginal st
-        self.assertNotEqual(st, new_st)
+        self.assertFalse(st is new_st)
         # check the spec is still ChunkShardingSpec
         spec_after_move = new_st.sharding_spec()
         self.assertIsInstance(spec_after_move, ChunkShardingSpec)
@@ -2463,7 +2472,7 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
     @requires_nccl()
     def test_custom_op(self):
 
-        @sharded_op_impl(torch.asin)
+        @custom_sharded_op_impl(torch.asin)
         def my_sharded_asin(types, args, kwargs, process_group):
             return torch.asin(args[0].local_shards()[0].tensor)
 
@@ -2491,7 +2500,7 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
         from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
 
         @custom_sharding_spec_op(ChunkShardingSpec, torch.nn.functional.linear)
-        def my_sharded_linear(types, args, kwargs):
+        def my_sharded_linear(types, args, kwargs, process_group):
             return t
 
         spec = ChunkShardingSpec(
@@ -2515,12 +2524,12 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
     def test_custom_op_errors(self):
 
         with self.assertRaisesRegex(TypeError, 'expects signature'):
-            @sharded_op_impl(torch.nn.functional.linear)
+            @custom_sharded_op_impl(torch.nn.functional.linear)
             def my_op1(types, args, kwargs, process_group, random_param):
                 pass
 
         with self.assertRaisesRegex(TypeError, 'expects signature'):
-            @sharded_op_impl(torch.nn.functional.linear)
+            @custom_sharded_op_impl(torch.nn.functional.linear)
             def my_op2(types):
                 pass
 
