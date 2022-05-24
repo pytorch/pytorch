@@ -57,8 +57,8 @@ class TestMkldnnFusion(JitTestCase):
                 return res
 
         for memory_format, enabled in [
-            [torch.contiguous_format, True],
-            [torch.channels_last, False],  # TODO: enable support on channels_last
+            [torch.contiguous_format, False],
+            [torch.channels_last, True],
         ]:
             for bias in [True, False]:
                 m = M(3, 10, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
@@ -82,14 +82,21 @@ class TestMkldnnFusion(JitTestCase):
                 x = self.eltwise(x)
                 return x
 
-        for eltwise_fn in [torch.relu]:
-            for bias in [True, False]:
-                m = M(eltwise_fn, 3, 10, bias, kernel_size=(3, 3))
-                x = torch.randn(1, 3, 224, 224)
+        for memory_format, enabled in [
+            [torch.contiguous_format, False],
+            [torch.channels_last, True],
+        ]:
+            for eltwise_fn in [torch.relu]:
+                for bias in [True, False]:
+                    m = M(eltwise_fn, 3, 10, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
+                    x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
 
-                graph = self._check_model(m, x)
-                self.assertFused(graph, ['aten::conv2d', 'aten::' + eltwise_fn.__name__])
-                self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+                    graph = self._check_model(m, x)
+                    if enabled:
+                        self.assertFused(graph, ['aten::conv2d', 'aten::' + eltwise_fn.__name__])
+                        self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+                    else:
+                        self.assertGraphContains(graph, kind='aten::conv2d')
 
 
 if __name__ == "__main__":
