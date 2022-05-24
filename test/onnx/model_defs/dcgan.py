@@ -22,7 +22,7 @@ def weights_init(m):
 
 class _netG(nn.Module):
     def __init__(self, ngpu):
-        super(_netG, self).__init__()
+        super().__init__()
         self.ngpu = ngpu
         self.main = nn.Sequential(
             # input is Z, going into a convolution
@@ -57,7 +57,7 @@ class _netG(nn.Module):
 
 class _netD(nn.Module):
     def __init__(self, ngpu):
-        super(_netD, self).__init__()
+        super().__init__()
         self.ngpu = ngpu
         self.main = nn.Sequential(
             # input is (nc) x 64 x 64

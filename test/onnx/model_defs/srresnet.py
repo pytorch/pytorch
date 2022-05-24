@@ -13,7 +13,7 @@ def _initialize_orthogonal(conv):
 
 class ResidualBlock(nn.Module):
     def __init__(self, n_filters):
-        super(ResidualBlock, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(
             n_filters, n_filters, kernel_size=3, padding=1, bias=False
         )
@@ -36,7 +36,7 @@ class ResidualBlock(nn.Module):
 
 class UpscaleBlock(nn.Module):
     def __init__(self, n_filters):
-        super(UpscaleBlock, self).__init__()
+        super().__init__()
         self.upscaling_conv = nn.Conv2d(
             n_filters, 4 * n_filters, kernel_size=3, padding=1
         )
@@ -50,7 +50,7 @@ class UpscaleBlock(nn.Module):
 
 class SRResNet(nn.Module):
     def __init__(self, rescale_factor, n_filters, n_blocks):
-        super(SRResNet, self).__init__()
+        super().__init__()
         self.rescale_levels = int(math.log(rescale_factor, 2))
         self.n_filters = n_filters
         self.n_blocks = n_blocks

@@ -20,7 +20,7 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_helper(self):
         class SuperResolutionNet(nn.Module):
             def __init__(self, upscale_factor, inplace=False):
-                super(SuperResolutionNet, self).__init__()
+                super().__init__()
 
                 self.relu = nn.ReLU(inplace=inplace)
                 self.conv1 = nn.Conv2d(1, 64, (5, 5), (1, 1), (2, 2))

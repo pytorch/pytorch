@@ -12,7 +12,7 @@ _next_idx = 0
 # We fake dict here
 
 
-class _FakeDict(object):
+class _FakeDict:
     def __init__(self, fn):
         self.fn = fn
 
@@ -59,7 +59,7 @@ def PyTorchModule(helper, model, sample_arguments, caffe2_inputs, prefix_name=No
     onnx_model = onnx.load(io.BytesIO(f.getvalue()))
     init_net, predict_net = Caffe2Backend.onnx_graph_to_caffe2_net(onnx_model)
 
-    initialized = set([x.name for x in onnx_model.graph.initializer])
+    initialized = {x.name for x in onnx_model.graph.initializer}
     uninitialized_inputs = {
         x.name: i
         for i, x in enumerate(onnx_model.graph.input)
@@ -86,9 +86,7 @@ def PyTorchModule(helper, model, sample_arguments, caffe2_inputs, prefix_name=No
     helper.param_init_net.AppendNet(init_net)
 
     results = tuple(
-        [
-            BlobReference(remap_blob_name(x.name), helper.net)
-            for x in onnx_model.graph.output
-        ]
+        BlobReference(remap_blob_name(x.name), helper.net)
+        for x in onnx_model.graph.output
     )
     return results
