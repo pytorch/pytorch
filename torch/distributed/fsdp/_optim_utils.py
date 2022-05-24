@@ -1027,8 +1027,8 @@ def _check_optim_state_dict_shapes(
                     (param, unflat_param_names, state_name, state_value)
                 )
     if len(missing_entries) > 0:
-        # War instead of error for missing entries since the user may still add
-        # those entries before calling `optim.load_state_dict()`
+        # Warn instead of error for missing entries since the user may still
+        # add those entries before calling `optim.load_state_dict()`
         warn_msg = "Missing entries from the optim state dict:\n"
         for (param_id, unflat_param_names) in missing_entries:
             warn_msg += f"param ID: {param_id} param names: {unflat_param_names}"
