@@ -15,7 +15,11 @@ namespace mps {
 struct BinaryOpCachedGraph : public MPSCachedGraph
 {
   BinaryOpCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-  MPSGraphTensor *primaryTensor = nil, *secondaryTensor = nil, *outputTensor = nil;
+  MPSGraphTensor* primaryTensor = nil;
+  MPSGraphTensor* primaryTensorCast = nil;
+  MPSGraphTensor* secondaryTensor = nil;
+  MPSGraphTensor* secondaryTensorCast = nil;
+  MPSGraphTensor* outputTensor = nil;
 };
 
 typedef MPSGraphTensor* (^BinaryOpBlock)(MPSGraph*, MPSGraphTensor*, MPSGraphTensor*);
@@ -35,23 +39,73 @@ void binaryOpTensor(const Tensor& self_t, const Tensor& other_t, const Tensor& o
   Tensor self = is_self_scalar ? self_t : self_t.contiguous(at::MemoryFormat::Contiguous);
   Tensor other = is_other_scalar ? other_t : other_t.contiguous(at::MemoryFormat::Contiguous);
 
-  const MPSDataType self_dtype = getMPSScalarType((is_self_scalar && !is_other_scalar ? other_t : self_t).scalar_type());
-  const MPSDataType other_dtype = getMPSScalarType((!is_other_scalar ? other_t : self_t).scalar_type());
+  const MPSDataType self_dtype = getMPSScalarType(self_t.scalar_type());
+  const MPSDataType other_dtype = getMPSScalarType(other_t.scalar_type());
+
+  // In case of two different dtypes, cast by the following precedence rules:
+  //   bool,int{8,16,32,64},float16 -> float32
+  //   bool,int{8,16,32,64} -> float16
+  //   int{8,16,32} -> int{16,32,64}
+  //   bool -> int{8,16,32,64}
+  // The dimensionality or order of both arguments does not matter for casting.
+  bool cast_self = false;
+  bool cast_other = false;
+  if (self_dtype == MPSDataTypeFloat32 && other_dtype != MPSDataTypeFloat32) {
+    cast_other = true;
+  } else if (self_dtype != MPSDataTypeFloat32 && other_dtype == MPSDataTypeFloat32) {
+    cast_self = true;
+  } else if (self_dtype == MPSDataTypeFloat16 && other_dtype != MPSDataTypeFloat16) {
+    cast_other = true;
+  } else if (self_dtype != MPSDataTypeFloat16 && other_dtype == MPSDataTypeFloat16) {
+    cast_self = true;
+  } else if (self_dtype == MPSDataTypeInt64 && other_dtype != MPSDataTypeInt64) {
+    cast_other = true;
+  } else if (self_dtype != MPSDataTypeInt64 && other_dtype == MPSDataTypeInt64) {
+    cast_self = true;
+  } else if (self_dtype == MPSDataTypeInt32 && other_dtype != MPSDataTypeInt32) {
+    cast_other = true;
+  } else if (self_dtype != MPSDataTypeInt32 && other_dtype == MPSDataTypeInt32) {
+    cast_self = true;
+  } else if (self_dtype == MPSDataTypeInt16 && other_dtype != MPSDataTypeInt16) {
+    cast_other = true;
+  } else if (self_dtype != MPSDataTypeInt16 && other_dtype == MPSDataTypeInt16) {
+    cast_self = true;
+  } else if (self_dtype == MPSDataTypeInt8 && other_dtype != MPSDataTypeInt8) {
+    cast_other = true;
+  } else if (self_dtype != MPSDataTypeInt8 && other_dtype == MPSDataTypeInt8) {
+    cast_self = true;
+  }
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self, other}, /*use_scalar_value*/ false);
     BinaryOpCachedGraph* cachedGraph = static_cast<BinaryOpCachedGraph *>(cache_->LookUp(key));
 
-    if(!cachedGraph) {
+    if (!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph* () {
         BinaryOpCachedGraph *newCachedGraph = nil;
         @autoreleasepool {
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new BinaryOpCachedGraph(mpsGraph);
-          newCachedGraph->primaryTensor   = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype , getMPSShape(self));
+          newCachedGraph->primaryTensor = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype, getMPSShape(self));
           newCachedGraph->secondaryTensor = mpsGraphRankedPlaceHolder(mpsGraph, other_dtype, getMPSShape(other));
-          newCachedGraph->outputTensor = binaryBlock(mpsGraph, newCachedGraph->primaryTensor, newCachedGraph->secondaryTensor);
+          if (cast_self) {
+            newCachedGraph->primaryTensorCast = [mpsGraph castTensor:newCachedGraph->primaryTensor
+                                                              toType:other_dtype
+                                                                name:@"castPrimary"];
+            newCachedGraph->secondaryTensorCast = newCachedGraph->secondaryTensor;
+          } else if (cast_other) {
+            newCachedGraph->primaryTensorCast = newCachedGraph->primaryTensor;
+            newCachedGraph->secondaryTensorCast = [mpsGraph castTensor:newCachedGraph->secondaryTensor
+                                                                toType:self_dtype
+                                                                  name:@"castSecondary"];
+          } else {
+            newCachedGraph->primaryTensorCast = newCachedGraph->primaryTensor;
+            newCachedGraph->secondaryTensorCast = newCachedGraph->secondaryTensor;
+          }
+          newCachedGraph->outputTensor = binaryBlock(mpsGraph,
+                                                     newCachedGraph->primaryTensorCast,
+                                                     newCachedGraph->secondaryTensorCast);
         }
         return newCachedGraph;
       });
