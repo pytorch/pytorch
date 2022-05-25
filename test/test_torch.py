@@ -713,34 +713,33 @@ class TestTorchDeviceType(TestCase):
         msg = 'ComplexHalf support is experimental'
         with self.assertWarnsOnceRegex(UserWarning, msg):
             t = torch.randn(3, dtype=torch.chalf, device=device)
-        
+
         with self.assertWarnsOnceRegex(UserWarning, msg):
             torch.rand(3, dtype=torch.chalf, device=device)
-        
+
         with self.assertWarnsOnceRegex(UserWarning, msg):
             torch.empty(3, dtype=torch.chalf, device=device)
-        
+
         with self.assertWarnsOnceRegex(UserWarning, msg):
             torch.ones(3, dtype=torch.chalf, device=device)
-        
+
         with self.assertWarnsOnceRegex(UserWarning, msg):
             torch.zeros(3, dtype=torch.chalf, device=device)
 
         with self.assertWarnsOnceRegex(UserWarning, msg):
             torch.randn_like(t)
-        
+
         with self.assertWarnsOnceRegex(UserWarning, msg):
             torch.rand_like(t)
-        
+
         with self.assertWarnsOnceRegex(UserWarning, msg):
             torch.empty_like(t)
-        
+
         with self.assertWarnsOnceRegex(UserWarning, msg):
             torch.ones_like(t)
 
         with self.assertWarnsOnceRegex(UserWarning, msg):
             torch.zeros_like(t)
-        
 
         with self.assertWarnsOnceRegex(UserWarning, msg):
             # t + 1 allocates a new tensor for result using empty
