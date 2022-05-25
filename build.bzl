@@ -28,6 +28,7 @@ def define_targets(rules):
             ":DispatchKeyNativeFunctions.cpp",
             ":DispatchKeyNativeFunctions.h",
             ":LazyIr.h",
+            ":LazyNonNativeIr.h",
             ":RegisterDispatchKey.cpp",
             ":native_functions.yaml",
             ":shape_inference.h",
@@ -42,6 +43,12 @@ def define_targets(rules):
               "--native-functions-path $(location :native_functions.yaml) " +
               "--tags-path=$(location :tags.yaml) " +
               "--gen_lazy_ts_backend",
+    )
+
+    rules.cc_library(
+        name = "generated-autograd-headers",
+        hdrs = [":{}".format(h) for h in _GENERATED_AUTOGRAD_CPP_HEADERS + _GENERATED_AUTOGRAD_PYTHON_HEADERS],
+        visibility = ["//visibility:public"],
     )
 
     rules.genrule(
@@ -76,14 +83,13 @@ _GENERATED_AUTOGRAD_CPP_HEADERS = [
     "torch/csrc/autograd/generated/variable_factories.h",
 ]
 
-GENERATED_AUTOGRAD_H = _GENERATED_AUTOGRAD_CPP_HEADERS + _GENERATED_AUTOGRAD_PYTHON_HEADERS
-
 GENERATED_TESTING_PY = [
     "torch/testing/_internal/generated/annotated_fn_args.py",
 ]
 
 GENERATED_LAZY_H = [
     "torch/csrc/lazy/generated/LazyIr.h",
+    "torch/csrc/lazy/generated/LazyNonNativeIr.h",
     "torch/csrc/lazy/generated/LazyNativeFunctions.h",
 ]
 

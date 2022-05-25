@@ -1,7 +1,7 @@
 import warnings
 
 from collections import deque
-from typing import Any, Callable, Iterator, List, Optional, Set, Sized, Tuple, TypeVar, Deque
+from typing import Any, Callable, Iterator, List, Optional, Sized, Tuple, TypeVar, Deque
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
@@ -151,7 +151,7 @@ class _ForkerIterDataPipe(IterDataPipe):
     def is_every_instance_exhausted(self) -> bool:
         return all(self.end_ptr == ptr for ptr in self.child_pointers)
 
-    def reset(self):
+    def reset(self) -> None:
         self._datapipe_iterator = iter(self.main_datapipe)
         self.buffer = deque()
         self.child_pointers = [0] * self.num_instances
@@ -376,7 +376,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
     def is_every_instance_exhausted(self) -> bool:
         return self.main_datapipe_exhausted and all(not child_buffer for child_buffer in self.child_buffers)
 
-    def reset(self):
+    def reset(self) -> None:
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
         self.child_buffers = [deque() for _ in range(self.num_instances)]
@@ -418,32 +418,35 @@ class MultiplexerIterDataPipe(IterDataPipe):
     r"""
     Yields one element at a time from each of the input Iterable DataPipes (functional name: ``mux``). As in,
     one element from the 1st input DataPipe, then one element from the 2nd DataPipe in the next iteration,
-    and so on. It skips over DataPipes that are exhausted, and ends when all input DataPipes are exhausted.
+    and so on. It ends when the shortest input DataPipe is exhausted.
 
     Args:
-        datapipes: Iterable DataPipes that will take turn to yield their elements, until they are all exhausted
+        datapipes: Iterable DataPipes that will take turn to yield their elements, until the shortest DataPipe is exhausted
 
     Example:
         >>> from torchdata.datapipes.iter import IterableWrapper
-        >>> dp1, dp2, dp3 = IterableWrapper(range(5)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
+        >>> dp1, dp2, dp3 = IterableWrapper(range(3)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
         >>> list(dp1.mux(dp2, dp3))
-        [0, 10, 20, 1, 11, 21, 2, 12, 22, 3, 13, 23, 4, 14, 24]
+        [0, 10, 20, 1, 11, 21, 2, 12, 22]
     """
     def __init__(self, *datapipes):
         self.datapipes = datapipes
         self.length: Optional[int] = None
+        self.buffer: List = []  # Store values to be yielded only when every iterator provides one
 
     def __iter__(self):
         iterators = [iter(x) for x in self.datapipes]
-        finished: Set[int] = set()
-        while len(finished) < len(iterators):
-            for i in range(len(iterators)):
-                if i not in finished:
-                    try:
-                        value = next(iterators[i])
-                        yield value
-                    except StopIteration:
-                        finished.add(i)
+        while len(iterators):
+            for it in iterators:
+                try:
+                    value = next(it)
+                    self.buffer.append(value)
+                except StopIteration:
+                    self.buffer.clear()
+                    return
+            for value in self.buffer:
+                yield value
+            self.buffer.clear()
 
     def __len__(self):
         if self.length is not None:
@@ -451,10 +454,33 @@ class MultiplexerIterDataPipe(IterDataPipe):
                 raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
             return self.length
         if all(isinstance(dp, Sized) for dp in self.datapipes):
-            self.length = sum(len(dp) for dp in self.datapipes)
+            self.length = min(len(dp) for dp in self.datapipes) * len(self.datapipes)
         else:
             self.length = -1
         return len(self)
+
+    def reset(self) -> None:
+        self.buffer = []
+
+    def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+
+        state = (
+            self.datapipes,
+            self.length,
+        )
+        return state
+
+    def __setstate__(self, state):
+        (
+            self.datapipes,
+            self.length,
+        ) = state
+        self.buffer = []
+
+    def __del__(self):
+        self.buffer.clear()
 
 
 @functional_datapipe('zip')
