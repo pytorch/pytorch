@@ -4263,9 +4263,9 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
   // also from low level functions or add it to the public API.
   bool upper = false;
   if (upper) {
-    at::triu_out(LD, self);
+    at::triu_out(const_cast<Tensor&>(LD), self);
   } else {
-    at::tril_out(LD, self);
+    at::tril_out(const_cast<Tensor&>(LD), self);
   }
 
   // call ldl_factor_stub that fills the result tensors
