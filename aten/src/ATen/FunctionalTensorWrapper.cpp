@@ -17,10 +17,10 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // For now I'm retroactively setting this in functorch,
   // but once Open Multiple Dispatch lands we should be able to calculate this in core.
   level_ = -1;
-  // shallow_copy_from overwrites the storage and dispatch keyset...
-  auto functional_storage = storage_;
-  shallow_copy_from(value_.getIntrusivePtr());
-  storage_ = functional_storage;
+  // mirror all of the generic tensor metadata onto the wrapper
+  copy_generic_tensor_metadata(value_.getIntrusivePtr().get(), this);
+  refresh_numel();
+  refresh_contiguous();
   storage_access_should_throw_ = false;
   key_set_ = c10::DispatchKeySet(c10::DispatchKey::Functionalize) | value_.key_set();
   // All of the keys corresponding to functorch transforms should not be copied over.
@@ -183,6 +183,10 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
   // We need to propagate that metadata mutation to the wrapper (new size).
   set_sizes_and_strides(value_.sizes(), value_.strides());
+  set_storage_offset(value_.storage_offset());
+  if (dtype() != value_.unsafeGetTensorImpl()->dtype() || layout() != value_.unsafeGetTensorImpl()->layout()) {
+    value_ = value_.to(c10::TensorOptions().dtype(dtype()).layout(layout()));
+  }
 }
 
 
@@ -190,10 +194,8 @@ void FunctionalTensorWrapper::sync_() {
   if (is_up_to_date()) {
     return;
   }
-  auto any_updates = apply_updates();
-  if (any_updates) {
-    regenerate_from_base();
-  }
+  apply_updates();
+  regenerate_from_base();
 }
 
 void FunctionalTensorWrapper::regenerate_from_base() {

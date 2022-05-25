@@ -34,7 +34,7 @@ static inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor)
   }
 }
 
-static inline std::vector<int64_t> batched_matrix_contiguous_strides(
+static inline DimVector batched_matrix_contiguous_strides(
     const IntArrayRef sizes,
     const bool f_contig = false) {
   // f_contig chooses between the strides of a batch of Fortran (F-contiguous)
@@ -428,14 +428,14 @@ static inline std::tuple<bool, bool> _parse_qr_mode(c10::string_view mode) {
 }
 
 // Function to compute sizes, strides and the extra columns for the Q matrix in the QR Decomposition
-static inline std::tuple<std::vector<int64_t>,
-                         std::vector<int64_t>,
-                         int64_t> _compute_geometry_for_Q(const Tensor& input, bool reduced) {
+static inline std::tuple<DimVector, DimVector, int64_t> _compute_geometry_for_Q(
+    const Tensor& input,
+    bool reduced) {
   int64_t m = input.size(-2), n = input.size(-1);
   int64_t n_columns_q;
 
   // We need to compute the required size of Q based on the `reduced` option
-  auto q_sizes = input.sizes().vec();
+  DimVector q_sizes(input.sizes());
   if (!reduced && m > n) {
     q_sizes[input.dim() - 1] = m;
     n_columns_q = m;
@@ -623,7 +623,10 @@ static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim >= 2);
+  if (ndim > 3) {
+    return input.transpose(-2, -1).is_contiguous();
+  }
   auto leading_dimension = input_strides[ndim - 1];
   auto rows = input_sizes[ndim - 2];
   bool batch_stride_compatible = true;
@@ -641,7 +644,10 @@ static inline bool is_blas_compatible_row_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim >= 2);
+  if (ndim > 3) {
+    return input.is_contiguous();
+  }
   auto leading_dimension = input_strides[ndim - 2];
   auto cols = input_sizes[ndim - 1];
   bool batch_stride_compatible = true;

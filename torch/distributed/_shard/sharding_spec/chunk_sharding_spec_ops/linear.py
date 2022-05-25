@@ -1,4 +1,4 @@
-from typing import List, cast
+from typing import List
 
 import torch
 import torch.distributed as dist
@@ -25,7 +25,7 @@ from ._common import (
 
 
 @custom_sharding_spec_op(ChunkShardingSpec, torch.nn.functional.linear)
-def sharded_linear(types, args, kwargs):
+def sharded_linear(types, args, kwargs, pg):
     """
     Handles ``__torch_function__`` dispatch for ``torch.nn.functional.linear``.
     This method computes a sharded linear and has the following limitations:
@@ -99,20 +99,19 @@ def sharded_linear(types, args, kwargs):
     weight = args[1]
     bias = args[2]
 
-    pg = weight._process_group
     local_shard = weight.local_tensor()
     local_shard_t = local_shard.t().contiguous()
     sharding_dim = weight._sharding_spec.dim
     world_size = dist.get_world_size(pg)
     rank = dist.get_rank(pg)
 
-    if sharding_dim == 1 and isinstance(input, torch.Tensor):
-        return _handle_row_wise_sharding_tensor(
-            input, world_size, weight, rank, local_shard_t, bias, pg
-        )
-    elif sharding_dim == 1 and isinstance(input, ShardedTensor):
+    if sharding_dim == 1 and isinstance(input, ShardedTensor):
         return _handle_row_wise_sharding_sharded_tensor(
             input, world_size, weight, local_shard_t, bias, pg
+        )
+    elif sharding_dim == 1 and isinstance(input, torch.Tensor):
+        return _handle_row_wise_sharding_tensor(
+            input, world_size, weight, rank, local_shard_t, bias, pg
         )
     elif sharding_dim == 0:
         return _handle_col_wise_sharding(
@@ -126,7 +125,7 @@ def sharded_linear(types, args, kwargs):
 
 def _validate_linear_op_param(args, kwargs):
     """
-    Validate input params of sharded embedding op.
+    Validate input params of sharded linear op.
 
     Args:
         input: input of the linear layer.
@@ -142,13 +141,13 @@ def _validate_linear_op_param(args, kwargs):
     # Validate types
     if not isinstance(input, torch.Tensor) and not isinstance(input, ShardedTensor):
         raise TypeError("input needs to be either torch.Tensor or ShardedTensor")
-    if not isinstance(bias, torch.Tensor):
+    if type(bias) != torch.Tensor and type(bias) != torch.nn.Parameter:
         raise TypeError("bias needs to be torch.Tensor")
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")
     if len(input.size()) < 1:  # type: ignore[arg-type]
         raise ValueError("Input needs to have at least 1 dim")
-    weight_size = cast(torch.Size, weight.size())
+    weight_size = weight.size()
     if len(weight_size) != 2:
         raise ValueError("Weight needs to have exactly 2 dims")
     if len(bias.size()) != 1:

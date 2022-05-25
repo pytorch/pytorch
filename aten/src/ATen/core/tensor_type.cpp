@@ -193,7 +193,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
       } else if (strides[a] > strides[b]) {
         return 1;
       } else { // strides[a] == strides[b]
-        if (sizes[a] < sizes[b] || a > b ) {
+        if (sizes[a] > sizes[b]) {
           return 1;
         }
       }
