@@ -60,7 +60,6 @@ full_codegen:
   - hardsigmoid
   - index_select
   - kl_div_backward
-  - l1_loss_backward
   - le.Scalar
   - le.Tensor
   - leaky_relu
