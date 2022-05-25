@@ -4,7 +4,7 @@ The correct unpack backend function is determined using runtime polymorphism thr
 which is of type intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> and points to either a PackedConvWeightsQnnp,
 PackedConvWeights (Fbgemm), or PackedConvWeightsCudnn at runtime, which all inherit from ConvPackedParamsBase.
 The implementations for the unpack functions can be found in /cpu/qconv_unpack_impl.cpp, for fbgemm&qnnpack
-and /cudnn/conv_unpack_impl.cpp, for cudnn.
+and /cudnn/ConvUnpackImpl.cpp, for cudnn.
 */
 
 #include <tuple>
