@@ -1708,7 +1708,9 @@ def reshape(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=True)
 
 
-def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()) -> TensorLikeType:
+def roll(
+    a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
+) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
     dims = utils.canonicalize_dims(a.ndim, dims)
     # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
@@ -1732,7 +1734,9 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()) -> Tenso
             # clone is used here to avoid test failures that ATen returns a tensor that is not a view
             return clone(view(roll(flatten(a), shifts, 0), a.shape))
         if len_shifts != len_dims:
-            raise RuntimeError(f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}")
+            raise RuntimeError(
+                f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}"
+            )
         assert len_dims > 1
         tail_shifts = shifts[1:]
         tail_dims = dims[1:]
