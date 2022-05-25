@@ -22,7 +22,7 @@ class RNNModel(nn.Module):
         tie_weights=False,
         batchsize=2,
     ):
-        super(RNNModel, self).__init__()
+        super().__init__()
         self.drop = nn.Dropout(dropout)
         self.encoder = nn.Embedding(ntoken, ninp)
         if rnn_type in ["LSTM", "GRU"]:

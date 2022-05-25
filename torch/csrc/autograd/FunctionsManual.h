@@ -319,6 +319,7 @@ Tensor gelu_double_backward(
     const Tensor & input,
     c10::string_view approximate);
 Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntArrayRef sizes, IntArrayRef strides, optional<int64_t> storage_offset_);
+Tensor as_strided_scatter_backward(Tensor grad, TensorGeometry input_geometry, TensorGeometry src_geometry, IntArrayRef sizes, IntArrayRef strides, optional<int64_t> storage_offset);
 std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self, const Tensor& other, std::array<bool, 2> output_mask);
 std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor & input,

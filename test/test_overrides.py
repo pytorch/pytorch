@@ -17,7 +17,6 @@ from torch.overrides import (
     is_tensor_method_or_property,
     TorchFunctionMode
 )
-from functools import partial
 
 Tensor = torch.Tensor
 
