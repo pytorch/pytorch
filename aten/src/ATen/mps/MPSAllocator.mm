@@ -101,7 +101,6 @@ id<MTLBuffer> MPSHeapAllocatorImpl::Malloc(size_t size, bool sharedStorage)
   TORCH_CHECK(size < m_max_buffer_size, "Invalid buffer size: ", format_size(size));
 
   std::lock_guard<std::mutex> lock(m_mutex);
-  __block id<MTLBuffer> buf = nil;
 
   size_t alloc_size = get_allocation_size(size, sharedStorage);
   auto& pool = get_pool(alloc_size, sharedStorage);
@@ -252,39 +251,44 @@ bool MPSHeapAllocatorImpl::release_cached_buffers()
 } // namespace HeapAllocator
 
 // Use "at::mps::GetMPSAllocator()" to acquire a handle to MPS Allocator
-static HeapAllocator::MPSHeapAllocatorImpl s_allocatorImpl;
+namespace {
+HeapAllocator::MPSHeapAllocatorImpl& _getAllocImpl() {
+  static HeapAllocator::MPSHeapAllocatorImpl s_allocatorImpl;
+  return s_allocatorImpl;
+}
+}
 
 // MPS allocator struct to be registered with Pytorch
 struct TORCH_API MPSAllocator final : public at::Allocator {
 public:
   explicit MPSAllocator(bool useSharedStorage) :
-      m_has_unified_memory(s_allocatorImpl.Device().hasUnifiedMemory), m_use_shared_storage(useSharedStorage)
+      m_has_unified_memory(_getAllocImpl().Device().hasUnifiedMemory), m_use_shared_storage(useSharedStorage)
   {
     const bool enable_debug_info = isEnvVarEnabled("PYTORCH_DEBUG_MPS_ALLOCATOR");
     if (enable_debug_info) {
-      s_allocatorImpl.enable_debug_info();
+      _getAllocImpl().enable_debug_info();
       if (!m_use_shared_storage || m_has_unified_memory) {
         std::cerr << "Initializing "
                   << (useSharedStorage ? "shared" : "private")
                   << " heap allocator on "
                   << (m_has_unified_memory ? "unified" : "discrete")
                   << " device memory of size "
-                  << s_allocatorImpl.Device().recommendedMaxWorkingSetSize / 1048576UL << " MB\n";
+                  << _getAllocImpl().Device().recommendedMaxWorkingSetSize / 1048576UL << " MB\n";
       }
     }
   }
 
   ~MPSAllocator() override {
-    s_allocatorImpl.EmptyCache();
+    _getAllocImpl().EmptyCache();
   }
 
   DataPtr allocate(const size_t nbytes) const override {
-    __block id<MTLBuffer> buf = nbytes > 0 ? s_allocatorImpl.Malloc(nbytes, m_use_shared_storage) : nullptr;
+    __block id<MTLBuffer> buf = nbytes > 0 ? _getAllocImpl().Malloc(nbytes, m_use_shared_storage) : nullptr;
     return { buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
   }
 
   DeleterFnPtr raw_deleter() const override { return &Delete; }
-  bool is_shared(void* ptr) const { return s_allocatorImpl.isSharedBuffer(ptr); }
+  bool is_shared(void* ptr) const { return _getAllocImpl().isSharedBuffer(ptr); }
   bool is_shared_storge_supported() const { return m_has_unified_memory; }
 
 private:
@@ -292,7 +296,11 @@ private:
   // use shared buffers on unified memory
   bool m_use_shared_storage;
 
-  static void Delete(void* ptr) { if (ptr) s_allocatorImpl.Free(ptr); }
+  static void Delete(void* ptr) {
+    if (ptr) {
+      _getAllocImpl().Free(ptr);
+    }
+  }
 
   static bool isEnvVarEnabled(const char *envvar) {
     const char *e = getenv(envvar);
@@ -305,13 +313,29 @@ private:
   }
 };
 
-static MPSAllocator s_mps_shared_alloc(true);
+namespace {
+MPSAllocator& _getSharedAllocator() {
+  static MPSAllocator s_mps_shared_alloc(true);
+  return s_mps_shared_alloc;
+}
+MPSAllocator& _getPrivateAllocator() {
+  static mps::MPSAllocator s_mps_private_alloc(false);
+  return s_mps_private_alloc;
+}
+} // anonymous namespace
+
 at::Allocator* getMPSSharedAllocator()
 {
-  if (s_mps_shared_alloc.is_shared_storge_supported())
-    return &s_mps_shared_alloc;
+  auto& sa = _getSharedAllocator();
+  if (sa.is_shared_storge_supported()) {
+    return &sa;
+  }
 
   return nullptr;
+}
+
+at::Allocator* getMPSStaticAllocator() {
+  return &_getPrivateAllocator();
 }
 
 } // namespace mps
@@ -325,7 +349,7 @@ namespace native {
 bool is_pinned_mps(const Tensor& self, c10::optional<Device> device)
 {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_mps());
-  return at::mps::s_mps_shared_alloc.is_shared(self.storage().data());
+  return at::mps::_getSharedAllocator().is_shared(self.storage().data());
 }
 
 // torch.pin_memory() implementation
@@ -344,8 +368,5 @@ Tensor _pin_memory_mps(const Tensor& self, c10::optional<Device> device)
 }
 
 } // namespace native
-
-static mps::MPSAllocator s_mps_private_alloc(false);
-REGISTER_ALLOCATOR(DeviceType::MPS, &s_mps_private_alloc);
 
 } // namespace at
