@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <iostream>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Optional.h>
 #include <ATen/quantized/Quantizer.h>
@@ -574,7 +575,7 @@ Tensor _batch_tile_tensor(const Tensor& self, IntArrayRef blocksize) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[1] > 0);
   auto block_size_0 = self.size(-2) / blocksize[0];
   auto block_size_1 = self.size(-1) / blocksize[1];
-  return self.reshape({-1, block_size_0, blocksize[0], block_size_1, blocksize[1]})
+  return self.reshape({self.size(0), block_size_0, blocksize[0], block_size_1, blocksize[1]})
       .transpose(2, 3)
       .contiguous();
 }
@@ -583,7 +584,7 @@ Tensor _mask_to_indices(const Tensor& mask) {
   // This function returns a vector of the indices at which given
   // boolean mask is True. at::nonzero can achieve the same, but
   // we yet have to compare the performance difference.
-  TORCH_CHECK(mask.dim() == 0, "Currently _mask_to_indices only supports 1-d masks.");
+  TORCH_CHECK(mask.dim() == 1, "Currently _mask_to_indices only supports 1-d masks.");
   TORCH_CHECK(mask.dtype() == at::kBool, "Expected mask to be of dtype bool.");
   return at::native::arange(
       mask.numel(), at::kLong, kStrided, mask.device())
@@ -625,7 +626,7 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
       self.size(-1),
       " needs to be divisible by blocksize[1] ",
       blocksize[1]);
-  auto block_size_0 = self.size(0) / blocksize[0];
+  auto block_size_0 = self.size(-2) / blocksize[0];
 
   auto values = _batch_tile_tensor(self, blocksize);
   auto not_zero_mask = _batch_tile_tensor((self != 0), blocksize);
@@ -648,8 +649,8 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
       row_indices.view({-1}), block_size_0, false /* out_int32 */);
   not_zero_mask = not_zero_mask.reshape({-1});
   if (self.dim() == 3) {
-    crow_indices = crow_indices.unsqueeze(0).repeat({self.size(0), 1, 1});
-    col_indices = col_indices.unsqueeze(0).repeat({self.size(0), 1, 1});
+    crow_indices = crow_indices.repeat({self.size(0), 1});
+    col_indices = col_indices.repeat({self.size(0), 1});
     values = values.reshape({self.size(0), -1, values.size(-2), values.size(-1)});
     values = values.index_select(
         1,
