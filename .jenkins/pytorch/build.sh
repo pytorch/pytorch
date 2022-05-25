@@ -196,10 +196,8 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 
   get_bazel
 
-  # first build torch for CPU-only
-  tools/bazel build --config=no-tty :torch
-  # then build Python module and tests for CPU-only
-  tools/bazel build --config=no-tty :_C.so :all_tests
+  # first build torch, the Python module, and tests for CPU-only
+  tools/bazel build --config=no-tty :torch :_C.so :all_tests
   # then build everything with CUDA
   tools/bazel build --config=no-tty --config=gpu :all
 else
