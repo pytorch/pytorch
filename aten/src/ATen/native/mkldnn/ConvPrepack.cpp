@@ -191,6 +191,9 @@ std::vector<int64_t> get_output_sizes(
 }
 
 Tensor run(ContextConv& context, const Tensor& input) {
+  TORCH_INTERNAL_ASSERT(
+      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast,
+      "Expected input to be in ChannelsLast format");
   std::vector<int64_t> output_sizes = get_output_sizes(context, input);
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
@@ -214,6 +217,9 @@ Tensor run(ContextConv& context, const Tensor& input) {
 }
 
 void run(ContextConv& context, const Tensor& input, void* output) {
+  TORCH_INTERNAL_ASSERT(
+      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast,
+      "Expected input to be in ChannelsLast format");
   std::vector<int64_t> output_sizes = get_output_sizes(context, input);
 
   ideep::tensor::desc o_desc = {
