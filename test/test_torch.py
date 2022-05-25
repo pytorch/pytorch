@@ -2335,6 +2335,15 @@ else:
                 'expected scalar_type Double but found Float'):
             torch.logcumsumexp(b, axis, out=inplace_out)
 
+        # Check dim out of range
+        axis = 3
+        b = torch.randn(5, 2, device=device)
+        with self.assertRaisesRegex(IndexError, 'Dimension out of range'):
+            torch.logcumsumexp(b, axis)
+        b = torch.randn(0, 2, device=device)
+        with self.assertRaisesRegex(IndexError, 'Dimension out of range'):
+            torch.logcumsumexp(b, axis)
+
     def _test_diff_numpy(self, t, dims=None):
         # Helper for test_diff to compare with NumPy reference implementation
         def to_np(t):
