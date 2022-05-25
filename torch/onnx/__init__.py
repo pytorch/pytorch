@@ -57,7 +57,7 @@ class SymbolicContext:
         params_dict: Dict[str, _C.IValue],
         env: Dict[_C.Value, _C.Value],
         cur_node: _C.Node,
-        onnx_block: _C.Block
+        onnx_block: _C.Block,
     ):
         self.params_dict: Dict[str, _C.IValue] = params_dict
         self.env: Dict[_C.Value, _C.Value] = env

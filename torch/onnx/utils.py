@@ -1016,7 +1016,7 @@ def _export(
     add_node_names=True,
     onnx_shape_inference=True,
     export_modules_as_functions=False,
-) -> None:
+):
     if export_type is None:
         export_type = torch.onnx.ExportTypes.PROTOBUF_FILE
 
