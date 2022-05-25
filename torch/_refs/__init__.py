@@ -1597,7 +1597,7 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()) -> Tenso
     len_dims = len(dims)
     if len_shifts != 1 or len_dims != 1:
         if len_shifts == 0:
-            raise ValueError("`shifts` required")
+            raise RuntimeError("`shifts` required")
         # Takes care of the case when dims is not specified (default)
         # By default, the tensor is flattened before shifting, after which the original shape is restored
         if len_dims == 0 and len_shifts == 1:
