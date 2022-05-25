@@ -39,7 +39,7 @@ def collect_generated_testcases(
                         run_generated_test(model_file, data_dir, device)
                 if expect:
                     expect_file = os.path.join(
-                        _expect_dir, f"PyTorch-generated-{d}.expect"
+                        _expect_dir, "PyTorch-generated-{}.expect".format(d)
                     )
                     with open(expect_file, "w") as text_file:
                         model = onnx.load(model_file)
@@ -51,7 +51,7 @@ def collect_generated_testcases(
                 total_pass += 1
             except Exception as e:
                 if verbose:
-                    print(f"The test case in {dir_name} failed!")
+                    print("The test case in {} failed!".format(dir_name))
                     traceback.print_exc()
                 if fail_dir is None:
                     shutil.rmtree(dir_name)
@@ -61,10 +61,12 @@ def collect_generated_testcases(
                         shutil.rmtree(target_dir)
                     shutil.move(dir_name, target_dir)
                 total_fail += 1
-    print(f"Successfully generated/updated {total_pass} test cases from PyTorch.")
+    print(
+        "Successfully generated/updated {} test cases from PyTorch.".format(total_pass)
+    )
     if expect:
-        print(f"Expected pbtxt files are generated in {_expect_dir}.")
-    print(f"Failed {total_fail} testcases are moved to {_fail_test_dir}.")
+        print("Expected pbtxt files are generated in {}.".format(_expect_dir))
+    print("Failed {} testcases are moved to {}.".format(total_fail, _fail_test_dir))
 
 
 if __name__ == "__main__":

@@ -14,7 +14,6 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
-#include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -22,10 +21,6 @@ namespace py = pybind11;
 
 
 namespace torch { namespace autograd { namespace profiler { namespace python_tracer {
-using torch::profiler::impl::python_tracer::CallType;
-using torch::profiler::impl::python_tracer::PythonTracerBase;
-using torch::profiler::impl::python_tracer::PyTraceEvent;
-
 namespace {
 
 // ============================================================================
@@ -231,23 +226,26 @@ struct hash_pair {
 // ============================================================================
 constexpr size_t max_py_threads = std::numeric_limits<uint8_t>::max() + 1;
 
-class PythonTracer final : public PythonTracerBase {
+class PythonTracer final {
  public:
+  // Static methods serve as external interfaces (which expect raw pointers)
+  // and handle forwarding to the singleton.
+  static void call(Command c);
+
   static int pyProfileFn(
       PyObject* obj,
       PyFrameObject* frame,
       int what,
       PyObject* arg);
 
-  static PythonTracer& singleton();
-  void start() override;
-  void stop() override;
-  std::vector<std::unique_ptr<PyTraceEvent>> getEvents() override;
-  void clear() override;
-
  private:
   PythonTracer();
+  static PythonTracer& singleton();
   friend class PyTraceReplay;
+
+  void start(size_t max_threads = max_py_threads);
+  void stop();
+  void clear();
 
   void recordPyCall(TraceContext* ctx, PyFrameObject* frame);
   void recordCCall(TraceContext* ctx, PyFrameObject* frame, PyObject* arg);
@@ -320,9 +318,7 @@ PythonTracer::PythonTracer() : active_(false) {
     .ptr();
 }
 
-void PythonTracer::start() {
-  // TODO: Make `max_threads` an input again.
-  size_t max_threads = 1;
+void PythonTracer::start(size_t max_threads) {
   TORCH_CHECK(!active_, "PythonTracer is already active")
   TORCH_CHECK(
       !trace_contexts_.size(), "PythonTracer should not have active contexts");
@@ -652,10 +648,6 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
   return out;
 }
 
-std::vector<std::unique_ptr<PyTraceEvent>> PythonTracer::getEvents() {
-  return PyTraceReplay::getEvents();
-}
-
 // ============================================================================
 // == API =====================================================================
 // ============================================================================
@@ -687,14 +679,37 @@ int PythonTracer::pyProfileFn(
   return 0;
 }
 
-PythonTracerBase& getTracer() {
-  return PythonTracer::singleton();
-}
+void PythonTracer::call(Command c) {
+  switch (c) {
+    case Command::kStartOne:
+      PythonTracer::singleton().start(1);
+      break;
+
+    case Command::kStartAll:
+      PythonTracer::singleton().start();
+      break;
+
+    case Command::kStop:
+      PythonTracer::singleton().stop();
+      break;
+
+    case Command::kClear:
+      PythonTracer::singleton().clear();
+      break;
+
+    default:
+      break;
+  }
+};
+
 } // namespace
 
 void init() {
   pybind11::gil_scoped_acquire gil;
   TORCH_CHECK(PyType_Ready(&TraceContextType) == 0);
-  torch::profiler::impl::python_tracer::registerTracer(&getTracer);
+
+  registerFunctions(
+      /*call=*/&PythonTracer::call,
+      /*get_events=*/&PyTraceReplay::getEvents);
 }
 }}}} // namespace torch::autograd::profiler::python_tracer
