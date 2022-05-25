@@ -12607,7 +12607,9 @@ class _TestONNXRuntime:
     def test_qat_avg_pool2d(self):
         model = torch.nn.Sequential()
         model.add_module("quant", torch.quantization.QuantStub())
-        model.add_module("avgpool", torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1))
+        model.add_module(
+            "avgpool", torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
+        )
         model.add_module("dequant", torch.quantization.DeQuantStub())
 
         model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
@@ -12622,7 +12624,9 @@ class _TestONNXRuntime:
     def test_qat_upsample_nearest2d(self):
         model = torch.nn.Sequential()
         model.add_module("quant", torch.quantization.QuantStub())
-        model.add_module("upsample_nearest2d", torch.nn.UpsamplingNearest2d(scale_factor=1.5))
+        model.add_module(
+            "upsample_nearest2d", torch.nn.UpsamplingNearest2d(scale_factor=1.5)
+        )
         model.add_module("dequant", torch.quantization.DeQuantStub())
 
         model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
