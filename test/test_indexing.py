@@ -692,7 +692,7 @@ class TestIndexing(TestCase):
             self.assertEqual(v[boolIndices].shape, v[uint8Indices].shape)
             self.assertEqual(v[boolIndices], v[uint8Indices])
             self.assertEqual(v[boolIndices], tensor([True], dtype=torch.bool, device=device))
-            self.assertEquals(len(w), 2)
+            self.assertEqual(len(w), 2)
 
     def test_bool_indices_accumulate(self, device):
         mask = torch.zeros(size=(10, ), dtype=torch.bool, device=device)
@@ -713,7 +713,7 @@ class TestIndexing(TestCase):
         with warnings.catch_warnings(record=True) as w:
             self.assertEqual(v[mask].shape, (3, 7, 3))
             self.assertEqual(v[mask], torch.stack([v[0], v[2], v[3]]))
-            self.assertEquals(len(w), 2)
+            self.assertEqual(len(w), 2)
 
         v = torch.tensor([1.], device=device)
         self.assertEqual(v[v == 0], torch.tensor([], device=device))
@@ -725,7 +725,7 @@ class TestIndexing(TestCase):
             warnings.simplefilter("always")
             y.index_put_((mask, ), y[mask], accumulate=True)
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
-            self.assertEquals(len(w), 2)
+            self.assertEqual(len(w), 2)
 
     def test_index_put_accumulate_large_tensor(self, device):
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
@@ -804,6 +804,53 @@ class TestIndexing(TestCase):
         out_cpu = t.index_put_(indices, values2d, accumulate=True)
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
+    @onlyCUDA
+    def test_index_put_accumulate_non_contiguous(self, device):
+        t = torch.zeros((5, 2, 2))
+        t_dev = t.to(device)
+        t1 = t_dev[:, 0, :]
+        t2 = t[:, 0, :]
+        self.assertTrue(not t1.is_contiguous())
+        self.assertTrue(not t2.is_contiguous())
+
+        indices = [torch.tensor([0, 1]), ]
+        indices_dev = [i.to(device) for i in indices]
+        value = torch.randn(2, 2)
+        out_cuda = t1.index_put_(indices_dev, value.to(device), accumulate=True)
+        out_cpu = t2.index_put_(indices, value, accumulate=True)
+        self.assertTrue(not t1.is_contiguous())
+        self.assertTrue(not t2.is_contiguous())
+
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
+    @onlyCUDA
+    def test_index_put_accumulate_with_optional_tensors(self, device):
+        # TODO: replace with a better solution.
+        # Currently, here using torchscript to put None into indices.
+        # on C++ it gives indices as a list of 2 optional tensors: first is null and
+        # the second is a valid tensor.
+        @torch.jit.script
+        def func(x, i, v):
+            idx = [None, i]
+            x.index_put_(idx, v, accumulate=True)
+            return x
+
+        n = 4
+        t = torch.arange(n * 2, dtype=torch.float32).reshape(n, 2)
+        t_dev = t.to(device)
+        indices = torch.tensor([1, 0])
+        indices_dev = indices.to(device)
+        value0d = torch.tensor(10.0)
+        value1d = torch.tensor([1.0, 2.0])
+
+        out_cuda = func(t_dev, indices_dev, value0d.cuda())
+        out_cpu = func(t, indices, value0d)
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
+        out_cuda = func(t_dev, indices_dev, value1d.cuda())
+        out_cpu = func(t, indices, value1d)
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
         for i in range(1, 512):
@@ -832,7 +879,7 @@ class TestIndexing(TestCase):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
-            self.assertEquals(len(w), 2)
+            self.assertEqual(len(w), 2)
 
     def test_byte_mask2d(self, device):
         v = torch.randn(5, 7, 3, device=device)
@@ -1086,7 +1133,7 @@ class TestIndexing(TestCase):
 
         with warnings.catch_warnings(record=True) as w:
             x[b] = value
-            self.assertEquals(len(w), 1)
+            self.assertEqual(len(w), 1)
 
         self.assertEqual(x[0], value)
         self.assertEqual(x[1], torch.arange(4., 8, device=device))
@@ -1495,8 +1542,8 @@ class NumpyTests(TestCase):
         expected = b.float().unsqueeze(1).expand(100, 100)
         self.assertEqual(a, expected)
 
-instantiate_device_type_tests(TestIndexing, globals())
-instantiate_device_type_tests(NumpyTests, globals())
+instantiate_device_type_tests(TestIndexing, globals(), except_for='meta')
+instantiate_device_type_tests(NumpyTests, globals(), except_for='meta')
 
 if __name__ == '__main__':
     run_tests()

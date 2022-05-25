@@ -69,8 +69,8 @@ class TestTensorExprPyBind(JitTestCase):
 
     def test_dynamic_shape(self):
         dN = te.VarHandle(torch.int32)
-        A = te.BufHandle(torch.float64)
-        B = te.BufHandle(torch.float64)
+        A = te.BufHandle([dN], torch.float64)
+        B = te.BufHandle([dN], torch.float64)
 
         def compute(i):
             return A.load(i) - B.load(i)
@@ -91,6 +91,32 @@ class TestTensorExprPyBind(JitTestCase):
 
         test_with_shape(8)
         test_with_shape(31)
+
+    def test_dynamic_shape_2d(self):
+        dN = te.VarHandle(torch.int32)
+        dM = te.VarHandle(torch.int32)
+        A = te.BufHandle([dN, dM], torch.float64)
+        B = te.BufHandle([dN, dM], torch.float64)
+
+        def compute(i, j):
+            return A.load([i, j]) - B.load([i, j])
+
+        C = te.Compute("C", [dN, dM], compute)
+
+        loopnest = te.LoopNest([C])
+        loopnest.prepare_for_codegen()
+
+        cg = te.construct_codegen("ir_eval", loopnest.simplify(), [A, B, C, dN, dM])
+
+        def test_with_shape(n, m):
+            tA = torch.randn(n, m, dtype=torch.double)
+            tB = torch.randn(n, m, dtype=torch.double)
+            tC = torch.empty(n, m, dtype=torch.double)
+            cg.call([tA, tB, tC, n, m])
+            torch.testing.assert_close(tA - tB, tC)
+
+        test_with_shape(2, 4)
+        test_with_shape(5, 3)
 
     def test_dtype_error(self):
         te.BufHandle("a", [1], torch.float32)  # ok
@@ -322,20 +348,14 @@ graph(%x : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
         """
         graph = torch._C.parse_ir(graph_str)
 
-        def my_custom_lowering(inputs, out_shape, out_type, device):
-            def get_dim_args(dims):
-                dim_args = []
-                for dim in dims:
-                    dim_args.append(te.DimArg(dim, "i" + str(len(dim_args))))
-                return dim_args
-
+        def my_custom_lowering(inputs, out_shape, out_stride, out_type, device):
             def compute(idxs):
                 load = inputs[0].as_buf().load(idxs)
                 return te.ifThenElse(
                     te.ExprHandle.isnan(load), te.ExprHandle.float(0.0), load
                 )
 
-            return te.Compute2("custom_nan_to_num", get_dim_args(out_shape), compute)
+            return te.Compute2("custom_nan_to_num", out_shape, compute)
 
         kernel = te.TensorExprKernel(graph, {"aten::nan_to_num": my_custom_lowering})
         res1 = kernel.run((x,))

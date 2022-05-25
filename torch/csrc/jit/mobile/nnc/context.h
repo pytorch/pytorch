@@ -47,6 +47,8 @@ struct TORCH_API OutputSpec {
 
   std::vector<int64_t> sizes_;
   c10::ScalarType dtype_{c10::ScalarType::Undefined};
+  c10::optional<double> qscale_;
+  c10::optional<int64_t> qzero_;
 };
 
 // Hold the temporary buffers / states needed during the execution.
@@ -87,6 +89,16 @@ struct TORCH_API MemoryPlan {
   void allocate(ExecutionState* state) const;
 
   std::vector<int64_t> buffer_sizes_;
+};
+
+// Location of a symbolic shape among dimensions of the inputs
+struct TORCH_API SymbolicShapePosition {
+  SymbolicShapePosition() = default;
+  SymbolicShapePosition(int64_t input_idx, int64_t dim_idx)
+      : input_idx_(input_idx), dim_idx_(dim_idx) {}
+
+  int64_t input_idx_;
+  int64_t dim_idx_;
 };
 
 // Represents a compiled NNC function which has a 1-1 correspondence with a
@@ -156,6 +168,15 @@ class TORCH_API Function {
     memory_plan_ = memory_plan;
   }
 
+  const std::vector<SymbolicShapePosition>& sym_shape_positions() const {
+    return sym_shape_positions_;
+  }
+
+  void set_sym_shape_positions(
+      const std::vector<SymbolicShapePosition>& sym_shape_pos) {
+    sym_shape_positions_ = sym_shape_pos;
+  }
+
  private:
   void init_execution_state() const;
 
@@ -164,6 +185,7 @@ class TORCH_API Function {
   c10::impl::GenericList parameters_{at::AnyType::get()};
   std::vector<InputSpec> input_specs_;
   std::vector<OutputSpec> output_specs_;
+  std::vector<SymbolicShapePosition> sym_shape_positions_;
   MemoryPlan memory_plan_;
   mutable std::unique_ptr<ExecutionState> execution_state_;
 };

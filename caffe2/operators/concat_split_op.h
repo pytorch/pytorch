@@ -7,6 +7,7 @@
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/string_utils.h"
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 
@@ -161,7 +162,7 @@ bool SplitOp<Context>::RunOnDevice() {
       input_channels);
   vector<int64_t> output_dims(input.sizes().vec());
   int before = 1, after = 1;
-  for (int i = 0; i < canonical_axis; ++i) {
+  for (const auto i : c10::irange(canonical_axis)) {
     before *= input.dim32(i);
   }
   for (int i = canonical_axis + 1; i < input.dim(); ++i) {
@@ -174,7 +175,7 @@ bool SplitOp<Context>::RunOnDevice() {
   const auto *const input_ptr = static_cast<const char*>(input.raw_data());
 
   size_t input_offset = 0;
-  for (int i = 0; i < OutputSize(); ++i) {
+  for (const auto i : c10::irange(OutputSize())) {
     auto *const output = Output(i);
     const auto axis_dim = add_axis_ ? 1 : axis_data[i];
     if (!add_axis_) {
@@ -264,7 +265,7 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
     dim_multiplier = 1;
   }
 
-  for (int i = 0; i < OutputSize(); ++i) {
+  for (const auto i : c10::irange(OutputSize())) {
     auto* output = Output(i);
     const auto* axis_offset = axis_data + lengths_length / OutputSize() * i;
     auto axis_dim =
@@ -301,7 +302,7 @@ bool ConcatOp<Context>::RunOnDevice() {
   int adj_size = input_zero.dim() + (add_axis_ ? 1 : 0);
   int canonical_axis = canonical_axis_index_(axis_, adj_size);
   CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
-  for (int i = 1; i < InputSize(); ++i) {
+  for (const auto i : c10::irange(1, InputSize())) {
     CAFFE_ENFORCE_EQ(
         Input(i).dtype(),
         input_zero.dtype(),
@@ -315,7 +316,7 @@ bool ConcatOp<Context>::RunOnDevice() {
 
   int before = 1, after = 1;
   vector<int64_t> output_dims(input_zero.sizes().vec());
-  for (int i = 0; i < input_zero.dim(); ++i) {
+  for (const auto i : c10::irange(input_zero.dim())) {
     if (i == canonical_axis && !add_axis_) {
       continue;
     }
@@ -326,7 +327,7 @@ bool ConcatOp<Context>::RunOnDevice() {
       after *= dim;
     }
     // check the input dims are compatible.
-    for (int j = 1; j < InputSize(); ++j) {
+    for (const auto j : c10::irange(1, InputSize())) {
       int dim_j = Input(j).dim32(i);
       CAFFE_ENFORCE_EQ(
           dim,
@@ -351,7 +352,7 @@ bool ConcatOp<Context>::RunOnDevice() {
   }
 
   int output_channels = 0;
-  for (int i = 0; i < InputSize(); ++i) {
+  for (const auto i : c10::irange(InputSize())) {
     axis_data[i] = add_axis_ ? 1 : Input(i).dim32(canonical_axis);
     output_channels += axis_data[i];
   }
@@ -368,7 +369,7 @@ bool ConcatOp<Context>::RunOnDevice() {
   }
 
   size_t output_offset = 0;
-  for (int i = 0; i < InputSize(); ++i) {
+  for (const auto i : c10::irange(InputSize())) {
     auto& input = Input(i);
     auto axis_dim = add_axis_ ? 1 : input.dim32(canonical_axis);
     math::CopyMatrix<Context>(

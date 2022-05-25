@@ -1,7 +1,7 @@
 #pragma once
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/api/include/torch/imethod.h>
+#include <torch/csrc/deploy/interpreter/Optional.hpp>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <torch/csrc/deploy/noop_environment.h>
 #include <torch/csrc/jit/serialization/import.h>
@@ -95,7 +95,7 @@ struct TORCH_API LoadBalancer {
   }
   void setResourceLimit(size_t n) {
     TORCH_DEPLOY_TRY
-    TORCH_INTERNAL_ASSERT(n <= allocated_);
+    MULTIPY_INTERNAL_ASSERT(n <= allocated_);
     n_ = n;
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }

@@ -1,6 +1,6 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/script.h>
 

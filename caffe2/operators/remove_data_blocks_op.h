@@ -6,6 +6,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -40,7 +41,7 @@ class RemoveDataBlocksOp final : public Operator<Context> {
     const auto* ind_ptr = indices.template data<T>();
 
     std::vector<T> ind_vec;
-    for (int64_t i = 0; i < indices_size; i++) {
+    for (const auto i : c10::irange(indices_size)) {
       ind_vec.push_back(ind_ptr[i]);
     }
     std::sort(ind_vec.begin(), ind_vec.end());
@@ -60,7 +61,7 @@ class RemoveDataBlocksOp final : public Operator<Context> {
 
     ind_vec.insert(ind_vec.begin(), -1);
     int64_t ind_vec_size = ind_vec.size();
-    for (auto i = 0; i < ind_vec_size; i++) {
+    for (const auto i : c10::irange(ind_vec_size)) {
       int64_t interval_start = ind_vec[i] + 1;
       int64_t interval_end =
           (i == ind_vec_size - 1) ? outer_size : ind_vec[i + 1];

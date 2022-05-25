@@ -1,6 +1,11 @@
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
-#include <ATen/native/DispatchStub.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/roll.h>
+#endif
+
 #include <c10/util/Exception.h>
 
 namespace at {
@@ -22,8 +27,5 @@ static inline Tensor roll_common(const Tensor& self, IntArrayRef shifts, IntArra
   auto first_dim_rolled = roll(self, shifts[0], dims[0]);
   return at::roll(first_dim_rolled, tail_shifts, tail_dims);
 }
-
-using flip_fn = void(*)(TensorIterator &, const bool);
-DECLARE_DISPATCH(flip_fn, flip_stub);
 
 }}  // namespace at::native

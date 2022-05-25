@@ -2,38 +2,24 @@
 
 # Common prelude for macos-build.sh and macos-test.sh
 
-sysctl -a | grep machdep.cpu
-
-# shellcheck disable=SC2034
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
-
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-export PATH="/usr/local/bin:$PATH"
-export WORKSPACE_DIR="${HOME}/workspace"
-mkdir -p "${WORKSPACE_DIR}"
 
-if [[ "${COMPACT_JOB_NAME}" == *arm64* ]]; then
-  MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-py38_4.9.2-MacOSX-x86_64.sh"
-else
-  MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-py37_4.8.3-MacOSX-x86_64.sh"
-fi
-
-# If a local installation of conda doesn't exist, we download and install conda
-if [ ! -d "${WORKSPACE_DIR}/miniconda3" ]; then
-  mkdir -p "${WORKSPACE_DIR}"
-  curl --retry 3 ${MINICONDA_URL} -o "${WORKSPACE_DIR}"/miniconda3.sh
-  retry bash "${WORKSPACE_DIR}"/miniconda3.sh -b -p "${WORKSPACE_DIR}"/miniconda3
-fi
-export PATH="${WORKSPACE_DIR}/miniconda3/bin:$PATH"
-# shellcheck disable=SC1091
-source "${WORKSPACE_DIR}"/miniconda3/bin/activate
+sysctl -a | grep machdep.cpu
 
 # NOTE: mkl 2021.3.0+ cmake requires sub-command PREPEND, may break the build
 retry conda install -y \
-  mkl=2021.2.0 mkl-include=2021.2.0 \
-  numpy=1.18.5 pyyaml=5.3 setuptools=46.0.0 \
-  cmake cffi ninja typing_extensions dataclasses pip
+  mkl=2021.2.0 \
+  mkl-include=2021.2.0 \
+  numpy=1.18.5 \
+  pyyaml=5.3 \
+  setuptools=46.0.0 \
+  cmake=3.19 \
+  cffi \
+  ninja \
+  typing_extensions \
+  dataclasses \
+  pip
 
 # The torch.hub tests make requests to GitHub.
 #
@@ -51,10 +37,6 @@ retry conda install -y pillow
 
 # Building with USE_DISTRIBUTED=1 requires libuv (for Gloo).
 retry conda install -y libuv pkg-config
-
-# Image commit tag is used to persist the build from the build job
-# and to retrieve the build from the test job.
-export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 
 # These are required for both the build job and the test job.
 # In the latter to test cpp extensions.

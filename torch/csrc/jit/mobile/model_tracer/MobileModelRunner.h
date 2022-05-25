@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iostream>
+#include <mutex>
 #include <sstream>
 
 #include <torch/csrc/autograd/grad_mode.h>
@@ -32,6 +33,11 @@ class MobileModelRunner {
             at::Device(at::DeviceType::CPU, 0),
             extra_files,
             module_load_options));
+  }
+
+  MobileModelRunner(std::stringstream oss) {
+    module_ = std::make_shared<torch::jit::mobile::Module>(
+        torch::jit::_load_for_mobile(oss, at::Device(at::DeviceType::CPU, 0)));
   }
 
   /**

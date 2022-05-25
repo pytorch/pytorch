@@ -19,6 +19,7 @@ Matrix Properties
     norm
     vector_norm
     matrix_norm
+    diagonal
     det
     slogdet
     cond
@@ -33,6 +34,8 @@ Decompositions
 
     cholesky
     qr
+    lu
+    lu_factor
     eig
     eigvals
     eigh
@@ -48,6 +51,7 @@ Solvers
     :nosignatures:
 
     solve
+    solve_triangular
     lstsq
 
 Inverses
@@ -77,6 +81,7 @@ Matrix Products
     :toctree: generated
     :nosignatures:
 
+    cross
     matmul
     multi_dot
     householder_product
@@ -91,6 +96,15 @@ Tensor Operations
     tensorinv
     tensorsolve
 
+Misc
+----
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    vander
+
 Experimental Functions
 ----------------------
 .. autosummary::
@@ -99,3 +113,7 @@ Experimental Functions
 
     cholesky_ex
     inv_ex
+    lu_factor_ex
+    ldl_factor
+    ldl_factor_ex
+    ldl_solve

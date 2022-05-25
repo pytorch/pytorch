@@ -5,6 +5,8 @@
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/ReduceOps.h>
+#include <ATen/jit_macros.h>
+#include <ATen/OpMathType.h>
 
 namespace at { namespace native {
 
@@ -18,6 +20,35 @@ struct sum_functor {
   }
 };
 
+// jiterated specialization for `complex<Half>`
+const char sum_name[] = "sum";
+template <>
+struct sum_functor<c10::complex<at::Half>> {
+// jiterator reduction fails on windows
+// Ref: https://github.com/pytorch/pytorch/issues/77305
+#if AT_USE_JITERATOR() && !defined(_MSC_VER)
+  void operator()(TensorIterator& iter) {
+    using scalar_t = c10::complex<at::Half>;
+    std::string func = jiterator_stringify(
+    arg_t combine(arg_t a, arg_t b) {
+      return a + b;
+    }
+    );
+    jitted_gpu_reduce_kernel<sum_name, scalar_t, scalar_t>(
+        iter, func, 0.);
+  }
+#else
+  void operator()(TensorIterator& iter) {
+    using scalar_t = c10::complex<at::Half>;
+    using acc_t = at::opmath_type<scalar_t>;
+    gpu_reduce_kernel<scalar_t, scalar_t>(
+        iter, func_wrapper<scalar_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
+          return a + b;
+        }), acc_t{0.});
+  }
+#endif
+};
+
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct nansum_functor {
   void operator()(TensorIterator& iter) {
@@ -26,14 +57,30 @@ struct nansum_functor {
   }
 };
 
+const char prod_name[] = "prod";
+
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct prod_functor {
+  // jiterator reduction fails on windows
+  // Ref: https://github.com/pytorch/pytorch/issues/77305
+  #if AT_USE_JITERATOR() && !defined(_MSC_VER)
+  void operator()(TensorIterator& iter) {
+    std::string func = jiterator_stringify(
+    arg_t combine(arg_t a, arg_t b) {
+      return a * b;
+    }
+    );
+    jitted_gpu_reduce_kernel<prod_name, scalar_t, out_t>(
+        iter, func, 1.);
+  }
+  #else
   void operator()(TensorIterator& iter) {
     gpu_reduce_kernel<scalar_t, out_t>(
         iter, func_wrapper<out_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
           return a * b;
-        }), 1);
+        }), 1.);
   }
+  #endif
 };
 
 // Workaround for the error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
@@ -45,6 +92,31 @@ struct prod_functor<bool> {
           return a && b;
         }), 1);
   }
+};
+
+// jiterated specialization for `complex<Half>`
+template <>
+struct prod_functor<c10::complex<at::Half>> {
+// jiterator reduction fails on windows
+// Ref: https://github.com/pytorch/pytorch/issues/77305
+#if AT_USE_JITERATOR() && !defined(_MSC_VER)
+  void operator()(TensorIterator& iter) {
+    using scalar_t = c10::complex<at::Half>;
+    std::string func =
+        jiterator_stringify(arg_t combine(arg_t a, arg_t b) { return a * b; });
+    jitted_gpu_reduce_kernel<prod_name, scalar_t, scalar_t>(iter, func, 1.);
+  }
+#else
+  void operator()(TensorIterator& iter) {
+    using scalar_t = c10::complex<at::Half>;
+    using acc_t = at::opmath_type<scalar_t>;
+    gpu_reduce_kernel<scalar_t, scalar_t>(
+        iter,
+        func_wrapper<scalar_t>(
+            [] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t { return a * b; }),
+        acc_t{1.});
+  }
+#endif
 };
 
 // The function `reduce_dispatch` below dispatches to the kernel based
@@ -79,8 +151,8 @@ static void reduce_dispatch(TensorIterator& iter, GeneralDispatcher op) {
 
 static void sum_kernel_cuda(TensorIterator& iter){
   auto general_dispatcher = [](TensorIterator& iter) {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(
-        ScalarType::Bool, iter.dtype(), "sum_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+        kBool, kComplexHalf, iter.dtype(), "sum_cuda", [&]() {
           sum_functor<scalar_t>{}(iter);
         });
   };
@@ -100,7 +172,7 @@ static void nansum_kernel_cuda(TensorIterator& iter) {
 
 static void prod_kernel_cuda(TensorIterator& iter) {
   auto general_dispatcher = [](TensorIterator& iter) {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, iter.dtype(), "prod_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kComplexHalf, kBool, iter.dtype(), "prod_cuda", [&]() {
       prod_functor<scalar_t>{}(iter);
     });
   };

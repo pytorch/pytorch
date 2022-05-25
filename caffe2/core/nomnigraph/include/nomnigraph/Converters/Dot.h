@@ -1,6 +1,7 @@
 #ifndef NOM_CONVERTERS_DOT_H
 #define NOM_CONVERTERS_DOT_H
 
+#include "c10/util/irange.h"
 #include "nomnigraph/Graph/Algorithms.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Support/Casting.h"
@@ -42,7 +43,7 @@ class DotGenerator {
     for (const auto& node : sg.getNodes()) {
       generateNode(node, sg, output);
     }
-    for (size_t i = 0; i < subgraphs.size(); ++i) {
+    for (const auto i : c10::irange(subgraphs.size())) {
       const auto& subgraph = subgraphs[i];
       output << "subgraph cluster" << i << " {\n";
       output << "style=dotted;\n";

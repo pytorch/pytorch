@@ -18,6 +18,7 @@ namespace {
 
 bool analyzeIfDerivedFromTrivialReduction(TensorView* tv, IterDomain* id);
 
+// Checks the producer of tv to see if the
 bool traverseToRFactorTensor(TensorView* tv, IterDomain* root_id) {
   TORCH_INTERNAL_ASSERT(
       root_id->definition() == nullptr, "Not root IterDomain: ", root_id);
@@ -29,6 +30,7 @@ bool traverseToRFactorTensor(TensorView* tv, IterDomain* root_id) {
 
   const auto& inputs = tv->definition()->inputs();
 
+  // Check the reduction expression that produces tv
   if (inputs.size() != 1 || !inputs[0]->isA<TensorView>() ||
       (tv->definition()->getExprType() != ExprType::ReductionOp &&
        tv->definition()->getExprType() != ExprType::WelfordOp)) {
@@ -63,8 +65,10 @@ bool analyzeIfDerivedFromTrivialReduction(TensorView* tv, IterDomain* id) {
       continue;
     }
     // If not possible to prove the root ID is trivial, see if the ID
-    // is derived from a rfactor tensor and, if so, continue the
-    // analysis at the rfactor tensor.
+    // is derived from a rfactor tensor. This may mean that the iteration domain
+    // was merged or split in another expression through rfactor. Trace back
+    // through rfactor expressions to find original roots and determine there if
+    // trivial.
     if (!traverseToRFactorTensor(tv, root_id)) {
       return false;
     }
@@ -74,7 +78,7 @@ bool analyzeIfDerivedFromTrivialReduction(TensorView* tv, IterDomain* id) {
 
 } // namespace
 
-void TrivialReductionInfo::build(Fusion* fusion, GpuLower* gpu_lower) {
+void TrivialReductionInfo::build(Fusion* fusion) {
   auto used_vals = fusion->usedMathVals();
 
   for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
@@ -99,20 +103,6 @@ void TrivialReductionInfo::build(Fusion* fusion, GpuLower* gpu_lower) {
       }
     }
   }
-
-  buildKir(fusion, gpu_lower);
-}
-
-void TrivialReductionInfo::buildKir(Fusion* fusion, GpuLower* gpu_lower) {
-  for (auto id : domains_) {
-    auto kir_trivial_id = gpu_lower->lowerValue(id)->as<kir::IterDomain>();
-    kir_domains_.insert(kir_trivial_id);
-  }
-
-  for (auto id : domains_derived_from_root_) {
-    auto kir_trivial_id = gpu_lower->lowerValue(id)->as<kir::IterDomain>();
-    kir_domains_derived_from_root_.insert(kir_trivial_id);
-  }
 }
 
 bool TrivialReductionInfo::isDerived(IterDomain* id) const {
@@ -122,15 +112,6 @@ bool TrivialReductionInfo::isDerived(IterDomain* id) const {
 bool TrivialReductionInfo::isDerivedFromRoot(IterDomain* id) const {
   return domains_derived_from_root_.find(id) !=
       domains_derived_from_root_.end();
-}
-
-bool TrivialReductionInfo::isDerived(kir::IterDomain* id) const {
-  return kir_domains_.find(id) != kir_domains_.end();
-}
-
-bool TrivialReductionInfo::isDerivedFromRoot(kir::IterDomain* id) const {
-  return kir_domains_derived_from_root_.find(id) !=
-      kir_domains_derived_from_root_.end();
 }
 
 } // namespace cuda

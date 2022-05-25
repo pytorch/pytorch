@@ -21,7 +21,7 @@ class TORCH_CUDA_CU_API ParallelDimensionMap {
 
   //! Returns the dimension of a ParallelType. nullptr is returned if
   //! a ParallelType is unused.
-  kir::Val* get(ParallelType pt) const;
+  Val* get(ParallelType pt) const;
 
   //! True if the dimension of a ParallelType is known to be exact
   bool isExact(ParallelType pt) const;
@@ -29,7 +29,7 @@ class TORCH_CUDA_CU_API ParallelDimensionMap {
   std::string toString() const;
 
   //! Symbolically analyze if two extent vals are equal
-  static bool equalDim(kir::Val* dim1, kir::Val* dim2);
+  static bool equalDim(Val* dim1, Val* dim2);
 
  private:
   //! Register the extent of an IterDomain if its constant
@@ -45,12 +45,16 @@ class TORCH_CUDA_CU_API ParallelDimensionMap {
       ParallelType pt,
       const std::unordered_set<IterDomain*>& dom_set);
 
+  //! TIDx may need to be marked as non-exact as it may be padded to a
+  //! multiple of the warp size.
+  void adjustMappingsForWarpPadding();
+
   static IterDomain* getCAMappedConcreteDomain(IterDomain* id);
 
  private:
   //! Maps from parallel types to dimensions, which are constant if
   //! a unique value is found.
-  std::unordered_map<ParallelType, kir::Val*, TypeHash> dim_map_;
+  std::unordered_map<ParallelType, Val*, TypeHash> dim_map_;
   //! Set of parallel types whose dimensions are identified to be
   //! exactly the same as extents of mapped domains.
   std::unordered_set<ParallelType, TypeHash> exact_types_;

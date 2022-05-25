@@ -83,7 +83,8 @@ StorePtr BufHandle::store(
 
 ExprPtr flatten_index(
     const std::vector<ExprPtr>& dims,
-    const std::vector<ExprPtr>& indices) {
+    const std::vector<ExprPtr>& indices,
+    const std::vector<ExprPtr>& strides) {
   // Handle already flattened indices first
   if (indices.size() == 1) {
     return indices[0];
@@ -93,17 +94,12 @@ ExprPtr flatten_index(
   if (ndim != indices.size()) {
     throw malformed_input("dimensions mismatch in flatten_index");
   }
+  if (ndim != strides.size()) {
+    throw malformed_input("strides mismatch in flatten_index");
+  }
   if (ndim == 0) {
     return alloc<LongImm>(0);
   }
-  std::vector<ExprPtr> strides(ndim);
-  // stride[i] = stride[i+1]*dims[i+1], i < ndim-1
-  // stride[i] = 1,                     i = ndim-1
-  strides[ndim - 1] = immLike(dims[ndim - 1], 1);
-  for (size_t i = 1; i < ndim; i++) {
-    strides[ndim - 1 - i] = alloc<Mul>(strides[ndim - i], dims[ndim - i]);
-  }
-
   ExprPtr total_index = immLike(indices[0], 0);
   for (const auto i : c10::irange(ndim)) {
     total_index = alloc<Add>(total_index, alloc<Mul>(indices[i], strides[i]));
@@ -196,6 +192,38 @@ ExternalCallPtr ExternalCall::make(
       buf.node(), func_name, buf_arg_nodes, ExprHandleVectorToExprVector(args));
 }
 
+ExternalCallWithAllocPtr ExternalCallWithAlloc::make(
+    const std::string& func_name,
+    const std::vector<BufHandle>& buf_out_args,
+    const std::vector<BufHandle>& buf_args,
+    const std::vector<ExprHandle>& args) {
+  std::vector<BufPtr> buf_out_arg_nodes;
+  buf_out_arg_nodes.reserve(buf_out_args.size());
+  for (const BufHandle& buf_out_arg : buf_out_args) {
+    buf_out_arg_nodes.push_back(buf_out_arg.node());
+  }
+
+  std::vector<BufPtr> buf_arg_nodes;
+  buf_arg_nodes.reserve(buf_args.size());
+  for (const BufHandle& buf_arg : buf_args) {
+    buf_arg_nodes.push_back(buf_arg.node());
+  }
+  return alloc<ExternalCallWithAlloc>(
+      func_name,
+      buf_out_arg_nodes,
+      buf_arg_nodes,
+      ExprHandleVectorToExprVector(args));
+}
+
+FreeExtPtr FreeExt::make(const std::vector<BufHandle>& bufs) {
+  std::vector<BufPtr> buf_nodes;
+  buf_nodes.reserve(bufs.size());
+  for (const BufHandle& buf : bufs) {
+    buf_nodes.push_back(buf.node());
+  }
+  return alloc<FreeExt>(buf_nodes);
+}
+
 std::vector<ExprPtr> ExprHandleVectorToExprVector(
     const std::vector<ExprHandle>& v) {
   std::vector<ExprPtr> result(v.size());
@@ -238,6 +266,26 @@ bool immediateIsNegative(ExprPtr e) {
     return imm->value() < 0;                 \
   }
   AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
+#undef TYPE_CASE
+  return false;
+}
+
+bool immediateIsPositive(ExprPtr e) {
+#define TYPE_CASE(Type, Name)                \
+  if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
+    return imm->value() > 0;                 \
+  }
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+#undef TYPE_CASE
+  return false;
+}
+
+bool immediateIsZero(ExprPtr e) {
+#define TYPE_CASE(Type, Name)                \
+  if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
+    return imm->value() == 0;                \
+  }
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
   return false;
 }

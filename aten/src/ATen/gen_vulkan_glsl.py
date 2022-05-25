@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 
 import argparse
+import glob
 import sys
 import os
-from tools.codegen.code_template import CodeTemplate
+from torchgen.code_template import CodeTemplate
 
 H_NAME = "glsl.h"
 CPP_NAME = "glsl.cpp"
-DEFAULT_ENV = {"precision": "highp"}
+DEFAULT_ENV = {"precision": "highp", "format": "rgba32f"}
 
 def findAllGlsls(path):
-    cmd = "find " + path + " -name \"*.glsl\""
-    vexs = os.popen(cmd).read().split('\n')
+    vexs = glob.glob(os.path.join(path, '**', '*.glsl'), recursive=True)
     output = []
     for f in vexs:
         if len(f) > 1:

@@ -1,6 +1,6 @@
 #pragma once
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <vector>
 
@@ -51,9 +51,12 @@ class TORCH_API IRMutator {
   virtual StmtPtr mutate(AtomicAddPtr v);
   virtual StmtPtr mutate(SyncThreadsPtr v);
   virtual StmtPtr mutate(ExternalCallPtr v);
+  virtual StmtPtr mutate(ExternalCallWithAllocPtr v);
 
   virtual StmtPtr mutate(AllocatePtr v);
   virtual StmtPtr mutate(FreePtr v);
+  virtual StmtPtr mutate(FreeExtPtr v);
+  virtual StmtPtr mutate(PlacementAllocatePtr v);
   virtual StmtPtr mutate(LetPtr v);
   virtual StmtPtr mutate(CondPtr v);
 };

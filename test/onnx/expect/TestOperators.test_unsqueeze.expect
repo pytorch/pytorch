@@ -3,19 +3,29 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    output: "1"
-    name: "Unsqueeze_0"
-    op_type: "Unsqueeze"
+    output: "onnx::Unsqueeze_1"
+    name: "Constant_0"
+    op_type: "Constant"
     attribute {
-      name: "axes"
-      ints: 2
-      type: INTS
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\002\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
     }
   }
-  name: "torch-jit-export"
+  node {
+    input: "onnx::Unsqueeze_0"
+    input: "onnx::Unsqueeze_1"
+    output: "2"
+    name: "Unsqueeze_1"
+    op_type: "Unsqueeze"
+  }
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Unsqueeze_0"
     type {
       tensor_type {
         elem_type: 1
@@ -31,7 +41,7 @@ graph {
     }
   }
   output {
-    name: "1"
+    name: "2"
     type {
       tensor_type {
         elem_type: 1
@@ -51,5 +61,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }

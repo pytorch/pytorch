@@ -1,7 +1,15 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/sparse/ParamUtils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/ATen.h>
+#include <ATen/WrapDimUtils.h>
 #include <tuple>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty_like_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -18,7 +26,7 @@ std::pair<Tensor, Tensor> softmax_sparse_input_preprocessing(
           ": with half to float conversion is not supported on " +
           input_.device().str());
   auto input = input_.coalesce();
-  Tensor output = at::native::empty_like(input);
+  Tensor output = at::native::empty_like_sparse_coo(input);
   TORCH_CHECK(
       dim_ >= 0 && dim_ < input.dim(),
       ": dim must be non-negative and less than input dimensions");
@@ -39,7 +47,7 @@ std::tuple<Tensor, Tensor, Tensor> softmax_backward_sparse_input_preprocessing(
   auto grad = grad_.coalesce();
   auto output = output_.coalesce();
 
-  Tensor grad_input = at::native::empty_like(output);
+  Tensor grad_input = at::native::empty_like_sparse_coo(output);
   TORCH_CHECK(
       dim >= 0 && dim < grad.dim(),
       ": dim must be non-negative and less than input dimensions");

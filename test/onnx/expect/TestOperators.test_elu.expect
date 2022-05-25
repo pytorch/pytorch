@@ -13,7 +13,7 @@ graph {
       type: FLOAT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "input"
     type {
@@ -60,5 +60,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }

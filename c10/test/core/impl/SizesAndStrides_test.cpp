@@ -3,6 +3,10 @@
 #include <c10/core/impl/SizesAndStrides.h>
 #include <c10/util/irange.h>
 
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wself-assign-overloaded"
+#endif
+
 using namespace c10;
 using namespace c10::impl;
 
@@ -201,7 +205,7 @@ static SizesAndStrides makeBig(int offset = 0) {
 
 static void checkSmall(const SizesAndStrides& sm, int offset = 0) {
   std::vector<int64_t> sizes(3), strides(3);
-  for (int ii = 0; ii < 3; ++ii) {
+  for (const auto ii : c10::irange(3)) {
     sizes[ii] = ii + 1 + offset;
     strides[ii] = 2 * (ii + 1 + offset);
   }
@@ -210,7 +214,7 @@ static void checkSmall(const SizesAndStrides& sm, int offset = 0) {
 
 static void checkBig(const SizesAndStrides& big, int offset = 0) {
   std::vector<int64_t> sizes(8), strides(8);
-  for (int ii = 0; ii < 8; ++ii) {
+  for (const auto ii : c10::irange(8)) {
     sizes[ii] = ii - 1 + offset;
     strides[ii] = 2 * (ii - 1 + offset);
   }

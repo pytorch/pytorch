@@ -196,6 +196,34 @@ class StmtsReadingBuf : public IRVisitor {
   std::vector<StmtPtr> reads_;
 };
 
+class ExternalAllocBufFinder : public IRVisitor {
+ public:
+  void visit(ExternalCallWithAllocPtr v) override {
+    const auto& bufs_out = v->buf_out_args();
+    bufs_.insert(bufs_out.begin(), bufs_out.end());
+    IRVisitor::visit(v);
+  }
+
+  static std::unordered_set<BufPtr> find(StmtPtr s) {
+    ExternalAllocBufFinder f;
+    s->accept(&f);
+    return f.bufs();
+  }
+
+  static std::unordered_set<BufPtr> find(ExprPtr e) {
+    ExternalAllocBufFinder f;
+    e->accept(&f);
+    return f.bufs();
+  }
+
+  const std::unordered_set<BufPtr>& bufs() {
+    return bufs_;
+  }
+
+ private:
+  std::unordered_set<BufPtr> bufs_;
+};
+
 // Traverses the IR to determine if a particular Var is modified within it.
 class ModifiesVarChecker : public IRVisitor {
  public:
@@ -246,6 +274,103 @@ class ModifiesVarChecker : public IRVisitor {
 
   VarPtr var_;
   bool found_{false};
+};
+
+// Traverse the Block stmt to identify the live range of the specified buf. The
+// live range, indicated by a pair of integers, specifies the first and last
+// stmt in block stmts that access to the buf.
+class BufLiveRange : public IRVisitor {
+ public:
+  BufLiveRange(BufPtr b) : buf_(b) {}
+
+  static std::tuple<int32_t, int32_t> liveRange(StmtPtr s, BufPtr b) {
+    BlockPtr block = to<Block>(s);
+    // We Only analze buffer live ranges for block stmts.
+    if (!block) {
+      return std::make_tuple(0, 0);
+    }
+
+    BufLiveRange analyzer(b);
+    block->accept(&analyzer);
+    return analyzer.getLiveRange();
+  }
+
+ private:
+  std::tuple<int32_t, int32_t> getLiveRange() {
+    return std::make_tuple(begin_, end_);
+  }
+
+  bool hasBufReads(StmtPtr s) {
+    auto loads1 = NodeFinder<Load>::find(s);
+    for (auto l : loads1) {
+      if (l->buf() == buf_) {
+        return true;
+      }
+    }
+    auto loads2 = NodeFinder<ExternalCall>::find(s);
+    for (auto l : loads2) {
+      for (auto lb : l->buf_args()) {
+        if (lb == buf_) {
+          return true;
+        }
+      }
+    }
+    auto loads3 = NodeFinder<ExternalCallWithAlloc>::find(s);
+    for (auto l : loads3) {
+      for (auto lb : l->buf_args()) {
+        if (lb == buf_) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  bool hasBufWrites(StmtPtr s) {
+    auto writes1 = NodeFinder<Store>::find(s);
+    for (auto w : writes1) {
+      if (w->buf() == buf_) {
+        return true;
+      }
+    }
+    auto writes2 = NodeFinder<ExternalCall>::find(s);
+    for (auto w : writes2) {
+      if (w->buf() == buf_) {
+        return true;
+      }
+    }
+    auto writes3 = NodeFinder<ExternalCallWithAlloc>::find(s);
+    for (auto w : writes3) {
+      for (auto wb : w->buf_out_args()) {
+        if (wb == buf_) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  void findAccAndUpdateLiveRange(StmtPtr s) {
+    bool has_reads = hasBufReads(s), has_writes = hasBufWrites(s);
+    if (has_reads || has_writes) {
+      if (begin_ == -1) {
+        begin_ = curr_index_;
+      };
+      end_ = curr_index_;
+    }
+  }
+
+  void visit(BlockPtr v) {
+    for (StmtPtr s : *v) {
+      curr_index_ += 1;
+      findAccAndUpdateLiveRange(s);
+    }
+  }
+
+  BufPtr buf_;
+  int32_t begin_ = -1;
+  int32_t end_ = -1;
+  int32_t curr_index_ = -1;
 };
 
 // A class that analyzes the given program relevant for Block backend

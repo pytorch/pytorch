@@ -3,6 +3,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -48,7 +49,7 @@ class GatherByKeyOp : public Operator<CPUContext> {
     CAFFE_ENFORCE_GE(outShape.size(), 1);
     auto totalSize = in0Shape[0];
     auto meta = Input(1).dtype();
-    for (int i = 2; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(2, InputSize())) {
       const auto& input = Input(i);
       CAFFE_ENFORCE(meta == input.dtype());
       CAFFE_ENFORCE_GE(input.dim(), 1);
@@ -66,7 +67,7 @@ class GatherByKeyOp : public Operator<CPUContext> {
     const auto blockSize = outTensor->size_from_dim(1);
 
     inputDatas_.resize(numPartitions);
-    for (int i = 0; i < numPartitions; ++i) {
+    for (const auto i : c10::irange(numPartitions)) {
       inputDatas_[i] = static_cast<const char*>(Input(i + 1).raw_data());
     }
     inStartOffsets_.assign(numPartitions, 0);
@@ -127,7 +128,7 @@ class PartitionOpBase : public Operator<CPUContext> {
     int64_t size = main_input.numel();
     const Index* data = main_input.template data<Index>();
     counts_.assign(partitions, 0);
-    for (int64_t p = 0; p < size; p++) {
+    for (const auto p : c10::irange(size)) {
       int shard = moduloPartition(data[p], partitions);
       ++counts_[shard];
     }
@@ -136,7 +137,7 @@ class PartitionOpBase : public Operator<CPUContext> {
     block_sizes_.resize(inputSize);
     metas_.resize(inputSize);
     out_datas_.resize(OutputSize());
-    for (int i = mainInputIndex; i < inputSize; ++i) {
+    for (const auto i : c10::irange(mainInputIndex, inputSize)) {
       auto& input = Input(i);
       if (i > mainInputIndex) {
         CAFFE_ENFORCE_GE(
@@ -145,7 +146,7 @@ class PartitionOpBase : public Operator<CPUContext> {
             "Prefix of extra input's shape must match main input's shape, ",
             "input: ",
             i);
-        for (int j = 0; j < main_input.dim(); ++j) {
+        for (const auto j : c10::irange(main_input.dim())) {
           CAFFE_ENFORCE_GE(
               input.size(j),
               main_input.size(j),
@@ -162,7 +163,7 @@ class PartitionOpBase : public Operator<CPUContext> {
       // shape = partition_size + suffix of input dims
       vector<int64_t> shape(
           input.sizes().begin() + main_input.dim() - 1, input.sizes().end());
-      for (int j = 0; j < partitions; ++j) {
+      for (const auto j : c10::irange(partitions)) {
         int out_idx = i + j * inputSize;
         auto output = Output(out_idx);
         shape[0] = counts_[j];
@@ -172,7 +173,7 @@ class PartitionOpBase : public Operator<CPUContext> {
     }
 
     counts_.assign(partitions, 0);
-    for (int64_t p = 0; p < size; p++) {
+    for (const auto p : c10::irange(size)) {
       int shard = moduloPartition(data[p], partitions);
       int64_t idx = counts_[shard]++;
 
@@ -254,7 +255,7 @@ class LengthsPartitionOp : public PartitionOpBase {
 
     if (partitions == 1) {
       // Specialization when partitions == 1 which just becomes a copy.
-      for (int i = 0; i < InputSize(); ++i) {
+      for (const auto i : c10::irange(InputSize())) {
         auto& input = Input(i);
         auto& output = *Output(i);
         output.ResizeLike(input);
@@ -279,14 +280,14 @@ class LengthsPartitionOp : public PartitionOpBase {
     int64_t elements = length_input.numel();
     const int32_t* lengths_data = length_input.template data<int32_t>();
     out_length_.resize(partitions);
-    for (int i = 0; i < partitions; ++i) {
+    for (const auto i : c10::irange(partitions)) {
       auto& output = *Output(i * InputSize());
       output.Resize(elements);
       out_length_[i] = output.template mutable_data<int32_t>();
     }
 
     int total_length = 0;
-    for (int i = 0; i < elements; ++i) {
+    for (const auto i : c10::irange(elements)) {
       total_length += lengths_data[i];
     }
     CAFFE_ENFORCE(
@@ -294,8 +295,8 @@ class LengthsPartitionOp : public PartitionOpBase {
         "Total length is not matching to the number of elements");
 
     int index = 0;
-    for (int i = 0; i < elements; ++i) {
-      for (int j = 0; j < partitions; ++j) {
+    for (const auto i : c10::irange(elements)) {
+      for (const auto j : c10::irange(partitions)) {
         out_length_[j][i] = 0;
       }
       for (int j = 0; j < lengths_data[i]; ++j, ++index) {

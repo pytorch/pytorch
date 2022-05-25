@@ -9,7 +9,7 @@ namespace impl {
 
 // FakeGuardImpl is hardcoded to have eight devices.  Not for
 // any good reason, just to simplify code.
-constexpr size_t kFakeGuardImplMaxDevices = 8;
+constexpr DeviceIndex kFakeGuardImplMaxDevices = 8;
 
 /**
  * A fake implementation of DeviceGuardImplInterface suitable for testing.
@@ -21,7 +21,7 @@ struct FakeGuardImpl final : public DeviceGuardImplInterface {
   static constexpr DeviceType static_type = T;
   // Runtime device type is not used
   FakeGuardImpl(DeviceType) {}
-  FakeGuardImpl() {}
+  FakeGuardImpl() = default;
   DeviceType type() const override {
     return T;
   }

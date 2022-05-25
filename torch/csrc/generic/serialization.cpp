@@ -2,36 +2,36 @@
 #define TH_GENERIC_FILE "torch/csrc/generic/serialization.cpp"
 #else
 
-#ifdef THC_GENERIC_FILE
-#include <c10/cuda/CUDAGuard.h>
-#endif
+#include <c10/core/CPUAllocator.h>
 
 // save_save is necessary since the old eager format saved storages as
 // [size + data], but the v1.5 eager format removes this since size is saved in
 // the filesize.
 template <class io>
-void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size, uint64_t element_size)
+void THPStorage_(writeFileRaw)(c10::StorageImpl *self, io fd, bool save_size, uint64_t element_size)
 {
-#ifdef THC_GENERIC_FILE
-  c10::cuda::CUDAGuard guard(self->device());
-#endif
-
+  c10::DeviceGuard guard(self->device());
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   scalar_t *data;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  std::unique_ptr<char[]> cpu_data;
   int64_t size_bytes = self->nbytes();
   int64_t numel = size_bytes / element_size;
-#ifndef THC_GENERIC_FILE
-  data = THWStorage_(data)(LIBRARY_STATE self);
-#else
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::unique_ptr<char[]> cpu_data(new char[size_bytes]);
-  data = (scalar_t*)cpu_data.get();
-  C10_CUDA_CHECK(cudaMemcpy(
-      data,
-      THWStorage_(data)(LIBRARY_STATE self),
-      size_bytes,
-      cudaMemcpyDeviceToHost));
+  if (self->device_type() == at::kCPU) {
+    data = self->data<scalar_t>();
+#ifdef USE_CUDA
+  } else if (self->device_type() == at::kCUDA) {
+    cpu_data = std::unique_ptr<char[]>(new char[size_bytes]);
+    data = (scalar_t*)cpu_data.get();
+    C10_CUDA_CHECK(cudaMemcpy(
+        data,
+        self->data<scalar_t>(),
+        size_bytes,
+        cudaMemcpyDeviceToHost));
 #endif
+  } else {
+    TORCH_CHECK(false, "writeFileRaw: Device not recognized: ", self->device_type());
+  }
   if (save_size) {
     if (torch::utils::THP_nativeByteOrder() ==
         torch::utils::THPByteOrder::THP_LITTLE_ENDIAN)
@@ -84,19 +84,17 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size, uint64_t
   }
 }
 
-template void THPStorage_(writeFileRaw<int>)(THWStorage *self, int fd, bool save_size, uint64_t element_size);
-template void THPStorage_(writeFileRaw<PyObject*>)(THWStorage *self, PyObject* fd, bool save_size, uint64_t element_size);
+template void THPStorage_(writeFileRaw<int>)(c10::StorageImpl *self, int fd, bool save_size, uint64_t element_size);
+template void THPStorage_(writeFileRaw<PyObject*>)(c10::StorageImpl *self, PyObject* fd, bool save_size, uint64_t element_size);
 
 template <class io>
-THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage, uint64_t element_size)
+c10::intrusive_ptr<c10::StorageImpl> THPStorage_(readFileRaw)(
+    io file, c10::intrusive_ptr<c10::StorageImpl> storage, uint64_t element_size)
 {
-#ifdef THC_GENERIC_FILE
-  c10::cuda::OptionalCUDAGuard guard;
-  if (_storage != nullptr) {
-    guard.set_device(_storage->device());
+  c10::OptionalDeviceGuard guard;
+  if (storage.defined()) {
+    guard.reset_device(storage->device());
   }
-#endif
-
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   scalar_t *data;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -111,26 +109,30 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage, uint64_t el
     torch::utils::THP_decodeInt64Buffer(
         &nbytes, (const uint8_t*)&nsize, torch::utils::THP_nativeByteOrder(), 1);
   }
-  THWStoragePtr storage;
-  if (_storage == nullptr) {
-    storage = THWStorage_(newWithSize)(LIBRARY_STATE nbytes);
+  if (!storage.defined()) {
+    storage = c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      nbytes,
+      c10::GetDefaultCPUAllocator(),
+      /*resizable=*/true);
   } else {
-    int64_t _storage_nbytes = _storage->nbytes();
-    THPUtils_assert(
+    int64_t _storage_nbytes = storage->nbytes();
+    TORCH_CHECK(
         _storage_nbytes == nbytes,
         "storage has wrong byte size: expected %ld got %ld",
         nbytes,
         _storage_nbytes);
-    storage = _storage;
   }
 
-#ifndef THC_GENERIC_FILE
-  data = THWStorage_(data)(LIBRARY_STATE storage);
-#else
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::unique_ptr<char[]> cpu_data(new char[nbytes]);
-  data = (scalar_t*)cpu_data.get();
-#endif
+  std::unique_ptr<char[]> cpu_data;
+
+  if (storage->device_type() == at::kCPU) {
+    data = storage->data<scalar_t>();
+  } else {
+    cpu_data = std::unique_ptr<char[]>(new char[nbytes]);
+    data = (scalar_t*)cpu_data.get();
+  }
 
   // fast track for bytes and little endian
   if (element_size == 1 ||
@@ -170,13 +172,17 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage, uint64_t el
     }
   }
 
-#ifdef THC_GENERIC_FILE
-  C10_CUDA_CHECK(cudaMemcpy(THWStorage_(data)(LIBRARY_STATE storage), data, nbytes, cudaMemcpyHostToDevice));
+#ifdef USE_CUDA
+  if (storage->device_type() == at::kCUDA) {
+    C10_CUDA_CHECK(cudaMemcpy(storage->data<scalar_t>(), data, nbytes, cudaMemcpyHostToDevice));
+  }
 #endif
-  return storage.release();
+  return storage;
 }
 
-template THWStorage* THPStorage_(readFileRaw<int>)(int fd, THWStorage* storage, uint64_t element_size);
-template THWStorage* THPStorage_(readFileRaw<PyObject*>)(PyObject* fd, THWStorage* storage, uint64_t element_size);
+template c10::intrusive_ptr<c10::StorageImpl> THPStorage_(readFileRaw<int>)(
+    int fd, c10::intrusive_ptr<c10::StorageImpl> storage, uint64_t element_size);
+template c10::intrusive_ptr<c10::StorageImpl> THPStorage_(readFileRaw<PyObject*>)(
+    PyObject* fd, c10::intrusive_ptr<c10::StorageImpl> storage, uint64_t element_size);
 
 #endif

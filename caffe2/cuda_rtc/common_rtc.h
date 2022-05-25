@@ -120,7 +120,7 @@ inline std::string GetUniqueName() {
 
   std::stringstream ss;
   ss << "_cuda_kernel_";
-  for (int i = 0; i < len; ++i) {
+  for (const auto i : c10::irange(len)) {
     ss << alpha[rand() % (sizeof(alpha) - 1)];
   }
   return ss.str();

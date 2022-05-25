@@ -39,6 +39,7 @@ class C10_CUDA_API CUDAError : public c10::Error {
     cudaError_t __err = EXPR;                                       \
     if (__err != cudaSuccess) {                                     \
       auto error_unused C10_UNUSED = cudaGetLastError();            \
+      (void)error_unused;                                           \
       auto _cuda_check_suffix = c10::cuda::get_cuda_check_suffix(); \
       throw c10::CUDAError(                                         \
           {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},    \
@@ -57,8 +58,29 @@ class C10_CUDA_API CUDAError : public c10::Error {
     cudaError_t __err = EXPR;                                  \
     if (__err != cudaSuccess) {                                \
       auto error_unused C10_UNUSED = cudaGetLastError();       \
+      (void)error_unused;                                      \
       TORCH_WARN("CUDA warning: ", cudaGetErrorString(__err)); \
     }                                                          \
+  } while (0)
+
+// Indicates that a CUDA error is handled in a non-standard way
+#define C10_CUDA_ERROR_HANDLED(EXPR) EXPR
+
+// Intentionally ignore a CUDA error
+#define C10_CUDA_IGNORE_ERROR(EXPR)                             \
+  do {                                                          \
+    cudaError_t __err = EXPR;                                   \
+    if (__err != cudaSuccess) {                                 \
+      cudaError_t error_unused C10_UNUSED = cudaGetLastError(); \
+      (void)error_unused;                                       \
+    }                                                           \
+  } while (0)
+
+// Clear the last CUDA error
+#define C10_CUDA_CLEAR_ERROR()                                \
+  do {                                                        \
+    cudaError_t error_unused C10_UNUSED = cudaGetLastError(); \
+    (void)error_unused;                                       \
   } while (0)
 
 // This should be used directly after every kernel launch to ensure

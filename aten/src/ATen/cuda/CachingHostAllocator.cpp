@@ -1,295 +1,405 @@
 #include <ATen/cuda/CachingHostAllocator.h>
-#include <ATen/DeviceGuard.h>
-#include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/cuda/detail/CUDAHooks.h>
 
+#include <ATen/DeviceGuard.h>
+#include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/detail/CUDAHooks.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 
 #include <cuda_runtime_api.h>
+#include <stdint.h>
 #include <deque>
 #include <memory>
 #include <mutex>
-#include <stdint.h>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
-#include <set>
 #include <utility>
 
 namespace at {
 namespace cuda {
 namespace {
 
-struct BlockSize
-{
-  size_t  size; // allocation size
-  void*   ptr;  // host memory pointer
-
-  BlockSize(size_t size, void* ptr=NULL) : size(size), ptr(ptr) {}
+struct BlockSize {
+  size_t size_{0};
+  void* ptr_{nullptr};
 };
 
-struct Block : public BlockSize
-{
-  bool  allocated;    // true if the block is currently allocated
-  int   event_count;  // number of outstanding cuda events
-  std::unordered_set<at::cuda::CUDAStream> streams;
+struct Block {
+  size_t size_{0};
+  void* ptr_{nullptr};
 
-  Block(size_t size, void* ptr, bool allocated) :
-      BlockSize(size, ptr), allocated(allocated), event_count(0), streams() {}
+  std::mutex mutex_;
+  bool allocated_{false};
+  size_t event_count_{0};
+  std::unordered_set<at::cuda::CUDAStream> streams_;
 };
 
-static bool BlockComparator(const BlockSize& a, const BlockSize& b)
-{
-  // sort by size, break ties with pointer
-  if (a.size != b.size) {
-    return a.size < b.size;
+// Note: cudaEventCreate when concurrently invoked from multiple threads can be
+// very expensive (at least on certain device/driver combinations). Thus, we a)
+// serialize event creation at a per-device level, and b) pool the events to
+// avoid constantly calling cudaEventCreate/cudaEventDestroy. This results in
+// significant improvements in multithreaded workloads with high allocation
+// rates.
+class EventPool {
+ public:
+  using Event = std::unique_ptr<
+      at::cuda::CUDAEvent,
+      std::function<void(at::cuda::CUDAEvent*)>>;
+  EventPool() : pools_(at::cuda::device_count()) {}
+
+  Event get(DeviceIndex device) {
+    TORCH_INTERNAL_ASSERT(0 <= device);
+    TORCH_INTERNAL_ASSERT(device < static_cast<DeviceIndex>(pools_.size()));
+    auto& pool = pools_[device];
+    auto destructor = [&pool](at::cuda::CUDAEvent* event) {
+      std::lock_guard<std::mutex> g(pool.mutex_);
+      pool.event_pool_.push_back(std::unique_ptr<at::cuda::CUDAEvent>(event));
+    };
+
+    // Try to acquire an event from the per-device pool.
+    {
+      std::lock_guard<std::mutex> g(pool.mutex_);
+      if (!pool.event_pool_.empty()) {
+        auto* event = pool.event_pool_.back().release();
+        pool.event_pool_.pop_back();
+        return Event(event, destructor);
+      }
+    }
+    // otherwise, allocate a new event that will be returned to the pool on
+    // destruction.
+    return Event(
+        std::make_unique<at::cuda::CUDAEvent>(cudaEventDisableTiming).release(),
+        destructor);
   }
-  return (uintptr_t)a.ptr < (uintptr_t)b.ptr;
-}
 
-struct HostAllocator
-{
-  typedef bool (*Comparison)(const BlockSize&, const BlockSize&);
+  void empty_cache() {
+    for (auto& pool : pools_) {
+      std::lock_guard<std::mutex> g(pool.mutex_);
+      pool.event_pool_.clear();
+    }
+  }
 
-  // lock around all operations
-  std::mutex mutex;
+ private:
+  struct PerDevicePool {
+    alignas(64) std::mutex mutex_;
+    std::vector<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
+  };
+  std::vector<PerDevicePool> pools_;
+};
 
-  // blocks by pointer
-  std::unordered_map<void*, Block> blocks;
+// Used for heterogenous lookup support in the free list.
+struct BlockComparator {
+  using is_transparent = void;
+  bool operator()(const Block* a, const Block* b) const {
+    if (a->size_ != b->size_) {
+      return a->size_ < b->size_;
+    }
+    return (uintptr_t)a->ptr_ < (uintptr_t)b->ptr_;
+  }
 
-  // pointers that are ready to be allocated (event_count=0)
-  std::set<BlockSize, Comparison> available;
+  // Transparent overloads
+  bool operator()(const Block* a, BlockSize b) const {
+    if (a->size_ != b.size_) {
+      return a->size_ < b.size_;
+    }
+    return (uintptr_t)a->ptr_ < (uintptr_t)b.ptr_;
+  }
+  bool operator()(BlockSize a, const Block* b) const {
+    if (a.size_ != b->size_) {
+      return a.size_ < b->size_;
+    }
+    return (uintptr_t)a.ptr_ < (uintptr_t)b->ptr_;
+  }
+};
 
-  // outstanding cuda events
-  std::deque<std::pair<cudaEvent_t, void*>> cuda_events;
-
-  HostAllocator() : available(BlockComparator) {}
-
-  cudaError_t malloc(void** ptr, size_t size)
-  {
-    std::lock_guard<std::mutex> lock(mutex);
-
-    // process outstanding cuda events which may have occurred
-    cudaError_t err = processEvents();
-    if (err != cudaSuccess) {
-      return err;
+/**
+ * Note [CUDAHostAllocator design]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * We have three key data structures - the free list which stores blocks that
+ * are not currently used, the block list which stores all blocks that have been
+ * allocated, and the event queue which stores CUDA events and their
+ * corresponding blocks.
+ *
+ * Each of these are protected by a separate mutex. The key design principles
+ * are to 1) only hold each mutex for the minimal amount of time possible, 2)
+ * never do any possible expensive operations (such as CUDA runtime API calls)
+ * while holding the lock.
+ *
+ * There are three public methods: allocate, free, and record_event. In the
+ * allocate path, we first check to see if we can service our request from this
+ * free list, and otherwise we create a new block with cudaHostAlloc. In the
+ * free path, we insert events (if required) into the event queue, and if
+ * possible insert our block back into the free list. In allocate, we first
+ * eagerly query events until we find one that is not ready, and insert the
+ * corresponding block onto the free list if all the events recorded for a
+ * block are ready. In the record_event path, we simply insert the given
+ * stream into the set of streams tracked by the specified block. This set of
+ * streams is then consumed in the free path.
+ *
+ * Some of the invariants here are less strict than they could be - for example,
+ * we do not enforce that free(Block* block) => block->event_count == 0. This is
+ * for compatibility reasons, and we can explore enforcing these in subsequent
+ * versions.
+ */
+class CUDAHostAllocator {
+ public:
+  std::pair<void*, void*> allocate(size_t size) {
+    if (size == 0) {
+      return {nullptr, nullptr};
     }
 
-    // search for the smallest block which can hold this allocation
-    BlockSize search_key(size);
-    auto it = available.lower_bound(search_key);
-    if (it != available.end()) {
-      Block& block = blocks.at(it->ptr);
-      TORCH_INTERNAL_ASSERT(!block.allocated && block.event_count == 0);
-      block.allocated = true;
-      *ptr = block.ptr;
-      available.erase(it);
-      return cudaSuccess;
-    }
+    process_events();
 
-    // Pinned memory pointers allocated by any device can be directly used by any
-    // other device, regardless of the current device at the time of allocation,
-    // since we assume unified addressing.
-    // So we grab any existing primary context, if available.
-    // See pytorch/pytorch#21081.
+    // First, try to allocate from the free list
+    {
+      std::lock_guard<std::mutex> g(free_list_mutex_);
+      auto it = free_list_.lower_bound(BlockSize{size, nullptr});
+      if (it != free_list_.end()) {
+        auto block = *it;
+        block->allocated_ = true;
+        free_list_.erase(it);
+        return {block->ptr_, reinterpret_cast<void*>(block)};
+      }
+    }
+    // Then, create a new block.
+    // Pinned memory pointers allocated by any device can be directly used by
+    // any other device, regardless of the current device at the time of
+    // allocation, since we assume unified addressing. So we grab any existing
+    // primary context, if available. See pytorch/pytorch#21081.
     at::OptionalDeviceGuard device_guard;
-    auto primary_ctx_device_index = at::cuda::detail::getDeviceIndexWithPrimaryContext();
+    auto primary_ctx_device_index =
+        at::cuda::detail::getDeviceIndexWithPrimaryContext();
     if (primary_ctx_device_index.has_value()) {
-      device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
+      device_guard.reset_device(
+          at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
     }
 
-    // note that cudaHostAlloc may not touch pointer if size is 0
-    *ptr = 0;
+    // Round up the allocation to the nearest power of two to improve reuse.
+    void* ptr = nullptr;
+    C10_CUDA_CHECK(cudaHostAlloc(
+        &ptr, c10::llvm::PowerOf2Ceil(size), cudaHostAllocDefault));
+    auto block = new Block();
+    block->size_ = c10::llvm::PowerOf2Ceil(size);
+    block->ptr_ = ptr;
+    block->allocated_ = true;
 
-    // allocate a new block if no cached allocation is found
-    err = cudaHostAlloc(ptr, size, cudaHostAllocDefault);
-    if (err != cudaSuccess) {
-      return err;
+    {
+      std::lock_guard<std::mutex> g(blocks_mutex_);
+      blocks_.insert(block);
+      ptr_to_block_.insert({block->ptr_, block});
     }
-
-    blocks.insert({*ptr, Block(size, *ptr, true)});
-    return cudaSuccess;
+    return {block->ptr_, reinterpret_cast<void*>(block)};
   }
 
-  cudaError_t free(void* ptr)
-  {
-    std::lock_guard<std::mutex> lock(mutex);
-
-    if (!ptr) {
-      return cudaSuccess;
+  void free(void* ctx) {
+    if (!ctx) {
+      return;
     }
 
-    // process outstanding cuda events which may have occurred
-    cudaError_t err = processEvents();
-    if (err != cudaSuccess) {
-      return err;
-    }
+    // Note: we can assume that free is correctly paired with alloc,
+    // and thus we do not need to look up the ctx in blocks_.
+    auto* block = reinterpret_cast<Block*>(ctx);
 
-    auto it = blocks.find(ptr);
-    TORCH_INTERNAL_ASSERT(it != blocks.end());
-
-    Block& block = it->second;
-    TORCH_INTERNAL_ASSERT(block.allocated);
-
-    // free (on valid memory) shouldn't fail, so mark unallocated before
-    // we process the streams.
-    block.allocated = false;
-
-    // insert CUDA events for each stream on which this block was used. This
-    err = insertEvents(block);
-    if (err != cudaSuccess) {
-      return err;
-    }
-
-    if (block.event_count == 0) {
-      // the block can be re-used if there are no outstanding cuda events
-      available.insert(block);
-    }
-    return cudaSuccess;
-  }
-
-  cudaError_t recordEvent(void* ptr, at::cuda::CUDAStream stream)
-  {
-    std::lock_guard<std::mutex> lock(mutex);
-
-    auto it = blocks.find(ptr);
-    if (it == blocks.end()) {
-      // ignore events for untracked pointers
-      return cudaSuccess;
-    }
-
-    Block& block = it->second;
-    TORCH_INTERNAL_ASSERT(block.allocated);
-
-    block.streams.insert(stream);
-    return cudaSuccess;
-  }
-
-  cudaError_t processEvents()
-  {
-    // Process outstanding cudaEvents. Events that are completed are removed
-    // from the queue, and the 'event_count' for the corresponding allocation
-    // is decremented. Stops at the first event which has not been completed.
-    // Since events on different devices or streams may occur out of order,
-    // the processing of some events may be delayed.
-    while (!cuda_events.empty()) {
-      auto& e = cuda_events.front();
-      cudaEvent_t event = e.first;
-
-      cudaError_t err = cudaEventQuery(event);
-      if (err == cudaErrorNotReady) {
-        // ignore and clear the error if not ready
-        cudaGetLastError();
-        break;
-      } else if (err != cudaSuccess) {
-        return err;
-      }
-      err = cudaEventDestroy(event);
-      if (err != cudaSuccess) {
-        return err;
-      }
-
-      Block& block = blocks.at(e.second);
-      block.event_count--;
-      if (block.event_count == 0 && !block.allocated) {
-        available.insert(block);
-      }
-      cuda_events.pop_front();
-    }
-    return cudaSuccess;
-  }
-
-  void emptyCache()
-  {
-    std::lock_guard<std::mutex> lock(mutex);
-
-    // remove events for freed blocks
-    for (const auto & cuda_event : cuda_events) {
-      const cudaEvent_t event = cuda_event.first;
-      Block& block = blocks.at(cuda_event.second);
-      if (!block.allocated) {
-        C10_CUDA_CHECK_WARN(cudaEventDestroy(event));
-        block.event_count--;
-      }
-    }
-
-    // all cuda_events have been processed
-    cuda_events.clear();
-
-    // clear list of available blocks
-    available.clear();
-
-    // free and erase non-allocated blocks
-    for (auto it = blocks.begin(); it != blocks.end();) {
-      Block& block = it->second;
-      if (!block.allocated) {
-        C10_CUDA_CHECK_WARN(cudaFreeHost(block.ptr));
-        it = blocks.erase(it);
+    c10::optional<std::vector<EventPool::Event>> events;
+    {
+      std::lock_guard<std::mutex> g(block->mutex_);
+      block->allocated_ = false;
+      if (block->streams_.empty()) {
+        TORCH_INTERNAL_ASSERT(block->event_count_ == 0);
       } else {
-        ++it;
+        events = std::vector<EventPool::Event>();
+        events->reserve(block->streams_.size());
+        for (auto stream : block->streams_) {
+          auto event = event_pool_.get(stream.device_index());
+          event->record(stream);
+          events->push_back(std::move(event));
+        }
+        block->event_count_ += events->size();
+        block->streams_.clear();
+      }
+    }
+
+    if (!events) {
+      std::lock_guard<std::mutex> g(free_list_mutex_);
+      free_list_.insert(block);
+    } else {
+      std::lock_guard<std::mutex> g(cuda_events_mutex_);
+      for (auto&& event : *events) {
+        cuda_events_.push_front({std::move(event), block});
       }
     }
   }
 
-  cudaError_t insertEvents(Block& block)
-  {
-    cudaError_t err;
+  bool record_event(void* ptr, void* ctx, at::cuda::CUDAStream stream) {
+    auto* block = reinterpret_cast<Block*>(ctx);
 
-    int prev_device;
-    err = cudaGetDevice(&prev_device);
-    if (err != cudaSuccess) return err;
-
-    std::unordered_set<at::cuda::CUDAStream> streams(std::move(block.streams));
-    for (auto stream : streams) {
-      err = cudaSetDevice(stream.device_index());
-      if (err != cudaSuccess) break;
-
-      cudaEvent_t event;
-      err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
-      if (err != cudaSuccess) break;
-
-      err = cudaEventRecord(event, stream.stream());
-      if (err != cudaSuccess) break;
-
-      block.event_count++;
-      cuda_events.emplace_back(event, block.ptr);
+    // Note: we need to check if the passed-in `ctx` is valid. This is because
+    // `record_event` (via `CachingHostAllocator_recordEvent`) can be invoked on
+    // an arbitrary tensor, and is not guaranteed to correspond to a pinned
+    // memory allocation. Therefore, we need to check that `ctx` is valid before
+    // proceeding.
+    {
+      std::lock_guard<std::mutex> g(blocks_mutex_);
+      if (blocks_.find(block) != blocks_.end()) {
+        // Now we know this object is safe to access.
+        std::lock_guard<std::mutex> gb(block->mutex_);
+        TORCH_INTERNAL_ASSERT(block->allocated_);
+        block->streams_.insert(stream);
+        return true;
+      }
+      auto it = ptr_to_block_.find(ptr);
+      if (it != ptr_to_block_.end()) {
+        block = it->second;
+        std::lock_guard<std::mutex> g(block->mutex_);
+        TORCH_INTERNAL_ASSERT(block->allocated_);
+        block->streams_.insert(stream);
+        return true;
+      }
     }
 
-    cudaSetDevice(prev_device);
-    return err;
+    return false;
   }
+
+  void empty_cache() {
+    // Flush any available blocks into the free_list.
+    process_events();
+
+    // Release cached events from the event pool.
+    event_pool_.empty_cache();
+
+    // Remove all elements from the free list, remove them from the blocks
+    // list, and free the associated pinned memory allocation. This requires
+    // concurrently holding both the free list mutex and the blocks mutex, and
+    // is the only function that concurrently holds multiple mutexes.
+    std::lock(free_list_mutex_, blocks_mutex_);
+    std::lock_guard<std::mutex> gf(free_list_mutex_, std::adopt_lock);
+    std::lock_guard<std::mutex> gb(blocks_mutex_, std::adopt_lock);
+
+    std::vector<Block*> blocks_to_remove(free_list_.begin(), free_list_.end());
+    free_list_.clear();
+    for (auto* block : blocks_to_remove) {
+      blocks_.erase(block);
+      ptr_to_block_.erase(block->ptr_);
+      AT_CUDA_CHECK(cudaFreeHost(block->ptr_));
+      delete block;
+    }
+  }
+
+ private:
+  void process_events() {
+    while (true) {
+      // Avoid calling cudaEventDestroy while holding a mutex, so move
+      // intermediate events out of the lock into this object.
+      c10::optional<std::pair<EventPool::Event, Block*>> processed;
+
+      {
+        std::lock_guard<std::mutex> g(cuda_events_mutex_);
+        if (!cuda_events_.empty()) {
+          processed = std::move(cuda_events_.back());
+          cuda_events_.pop_back();
+        }
+      }
+
+      if (!processed) {
+        return;
+      }
+
+      // otherwise, query the event
+      {
+        // now, see if we can handle this element
+        auto& event = processed->first;
+        cudaError_t err = cudaEventQuery(*event);
+        if (err == cudaErrorNotReady) {
+          cudaGetLastError();
+          // push the event onto the back of the queue if it's not
+          // ready. TODO: do we need some debouncing logic to avoid allocating
+          // threads repeatedly spinning on an event?
+          {
+            std::lock_guard<std::mutex> g(cuda_events_mutex_);
+            cuda_events_.push_back(std::move(*processed));
+          }
+          return;
+        } else if (err != cudaSuccess) {
+          C10_CUDA_CHECK(err);
+        }
+      }
+
+      // Process the events.
+      TORCH_INTERNAL_ASSERT(processed);
+      auto* block = processed->second;
+      bool available = false;
+      {
+        std::lock_guard<std::mutex> g(block->mutex_);
+        TORCH_INTERNAL_ASSERT(!block->allocated_)
+        block->event_count_--;
+        if (block->event_count_ == 0) {
+          available = true;
+        }
+      }
+
+      if (available) {
+        std::lock_guard<std::mutex> g(free_list_mutex_);
+        free_list_.insert(block);
+      }
+    }
+  }
+
+  EventPool event_pool_;
+
+  alignas(64) std::mutex blocks_mutex_;
+  std::unordered_set<Block*> blocks_;
+  std::unordered_map<void*, Block*> ptr_to_block_;
+  // Note: sharding this mutex seems to be profitable in heavily multi-threaded
+  // scenarios.
+  alignas(64) std::mutex free_list_mutex_;
+  // Note: an alternative datastructure can yield significant wins here in
+  // microbenchmarks.
+  std::set<Block*, BlockComparator> free_list_;
+
+  alignas(64) std::mutex cuda_events_mutex_;
+  std::deque<std::pair<EventPool::Event, Block*>> cuda_events_;
 };
 
-}  // namespace
+} // namespace
 
-static HostAllocator allocator;
-
-cudaError_t CachingHostAllocator_recordEvent(void *ptr, at::cuda::CUDAStream stream)
-{
-  return allocator.recordEvent(ptr, stream);
+static CUDAHostAllocator& getCUDAHostAllocator() {
+  // leak and don't worry about shutdown
+  static auto* r = new CUDAHostAllocator();
+  return *r;
 }
 
-void CachingHostAllocator_emptyCache()
-{
-  allocator.emptyCache();
+static void CUDAHostAllocatorDeleter(void* ctx) {
+  getCUDAHostAllocator().free(ctx);
 }
 
-static void CachingHostDeleter(void* ptr) {
-  allocator.free(ptr);
+bool CachingHostAllocator_recordEvent(
+    void* ptr,
+    void* ctx,
+    at::cuda::CUDAStream stream) {
+  return getCUDAHostAllocator().record_event(ptr, ctx, stream);
 }
 
-struct CachingHostAllocator final : public at::Allocator {
+// Releases cached pinned memory allocations via cudaHostFree
+void CachingHostAllocator_emptyCache() {
+  getCUDAHostAllocator().empty_cache();
+}
+
+struct CUDAHostAllocatorWrapper final : public at::Allocator {
   at::DataPtr allocate(size_t size) const override {
-    void *ptr;
-    C10_CUDA_CHECK(allocator.malloc(&ptr, size));
-    return {ptr, ptr, &CachingHostDeleter, at::DeviceType::CPU};
-  }
-  at::DeleterFnPtr raw_deleter() const override {
-    return &CachingHostDeleter;
+    auto ptr_and_ctx = getCUDAHostAllocator().allocate(size);
+    return {
+        ptr_and_ctx.first,
+        ptr_and_ctx.second,
+        &CUDAHostAllocatorDeleter,
+        at::DeviceType::CPU};
   }
 };
 
-static CachingHostAllocator caching_host_allocator;
+static CUDAHostAllocatorWrapper cuda_host_allocator;
+
 at::Allocator* getCachingHostAllocator() {
-  return &caching_host_allocator;
+  return &cuda_host_allocator;
 }
 
-}}  // namespace at::cuda
+} // namespace cuda
+} // namespace at

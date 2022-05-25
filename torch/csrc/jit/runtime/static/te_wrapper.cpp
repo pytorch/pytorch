@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
 namespace torch {
@@ -148,7 +149,7 @@ std::shared_ptr<TEWrapper> createRelu() {
   Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto zero = FloatImm::make(0.f);
     auto a = A.load(i);
-    return ifThenElse(a < zero, zero, a);
+    return CompareSelect::make(a, zero, zero, a, kLT);
   });
   wrap = wrapTECompute(wrap, B, {A, N});
   updateNNCCache(aten::relu, wrap);
@@ -180,13 +181,59 @@ std::shared_ptr<TEWrapper> createSigmoid() {
   wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   BufHandle A("A", {N}, kFloat);
-  Tensor B =
-      Compute("B", {N}, [&](const VarHandle& i) { return sigmoid(A.load(i)); });
-  // NNC uses sleef for vectorizing sigmoid, which comes in an 8-wide flavor
-  // (Sleef_expf8).
-  constexpr int kSleefWidth = 8;
-  wrap = wrapTECompute(wrap, B, {A, N}, kSleefWidth);
+  Tensor B = Compute(
+      "B", {N}, [&](const VarHandle& i) { return fast_sigmoid(A.load(i)); });
+  wrap = wrapTECompute(wrap, B, {A, N});
   updateNNCCache(aten::sigmoid, wrap);
+  return wrap;
+}
+
+std::shared_ptr<TEWrapper> createClamp() {
+  static auto clamp_symbol = c10::Symbol::fromQualString("aten::clamp");
+  auto wrap = lookupNNCCache(clamp_symbol);
+  if (wrap) {
+    return wrap;
+  }
+  wrap = std::make_shared<TEWrapper>();
+  auto N = VarHandle("N", kInt);
+  auto min_handle = VarHandle("min", kFloat);
+  auto max_handle = VarHandle("max", kFloat);
+
+  BufHandle A("A", {N}, kFloat);
+  Tensor result = Compute("aten_clamp", {N}, [&](const VarHandle& i) {
+    auto a = A.load(i);
+    return tensorexpr::clamp(min_handle, max_handle, a);
+  });
+  wrap = wrapTECompute(wrap, result, {A, min_handle, max_handle, N});
+  updateNNCCache(clamp_symbol, wrap);
+  return wrap;
+}
+
+std::shared_ptr<TEWrapper> createClampNanToNum() {
+  static auto symbol =
+      c10::Symbol::fromQualString("static_runtime::clamp_nan_to_num");
+  auto wrap = lookupNNCCache(symbol);
+  if (wrap) {
+    return wrap;
+  }
+  wrap = std::make_shared<TEWrapper>();
+  auto N = VarHandle("N", kInt);
+  auto min_handle = VarHandle("min", kFloat);
+  auto max_handle = VarHandle("max", kFloat);
+  auto nan_replace_val = VarHandle("nan_replace_val", kFloat);
+
+  BufHandle A("A", {N}, kFloat);
+  Tensor result = Compute("aten_clamp", {N}, [&](const VarHandle& i) {
+    auto a = A.load(i);
+    auto clamp = tensorexpr::clamp(min_handle, max_handle, a);
+    auto is_nan = tensorexpr::isnan(clamp);
+    auto nans_replaced =
+        tensorexpr::CompareSelect::make(is_nan, 1, nan_replace_val, clamp, kEQ);
+    return nans_replaced;
+  });
+  wrap = wrapTECompute(
+      wrap, result, {A, min_handle, max_handle, nan_replace_val, N});
+  updateNNCCache(symbol, wrap);
   return wrap;
 }
 
@@ -220,29 +267,6 @@ std::shared_ptr<TEWrapper> createSignedLog1p() {
   GRAPH_DEBUG("Final stmt: ", *ln.root_stmt());
   wrap = wrapTECompute(wrap, &ln, {output, A, N});
   updateNNCCache(signed_log1p_symbol, wrap);
-  return wrap;
-}
-
-std::shared_ptr<TEWrapper> createWhere() {
-  auto wrap = lookupNNCCache(aten::where);
-  if (wrap) {
-    return wrap;
-  }
-  wrap = std::make_shared<TEWrapper>();
-  auto N = VarHandle("N", kLong);
-  BufHandle cond("cond", {N}, kBool);
-  BufHandle x("x", {N}, kLong);
-  BufHandle y("y", {N}, kLong);
-
-  Tensor res = Compute("res", {N}, [&](const VarHandle& i) {
-    auto cond_i = cond.load(i);
-    auto x_i = x.load(i);
-    auto y_i = y.load(i);
-    return ifThenElse(cond_i, x_i, y_i);
-  });
-
-  wrap = wrapTECompute(wrap, res, {cond, x, y, N});
-  updateNNCCache(aten::where, wrap);
   return wrap;
 }
 

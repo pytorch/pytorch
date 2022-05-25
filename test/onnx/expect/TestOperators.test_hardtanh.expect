@@ -3,22 +3,40 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "input"
-    output: "1"
-    name: "Clip_0"
-    op_type: "Clip"
+    output: "onnx::Clip_1"
+    name: "Constant_0"
+    op_type: "Constant"
     attribute {
-      name: "max"
-      f: 0.5
-      type: FLOAT
-    }
-    attribute {
-      name: "min"
-      f: -0.5
-      type: FLOAT
+      name: "value"
+      t {
+        data_type: 1
+        raw_data: "\000\000\000\277"
+      }
+      type: TENSOR
     }
   }
-  name: "torch-jit-export"
+  node {
+    output: "onnx::Clip_2"
+    name: "Constant_1"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 1
+        raw_data: "\000\000\000?"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "input"
+    input: "onnx::Clip_1"
+    input: "onnx::Clip_2"
+    output: "3"
+    name: "Clip_2"
+    op_type: "Clip"
+  }
+  name: "torch_jit"
   input {
     name: "input"
     type {
@@ -36,7 +54,7 @@ graph {
     }
   }
   output {
-    name: "1"
+    name: "3"
     type {
       tensor_type {
         elem_type: 1
@@ -53,5 +71,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }

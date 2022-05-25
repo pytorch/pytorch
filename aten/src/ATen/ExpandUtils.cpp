@@ -1,8 +1,15 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
+#include <ATen/ExpandBase.h>
 
 #include <c10/util/irange.h>
 
 namespace at {
+namespace internal {
+TensorBase expand_slow_path(const TensorBase &self, IntArrayRef size) {
+  return OptionalTensorRef(self)->expand(size);
+}
+}
 
 namespace {
 // NOTE: are_expandable did a similar check, please keep them sync if change is needed

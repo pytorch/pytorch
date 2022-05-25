@@ -4,6 +4,7 @@ Stmt
 | Store(buf_ = Buf, indices = [Expr], value_ = Expr, mask_ = Expr)
 | Allocate(buf_ = Buf)
 | Free(buf_ = Buf)
+| PlacementAllocate(buf_ = Buf, buf_to_reuse_ = Buf)
 | Let(var_ = Var, val_ = Expr)
 | Cond(condition_ = Expr, true_stmt_ = Block, false_stmt_ = Block)
 | For(var_ = Var, start_ = Expr, stop_ = Expr, body_ = Block, loopOptions = LoopOptions)

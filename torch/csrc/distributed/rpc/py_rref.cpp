@@ -121,6 +121,7 @@ TypePtr tryInferTypeWithTypeHint(
 PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref)
     : rref_(std::move(rref)), profilingFuture_(c10::nullopt) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
+  C10_LOG_API_USAGE_ONCE("torch.distributed.rref");
 }
 
 PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
@@ -181,6 +182,7 @@ std::string PyRRef::ownerName() const {
 }
 
 py::object PyRRef::toHere(const float timeoutSeconds) const {
+  C10_LOG_API_USAGE_ONCE("torch.distributed.rref.to_here");
   if (rref_->isOwner()) {
     return localValue();
   } else {

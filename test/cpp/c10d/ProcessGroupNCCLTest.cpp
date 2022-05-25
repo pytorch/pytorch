@@ -57,9 +57,9 @@ class NCCLTest : public NCCLTestBase {
   NCCLTest(const std::string& path, int worldSize, std::chrono::milliseconds pgTimeout = kProcessGroupDefaultTimeout)
       : NCCLTestBase(path, pgTimeout),
         numDevices_(cudaNumDevices()),
-        state_(::at::globalContext().lazyInitCUDA()),
         worldSize_(worldSize) {
     // Each device has a single tensor to perf the NCCL op
+    ::at::globalContext().lazyInitCUDA();
     tensors_.resize(numDevices_);
     inputs_.resize(numDevices_);
     outputs_.resize(numDevices_);
@@ -163,7 +163,6 @@ class NCCLTest : public NCCLTestBase {
   }
 
   const int numDevices_;
-  THCState* state_;
   int worldSize_;
   std::vector<at::Tensor> tensors_;
   std::vector<std::vector<at::Tensor>> inputs_;
@@ -509,7 +508,6 @@ void testReduceScatter(const std::string& path, int rank, int size) {
 void testProcessGroupNCCLHealthCheckFailHelper(const std::string& path, bool timeout) {
   // simulate world_size > 1 here via threads.
   const int worldSize = 4;
-  std::mutex m;
   std::unordered_set<uint64_t> nums;
   auto runTest = [&](int i) {
     NCCLTest test(path, worldSize, std::chrono::milliseconds(3000));

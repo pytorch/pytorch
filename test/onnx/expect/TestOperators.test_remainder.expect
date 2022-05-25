@@ -3,35 +3,35 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    input: "1"
-    output: "2"
+    input: "onnx::Div_0"
+    input: "onnx::Div_1"
+    output: "onnx::Floor_2"
     name: "Div_0"
     op_type: "Div"
   }
   node {
-    input: "2"
-    output: "3"
+    input: "onnx::Floor_2"
+    output: "onnx::Mul_3"
     name: "Floor_1"
     op_type: "Floor"
   }
   node {
-    input: "3"
-    input: "1"
-    output: "4"
+    input: "onnx::Mul_3"
+    input: "onnx::Div_1"
+    output: "onnx::Sub_4"
     name: "Mul_2"
     op_type: "Mul"
   }
   node {
-    input: "0"
-    input: "4"
+    input: "onnx::Div_0"
+    input: "onnx::Sub_4"
     output: "5"
     name: "Sub_3"
     op_type: "Sub"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Div_0"
     type {
       tensor_type {
         elem_type: 1
@@ -50,7 +50,7 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "onnx::Div_1"
     type {
       tensor_type {
         elem_type: 1
@@ -89,5 +89,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }

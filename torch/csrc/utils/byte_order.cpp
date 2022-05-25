@@ -148,11 +148,11 @@ void THP_decodeInt64Buffer(int64_t* dst, const uint8_t* src, THPByteOrder order,
   }
 }
 
-void THP_decodeHalfBuffer(THHalf* dst, const uint8_t* src, THPByteOrder order, size_t len)
+void THP_decodeHalfBuffer(c10::Half* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
   for(const auto i : c10::irange(len)) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    union { uint16_t x; THHalf f; };
+    union { uint16_t x; c10::Half f; };
     x = (order == THP_BIG_ENDIAN ? decodeUInt16BE(src) : decodeUInt16LE(src));
     dst[i] = f;
     src += sizeof(uint16_t);
@@ -309,7 +309,8 @@ void THP_encodeComplexFloatBuffer(uint8_t* dst, const c10::complex<float>* src, 
   auto new_src = complex_to_float(src, len);
   memcpy(dst, static_cast<void*>(&new_src), 2 * sizeof(float) * len);
   if (order != THP_nativeByteOrder()) {
-    for (size_t i = 0; i < (2 * len); i++) {
+    for (const auto i : c10::irange(2 * len)) {
+      (void)i; // Suppress unused variable warning
       swapBytes32(dst);
       dst += sizeof(float);
     }
@@ -321,7 +322,8 @@ void THP_encodeCompelxDoubleBuffer(uint8_t* dst, const c10::complex<double>* src
   auto new_src = complex_to_float(src, len);
   memcpy(dst, static_cast<void*>(&new_src), 2 * sizeof(double) * len);
   if (order != THP_nativeByteOrder()) {
-    for (size_t i = 0; i < (2 * len); i++) {
+    for (const auto i : c10::irange(2 * len)) {
+      (void)i; // Suppress unused variable warning
       swapBytes64(dst);
       dst += sizeof(double);
     }

@@ -13,7 +13,7 @@ struct SourceLocation {
   int line = -1;
 };
 
-void EmitShortFrameInfo(
+TORCH_API void EmitShortFrameInfo(
     std::ostream& stream,
     const std::vector<SourceLocation>& frames);
 
@@ -43,13 +43,7 @@ struct TORCH_API ScopePusher {
   static void ResetScopes();
 };
 
-MetaData GetMetaDataIfDebugging();
-
-// If python bindings for lazy tensor core are initialized, they should
-// register a function to get python frame info.  Otherwise, frame info
-// will not be available.
-TORCH_API void RegisterGetFrameInfo(
-    const std::function<std::vector<SourceLocation>()>& getFrameInfo);
+TORCH_API MetaData GetMetaDataIfDebugging();
 
 } // namespace lazy
 } // namespace torch

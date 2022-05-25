@@ -421,6 +421,8 @@ Example::
 .. autoclass:: ConcatDataset
 .. autoclass:: ChainDataset
 .. autoclass:: Subset
+.. autofunction:: torch.utils.data.default_collate
+.. autofunction:: torch.utils.data.default_convert
 .. autofunction:: torch.utils.data.get_worker_info
 .. autofunction:: torch.utils.data.random_split
 .. autoclass:: torch.utils.data.Sampler
@@ -430,3 +432,15 @@ Example::
 .. autoclass:: torch.utils.data.WeightedRandomSampler
 .. autoclass:: torch.utils.data.BatchSampler
 .. autoclass:: torch.utils.data.distributed.DistributedSampler
+
+
+.. This module is experimental and should be private, adding it here for now
+.. py:module:: torch.utils.data.communication
+
+.. These modules are documented as part of torch/data listing them here for
+.. now until we have a clearer fix
+.. py:module:: torch.utils.data.datapipes
+.. py:module:: torch.utils.data.datapipes.dataframe
+.. py:module:: torch.utils.data.datapipes.iter
+.. py:module:: torch.utils.data.datapipes.map
+.. py:module:: torch.utils.data.datapipes.utils

@@ -49,12 +49,15 @@ namespace at { namespace cuda {
   _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
   _(cuGetErrorString)                            \
   _(cuLaunchKernel)                              \
+  _(cuLaunchCooperativeKernel)                   \
   _(cuCtxGetCurrent)                             \
   _(cuModuleUnload)                              \
   _(cuDevicePrimaryCtxGetState)                  \
   _(cuLinkCreate)                                \
   _(cuLinkAddData)                               \
-  _(cuLinkComplete)
+  _(cuLinkComplete)                              \
+  _(cuFuncSetAttribute)                          \
+  _(cuFuncGetAttribute)
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
 #define AT_FORALL_NVRTC(_) \

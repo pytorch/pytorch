@@ -27,6 +27,7 @@
 #include <c10/util/flat_hash_map.h>
 
 #include <c10/core/ScalarType.h>
+#include <c10/util/irange.h>
 
 /*
  * TypeIdentifier is a small type containing an id.
@@ -170,7 +171,7 @@ struct TypeMetaData final {
 template <typename T>
 inline void _PlacementNew(void* ptr, size_t n) {
   T* typed_ptr = static_cast<T*>(ptr);
-  for (size_t i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     new (typed_ptr + i) T;
   }
 }
@@ -234,7 +235,7 @@ template <typename T>
 inline void _Copy(const void* src, void* dst, size_t n) {
   const T* typed_src = static_cast<const T*>(src);
   T* typed_dst = static_cast<T*>(dst);
-  for (size_t i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     typed_dst[i] = typed_src[i];
   }
 }
@@ -274,7 +275,7 @@ inline constexpr TypeMetaData::Copy* _PickCopy() {
 template <typename T>
 inline void _PlacementDelete(void* ptr, size_t n) {
   T* typed_ptr = static_cast<T*>(ptr);
-  for (size_t i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     typed_ptr[i].~T();
   }
 }

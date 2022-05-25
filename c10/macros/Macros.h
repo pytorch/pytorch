@@ -1,5 +1,6 @@
 #ifndef C10_MACROS_MACROS_H_
 #define C10_MACROS_MACROS_H_
+#include <cassert>
 
 /* Main entry for c10/macros.
  *
@@ -138,6 +139,13 @@
 #define C10_UNUSED __attribute__((__unused__))
 #endif //_MSC_VER
 
+// Direct port of LLVM_ATTRIBUTE_USED.
+#if __has_attribute(used)
+#define C10_USED __attribute__((__used__))
+#else
+#define C10_USED
+#endif
+
 #define C10_RESTRICT __restrict
 
 // Simply define the namespace, in case a dependent library want to refer to
@@ -217,6 +225,16 @@ using namespace c10::hip;
 #else
 #define C10_ALWAYS_INLINE inline
 #endif
+
+#if defined(_MSC_VER)
+#define C10_ATTR_VISIBILITY_HIDDEN
+#elif defined(__GNUC__)
+#define C10_ATTR_VISIBILITY_HIDDEN __attribute__((__visibility__("hidden")))
+#else
+#define C10_ATTR_VISIBILITY_HIDDEN
+#endif
+
+#define C10_ERASE C10_ALWAYS_INLINE C10_ATTR_VISIBILITY_HIDDEN
 
 // C10_FALLTHROUGH - Annotate fallthrough to the next case in a switch.
 #if C10_HAS_CPP_ATTRIBUTE(fallthrough)
@@ -314,15 +332,14 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) || defined(__XROS__) || \
-    (defined(USE_ROCM) && ROCM_VERSION < 40100)
+#if defined(__ANDROID__) || defined(__APPLE__) || defined(USE_ROCM)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
 #if defined(NDEBUG)
 extern "C" {
 C10_IMPORT
-#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__) || defined(__HIP__)
+#if defined(__CUDA_ARCH__)
 __host__ __device__
 #endif // __CUDA_ARCH__
     void
@@ -343,8 +360,7 @@ extern SYCL_EXTERNAL void __assert_fail(
     unsigned int line,
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
-#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
-    defined(__HIP_ARCH__) || defined(__HIP__)
+#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))
 __host__ __device__
 #endif // __CUDA_ARCH__
     void
@@ -383,6 +399,12 @@ __host__ __device__
 #define C10_IOS 1
 #define C10_MOBILE 1
 #endif // ANDROID / IOS
+
+#if defined(C10_MOBILE) && C10_MOBILE
+#define C10_ALWAYS_INLINE_UNLESS_MOBILE inline
+#else
+#define C10_ALWAYS_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE
+#endif
 
 // Portable determination of whether type T is trivially copyable.
 // Warning: __has_trivial_copy for GCC may not always detect the non-POD
@@ -465,8 +487,7 @@ __host__ __device__
 #endif
 
 #ifndef HAS_DEMANGLE
-#if defined(__ANDROID__) || defined(_WIN32) || defined(__EMSCRIPTEN__) || \
-    defined(__XROS__)
+#if defined(__ANDROID__) || defined(_WIN32) || defined(__EMSCRIPTEN__)
 #define HAS_DEMANGLE 0
 #elif defined(__APPLE__) && \
     (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE)
@@ -475,5 +496,20 @@ __host__ __device__
 #define HAS_DEMANGLE 1
 #endif
 #endif // HAS_DEMANGLE
+
+#ifdef __clang__
+#define _C10_PRAGMA__(string) _Pragma(#string)
+#define _C10_PRAGMA_(string) _C10_PRAGMA__(string)
+#define C10_CLANG_DIAGNOSTIC_PUSH() _Pragma("clang diagnostic push")
+#define C10_CLANG_DIAGNOSTIC_POP() _Pragma("clang diagnostic pop")
+#define C10_CLANG_DIAGNOSTIC_IGNORE(flag) \
+  _C10_PRAGMA_(clang diagnostic ignored flag)
+#define C10_CLANG_HAS_WARNING(flag) __has_warning(flag)
+#else
+#define C10_CLANG_DIAGNOSTIC_PUSH()
+#define C10_CLANG_DIAGNOSTIC_POP()
+#define C10_CLANG_DIAGNOSTIC_IGNORE(flag)
+#define C10_CLANG_HAS_WARNING(flag) 0
+#endif
 
 #endif // C10_MACROS_MACROS_H_

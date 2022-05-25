@@ -1,9 +1,10 @@
-#include <ATen/native/TensorAdvancedIndexing.h>
-#include <ATen/native/TensorTransformations.h> // flip
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/native/IndexKernel.h>
 
 #include <cmath>
 #include <iostream>
 
+#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/TensorIterator.h>
@@ -11,6 +12,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
+#include <c10/core/Scalar.h>
 
 namespace at { namespace native {
 namespace {
@@ -101,7 +103,7 @@ void cpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
 }
 
 void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
     iter.dtype(), "index_cpu", [&] {
     cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
       *(scalar_t*)dst = *(scalar_t*)(src + offset);
@@ -115,14 +117,14 @@ void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef inde
 struct IndexToOffset {
   const IntArrayRef sizes;
   const IntArrayRef strides;
-  const int ndim;
-  IndexToOffset(const Tensor & tensor) : sizes(tensor.sizes()),
-                                         strides(tensor.strides()),
-                                         ndim(tensor.dim()) {}
+  const int64_t ndim;
+  explicit IndexToOffset(const TensorBase & tensor) :
+      sizes(tensor.sizes()), strides(tensor.strides()), ndim(tensor.dim()) {
+  }
 
   int64_t get(int64_t linear_index) const {
     int64_t offset = 0;
-    for (int i = ndim - 1; i > 0; i--) {
+    for (int64_t i = ndim - 1; i > 0; i--) {
       offset += (linear_index % sizes[i]) * strides[i];
       linear_index /= sizes[i];
     }
@@ -133,7 +135,7 @@ struct IndexToOffset {
 template <typename scalar_t, typename func_t>
 void cpu_take_put_kernel(
     TensorIterator& iter,
-    const Tensor& indexed,
+    const TensorBase& indexed,
     const func_t& f,
     bool serial_execution=false) {
   // This kernel follows the same strategy as `cpu_index_kernel`
@@ -182,7 +184,7 @@ void cpu_take_put_kernel(
 
 void put_kernel(
   TensorIterator& iter,
-  const Tensor & self,
+  const TensorBase & self,
   const bool accumulate) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
     iter.dtype(), "take_put_cpu", [&] {
@@ -220,7 +222,7 @@ void put_kernel(
 
 void take_kernel(
   TensorIterator& iter,
-  const Tensor & input) {
+  const TensorBase & input) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
     iter.dtype(), "take_cpu", [&] {
       cpu_take_put_kernel<scalar_t>(iter, input,
@@ -232,7 +234,7 @@ void take_kernel(
 
 void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
   // NOTE: duplicate indices are only supported if accumulate is true.
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
     iter.dtype(), "index_put", [&] {
     // See Note [Enabling Deterministic Operations]
     // Parallel cpu_index_kernel with accumulation is nondeterministic, so we
@@ -407,7 +409,7 @@ void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
 }
 
 void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kBool, kBFloat16, kHalf,
     iter.dtype(), "masked_fill", [&] {
       scalar_t scalar_val = value.to<scalar_t>();
       auto mask_dtype = iter.input_dtype(0);
@@ -420,7 +422,7 @@ void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
 }
 
 template <typename scalar_t, typename mask_t>
-void cpu_masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
+void cpu_masked_scatter_kernel(TensorIterator& iter, const TensorBase& source) {
   auto is_mask_bool = std::is_same<mask_t, bool>::value;
   std::ptrdiff_t source_cntr = 0;
   scalar_t* source_ptr = source.data_ptr<scalar_t>();
@@ -447,7 +449,7 @@ void cpu_masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
   iter.serial_for_each(loop, {0, iter.numel()});
 }
 
-void masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
+void masked_scatter_kernel(TensorIterator& iter, const TensorBase& source) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Bool,
       ScalarType::BFloat16,

@@ -200,8 +200,8 @@ class BenchmarkRunner(object):
                 print("# {}".format(self.args.operators))
 
     def _print_perf_result(self, reported_run_time_us, test_case):
-        if self.args.ai_pep_format:
-            # Output for AI-PEP
+        if self.args.report_aibench:
+            # Output for AIBench
             # Print out per iteration execution time instead of avg time
             return
             test_name = '_'.join([test_case.framework, test_case.test_config.test_name])
@@ -288,7 +288,7 @@ class BenchmarkRunner(object):
             report_run_time = 1e6 * run_time_sec / iters
             time_trace.append(report_run_time)
             # Print out the time spent in each epoch in ms
-            if self.args.ai_pep_format:
+            if self.args.report_aibench:
                 mode = "JIT" if self.use_jit else "Eager"
                 test_name = '_'.join([test_case.framework, test_case.test_config.test_name, mode])
                 print("PyTorchObserver " + json.dumps(

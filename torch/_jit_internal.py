@@ -18,6 +18,7 @@ import builtins
 import typing
 import io
 import pickle
+import threading
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
@@ -977,7 +978,7 @@ def is_scripting() -> bool:
 
 
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
-def _qualified_name(obj) -> str:
+def _qualified_name(obj, mangle_name=True) -> str:
     # This special case allows us to override the qualified name on a type.
     # It's currently used in conjunction with tracing, where we create a
     # fake module to filter only supported attributes. However, since this
@@ -1021,16 +1022,21 @@ def _qualified_name(obj) -> str:
 
     # torch.package and TorchScript have separate mangling schemes to avoid
     # name collisions from multiple packages. To avoid them interfering with
-    # each other, remove the package mangling here.
-    module_name = package_mangling.demangle(module_name)
+    # each other, normalize the package manging here.
+    if package_mangling.is_mangled(module_name):
+        module_name = module_name.replace("<", "_")
+        module_name = module_name.replace(">", "_")
 
-    # __main__ is a builtin module, so rewrite it to "__torch__".
-    if module_name == "__main__":
-        module_name = "__torch__"
-    else:
-        # Everything else gets a "__torch__" prefix to avoid name collisions
-        # with the names of user values.
-        module_name = "__torch__." + module_name
+    # The PythonExceptionValue C++ class in torch/csrc/jit/python/python_sugared_value.h
+    # does not need mangle the python class name.
+    if mangle_name:
+        # __main__ is a builtin module, so rewrite it to "__torch__".
+        if module_name == "__main__":
+            module_name = "__torch__"
+        else:
+            # Everything else gets a "__torch__" prefix to avoid name collisions
+            # with the names of user values.
+            module_name = "__torch__." + module_name
 
     if "." in name:
         raise RuntimeError(f"Could not get qualified name for class '{name}': "
@@ -1215,11 +1221,8 @@ def _isinstance(obj, target_type) -> bool:
     if origin_type:
         return container_checker(obj, target_type)
 
-    # Check to handle weird python type behaviors
-    # 1. python 3.6 returns None for origin of containers without
-    #    contained type (intead of returning outer container type)
-    # 2. non-typed optional origin returns as none instead
-    #    of as optional in 3.6-3.8
+    # Check to handle non-typed optional origin returns as none instead
+    #    of as optional in 3.7-3.8
     check_args_exist(target_type)
 
     # handle non-containers
@@ -1248,6 +1251,8 @@ class _TensorExtractor(pickle.Pickler):
         if isinstance(obj, CFuture) or is_rref_instance(obj):
             return ""
         if isinstance(obj, torch.cuda.Event):
+            return ""
+        if isinstance(obj, threading.Thread):
             return ""
         return None
 

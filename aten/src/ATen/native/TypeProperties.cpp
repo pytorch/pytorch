@@ -30,6 +30,10 @@ bool is_signed(const Tensor &self) {
   return self.is_signed();
 }
 
+bool _is_zerotensor(const Tensor& self) {
+  return self._is_zerotensor();
+}
+
 bool is_conj(const Tensor& self) {
   return self.is_conj();
 }
@@ -76,15 +80,22 @@ static inline ScalarType combine_categories(ScalarType higher, ScalarType lower)
   // NOLINTNEXTLINE(bugprone-branch-clone)
   if(isComplexType(higher)) {
     return higher;
-  }
-  else if(!isComplexType(lower) && isFloatingType(higher)) {
+  } else if (isComplexType(lower)) {
+    // preserve value type of higher if it is floating type.
+    if (isFloatingType(higher)) {
+      return toComplexType(higher);
+    }
+    // in case of integral input
+    // lower complex takes precedence.
+    return lower;
+  } else if (isFloatingType(higher)) {
     return higher;
   }
-  if (higher == ScalarType::Bool || isFloatingType(lower) || isComplexType(lower)) {
+  if (higher == ScalarType::Bool || isFloatingType(lower)) {
     return promote_skip_undefined(higher, lower);
   }
   if (higher != ScalarType::Undefined) {
-      return higher;
+    return higher;
   }
   return lower;
 }
@@ -129,7 +140,7 @@ ScalarType result_type(const ResultTypeState& in_state) {
   return combine_categories(in_state.dimResult, combine_categories(in_state.zeroResult, in_state.wrappedResult));
 }
 
-ScalarType result_type(TensorList tensors) {
+ScalarType result_type(ITensorListRef tensors) {
   ResultTypeState state = {};
   for (const Tensor& tensor : tensors) {
     state = update_result_type_state(tensor, state);

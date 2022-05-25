@@ -96,6 +96,8 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::arcsin_, aten::asin_},
       {aten::arctan, aten::atan},
       {aten::arctan_, aten::atan_},
+      {aten::arctan2, aten::atan2},
+      {aten::arctan2_, aten::atan2_},
       {aten::arccosh, aten::acosh},
       {aten::arccosh_, aten::acosh_},
       {aten::arcsinh, aten::asinh},

@@ -37,8 +37,6 @@ namespace at { namespace native {
 
 #else // AT_ROCM_ENABLED()
 
-#include <aten/src/THH/THH.h>
-
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/miopen/Descriptors.h>
 #include <ATen/miopen/Types.h>
@@ -354,7 +352,7 @@ std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, con
             param_size /= elem_size;
 
             if(linear_id == 0 || linear_id == num_linear_layers / 2) {
-                std::initializer_list<int64_t> size = { param_size * num_linear_layers / 2, 1};
+                std::initializer_list<int64_t> size = { static_cast<int64_t>(param_size * num_linear_layers / 2), 1L};
                 Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
                 params.emplace_back(std::move(param));
                 layer_params_count++;
@@ -388,7 +386,7 @@ std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, con
                 bias_size /= elem_size;
 
                 if(linear_id == 0 || linear_id == num_linear_layers / 2) {
-                    std::initializer_list<int64_t> size = { bias_size * num_linear_layers / 2, 1};
+                    std::initializer_list<int64_t> size = { static_cast<int64_t>(bias_size * num_linear_layers / 2), 1L};
                     Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
                     params.emplace_back(std::move(param));
                     layer_params_count++;

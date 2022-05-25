@@ -1,46 +1,41 @@
 #include <ATen/native/Lerp.h>
-
-#include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/Dispatch.h>
-#include <ATen/ExpandUtils.h>
 
 namespace at {
+namespace meta {
+
+TORCH_META_FUNC(lerp_Tensor)(
+    const Tensor& self, const Tensor& end, const Tensor& weight) {
+  TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(),
+              " for `end` but got dtype ", end.dtype());
+  TORCH_CHECK(self.dtype() == weight.dtype(), "expected dtype ", self.dtype(),
+              " for `weight` but got dtype ", weight.dtype());
+  build(at::TensorIteratorConfig()
+        .add_output(maybe_get_output())
+        .add_input(self)
+        .add_input(end)
+        .add_input(weight));
+}
+
+TORCH_META_FUNC(lerp_Scalar)(
+    const Tensor& self, const Tensor& end, const Scalar& /*weight*/) {
+  TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(),
+              " for `end` but got dtype ", end.dtype());
+  build_binary_op(maybe_get_output(), self, end);
+}
+
+}  // namespace meta
+
 namespace native {
 
-Tensor& lerp_cpu_tensor_out(const Tensor& self,
-                            const Tensor& end, const Tensor& weight, Tensor& result) {
-  lerp_kernel_tensor_weight(kCPU, result, self, end, weight);
-  return result;
+TORCH_IMPL_FUNC(lerp_Tensor)(
+    const Tensor& /*self*/, const Tensor& /*end*/, const Tensor& weight, const Tensor& /*out*/) {
+  lerp_kernel_tensor_weight(device_type(), *this);
 }
 
-Tensor& lerp_cpu_scalar_out(const Tensor& self,
-                            const Tensor& end, const Scalar& weight, Tensor& result) {
-  lerp_kernel_scalar_weight(kCPU, result, self, end, weight);
-  return result;
-}
-
-Tensor& lerp_cpu_tensor_(Tensor& self, const Tensor& end, const Tensor& weight) {
-  lerp_kernel_tensor_weight(kCPU, self, self, end, weight);
-  return self;
-}
-
-Tensor& lerp_cpu_scalar_(Tensor& self, const Tensor& end, const Scalar& weight) {
-  lerp_kernel_scalar_weight(kCPU, self, self, end, weight);
-  return self;
-}
-
-Tensor lerp_cpu_tensor(const Tensor& self, const Tensor& end, const Tensor& weight) {
-  Tensor result = at::empty({0}, self.options());
-  lerp_kernel_tensor_weight(kCPU, result, self, end, weight);
-  return result;
-}
-
-Tensor lerp_cpu_scalar(const Tensor& self, const Tensor& end, const Scalar& weight) {
-  Tensor result = at::empty({0}, self.options());
-  lerp_kernel_scalar_weight(kCPU, result, self, end, weight);
-  return result;
+TORCH_IMPL_FUNC(lerp_Scalar)(
+    const Tensor& /*self*/, const Tensor& /*end*/, const Scalar& weight, const Tensor& /*out*/) {
+  lerp_kernel_scalar_weight(device_type(), *this, weight);
 }
 
 DEFINE_DISPATCH(lerp_kernel_scalar_weight);

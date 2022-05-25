@@ -1,7 +1,7 @@
 #pragma once
 #include <memory>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace jit {
