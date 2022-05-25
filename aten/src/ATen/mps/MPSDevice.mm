@@ -25,7 +25,7 @@ MPSDevice::MPSDevice(): _mtl_device(nil) {
   // Create the MPSGraph and check method introduced in 12.3+
   // which is used by MPS backend.
   id mpsCD = NSClassFromString(@"MPSGraph");
-  if (mpsCD == nil || ([mpsCD instancesRespondToSelector:@selector(LSTMWithSourceTensor:
+  if ([mpsCD instancesRespondToSelector:@selector(LSTMWithSourceTensor:
                                                            recurrentWeight:
                                                                inputWeight:
                                                                       bias:
