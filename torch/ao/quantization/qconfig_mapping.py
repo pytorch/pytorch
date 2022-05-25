@@ -113,6 +113,7 @@ class QConfigMapping:
         self.module_name_object_type_order_qconfigs[(module_name, object_type, index)] = qconfig
         return self
 
+    # TODO: remove this
     def to_dict(self) -> Dict[str, Any]:
         """
         Convert this `QConfigMapping` to a dictionary with the following keys:
@@ -135,6 +136,7 @@ class QConfigMapping:
             ],
         }
 
+    # TODO: remove this
     @classmethod
     def from_dict(cls, qconfig_dict: Dict[str, Any]) -> QConfigMapping:
         """

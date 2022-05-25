@@ -605,7 +605,7 @@
   result: auto_linear
 
 - name: expand.SymInt(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
-  self: at::sum_to(grad, c10::asIntArrayRefSlow(self.sym_sizes()))
+  self: at::sum_to(grad, c10::expectIntArrayRef(self.sym_sizes()))
   result: auto_linear
 
 - name: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
@@ -1410,6 +1410,12 @@
 - name: diagonal_scatter(Tensor self, Tensor src, int offset=0, int dim1=0, int dim2=1) -> Tensor
   self: diagonal_scatter(grad, zeros_like(src), offset, dim1, dim2)
   src: grad.diagonal(offset, dim1, dim2)
+  result: auto_linear
+
+- name: as_strided_scatter(Tensor self, Tensor src, int[] size, int[] stride, int? storage_offset=None) -> Tensor
+  self: as_strided_scatter_backward(grad, TensorGeometry(self), TensorGeometry(src), size, stride, storage_offset)
+  # See Note [as_strided_scatter backward support]
+  src: grad.contiguous().as_strided(size, stride, storage_offset)
   result: auto_linear
 
 - name: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
