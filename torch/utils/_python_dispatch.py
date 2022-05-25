@@ -10,8 +10,7 @@ from dataclasses import dataclass
 @dataclass
 class TorchDispatchModeInfo(_ModeInfo):
     def __init__(self):
-        super().__init__(mode_name="torch_dispatch", mode_class=TorchDispatchMode,
-                         base_mode_class=BaseTorchDispatchMode)
+        super().__init__(mode_name="torch_dispatch", mode_class=TorchDispatchMode)
 
     def get_mode(self):
         return _get_torch_dispatch_mode()
@@ -157,10 +156,3 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         _set_torch_dispatch_mode(self.inner)
-
-
-class BaseTorchDispatchMode(TorchDispatchMode):
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
-        return func(*args, **kwargs)

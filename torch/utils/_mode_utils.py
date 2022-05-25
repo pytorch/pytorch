@@ -23,7 +23,6 @@ def _wrap_init(f):
 class _ModeInfo:
     mode_name: str
     mode_class: type  # the class related to the mode that's allowed to be passed in
-    base_mode_class: type  # the base class of mode_class that dispatches to the original function
 
     def mode_class_name(self):
         return self.mode_class.__name__

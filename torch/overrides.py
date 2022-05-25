@@ -1828,13 +1828,6 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
         _set_torch_function_mode(self.inner)
 
 
-class BaseTorchFunctionMode(TorchFunctionMode):
-    def __torch_function__(self, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
-        return func(*args, **kwargs)
-
-
 # This is private API as I'm not sure it's possible for users to use this
 # compositionally (easy to discard too many modes).  It is useful for
 # library code though, e.g., in handle_torch_function
@@ -1850,8 +1843,7 @@ def _no_torch_function_mode() -> Iterator[None]:
 
 class _TorchFunctionModeInfo(_ModeInfo):
     def __init__(self):
-        super().__init__(mode_name="torch_function", mode_class=TorchFunctionMode,
-                         base_mode_class=BaseTorchFunctionMode)
+        super().__init__(mode_name="torch_function", mode_class=TorchFunctionMode)
 
     def get_mode(self):
         return _get_torch_function_mode()
