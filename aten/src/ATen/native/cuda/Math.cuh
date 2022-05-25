@@ -1265,6 +1265,69 @@ const auto erfcx_string = jiterator_stringify(
   }
 ); // erfcx_string
 
+const auto chebyshev_polynomial_w_string = jiterator_stringify(
+    template<typename T>
+        T chebyshev_polynomial_w_forward(T x, int64_t n) {
+        if (n < 0) {
+            return T(0.0);
+        }
+
+        if (abs(x) == T(1.0)) {
+            if (x > T(0.0)) {
+                return n + n + 1;
+            }
+
+            if (n % 2 == 0) {
+                return T(1.0);
+            }
+
+            return T(-1.0);
+        }
+
+        if ((n > 8) && (abs(x) < T(1.0))) {
+            if (cos(acos(x) / T(2.0)) != T(1.0)) {
+                return sin((n + T(0.5)) * acos(x)) / sin(acos(x) / T(2.0));
+            }
+
+            if (x > T(0.0)) {
+                return n + n + 1;
+            }
+
+            if (n % 2 == 0) {
+                return T(1.0);
+            }
+
+            return T(-1.0);
+        }
+
+
+        if (n == 0) {
+            return T(1.0);
+        }
+
+        if (n == 1) {
+            return x + x + T(1.0);
+        }
+
+        T p = T(1.0);
+        T q = x + x + T(1.0);
+        T r;
+
+        for (int64_t k = 2; k <= n; k++) {
+            r = (x + x) * q - p;
+            p = q;
+            q = r;
+        }
+
+        return r;
+    } // chebyshev_polynomial_w_forward(T x, int64_t n)
+
+    template<typename T>
+    T chebyshev_polynomial_w_forward(T x, T n) {
+        return chebyshev_polynomial_w_forward(x, static_cast<int64_t>(n));
+    } // chebyshev_polynomial_w_forward(T x, T n)
+); // chebyshev_polynomial_w_string
+
 #else // !AT_USE_JITERATOR() -- kernels must be precompiled
 
 template <typename scalar_t>

@@ -2,10 +2,41 @@ import torch
 from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
-__all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'erf', 'erfc', 'erfinv',
-           'erfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py', 'xlogy',
-           'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log_ndtr', 'log1p', 'sinc', 'round', 'log_softmax',
-           'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'softmax']
+__all__ = [
+    'chebyshev_polynomial_w',
+    'digamma',
+    'entr',
+    'erf',
+    'erfc',
+    'erfcx',
+    'erfinv',
+    'exp2',
+    'expit',
+    'expm1',
+    'gammainc',
+    'gammaincc',
+    'gammaln',
+    'i0',
+    'i0e',
+    'i1',
+    'i1e',
+    'log1p',
+    'log_ndtr',
+    'log_softmax',
+    'logit',
+    'logsumexp',
+    'multigammaln',
+    'ndtr',
+    'ndtri',
+    'polygamma',
+    'psi',
+    'round',
+    'sinc',
+    'softmax',
+    'xlog1py',
+    'xlogy',
+    'zeta',
+]
 
 Tensor = torch.Tensor
 
@@ -819,4 +850,18 @@ Example::
     >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
     tensor([1., 1., 1.])
 
+""".format(**common_args))
+
+chebyshev_polynomial_w = _add_docstr(_special.special_chebyshev_polynomial_w,
+                                     r"""
+chebyshev_polynomial_w(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the fourth kind :math:`W_{n}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
 """.format(**common_args))
