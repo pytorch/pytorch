@@ -382,7 +382,7 @@ class TestMPS(TestCase):
     def test_linear3D(self):
         self._linear_helper(in_features=200, out_features=33278, shape=((35, 20, 200)), bias=True, backward_pass=False)
 
-    def test_linear3D_backwarwd(self):
+    def test_linear3D_backward(self):
         self._linear_helper(in_features=200, out_features=33278, shape=((35, 20, 200)), bias=True, backward_pass=True)
 
     def test_linear3D_no_bias(self):
