@@ -557,14 +557,11 @@ neg = _make_elementwise_unary_reference(
 )
 
 
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("a,"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
-)
+# positive does not use _make_elementwise_unary_reference because it does not support out
 def positive(a: TensorLikeType) -> TensorLikeType:
     assert isinstance(a, TensorLike)
     if a.dtype is torch.bool:
-        msg = "neg is not supported on bool tensors."
+        msg = "positive does not support bool tensors."
         raise RuntimeError(msg)
     return a
 
