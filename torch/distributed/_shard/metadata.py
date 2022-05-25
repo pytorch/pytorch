@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Union
+from functools import reduce
 
 from torch.distributed.remote_device import _remote_device
 
@@ -25,6 +26,15 @@ class ShardMetadata(object):
     shard_offsets: List[int]
     shard_sizes: List[int]
     placement: Union[str, _remote_device]
+
+    def __hash__(self):
+        def _hash_reduce(a, b):
+            return (a << 8) + hash(b)
+
+        res = reduce(_hash_reduce, self.shard_offsets, 37)
+        res = reduce(_hash_reduce, self.shard_sizes, res)
+        res = _hash_reduce(res, self.placement)
+        return res
 
     def __post_init__(self):
         if isinstance(self.placement, str):

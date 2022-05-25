@@ -1,8 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/mps/MPSDevice.h>
-#include <torch/library.h>
-#include <ATen/native/CPUFallback.h>
 
 namespace at {
 namespace mps {
@@ -22,13 +20,19 @@ MPSDevice::~MPSDevice() {
   _mtl_device = nil;
 }
 
-MPSDevice::MPSDevice() {
-  NSArray* devices = MTLCopyAllDevices();
-  bool allowIntelGPUs = false;
+MPSDevice::MPSDevice(): _mtl_device(nil) {
+  // Check that MacOS 12.3+ version of MPS framework is available
+  id mpsCD = NSClassFromString(@"MPSGraphCompilationDescriptor");
+  if (![mpsCD instancesRespondToSelector:@selector(optimizationLevel)]) {
+    // According to https://developer.apple.com/documentation/metalperformanceshadersgraph/mpsgraphcompilationdescriptor/3922624-optimizationlevel
+    // this means we are running on older MacOS
+    return;
+  }
+  NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0 ; i < [devices count] ; i++) {
     id<MTLDevice>  device = devices[i];
     if(![device isLowPower]) { // exclude Intel GPUs
-      _mtl_device = device;
+      _mtl_device = [device retain];
       break;
     }
   }
@@ -40,14 +44,9 @@ at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
   return useSharedAllocator ? getMPSSharedAllocator() : GetAllocator(DeviceType::MPS);
 }
 
-} // namespace mps
-
-TORCH_LIBRARY_IMPL(_, MPS, m) {
-  static const char *mps_fallback = getenv("PYTORCH_DISABLE_MPS_FALLBACK");
-  if(mps_fallback && std::stoi(mps_fallback) == 1) {
-    return;
-  }
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&native::cpu_fallback>());
+bool is_available() {
+  return MPSDevice::getInstance()->device() != nil;
 }
 
+} // namespace mps
 } // namespace at
