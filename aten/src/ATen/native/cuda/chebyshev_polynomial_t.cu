@@ -11,7 +11,7 @@
 namespace at {
     namespace native {
         namespace {
-            const char chebyshev_polynomial_t_name[] = "chebyshev_polynomial_t";
+            const char chebyshev_polynomial_t_name[] = "chebyshev_polynomial_t_forward";
 
             void chebyshev_polynomial_t_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()
@@ -21,7 +21,7 @@ namespace at {
 #else
                 AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "chebyshev_polynomial_t_cuda", [&]() {
                     gpu_kernel_with_scalars(iterator, []GPU_LAMBDA(scalar_t x, scalar_t n) -> scalar_t {
-                        return chebyshev_polynomial_t<scalar_t, true>(x, n);
+                        return chebyshev_polynomial_t_forward<scalar_t, true>(x, n);
                     });
                 });
 #endif

@@ -1267,12 +1267,12 @@ const auto erfcx_string = jiterator_stringify(
 
 const auto chebyshev_polynomial_t_string = jiterator_stringify(
     template<typename T>
-    T chebyshev_polynomial_t(T x, std::int64_t n) {
+    T chebyshev_polynomial_t_forward(T x, int n) {
         if (n < 0) {
             return T(0.0);
         }
 
-        if (std::abs(x) == T(1.0)) {
+        if (abs(x) == T(1.0)) {
             if (x > T(0.0) || n % 2 == 0) {
                 return T(1.0);
             }
@@ -1280,8 +1280,8 @@ const auto chebyshev_polynomial_t_string = jiterator_stringify(
             return T(-1.0);
         }
 
-        if ((n > 6) && (std::abs(x) < T(1.0))) {
-            return std::cos(n * std::acos(x));
+        if ((n > 6) && (abs(x) < T(1.0))) {
+            return cos(n * acos(x));
         }
 
         if (n == 0) {
@@ -1303,6 +1303,11 @@ const auto chebyshev_polynomial_t_string = jiterator_stringify(
         }
 
         return r;
+    }
+
+    template<typename T>
+    T chebyshev_polynomial_t_forward(T x, T n) {
+        return chebyshev_polynomial_t_forward(x, static_cast<int>(n));
     }
 );
 
