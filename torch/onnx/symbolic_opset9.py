@@ -2716,10 +2716,10 @@ def slice(g, self, *args):
         if step != 1:
             raise RuntimeError("step!=1 is currently not supported")
         is_start_none = start.node().kind() == "prim::Constant" and isinstance(
-            start.type(), type(None)
+            start.type(), _C.NoneType
         )
         is_end_none = end.node().kind() == "prim::Constant" and isinstance(
-            end.type(), type(None)
+            end.type(), _C.NoneType
         )
         is_start_onnx_const = start.node().kind() == "onnx::Constant"
         is_end_onnx_const = end.node().kind() == "onnx::Constant"
@@ -2761,10 +2761,10 @@ def slice(g, self, *args):
         start, end, step = args
         dim = 0
         is_start_none = start.node().kind() == "prim::Constant" and isinstance(
-            start.type(), type(None)
+            start.type(), _C.NoneType
         )
         is_end_none = end.node().kind() == "prim::Constant" and isinstance(
-            end.type(), type(None)
+            end.type(), _C.NoneType
         )
         start = 0 if is_start_none else symbolic_helper._parse_arg(start, "i")
         end = (
