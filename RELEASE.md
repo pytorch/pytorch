@@ -9,7 +9,7 @@
     - [`pytorch/builder` / PyTorch domain libraries](#pytorchbuilder--pytorch-domain-libraries)
     - [Making release branch specific changes for PyTorch](#making-release-branch-specific-changes-for-pytorch)
     - [Making release branch specific changes for domain libraries](#making-release-branch-specific-changes-for-domain-libraries)
-  - [Drafting RCs (Release Candidates) for PyTorch and domain libraries](#drafting-rcs-release-candidates-for-pytorchpytorch-and-domain-libraries)
+  - [Drafting RCs (Release Candidates) for PyTorch and domain libraries](#drafting-rcs-release-candidates-for-pytorch-and-domain-libraries)
     - [Release Candidate Storage](#release-candidate-storage)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
