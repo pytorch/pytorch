@@ -418,19 +418,12 @@ Tensor sparse_compressed_to_dense(
       return dense;
     }
     if (self.dim() == 3) {
-      std::cout << "0 values.sizes(): " << values.sizes() << std::endl;
-      std::cout << "0 indices.sizes(): " << indices.sizes() << std::endl;
-      values = values.reshape(
-          {values.size(0) * values.size(1), values.size(2), values.size(3)});
-
       Tensor dense = at::zeros(self.sizes(), self.options().layout(kStrided));
       dense =
           dense.reshape({self.size(0), -1, values.size(-2), values.size(-1)});
       auto row_indices = indices.select(0, 0);
       auto col_indices = indices.select(0, 1);
-      std::cout << "indices: " << indices << std::endl;
       auto offsets = col_indices + row_indices * (self.size(-1) / blocksize[1]);
-      std::cout << "offsets: " << offsets << std::endl;
       dense.index_add_(1, offsets, values);
       dense = dense.reshape(
           {self.size(0),
