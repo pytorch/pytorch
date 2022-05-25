@@ -2207,7 +2207,7 @@ static inline T chebyshev_polynomial_t_forward(T x, std::int64_t n) {
     T q = x;
     T r;
 
-    for (int k = 2; k <= n; k++) {
+    for (std::int64_t k = 2; k <= n; k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
