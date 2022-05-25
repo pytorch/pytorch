@@ -191,6 +191,14 @@ def instantiate_parametrized_tests(generic_cls):
     decorator subclass of _TestParametrizer. The generic test will be replaced on the test class by
     parametrized tests with specialized names.
 
+    You can also use it as a class decorator. E.g.
+
+    ```
+    @instantiate_parametrized_tests
+    class TestFoo(TestCase):
+        ...
+    ```
+
     Args:
         generic_cls (class): Generic test class object containing tests (e.g. TestFoo)
     """
