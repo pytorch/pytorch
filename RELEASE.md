@@ -76,7 +76,7 @@ This script should create 2 branches:
 
 ### `pytorch/builder` / PyTorch domain libraries
 
-Important note: Cutting the branch for individual domain libraries is performed a week later after branch cut for the Pytorch and Builder. This is absolutely required to allow sufficient testing time for each of the domain library. Domain libraries branch cut is performed by Domain Library POC.
+*Note*:  Release branches for individual domain libraries should be created after first release candidate build of PyTorch is available in staging channels (which happens about a week after PyTorch release branch has been created). This is absolutely required to allow sufficient testing time for each of the domain library. Domain libraries branch cut is performed by Domain Library POC.
 Builder branch cut should be performed at the same time as Pytorch core branch cut. Convenience script can also be used domains as well as `pytorch/builder`
 
 > NOTE: RELEASE_VERSION only needs to be specified if version.txt is not available in root directory
