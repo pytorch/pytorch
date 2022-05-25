@@ -3793,11 +3793,21 @@ def reference_inputs_broadcast_tensors(op, device, dtype, requires_grad, **kwarg
 
 def sample_inputs_block_diag(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
-    test_cases: Tuple[tuple] = (((1, S), (2, S), (3, S),),)
+    test_cases: Tuple[tuple] = (
+        ((1, S), (2, S), (3, S),),
+        ((S, 1), (S, 2), (S, 3),),
+        ((1,), (2,), (3,),),
+        ((2, S), (S,))
+    )
 
     samples: List[SampleInput] = []
     for shape, *other_shapes in test_cases:
         samples.append(SampleInput(make_arg(shape), args=tuple(make_arg(s) for s in other_shapes)))
+        # We also want to test mixed complex-non-complex inputs to block_diag
+        if dtype == torch.complex32 or dtype == torch.complex64:
+            non_complex_dtype = torch.float32 if dtype == torch.complex32 else torch.float64
+            make_arg_non_complex = partial(make_tensor, dtype=non_complex_dtype, device=device, requires_grad=requires_grad)
+            samples.append(SampleInput(make_arg_non_complex(shape), args=tuple(make_arg(s) for s in other_shapes)))
 
     return samples
 
@@ -10557,6 +10567,8 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           # Default batching rule in core doesn't work for ops with TensorList args
+           check_batched_forward_grad=False,
            skips=(
                # https://github.com/pytorch/pytorch/issues/64997
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -10565,10 +10577,6 @@ op_db: List[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":252,
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
-               # Problem; should be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ),
            sample_inputs_func=sample_inputs_block_diag),
     UnaryUfuncInfo('bitwise_not',
