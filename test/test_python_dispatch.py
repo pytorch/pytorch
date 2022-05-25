@@ -801,7 +801,7 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
                     kwargs = {}
                 return func(*args, **kwargs)
 
-        x = TestMode(inner=None)
+        x = TestMode()
         y = torch.tensor([2.])
         with enable_torch_dispatch_mode(x):
             y + y
@@ -926,7 +926,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
         class A(TorchDispatchMode):
             pass
         with self.assertRaisesRegex(ValueError, 'instance of TorchDispatchMode'):
-            with push_torch_dispatch_mode(A(inner=None)):
+            with push_torch_dispatch_mode(A()):
                 pass
 
     def test_push_mode_returns_unrelated(self):
