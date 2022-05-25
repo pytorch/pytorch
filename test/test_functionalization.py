@@ -86,11 +86,24 @@ class TestFunctionalization(TestCase):
         finally:
             torch._disable_functionalization()
 
+        self.assertEqual(out_ref.size(), out_functional.size())
         # We need to sync the input tensors first, in case there are any queued mutations left.
         torch._sync(input_functional)
         torch._sync(out_functional)
         self.assertEqual(out_ref, torch._from_functional_tensor(out_functional))
         self.assertEqual(inpt, torch._from_functional_tensor(input_functional))  # input mutations should still occur
+
+    def test_multiple_views_of_same_base(self):
+        def f(x):
+            y = x.view(-1)
+            z = x.view(-1)
+            x.add_(1)
+            # y should have been updated.
+            y2 = y + 1
+            # z should have been updated too.
+            z2 = z + 1
+            return z2
+        self.assert_functionalization(f, torch.ones(4))
 
     def test_simple(self):
         def f(x):
@@ -185,6 +198,18 @@ $2 = torch._ops.aten.add.Tensor($0, tensor([[1., 1.],
 $0 = input('input')
 $1, $2, $3, $4, $5, $6 = torch._ops.aten._fused_moving_avg_obs_fq_helper.functional($0, $0, $0, $0, $0, $0, $0, 1.0, 0, 1, 0)""")
 
+    def test_as_strided(self):
+        def f(x):
+            y = x.as_strided((2,), (2,), 1)
+            y.add_(1)
+            return x
+        self.assert_functionalization(f, torch.ones(9))
+        logs = self.get_logs(f, torch.ones(9))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.as_strided_copy.default($0, [2], [2], 1)
+$2 = torch._ops.aten.add.Tensor($1, 1)""")
+
     def test_tensor_list_composite(self):
         def f(x):
             # Test an op with TensorList input
@@ -272,7 +297,7 @@ $9 = torch._ops.aten.mul.Tensor($8, $8)""")
             x.transpose_(1, 0)
             y = x[0]
             y.add_(tmp)
-            return y
+            return x
         self.assert_functionalization(f, torch.ones(4, 2))
         logs = self.get_logs(f, torch.ones(4, 2))
         self.assertExpectedInline('\n'.join(logs), """\
@@ -314,6 +339,18 @@ $1 = torch._ops.aten.view_copy.default($0, [4, 2])
 $2 = torch._ops.aten.add.Tensor($1, 1)
 $3 = torch._ops.aten.mul.Tensor($2, 2)
 $4 = torch._ops.aten.div.Tensor($3, 1)""")
+
+    def test_metadata_change(self):
+        def f(x):
+            # ops like ge_() are allowed to change the dtype of the input.
+            # functionalization should pick up on that.
+            return x.ge_(0)
+        self.assert_functionalization(f, torch.ones(4, 2))
+        logs = self.get_logs(f, torch.ones(4, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.ge.Scalar($0, 0)
+$2 = torch._ops.aten._to_copy.default($1, dtype=torch.float32, layout=torch.strided)""")
 
     def test_only_one_view(self):
         def f(x):

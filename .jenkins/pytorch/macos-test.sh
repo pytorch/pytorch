@@ -66,7 +66,7 @@ test_python_shard() {
 
   setup_test_python
 
-  time python test/run_test.py --verbose --exclude-jit-executor --shard "$1" "$NUM_TEST_SHARDS"
+  time python test/run_test.py --verbose --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS"
 
   assert_git_not_dirty
 }
