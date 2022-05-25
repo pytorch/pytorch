@@ -34,7 +34,7 @@ jobs:
         run: |
           set -ex
           if [ -n "${STABLE}" ]; then
-            python3 .github/scripts/tryrebase.py --stable "${PR_NUM}" 
+            python3 .github/scripts/tryrebase.py --stable "${PR_NUM}"
           else
-            python3 .github/scripts/tryrebase.py "${PR_NUM}" 
+            python3 .github/scripts/tryrebase.py "${PR_NUM}"
           fi
