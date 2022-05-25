@@ -6729,6 +6729,11 @@ def error_inputs_roll(op_info, device, **kwargs):
     )
     yield ErrorInput(s2, error_regex=err_msg2)
 
+    err_msg3 = ("out of range")
+    s3 = SampleInput(
+        make_tensor((S, ), dtype=torch.float32, device=device), args=(0, 2)
+    )
+    yield ErrorInput(s3, error_regex=err_msg3, error_type=IndexError)
 
 def sample_inputs_rot90(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -19454,6 +19459,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.roll",
         torch_opinfo_name="roll",
+        skips=(
+            # TODO: decide on the error message for the reference implementation
+            # See https://github.com/pytorch/pytorch/issues/78252
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.rot90",
