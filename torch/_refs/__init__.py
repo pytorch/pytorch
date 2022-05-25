@@ -550,13 +550,15 @@ neg = _make_elementwise_unary_reference(
 )
 
 
-@register_decomposition(torch.ops.aten.positive)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a,"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def positive(a: TensorLikeType) -> TensorLikeType:
     assert isinstance(a, TensorLike)
+    if a.dtype is torch.bool:
+        msg = "neg is not supported on bool tensors."
+        raise RuntimeError(msg)
     return a
 
 
