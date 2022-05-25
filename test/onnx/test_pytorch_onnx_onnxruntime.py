@@ -1,5 +1,7 @@
 # Owner(s): ["module: onnx"]
 
+from __future__ import annotations
+
 import io
 import itertools
 import os
@@ -61,16 +63,20 @@ from torch.onnx.symbolic_helper import _unimplemented
 _ORT_PROVIDERS = ["CPUExecutionProvider"]
 
 
-def run_model_test(self, *args, **kwargs):
+def run_model_test(
+    test_suite: Union[_TestONNXRuntime, unittest.TestCase], *args, **kwargs
+):
     kwargs["ort_providers"] = _ORT_PROVIDERS
-    kwargs["opset_version"] = self.opset_version
-    kwargs["keep_initializers_as_inputs"] = self.keep_initializers_as_inputs
+    kwargs["opset_version"] = test_suite.opset_version
+    kwargs["keep_initializers_as_inputs"] = test_suite.keep_initializers_as_inputs
     return verification.verify(*args, **kwargs)
 
 
-def run_model_test_with_external_data(self, *args, **kwargs):
+def run_model_test_with_external_data(
+    test_suite: Union[_TestONNXRuntime, unittest.TestCase], *args, **kwargs
+):
     kwargs["use_external_data"] = True
-    return run_model_test(self, *args, **kwargs)
+    return run_model_test(test_suite, *args, **kwargs)
 
 
 def _init_test_generalized_rcnn_transform():
