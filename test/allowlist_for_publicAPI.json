@@ -3106,6 +3106,7 @@
     "polygamma",
     "psi",
     "round",
+    "shifted_chebyshev_polynomial_t",
     "sinc",
     "softmax",
     "xlog1py",
