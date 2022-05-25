@@ -1,7 +1,8 @@
 import torch
+from typing import Callable, Dict
 from ..qconfig_mapping import QConfigMapping
 
-TYPE_TO_REPLACEMENT_TYPE = {
+TYPE_TO_REPLACEMENT_TYPE: Dict[Callable, Callable] = {
     torch.add: torch.Tensor.add,
     torch.Tensor.add_: torch.Tensor.add,
     torch.mul: torch.Tensor.mul,
@@ -17,7 +18,8 @@ def normalize_object_types(qconfig_mapping: QConfigMapping) -> None:
     This is needed because the tensor variant is what is expected
     within the framework.
     """
-    for qconfig_entry in qconfig_mapping.object_type_qconfigs:
-        replacement_type = TYPE_TO_REPLACEMENT_TYPE.get(qconfig_entry.object_type, None)  # type: ignore[arg-type]
+    for object_type, qconfig in list(qconfig_mapping.object_type_qconfigs.items()):
+        replacement_type = TYPE_TO_REPLACEMENT_TYPE.get(object_type, None)  # type: ignore[arg-type]
         if replacement_type is not None:
-            qconfig_entry.object_type = replacement_type  # type: ignore[assignment]
+            del qconfig_mapping.object_type_qconfigs[object_type]
+            qconfig_mapping.object_type_qconfigs[replacement_type] = qconfig
