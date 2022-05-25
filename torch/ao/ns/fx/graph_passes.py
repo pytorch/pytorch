@@ -37,16 +37,23 @@ def _get_normalized_nth_input(node: Node, gm: GraphModule, idx: int) -> Node:
             gm, normalize_to_only_use_kwargs=True)
         if norm_args_and_kwargs is not None:
             norm_args, norm_kwargs = norm_args_and_kwargs
-            assert len(norm_args) + len(norm_kwargs) >= idx + 1
+            assert len(norm_args) + len(norm_kwargs) > idx
             if idx < len(norm_args):
                 return norm_args[idx]
             else:
                 # note: in Python 3.7+ dicts are ordered
                 return list(norm_kwargs.values())[idx]
         else:
-            assert len(node.args) > idx
-            return node.args[idx]  # type: ignore[return-value]
+            assert len(node.args) + len(node.kwargs) > idx
+            if idx < len(node.args):
+                return node.args[idx]  # type: ignore[return-value]
+            else:
+                kwargs_idx = idx + len(node.args)
+                return list(node.kwargs.values())[kwargs_idx]  # type: ignore[return-value]
     except RuntimeError:
+        # this RuntimeError happens when node argument normalization
+        # requires typehints to proceed, such as for torch.add where
+        # either the first, second or both arguments could be tensors
         assert len(node.args) + len(node.kwargs) > idx
         if idx < len(node.args):
             return node.args[idx]  # type: ignore[return-value]
