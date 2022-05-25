@@ -1412,6 +1412,12 @@
   src: grad.diagonal(offset, dim1, dim2)
   result: auto_linear
 
+- name: as_strided_scatter(Tensor self, Tensor src, int[] size, int[] stride, int? storage_offset=None) -> Tensor
+  self: as_strided_scatter_backward(grad, TensorGeometry(self), TensorGeometry(src), size, stride, storage_offset)
+  # See Note [as_strided_scatter backward support]
+  src: grad.contiguous().as_strided(size, stride, storage_offset)
+  result: auto_linear
+
 - name: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   self: slogdet_backward(grad, self, sign, logabsdet)
   output_differentiability: [false, true]
@@ -2743,13 +2749,3 @@
 - name: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
-
-- name: special_beta(Tensor x, Tensor y) -> Tensor
-  x: non_differentiable
-  y: non_differentiable
-
-- name: special_beta.x_scalar(Scalar x, Tensor y) -> Tensor
-  y: non_differentiable
-
-- name: special_beta.y_scalar(Tensor x, Scalar y) -> Tensor
-  x: non_differentiable
