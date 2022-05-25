@@ -291,9 +291,6 @@ struct TORCH_API RecordFunction {
       return;
     }
     inputs_ = args;
-#ifndef NDEBUG
-    inputs_valid_ = true;
-#endif
     before(fn, current_sequence_nr);
   }
 
