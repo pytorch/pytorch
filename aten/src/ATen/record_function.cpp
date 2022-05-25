@@ -703,6 +703,9 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
   fn_ = name;
   sequence_nr_ = sequence_nr;
 
+#ifndef NDEBUG
+    inputs_valid_ = true;
+#endif
   runStartCallbacks();
   invalidateInputs();
 }
@@ -711,6 +714,9 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   fn_ = std::move(name);
   sequence_nr_ = sequence_nr;
 
+#ifndef NDEBUG
+    inputs_valid_ = true;
+#endif
   runStartCallbacks();
   invalidateInputs();
 }
@@ -721,6 +727,9 @@ void RecordFunction::before(
   sequence_nr_ = sequence_nr;
   fn_ = schema;
 
+#ifndef NDEBUG
+    inputs_valid_ = true;
+#endif
   runStartCallbacks();
   invalidateInputs();
 }
