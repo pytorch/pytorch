@@ -113,7 +113,7 @@ TORCH_META_FUNC(gather)
   // For more details, see: https://github.com/pytorch/pytorch/pull/63312#discussion_r694794832
   // and https://github.com/pytorch/pytorch/issues/63837
   bool check_result = result.defined();
-  set_output(index.sizes(), self.options());
+  set_output_raw_strided(0, index.sizes(), {}, self.options());
   if (check_result) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
@@ -152,7 +152,7 @@ void scatter_meta_impl(
     }
   }
 
-  meta.set_output(self.sizes(), self.options());
+  meta.set_output_raw_strided(0, self.sizes(), {}, self.options());
   if (reduce.has_value()) {
     // Check if we have a valid reduce operator.
     get_operator_enum(reduce.value(), use_new_options);
@@ -215,7 +215,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
   // For more details, see: https://github.com/pytorch/pytorch/pull/63312#discussion_r694794832
   // and https://github.com/pytorch/pytorch/issues/63837
   bool check_result = result.defined();
-  set_output(self.sizes(), self.options());
+  set_output_raw_strided(0, self.sizes(), {}, self.options());
   if (check_result) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, index);
@@ -288,7 +288,7 @@ void index_func_meta_impl(
 
   auto& result = meta.maybe_get_output(0);
   bool is_defined = result.defined();
-  meta.set_output(self.sizes(), self.options());
+  meta.set_output_raw_strided(0, self.sizes(), {}, self.options());
   if (is_defined) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, index);
@@ -298,7 +298,7 @@ void index_func_meta_impl(
   // A hack to run TensorIterator checks in the meta function.
   // See comment: https://github.com/pytorch/pytorch/pull/65993#discussion_r760307417
   // TODO: (@krshrimali) Try inheriting from TensorIteratorBase instead.
-  if (result.device() == kMeta) {
+  if (result.device() == kMeta && result.dim() > 0) {
     auto selfSlice = result.select(dim, 0);
     auto sourceSlice = source.select(dim, 0);
     auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
@@ -312,7 +312,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
   return TORCH_PRECOMPUTE_STRUCT(index_add)().set_dim(dim);
 }
 
-TORCH_PRECOMPUTE_META_FUNC(_index_reduce)
+TORCH_PRECOMPUTE_META_FUNC(index_reduce)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
@@ -321,10 +321,10 @@ TORCH_PRECOMPUTE_META_FUNC(_index_reduce)
  bool include_self) {
   (void)include_self;
   TORCH_CHECK(reduce == "prod" || reduce == "mean" || reduce == "amax" || reduce == "amin",
-              "_index_reduce(): Expected reduce to be one of prod, mean, amax or amin but got ", reduce, ".");
+              "index_reduce(): Expected reduce to be one of prod, mean, amax or amin but got ", reduce, ".");
   dim = maybe_wrap_dim(dim, self.dim());
-  index_func_meta_impl(*this, self, dim, index, source, "_index_reduce");
-  return TORCH_PRECOMPUTE_STRUCT(_index_reduce)().set_dim(dim);
+  index_func_meta_impl(*this, self, dim, index, source, "index_reduce");
+  return TORCH_PRECOMPUTE_STRUCT(index_reduce)().set_dim(dim);
 }
 
 } // namespace meta
@@ -1026,7 +1026,7 @@ void index_reduce_func_impl(
   }
 }
 
-TORCH_IMPL_FUNC(_index_reduce_cpu_out)
+TORCH_IMPL_FUNC(index_reduce_cpu_out)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
@@ -1278,7 +1278,12 @@ Tensor index_select_quantized_cpu_(const Tensor & self, int64_t dim, const Tenso
 }
 
 Tensor index_select_backward(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
-  return at::zeros(self_sizes, grad.options()).index_add_(dim, index, grad);
+  // for composite compliance, use out-of-place variant of
+  // `index_add` if index tensor is a Tensor Subclass.
+  if (isTensorSubclassLike(index)) {
+    return grad.new_zeros(self_sizes, grad.options()).index_add(dim, index, grad);
+  }
+  return grad.new_zeros(self_sizes, grad.options()).index_add_(dim, index, grad);
 }
 
 Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Scalar& source) {
