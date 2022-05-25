@@ -75,13 +75,13 @@ STATE_DICT_MAPPING = {
 
 
 class Model(Module):
-    def __init__(self, wrap_fsdp, register_buffers=False):
+    def __init__(self, wrap_fsdp, register_buffers=False, ignore_inner=False):
         super().__init__()
         self.inner = Linear(*INNER_SHAPE)
         if register_buffers:
             self.inner.register_buffer("buffer", torch.randn(BUFFER_SHAPE))
         if wrap_fsdp:
-            self.inner = FSDP(self.inner)
+            self.inner = FSDP(self.inner, ignored_modules=([self.inner] if ignore_inner else []))
         self.outer = Linear(*OUTER_SHAPE)
         if register_buffers:
             self.outer.register_buffer("buffer", torch.randn(BUFFER_SHAPE))
@@ -667,17 +667,23 @@ class TestFSDPStateDict(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("prefix", [True, False])
-    def test_state_dict_with_ignored_modules(self, prefix):
+    @parametrize("ignore_inner", [True, False])
+    def test_state_dict_with_ignored_modules(self, prefix, ignore_inner):
         # Initialize an FSDP-wrapped model with an ignored module that includes
         # both parameters and a buffer
-        model = Model(wrap_fsdp=True, register_buffers=True).cuda()
+        model = Model(wrap_fsdp=True, register_buffers=True, ignore_inner=ignore_inner).cuda()
         ignored_modules = [model.outer]
         ignored_tensor_to_tensor_name = {
             model.outer.bias: "outer.bias",
             model.outer.weight: "outer.weight",
-            model.outer.buffer: "outer.buffer",
         }
-        # Note that model.outer is not ignored so this test also ensures
+        if ignore_inner:
+            ignored_tensor_to_tensor_name = {
+                **ignored_tensor_to_tensor_name,
+                model.inner.bias: "inner.bias",
+                model.inner.weight: "inner.weight",
+            }
+        # Note that when model.inner is not ignored this test also ensures
         # non-ignored buffers are not cloned.
         buffer_to_buffer_name = {
             model.inner.buffer: "inner.buffer", model.outer.buffer: "outer.buffer",
@@ -695,7 +701,7 @@ class TestFSDPStateDict(FSDPTest):
         }.items():
             prefixed_tensor_name = f"{prefix_str}{tensor_name}"
             self.assertTrue(prefixed_tensor_name in sd1)
-            self.assertEqual(tensor.data_ptr(), sd1[prefixed_tensor_name].data_ptr())
+            self.assertEqual(tensor.data_ptr(), sd1[prefixed_tensor_name].data_ptr(), f"{prefixed_tensor_name}")
         # Check that the state dict can be loaded into a non-wrapped version of
         # the model
         nonwrapped_model = Model(wrap_fsdp=False, register_buffers=True).cuda()

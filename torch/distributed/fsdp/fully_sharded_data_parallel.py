@@ -620,6 +620,7 @@ class FullyShardedDataParallel(nn.Module):
         super().__init__()
         # Validate the ignored modules and derive the ignored parameters/buffers
         ignored_modules = self._get_ignored_modules(module, ignored_modules)
+        self._ignored_modules = ignored_modules
         ignored_params, ignored_param_names = \
             self._get_ignored_params(module, ignored_modules)
         buffer_names = self._get_buffer_names(module)
@@ -627,6 +628,7 @@ class FullyShardedDataParallel(nn.Module):
         # of the ignored modules' parameters and of all modules' buffers)
         self._ignored_param_names = ignored_param_names
         self._buffer_names = buffer_names
+        print(f"init: param names: {ignored_param_names} bufs: {self._buffer_names}")
         # NOTE: Since the names are computed at construction time, if the user
         # changes them later, then FSDP will not properly ignore them. However,
         # the `FlatParameter` implementation already relies on this assumption.
@@ -996,11 +998,15 @@ class FullyShardedDataParallel(nn.Module):
             not isinstance(child, FlattenParamsWrapper)
         )
         if root_module in ignored_modules:
-            raise ValueError(
+            warnings.warn(
                 "Trying to ignore the top-level module passed into the FSDP "
                 "constructor itself will result in all parameters being "
                 f"ignored and is not supported: {module}"
             )
+        for submodule in root_module.modules():
+            if isinstance(submodule, FullyShardedDataParallel):
+                assert hasattr(submodule, "_ignored_modules")
+                ignored_modules.update(submodule._ignored_modules)
         return ignored_modules
 
     def _get_ignored_params(
@@ -1026,9 +1032,13 @@ class FullyShardedDataParallel(nn.Module):
             root_module, dedup_shared_params=False,
         )
         ignored_param_names = set()
+        print(f"Param to unflat param names has vals {param_to_unflat_param_names.values()}")
         for param in ignored_params:
             unflat_param_names = param_to_unflat_param_names[param]
-            ignored_param_names.update(unflat_param_names)
+            clean_names = []
+            for k in unflat_param_names:
+                clean_names.append(clean_tensor_name(k))
+            ignored_param_names.update(clean_names)
         return ignored_params, ignored_param_names
 
     def _get_buffer_names(self, root_module: torch.nn.Module) -> Set[str]:
@@ -1634,9 +1644,10 @@ class FullyShardedDataParallel(nn.Module):
                 # parameters and all buffer names since only the root's names
                 # are fully prefixed like the state dict keys
                 m._exec_order_data = self._exec_order_data
-                m._ignored_param_names = self._ignored_param_names
-                self._buffer_names = self._buffer_names.union(m._buffer_names)
-                m._buffer_names = self._buffer_names
+                # self._ignored_param_names = self._ignored_param_names.union(m._ignored_param_names)
+                # m._ignored_param_names = self._ignored_param_names
+                # self._buffer_names = self._buffer_names.union(m._buffer_names)
+                # m._buffer_names = self._buffer_names
 
     def _wait_for_previous_optim_step(self) -> None:
         """
@@ -1789,6 +1800,9 @@ class FullyShardedDataParallel(nn.Module):
                 continue
             # Clone non-ignored parameters before exiting the
             # `_summon_full_params()` context
+            ig = clean_key in self._ignored_param_names
+            if ig:
+                print(f"{self.rank} {clean_key} found in {self._ignored_param_names}")
             if clean_key not in self._ignored_param_names and \
                     not getattr(state_dict[key], "_has_been_cloned", False):
                 try:
