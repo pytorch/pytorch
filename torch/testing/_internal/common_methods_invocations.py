@@ -6656,23 +6656,22 @@ def sample_inputs_linalg_solve_triangular(op_info, device, dtype, requires_grad=
     ks = (1, 3, 0)
 
     for b, n, k, (left, upper, uni) in product(bs, ns, ks, product((True, False), repeat=3)):
-        with torch.no_grad():
-            if b == 1:
-                A = make_arg((n, n)) if left else make_arg((k, k))
-                B = make_arg((n, k))
-            else:
-                A = make_arg((b, n, n)) if left else make_arg((b, k, k))
-                B = make_arg((b, n, k))
-            if uni:
-                # Not really necessary, but writing it for consistency
-                A.diagonal(0, -2, -1).fill_(1.)
-            else:
-                d = A.diagonal(0, -2, -1)
-                d[d.abs() < 1e-6] = 1.
-            if upper:
-                A.triu_()
-            else:
-                A.tril_()
+        if b == 1:
+            A = make_arg((n, n)) if left else make_arg((k, k))
+            B = make_arg((n, k))
+        else:
+            A = make_arg((b, n, n)) if left else make_arg((b, k, k))
+            B = make_arg((b, n, k))
+        if uni:
+            # Not really necessary, but writing it for consistency
+            A.diagonal(0, -2, -1).fill_(1.)
+        else:
+            d = A.diagonal(0, -2, -1)
+            d[d.abs() < 1e-6] = 1.
+        if upper:
+            A.triu_()
+        else:
+            A.tril_()
         kwargs = {"upper": upper, "left": left, "unitriangular": uni}
         if requires_grad:
             for grad_A, grad_B in product((True, False), repeat=2):
@@ -9128,12 +9127,11 @@ def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwar
                     t1 = _make_tensor(s, low=0)
                     t2 = _make_tensor(s, low=0)
 
-                    with torch.no_grad():
-                        if not li:
-                            i1.abs_()
-                            i2.abs_()
-                        t1.abs_()
-                        t2.abs_()
+                    if not li:
+                        i1.abs_()
+                        i2.abs_()
+                    t1.abs_()
+                    t2.abs_()
 
                     yield (
                         i1, t1,
