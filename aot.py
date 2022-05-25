@@ -29,7 +29,7 @@ def all_reduce(x):
     # So, let's work around by clone the input.
     xc = x.clone()
     dist.all_reduce(xc)
-    print(f"{os.getpid()} all_reduce: {x}")
+    print(f"{os.getpid()} all_reduce: {xc}")
     return xc
 
 def all_gather(xs, x):
