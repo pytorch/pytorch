@@ -752,9 +752,9 @@ class TestAutocast(JitTestCase):
         FileCheck().check_not("_autocast_to_reduced").run(g)
 
 class convbn(torch.nn.Module):
-    def __init__(self, bias_enabled = True):
+    def __init__(self, bias_enabled=True):
         super(convbn, self).__init__()
-        self.conv = torch.nn.Conv2d(3, 64, 7, stride=2, bias = bias_enabled)
+        self.conv = torch.nn.Conv2d(3, 64, 7, stride=2, bias=bias_enabled)
         self.bn = torch.nn.BatchNorm2d(64)
 
     def forward(self, x):
@@ -766,11 +766,11 @@ class TestJitTraceAutocast(JitTestCase):
         self.previous_default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.float32)
         self.models = [MnistNet(),
-                    convbn(bias_enabled=True),
-                    convbn(bias_enabled=False)]
+                       convbn(bias_enabled=True),
+                       convbn(bias_enabled=False)]
         self.inputs = [torch.randn(5, 1, 28, 28, device='cpu'),
-                    torch.randn(32, 3, 224, 224, device='cpu'),
-                    torch.randn(32, 3, 224, 224, device='cpu')]
+                       torch.randn(32, 3, 224, 224, device='cpu'),
+                       torch.randn(32, 3, 224, 224, device='cpu')]
         self.previous_jit_autocast_pass = torch._C._jit_set_autocast_mode(False)
 
     def tearDown(self):
