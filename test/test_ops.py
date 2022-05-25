@@ -1341,6 +1341,9 @@ class TestMathBits(TestCase):
             torch.is_complex,
         )
 
+# A simple wrapper tensor subclass that runs runs
+# correctness checks to ensure that operators have expected
+# tags based on their input and ouput tensor properties
 class WrapperToTestTags(torch.Tensor):
     elem: torch.Tensor
 
