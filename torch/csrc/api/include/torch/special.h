@@ -565,4 +565,40 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
   return torch::special_softmax(self, dim, dtype);
 }
 
+/// Legendre polynomial.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.legendre_polynomial_p.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto n = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::legendre_polynomial_p(x, n);
+/// ```
+inline Tensor legendre_polynomial_p(const Tensor& x, const Tensor& n) {
+  return torch::special_legendre_polynomial_p(x, n);
+}
+
+inline Tensor legendre_polynomial_p(const Scalar& x, const Tensor& n) {
+  return torch::special_legendre_polynomial_p(x, n);
+}
+
+inline Tensor legendre_polynomial_p(const Tensor& x, const Scalar& n) {
+  return torch::special_legendre_polynomial_p(x, n);
+}
+
+inline Tensor& legendre_polynomial_p_out(Tensor& output, const Tensor& x, const Tensor& n) {
+  return torch::special_legendre_polynomial_p_out(output, x, n);
+}
+
+inline Tensor& legendre_polynomial_p_out(Tensor& output, const Scalar& x, const Tensor& n) {
+  return torch::special_legendre_polynomial_p_out(output, x, n);
+}
+
+inline Tensor& legendre_polynomial_p_out(Tensor& output, const Tensor& x, const Scalar& n) {
+  return torch::special_legendre_polynomial_p_out(output, x, n);
+}
+
 }} // torch::special
