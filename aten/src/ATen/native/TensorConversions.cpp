@@ -579,6 +579,17 @@ Tensor _batch_tile_tensor(const Tensor& self, IntArrayRef blocksize) {
       .contiguous();
 }
 
+Tensor _mask_to_indices(const Tensor& mask) {
+  // This function returns a vector of the indices at which given
+  // boolean mask is True. at::nonzero can achieve the same, but
+  // we yet have to compare the performance difference.
+  TORCH_CHECK(mask.dim() == 0, "Currently _mask_to_indices only supports 1-d masks.");
+  TORCH_CHECK(mask.dtype() == at::kBool, "Expected mask to be of dtype bool.");
+  return at::native::arange(
+      mask.numel(), at::kLong, kStrided, mask.device())
+      .masked_select(mask);
+}
+
 std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
     Tensor not_zero_mask,
     ScalarType index_dtype,
@@ -631,26 +642,26 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   }
   Tensor col_indices;
   Tensor row_indices;
-  std::tie(col_indices, row_indices) =
-      _not_zero_mask_to_col_row_indices(not_zero_mask, at::kLong, not_zero_mask.device());
+  std::tie(col_indices, row_indices) = _not_zero_mask_to_col_row_indices(
+      not_zero_mask, at::kLong, not_zero_mask.device());
   Tensor crow_indices = at::_convert_indices_from_coo_to_csr(
       row_indices.view({-1}), block_size_0, false /* out_int32 */);
-  if (self.dim() == 3) {
-    values = values.reshape({-1, values.size(-2), values.size(-1)});
-  }
-  values = values.reshape({-1, values.size(-2), values.size(-1)});
   not_zero_mask = not_zero_mask.reshape({-1});
-  // TODO: masked_select does not support some form of broadcasting, so we're
-  // using the mask to construct indices that are then passed into index_select.
-  // This isn't ideal.
-  values = values.index_select(
-      0,
-      at::native::arange(not_zero_mask.numel(), at::kLong, kStrided, not_zero_mask.device())
-          .masked_select(not_zero_mask));
   if (self.dim() == 3) {
-    crow_indices = crow_indices.repeat({self.size(0), 1, 1});
-    col_indices = col_indices.repeat({self.size(0), 1, 1});
+    crow_indices = crow_indices.unsqueeze(0).repeat({self.size(0), 1, 1});
+    col_indices = col_indices.unsqueeze(0).repeat({self.size(0), 1, 1});
     values = values.reshape({self.size(0), -1, values.size(-2), values.size(-1)});
+    values = values.index_select(
+        1,
+        _mask_to_indices(not_zero_mask));
+  } else {
+    values = values.reshape({-1, values.size(-2), values.size(-1)});
+    // TODO: masked_select does not support some form of broadcasting, so we're
+    // using the mask to construct indices that are then passed into
+    // index_select. This isn't ideal.
+    values = values.index_select(
+        0,
+        _mask_to_indices(not_zero_mask));
   }
 
   return at::native::_sparse_bsr_tensor_unsafe(
