@@ -874,7 +874,6 @@ is evaluated.
 """ + r"""
 Args:
     {input}
-    {n}
 
 Keyword args:
     {out}
