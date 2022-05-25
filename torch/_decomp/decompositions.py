@@ -355,19 +355,6 @@ def l1_loss(
     return apply_loss_reduction(loss, reduction).to(float_type)
 
 
-@register_decomposition(aten.l1_loss_backward)
-@pw_cast_for_opmath
-def l1_loss_backward(
-    grad_output: Tensor,
-    self: Tensor,
-    target: Tensor,
-    reduction: int = Reduction.MEAN.value,
-):
-    sign = torch.sign(self - target)
-
-    norm = sign / self.numel() if reduction == Reduction.MEAN.value else sign
-    return grad_output * norm
-
 
 @register_decomposition(aten.mse_loss)
 @pw_cast_for_opmath

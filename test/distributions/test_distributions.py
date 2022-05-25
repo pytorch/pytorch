@@ -48,7 +48,6 @@ from torch.testing._internal.common_utils import \
      gradcheck)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad
-import torch.autograd.forward_ad as fwAD
 from torch.autograd.functional import jacobian
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, ContinuousBernoulli, Dirichlet,
