@@ -21,10 +21,11 @@ namespace native {
 static void check_convert(const Scalar& scalar, ScalarType scalarType) {
   // Validate that is possible to convert scalar to tensor dtype without
   // overflow
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       at::ScalarType::Bool,
       at::ScalarType::BFloat16,
       at::ScalarType::Half,
+      at::ScalarType::ComplexHalf,
       scalarType,
       "check_convert",
       [&] { scalar.to<scalar_t>(); });

@@ -332,14 +332,14 @@ TORCH_META_FUNC(linalg_ldl_factor_ex)
   auto ndim = shape.size();
 
   // prefer column major strides
-  auto ld_strides = at::native::batched_matrix_contiguous_strides(self.sizes(), /*column_major=*/true);
-  set_output(0, shape, ld_strides, self.options(), {}); // LD
+  auto ld_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig=*/true);
+  set_output_strided(0, shape, ld_strides, self.options(), {}); // LD
 
-  set_output(
-      1, shape.slice(0, ndim - 1), {}, self.options().dtype(ScalarType::Int), {}); // pivots
+  set_output_contiguous(
+      1, shape.slice(0, ndim - 1), self.options().dtype(ScalarType::Int)); // pivots
 
-  set_output(
-      2, shape.slice(0, ndim - 2), {}, self.options().dtype(ScalarType::Int), {}); // info
+  set_output_contiguous(
+      2, shape.slice(0, ndim - 2), self.options().dtype(ScalarType::Int)); // info
 }
 
 TORCH_META_FUNC(linalg_ldl_solve)
@@ -380,7 +380,7 @@ TORCH_META_FUNC(linalg_ldl_solve)
 
   // prefer column major strides
   auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/true);
-  set_output(0, B_broadcast_size, result_strides, B.options(), {});
+  set_output_strided(0, B_broadcast_size, result_strides, B.options(), {});
 }
 
 TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
@@ -397,15 +397,15 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
 
     // make column major strides for BLAS
     const auto solution_strides = at::native::batched_matrix_contiguous_strides(self_broadcast_size, /*f-contig=*/true);
-    set_output(0, self_broadcast_size, solution_strides, self.options(), {});
+    set_output_raw_strided(0, self_broadcast_size, solution_strides, self.options(), {});
 
     // make column major strides for BLAS
     auto clone_A_strides = at::native::batched_matrix_contiguous_strides(A_broadcast_size, /*f_contig=*/true);
-    set_output(1, A_broadcast_size, clone_A_strides, A.options(), {});
+    set_output_raw_strided(1, A_broadcast_size, clone_A_strides, A.options(), {});
   } else if (A.layout() == Layout::SparseCsr || A.layout() == Layout::SparseBsr) {
     // no broadcasting for non-strided layout
-    set_output(0, self.sizes(), {}, self.options(), {}); // make row major strides for Sparse BLAS
-    set_output(1, {0}, {}, self.options(), {}); // return 0-sized tensor
+    set_output_raw_strided(0, self.sizes(), {}, self.options(), {}); // make row major strides for Sparse BLAS
+    set_output_raw_strided(1, {0}, {}, self.options(), {}); // return 0-sized tensor
   } else {
     TORCH_INTERNAL_ASSERT(false, "triangular_solve: Got an unexpected layout.");
   }
@@ -420,16 +420,16 @@ TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_err
 
   // make column major strides for BLAS
   auto LU_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/true);
-  set_output(0, sizes, LU_strides, A.options(), {});
+  set_output_strided(0, sizes, LU_strides, A.options(), {});
 
   // Set sizes to the size of pivots
   sizes.pop_back();
   sizes.back() = std::min(m, n);
-  set_output(1, sizes, {}, A.options().dtype(kInt), {});
+  set_output_contiguous(1, sizes, A.options().dtype(kInt), {});
 
   // Set sizes to the size of info
   sizes.pop_back();
-  set_output(2, sizes, {}, A.options().dtype(kInt), {});
+  set_output_contiguous(2, sizes, A.options().dtype(kInt), {});
 }
 
 TORCH_META_FUNC(linalg_lu_solve)(const Tensor& LU,
@@ -462,7 +462,7 @@ TORCH_META_FUNC(linalg_lu_solve)(const Tensor& LU,
   auto B_broadcast_size = std::get<0>(at::native::_linalg_broadcast_batch_dims(B, LU));
   auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/left);
 
-  set_output(0, B_broadcast_size, result_strides, B.options(), {});
+  set_output_strided(0, B_broadcast_size, result_strides, B.options(), {});
 }
 
 
@@ -480,7 +480,7 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
   if (compute_uv) {
     sizes.back() = full_matrices ? m : k;
     auto U_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/true);
-    set_output(0, sizes, U_strides, A.options(), {});
+    set_output_strided(0, sizes, U_strides, A.options(), {});
 
     // Prepare sizes for Vh
     sizes.end()[-2] = full_matrices ? n : k;
@@ -490,16 +490,16 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
     // expect F-contig matrices, but they compute V rather than Vh
     const bool use_cusolver = at::native::svd_uses_cusolver(A);
     auto Vh_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/!use_cusolver);
-    set_output(2, sizes, Vh_strides, A.options(), {});
+    set_output_strided(2, sizes, Vh_strides, A.options(), {});
   } else {
-    set_output(0, {0}, {}, A.options(), {});
-    set_output(2, {0}, {}, A.options(), {});
+    set_output_raw_strided(0, {0}, {}, A.options(), {});
+    set_output_raw_strided(2, {0}, {}, A.options(), {});
   }
 
   // Prepare sizes for S. S is always real, even when A is complex.
   sizes.pop_back();
   sizes.end()[-1] = k;
-  set_output(1, sizes, {}, A.options().dtype(c10::toRealValueType(A.scalar_type())), {});
+  set_output_contiguous(1, sizes, A.options().dtype(c10::toRealValueType(A.scalar_type())), {});
 }
 
 TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_data, bool unpack_pivots) {
@@ -518,23 +518,23 @@ TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_d
   // P.shape[-2:] == (m, m) (or size zero if pivot == False)
   sizes.end()[-1] = m;
   if (unpack_pivots) {
-    set_output(0, sizes, LU.options());
+    set_output_raw_strided(0, sizes, {}, LU.options(), {});
   } else {
-    set_output(0, {0}, LU.options());
+    set_output_raw_strided(0, {0}, {}, LU.options(), {});
   }
 
   if (unpack_data) {
     // L.shape[-2:] == (m, k)
     sizes.end()[-1] = k;
-    set_output(1, sizes, LU.options());
+    set_output_raw_strided(1, sizes, {}, LU.options(), {});
 
     // U.shape[-2:] == (k, n)
     sizes.end()[-2] = k;
     sizes.end()[-1] = n;
-    set_output(2, sizes, LU.options());
+    set_output_raw_strided(2, sizes, {}, LU.options(), {});
   } else {
-    set_output(1, {0}, LU.options());
-    set_output(2, {0}, LU.options());
+    set_output_raw_strided(1, {0}, {}, LU.options(), {});
+    set_output_raw_strided(2, {0}, {}, LU.options(), {});
   }
 }
 
@@ -549,19 +549,19 @@ TORCH_META_FUNC(linalg_lu)(const Tensor& A, bool pivot) {
   // P.shape[-2:] == (m, m) (or size zero if pivot == False)
   sizes.end()[-1] = m;
   if (pivot) {
-    set_output(0, sizes, A.options());
+    set_output_raw_strided(0, sizes, {}, A.options(), {});
   } else {
-    set_output(0, {0}, A.options());
+    set_output_raw_strided(0, {0}, {}, A.options(), {});
   }
 
   // L.shape[-2:] == (m, k)
   sizes.end()[-1] = k;
-  set_output(1, sizes, A.options());
+  set_output_raw_strided(1, sizes, {}, A.options(), {});
 
   // U.shape[-2:] == (k, n)
   sizes.end()[-2] = k;
   sizes.end()[-1] = n;
-  set_output(2, sizes, A.options());
+  set_output_raw_strided(2, sizes, {}, A.options(), {});
 }
 
 } // namespace meta
@@ -2041,30 +2041,11 @@ TORCH_IMPL_FUNC(linalg_lu_factor_ex_out)(const Tensor& A,
                                          const Tensor& LU,
                                          const Tensor& pivots,
                                          const Tensor& info) {
-  const auto LU_f_contig = LU.mT().is_contiguous() ;
-
-  if (LU_f_contig && !LU.is_same(A)) {
+  if (!LU.is_same(A)) {
     LU.copy_(A);
   }
-  const auto LU_ = borrow_else_clone(LU_f_contig, LU, A, /*C-contig*/false);
 
-  const auto pivots_contig = pivots.is_contiguous();
-  const auto pivots_ = borrow_else_clone(pivots_contig, pivots, pivots, /*C-contig*/true);
-
-  const auto info_contig = info.is_contiguous();
-  const auto info_ = borrow_else_clone(info_contig, info, info, /*C-contig*/true);
-
-  lu_factor_stub(A.device().type(), *LU_, *pivots_, *info_, pivot);
-
-  if (!LU_f_contig) {
-    LU.copy_(*LU_);
-  }
-  if (!pivots_contig) {
-    pivots.copy_(*pivots_);
-  }
-  if (!info_contig) {
-    info.copy_(*info_);
-  }
+  lu_factor_stub(A.device().type(), LU, pivots, info, pivot);
 
   if (check_errors) {
     at::_linalg_check_errors(info, "torch.linalg.lu_factor_ex", A.dim() == 2);
@@ -2213,59 +2194,33 @@ TORCH_IMPL_FUNC(linalg_lu_solve_out)(const Tensor& LU,
     return;
   }
 
-  // B will be cloned into result, so it needn't be contiguous
-  auto B_ = B.expand_as(result);
-
-  // Expand LU / pivots
-  auto broadcasted_dim = result.sizes().vec();
-  broadcasted_dim.end()[-2] = LU.size(-2);
-  broadcasted_dim.end()[-1] = LU.size(-1);
-  auto LU_expanded = LU.expand(broadcasted_dim);
-  broadcasted_dim.pop_back();
-  broadcasted_dim.end()[-1] = pivots.size(-1);
-  auto pivots_expanded = pivots.expand(broadcasted_dim);
-
   // Solve A^H X = B^H. Then we return X^H
   if (!left) {
     adjoint = !adjoint;
     result.transpose_(-2, -1);
-    B_.transpose_(-2, -1);
-    if (B_.is_complex()) {
-      B_._set_conj(!B_.is_conj());
-    }
   }
 
-  // Make LU / pivots / result C or F contiguous and copy B into result
-  auto pivots_ = pivots_expanded.expect_contiguous();
-  auto LU_ = at::native::borrow_else_clone(
-      LU_expanded.mT().is_contiguous(), LU_expanded, LU_expanded, /*row_major=*/false);
-  auto result_ = at::native::borrow_else_clone(
-      result.mT().is_contiguous(), result, B_, /*row_major=*/false);
-  if (result.is_same(*result_)) {
-    result_->copy_(B_);
+  // Copy B (or B^H) into result
+  if (!result.is_same(B)) {
+    result.copy_(left ? B : B.mH());
   }
+
+  // Make LU / pivots F-contiguous
+  auto pivots_ = pivots.expect_contiguous();
+  auto LU_ = at::native::borrow_else_clone(
+      LU.mT().is_contiguous(), LU, LU, /*row_major=*/false);
 
   const auto trans = !adjoint ? TransposeType::NoTranspose :
                      LU.is_complex() ? TransposeType::ConjTranspose
                                      : TransposeType::Transpose;
 
-  lu_solve_stub(LU_->device().type(), *LU_, *pivots_, *result_, trans);
+  lu_solve_stub(LU_->device().type(), *LU_, *pivots_, result, trans);
 
-  if (!result.is_same(*result_)) {
-    if (left) {
-      result.copy_(*result_);
-    } else {
-      // Fuse the copy with the conj
-      result.copy_(result_->conj());
-      result.transpose_(-2, -1);
-    }
-  } else {
-    // Conj-transpose back in-place
-    if (!left) {
-      result.transpose_(-2, -1);
-      if (result.is_complex()) {
-        result._set_conj(!result.is_conj());
-      }
+  // Conj-transpose back in-place
+  if (!left) {
+    result.transpose_(-2, -1);
+    if (result.is_complex()) {
+      result._set_conj(!result.is_conj());
     }
   }
 }
@@ -3621,42 +3576,16 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
     }
     return;
   }
-  // We need to distinguish the cuSOLVER case, as cuSOLVER expects F-contig matrices, but
-  // it computes V rather than Vh
-  const bool use_cusolver = at::native::svd_uses_cusolver(A);
-
   // A always needs to be copied as its contents will be destroyed during the computaton of the SVD
   // Now, MAGMA needs the copy to be on CPU, while cuSOLVER needs it to be on CUDA, so we'll defer
   // the copy as a column major matrix to the backends.
   const auto info = at::zeros(IntArrayRef(A.sizes().begin(), A.sizes().end() - 2), A.options().dtype(kInt));
 
-  // Prepare S
-  const auto S_ = S.expect_contiguous();
-
-  // Prepare U / Vh
-  // U_ and Vh_ are just going to be accessed whenever compute_uv == true
-  const auto U_ready = !compute_uv || U.mT().is_contiguous();
-  const auto U_ = borrow_else_clone(U_ready, U, U, /*C-contig*/false);
-  const auto Vh_ready = !compute_uv
-                            || (!use_cusolver && Vh.mT().is_contiguous())
-                            || (use_cusolver && Vh.is_contiguous());
-  const auto Vh_ = borrow_else_clone(Vh_ready, Vh, Vh, /*C-contig*/use_cusolver);
-
   svd_stub(A.device().type(),
            A,
            full_matrices,
            compute_uv,
-           *U_, *S_, *Vh_, info);
-
-  if (!U_ready) {
-    U.copy_(*U_);
-  }
-  if (!S.is_same(*S_)) {
-    S.copy_(*S_);
-  }
-  if (!Vh_ready) {
-    Vh.copy_(*Vh_);
-  }
+           U, S, Vh, info);
 
   // TODO This should be removed, and the code checking for convergence should be lifted
   // from svd_cusolver to this function. We should then make sure that this function
@@ -4369,14 +4298,7 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
     return;
   }
 
-  auto pivots_ = pivots.expect_contiguous();
-  auto info_ = info.expect_contiguous();
-
-  auto LD_ = at::native::borrow_else_clone(
-      LD.mT().is_contiguous(), LD, self, /*row_major=*/false);
-  if (LD.mT().is_contiguous()) {
-    LD_->copy_(self);
-  }
+  LD.copy_(self);
 
   // We decided not to include upper flag in the API.
   // https://github.com/pytorch/pytorch/pull/69828#issuecomment-1015143819
@@ -4384,24 +4306,14 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
   // also from low level functions or add it to the public API.
   bool upper = false;
   if (upper) {
-    LD_->triu_();
+    LD.triu_();
   } else {
-    LD_->tril_();
+    LD.tril_();
   }
 
   // call ldl_factor_stub that fills the result tensors
   ldl_factor_stub(
-      self.device().type(), *LD_, *pivots_, *info_, upper, hermitian);
-
-  if (!LD.is_same(*LD_)) {
-    LD.copy_(*LD_);
-  }
-  if (!info.is_same(*info_)) {
-    info.copy_(*info_);
-  }
-  if (!pivots.is_same(*pivots_)) {
-    pivots.copy_(*pivots_);
-  }
+      self.device().type(), LD, pivots, info, upper, hermitian);
 
   if (check_errors) {
     at::_linalg_check_errors(
@@ -4450,16 +4362,10 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
   auto LD_ = at::native::borrow_else_clone(
       LD.mT().is_contiguous(), LD, LD, /*row_major=*/false);
   result.copy_(B);
-  auto result_ = at::native::borrow_else_clone(
-      result.mT().is_contiguous(), result, result, /*row_major=*/false);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(result) == batchCount(*result_));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(result) == batchCount(result));
 
   ldl_solve_stub(
-      B.device().type(), *LD_, *pivots_, *result_, false, hermitian);
-
-  if (!result.is_same(*result_)) {
-    result.copy_(*result_);
-  }
+      B.device().type(), *LD_, *pivots_, result, false, hermitian);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve_triangular ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
