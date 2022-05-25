@@ -90,6 +90,10 @@ TORCH_META_FUNC(special_zeta) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC(special_beta) (const Tensor& x, const Tensor& y) {
+    build_borrowing_binary_float_op(maybe_get_output(), x, y);
+}
+
 TORCH_META_FUNC2(copysign, Tensor) (
   const Tensor& self, const Tensor& other
 ) {
@@ -276,6 +280,7 @@ DEFINE_DISPATCH(copysign_stub);
 DEFINE_DISPATCH(xlogy_stub);
 DEFINE_DISPATCH(xlog1py_stub);
 DEFINE_DISPATCH(zeta_stub);
+DEFINE_DISPATCH(beta_stub);
 
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -320,6 +325,10 @@ TORCH_IMPL_FUNC(special_xlog1py_out) (const Tensor& self, const Tensor& other, c
 
 TORCH_IMPL_FUNC(special_zeta_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
   zeta_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_beta_out) (const Tensor& x, const Tensor& y, const Tensor& result) {
+    beta_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(tanh_backward_out) (const Tensor& grad_output, const Tensor& output, const Tensor& result) {
@@ -380,6 +389,22 @@ Tensor& special_zeta_out(const Scalar& self, const Tensor& other, Tensor& result
 
 Tensor& special_zeta_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::special_zeta_out(result, self, wrapped_scalar_tensor(other));
+}
+
+Tensor special_beta(const Scalar& x, const Tensor& y) {
+  return at::special_beta(wrapped_scalar_tensor(x), y);
+}
+
+Tensor special_beta(const Tensor& x, const Scalar& y) {
+  return at::special_beta(x, wrapped_scalar_tensor(y));
+}
+
+Tensor& special_beta_out(const Scalar& x, const Tensor& y, Tensor& output) {
+  return at::special_beta_out(output, wrapped_scalar_tensor(x), y);
+}
+
+Tensor& special_beta_out(const Tensor& x, const Scalar& y, Tensor& output) {
+  return at::special_beta_out(output, x, wrapped_scalar_tensor(y));
 }
 
 Tensor& special_gammainc_out(const Tensor& self, const Tensor& other, Tensor& result) {
