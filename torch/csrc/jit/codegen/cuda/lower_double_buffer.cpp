@@ -67,8 +67,8 @@ void validateDoubleBufferedTensor(const TensorView* tv) {
   // considered.
   auto def = tv->definition();
   TORCH_INTERNAL_ASSERT(
-      def->isA<UnaryOp>() &&
-              def->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Set ||
+      (def->isA<UnaryOp>() &&
+       def->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Set) ||
           // Load store op should generally support double buffering.
           def->isA<LoadStoreOp>(),
       "Invalid tensor to double-buffer. Only tensor defined by UnaryOp::Set is supported: ",
