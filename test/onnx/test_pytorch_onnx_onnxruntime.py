@@ -12567,6 +12567,7 @@ class _TestONNXRuntime:
             model = torch.quantization.fuse_modules(model.eval(), fuse_modules)
             model.train()
         model = torch.quantization.prepare_qat(model)
+        model = torch.quantization.convert(model)
 
         self.run_test(model, input_)
 
