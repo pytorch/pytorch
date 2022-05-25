@@ -2178,7 +2178,7 @@ static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
 }
 
 template<typename T>
-static inline T chebyshev_polynomial_t_forward(T x, std::int64_t n) {
+static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, std::int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
