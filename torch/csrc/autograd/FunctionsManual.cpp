@@ -213,19 +213,11 @@ Tensor norm_backward(
   } else if (p == 2.0) {
     return self * (grad / norm).masked_fill_(norm == 0, 0);
   } else if (std::isinf(p)) {
-    const auto self_isnan = self.isnan();
-    const auto norm_isnan = norm.isnan();
-    const auto& self_and_norm_isnan = areAnyTensorSubclassLike({self, norm}) ?
-      self_isnan.logical_and(norm_isnan) :
-      self_isnan.logical_and_(norm_isnan);
-    auto is_eq_max = (self.abs() == norm).logical_or_(self_and_norm_isnan).type_as(self);
-    self_scaled = self.sgn() * is_eq_max;
-    auto nb_max = is_eq_max.count_nonzero(dim);
-    if (self.dim() != 0) {
-      nb_max = unsqueeze_multiple(nb_max, dim, ndim);
-    }
-    scale_v = grad / nb_max;
-    return self_scaled * scale_v;
+    // Derivative of amax(abs(self), dim, keepdim) but respecting nans
+    // We create a mask of `argmax`: it's argmax if self.abs() == norm or it's NaN
+    auto self_abs = self.abs();
+    auto mask = self_abs.eq(norm).logical_or(self_abs.isnan());
+    return self.sgn() * ((grad / mask.sum(dim, true)) * mask);
   } else if (p < 1.0) {
     self_scaled = self.sgn() * self.abs().pow_(p - 1).masked_fill_(self == 0, 0);
     return self_scaled * grad * norm.pow(1 - p);
