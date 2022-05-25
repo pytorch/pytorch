@@ -1635,6 +1635,7 @@ class FullyShardedDataParallel(nn.Module):
                 # are fully prefixed like the state dict keys
                 m._exec_order_data = self._exec_order_data
                 m._ignored_param_names = self._ignored_param_names
+                self._buffer_names = self._buffer_names.union(m._buffer_names)
                 m._buffer_names = self._buffer_names
 
     def _wait_for_previous_optim_step(self) -> None:
@@ -1768,6 +1769,14 @@ class FullyShardedDataParallel(nn.Module):
         cpu_device = torch.device("cpu")
         for key in state_dict:
             clean_key = clean_tensor_name(key)
+            clean_prefix = clean_tensor_name(prefix)
+            # Strip prefix out of key if needed as buffer names and param names
+            # do not have prefix considered as they are not computed in `state_dict`
+            # call.
+            print(f"Rank {self.rank} clean key {clean_key}, prefix is {clean_prefix} buffer names is {self._buffer_names}")
+            if clean_key.startswith(clean_prefix):
+                clean_key = clean_key[len(clean_prefix):]
+                print(f"{self.rank} computed clean key {clean_key}")
             # Do not need to clone buffers since they are not sharded
             if clean_key in self._buffer_names:
                 # Offload the buffer to CPU if needed -- we do not do this in
@@ -1783,6 +1792,7 @@ class FullyShardedDataParallel(nn.Module):
             if clean_key not in self._ignored_param_names and \
                     not getattr(state_dict[key], "_has_been_cloned", False):
                 try:
+                    print(f"rank {self.rank} cloning {key} (cleaned {clean_key})")
                     state_dict[key] = state_dict[key].clone().detach()
                     state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
                 except BaseException as e:
