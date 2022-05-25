@@ -9545,28 +9545,6 @@ class TestNN(NNTestCase):
         with self.assertRaises(ValueError):
             nn.BCEWithLogitsLoss()(input, target)
 
-    def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss(self):
-        sigmoid = nn.Sigmoid()
-
-        target = torch.rand(64, 4)
-        output = torch.rand(64, 4) - 0.5
-
-        self.assertEqual(nn.BCEWithLogitsLoss()(output, target), nn.BCELoss()(sigmoid(output), target))
-
-        weight = torch.rand(4)
-        self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
-
-        target = torch.zeros(4, 1, dtype=torch.float)
-        output = torch.empty(4, 1, dtype=torch.float).fill_(-100)
-
-        self.assertEqual(nn.BCEWithLogitsLoss()(output, target), nn.BCELoss()(sigmoid(output), target))
-
-        self.assertEqual(nn.BCEWithLogitsLoss(reduction='none')(output, target),
-                         nn.BCELoss(reduction='none')(sigmoid(output), target))
-
-        weight = torch.rand(1, dtype=torch.float)
-        self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
-
     def test_bce_loss_input_range(self):
         bceloss = nn.BCELoss()
 
@@ -20665,6 +20643,28 @@ class TestNNDeviceType(NNTestCase):
                 cm = torch.no_grad()
             with cm:
                 _test(activation=activation, batch_first=batch_first, training=training)
+
+    def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss(self, device):
+        sigmoid = nn.Sigmoid()
+
+        target = torch.rand(64, 4, device=device)
+        output = torch.rand(64, 4, device=device) - 0.5
+
+        self.assertEqual(nn.BCEWithLogitsLoss()(output, target), nn.BCELoss()(sigmoid(output), target))
+
+        weight = torch.rand(4, device=device)
+        self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
+
+        target = torch.zeros(4, 1, device=device, dtype=torch.float)
+        output = torch.empty(4, 1, device=device, dtype=torch.float).fill_(-100)
+
+        self.assertEqual(nn.BCEWithLogitsLoss()(output, target), nn.BCELoss()(sigmoid(output), target))
+
+        self.assertEqual(nn.BCEWithLogitsLoss(reduction='none')(output, target),
+                         nn.BCELoss(reduction='none')(sigmoid(output), target))
+
+        weight = torch.rand(1, device=device, dtype=torch.float)
+        self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
 
 
 class TestModuleGlobalHooks(TestCase):

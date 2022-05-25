@@ -959,6 +959,8 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
+    CPU: binary_cross_entropy_with_logits_cpu
+    CUDA: binary_cross_entropy_with_logits_cuda
     CompositeExplicitAutograd: binary_cross_entropy_with_logits
 
 - func: binary_cross_entropy_with_logits_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
