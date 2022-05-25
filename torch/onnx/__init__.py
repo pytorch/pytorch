@@ -1,5 +1,19 @@
-from typing import Dict
+"""ONNX exporter."""
 
+from typing import (
+    Any,
+    BinaryIO,
+    Callable,
+    Collection,
+    Dict,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
+
+import torch
 import torch._C as _C
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
@@ -29,13 +43,13 @@ class CheckerError(Exception):
 
 
 class SymbolicContext:
-    r"""Provides extra context for symbolic functions.
+    """Extra context for symbolic functions.
 
-    Args:
-        params_dict (Dict[str, _C.IValue]): Mapping from graph initializer name to IValue.
-        env (Dict[_C.Value, _C.Value]): Mapping from Torch domain graph Value to ONNX domain graph Value.
-        cur_node (_C.Node): Current node being converted to ONNX domain.
-        onnx_block (_C.Block): Current ONNX block that converted nodes are being appended to.
+    Attributes:
+        params_dict: Mapping from graph initializer name to IValue.
+        env: Mapping from Torch domain graph Value to ONNX domain graph Value.
+        cur_node: Current node being converted to ONNX domain.
+        onnx_block: Current ONNX block that converted nodes are being appended to.
     """
 
     def __init__(self, params_dict, env, cur_node, onnx_block):
@@ -55,25 +69,28 @@ def _export(*args, **kwargs):
 
 
 def export(
-    model,
-    args,
-    f,
-    export_params=True,
-    verbose=False,
-    training=TrainingMode.EVAL,
-    input_names=None,
-    output_names=None,
-    operator_export_type=OperatorExportTypes.ONNX,
-    opset_version=None,
-    do_constant_folding=True,
-    dynamic_axes=None,
-    keep_initializers_as_inputs=None,
-    custom_opsets=None,
-    export_modules_as_functions=False,
-):
-    r"""
-    Exports a model into ONNX format. If ``model`` is not a
-    :class:`torch.jit.ScriptModule` nor a :class:`torch.jit.ScriptFunction`, this runs
+    model: Union[torch.nn.Module, torch.jit.ScriptModule, torch.jit.ScriptFunction],
+    args: Union[Tuple[Any, ...], torch.Tensor],
+    f: Union[str, BinaryIO],
+    export_params: bool = True,
+    verbose: bool = False,
+    training: TrainingMode = TrainingMode.EVAL,
+    input_names: Optional[Sequence[str]] = None,
+    output_names: Optional[Sequence[str]] = None,
+    operator_export_type: OperatorExportTypes = OperatorExportTypes.ONNX,
+    opset_version: Optional[int] = None,
+    do_constant_folding: bool = True,
+    dynamic_axes: Optional[
+        Union[Mapping[str, Mapping[int, str]], Mapping[str, Sequence[int]]]
+    ] = None,
+    keep_initializers_as_inputs: Optional[bool] = None,
+    custom_opsets: Optional[Mapping[str, int]] = None,
+    export_modules_as_functions: Union[bool, Collection[torch.nn.Module]] = False,
+) -> None:
+    r"""Exports a model into ONNX format.
+
+    If ``model`` is not a :class:`torch.jit.ScriptModule` nor a
+    :class:`torch.jit.ScriptFunction`, this runs
     ``model`` once in order to convert it to a TorchScript graph to be exported
     (the equivalent of :func:`torch.jit.trace`). Thus this has the same limited support
     for dynamic control flow as :func:`torch.jit.trace`.
@@ -373,12 +390,12 @@ def export_to_pretty_string(*args, **kwargs) -> str:
     as :func:`export`.
 
     Args:
-      add_node_names (bool, default True): Whether or not to set
-          NodeProto.name. This makes no difference unless
-          ``google_printer=True``.
-      google_printer (bool, default False): If False, will return a custom,
-          compact representation of the model. If True will return the
-          protobuf's `Message::DebugString()`, which is more verbose.
+        add_node_names (bool, default True): Whether or not to set
+            NodeProto.name. This makes no difference unless
+            ``google_printer=True``.
+        google_printer (bool, default False): If False, will return a custom,
+            compact representation of the model. If True will return the
+            protobuf's `Message::DebugString()`, which is more verbose.
 
     Returns:
       A UTF-8 str containing a human-readable representation of the ONNX model.
@@ -401,8 +418,8 @@ def select_model_mode_for_export(model, mode):
     mode is None.
 
     Args:
-      model: Same type and meaning as ``model`` arg to :func:`export`.
-      mode: Same type and meaning as ``training`` arg to :func:`export`.
+        model: Same type and meaning as ``model`` arg to :func:`export`.
+        mode: Same type and meaning as ``training`` arg to :func:`export`.
     """
 
     from torch.onnx import utils
@@ -422,28 +439,28 @@ def _run_symbolic_method(*args, **kwargs):
     return utils._run_symbolic_method(*args, **kwargs)
 
 
-def is_in_onnx_export():
-    r"""
-    Returns True iff :func:`export` is running in the current thread
-    """
+def is_in_onnx_export() -> bool:
+    r"""Returns True iff :func:`export` is running in the current thread."""
 
     from torch.onnx import utils
 
     return utils.is_in_onnx_export()
 
 
-def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
-    r"""
-    Registers ``symbolic_fn`` to handle ``symbolic_name``. See
-    "Custom Operators" in the module documentation for an example usage.
+def register_custom_op_symbolic(
+    symbolic_name: str, symbolic_fn: Callable, opset_version: int
+):
+    r"""Registers ``symbolic_fn`` to handle ``symbolic_name``.
+
+    See "Custom Operators" in the module documentation for an example usage.
 
     Args:
-      symbolic_name (str): The name of the custom operator in "<domain>::<op>"
-        format.
-      symbolic_fn (Callable): A function that takes in the ONNX graph and
-        the input arguments to the current operator, and returns new
-        operator nodes to add to the graph.
-      opset_version (int): The ONNX opset version in which to register.
+        symbolic_name: The name of the custom operator in "<domain>::<op>"
+            format.
+        symbolic_fn: A function that takes in the ONNX graph and
+            the input arguments to the current operator, and returns new
+            operator nodes to add to the graph.
+        opset_version: The ONNX opset version in which to register.
     """
     from torch.onnx import utils
 
@@ -451,14 +468,14 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
 
 
 def unregister_custom_op_symbolic(symbolic_name, opset_version):
-    r"""
-    Unregisters ``symbolic_name``. See
-    "Custom Operators" in the module documentation for an example usage.
+    r"""Unregisters ``symbolic_name``.
+
+    See "Custom Operators" in the module documentation for an example usage.
 
     Args:
-      symbolic_name (str): The name of the custom operator in "<domain>::<op>"
-        format.
-      opset_version (int): The ONNX opset version in which to unregister.
+        symbolic_name (str): The name of the custom operator in "<domain>::<op>"
+            format.
+        opset_version (int): The ONNX opset version in which to unregister.
     """
 
     from torch.onnx import utils
@@ -466,44 +483,36 @@ def unregister_custom_op_symbolic(symbolic_name, opset_version):
     utils.unregister_custom_op_symbolic(symbolic_name, opset_version)
 
 
-def is_onnx_log_enabled():
-    r"""
-    Returns True iff ONNX logging is turned on.
-    """
+def is_onnx_log_enabled() -> bool:
+    r"""Returns True iff ONNX logging is turned on."""
     return _C._jit_is_onnx_log_enabled()
 
 
-def enable_log():
-    r"""
-    Enables ONNX logging.
-    """
+def enable_log() -> None:
+    r"""Enables ONNX logging."""
     _C._jit_set_onnx_log_enabled(True)
 
 
-def disable_log():
-    r"""
-    Disables ONNX logging.
-    """
+def disable_log() -> None:
+    r"""Disables ONNX logging."""
     _C._jit_set_onnx_log_enabled(False)
 
 
-def set_log_stream(stream_name="stdout"):
-    r"""
-    Set output stream for ONNX logging.
+def set_log_stream(stream_name: str = "stdout"):
+    r"""Sets output stream for ONNX logging.
 
     Args:
-      stream_name (str, default "stdout"): Only ``stdout`` and ``stderr`` are supported
-        as `stream_name`.
+        stream_name: Only ``stdout`` and ``stderr`` are supported
+            as `stream_name`.
     """
     _C._jit_set_onnx_log_output_stream(stream_name)
 
 
 def log(*args):
-    r"""
-    A simple logging facility for ONNX exporter.
+    r"""A simple logging facility for ONNX exporter.
 
     Args:
-      args: Arguments are converted to string, concatenated together with a newline
-        character appended to the end, and flushed to output stream.
+        args: Arguments are converted to string, concatenated together with a newline
+            character appended to the end, and flushed to output stream.
     """
     _C._jit_onnx_log(*args)
