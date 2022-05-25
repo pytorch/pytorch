@@ -121,7 +121,6 @@ An example of this would look like:
 ```
 v1.12.0-rc1
 ```
-
 You can use following commands to perform tag from pytorch core repo (not fork):
 * Checkout and validate the repo history before tagging
 ```
