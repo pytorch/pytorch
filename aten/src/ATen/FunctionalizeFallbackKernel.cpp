@@ -1,11 +1,13 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <torch/library.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/ATen.h>
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_to_copy.h>
@@ -118,7 +120,7 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
   // Case 1: arguments are not functional tensors, so we no-op and redispatch.
   if (!at::functionalization::impl::isFunctionalTensor(self)) {
      at::AutoDispatchSkipFunctionalize guard;
-     at::Tensor tmp_output = at::_ops::resize_::call(self_, size, memory_format);
+     at::Tensor tmp_output = self_.resize_(size, memory_format);
      return self;
   }
 
@@ -126,7 +128,7 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
   at::Tensor tmp_output;
   {
     at::AutoDispatchSkipFunctionalize guard;
-    tmp_output = at::_ops::resize_functional::call(self_, size, memory_format);
+    tmp_output = at::resize_functional(self_, size, memory_format);
   }
 
   auto itemsize = self.dtype().itemsize();
@@ -152,7 +154,7 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
   at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
     [reapply_views = reapply_views, size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
       if (reapply_views) {
-        return at::as_strided(base, size, compute_contiguous_strides(size));
+        return base.as_strided(size, compute_contiguous_strides(size));
       } else {
         return at::as_strided_copy(base, size, compute_contiguous_strides(size));
       }
