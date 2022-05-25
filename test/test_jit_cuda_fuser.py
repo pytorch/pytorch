@@ -43,7 +43,6 @@ if RUN_NVFUSER and torch.version.cuda is not None:
 
 os.environ['PYTORCH_NVFUSER_DISABLE'] = 'fallback,fma,unroll_with_rng'
 os.environ['PYTORCH_NVFUSER_JIT_OPT_LEVEL'] = '0'
-os.environ['PYTORCH_NVFUSER_ENABLE'] = 'complex'
 
 if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
     torch._C._jit_set_texpr_fuser_enabled(False)
@@ -126,6 +125,8 @@ class TestCudaFuser(JitTestCase):
 
     def setUp(self):
         super(TestCudaFuser, self).setUp()
+        # TODO: enable complex when we fixes the extremal cases in OpInfo
+        os.environ['PYTORCH_NVFUSER_ENABLE'] = 'complex'
 
         self.skip_node_list = []
         disabled_ops = ("aten::batch_norm",
