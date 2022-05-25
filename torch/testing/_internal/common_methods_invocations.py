@@ -6745,6 +6745,26 @@ def sample_inputs_rot90(op_info, device, dtype, requires_grad=False, **kwargs):
         yield SampleInput(make_arg((S, S, S)), args=arg)
 
 
+def error_inputs_rot90(op_info, device, **kwargs):
+    err_msg1 = "expected total rotation dims"
+    s1 = SampleInput(
+        make_tensor((S, S), dtype=torch.float32, device=device), kwargs={"dims": (0,)}
+    )
+    yield ErrorInput(s1, error_regex=err_msg1)
+
+    err_msg2 = "expected total dims >= 2"
+    s2 = SampleInput(
+        make_tensor((S,), dtype=torch.float32, device=device),
+    )
+    yield ErrorInput(s2, error_regex=err_msg2)
+
+    err_msg3 = "expected rotation dims to be different"
+    s3 = SampleInput(
+        make_tensor((S, S), dtype=torch.float32, device=device), kwargs={"dims": (1, 1)}
+    )
+    yield ErrorInput(s3, error_regex=err_msg3)
+
+
 def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     tensor_nd = partial(make_tensor, (S, S, S), device=device, dtype=dtype,
                         requires_grad=requires_grad)
@@ -14799,15 +14819,16 @@ op_db: List[OpInfo] = [
         "roll",
         ref=np.roll,
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+        error_inputs_func=error_inputs_roll,
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        error_inputs_func=error_inputs_roll,
         sample_inputs_func=sample_inputs_roll,
     ),
     OpInfo(
         "rot90",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+        error_inputs_func=error_inputs_rot90,
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,

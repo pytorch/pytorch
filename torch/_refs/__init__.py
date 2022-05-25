@@ -1627,13 +1627,13 @@ def rot90(
     """Reference implementation of :func:`torch.rot90`."""
     dims = utils.canonicalize_dims(a.ndim, dims)
     if len(dims) != 2:
-        raise ValueError(
+        raise RuntimeError(
             f"expected total rotation dims == 2, but got dims = {len(dims)}"
         )
     if a.ndim < 2:
-        raise ValueError(f"expected total dims >= 2, but got total dims = {a.ndim}")
+        raise RuntimeError(f"expected total dims >= 2, but got total dims = {a.ndim}")
     if not (dims[0] != dims[1] and builtins.abs(dims[0] - dims[1]) != a.ndim):
-        raise ValueError(
+        raise RuntimeError(
             f"expected rotation dims to be different, but got dim0 = {dims[0]} and dim1 = {dims[1]}"
         )
     k = k % 4  # Rotation direction is from the second towards the first axis for k < 0
