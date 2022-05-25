@@ -858,7 +858,7 @@ chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
 
 Chebyshev polynomial of the first kind :math:`T_{n}(\text{input})`.
 
-If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}` 
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
 is returned. If :math:`n < 6` or :math:`|\text{input}| > 1` the recursion:
 
 .. math::
