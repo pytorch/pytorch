@@ -1820,7 +1820,8 @@ class TestCase(expecttest.TestCase):
         using_unittest = isinstance(result, unittest.TestResult)
         if num_runs_left == 0:
             if num_green > 0 and num_red > 0 and using_unittest:
-                result.addSkip(self, f'{{"flaky": {True}, "num_red": {num_red}, "num_green": {num_green}, "max_num_retries": {MAX_NUM_RETRIES}}}')
+                result.addSkip(self, f'{{"flaky": {True}, "num_red": {num_red}, "num_green": {num_green},' +
+                                     f'"max_num_retries": {MAX_NUM_RETRIES}}}')
             return
 
         if using_unittest:
@@ -1857,22 +1858,26 @@ class TestCase(expecttest.TestCase):
                 _, traceback_str = result.failures.pop(-1)
                 print(traceback_str)
                 result.addExpectedFailure(self, err)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only, num_red=num_red+1, num_green=num_green)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
+                                 num_red=num_red + 1, num_green=num_green)
         elif errors_before < len(result.errors):
             print(f"    {self._testMethodName} errored - num_retries_left: {num_retries_left}")
             if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
                 _, traceback_str = result.errors.pop(-1)
                 print(traceback_str)
                 result.addExpectedFailure(self, err)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only, num_red=num_red+1, num_green=num_green)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
+                                 num_red=num_red + 1, num_green=num_green)
         elif report_only and num_retries_left < MAX_NUM_RETRIES:
             print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
             result.addUnexpectedSuccess(self)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only, num_red=num_red, num_green=num_green+1)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
+                                 num_red=num_red, num_green=num_green + 1)
         elif not report_only and num_retries_left < MAX_NUM_RETRIES:
             # in this case, our test was rerun (as a retry has been used) and it just passed.
             # we incur one more recursive call with num_runs_left = 0 to allow for accurate flaky reporting
-            self._run_with_retry(result=result, num_runs_left=0, report_only=report_only, num_red=num_red, num_green=num_green+1)
+            self._run_with_retry(result=result, num_runs_left=0, report_only=report_only,
+                                 num_red=num_red, num_green=num_green + 1)
 
 
     def run(self, result=None):
