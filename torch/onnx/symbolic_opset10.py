@@ -2,6 +2,7 @@ import sys
 import warnings
 
 import torch
+from torch import _C
 import torch._C._onnx as _C_onnx
 import torch.onnx
 
