@@ -1589,6 +1589,10 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()) -> Tenso
     if not isinstance(dims, Iterable):
         dims = (dims,)
 
+    # Avoid modulo by zero
+    if a.numel() == 0:
+        return clone(a)
+
     len_shifts = len(shifts)
     len_dims = len(dims)
     if len_shifts != 1 or len_dims != 1:
@@ -1606,9 +1610,6 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()) -> Tenso
         tail_dims = dims[1:]
         first_dim_rolled = roll(a, shifts[0], dims[0])
         return roll(first_dim_rolled, tail_shifts, tail_dims)
-
-    if a.numel == 0:
-        return clone(a)
 
     dim = dims[0]
     size = a.shape[dim]
