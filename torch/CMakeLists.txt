@@ -449,7 +449,7 @@ add_custom_command(
     "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
       --is_debug=${TORCH_VERSION_DEBUG}
       --cuda_version=${CUDA_VERSION}
-      --hip_version=${HIP_VERSION}
+      --rocm_version=${ROCM_VERSION_DEV}
   DEPENDS ${TOOLS_PATH}/generate_torch_version.py
   WORKING_DIRECTORY ${TORCH_ROOT}
 )

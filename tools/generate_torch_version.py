@@ -44,13 +44,13 @@ if __name__ == "__main__":
         help="Whether this build is debug mode or not.",
     )
     parser.add_argument("--cuda_version", type=str)
-    parser.add_argument("--hip_version", type=str)
+    parser.add_argument("--rocm_version", type=str)
 
     args = parser.parse_args()
 
     assert args.is_debug is not None
     args.cuda_version = None if args.cuda_version == "" else args.cuda_version
-    args.hip_version = None if args.hip_version == "" else args.hip_version
+    args.rocm_version = None if args.rocm_version == "" else args.rocm_version
 
     pytorch_root = Path(__file__).parent.parent
     version_path = pytorch_root / "torch" / "version.py"
@@ -65,4 +65,4 @@ if __name__ == "__main__":
         f.write("debug = {}\n".format(repr(bool(args.is_debug))))
         f.write("cuda = {}\n".format(repr(args.cuda_version)))
         f.write("git_version = {}\n".format(repr(sha)))
-        f.write("hip = {}\n".format(repr(args.hip_version)))
+        f.write("rocm = {}\n".format(repr(args.rocm_version)))
