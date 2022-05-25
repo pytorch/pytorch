@@ -565,4 +565,40 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
   return torch::special_softmax(self, dim, dtype);
 }
 
+/// Physicist’s Hermite polynomial.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.hermite_polynomial_h.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto n = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::hermite_polynomial_h(x, n);
+/// ```
+inline Tensor hermite_polynomial_h(const Tensor& x, const Tensor& n) {
+  return torch::special_hermite_polynomial_h(x, n);
+}
+
+inline Tensor hermite_polynomial_h(const Scalar& x, const Tensor& n) {
+  return torch::special_hermite_polynomial_h(x, n);
+}
+
+inline Tensor hermite_polynomial_h(const Tensor& x, const Scalar& n) {
+  return torch::special_hermite_polynomial_h(x, n);
+}
+
+inline Tensor& hermite_polynomial_h_out(Tensor& output, const Tensor& x, const Tensor& n) {
+  return torch::special_hermite_polynomial_h_out(output, x, n);
+}
+
+inline Tensor& hermite_polynomial_h_out(Tensor& output, const Scalar& x, const Tensor& n) {
+  return torch::special_hermite_polynomial_h_out(output, x, n);
+}
+
+inline Tensor& hermite_polynomial_h_out(Tensor& output, const Tensor& x, const Scalar& n) {
+  return torch::special_hermite_polynomial_h_out(output, x, n);
+}
+
 }} // torch::special

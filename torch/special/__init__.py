@@ -2,10 +2,41 @@ import torch
 from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
-__all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'erf', 'erfc', 'erfinv',
-           'erfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py', 'xlogy',
-           'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log_ndtr', 'log1p', 'sinc', 'round', 'log_softmax',
-           'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'softmax']
+__all__ = [
+    'digamma',
+    'entr',
+    'erf',
+    'erfc',
+    'erfcx',
+    'erfinv',
+    'exp2',
+    'expit',
+    'expm1',
+    'gammainc',
+    'gammaincc',
+    'gammaln',
+    'i0',
+    'i0e',
+    'i1',
+    'i1e',
+    'hermite_polynomial_h',
+    'log_ndtr',
+    'log_softmax',
+    'log1p',
+    'logit',
+    'logsumexp',
+    'multigammaln',
+    'ndtr',
+    'ndtri',
+    'polygamma',
+    'psi',
+    'round',
+    'sinc',
+    'softmax',
+    'xlog1py',
+    'xlogy',
+    'zeta',
+]
 
 Tensor = torch.Tensor
 
@@ -819,4 +850,26 @@ Example::
     >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
     tensor([1., 1., 1.])
 
+""".format(**common_args))
+
+hermite_polynomial_h = _add_docstr(_special.special_hermite_polynomial_h,
+                                   r"""
+hermite_polynomial_h(input, n, *, out=None) -> Tensor
+
+Physicist’s Hermite polynomial :math:`H_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    H_{n + 1}(\text{input}) = 2 \times \text{input} \times H_{n}(\text{input}) - H_{n - 1}(\text{input})
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
 """.format(**common_args))
