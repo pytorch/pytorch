@@ -192,6 +192,14 @@ class FakeTensor(torch.Tensor):
             r = super().__torch_dispatch__(func, types, (), new_kwargs)
             return converter(r, out_device)
 
+        if func in (aten.to.prim_Device, aten.to.device):
+            _, new_kwargs = normalize_function(func, args, kwargs, normalize_to_only_use_kwargs=True)
+            input_device = new_kwargs["device"]
+            out_device = input_device if input_device else new_kwargs["input"].device
+            new_kwargs["device"] = torch.device("meta")
+            r = super().__torch_dispatch__(func, types, (), new_kwargs)
+            return converter(r, out_device)
+
         r = super().__torch_dispatch__(func, types, args, kwargs)
 
         # TODO: handle non-kwarg devices

@@ -58,6 +58,14 @@ class FakeTensorTest(TestCase):
         self.assertTrue(isinstance(x, FakeTensor))
         self.assertTrue(x.device.type == "cpu")
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_non_kwarg_device(self):
+        x = FakeTensor.from_tensor(torch.rand([16, 1], device="cpu"))
+        y = x.to(torch.device("cpu"))
+        self.assertIs(x, y)
+        z = x.to(torch.device("cuda"))
+        self.assertEqual(z.device.type, "cuda")
+
     def test_fake_mode_error(self):
         x = torch.rand([4, 4])
 
