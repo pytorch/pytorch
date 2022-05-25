@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from torch.nn.modules.utils import _single, _pair
 
 from hypothesis import settings, HealthCheck
-from hypothesis import assume, given, note
+from hypothesis import assume, given, note, Verbosity
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
@@ -4774,6 +4774,7 @@ class TestQuantizedConv(TestCase):
            Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans())
+    @settings(verbosity=Verbosity.verbose)
     @override_qengines
     def test_qconv_transpose2d(
             self,
