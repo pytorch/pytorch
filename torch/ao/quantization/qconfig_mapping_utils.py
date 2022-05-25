@@ -1,4 +1,3 @@
-from collections import OrderedDict
 import re
 from typing import Dict, Callable, Union
 
@@ -15,7 +14,6 @@ from .qconfig_mapping import QConfigMapping
 
 # TODO: revisit this list. Many helper methods shouldn't be public
 __all__ = [
-    "convert_lists_to_ordered_dicts",
     "get_flattened_qconfig_dict",
     "get_object_type_qconfig",
     "get_module_name_qconfig",
@@ -29,11 +27,11 @@ def get_object_type_qconfig(
         qconfig_mapping: QConfigMapping,
         object_type: Union[Callable, str],
         fallback_qconfig: QConfigAny) -> QConfigAny:
-    return qconfig_mapping._object_type_qconfig_dict.get(object_type, fallback_qconfig)
+    return qconfig_mapping.object_type_qconfigs.get(object_type, fallback_qconfig)
 
 
 def get_module_name_regex_qconfig(qconfig_mapping, module_name, fallback_qconfig):
-    for regex_pattern, qconfig in qconfig_mapping._module_name_regex_qconfig_dict.items():
+    for regex_pattern, qconfig in qconfig_mapping.module_name_regex_qconfigs.items():
         if re.match(regex_pattern, module_name):
             # first match wins
             return qconfig
@@ -44,8 +42,8 @@ def get_module_name_qconfig(qconfig_mapping, module_name, fallback_qconfig):
     if module_name == '':
         # module name qconfig not found
         return fallback_qconfig
-    if module_name in qconfig_mapping._module_name_qconfig_dict:
-        return qconfig_mapping._module_name_qconfig_dict[module_name]
+    if module_name in qconfig_mapping.module_name_qconfigs:
+        return qconfig_mapping.module_name_qconfigs[module_name]
     else:
         parent, _ = _parent_name(module_name)
         return get_module_name_qconfig(qconfig_mapping, parent, fallback_qconfig)
@@ -89,23 +87,11 @@ def get_flattened_qconfig_dict(qconfig_mapping: QConfigMapping) -> Dict[Union[Ca
     }
     """
     flattened: Dict[Union[Callable, str], QConfigAny] = {"": qconfig_mapping.global_qconfig}
-    for obj, qconfig in qconfig_mapping._object_type_qconfig_dict.items():
+    for obj, qconfig in qconfig_mapping.object_type_qconfigs.items():
         flattened[obj] = qconfig
-    for obj, qconfig in qconfig_mapping._module_name_qconfig_dict.items():
+    for obj, qconfig in qconfig_mapping.module_name_qconfigs.items():
         flattened[obj] = qconfig
     return flattened
-
-
-def convert_lists_to_ordered_dicts(qconfig_mapping: QConfigMapping):
-    """
-    Convert lists in a QConfigMapping to OrderedDicts.
-    """
-    qconfig_mapping._object_type_qconfig_dict = OrderedDict(
-        [(e.object_type, e.qconfig) for e in qconfig_mapping.object_type_qconfigs])
-    qconfig_mapping._module_name_qconfig_dict = OrderedDict(
-        [(e.module_name, e.qconfig) for e in qconfig_mapping.module_name_qconfigs])
-    qconfig_mapping._module_name_regex_qconfig_dict = OrderedDict(
-        [(e.module_name_regex, e.qconfig) for e in qconfig_mapping.module_name_regex_qconfigs])
 
 
 def update_qconfig_for_qat(
@@ -117,7 +103,7 @@ def update_qconfig_for_qat(
     """
     all_qat_mappings = get_combined_dict(
         get_default_qat_module_mappings(), additional_qat_module_mapping)
-    object_type_dict = qconfig_mapping._object_type_qconfig_dict
+    object_type_dict = qconfig_mapping.object_type_qconfigs
     new_object_type_dict = object_type_dict.copy()
     for k, v in new_object_type_dict.items():
         if k in all_qat_mappings:

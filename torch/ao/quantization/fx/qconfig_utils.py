@@ -53,13 +53,13 @@ def maybe_adjust_qconfig_for_module_name_object_type_order(
     cur_object_type_idx: int,
     fallback_qconfig: QConfigAny,
 ) -> QConfigAny:
-    for qconfig_entry in qconfig_mapping.module_name_object_type_order_qconfigs:
+    for (module_name, object_type, index), qconfig in qconfig_mapping.module_name_object_type_order_qconfigs.items():
         if (
-            (qconfig_entry.module_name == cur_module_path) and
-            (qconfig_entry.object_type == cur_object_type) and
-            (qconfig_entry.index == cur_object_type_idx)
+            (module_name == cur_module_path) and
+            (object_type == cur_object_type) and
+            (index == cur_object_type_idx)
         ):
-            return qconfig_entry.qconfig
+            return qconfig
     return fallback_qconfig
 
 
@@ -68,7 +68,7 @@ def update_qconfig_for_fusion(model: GraphModule, qconfig_mapping: QConfigMappin
     Update the QConfigMapping to account for fused modules such as LinearReLU.
     This assumes the QConfigMapping's attributes have already been converted to OrderedDicts.
     """
-    object_type_dict = qconfig_mapping._object_type_qconfig_dict
+    object_type_dict = qconfig_mapping.object_type_qconfigs
     if len(object_type_dict) == 0:
         return qconfig_mapping
 
@@ -265,14 +265,14 @@ def compare_prepare_convert_qconfig_mappings(
     assert qconfig_equals(prepare_qconfig_mapping.global_qconfig, convert_qconfig_mapping.global_qconfig), \
         "Expected global qconfigs to be the same in the prepare and convert quantization configs"
     prepare_dicts: List[OrderedDict] = [
-        prepare_qconfig_mapping._object_type_qconfig_dict,
-        prepare_qconfig_mapping._module_name_qconfig_dict,
-        prepare_qconfig_mapping._module_name_regex_qconfig_dict,
+        prepare_qconfig_mapping.object_type_qconfigs,
+        prepare_qconfig_mapping.module_name_qconfigs,
+        prepare_qconfig_mapping.module_name_regex_qconfigs,
     ]
     convert_dicts: List[OrderedDict] = [
-        convert_qconfig_mapping._object_type_qconfig_dict,
-        convert_qconfig_mapping._module_name_qconfig_dict,
-        convert_qconfig_mapping._module_name_regex_qconfig_dict,
+        convert_qconfig_mapping.object_type_qconfigs,
+        convert_qconfig_mapping.module_name_qconfigs,
+        convert_qconfig_mapping.module_name_regex_qconfigs,
     ]
     dict_names = [OBJECT_TYPE_DICT_KEY, MODULE_NAME_DICT_KEY, MODULE_NAME_REGEX_DICT_KEY]
     for i in range(len(prepare_dicts)):

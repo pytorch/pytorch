@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
+from collections import OrderedDict
 import os
 import torch
 import torch.nn.functional as F
@@ -77,17 +78,12 @@ from torch.ao.quantization.qconfig_mapping import (
     MODULE_NAME_REGEX_DICT_KEY,
     OBJECT_TYPE_DICT_KEY,
     QConfigMapping,
-    QConfigModuleNameEntry,
-    QConfigModuleNameObjectTypeOrderEntry,
-    QConfigModuleNameRegexEntry,
-    QConfigObjectTypeEntry,
 )
 
 from torch.ao.quantization.qconfig_mapping_utils import (
     get_object_type_qconfig,
     get_module_name_qconfig,
     get_module_name_regex_qconfig,
-    convert_lists_to_ordered_dicts,
 )
 
 from torch.ao.quantization.fx.pattern_utils import (
@@ -1872,22 +1868,17 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertNotEqual(qconfig1, qconfig2)
         self.assertNotEqual(qconfig1, qconfig3)
         qconfig_mapping = QConfigMapping()
-        self.assertEqual(qconfig_mapping.object_type_qconfigs, [])
+        self.assertEqual(len(qconfig_mapping.object_type_qconfigs), 0)
         # Insert some entries
         qconfig_mapping.set_object_type(torch.nn.Linear, qconfig1)
         qconfig_mapping.set_object_type(torch.nn.ReLU, qconfig2)
         self.assertEqual(len(qconfig_mapping.object_type_qconfigs), 2)
-        self.assertEqual(qconfig_mapping.object_type_qconfigs[0], QConfigObjectTypeEntry(torch.nn.Linear, qconfig1))
-        self.assertEqual(qconfig_mapping.object_type_qconfigs[1], QConfigObjectTypeEntry(torch.nn.ReLU, qconfig2))
+        self.assertEqual(qconfig_mapping.object_type_qconfigs[torch.nn.Linear], qconfig1)
+        self.assertEqual(qconfig_mapping.object_type_qconfigs[torch.nn.ReLU], qconfig2)
         # Override existing key
         qconfig_mapping.set_object_type(torch.nn.Linear, qconfig3)
-        self.assertEqual(len(qconfig_mapping.object_type_qconfigs), 3)
-        self.assertEqual(qconfig_mapping.object_type_qconfigs[0], QConfigObjectTypeEntry(torch.nn.Linear, qconfig1))
-        self.assertEqual(qconfig_mapping.object_type_qconfigs[1], QConfigObjectTypeEntry(torch.nn.ReLU, qconfig2))
-        self.assertEqual(qconfig_mapping.object_type_qconfigs[2], QConfigObjectTypeEntry(torch.nn.Linear, qconfig3))
-        convert_lists_to_ordered_dicts(qconfig_mapping)
-        self.assertEqual(qconfig_mapping._object_type_qconfig_dict[torch.nn.Linear], qconfig3)
-        self.assertEqual(qconfig_mapping._object_type_qconfig_dict[torch.nn.ReLU], qconfig2)
+        self.assertEqual(qconfig_mapping.object_type_qconfigs[torch.nn.Linear], qconfig3)
+        self.assertEqual(qconfig_mapping.object_type_qconfigs[torch.nn.ReLU], qconfig2)
         self.assertEqual(get_object_type_qconfig(qconfig_mapping, torch.nn.Linear, None), qconfig3)
         self.assertEqual(get_object_type_qconfig(qconfig_mapping, torch.nn.ReLU, None), qconfig2)
         self.assertEqual(get_object_type_qconfig(qconfig_mapping, "nomatch", None), None)
@@ -1899,22 +1890,17 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertNotEqual(qconfig1, qconfig2)
         self.assertNotEqual(qconfig1, qconfig3)
         qconfig_mapping = QConfigMapping()
-        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs, [])
+        self.assertEqual(len(qconfig_mapping.module_name_regex_qconfigs), 0)
         # Insert some entries
         qconfig_mapping.set_module_name_regex("foo.*bar", qconfig1)
         qconfig_mapping.set_module_name_regex("foo.*", qconfig2)
         self.assertEqual(len(qconfig_mapping.module_name_regex_qconfigs), 2)
-        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs[0], QConfigModuleNameRegexEntry("foo.*bar", qconfig1))
-        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs[1], QConfigModuleNameRegexEntry("foo.*", qconfig2))
+        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs["foo.*bar"], qconfig1)
+        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs["foo.*"], qconfig2)
         # Override existing key
         qconfig_mapping.set_module_name_regex("foo.*bar", qconfig3)
-        self.assertEqual(len(qconfig_mapping.module_name_regex_qconfigs), 3)
-        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs[0], QConfigModuleNameRegexEntry("foo.*bar", qconfig1))
-        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs[1], QConfigModuleNameRegexEntry("foo.*", qconfig2))
-        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs[2], QConfigModuleNameRegexEntry("foo.*bar", qconfig3))
-        convert_lists_to_ordered_dicts(qconfig_mapping)
-        self.assertEqual(qconfig_mapping._module_name_regex_qconfig_dict["foo.*bar"], qconfig3)
-        self.assertEqual(qconfig_mapping._module_name_regex_qconfig_dict["foo.*"], qconfig2)
+        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs["foo.*bar"], qconfig3)
+        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs["foo.*"], qconfig2)
         self.assertEqual(get_module_name_regex_qconfig(qconfig_mapping, "foo123bar", None), qconfig3)
         self.assertEqual(get_module_name_regex_qconfig(qconfig_mapping, "foobar", None), qconfig3)
         self.assertEqual(get_module_name_regex_qconfig(qconfig_mapping, "foobaz", None), qconfig2)
@@ -1928,22 +1914,17 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertNotEqual(qconfig1, qconfig2)
         self.assertNotEqual(qconfig1, qconfig3)
         qconfig_mapping = QConfigMapping()
-        self.assertEqual(qconfig_mapping.module_name_qconfigs, [])
+        self.assertEqual(len(qconfig_mapping.module_name_qconfigs), 0)
         # Insert some entries
         qconfig_mapping.set_module_name("mod1", qconfig1)
         qconfig_mapping.set_module_name("mod2", qconfig2)
         self.assertEqual(len(qconfig_mapping.module_name_qconfigs), 2)
-        self.assertEqual(qconfig_mapping.module_name_qconfigs[0], QConfigModuleNameEntry("mod1", qconfig1))
-        self.assertEqual(qconfig_mapping.module_name_qconfigs[1], QConfigModuleNameEntry("mod2", qconfig2))
+        self.assertEqual(qconfig_mapping.module_name_qconfigs["mod1"], qconfig1)
+        self.assertEqual(qconfig_mapping.module_name_qconfigs["mod2"], qconfig2)
         # Override existing key
         qconfig_mapping.set_module_name("mod1", qconfig3)
-        self.assertEqual(len(qconfig_mapping.module_name_qconfigs), 3)
-        self.assertEqual(qconfig_mapping.module_name_qconfigs[0], QConfigModuleNameEntry("mod1", qconfig1))
-        self.assertEqual(qconfig_mapping.module_name_qconfigs[1], QConfigModuleNameEntry("mod2", qconfig2))
-        self.assertEqual(qconfig_mapping.module_name_qconfigs[2], QConfigModuleNameEntry("mod1", qconfig3))
-        convert_lists_to_ordered_dicts(qconfig_mapping)
-        self.assertEqual(qconfig_mapping._module_name_qconfig_dict["mod1"], qconfig3)
-        self.assertEqual(qconfig_mapping._module_name_qconfig_dict["mod2"], qconfig2)
+        self.assertEqual(qconfig_mapping.module_name_qconfigs["mod1"], qconfig3)
+        self.assertEqual(qconfig_mapping.module_name_qconfigs["mod2"], qconfig2)
         self.assertEqual(get_module_name_qconfig(qconfig_mapping, "mod1", None), qconfig3)
         self.assertEqual(get_module_name_qconfig(qconfig_mapping, "mod2", None), qconfig2)
         self.assertEqual(get_module_name_qconfig(qconfig_mapping, "nomatch", None), None)
@@ -1955,17 +1936,30 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertNotEqual(qconfig1, qconfig2)
         self.assertNotEqual(qconfig1, qconfig3)
         qconfig_mapping = QConfigMapping()
-        self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs, [])
+        self.assertEqual(len(qconfig_mapping.module_name_object_type_order_qconfigs), 0)
         # Insert some entries
         qconfig_mapping.set_module_name_object_type_order("mod1", torch.nn.Linear, 0, qconfig1)
         qconfig_mapping.set_module_name_object_type_order("mod2", torch.nn.ReLU, 1, qconfig2)
         self.assertEqual(len(qconfig_mapping.module_name_object_type_order_qconfigs), 2)
-        self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[0],
-                         QConfigModuleNameObjectTypeOrderEntry("mod1", torch.nn.Linear, 0, qconfig1))
-        self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[1],
-                         QConfigModuleNameObjectTypeOrderEntry("mod2", torch.nn.ReLU, 1, qconfig2))
+        key1 = ("mod1", torch.nn.Linear, 0)
+        key2 = ("mod2", torch.nn.ReLU, 1)
+        self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[0], key1)
+        self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[1], key2)
+        self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key1], qconfig1)
+        self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key2], qconfig2)
         self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
                          qconfig_mapping, "mod1", torch.nn.Linear, 0, None), qconfig1)
+        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+                         qconfig_mapping, "mod2", torch.nn.ReLU, 1, None), qconfig2)
+        # Override existing key
+        qconfig_mapping.set_module_name_object_type_order("mod1", torch.nn.Linear, 0, qconfig3)
+        self.assertEqual(len(qconfig_mapping.module_name_object_type_order_qconfigs), 2)
+        self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[0], key1)
+        self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[1], key2)
+        self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key1], qconfig3)
+        self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key2], qconfig2)
+        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+                         qconfig_mapping, "mod1", torch.nn.Linear, 0, None), qconfig3)
         self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
                          qconfig_mapping, "mod2", torch.nn.ReLU, 1, None), qconfig2)
         # No match
@@ -2015,22 +2009,22 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_dict["undefined_dict_key"] = [(123, qconfig1), (234, qconfig2)]
         qconfig_mapping = QConfigMapping.from_dict(qconfig_dict)
         self.assertEqual(qconfig_mapping.global_qconfig, global_qconfig)
-        self.assertEqual(qconfig_mapping.object_type_qconfigs, [
-            QConfigObjectTypeEntry(torch.nn.Linear, qconfig1),
-            QConfigObjectTypeEntry(torch.nn.ReLU, qconfig2),
-        ])
-        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs, [
-            QConfigModuleNameRegexEntry("foo.*bar", qconfig1),
-            QConfigModuleNameRegexEntry("foo.*", qconfig2),
-        ])
-        self.assertEqual(qconfig_mapping.module_name_qconfigs, [
-            QConfigModuleNameEntry("bazbaz", qconfig1),
-            QConfigModuleNameEntry("borbor", qconfig2),
-        ])
-        self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs, [
-            QConfigModuleNameObjectTypeOrderEntry("bazbaz", torch.nn.Linear, 0, qconfig1),
-            QConfigModuleNameObjectTypeOrderEntry("foofoo", torch.nn.ReLU, 1, qconfig2),
-        ])
+        self.assertEqual(qconfig_mapping.object_type_qconfigs, OrderedDict({
+            torch.nn.Linear: qconfig1,
+            torch.nn.ReLU: qconfig2,
+        }))
+        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs, OrderedDict({
+            "foo.*bar": qconfig1,
+            "foo.*": qconfig2,
+        }))
+        self.assertEqual(qconfig_mapping.module_name_qconfigs, OrderedDict({
+            "bazbaz": qconfig1,
+            "borbor": qconfig2,
+        }))
+        self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs, OrderedDict({
+            ("bazbaz", torch.nn.Linear, 0): qconfig1,
+            ("foofoo", torch.nn.ReLU, 1): qconfig2,
+        }))
 
     def test_qconfig_mapping_to_dict(self):
         global_qconfig = QConfig(123, "global")

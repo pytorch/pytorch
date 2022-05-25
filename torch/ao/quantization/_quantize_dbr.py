@@ -6,7 +6,6 @@ from ._dbr.qconfig_mapping_utils import normalize_object_types
 
 from .qconfig_mapping_utils import (
     get_flattened_qconfig_dict,
-    convert_lists_to_ordered_dicts,
 )
 from torch.ao.quantization.qconfig_mapping import QConfigMapping
 from torch.ao.quantization.quantization_mappings import (
@@ -50,7 +49,6 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
         'qconfig_mapping.set_module_name_object_type_order is not supported yet in define-by-run quantization'
 
     normalize_object_types(qconfig_mapping)
-    convert_lists_to_ordered_dicts(qconfig_mapping)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_mapping)
     torch.quantization.propagate_qconfig_(model, flattened_qconfig_dict)
 
@@ -122,7 +120,7 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
             child.qconfig = None  # type: ignore[assignment]
         elif isinstance(child, torch.nn.LSTM):
             # TODO: fix LSTM handling in eager mode static quant and remove this
-            qconfig_mapping._object_type_qconfig_dict[torch.nn.LSTM] = None
+            qconfig_mapping.object_type_qconfigs[torch.nn.LSTM] = None
 
     # TODO(future PR): do the QAT module swap
 

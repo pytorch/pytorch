@@ -23,7 +23,6 @@ from ..qconfig import (
 )
 from ..qconfig_mapping import QConfigMapping
 from ..qconfig_mapping_utils import (
-    convert_lists_to_ordered_dicts,
     update_qconfig_for_qat,
 )
 from .qconfig_utils import (
@@ -595,7 +594,6 @@ def convert(
         prepare_qconfig_mapping: QConfigMapping = model._qconfig_mapping  # type: ignore[assignment]
         modules_copy = copy.deepcopy(modules)
 
-        convert_lists_to_ordered_dicts(qconfig_mapping)
         if model._is_qat:
             update_qconfig_for_qat(qconfig_mapping, {})
         update_qconfig_for_fusion(model, qconfig_mapping)

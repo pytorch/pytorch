@@ -21,7 +21,6 @@ from ..qconfig import QConfigAny, is_reuse_input_qconfig
 from ..qconfig_mapping import QConfigMapping
 from ..qconfig_mapping_utils import (
     get_flattened_qconfig_dict,
-    convert_lists_to_ordered_dicts,
     update_qconfig_for_qat,
 )
 from .qconfig_utils import (
@@ -1476,8 +1475,6 @@ def prepare(
     root_node_getter_mapping = \
         get_fusion_pattern_to_root_node_getter(backend_config_dict)
 
-    convert_lists_to_ordered_dicts(qconfig_mapping)
-    convert_lists_to_ordered_dicts(equalization_config)
     update_qconfig_for_fusion(model, qconfig_mapping)
     update_qconfig_for_fusion(model, equalization_config)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_mapping)
