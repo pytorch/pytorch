@@ -765,7 +765,8 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
     """
     if callable(op):
         is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin',
-                                       'argmax', 'argmin', 'mean', 'median', 'norm', 'var', 'std', 'logsumexp'}        is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize', 'cumsum', 'cumprod'}
+                                       'argmax', 'argmin', 'mean', 'median', 'norm', 'var', 'std', 'logsumexp'}
+        is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize', 'cumsum', 'cumprod'}
         if is_reduction:
             if op.__name__ == 'norm':
                 if args:
