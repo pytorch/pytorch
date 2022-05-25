@@ -280,7 +280,7 @@
          "aten/src/ATen/mps/**",
          "aten/src/ATen/native/mps/**"
       ],
-      "approved_by": ["kulinseth"],
+      "approved_by": ["kulinseth", "razarmehr"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint"
