@@ -91,6 +91,10 @@ class NVFuserEnabler {
   }
 
   bool isEnabledImpl() {
+    // 0. opportunity to force disable NVFuser
+    if (getCachedNNCNotNVFuser()) {
+      return false;
+    }
     std::call_once(enabled_check_flag_, [&]() {
       // if environment variable is setting the value, we must
       if (!runtime_assigned_fuser_enabled_.has_value() &&
@@ -98,10 +102,6 @@ class NVFuserEnabler {
         assertFuserCanBeEnabled(*getCachedFuserEnabledEnvVar());
       }
     });
-    // 0. opportunity to force disable NVFuser
-    if (getCachedNNCNotNVFuser()) {
-      return false;
-    }
     // 1. if user has explicitly assigned fuser value, that value takes
     // precedence.
     if (runtime_assigned_fuser_enabled_.has_value()) {
@@ -737,6 +737,27 @@ RegisterOperators reg_view_copy({
             IValue self, size;
             pop(stack, self, size);
             push(stack, at::native::view(self.toTensor(), size.toIntVector()));
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators reg_flatten_copy({
+    Operator(
+        "prim::flatten_copy(Tensor self, int start_dim, int end_dim) -> Tensor",
+        [](const Node* node) -> Operation {
+          return [node](Stack& stack) {
+            TORCH_CHECK(
+                node->s(attr::name) == "CudaFusionGroup",
+                "flatten_copy is only used by nvfuser to identify non-mutating ",
+                "alias ops, should be restored after fusion pass!");
+            IValue self, start_dim, end_dim;
+            pop(stack, self, start_dim, end_dim);
+            push(
+                stack,
+                at::native::flatten(
+                    self.toTensor(), start_dim.toInt(), end_dim.toInt()));
           };
         },
         aliasAnalysisFromSchema()),

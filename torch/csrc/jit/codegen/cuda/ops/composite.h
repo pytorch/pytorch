@@ -53,6 +53,8 @@ TORCH_CUDA_CU_API TensorView* tanh_gelu(TensorView* x);
 TORCH_CUDA_CU_API TensorView* tanh_gelu_backward(TensorView* dy, TensorView* x);
 TORCH_CUDA_CU_API TensorView* tanh_backward(TensorView* dy, TensorView* tanh_x);
 
+TORCH_CUDA_CU_API TensorView* view_as_real(TensorView* x);
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

@@ -488,6 +488,8 @@ class TestFX(JitTestCase):
         f = Foo()
         x, y = torch.randn(5), torch.randn(5)
 
+        print(torch.__version__)
+
         tracer = Tracer()
         torch.testing.assert_close(GraphModule(f, tracer.trace(f))(x, y), f(x, y))
 
@@ -3942,8 +3944,6 @@ class TestFunctionalTracing(JitTestCase):
 
         "upsample_bilinear": INTERPOLATE_ARGS_CONFLICT,
         "upsample_nearest": INTERPOLATE_ARGS_CONFLICT,
-
-        "normalize" : MUTABLE,
     }
 
     # List of nn.functionals with Tensor inputs but not with type annotation
