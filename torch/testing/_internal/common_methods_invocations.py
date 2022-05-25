@@ -19242,12 +19242,12 @@ python_ref_db = [
         torch_opinfo_name="reshape",
     ),
     PythonRefInfo(
-        "_refs.rot90",
-        torch_opinfo_name="rot90",
-    ),
-    PythonRefInfo(
         "_refs.roll",
         torch_opinfo_name="roll",
+    ),
+    PythonRefInfo(
+        "_refs.rot90",
+        torch_opinfo_name="rot90",
     ),
     PythonRefInfo(
         "_refs.stack",
