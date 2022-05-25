@@ -501,6 +501,7 @@ const std::string jit_code_template = R"ESCAPE(
         int linear_idx = thread_idx + block_work_size * idx;
         auto output_offsets = output_calculator.get(linear_idx);
         //printf("output thread %d offset %d\n", threadIdx.x, output_offsets[0]);
+        //TODO handle multi-return functors
         ${store_outputs}
         thread_idx += num_threads;
     }
@@ -691,8 +692,7 @@ std::string generate_code(
     BinaryFuncVariant scalar_pos,
     c10::SmallVector<std::string>& extra_args_typenames,
     bool vectorized,
-    int vec_size,
-    bool return_by_ref) {
+    int vec_size) {
   at::jit::TemplateEnv env;
 
   env.s("index_type", "unsigned int");
@@ -751,37 +751,19 @@ std::string generate_code(
   env.s("args", functor_args.str());
 
   std::string call_functor_template;
-  if (return_by_ref) {  // return one or more outputs by reference
-    bool need_temp_out = (compute_type != result_type);
-    std::stringstream functor_outs;
-    if (need_temp_out) {
-      for (int i = 0; i < nOutputs - 1; i++) {
-        functor_outs << "temp_out" << std::to_string(i) << ", ";
-      }
-      functor_outs << "temp_out" << std::to_string(nOutputs - 1);
-    } else {
-      for (int i = 0; i < nOutputs - 1; i++) {
-        functor_outs << "out" << std::to_string(i) << "[j], ";
-      }
-      functor_outs << "out" << std::to_string(nOutputs - 1) << "[j]";
-    }
-    env.s("functor_outs", functor_outs.str());
-
-    if (need_temp_out) {
-      call_functor_template += "${compute_type} ${functor_outs};\n";
-    }
-
-    call_functor_template += "${name}<${compute_type}>(${args} ${extra_args}, ${functor_outs});\n";
-
-    if (need_temp_out) {
-      for (int i = 0; i < nOutputs; i++) {
-        auto i_string = std::to_string(i);
-        call_functor_template += "out" +i_string + "[j] = temp_out" + i_string + ";\n";
-      }
-    }
-
-  } else {  // return by value for single output functor
+  if (nOutputs == 1) {
+    // retunr by value for single output functor
     call_functor_template = "out0[j] = ${name}<${compute_type}>(${args} ${extra_args});";
+  } else {
+    // return by reference for multi-output functor
+    std::stringstream functor_outs;
+    for (int i = 0; i < nOutputs - 1; i++) {
+      functor_outs << "out" << std::to_string(i) << "[j], ";
+    }
+    functor_outs << "out" << std::to_string(nOutputs - 1) << "[j]";
+    env.s("outs", functor_outs.str());
+
+    call_functor_template = "${name}<${compute_type}>(${args} ${extra_args}, ${outs});";
   }
   env.s("call_functor", at::jit::CodeTemplate(call_functor_template).format(env));
 

@@ -2,7 +2,6 @@
 
 import torch
 from torch.cuda.jiterator import _create_jit_fn as create_jit_fn
-from torch.cuda.jiterator import _create_multi_output_jit_fn as create_multi_output_jit_fn
 import sys
 from itertools import product
 from torch.testing._internal.common_utils import TestCase, parametrize, run_tests, TEST_CUDA
@@ -83,8 +82,7 @@ class TestPythonJiterator(TestCase):
         self.assertEqual(expected, result)
 
     @skipCUDAIfRocm
-    @parametrize("is_train", [True, False])
-    def test_bool_extra_args(self, device, is_train):
+    def test_bool_extra_args(self, device):
         code_string = "template <typename T> T conditional(T x, T mask, bool is_train) { return is_train ? x * mask : x; }"
         jitted_fn = create_jit_fn(code_string, is_train=False)
 
@@ -94,31 +92,12 @@ class TestPythonJiterator(TestCase):
         a = torch.rand(3, device=device)
         b = torch.rand(3, device=device)
 
-        expected = ref_fn(a, b, is_train=is_train)
-        result = jitted_fn(a, b, is_train=is_train)
+        expected = ref_fn(a, b, is_train=True)
+        result = jitted_fn(a, b, is_train=True)
         self.assertEqual(expected, result)
 
     @skipCUDAIfRocm
-    def test_multiple_functors(self, device):
-        code_string = '''
-        template <typename T> T fn(T x, T mask) { return x * mask; }
-        template <typename T> T main_fn(T x, T mask, T y) { return fn(x, mask) + y; }
-        '''
-        jitted_fn = create_jit_fn(code_string)
-
-        def ref_fn(x, mask, y):
-            return x * mask + y
-
-        a = torch.rand(3, device=device)
-        b = torch.rand(3, device=device)
-        c = torch.rand(3, device=device)
-
-        expected = ref_fn(a, b, c)
-        result = jitted_fn(a, b, c)
-        self.assertEqual(expected, result)
-
-    @skipCUDAIfRocm
-    @parametrize("num_inputs", [1, 5, 8])
+    @parametrize("num_inputs", list(range(1, 9)))
     def test_various_num_inputs(self, num_inputs):
         inputs = []
         for i in range(num_inputs):
@@ -136,34 +115,6 @@ class TestPythonJiterator(TestCase):
         result = jitted_fn(*inputs)
 
         self.assertEqual(expected, result)
-
-    @skipCUDAIfRocm
-    @parametrize("num_outputs", [1, 4, 8])
-    def test_various_num_outputs(self, num_outputs):
-        input = torch.rand(3, device='cuda')
-
-        output_string = ", ".join([f"T& out{i}" for i in range(num_outputs)])
-        function_body = ""
-        for i in range(num_outputs):
-            function_body += f"out{i} = input + {i};\n"
-        code_string = f"template <typename T> T my_kernel(T input, {output_string}) {{ {function_body} }}"
-
-        jitted_fn = create_multi_output_jit_fn(code_string, num_outputs)
-
-        def ref_fn(input):
-            outputs = []
-            for i in range(num_outputs):
-                outputs.append(input + i)
-
-            if num_outputs == 1:
-                return outputs[0]
-            return tuple(outputs)
-
-        expected = ref_fn(input)
-        result = jitted_fn(input)
-
-        for i in range(num_outputs):
-            self.assertEqual(expected[i], result[i])
 
     @skipCUDAIfRocm
     @parametrize("code_string", [

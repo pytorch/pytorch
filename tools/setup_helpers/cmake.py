@@ -282,7 +282,6 @@ class CMake:
                 var: var
                 for var in (
                     "BLAS",
-                    "WITH_BLAS",
                     "BUILDING_WITH_TORCH_LIBS",
                     "CUDA_HOST_COMILER",
                     "CUDA_NVCC_EXECUTABLE",

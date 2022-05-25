@@ -51,6 +51,8 @@ git clone https://github.com/pytorch/cppdocs
 
 set -ex
 
+sudo apt-get -y install doxygen
+
 # Generate ATen files
 pushd "${pt_checkout}"
 pip install -r requirements.txt

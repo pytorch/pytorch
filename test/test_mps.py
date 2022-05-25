@@ -382,7 +382,7 @@ class TestMPS(TestCase):
     def test_linear3D(self):
         self._linear_helper(in_features=200, out_features=33278, shape=((35, 20, 200)), bias=True, backward_pass=False)
 
-    def test_linear3D_backward(self):
+    def test_linear3D_backwarwd(self):
         self._linear_helper(in_features=200, out_features=33278, shape=((35, 20, 200)), bias=True, backward_pass=True)
 
     def test_linear3D_no_bias(self):
@@ -1274,31 +1274,6 @@ class TestMPS(TestCase):
             if p.requires_grad:
                 self.assertEqual(p.grad, torch.zeros_like(p.grad))
         self.assertEqual(inp.grad, torch.zeros_like(inp))
-
-    # Test dtype casting, with and without simultaneous device change
-    def test_to(self):
-        values = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
-        cpu_x = torch.tensor(values, device='cpu')
-        mps_x = torch.tensor(values, device='mps')
-
-        self.assertEqual(cpu_x.int(), mps_x.int().cpu())
-        self.assertEqual(cpu_x.bool(), mps_x.bool().cpu())
-        self.assertEqual(cpu_x.float(), mps_x.float().cpu())
-
-        self.assertEqual(torch.tensor(1.3, device='mps').int().cpu(),
-                         torch.tensor(1, dtype=torch.int32))
-        self.assertEqual(torch.tensor(0.0, device='mps').bool().cpu(), torch.tensor(False))
-        self.assertEqual(torch.tensor(0.1, device='mps').bool().cpu(), torch.tensor(True))
-        self.assertEqual(torch.tensor(0.1, device='mps').bool().int().cpu(),
-                         torch.tensor(1, dtype=torch.int32))
-        self.assertEqual(torch.tensor(0.1, device='mps').bool().int().float().cpu(),
-                         torch.tensor(1.0))
-        self.assertEqual(torch.tensor(4.25, device='mps').to('cpu', torch.int),
-                         torch.tensor(4, dtype=torch.int32))
-        self.assertEqual(torch.tensor(4.25, device='cpu').to('mps', torch.int).cpu(),
-                         torch.tensor(4, dtype=torch.int32))
-        self.assertEqual(torch.tensor(-8.34, device='cpu').to('mps', torch.int),
-                         torch.tensor(-8.34, device='cpu').to('mps').to(torch.int))
 
 
 class TestSmoothL1Loss(TestCase):
