@@ -45,6 +45,7 @@
 
 #include <torch/csrc/lazy/core/shape_inference.h>
 
+#include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/TensorConversions.h>
@@ -53,6 +54,7 @@
 #include <ATen/CompositeExplicitAutogradFunctions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
+#include <ATen/InferSize.h>
 #include <ATen/WrapDimUtils.h>
 #include <aten/src/ATen/native/ReduceOpsUtils.h>
 #include <c10/core/ScalarType.h>
@@ -317,14 +319,6 @@ std::vector<Shape> compute_shape_inverse(const at::Tensor & self) {
 std::vector<Shape> compute_shape_kl_div_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& target, int64_t reduction, bool log_target) {
   // Based on definition of aten/src/ATen/native/Loss.cpp::kl_div_backward_cpu.
   return {Shape(self.scalar_type(), self.sizes().vec())};
-}
-
-std::vector<torch::lazy::Shape> compute_shape_block_diag(at::TensorList tensors) {
-  // block_diag is composite but all of its base ops are structured, so we can
-  // run meta tensors through it.
-  auto meta_tensors = at::native::to_meta(tensors);
-  auto meta_out = at::block_diag(meta_tensors);
-  return {Shape(meta_out.scalar_type(), meta_out.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
@@ -647,6 +641,25 @@ std::vector<Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef
 
 std::vector<Shape> compute_shape_narrow_copy(const at::Tensor & self, int64_t dim, int64_t start, c10::SymInt length) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+// Non-Native Ops
+std::vector<Shape> compute_shape_scalar(const at::Scalar& value, const at::ScalarType& type) {
+  return { Shape(type, {}) };
+}
+std::vector<Shape> compute_shape_expand(const Output& input, const std::vector<int64_t>& size, const bool& is_scalar_expand) {
+  return { Shape(input.shape().scalar_type(), size) };
+}
+std::vector<Shape> compute_shape_view(const Output& input, const std::vector<int64_t>& output_sizes) {
+  const Shape& input_shape = input.shape();
+  const auto complete_output_sizes =
+      at::infer_size(output_sizes, input_shape.numel());
+  return { Shape(input_shape.scalar_type(), complete_output_sizes) };
+}
+std::vector<Shape> compute_shape_cast(const Output& input, const at::ScalarType& dtype, const c10::optional<at::ScalarType>& stype) {
+  Shape shape = input.shape();
+  shape.set_scalar_type(dtype);
+  return { shape };
 }
 
 std::vector<Shape> compute_shape_select_scatter(const at::Tensor & self, const at::Tensor & src, int64_t dim, int64_t index) {
