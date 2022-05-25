@@ -50,13 +50,12 @@ skipIfNoBFloat16Cuda = _skipper(
 # smaller than the currently tested opset_version
 def skipIfUnsupportedMinOpsetVersion(min_opset_version):
     def skip_dec(func):
-        @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
+        def wrapper(self):
             if self.opset_version < min_opset_version:
                 raise unittest.SkipTest(
                     f"Unsupported opset_version: {self.opset_version} < {min_opset_version}"
                 )
-            return func(self, *args, **kwargs)
+            return func(self)
 
         return wrapper
 
@@ -66,13 +65,12 @@ def skipIfUnsupportedMinOpsetVersion(min_opset_version):
 # skips tests for all versions above max_opset_version.
 def skipIfUnsupportedMaxOpsetVersion(max_opset_version):
     def skip_dec(func):
-        @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
+        def wrapper(self):
             if self.opset_version > max_opset_version:
                 raise unittest.SkipTest(
                     f"Unsupported opset_version: {self.opset_version} > {max_opset_version}"
                 )
-            return func(self, *args, **kwargs)
+            return func(self)
 
         return wrapper
 
@@ -82,13 +80,12 @@ def skipIfUnsupportedMaxOpsetVersion(max_opset_version):
 # skips tests for all opset versions.
 def skipForAllOpsetVersions():
     def skip_dec(func):
-        @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
+        def wrapper(self):
             if self.opset_version:
                 raise unittest.SkipTest(
                     "Skip verify test for unsupported opset_version"
                 )
-            return func(self, *args, **kwargs)
+            return func(self)
 
         return wrapper
 
@@ -98,10 +95,9 @@ def skipForAllOpsetVersions():
 # skips tests for scripting.
 def skipScriptTest(min_opset_version=float("inf")):
     def script_dec(func):
-        @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
+        def wrapper(self):
             self.is_script_test_enabled = self.opset_version >= min_opset_version
-            return func(self, *args, **kwargs)
+            return func(self)
 
         return wrapper
 
@@ -113,13 +109,12 @@ def skipScriptTest(min_opset_version=float("inf")):
 # (for example, an op was modified but the change is not supported in caffe2)
 def skipIfUnsupportedOpsetVersion(unsupported_opset_versions):
     def skip_dec(func):
-        @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
+        def wrapper(self):
             if self.opset_version in unsupported_opset_versions:
                 raise unittest.SkipTest(
                     "Skip verify test for unsupported opset_version"
                 )
-            return func(self, *args, **kwargs)
+            return func(self)
 
         return wrapper
 
