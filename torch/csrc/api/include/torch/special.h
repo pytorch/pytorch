@@ -565,4 +565,40 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
   return torch::special_softmax(self, dim, dtype);
 }
 
+/// Chebyshev polynomial of the third kind.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.chebyshev_polynomial_v.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto n = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::chebyshev_polynomial_v(x, n);
+/// ```
+inline Tensor chebyshev_polynomial_v(const Tensor& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_v(x, n);
+}
+
+inline Tensor chebyshev_polynomial_v(const Scalar& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_v(x, n);
+}
+
+inline Tensor chebyshev_polynomial_v(const Tensor& x, const Scalar& n) {
+  return torch::special_chebyshev_polynomial_v(x, n);
+}
+
+inline Tensor& chebyshev_polynomial_v_out(Tensor& output, const Tensor& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_v_out(output, x, n);
+}
+
+inline Tensor& chebyshev_polynomial_v_out(Tensor& output, const Scalar& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_v_out(output, x, n);
+}
+
+inline Tensor& chebyshev_polynomial_v_out(Tensor& output, const Tensor& x, const Scalar& n) {
+  return torch::special_chebyshev_polynomial_v_out(output, x, n);
+}
+
 }} // torch::special
