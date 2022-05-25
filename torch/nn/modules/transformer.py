@@ -124,7 +124,7 @@ class Transformer(Module):
 
             Note: Due to the multi-head attention architecture in the transformer model,
             the output sequence length of a transformer is same as the input sequence
-            (i.e. target) length of the decode.
+            (i.e. target) length of the decoder.
 
             where S is the source sequence length, T is the target sequence length, N is the
             batch size, E is the feature number
