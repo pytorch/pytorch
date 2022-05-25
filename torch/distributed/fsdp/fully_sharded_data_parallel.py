@@ -1032,7 +1032,6 @@ class FullyShardedDataParallel(nn.Module):
             root_module, dedup_shared_params=False,
         )
         ignored_param_names = set()
-        print(f"Param to unflat param names has vals {param_to_unflat_param_names.values()}")
         for param in ignored_params:
             unflat_param_names = param_to_unflat_param_names[param]
             clean_names = []
@@ -1644,10 +1643,6 @@ class FullyShardedDataParallel(nn.Module):
                 # parameters and all buffer names since only the root's names
                 # are fully prefixed like the state dict keys
                 m._exec_order_data = self._exec_order_data
-                # self._ignored_param_names = self._ignored_param_names.union(m._ignored_param_names)
-                # m._ignored_param_names = self._ignored_param_names
-                # self._buffer_names = self._buffer_names.union(m._buffer_names)
-                # m._buffer_names = self._buffer_names
 
     def _wait_for_previous_optim_step(self) -> None:
         """
@@ -1784,10 +1779,8 @@ class FullyShardedDataParallel(nn.Module):
             # Strip prefix out of key if needed as buffer names and param names
             # do not have prefix considered as they are not computed in `state_dict`
             # call.
-            print(f"Rank {self.rank} clean key {clean_key}, prefix is {clean_prefix} buffer names is {self._buffer_names}")
             if clean_key.startswith(clean_prefix):
                 clean_key = clean_key[len(clean_prefix):]
-                print(f"{self.rank} computed clean key {clean_key}")
             # Do not need to clone buffers since they are not sharded
             if clean_key in self._buffer_names:
                 # Offload the buffer to CPU if needed -- we do not do this in
@@ -1800,13 +1793,9 @@ class FullyShardedDataParallel(nn.Module):
                 continue
             # Clone non-ignored parameters before exiting the
             # `_summon_full_params()` context
-            ig = clean_key in self._ignored_param_names
-            if ig:
-                print(f"{self.rank} {clean_key} found in {self._ignored_param_names}")
             if clean_key not in self._ignored_param_names and \
                     not getattr(state_dict[key], "_has_been_cloned", False):
                 try:
-                    print(f"rank {self.rank} cloning {key} (cleaned {clean_key})")
                     state_dict[key] = state_dict[key].clone().detach()
                     state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
                 except BaseException as e:
