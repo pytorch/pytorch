@@ -527,6 +527,9 @@ def nan_to_num(
 ) -> TensorLikeType:
     assert isinstance(a, TensorLike)
 
+    if a.dtype == torch.bool:
+        return clone(a)
+
     if posinf is None:
         posinf = prims.maximum_value(a.dtype)
 
