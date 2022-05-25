@@ -180,7 +180,6 @@ void OptimizeGraph(
       graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
   AddIfThenElseOp(graph);
   UseSplitAndSqueeze(graph);
-  QuantizedLinearReluFusion(graph);
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
@@ -1202,9 +1201,9 @@ c10::IValue BlockRunner::run_impl_record_functions(
     IValueList&& args,
     const KeywordArgs& kwargs) {
   auto step_callbacks =
-      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_MODEL);
-  if (!step_callbacks.empty()) {
-    at::RecordFunction guard(std::move(step_callbacks));
+      at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_MODEL);
+  if (C10_UNLIKELY(step_callbacks.has_value())) {
+    at::RecordFunction guard(std::move(*step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     guard.needsInputs()
         ? guard.before(
@@ -1846,9 +1845,9 @@ std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
 void ProcessedNode::run() {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
-      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_OP);
-  if (!step_callbacks.empty()) {
-    at::RecordFunction guard(std::move(step_callbacks));
+      at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_OP);
+  if (C10_UNLIKELY(step_callbacks.has_value())) {
+    at::RecordFunction guard(std::move(*step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     if (guard.needsInputs()) {
       const auto inputs = inputs_ivalue_vec();
