@@ -2303,7 +2303,7 @@ class TestSparseCSR(TestCase):
             pt_tensor = self._convert_to_layout(dense, layout, blocksize=blocksize)
             for i in range(shape[0]):
                 _test_matrix(pt_tensor[i], dense[i], layout, blocksize)
-            self.assertEqual(dense, pt_matrix.to_dense())
+            self.assertEqual(dense, pt_tensor.to_dense())
 
         # TODO: Case 2: Different sparsity pattern across matrices
 

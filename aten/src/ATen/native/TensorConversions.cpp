@@ -386,26 +386,63 @@ Tensor sparse_compressed_to_dense(
     return dst_transposed.transpose(batch_ndim, batch_ndim + 1);
   }
   if (self.layout() == kSparseBsr) {
-    TORCH_CHECK(self.dim() == 2, "Can only convert 2D SparseBsr to Strided.");
+    TORCH_CHECK(self.dim() == 2 || self.dim() == 3, "Can only convert 2D or 3D SparseBsr to Strided.");
+    auto crow_indices = self.crow_indices();
+    auto col_indices = self.col_indices();
+    if (self.dim() == 3) {
+      // These are assumed to be the same across all dimensions, because
+      // BSR currently requires the sparsity patterns to match!
+      crow_indices = crow_indices.select(0, 0);
+      col_indices = col_indices.select(0, 0);
+    }
     Tensor indices = at::_convert_indices_from_csr_to_coo(
-        self.crow_indices(), self.col_indices(), false, false);
+        crow_indices, col_indices, false, false);
     auto values = self.values();
     int64_t blocksize[2] = {values.size(-2), values.size(-1)};
-    DimVector expanded_size(
-        {self.size(0) / blocksize[0],
-         self.size(1) / blocksize[1],
-         blocksize[0],
-         blocksize[1]});
     // We make use of COO dense dimensions here to use the COO to dense format
     // conversion.
-    auto self_coo =
-        at::native::_sparse_coo_tensor_unsafe(indices, values, expanded_size)
-            .coalesce();
-    auto dense = self_coo.to_dense();
-    // Here we are untiling the result.
-    dense = dense.transpose(1, 2);
-    dense = dense.reshape({self.size(0), self.size(1)});
-    return dense;
+    Tensor self_coo;
+    if (self.dim() == 2) {
+      DimVector expanded_size(
+          {self.size(-2) / blocksize[0],
+           self.size(-1) / blocksize[1],
+           blocksize[0],
+           blocksize[1]});
+      self_coo =
+          at::native::_sparse_coo_tensor_unsafe(indices, values, expanded_size)
+              .coalesce();
+      auto dense = self_coo.to_dense();
+      // Here we are untiling the result.
+      dense = dense.transpose(1, 2);
+      dense = dense.reshape({self.size(0), self.size(1)});
+      return dense;
+    }
+    if (self.dim() == 3) {
+      std::cout << "0 values.sizes(): " << values.sizes() << std::endl;
+      std::cout << "0 indices.sizes(): " << indices.sizes() << std::endl;
+      values = values.reshape(
+          {values.size(0) * values.size(1), values.size(2), values.size(3)});
+
+      Tensor dense = at::zeros(self.sizes(), self.options().layout(kStrided));
+      dense =
+          dense.reshape({self.size(0), -1, values.size(-2), values.size(-1)});
+      auto row_indices = indices.select(0, 0);
+      auto col_indices = indices.select(0, 1);
+      std::cout << "indices: " << indices << std::endl;
+      auto offsets = col_indices + row_indices * (self.size(-1) / blocksize[1]);
+      std::cout << "offsets: " << offsets << std::endl;
+      dense.index_add_(1, offsets, values);
+      dense = dense.reshape(
+          {self.size(0),
+           self.size(-2) / blocksize[0],
+           self.size(-1) / blocksize[1],
+           blocksize[0],
+           blocksize[1]});
+      // Here we are untiling the result.
+      dense = dense.transpose(2, 3);
+      dense = dense.reshape({self.size(0), self.size(1), self.size(2)});
+      return dense;
+    }
   }
   return self.to_sparse().to_dense();
 }
