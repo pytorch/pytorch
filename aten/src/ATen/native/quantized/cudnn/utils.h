@@ -192,6 +192,17 @@ struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
 namespace cudnn_utils {
 namespace {
 
+// TODO: we can remove this function when cuDNN enables pass by value support for
+// pointwise multiplication operations. the only reason why we need this right now is
+// we use broadcasting scalar multiplication in conv, linear, and add ops, and cuDNN requires
+// the scalar to be a scalar tensor with the same number of dimensions (num_dim) as the tensor we're multiplying to
+at::Tensor getRequantMultiplierTensor(double requant_multiplier, uint8_t num_dim) {
+  at::SmallVector<int64_t, 4> requantize_multiplier_tensor_size(num_dim, 1);
+  at::Tensor requantize_multiplier_tensor = at::empty(requantize_multiplier_tensor_size, at::device(at::kCUDA).dtype(at::kFloat));
+  requantize_multiplier_tensor.fill_(requant_multiplier);
+  return requantize_multiplier_tensor;
+}
+
 uint8_t getAlignment(const at::Tensor &t) {
   // alignment are in bytes
   uint8_t alignment = 1;
