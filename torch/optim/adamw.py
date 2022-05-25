@@ -261,6 +261,10 @@ def _single_tensor_adamw(params: List[Tensor],
         bias_correction1 = 1 - torch.pow(beta1, step) if step_is_cuda else 1 - beta1 ** step
         bias_correction2 = 1 - torch.pow(beta2, step) if step_is_cuda else 1 - beta2 ** step
 
+        step_size = lr / bias_correction1
+        if step_is_cuda:
+            step_size_neg = step_size.neg()
+
         # Decay the first and second moment running average coefficient
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
@@ -269,16 +273,19 @@ def _single_tensor_adamw(params: List[Tensor],
             # Maintains the maximum of all 2nd moment running avg. till now
             torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
             # Use the max. for normalizing running avg. of gradient
-            denom = (max_exp_avg_sqs[i].sqrt() / bias_correction2_sqrt).add_(eps)
+            if step_is_cuda:
+                # Folds in 1-elem divs by step_size_neg here to avoid extra param-set-sized read+write
+                # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
+                denom = (max_exp_avg_sqs[i].sqrt() / (bias_correction2_sqrt * step_size_neg)).add_(eps / step_size_neg)
+            else:
+                denom = (max_exp_avg_sqs[i].sqrt() / bias_correction2_sqrt).add_(eps)
         else:
-            denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
+            if step_is_cuda:
+                denom = (exp_avg_sq.sqrt() / (bias_correction2_sqrt * step_size_neg)).add_(eps / step_size_neg)
+            else:
+                denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
 
-        step_size = lr / bias_correction1
-
-        # addcdiv_ requires value is a Number, not a Tensor
-        if (step_is_cuda):
-            # incurs an extra param-set-sized read+write
-            exp_avg = step_size.neg() * exp_avg
+        if step_is_cuda:
             param.addcdiv_(exp_avg, denom)
         else:
             param.addcdiv_(exp_avg, denom, value=-step_size)
