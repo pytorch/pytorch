@@ -858,6 +858,14 @@ legendre_polynomial_p(input, n, *, out=None) -> Tensor
 
 Legendre polynomial :math:`L_{n}(\text{input})`.
 
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    P_{n + 1}(\text{input}) = 2 \times \text{input} \times P_{n}(\text{input}) - P_{n - 1}(\text{input})
+
+is evaluated.
+
 """ + r"""
 Args:
     {input}
