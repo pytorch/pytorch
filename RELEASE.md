@@ -66,7 +66,7 @@ There's a convenience script to create release branches from current `viable/str
 git clone git@github.com:pytorch/pytorch.git
 ```
 
-* Change to pytorch repo root and run following commands:
+* Execute following command from PyTorch repository root folder:
 ```bash
 DRY_RUN=disabled scripts/release/cut-release-branch.sh
 ```
