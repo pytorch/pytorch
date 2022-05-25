@@ -218,6 +218,7 @@ def softplus(
     return refs.where(refs.gt(scaled_input, threshold), a, rhs)
 
 
+# tanhshrink does not use _make_elementwise_unary_reference because it does not support out
 @elementwise_unary_scalar_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
