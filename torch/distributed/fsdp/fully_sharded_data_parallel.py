@@ -548,7 +548,7 @@ class FullyShardedDataParallel(nn.Module):
             instances, and any child modules that are already-constructed
             :class:`FullyShardedDataParallel` instances will not be ignored if
             they are nested under this instance. This argument may be used to
-            avoid sharding specific parameters when using an
+            avoid sharding specific parameters at module granularity when using an
             ``auto_wrap_policy`` or if parameters' sharding is not managed by
             FSDP. (Default: ``None``)
         param_init_fn (Optional[Callable[[nn.Module], None]]):
@@ -628,7 +628,6 @@ class FullyShardedDataParallel(nn.Module):
         # of the ignored modules' parameters and of all modules' buffers)
         self._ignored_param_names = ignored_param_names
         self._buffer_names = buffer_names
-        print(f"init: param names: {ignored_param_names} bufs: {self._buffer_names}")
         # NOTE: Since the names are computed at construction time, if the user
         # changes them later, then FSDP will not properly ignore them. However,
         # the `FlatParameter` implementation already relies on this assumption.
