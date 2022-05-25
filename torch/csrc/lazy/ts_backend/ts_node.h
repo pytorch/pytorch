@@ -71,6 +71,10 @@ struct TORCH_API TensorList : public TsNode {
   TensorList() = delete;
   TensorList(OpList values);
 
+  bool CanBeReused(OpList values) const {
+    return operands() == std::vector<Output>(values.begin(), values.end());
+  }
+
   TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
                    TSLoweringContext* loctx) const override;
 };
