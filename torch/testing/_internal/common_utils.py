@@ -215,6 +215,7 @@ def instantiate_parametrized_tests(generic_cls):
                 class_attr, generic_cls=generic_cls, device_cls=None):
             full_name = '{}_{}'.format(test.__name__, test_suffix)
             instantiate_test_helper(cls=generic_cls, name=full_name, test=test, param_kwargs=param_kwargs)
+    return generic_cls
 
 
 class subtest(object):
@@ -1078,6 +1079,7 @@ def skipIfNotRegistered(op_name, message):
 
 def _decide_skip_caffe2(expect_caffe2, reason):
     def skip_dec(func):
+        @wraps(func)
         def wrapper(self):
             if torch.onnx._CAFFE2_ATEN_FALLBACK != expect_caffe2:
                 raise unittest.SkipTest(reason)
