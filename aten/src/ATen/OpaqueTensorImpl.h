@@ -70,7 +70,11 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
-        key_set(), dtype(), device(), opaque_handle_, sizes_and_strides_.sizes_arrayref());
+        key_set(),
+        dtype(),
+        device(),
+        opaque_handle_,
+        asIntArrayRefSlow(sizes_and_strides_.sizes_arrayref()));
     copy_tensor_metadata(
         /*src_opaque_impl=*/this,
         /*dest_opaque_impl=*/impl.get(),
@@ -90,7 +94,11 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
       c10::VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
-        key_set(), dtype(), device(), opaque_handle_, sizes_and_strides_.sizes_arrayref());
+        key_set(),
+        dtype(),
+        device(),
+        opaque_handle_,
+        asIntArrayRefSlow(sizes_and_strides_.sizes_arrayref()));
     copy_tensor_metadata(
         /*src_opaque_impl=*/this,
         /*dest_opaque_impl=*/impl.get(),
