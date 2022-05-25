@@ -19184,8 +19184,7 @@ python_ref_db = [
         torch_opinfo_name="fmax",
         supports_rhs_python_scalar=False,
         skips=(
-            # refs.fmax supports scalars, unlike torch.fmax
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_errors'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -19193,20 +19192,19 @@ python_ref_db = [
         torch_opinfo_name="fmin",
         supports_rhs_python_scalar=False,
         skips=(
-            # refs.fmin supports scalars, unlike torch.fmin
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_errors'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
-
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.fmod",
         torch_opinfo_name="fmod",
         rhs_make_tensor_kwargs={'exclude_zero': True},
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.bfloat16,), device_type='cpu', active_if=(not TEST_WITH_ROCM)),
-            # refs.fmod supports scalars, unlike torch.fmod
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_errors'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.bfloat16,), device_type='cpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.bfloat16,), device_type='cpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
