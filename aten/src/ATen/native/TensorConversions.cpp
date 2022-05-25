@@ -564,6 +564,21 @@ Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
       .contiguous();
 }
 
+Tensor _batch_tile_tensor(const Tensor& self, IntArrayRef blocksize) {
+  if (self.dim() == 2) {
+    return _tile_tensor(self, blocksize);
+  }
+  // Same as _tile_tensor, just per matrix entry of self, if self is 3D.
+  TORCH_CHECK(self.dim() == 3, "Currently _batch_tile_tensor only supports 3D inputs.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[0] > 0);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[1] > 0);
+  auto block_size_0 = self.size(-2) / blocksize[0];
+  auto block_size_1 = self.size(-1) / blocksize[1];
+  return self.reshape({-1, block_size_0, blocksize[0], block_size_1, blocksize[1]})
+      .transpose(2, 3)
+      .contiguous();
+}
+
 std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
     Tensor not_zero_mask,
     ScalarType index_dtype,
@@ -582,35 +597,47 @@ std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
 }
 
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
-  TORCH_CHECK(self.dim() == 2, "Can only covert 2D Tensor to BSR.");
+  TORCH_CHECK(self.dim() == 2 || self.dim() == 3, "Can only convert 2D or 3D Tensor to BSR.");
   TORCH_CHECK(
       blocksize[0] > 0 && blocksize[1] > 0,
       "blocksize needs to be non zero, but got ",
       blocksize);
   TORCH_CHECK(
-      self.size(0) % blocksize[0] == 0,
-      "Tensor size(0) ",
-      self.size(0),
+      self.size(-2) % blocksize[0] == 0,
+      "Tensor size(-2) ",
+      self.size(-2),
       " needs to be divisible by blocksize[0] ",
       blocksize[0]);
   TORCH_CHECK(
-      self.size(1) % blocksize[1] == 0,
-      "Tensor size(1) ",
-      self.size(1),
+      self.size(-1) % blocksize[1] == 0,
+      "Tensor size(-1) ",
+      self.size(-1),
       " needs to be divisible by blocksize[1] ",
       blocksize[1]);
   auto block_size_0 = self.size(0) / blocksize[0];
 
-  auto values = _tile_tensor(self, blocksize);
-  auto not_zero_mask = _tile_tensor((self != 0), blocksize);
+  auto values = _batch_tile_tensor(self, blocksize);
+  auto not_zero_mask = _batch_tile_tensor((self != 0), blocksize);
   // Find tiles that have at least 1 non-zero value in them.
   not_zero_mask = not_zero_mask.any(-1).any(-1);
+  if (self.dim() == 3) {
+    // If the input is 3D we assert that the same sparsity pattern
+    // is used across matrices.
+    // TODO: This costly check can be removed by taking the union of
+    // sparsity patterns and materializing zeros.
+    auto not_zero_mask_0 = not_zero_mask.select(0, 0);
+    TORCH_CHECK(not_zero_mask.any(0).equal(not_zero_mask_0), "Expect the same sparsity pattern across matrices for 3D input.");
+    not_zero_mask = not_zero_mask_0;
+  }
   Tensor col_indices;
   Tensor row_indices;
   std::tie(col_indices, row_indices) =
       _not_zero_mask_to_col_row_indices(not_zero_mask, at::kLong, not_zero_mask.device());
   Tensor crow_indices = at::_convert_indices_from_coo_to_csr(
       row_indices.view({-1}), block_size_0, false /* out_int32 */);
+  if (self.dim() == 3) {
+    values = values.reshape({-1, values.size(-2), values.size(-1)});
+  }
   values = values.reshape({-1, values.size(-2), values.size(-1)});
   not_zero_mask = not_zero_mask.reshape({-1});
   // TODO: masked_select does not support some form of broadcasting, so we're
@@ -620,6 +647,11 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
       0,
       at::native::arange(not_zero_mask.numel(), at::kLong, kStrided, not_zero_mask.device())
           .masked_select(not_zero_mask));
+  if (self.dim() == 3) {
+    crow_indices = crow_indices.repeat({self.size(0), 1, 1});
+    col_indices = col_indices.repeat({self.size(0), 1, 1});
+    values = values.reshape({self.size(0), -1, values.size(-2), values.size(-1)});
+  }
 
   return at::native::_sparse_bsr_tensor_unsafe(
       crow_indices,

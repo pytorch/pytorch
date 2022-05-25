@@ -2305,6 +2305,7 @@ class TestSparseCSR(TestCase):
             dense = make_tensor(shape, dtype=torch.float, device=device)
             dense = dense * mask.unsqueeze(0)
             pt_matrix = self._convert_to_layout(dense, layout, blocksize=blocksize)
+            print("dense: ", dense, " pt_matrix: ", pt_matrix)
             for d, matrix in zip(dense, pt_matrix):
                 _test_matrix(pt_matrix, d, layout, blocksize)
 
