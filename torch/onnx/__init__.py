@@ -455,7 +455,7 @@ def is_in_onnx_export() -> bool:
 
 def register_custom_op_symbolic(
     symbolic_name: str, symbolic_fn: Callable, opset_version: int
-):
+) -> None:
     r"""Registers ``symbolic_fn`` to handle ``symbolic_name``.
 
     See "Custom Operators" in the module documentation for an example usage.
@@ -473,7 +473,7 @@ def register_custom_op_symbolic(
     utils.register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version)
 
 
-def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
+def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int) -> None:
     r"""Unregisters ``symbolic_name``.
 
     See "Custom Operators" in the module documentation for an example usage.
@@ -504,7 +504,7 @@ def disable_log() -> None:
     _C._jit_set_onnx_log_enabled(False)
 
 
-def set_log_stream(stream_name: str = "stdout"):
+def set_log_stream(stream_name: str = "stdout") -> None:
     r"""Sets output stream for ONNX logging.
 
     Args:
@@ -514,7 +514,7 @@ def set_log_stream(stream_name: str = "stdout"):
     _C._jit_set_onnx_log_output_stream(stream_name)
 
 
-def log(*args):
+def log(*args) -> None:
     r"""A simple logging facility for ONNX exporter.
 
     Args:
