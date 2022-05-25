@@ -2749,3 +2749,13 @@
 - name: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
+
+- name: special_chebyshev_polynomial_u(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_chebyshev_polynomial_u.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_chebyshev_polynomial_u.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable

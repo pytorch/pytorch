@@ -90,6 +90,10 @@ TORCH_META_FUNC(special_zeta) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC(special_chebyshev_polynomial_u) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
 TORCH_META_FUNC2(copysign, Tensor) (
   const Tensor& self, const Tensor& other
 ) {
@@ -276,6 +280,7 @@ DEFINE_DISPATCH(copysign_stub);
 DEFINE_DISPATCH(xlogy_stub);
 DEFINE_DISPATCH(xlog1py_stub);
 DEFINE_DISPATCH(zeta_stub);
+DEFINE_DISPATCH(chebyshev_polynomial_u_stub);
 
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -320,6 +325,10 @@ TORCH_IMPL_FUNC(special_xlog1py_out) (const Tensor& self, const Tensor& other, c
 
 TORCH_IMPL_FUNC(special_zeta_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
   zeta_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_chebyshev_polynomial_u_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  chebyshev_polynomial_u_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(tanh_backward_out) (const Tensor& grad_output, const Tensor& output, const Tensor& result) {
@@ -380,6 +389,22 @@ Tensor& special_zeta_out(const Scalar& self, const Tensor& other, Tensor& result
 
 Tensor& special_zeta_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::special_zeta_out(result, self, wrapped_scalar_tensor(other));
+}
+
+Tensor special_chebyshev_polynomial_u(const Scalar& x, const Tensor& n) {
+  return at::special_chebyshev_polynomial_u(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_chebyshev_polynomial_u(const Tensor& x, const Scalar& n) {
+  return at::special_chebyshev_polynomial_u(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_chebyshev_polynomial_u_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_u_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_chebyshev_polynomial_u_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_u_out(result, self, wrapped_scalar_tensor(n));
 }
 
 Tensor& special_gammainc_out(const Tensor& self, const Tensor& other, Tensor& result) {
