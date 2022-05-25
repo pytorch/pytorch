@@ -78,7 +78,7 @@ class Library:
         # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
         # AliasAnalysis type in C++
         if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
-            raise RuntimeError("Invalid alias_analysis type {}", alias_analysis)
+            raise RuntimeError("Invalid alias_analysis type {}".format(alias_analysis))
         return self.m.define(schema, alias_analysis)
 
     def __del__(self):
