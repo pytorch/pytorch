@@ -97,12 +97,17 @@ class TestRecordFunction(TestCase):
             with record_function("## TEST 1 ##", "1, 2, 3"):
                 rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], "hello", u)
                 _record_function_with_args_exit(rf_handle)
+            with record_function("## TEST 3 ##"):
+                rf_handle = _record_function_with_args_enter("## TEST 4 ##")
+                _record_function_with_args_exit(rf_handle)
         return prof
 
     def test_record_function(self):
         prof_result = self._record_function_with_param()
         found_test_1 = False
         found_test_2 = False
+        found_test_3 = False
+        found_test_4 = False
         for e in prof_result.function_events:
             if "## TEST 1 ##" == e.name:
                 found_test_1 = True
@@ -110,8 +115,16 @@ class TestRecordFunction(TestCase):
             elif "## TEST 2 ##" == e.name:
                 found_test_2 = True
                 self.assertTrue(e.input_shapes == [[], [], [], [], [], [3, 4, 5]])
+            elif "## TEST 3 ##" == e.name:
+                found_test_3 = True
+                self.assertTrue(e.input_shapes == [])
+            elif "## TEST 4 ##" == e.name:
+                found_test_4 = True
+                self.assertTrue(e.input_shapes == [])
         self.assertTrue(found_test_1)
         self.assertTrue(found_test_2)
+        self.assertTrue(found_test_3)
+        self.assertTrue(found_test_4)
 
     def test_datapipe_with_record_function(self):
         with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
