@@ -1452,6 +1452,140 @@ TEST_F(NVFuserTest, FusionGroupedReductionChannelsLastBatchNormLike_CUDA) {
   testValidate(fe.kernel(), outputs, aten_inputs, {t5, t9}, __LINE__, __FILE__);
 }
 
+// Test the grouped grid allreduce with BN-like outer reductions
+TEST_F(
+    NVFuserTest,
+    FusionGroupedReductionPersistentChannelsLastBatchNormLike_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const std::vector<int64_t> shape({64, 14, 14, 32});
+
+  auto tv0 = makeContigTensor(4, DataType::Half);
+  fusion.addInput(tv0);
+  auto tv1 = makeContigTensor(4, DataType::Half);
+  fusion.addInput(tv1);
+  auto tv2 = makeContigTensor(1);
+  fusion.addInput(tv2);
+
+  std::vector<int> reduction_axes({0, 1, 2});
+  std::vector<bool> broadcast_mask({true, true, true, false});
+
+  auto tv3 = castOp(DataType::Float, tv0);
+  auto tv4 = castOp(DataType::Float, tv1);
+
+  auto tv5 = sum(tv3, reduction_axes);
+
+  auto tv6 = broadcast(tv2, broadcast_mask);
+  auto tv7 = sub(tv4, tv6);
+  auto tv8 = mul(tv3, tv7);
+  auto tv9 = sum(tv8, reduction_axes);
+
+  auto tv10 = broadcast(tv5, broadcast_mask);
+  auto tv11 = add(tv3, tv10);
+
+  auto tv12 = broadcast(tv9, broadcast_mask);
+  auto tv13 = add(tv4, tv12);
+
+  auto tv14 = castOp(DataType::Half, tv11);
+  auto tv15 = castOp(DataType::Half, tv13);
+
+  fusion.addOutput(tv14);
+  fusion.addOutput(tv15);
+
+  groupReductions({tv5, tv9});
+
+  // Applies the outer-reduction schedule
+  const int64_t num_channels = shape.back();
+  const int64_t vector = 2;
+  TORCH_CHECK(num_channels % vector == 0);
+  // Use at most 32 TIDx threads
+  const int64_t tidx = std::min(32l, num_channels / vector);
+  const auto bidx = ceilDiv(num_channels, tidx * vector);
+
+  const int64_t tidy = 8;
+  const int64_t reduction_work_per_thread = 8;
+
+  auto tv0_cache = tv0->cacheAfter();
+  auto tv1_cache = tv1->cacheAfter();
+
+  auto ref = tv5;
+
+  // Move the reduction domains inner positions
+  ref->reorder({{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+
+  // Parallelizing the reduction domains
+  ref->merge(2, 3);
+  ref->merge(1, 2);
+  ref->split(1, tidy);
+  ref->split(1, reduction_work_per_thread);
+
+  // Parallelizing the iteration domains
+  ref->split(0, vector);
+  ref->split(0, tidx);
+
+  // Move the vector axis to the innermost position
+  ref->reorder({{2, 5}, {3, 2}, {4, 3}, {5, 4}});
+  // Move the serial reduction to the right of the vector axis
+  ref->reorder({{3, 4}, {4, 3}});
+
+  TransformPropagator::from(ref);
+
+  auto rf_tvs = tv5->rFactor({-2}, {tv5, tv9});
+  auto tv5_rf = rf_tvs.at(0);
+  auto tv9_rf = rf_tvs.at(1);
+
+  tv0->computeAt(tv5_rf, -2, ComputeAtMode::BestEffort);
+  tv1->computeAt(tv9_rf, -2, ComputeAtMode::BestEffort);
+  tv3->computeAt(tv5_rf, -1, ComputeAtMode::BestEffort);
+  tv4->computeAt(tv9_rf, -1, ComputeAtMode::BestEffort);
+
+  ref = tv5_rf;
+
+  ref->axis(0)->parallelize(ParallelType::BIDx);
+  ref->axis(1)->parallelize(ParallelType::TIDx);
+  ref->axis(2)->parallelize(ParallelType::BIDy);
+  ref->axis(3)->parallelize(ParallelType::TIDy);
+  ref->axis(4)->parallelize(ParallelType::Serial);
+  ref->axis(5)->parallelize(ParallelType::Serial);
+
+  scheduler_utils::parallelizeAllLike(ref, ir_utils::allTvs(&fusion));
+
+  tv0_cache->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv1_cache->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options_half = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  auto options_float =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn(shape, options_half);
+  auto t1 = at::randn(shape, options_half);
+  auto t2 = at::randn({shape.back()}, options_float);
+  std::vector<IValue> aten_inputs({t0, t1, t2});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto t0_double = t0.to(at::kDouble);
+  auto t1_double = t1.to(at::kDouble);
+  auto t2_double = t2.to(at::kDouble);
+
+  std::vector<int64_t> at_reduction_axes(
+      {reduction_axes.begin(), reduction_axes.end()});
+  auto t5 = t0_double.sum(at_reduction_axes);
+  auto t8 = t0_double *
+      (t1_double - t2_double.unsqueeze(0).unsqueeze(0).unsqueeze(0));
+  auto t9 = t8.sum(at_reduction_axes);
+
+  auto t10 = t5.unsqueeze(0).unsqueeze(0).unsqueeze(0);
+  auto t11 = t0_double + t10;
+  auto t12 = t9.unsqueeze(0).unsqueeze(0).unsqueeze(0);
+  auto t13 = t1_double + t12;
+
+  testValidate(
+      fe.kernel(), outputs, aten_inputs, {t11, t13}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
