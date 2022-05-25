@@ -650,7 +650,8 @@ class TestIndexing(TestCase):
                          torch.tensor([0, 123, 44488, 68807, 123343], dtype=torch.int))
 
     def test_set_item_to_scalar_tensor(self, device):
-        m, n = 3, 2
+        m = random.randint(1, 10)
+        n = random.randint(1, 10)
         z = torch.randn([m, n], device=device)
         a = 1.0
         w = torch.tensor(a, requires_grad=True, device=device)
