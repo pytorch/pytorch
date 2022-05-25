@@ -1819,7 +1819,7 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
 
     def __enter__(self):
         if hasattr(self, "inner"):
-            raise RuntimeError(f"{self} has already been used as a mode, ")
+            raise RuntimeError(f"{self} has already been used as a mode, please create and use a fresh version")
         old = _get_torch_function_mode()
         self.inner = old
         _set_torch_function_mode(self)

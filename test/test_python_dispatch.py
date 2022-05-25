@@ -981,6 +981,16 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             with push_torch_dispatch_mode(lambda *, inner: None):
                 pass
 
+    def test_ctor_no_inner(self):
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.zeros([])
+
+        with enable_torch_dispatch_mode(A()):
+            x = torch.randn((3, 4))
+
+        self.assertEqual(x, torch.zeros([]))
+
     def test_with_mode(self):
         class ErrorA(RuntimeError):
             pass
