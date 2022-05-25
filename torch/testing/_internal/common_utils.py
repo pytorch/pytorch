@@ -298,7 +298,7 @@ class parametrize(_TestParametrizer):
         name_fn (callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
-        self.arg_names = arg_str.split(',')
+        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',')]
         self.arg_values = arg_values
         self.name_fn = name_fn
 
