@@ -1,8 +1,9 @@
 # Owner(s): ["module: mkldnn"]
+import itertools
+import unittest
 
 import torch
 from torch import nn
-import unittest
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
@@ -46,7 +47,7 @@ class TestMkldnnFusion(JitTestCase):
         torch._C._jit_set_te_must_use_llvm_cpu(old_te_must_use_llvm_cpu)
         return graph
 
-    def test_conv(self):
+    def test_single_conv(self):
         class M(nn.Module):
             def __init__(self, in_channels, out_channels, bias, **kwargs):
                 super(M, self).__init__()
@@ -60,9 +61,22 @@ class TestMkldnnFusion(JitTestCase):
             [torch.contiguous_format, False],
             [torch.channels_last, True],
         ]:
-            for bias in [True, False]:
-                m = M(3, 10, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
-                x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
+            input_size = 224
+            batch_size = 1
+            kernel_size = 3
+            options = itertools.product([True, False], [1, 2], [1, 4])
+            for bias, dilation, groups in options:
+                iC = 3 * groups
+                oC = 10 * groups
+                m = M(iC,
+                      oC,
+                      bias,
+                      kernel_size=(kernel_size, kernel_size),
+                      stride=2,
+                      padding=1,
+                      dilation=dilation,
+                      groups=groups).to(memory_format=memory_format)
+                x = torch.randn(batch_size, iC, input_size, input_size).to(memory_format=memory_format)
                 graph = self._check_model(m, x)
                 if enabled:
                     self.assertFused(graph, ['aten::conv2d'])
