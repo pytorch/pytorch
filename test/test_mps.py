@@ -1300,6 +1300,56 @@ class TestMPS(TestCase):
         self.assertEqual(torch.tensor(-8.34, device='cpu').to('mps', torch.int),
                          torch.tensor(-8.34, device='cpu').to('mps').to(torch.int))
 
+    # Test dtype precedence (casting order) in binary operations by comparing to CPU result
+    def test_binops_dtype_precedence(self):
+        sample_vals = {
+            torch.bool: True,
+            torch.int16: 8,
+            torch.int32: -376,
+            torch.int64: 123898458,
+            #torch.float16: -234.5,  # TODO: broken
+            torch.float32: 111.99
+        }
+        # Test all combinations of dtypes, operations, dimensionality
+        for dtype1, dtype2, binop in itertools.product(
+                sample_vals.keys(), sample_vals.keys(), ['add', 'sub', 'mul']):  # TODO: 'div' broken
+            if binop == 'sub' and (dtype1 == torch.bool or dtype2 == torch.bool):
+                # Not supported, so skip
+                continue
+            self.assertEqual(
+                getattr(torch.tensor(sample_vals[dtype1], dtype=dtype1, device='mps'), binop)
+                       (torch.tensor(sample_vals[dtype2], dtype=dtype2, device='mps')),
+                getattr(torch.tensor(sample_vals[dtype1], dtype=dtype1, device='cpu'), binop)
+                       (torch.tensor(sample_vals[dtype2], dtype=dtype2, device='cpu')))
+            self.assertEqual(
+                getattr(torch.tensor([sample_vals[dtype1]], dtype=dtype1, device='mps'), binop)
+                       (torch.tensor([sample_vals[dtype2]], dtype=dtype2, device='mps')),
+                getattr(torch.tensor([sample_vals[dtype1]], dtype=dtype1, device='cpu'), binop)
+                       (torch.tensor([sample_vals[dtype2]], dtype=dtype2, device='cpu')))
+            self.assertEqual(
+                getattr(torch.tensor(sample_vals[dtype1], dtype=dtype1, device='mps'), binop)
+                       (torch.tensor([sample_vals[dtype2]], dtype=dtype2, device='mps')),
+                getattr(torch.tensor(sample_vals[dtype1], dtype=dtype1, device='cpu'), binop)
+                       (torch.tensor([sample_vals[dtype2]], dtype=dtype2, device='cpu')))
+            self.assertEqual(
+                getattr(torch.tensor([sample_vals[dtype1]], dtype=dtype1, device='mps'), binop)
+                       (torch.tensor(sample_vals[dtype2], dtype=dtype2, device='mps')),
+                getattr(torch.tensor([sample_vals[dtype1]], dtype=dtype1, device='cpu'), binop)
+                       (torch.tensor(sample_vals[dtype2], dtype=dtype2, device='cpu')))
+            '''
+            # TODO: broken because [MPSGraph constantWithScalar:::] does not support MPSDataTypeBool
+            self.assertEqual(
+                getattr(torch.full((100,), sample_vals[dtype1], dtype=dtype1, device='mps'), binop)
+                       (torch.tensor(sample_vals[dtype2], dtype=dtype2, device='mps')),
+                getattr(torch.full((100,), sample_vals[dtype1], dtype=dtype1, device='cpu'), binop)
+                       (torch.tensor(sample_vals[dtype2], dtype=dtype2, device='cpu')))
+            self.assertEqual(
+                getattr(torch.tensor(sample_vals[dtype1], dtype=dtype1, device='mps'), binop)
+                       (torch.full((100,), sample_vals[dtype2], dtype=dtype2, device='mps')),
+                getattr(torch.tensor(sample_vals[dtype1], dtype=dtype1, device='cpu'), binop)
+                       (torch.full((100,), sample_vals[dtype2], dtype=dtype2, device='cpu')))
+            '''
+
 
 class TestSmoothL1Loss(TestCase):
 

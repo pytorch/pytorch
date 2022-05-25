@@ -51,6 +51,7 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
           MPSGraph *mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
+          // TODO: Does not work for MPSDataTypeBool
           MPSGraphTensor* inputTensor = [mpsGraph constantWithScalar:value.toDouble()
                                                                shape:input_shape
                                                             dataType:getMPSScalarType(self.scalar_type())];
