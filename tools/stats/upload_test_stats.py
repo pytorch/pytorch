@@ -24,14 +24,15 @@ def parse_xml_report(
     report: Path, workflow_id: int, workflow_run_attempt: int
 ) -> List[Dict[str, Any]]:
     """Convert a test report xml file into a JSON-serializable list of test cases."""
+    print(f"Parsing test report: {report}")
     # [Job id in artifacts]
     # Retrieve the job id from the report path. In our GHA workflows, we append
     # the job id to the end of the report name, so `report` looks like:
     #     unzipped-test-reports-foo_5596745227/test/test-reports/foo/TEST-foo.xml
     # and we want to get `5596745227` out of it.
     job_id = int(report.parts[0].rpartition("_")[2])
+    print(f"Found job id: {job_id}")
 
-    print(f"Parsing test report: {report}, job id: {job_id}")
     root = ET.parse(report)
 
     test_cases = []
