@@ -401,24 +401,22 @@ Tensor sparse_compressed_to_dense(
     int64_t blocksize[2] = {values.size(-2), values.size(-1)};
     // We make use of COO dense dimensions here to use the COO to dense format
     // conversion.
-    Tensor self_coo;
     if (self.dim() == 2) {
       DimVector expanded_size(
           {self.size(-2) / blocksize[0],
            self.size(-1) / blocksize[1],
            blocksize[0],
            blocksize[1]});
-      self_coo =
+      auto self_coo =
           at::native::_sparse_coo_tensor_unsafe(indices, values, expanded_size)
               .coalesce();
-      auto dense = self_coo.to_dense();
       // Here we are untiling the result.
-      dense = dense.transpose(1, 2);
-      dense = dense.reshape({self.size(0), self.size(1)});
-      return dense;
+      return self_coo.to_dense().transpose(1, 2).reshape({self.size(0), self.size(1)});
     }
     if (self.dim() == 3) {
       Tensor dense = at::zeros(self.sizes(), self.options().layout(kStrided));
+      // Lazy way of calculating the maximum number of blocks. Also won't
+      // work with 0-sized batches, which we currently disallow.
       dense =
           dense.reshape({self.size(0), -1, values.size(-2), values.size(-1)});
       auto row_indices = indices.select(0, 0);
@@ -603,7 +601,7 @@ Tensor _batch_tile_tensor(const Tensor& self, IntArrayRef blocksize) {
     return _tile_tensor(self, blocksize);
   }
   // Same as _tile_tensor, just per matrix entry of self, if self is 3D.
-  TORCH_CHECK(self.dim() == 3, "Currently _batch_tile_tensor only supports 3D inputs.");
+  TORCH_CHECK(self.dim() == 3, "Currently _batch_tile_tensor only supports 2D or 3D inputs.");
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[0] > 0);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[1] > 0);
   auto block_size_0 = self.size(-2) / blocksize[0];
@@ -666,10 +664,10 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   // Find tiles that have at least 1 non-zero value in them.
   not_zero_mask = not_zero_mask.any(-1).any(-1);
   if (self.dim() == 3) {
+    TORCH_CHECK(self.size(0) > 0, "to_sparse_bsr: Expected batch dimension 0 to be non-zero.");
     // If the input is 3D we assert that the same sparsity pattern
-    // is used across matrices.
-    // TODO: This costly check can be removed by taking the union of
-    // sparsity patterns and materializing zeros.
+    // is used across matrices. That means the same number of materialized
+    // values and *at the same location*.
     auto not_zero_mask_0 = not_zero_mask.select(0, 0);
     TORCH_CHECK(not_zero_mask.any(0).equal(not_zero_mask_0), "Expect the same sparsity pattern across matrices for 3D input.");
     not_zero_mask = not_zero_mask_0;
