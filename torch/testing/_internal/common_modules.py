@@ -678,6 +678,29 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
                 desc='no_batch_dim'
             ))
 
+    # test fast path. We abuse the fact that we can supply an arbitrary reference_fn to
+    # force the fast path to run -- we cannot call .eval() through the ordinary
+    # ModuleInfo interface, so the "reference" is actually the code under test.
+    @torch.no_grad()
+    def fast_path_reference_fn(module, parameters, *args, **kwargs):
+        assert module.training
+        module = module.eval()
+        output = module(*args, **kwargs)
+        module = module.train(True)
+        return output
+
+    for norm_first in (True, False):
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(4, 2, 8, dropout=0.0, batch_first=True, norm_first=norm_first),
+                forward_input=FunctionInput(
+                    make_input((2, 3, 4)),
+                ),
+                reference_fn=fast_path_reference_fn,
+                desc="fast_path_norm_first" if norm_first else "fast_path"
+            )
+        )
+
     return samples
 
 
