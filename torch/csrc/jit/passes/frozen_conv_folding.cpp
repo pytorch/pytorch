@@ -88,7 +88,7 @@ bool FoldFrozenConvBatchnorm(Block* b) {
         at::ScalarType bias_dtype = bn_rm.scalar_type();
         at::ScalarType weight_dtype = conv_w.scalar_type();
         at::DeviceType weight_device = conv_w.device().type();
-        if ( (weight_device == at::kCUDA || weight_device == at::kCPU) &&
+        if ((weight_device == at::kCUDA || weight_device == at::kCPU) &&
             (weight_dtype == at::kHalf || weight_dtype == at::kBFloat16) &&
             bias_dtype == at::kFloat) {
           bias_dtype = weight_dtype;
