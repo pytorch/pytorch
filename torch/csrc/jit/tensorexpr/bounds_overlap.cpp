@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
+#include <torch/csrc/jit/tensorexpr/stmt.h>
 
 namespace torch {
 namespace jit {
@@ -13,6 +15,71 @@ bool mustBePositive(ExprPtr e) {
     return e_val > 0;
   }
   return false;
+}
+
+// Returns true if the given expression is guaranteed to be negative.
+bool mustBeNegative(ExprPtr e) {
+  if (e->isConstant()) {
+    int e_val = immediateAs<int>(e);
+    return e_val < 0;
+  }
+  return false;
+}
+
+// Returns true if the given expression is guaranteed to be zero.
+bool mustBeZero(ExprPtr e) {
+  if (e->isConstant()) {
+    int e_val = immediateAs<int>(e);
+    return e_val == 0;
+  }
+  return false;
+}
+
+void Bound::print() const {
+  std::cout << "(" << *start << ", " << *end << ")";
+}
+
+bool Bound::equals(const Bound& other) const {
+  return exprEquals(start, other.start) && exprEquals(end, other.end);
+}
+
+bool Bound::operator==(const Bound& other) const {
+  if (equals(other)) {
+    auto ret_expr = IRSimplifier::simplify(alloc<Sub>(start, end));
+    return mustBeZero(ret_expr);
+  }
+
+  return false;
+}
+
+bool Bound::operator!=(const Bound& other) const {
+  return (*this < other) || (*this > other);
+}
+
+bool Bound::operator>=(const Bound& other) const {
+  if (*this == other) {
+    return true;
+  }
+  auto ret_expr = IRSimplifier::simplify(alloc<Sub>(start, other.end));
+  return mustBePositive(ret_expr) || mustBeZero(ret_expr);
+}
+
+bool Bound::operator>(const Bound& other) const {
+  auto ret_expr = IRSimplifier::simplify(alloc<Sub>(start, other.end));
+  return mustBePositive(ret_expr);
+}
+
+bool Bound::operator<=(const Bound& other) const {
+  if (*this == other) {
+    return true;
+  }
+  auto ret_expr = IRSimplifier::simplify(alloc<Sub>(end, other.start));
+  return mustBeNegative(ret_expr) || mustBeZero(ret_expr);
+}
+
+bool Bound::operator<(const Bound& other) const {
+  auto ret_expr = IRSimplifier::simplify(alloc<Sub>(end, other.start));
+  return mustBeNegative(ret_expr);
 }
 
 OverlapKind boundOverlap(Bound a, Bound b) {
@@ -69,6 +136,27 @@ OverlapKind boundOverlap(Bound a, Bound b) {
   // We can't be sure there's no overlap so the conservative answer is
   // partial.
   return PartialOverlap;
+}
+
+CmpEvalResult TORCH_API compareBound(
+    const Bound& a,
+    const Bound& b,
+    const CompareSelectOperation& cmp_op) {
+  switch (cmp_op) {
+    case CompareSelectOperation::kGT:
+      return (a > b) ? TRUE : (a <= b ? FALSE : NOT_DETERMINED);
+    case CompareSelectOperation::kGE:
+      return (a >= b) ? TRUE : (a < b ? FALSE : NOT_DETERMINED);
+    case CompareSelectOperation::kLT:
+      return (a < b) ? TRUE : (a >= b ? FALSE : NOT_DETERMINED);
+    case CompareSelectOperation::kLE:
+      return (a <= b) ? TRUE : (a > b ? FALSE : NOT_DETERMINED);
+    case CompareSelectOperation::kNE:
+      return (a != b) ? TRUE : (a == b ? FALSE : NOT_DETERMINED);
+    default:
+      TORCH_INTERNAL_ASSERT(cmp_op == CompareSelectOperation::kEQ)
+      return (a == b) ? TRUE : (a != b ? FALSE : NOT_DETERMINED);
+  }
 }
 
 bool indexBoundsEquals(const IndexBounds& A, const IndexBounds& B) {
