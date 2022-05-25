@@ -2177,8 +2177,8 @@ static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
   }
 }
 
-template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, std::int64_t n) {
+template<typename T>
+static inline T chebyshev_polynomial_t_forward(T x, std::int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -2214,6 +2214,11 @@ static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, std::int64_t
     }
 
     return r;
+}
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, T n) {
+    return chebyshev_polynomial_t_forward(x, static_cast<std::int64_t>(n));
 }
 
 C10_CLANG_DIAGNOSTIC_POP()
