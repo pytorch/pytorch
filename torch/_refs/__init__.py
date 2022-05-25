@@ -604,7 +604,7 @@ sign = _make_elementwise_unary_reference(
 def _signbit(a: TensorLikeType) -> TensorLikeType:
     if a.dtype.is_complex:
         raise RuntimeError("signbit is not implemented for complex tensors.")
-    elif a.dtype.is_signed == False:
+    elif a.dtype.is_signed is False:
         return full_like(a, False)
     else:
         return lt(a, 0)
