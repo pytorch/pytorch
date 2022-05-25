@@ -86,7 +86,7 @@ def is_acceptable(tensor):
 
 def set_flags(_enabled=None, _benchmark=None, _benchmark_limit=None, _deterministic=None, _allow_tf32=None):
     orig_flags = (torch._C._get_cudnn_enabled(),
-                  torch._C._get_cudnn_benchmark(),
+                  torch._C._cuda_get_cudnn_benchmark(),
                   torch._C._get_cudnn_benchmark_limit(),
                   torch._C._get_cudnn_deterministic(),
                   torch._C._get_cudnn_allow_tf32())
@@ -95,7 +95,7 @@ def set_flags(_enabled=None, _benchmark=None, _benchmark_limit=None, _determinis
     if _benchmark is not None:
         torch._C._set_cudnn_benchmark(_benchmark)
     if _benchmark_limit is not None:
-        torch._C._set_cudnn_benchmark_limit(_benchmark_limit)
+        torch._C._cuda_set_cudnn_benchmark_limit(_benchmark_limit)
     if _deterministic is not None:
         torch._C._set_cudnn_deterministic(_deterministic)
     if _allow_tf32 is not None:
@@ -126,7 +126,7 @@ class CudnnModule(PropModule):
     enabled = ContextProp(torch._C._get_cudnn_enabled, torch._C._set_cudnn_enabled)
     deterministic = ContextProp(torch._C._get_cudnn_deterministic, torch._C._set_cudnn_deterministic)
     benchmark = ContextProp(torch._C._get_cudnn_benchmark, torch._C._set_cudnn_benchmark)
-    benchmark_limit = ContextProp(torch._C._get_cudnn_benchmark_limit, torch._C._set_cudnn_benchmark_limit)
+    benchmark_limit = ContextProp(torch._C._cuda_get_cudnn_benchmark_limit, torch._C._cuda_set_cudnn_benchmark_limit)
     allow_tf32 = ContextProp(torch._C._get_cudnn_allow_tf32, torch._C._set_cudnn_allow_tf32)
 
 # This is the sys.modules replacement trick, see

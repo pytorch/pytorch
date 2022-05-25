@@ -344,7 +344,7 @@ void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::Opera
       remove_invalid = true;
     }
   }
-  if (remove_invalid) {
+  if (remove_invalid || max_plans) {
     cudnn_frontend::executionPlans_t new_valid_plans;
     unsigned int plan_count = 0;
     for (auto &plan : valid_plans) {
