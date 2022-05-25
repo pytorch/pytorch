@@ -1604,7 +1604,7 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()) -> Tenso
             # clone is used here to avoid test failures that ATen returns a tensor that is not a view
             return clone(view(roll(flatten(a), shifts, 0), a.shape))
         if len_shifts != len_dims:
-            raise ValueError(f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}")
+            raise RuntimeError(f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}")
         assert len_dims > 1
         tail_shifts = shifts[1:]
         tail_dims = dims[1:]

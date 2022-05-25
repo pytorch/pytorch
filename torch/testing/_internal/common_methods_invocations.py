@@ -6723,6 +6723,12 @@ def error_inputs_roll(op_info, device, **kwargs):
     )
     yield ErrorInput(s1, error_regex=err_msg1)
 
+    err_msg2 = ("shifts and dimensions must align")
+    s2 = SampleInput(
+        make_tensor((S, S), dtype=torch.float32, device=device), args=((2, 1), 0)
+    )
+    yield ErrorInput(s2, error_regex=err_msg2)
+
 
 def sample_inputs_rot90(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
