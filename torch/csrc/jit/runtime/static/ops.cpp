@@ -1049,12 +1049,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
   };
 });
 
-// TODO(T98923825): Uncomment this once the bug in this gets fixed.
-/*
 REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
-          "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) ->
-Tensor"))) { LogAndDumpSchema(n); return nullptr;
+          "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) ->Tensor"))) {
+    LogAndDumpSchema(n); return nullptr;
   }
   return [](ProcessedNode* p_node) {
     const auto& src = p_node->Input(0).toTensor();
@@ -1062,7 +1060,20 @@ Tensor"))) { LogAndDumpSchema(n); return nullptr;
         p_node->Input(1).toOptional<c10::MemoryFormat>();
     auto memory_format =
         optional_memory_format.value_or(c10::MemoryFormat::Preserve);
-
+    /*
+      Case: clone operator succeeds an expand/expand_as operator
+      disable out variant for this case as expand creates a new view
+      (without allocating new memory) with stride 0 for expanded dim.
+      Refer to T118519310 for more info on the fix (calls native clone)
+    */
+    if(at::has_internal_overlap(src.unsafeGetTensorImpl()) == at::MemOverlap::YES){
+      p_node->Output(0) = at::native::clone(src, memory_format);
+      return;
+    }
+    /*
+      Case for Non-MemoryOverlap clone
+      Calls the out variant for aten::clone, reusing the tensor
+    */
     if (p_node->Output(0).isNone()) {
       if (memory_format == c10::MemoryFormat::Preserve &&
           src.is_non_overlapping_and_dense()) {
@@ -1080,7 +1091,6 @@ Tensor"))) { LogAndDumpSchema(n); return nullptr;
     at::native::copy_(out_t, src, false);
   };
 });
-*/
 
 REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_byte_rowwise_offsets,
