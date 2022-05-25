@@ -18871,6 +18871,13 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
+    BinaryUfuncInfo(
+        'special.hermite_polynomial_he',
+        dtypes=all_types_and(torch.bool),
+        promotes_int_to_float=True,
+        supports_one_python_scalar=True,
+        supports_autograd=False,
+    ),
 ]
 
 # NOTE [Python References]
