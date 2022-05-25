@@ -1611,6 +1611,8 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()) -> Tenso
         first_dim_rolled = roll(a, shifts[0], dims[0])
         return roll(first_dim_rolled, tail_shifts, tail_dims)
 
+    # This path is taken when only one dimension is rolled
+    # For example to get `first_dim_rolled` above
     dim = dims[0]
     size = a.shape[dim]
     start = (size - shifts[0]) % size
