@@ -2178,13 +2178,17 @@ static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
 }
 
 template<typename T>
-static inline T laguerre_polynomial_l_forward(T x, std::int64_t n) {
+static inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, std::int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
 
-    if (std::abs(x) == T(0.0)) {
-        return T(1.0);
+    if (std::abs(x) == T(1.0)) {
+        if (x > T(0.0) || n % 2 == 0) {
+            return T(1.0);
+        }
+
+        return T(-1.0);
     }
 
     if (n == 0) {
@@ -2192,15 +2196,15 @@ static inline T laguerre_polynomial_l_forward(T x, std::int64_t n) {
     }
 
     if (n == 1) {
-        return T(1.0) - x;
+        return x;
     }
 
     T p = T(1.0);
-    T q = T(1.0) - x;
+    T q = x;
     T r;
 
-    for (std::int64_t k = 1; k < n; k++) {
-        r = (((k + k) + (T(1.0) - x)) * q - k * p) / (k + 1);
+    for (int k = 1; k < n; k++) {
+        r = ((k + k + 1) * x * q - k * p) / (k + 1);
         p = q;
         q = r;
     }
@@ -2209,8 +2213,8 @@ static inline T laguerre_polynomial_l_forward(T x, std::int64_t n) {
 }
 
 template<typename T>
-static inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, T n) {
-    return laguerre_polynomial_l_forward(x, static_cast<std::int64_t>(n));
+static inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, T n) {
+    return legendre_polynomial_p_forward(x, static_cast<std::int64_t>(n));
 }
 
 C10_CLANG_DIAGNOSTIC_POP()
