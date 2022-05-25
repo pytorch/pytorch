@@ -202,7 +202,6 @@ def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
 
 # Should not be used, only here to be able to load Tensors serialized with older versions of pytorch
 _rebuild_xla_tensor = _rebuild_device_tensor_from_numpy
-_rebuild_mlc_tensor = _rebuild_device_tensor_from_numpy
 
 
 def _rebuild_meta_tensor_no_storage(dtype, size, stride, requires_grad):

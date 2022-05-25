@@ -721,7 +721,7 @@ void SegmentedFusion::finalize() {
     //            \ -> half2float -> other uses in group
     // The conversion back and forth from half precision can hurt numerics.
     // Collect expressions that use the edge value of concern within the from
-    // group to avoid replacing with the casted tensor.
+    // group to avoid replacing with the cast tensor.
     std::unordered_set<Expr*> uses_in_from_group;
 
     // All expressions in the from group of the edge
@@ -1930,6 +1930,7 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   //  largely taken from batchnorm cpp benchmark
   auto& in_root = in_val->getRootDomain();
   auto& out_root = out_avg->getRootDomain();
+  TORCH_INTERNAL_ASSERT(in_root.size() <= out_root.size());
   std::vector<int> red_axes;
 
   // Create scalar version of the feature element

@@ -41,7 +41,7 @@ std::vector<c10::Device> getDevicesForTensors(
     const std::string& remoteName) {
   // If the deviceMap is overridden, use that instead.
   const auto errStr = c10::str(
-      "TensorPipe RPC backend only supports CPU tensors by default, please "
+      "TensorPipe RPC backend only supports CPU and Meta tensors by default, please "
       "move your tensors to CPU before sending them over RPC, or call "
       "`set_device_map` on `TensorPipeRpcBackendOptions` to explicitly "
       "configure device mapping. ",
@@ -51,7 +51,9 @@ std::vector<c10::Device> getDevicesForTensors(
   devices.reserve(tensors.size());
   bool hasMappedDevice = false;
   for (const auto& t : tensors) {
-    if (t.device().is_cpu()) {
+    if (t.device().is_meta()) {
+      devices.emplace_back(c10::kMeta);
+    } else if (t.device().is_cpu()) {
       const auto deviceIter = deviceMap.find(c10::kCPU);
       if (deviceIter == deviceMap.end()) {
         devices.emplace_back(c10::kCPU);
@@ -113,7 +115,7 @@ std::vector<c10::Device> getDevicesOfTensors(
   size_t deviceCount = 0;
   std::vector<bool> indexBitset;
   for (const torch::Tensor& tensor : tensors) {
-    if (!tensor.is_cpu()) {
+    if (!tensor.is_cpu() && !tensor.is_meta()) {
       c10::Device device = tensor.device();
       if (!impl.has_value()) {
         impl.emplace(device.type());
@@ -646,7 +648,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
 
     for (const auto& tensor : responseMessage->tensors()) {
       const auto device = tensor.device();
-      if (!device.is_cpu()) {
+      if (!device.is_cpu() && !device.is_meta()) {
         GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
         if (std::find(devices_.begin(), devices_.end(), device) ==
             devices_.end()) {
@@ -1078,7 +1080,7 @@ void TensorPipeAgent::leaveGroup() {
 }
 
 // TODO: Remove join()
-void TensorPipeAgent::join(bool shutdown) {
+void TensorPipeAgent::join(bool shutdown, float /* unused */) {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is joining";
   if (!isStaticGroup_) {
     leaveGroup();
@@ -1174,7 +1176,12 @@ const WorkerInfo& TensorPipeAgent::getWorkerInfo(
     it = workerNameToInfo_.find(workerName);
   }
   TORCH_CHECK(
-      it != workerNameToInfo_.end(), "Unknown destination worker ", workerName);
+      it != workerNameToInfo_.end(),
+      fmt::format(
+          "name:{},rank:{} could not find destination name {}",
+          workerInfo_.name_,
+          workerInfo_.id_,
+          workerName));
   return it->second;
 }
 
@@ -1185,7 +1192,12 @@ const WorkerInfo& TensorPipeAgent::getWorkerInfo(worker_id_t workerId) const {
     it = workerIdToInfo_.find(workerId);
   }
   TORCH_CHECK(
-      it != workerIdToInfo_.end(), "Unknown destination worker ", workerId);
+      it != workerIdToInfo_.end(),
+      fmt::format(
+          "name:{},rank:{} could not find destination id {}",
+          workerInfo_.name_,
+          workerInfo_.id_,
+          workerId));
   return it->second;
 }
 
@@ -1205,7 +1217,12 @@ const std::string& TensorPipeAgent::findWorkerURL(
     it = workerNameToURL_.find(worker.name_);
   }
   TORCH_CHECK(
-      it != workerNameToURL_.end(), "Unknown worker name: ", worker.name_);
+      it != workerNameToURL_.end(),
+      fmt::format(
+          "name:{},rank:{} could not find destination url for name {}",
+          workerInfo_.name_,
+          workerInfo_.id_,
+          worker.name_));
   return it->second;
 }
 
@@ -1396,7 +1413,7 @@ std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
   }
 
   const auto errStr = c10::str(
-      "TensorPipe RPC backend only supports CPU tensors by default, please "
+      "TensorPipe RPC backend only supports CPU and Meta tensors by default, please "
       "move your tensors to CPU before sending them over RPC, or call "
       "`set_device_map` on `TensorPipeRpcBackendOptions` to explicitly "
       "configure device mapping. ",
@@ -1408,7 +1425,7 @@ std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
   if (iter == deviceMaps.end()) {
     for (const auto& t : message.tensors()) {
       TORCH_CHECK(
-          t.device().is_cpu(),
+          t.device().is_cpu() || t.device().is_meta(),
           errStr,
           ", but found tensor on device: ",
           t.device());

@@ -2,8 +2,6 @@
 
 import sys
 import os
-import contextlib
-import io
 import re
 import shutil
 import random
@@ -20,7 +18,7 @@ from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import has_breakpad, load_tests, IS_SANDCASTLE, IS_WINDOWS, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import load_tests, IS_SANDCASTLE, IS_WINDOWS
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -260,6 +258,19 @@ class TestCheckpoint(TestCase):
             grad_no_checkpointing = inp.grad
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
+
+    @unittest.skipIf(not HAS_CUDA, 'No CUDA')
+    def test_checkpoint_not_preserve_rng_state_and_without_reentrant(self):
+        inp = torch.randn(2, device='cuda').requires_grad_()
+        layer = torch.nn.Dropout()
+
+        def run_fn(input):
+            return layer(input)
+
+        out = checkpoint(run_fn, inp, use_reentrant=False, preserve_rng_state=False)
+        out.sum().backward()
+        # This should run without error
+
 
     def test_checkpoint_non_tensor(self):
 
@@ -608,32 +619,6 @@ class TestAssert(TestCase):
         ms(x)
         with self.assertRaisesRegex(torch.jit.Error, "foo"):
             ms(torch.tensor([False], dtype=torch.bool))
-
-
-class TestCrashHandler(TestCase):
-    @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
-    @unittest.skipIf(not has_breakpad(), "Built without breakpad")
-    def test_python_exception_writing(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            torch.utils._crash_handler.enable_minidumps(temp_dir)
-            torch.utils._crash_handler.enable_minidumps_on_exceptions()
-
-            files = os.listdir(temp_dir)
-            self.assertEqual(len(files), 0)
-
-            f = io.StringIO()
-            with contextlib.redirect_stderr(f):
-                try:
-                    @torch.jit.script
-                    def x(i: int):
-                        return i + "2"  # type: ignore[operator]
-                except RuntimeError as e:
-                    pass
-
-            files = os.listdir(temp_dir)
-            self.assertEqual(len(files), 1)
-            self.assertTrue(files[0].endswith(".dmp"))
-            torch.utils._crash_handler.disable_minidumps()
 
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")

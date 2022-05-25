@@ -97,6 +97,7 @@ from typing import Callable, List, Optional, Sequence, Tuple, Union, Dict
 DONT_REQUIRE_DERIVATIVE = {
     # These only depend on the input Tensor's shape and device, not the data
     "ones_like",
+    "zeros_like",
     "rand_like",
     "randn_like",
     # These are only implemented on integral types
@@ -170,7 +171,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "triu",
     "chunk",
     "zero_",
-    "zeros_like",
     "eq_",
     "ne_",
     "add",
@@ -329,6 +329,9 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "im2col",
     "im2col_backward",
     "cholesky_inverse",
+    "to_sparse",
+    "sparse_sampled_addmm",
+    "linalg_lu",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -672,6 +675,7 @@ for (const auto& _t: ${arg}) {
 def gen_variable_type(
     out: str,
     native_yaml_path: str,
+    tags_yaml_path: str,
     fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
 ) -> None:
@@ -1299,7 +1303,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     and is_tensor_list_type(differentiable_inputs[0].type)
                 ):
                     raise RuntimeError(
-                        f'No differentiable input to "{name}" is a differentiable Tensor (as the provided'
+                        f'No differentiable input to "{name}" is a differentiable Tensor (as the provided '
                         "forward AD formula does not use any input tangent) even though a forward gradient "
                         "formula has been defined for it. This case should only happen for function that "
                         "take a single TensorList as input. All other cases are not supported right now."

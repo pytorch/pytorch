@@ -49,6 +49,7 @@ int nnc_lowerings_lazy_registration() {
        "aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         auto sub_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
@@ -58,11 +59,20 @@ int nnc_lowerings_lazy_registration() {
         TORCH_INTERNAL_ASSERT(
             inputs.size() == 2 || inputs.size() == 3,
             buildErrorMessage("Invalid number of input operands"));
-        return (inputs.size() > 2)
-            ? computeTwoOperandWithAlpha(
-                  "aten_sub", inputs, outputShape, outputType, sub_lambda)
-            : computeTwoOperand(
-                  "aten_sub", inputs, outputShape, outputType, sub_lambda);
+        return (inputs.size() > 2) ? computeTwoOperandWithAlpha(
+                                         "aten_sub",
+                                         inputs,
+                                         outputShape,
+                                         outputStrides,
+                                         outputType,
+                                         sub_lambda)
+                                   : computeTwoOperand(
+                                         "aten_sub",
+                                         inputs,
+                                         outputShape,
+                                         outputStrides,
+                                         outputType,
+                                         sub_lambda);
       });
 
   RegisterNNCLoweringsFunction aten_mul(
@@ -70,12 +80,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::mul.Tensor(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_mul",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return boolToInteger(lhs) * boolToInteger(rhs);
@@ -90,12 +102,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::" #op_name ".float(float a, float b) -> (float)"},          \
       [](const std::vector<ArgValue>& inputs,                             \
          const std::vector<ExprHandle>& outputShape,                      \
+         const std::vector<ExprHandle>& outputStrides,                    \
          const c10::optional<ScalarType>& outputType,                     \
          at::Device device) {                                             \
         return computeScalar(                                             \
             "aten_#op_name",                                              \
             inputs,                                                       \
             outputShape,                                                  \
+            outputStrides,                                                \
             outputType,                                                   \
             [](const ExprHandle& a, const ExprHandle& b) { return op; }); \
       });
@@ -111,12 +125,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::div.float(float a, float b) -> (float)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeScalar(
             "aten_div",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a, const ExprHandle& b) {
               return promoteIntegerToDefaultType(a) /
@@ -133,12 +149,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::" #op_name ".float(float a, float b) -> (bool)"},           \
       [](const std::vector<ArgValue>& inputs,                             \
          const std::vector<ExprHandle>& outputShape,                      \
+         const std::vector<ExprHandle>& outputStrides,                    \
          const c10::optional<ScalarType>& outputType,                     \
          at::Device device) {                                             \
         return computeScalar(                                             \
             "aten_#op_name",                                              \
             inputs,                                                       \
             outputShape,                                                  \
+            outputStrides,                                                \
             outputType,                                                   \
             [](const ExprHandle& a, const ExprHandle& b) { return op; }); \
       });
@@ -155,12 +173,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::" #op_name ".int(int a, int b) -> (int)"},                  \
       [](const std::vector<ArgValue>& inputs,                             \
          const std::vector<ExprHandle>& outputShape,                      \
+         const std::vector<ExprHandle>& outputStrides,                    \
          const c10::optional<ScalarType>& outputType,                     \
          at::Device device) {                                             \
         return computeScalar(                                             \
             "aten_#op_name",                                              \
             inputs,                                                       \
             outputShape,                                                  \
+            outputStrides,                                                \
             outputType,                                                   \
             [](const ExprHandle& a, const ExprHandle& b) { return op; }); \
       });
@@ -178,12 +198,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::" #op_name ".bool(bool a, bool b) -> (bool)"},              \
       [](const std::vector<ArgValue>& inputs,                             \
          const std::vector<ExprHandle>& outputShape,                      \
+         const std::vector<ExprHandle>& outputStrides,                    \
          const c10::optional<ScalarType>& outputType,                     \
          at::Device device) {                                             \
         return computeScalar(                                             \
             "aten_#op_name",                                              \
             inputs,                                                       \
             outputShape,                                                  \
+            outputStrides,                                                \
             outputType,                                                   \
             [](const ExprHandle& a, const ExprHandle& b) { return op; }); \
       });
@@ -197,12 +219,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::div.Tensor(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_div",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return promoteIntegerToDefaultType(lhs) /
@@ -215,12 +239,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::__and__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_and",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return boolToInteger(lhs) & boolToInteger(rhs);
@@ -232,12 +258,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::__or__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_or",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return boolToInteger(lhs) | boolToInteger(rhs);
@@ -249,12 +277,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::__xor__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_xor",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return boolToInteger(lhs) ^ boolToInteger(rhs);
@@ -266,12 +296,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::__lshift__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_lshift",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return lhs << rhs;
@@ -283,12 +315,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::__rshift__.Tensor(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_rshift",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return lhs >> rhs;
@@ -300,12 +334,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::eq.Tensor(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_eq",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return cast<bool>(lhs == rhs);
@@ -317,12 +353,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::ne.Tensor(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_ne",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return cast<bool>(lhs != rhs);
@@ -334,12 +372,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::ge.Tensor(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_ge",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return cast<bool>(lhs >= rhs);
@@ -351,12 +391,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::gt.Tensor(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_gt",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return cast<bool>(lhs > rhs);
@@ -368,12 +410,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::le.Tensor(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_le",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return cast<bool>(lhs <= rhs);
@@ -385,12 +429,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::lt.Tensor(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_lt",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return cast<bool>(lhs < rhs);
@@ -401,12 +447,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::min.other(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_min",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return Min::make(boolToInteger(lhs), boolToInteger(rhs), false);
@@ -417,12 +465,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::max.other(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_max",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return Max::make(boolToInteger(lhs), boolToInteger(rhs), false);
@@ -434,12 +484,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeThreeOperand(
             "aten_masked_fill",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& input,
                const ExprHandle& mask,
@@ -455,6 +507,7 @@ int nnc_lowerings_lazy_registration() {
        "aten::clamp.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         bool noMin = false;
@@ -471,6 +524,7 @@ int nnc_lowerings_lazy_registration() {
             "aten_clamp",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [noMin, noMax](
                 const ExprHandle& in,
@@ -501,12 +555,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeFourOperand(
             "aten_addcmul",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a0,
                const ExprHandle& a1,
@@ -518,18 +574,20 @@ int nnc_lowerings_lazy_registration() {
       {"aten::sigmoid(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         // check if the activation is quantized
         const BufHandle& x = c10::get<BufHandle>(inputs[0]);
         if (x.node()->qscale()) {
           return computeQuantizedSigmoidExternalCall(
-              inputs, outputShape, outputType, device);
+              inputs, outputShape, outputStrides, outputType, device);
         }
         return computeOneOperand(
             "aten_sigmoid",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return sigmoid(promoteIntegerToDefaultType(a));
@@ -540,12 +598,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::reciprocal(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_reciprocal",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) { return ExprHandle(1.0f) / a; });
       });
@@ -554,12 +614,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::neg(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_neg",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) { return ExprHandle(-0) - a; });
       });
@@ -568,12 +630,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::isnan(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_isnan",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               if (!a.dtype().is_floating_point()) {
@@ -587,16 +651,19 @@ int nnc_lowerings_lazy_registration() {
       {"aten::relu(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         auto A = c10::get<BufHandle>(inputs[0]);
         if (A.node()->qscale()) {
-          return computeQuantizedRelu(inputs, outputShape, outputType, device);
+          return computeQuantizedRelu(
+              inputs, outputShape, outputStrides, outputType, device);
         }
         return computeOneOperand(
             "aten_relu",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               auto zero = Cast::make(a.dtype(), 0);
@@ -608,12 +675,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_leaky_relu",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a, const ExprHandle& negative_slope) {
               auto neg_slope = Cast::make(a.dtype(), negative_slope);
@@ -628,12 +697,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::relu6(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_relu6",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               auto zero = Cast::make(a.dtype(), 0);
@@ -646,6 +717,7 @@ int nnc_lowerings_lazy_registration() {
       {"aten::gelu(Tensor self, *, str approximate='none') -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         const auto& kApproximate = c10::get<std::string>(inputs[1]);
@@ -657,6 +729,7 @@ int nnc_lowerings_lazy_registration() {
               "aten_tanh_gelu",
               operands,
               outputShape,
+              outputStrides,
               outputType,
               [](const ExprHandle& a) {
                 auto one = Cast::make(a.dtype(), 1.);
@@ -673,6 +746,7 @@ int nnc_lowerings_lazy_registration() {
               "aten_gelu",
               operands,
               outputShape,
+              outputStrides,
               outputType,
               [](const ExprHandle& a) {
                 auto m_sqrt1_2 = Cast::make(a.dtype(), M_SQRT1_2);
@@ -691,12 +765,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::log(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_log",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return log(promoteIntegerToDefaultType(a));
@@ -707,12 +783,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::log10(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_log10",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return log10(promoteIntegerToDefaultType(a));
@@ -723,12 +801,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::log1p(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_log1p",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return log1p(promoteIntegerToDefaultType(a));
@@ -739,12 +819,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::log2(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_log2",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return log2(promoteIntegerToDefaultType(a));
@@ -755,12 +837,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::exp(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_exp",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return exp(promoteIntegerToDefaultType(a));
@@ -771,12 +855,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::expm1(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_expm1",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return expm1(promoteIntegerToDefaultType(a));
@@ -787,12 +873,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::erf(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_erf",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return erf(promoteIntegerToDefaultType(a));
@@ -803,12 +891,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::erfc(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_erfc",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return erfc(promoteIntegerToDefaultType(a));
@@ -819,12 +909,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::cos(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_cos",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return cos(promoteIntegerToDefaultType(a));
@@ -835,12 +927,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::sin(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_sin",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return sin(promoteIntegerToDefaultType(a));
@@ -851,12 +945,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::tan(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_tan",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return tan(promoteIntegerToDefaultType(a));
@@ -867,6 +963,7 @@ int nnc_lowerings_lazy_registration() {
       {"aten::type_as(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         const BufHandle& rhs = c10::get<BufHandle>(inputs[1]);
@@ -875,6 +972,7 @@ int nnc_lowerings_lazy_registration() {
             "aten_type_as",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [dtype](const ExprHandle& lhs) { return Cast::make(dtype, lhs); });
       });
@@ -885,12 +983,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_pow",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               if (!rhs.node()->isConstant()) {
@@ -928,12 +1028,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::fmod.Tensor(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_fmod",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return fmod(promoteHalfToFloat(lhs), promoteHalfToFloat(rhs));
@@ -945,12 +1047,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeThreeOperand(
             "aten_lerp",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a,
                const ExprHandle& end,
@@ -963,6 +1067,7 @@ int nnc_lowerings_lazy_registration() {
        "aten::remainder.Tensor(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         auto imodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
@@ -1010,12 +1115,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::acos(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_acos",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return acos(promoteIntegerToDefaultType(a));
@@ -1026,12 +1133,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::asin(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_asin",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return asin(promoteIntegerToDefaultType(a));
@@ -1042,12 +1151,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::cosh(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_cosh",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return cosh(promoteIntegerToDefaultType(a));
@@ -1058,12 +1169,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::sinh(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_sinh",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return sinh(promoteIntegerToDefaultType(a));
@@ -1074,12 +1187,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::atan(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_atan",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return atan(promoteIntegerToDefaultType(a));
@@ -1090,12 +1205,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::atan2(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_atan2",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& lhs, const ExprHandle& rhs) {
               return atan2(
@@ -1108,12 +1225,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::tanh(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_tanh",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return tanh(promoteIntegerToDefaultType(a));
@@ -1124,12 +1243,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeThreeOperand(
             "aten_hardtanh",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a,
                const ExprHandle& min_val,
@@ -1143,12 +1264,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeThreeOperand(
             "aten_softplus",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a,
                const ExprHandle& beta,
@@ -1169,12 +1292,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::hardsigmoid(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_hardsigmoid",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               auto zero = Cast::make(a.dtype(), 0.0);
@@ -1188,12 +1313,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::hardswish(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_hardswish",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               //  x * torch.clamp(x + 3.0, 0.0, 6.0) / 6.0
@@ -1209,12 +1336,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::hardshrink(Tensor self, Scalar lambd=0.5) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTwoOperand(
             "aten_hardshrink",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a, const ExprHandle& lambd) {
               auto pos_clambd = Cast::make(a.dtype(), lambd);
@@ -1230,12 +1359,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::sqrt(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_sqrt",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return tensorexpr::sqrt(promoteIntegerToDefaultType(a));
@@ -1246,12 +1377,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::rsqrt(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_rsqrt",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return rsqrt(promoteIntegerToDefaultType(a));
@@ -1262,12 +1395,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::abs(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_abs",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return tensorexpr::abs(promoteHalfToFloat(a));
@@ -1279,6 +1414,7 @@ int nnc_lowerings_lazy_registration() {
       {"aten::sign(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) { return computeSign(inputs, outputShape); });
 
@@ -1286,12 +1422,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::ceil(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_ceil",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) { return ceil(a); });
       });
@@ -1300,12 +1438,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::floor(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_floor",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) { return floor(a); });
       });
@@ -1314,12 +1454,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::round(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_round",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) { return round(a); });
       });
@@ -1328,12 +1470,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::trunc(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_trunc",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) { return trunc(a); });
       });
@@ -1342,12 +1486,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::_cast_Float(Tensor self, bool non_blocking=False) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_cast_float",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) { return cast<float>(a); });
       });
@@ -1362,6 +1508,7 @@ int nnc_lowerings_lazy_registration() {
        "aten::_autocast_to_full_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled) -> Tensor(a)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         // see handling of aten::to in tensorexpr_fuser.cpp for why we only
@@ -1370,6 +1517,7 @@ int nnc_lowerings_lazy_registration() {
             "aten_to",
             {inputs[0]},
             outputShape,
+            outputStrides,
             outputType,
             [outputType](const ExprHandle& a) {
               TORCH_INTERNAL_ASSERT(
@@ -1382,12 +1530,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::threshold(Tensor self, Scalar threshold, Scalar value) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeThreeOperand(
             "aten_threshold",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a,
                const ExprHandle& threshold,
@@ -1404,12 +1554,14 @@ int nnc_lowerings_lazy_registration() {
        "aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeConditionWithTwoOperand(
             "aten_where",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a0,
                const ExprHandle& a1,
@@ -1420,12 +1572,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::frac(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_frac",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               auto aa = promoteHalfToFloat(a);
@@ -1438,12 +1592,14 @@ int nnc_lowerings_lazy_registration() {
       {"aten::lgamma(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeOneOperand(
             "aten_lgamma",
             inputs,
             outputShape,
+            outputStrides,
             outputType,
             [](const ExprHandle& a) {
               return lgamma(promoteIntegerToDefaultType(a));
@@ -1493,11 +1649,13 @@ int nnc_lowerings_lazy_registration() {
       {"aten::unsqueeze(Tensor(a) self, int dim) -> (Tensor(a))"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return Compute(
             "aten_unsqueeze",
             outputShape,
+            outputStrides,
             [&](const std::vector<VarHandle>& axes) {
               int64_t dim = c10::get<int64_t>(inputs[1]);
               if (dim < 0) {
@@ -1525,11 +1683,13 @@ int nnc_lowerings_lazy_registration() {
       {"aten::t(Tensor(a) self) -> (Tensor(a))"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTranspose(
             {inputs[0], (int64_t)1, (int64_t)0},
             outputShape,
+            outputStrides,
             outputType,
             device);
       });
@@ -1540,6 +1700,7 @@ int nnc_lowerings_lazy_registration() {
       {"aten::permute(Tensor(a) self, int[] dims) -> (Tensor(a))"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         auto A = c10::get<BufHandle>(inputs[0]);
@@ -1548,6 +1709,7 @@ int nnc_lowerings_lazy_registration() {
           auto tensor = Compute(
               "aten_permute",
               outputShape,
+              outputStrides,
               [&](const std::vector<VarHandle>& axes) {
                 std::vector<ExprHandle> empty_indices;
                 return A.load(empty_indices);
@@ -1612,18 +1774,20 @@ int nnc_lowerings_lazy_registration() {
       {"aten::softmax.int(Tensor self, int dim, int? dtype=None) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
-        return computeSoftmax(inputs, outputShape, false);
+        return computeSoftmax(inputs, outputShape, outputStrides, false);
       });
 
   RegisterNNCLoweringsFunction aten_log_softmax(
       {"aten::log_softmax.int(Tensor self, int dim, int? dtype=None) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
-        return computeSoftmax(inputs, outputShape, true);
+        return computeSoftmax(inputs, outputShape, outputStrides, true);
       });
 
   RegisterNNCLoweringsFunction aten_conv1d(
@@ -1654,6 +1818,7 @@ int nnc_lowerings_lazy_registration() {
        "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
         auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
@@ -1662,11 +1827,20 @@ int nnc_lowerings_lazy_registration() {
         TORCH_INTERNAL_ASSERT(
             inputs.size() == 2 || inputs.size() == 3,
             buildErrorMessage("Invalid number of input operands"));
-        return (inputs.size() > 2)
-            ? computeTwoOperandWithAlpha(
-                  "aten_add", inputs, outputShape, outputType, add_lambda)
-            : computeTwoOperand(
-                  "aten_add", inputs, outputShape, outputType, add_lambda);
+        return (inputs.size() > 2) ? computeTwoOperandWithAlpha(
+                                         "aten_add",
+                                         inputs,
+                                         outputShape,
+                                         outputStrides,
+                                         outputType,
+                                         add_lambda)
+                                   : computeTwoOperand(
+                                         "aten_add",
+                                         inputs,
+                                         outputShape,
+                                         outputStrides,
+                                         outputType,
+                                         add_lambda);
       });
   RegisterNNCLoweringsFunction aten_embedding(
       {"aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor"},

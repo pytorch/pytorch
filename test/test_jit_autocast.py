@@ -15,14 +15,15 @@ TEST_BFLOAT16 = TEST_CUDA and torch.cuda.is_bf16_supported()
 class TestAutocast(JitTestCase):
     def setUp(self):
         # common input tensors
-        self.a_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
-        self.b_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
-        self.c_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
-        self.d_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
-        self.a_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
-        self.b_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
-        self.c_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
-        self.d_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
+        if TEST_CUDA:
+            self.a_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
+            self.b_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
+            self.c_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
+            self.d_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
+            self.a_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
+            self.b_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
+            self.c_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
+            self.d_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
         self.old_value = torch._C._jit_set_autocast_mode(True)
         super().setUp()
 
@@ -708,6 +709,32 @@ class TestAutocast(JitTestCase):
         frozen_mod(y)
         optimized_graph = frozen_mod.graph_for(y)
         FileCheck().check_count("aten::_autocast_to_reduced_precision", 1, True).run(optimized_graph)
+
+    @unittest.skipIf(TEST_CUDA, "CPU-only test")
+    def test_jit_autocast_softmax_cpu(self):
+        def fn(x):
+            with torch.cpu.amp.autocast():
+                return torch.nn.functional.softmax(x, dim=0)
+
+        fn_s = torch.jit.script(fn)
+        x = torch.rand((2, 2), dtype=torch.bfloat16)
+        fn_s(x)
+        y = fn_s(x)
+
+        self.assertTrue(y.dtype == torch.bfloat16)
+
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_jit_autocast_softmax_gpu(self):
+        def fn(x):
+            with torch.cuda.amp.autocast():
+                return torch.nn.functional.softmax(x, dim=0)
+
+        fn_s = torch.jit.script(fn)
+        x = torch.rand((2, 2), dtype=torch.half).cuda()
+        fn_s(x)
+        y = fn_s(x)
+
+        self.assertTrue(y.dtype == torch.float)
 
 if __name__ == "__main__":
     run_tests()

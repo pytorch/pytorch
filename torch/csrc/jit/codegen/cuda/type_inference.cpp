@@ -4,6 +4,7 @@
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <ATen/ExpandUtils.h>
@@ -38,8 +39,10 @@ void copyScalarTypeAndDeviceToOutput(
   TORCH_INTERNAL_ASSERT(
       out != nullptr,
       "Expect target node's type pointer to be non-nullptr, but get nullptr");
-  out->scalarType() = dtype;
-  out->device() = device;
+  if (!hasTypeAndDevice(out)) {
+    out->scalarType() = dtype;
+    out->device() = device;
+  }
 }
 
 void copyScalarTypeAndDeviceToOutput(
@@ -153,6 +156,17 @@ class NaiveTypePropagator {
       case aten::sigmoid:
       case aten::tanh: {
         unary_float_type(node);
+        break;
+      }
+      // unary is
+      case aten::isfinite:
+      case aten::isinf:
+      case aten::isnan:
+      case aten::isneginf:
+      case aten::isposinf:
+      case aten::isreal: {
+        copyScalarTypeAndDeviceToOutput(
+            c10::ScalarType::Bool, c10::nullopt, node);
         break;
       }
       // binary float
@@ -633,7 +647,9 @@ class NaiveTypePropagator {
 
 void TypePropagate(std::shared_ptr<Graph>& graph) {
   FUSER_PERF_SCOPE("TypePropagate");
+  GRAPH_DUMP("Before TypePropagate: ", graph);
   NaiveTypePropagator(graph).run();
+  GRAPH_DUMP("After TypePropagate: ", graph);
 }
 
 } // namespace cuda

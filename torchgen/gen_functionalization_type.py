@@ -22,7 +22,6 @@ from torchgen.model import (
     NativeFunction,
     SchemaKind,
     BackendIndex,
-    Tag,
     FunctionSchema,
     SelfArgument,
     TensorOptionsArguments,
@@ -273,7 +272,7 @@ def emit_view_functionalization_body(
             e.expr for e in translate(meta_call_ctx, call_sig.arguments(), method=False)
         ]
 
-        if f.tag is Tag.inplace_view:
+        if "inplace_view" in f.tags:
             # See Note [Functionalization Pass - Inplace View Ops] for more details
             return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
@@ -537,6 +536,9 @@ def gen_functionalization_registration(
         return view_str
     else:
         f = g
+        if str(f.func.name) == "lift":
+            # See Note [Functionalization <> torch.Tensor constructor]
+            return []
         assert not f.is_view_op
         # functionalization needs to generate and register kernals for inplace ops.
         # We *also* need to directly register CompositeImplicitAUtograd kernels

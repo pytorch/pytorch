@@ -48,6 +48,7 @@ from torch.jit._trace import (
     _get_trace_graph,
 )
 from torch.jit._async import fork, wait
+from torch.jit._decomposition_utils import _register_decomposition
 from torch.jit._serialization import save, load, jit_module_from_flatbuffer, save_jit_module_to_flatbuffer
 from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph, set_fusion_strategy
 from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
@@ -187,7 +188,6 @@ def isinstance(obj, target_type):
     """
     return _isinstance(obj, target_type)
 
-
 class strict_fusion(object):
     """
     This class errors if not all nodes have been fused in
@@ -229,7 +229,19 @@ def _hide_source_ranges() -> Iterator[None]:
     finally:
         torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore[attr-defined]
 
-# dont expose Any, TODO: define `__all__`
+def enable_onednn_fusion(enabled: bool):
+    """
+    Enables or disables onednn JIT fusion based on the parameter `enabled`.
+    """
+
+    torch._C._jit_set_llga_enabled(enabled)
+
+def onednn_fusion_enabled():
+    """
+    Returns whether onednn JIT fusion is enabled
+    """
+    return torch._C._jit_llga_enabled()
+
 del Any
 
 if not torch._C._jit_init():

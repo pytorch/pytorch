@@ -22,7 +22,12 @@
    },
    {
       "name": "NVFuser",
-      "patterns": ["torch/csrc/jit/codegen/fuser/cuda/**", "torch/csrc/jit/codegen/cuda/**", "benchmarks/cpp/nvfuser/**"],
+      "patterns": [
+         "test/test_jit_cuda_fuser.py",
+         "torch/csrc/jit/codegen/fuser/cuda/**",
+         "torch/csrc/jit/codegen/cuda/**",
+         "benchmarks/cpp/nvfuser/**"
+      ],
       "approved_by": ["csarofeen", "ngimel", "jjsjann123"],
       "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },

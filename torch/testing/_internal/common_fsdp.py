@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import os
 import sys
 from contextlib import suppress
 from copy import deepcopy
@@ -18,6 +17,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
     MultiProcessTestCase,
 )
+from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import wrap
 from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
 
@@ -81,6 +81,17 @@ class DummyProcessGroup:
 
     def size(self) -> int:
         return self._size
+
+    def allreduce(self, *args, **kwargs):
+        dist_wait = mock.Mock()
+
+        def get_future():
+            future = torch.futures.Future()
+            future.set_result(1)
+            return future
+
+        dist_wait.get_future = get_future
+        return dist_wait
 
 class DeterministicModel(torch.nn.Module):
     def __init__(self, wrap_fsdp, cpu_offload=CPUOffload(offload_params=False)):
@@ -381,10 +392,7 @@ class FSDPTest(MultiProcessTestCase):
 
         # Specify gloo backend to make 'init_process_group()' succeed,
         # Actual tests will be skipped if there is no enough GPUs.
-
-        backend = os.environ.get("BACKEND", None)
-        if backend is None:
-            backend = "nccl" if torch.cuda.is_available() else "gloo"
+        backend = "nccl" if torch.cuda.is_available() else "gloo"
 
         try:
             dist.init_process_group(
@@ -424,11 +432,13 @@ class FSDPTest(MultiProcessTestCase):
         clip_norm=0.3,
         norm_type=None,
         save_model=False,
-        mixed_precision=None
+        mixed_precision=None,
+        enable_sharded_grad_scaler=False,
     ):
         cpu_offload_params = fsdp_cpu_offload and fsdp_cpu_offload.offload_params
 
         model_device = next(model.parameters()).device
+        sharded_grad_scaler = ShardedGradScaler(enabled=enable_sharded_grad_scaler)
         # use SGD with momentum instead of Adam, since Adam is scale invariant
         # and this makes it bad for tests
         optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
@@ -451,6 +461,8 @@ class FSDPTest(MultiProcessTestCase):
                         self.assertEqual(p.device, torch.device("cpu"))
 
                 loss = model.module.get_loss(input, output).to(model_device)
+            loss = sharded_grad_scaler.scale(loss)
+
             if not mixed_precision:
                 assert (
                     loss.dtype == torch.float32
@@ -481,9 +493,11 @@ class FSDPTest(MultiProcessTestCase):
                     # Params should always be on CPU, even if
                     # p._is_sharded=False
                     self.assertEqual(p.device, torch.device("cpu"))
-            optim.step()
+            # Unscale the gradients and step
+            sharded_grad_scaler.step(optim)
+            # Update the scale factor
+            sharded_grad_scaler.update()
             # if save_model, simulate save + load.
-
             if save_model:
                 state_dict = {k: v.clone() for k, v in model.state_dict().items()}
                 # Zero params, if save/load state_dict did not work properly, this
@@ -511,6 +525,7 @@ class FSDPTest(MultiProcessTestCase):
         save_model=True,
         clip_norm=0.3,
         norm_type=None,
+        enable_sharded_grad_scaler=False,
         **kwargs
     ):
         group = dist.distributed_c10d._get_default_group()
@@ -528,6 +543,7 @@ class FSDPTest(MultiProcessTestCase):
         ref_loss = self._train_for_several_steps(
             model, num_steps, autocast=mixed_precision is not None, lr=lr,
             fsdp_cpu_offload=cpu_offload, mixed_precision=mixed_precision,
+            enable_sharded_grad_scaler=enable_sharded_grad_scaler,
         )
         ref_full_params = list(model.parameters())
 
@@ -576,6 +592,7 @@ class FSDPTest(MultiProcessTestCase):
                 model, num_steps, autocast=False, lr=lr,
                 fsdp_cpu_offload=cpu_offload, save_model=save_model,
                 mixed_precision=mixed_precision,
+                enable_sharded_grad_scaler=enable_sharded_grad_scaler,
             )
         # We only check for errors in the case we have the following setup:
         # model = FSDP(model, cpu_offload=True)

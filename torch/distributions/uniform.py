@@ -1,6 +1,7 @@
 from numbers import Number
 
 import torch
+from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
@@ -29,6 +30,10 @@ class Uniform(Distribution):
     @property
     def mean(self):
         return (self.high + self.low) / 2
+
+    @property
+    def mode(self):
+        return nan * self.high
 
     @property
     def stddev(self):

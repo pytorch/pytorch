@@ -262,6 +262,12 @@ bool needFloatSuffix(UnaryOpType t) {
     case UnaryOpType::Reciprocal:
     case UnaryOpType::Set:
     case UnaryOpType::Sigmoid:
+    case UnaryOpType::IsFinite:
+    case UnaryOpType::IsInf:
+    case UnaryOpType::IsNan:
+    case UnaryOpType::IsNegInf:
+    case UnaryOpType::IsPosInf:
+    case UnaryOpType::IsReal:
       return false;
     default:
       return true;
@@ -344,6 +350,18 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "tanh";
     case UnaryOpType::Trunc:
       return "trunc";
+    case UnaryOpType::IsFinite:
+      return "isfinite";
+    case UnaryOpType::IsInf:
+      return "isinf";
+    case UnaryOpType::IsNan:
+      return "isnan";
+    case UnaryOpType::IsNegInf:
+      return "isneginf";
+    case UnaryOpType::IsPosInf:
+      return "isposinf";
+    case UnaryOpType::IsReal:
+      return "isreal";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for unary op type.");
   }
@@ -522,6 +540,8 @@ static const char* ternary_op_type2string(TernaryOpType t) {
   switch (t) {
     case TernaryOpType::Clamp:
       return "clamp";
+    case TernaryOpType::Lerp:
+      return "lerp";
     case TernaryOpType::Threshold:
       return "threshold";
     case TernaryOpType::Where:
@@ -674,10 +694,14 @@ static const char* supported_casts2string(
       return "(std::complex<float>)";
     case supported_switch_pair(DataType::Float, DataType::Half):
       return "__float2half";
+    case supported_switch_pair(DataType::Double, DataType::Half):
+      return "__double2half";
     case supported_switch_pair(DataType::Float, DataType::BFloat16):
       return "__float2bfloat";
     case supported_switch_pair(DataType::Half, DataType::Float):
       return "__half2float";
+    case supported_switch_pair(DataType::Half, DataType::Double):
+      return "__half2double";
     case supported_switch_pair(DataType::BFloat16, DataType::Float):
       return "__bfloat2float";
     default:
