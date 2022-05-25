@@ -1,5 +1,4 @@
 #include <ATen/Config.h>
-#include <ATen/native/ConvUtils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/operators/conv2d.h>
@@ -341,14 +340,8 @@ bool mkldnnPrepackedConvIsSupported(
 
   // Do not rewrite for cases where native is faster than mkldnn
   // Conditions are from: aten/src/ATen/native/Convolution.cpp:use_mkldnn
-  at::native::ConvParams params;
-  params.stride = stride;
-  params.padding = pad;
-  params.dilation = dilation;
-  params.groups = groups;
-
-  bool use_mkldnn = params.groups > 1 ||
-      (weight.dims[2] > 3 && weight.dims[3] > 3) || input.dims[0] > 1 ||
+  bool use_mkldnn = groups > 1 || (weight.dims[2] > 3 && weight.dims[3] > 3) ||
+      input.dims[0] > 1 ||
       input.dims[0] * input.dims[1] * input.dims[2] * input.dims[3] > 20480;
   GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: ", use_mkldnn);
   return use_mkldnn;
