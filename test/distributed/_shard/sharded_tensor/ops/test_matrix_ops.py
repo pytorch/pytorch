@@ -288,21 +288,6 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             ):
                 layer_norm = torch.nn.LayerNorm((35)).cuda(self.rank)
                 layer_norm(_shard_tensor(tensor, spec))
- 
-    @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_nccl()
-    def test_sharded_tensor_nan_to_num(self):
-        specs = _chunk_sharding_specs_list_for_test([0, 1], seed=10)
-        for spec in specs:
-            tensor = torch.rand(16, 12).cuda(self.rank)
-            tensor[:, :2] = float('nan')
-            tensor[:, 4:5] = float('inf')
-            tensor[:, 10:] = -float('inf')
-            st = _shard_tensor(tensor, spec)
-            st_expected = _shard_tensor(torch.nan_to_num(tensor), spec)
-            st = torch.nan_to_num(st)
-            self.assertTrue(torch.allclose(st, st_expected))
 
 
 if __name__ == "__main__":
