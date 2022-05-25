@@ -5,6 +5,7 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/PointwiseOps.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/Exception.h>
@@ -438,9 +439,6 @@ Tensor soft_margin_loss(
 }
 
 Tensor& smooth_l1_loss_backward_out(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta, Tensor& grad_input) {
-  if (beta <= 0)
-    return at::native::l1_loss_backward_out(
-        grad_output, input, target, reduction, grad_input);
   auto norm = reduction == Reduction::Mean ? 1. / input.numel() : 1.;
   auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)
@@ -456,8 +454,6 @@ Tensor& smooth_l1_loss_backward_out(const Tensor& grad_output, const Tensor& inp
 }
 
 Tensor smooth_l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta) {
-  if (beta <= 0)
-      return at::native::l1_loss_backward(grad_output, input, target, reduction);
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::smooth_l1_loss_backward_out(grad_input, grad_output, input, target, reduction, beta);
 }
@@ -518,35 +514,37 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
 }
 
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
-  const auto float_type = c10::toRealValueType(input.scalar_type());
-  Tensor result = at::empty({0}, input.options().dtype(float_type));
-  return at::l1_loss_out(result, input, target, reduction);
+  return apply_loss_reduction((input - target).abs(), reduction);
 }
 
 Tensor& l1_loss_out(const Tensor& input, const Tensor& target, int64_t reduction, Tensor& result) {
-  if (reduction != Reduction::None) {
-    auto diff = at::sub(input, target);
-    auto loss = diff.is_complex() ? diff.abs() : diff.abs_();
-    if (reduction == Reduction::Mean) {
-      return at::mean_out(result, loss, IntArrayRef{});
+  // Need to do these checks as this is a composite function
+    TORCH_CHECK(
+      result.device() == input.device(),
+      "l1_loss: Expected result and input tensors to be on the same device, but got ",
+      "result on ", result.device(), " and input on ", input.device());
+    TORCH_CHECK(
+      result.device() == target.device(),
+      "l1_loss: Expected result and target tensors to be on the same device, but got ",
+      "result on ", result.device(), " and target on ", target.device());
+
+  // It just makes sense to perform the operations in-place if reduction = "none"
+  if (reduction == Reduction::None) {
+    if (input.is_complex() || target.is_complex()) {
+      at::abs_out(result, input - target);
     } else {
-      return at::sum_out(result, loss, IntArrayRef{});
+      at::sub_out(result, input, target);
+      result.abs_();
     }
   } else {
-    auto diff = input.is_complex() ? at::sub(input, target) : at::sub_out(result, input, target);
-    return at::abs_out(result, diff);
+    auto out = at::native::l1_loss(input, target, reduction);
+    TORCH_CHECK(out.scalar_type() == result.scalar_type(),
+                "l1_loss expected out tensor dtype ", out.scalar_type(),
+                " but got: ", result.scalar_type());
+    at::native::resize_output(result, out.sizes());
+    result.copy_(out);
   }
-}
-
-Tensor l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
-  Tensor grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  return at::l1_loss_backward_out(grad_input, grad_output, input, target, reduction);
-}
-
-Tensor& l1_loss_backward_out(const Tensor& grad_output,
-    const Tensor& input, const Tensor& target, int64_t reduction, Tensor& grad_input) {
-  auto norm = reduction == Reduction::Mean ? grad_output / input.numel() : grad_output;
-  return at::sub_out(grad_input, input, target).sgn_().mul_(norm);
+  return result;
 }
 
 }}  // namespace at::native
