@@ -336,7 +336,6 @@ class TransformerEncoderLayer(Module):
           argument ``requires_grad``
         - training is disabled (using ``.eval()``)
         - batch_first is ``True`` and the input is batched (i.e., ``src.dim() == 3``)
-        - norm_first is ``False`` (this restriction may be loosened in the future)
         - activation is one of: ``"relu"``, ``"gelu"``, ``torch.functional.relu``, or ``torch.functional.gelu``
         - at most one of ``src_mask`` and ``src_key_padding_mask`` is passed
         - if src is a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_, neither ``src_mask``
@@ -406,7 +405,7 @@ class TransformerEncoderLayer(Module):
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
-        if (src.dim() == 3 and not self.norm_first and not self.training and
+        if (src.dim() == 3 and not self.training and
             self.self_attn.batch_first and
             self.self_attn._qkv_same_embed_dim and self.activation_relu_or_gelu and
             self.norm1.eps == self.norm2.eps and
@@ -442,7 +441,7 @@ class TransformerEncoderLayer(Module):
                     self.self_attn.out_proj.weight,
                     self.self_attn.out_proj.bias,
                     self.activation_relu_or_gelu == 2,
-                    False,  # norm_first, currently not supported
+                    self.norm_first,
                     self.norm1.eps,
                     self.norm1.weight,
                     self.norm1.bias,
