@@ -4309,17 +4309,15 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
     return;
   }
 
-  LD.copy_(self);
-
   // We decided not to include upper flag in the API.
   // https://github.com/pytorch/pytorch/pull/69828#issuecomment-1015143819
   // We can revisit this decision later and remove upper completely
   // also from low level functions or add it to the public API.
   bool upper = false;
   if (upper) {
-    LD.triu_();
+    at::triu_out(LD, self);
   } else {
-    LD.tril_();
+    at::tril_out(LD, self);
   }
 
   // call ldl_factor_stub that fills the result tensors
