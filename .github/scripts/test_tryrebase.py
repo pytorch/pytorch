@@ -23,6 +23,21 @@ class TestRebase(TestCase):
         self.assertTrue("Successfully rebased `master` onto `master`" in mocked_post_comment.call_args[0][3])
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    @mock.patch('gitutils.GitRepo._run_git')
+    @mock.patch('tryrebase.gh_post_comment')
+    def test_rebase_to_stable(self, mocked_post_comment: Any, mocked_run_git: Any, mocked_gql: Any) -> None:
+        "Tests rebase to viable/strict successfully"
+        pr = GitHubPR("pytorch", "pytorch", 77907)
+        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+        rebase_onto(pr, repo, False, True)
+        calls = [mock.call('fetch', 'origin', 'pull/77907/head:pull/77907/head'),
+                 mock.call('rebase', 'viable/strict', 'pull/77907/head'),
+                 mock.call('push', '-f', 'https://github.com/swang392/pytorch.git', 'pull/77907/head:install-doxygen')]
+        mocked_run_git.assert_has_calls(calls)
+        self.assertTrue(
+            "Successfully rebased `install-doxygen` onto `viable/strict`" in mocked_post_comment.call_args[0][3])
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('gitutils.GitRepo._run_git', return_value="Everything up-to-date")
     @mock.patch('tryrebase.gh_post_comment')
     def test_no_need_to_rebase(self, mocked_post_comment: Any, mocked_run_git: Any, mocked_gql: Any) -> None:
