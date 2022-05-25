@@ -14,7 +14,78 @@ from functools import lru_cache
 from warnings import warn
 
 
-GH_GET_PR_INFO_QUERY = """
+GH_PR_REVIEWS_FRAGMENT = """
+fragment PRReviews on PullRequestReviewConnection {
+  nodes {
+    author {
+      login
+    }
+    state
+  }
+  pageInfo {
+    startCursor
+    hasPreviousPage
+  }
+}
+"""
+
+GH_CHECKSUITES_FRAGMENT = """
+fragment PRCheckSuites on CheckSuiteConnection {
+  edges {
+    node {
+      app {
+        name
+        databaseId
+      }
+      workflowRun {
+        workflow {
+          name
+        }
+      }
+      checkRuns(first: 50) {
+        nodes {
+          name
+          conclusion
+          detailsUrl
+        }
+        pageInfo {
+          endCursor
+          hasNextPage
+        }
+      }
+      conclusion
+      url
+    }
+    cursor
+  }
+  pageInfo {
+    hasNextPage
+  }
+}
+"""
+
+GH_COMMIT_AUTHORS_FRAGMENT = """
+fragment CommitAuthors on PullRequestCommitConnection {
+  nodes {
+    commit {
+      author {
+        user {
+          login
+        }
+        email
+        name
+      }
+      oid
+    }
+  }
+  pageInfo {
+    endCursor
+    hasNextPage
+  }
+}
+"""
+
+GH_GET_PR_INFO_QUERY = GH_PR_REVIEWS_FRAGMENT + GH_CHECKSUITES_FRAGMENT + GH_COMMIT_AUTHORS_FRAGMENT + """
 query ($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
@@ -41,58 +112,14 @@ query ($owner: String!, $name: String!, $number: Int!) {
         oid
       }
       commits_with_authors:commits(first: 100) {
-        nodes {
-          commit {
-            author {
-              user {
-                login
-              }
-              email
-              name
-            }
-            oid
-          }
-        }
-        pageInfo {
-          endCursor
-          hasNextPage
-        }
+        ...CommitAuthors
         totalCount
       }
       commits(last: 1) {
         nodes {
           commit {
             checkSuites(first: 10) {
-              edges {
-                node {
-                  app {
-                    name
-                    databaseId
-                  }
-                  workflowRun {
-                    workflow {
-                      name
-                    }
-                  }
-                  checkRuns(first: 50) {
-                    nodes {
-                      name
-                      conclusion
-                      detailsUrl
-                    }
-                    pageInfo {
-                      endCursor
-                      hasNextPage
-                    }
-                  }
-                  conclusion
-                  url
-                }
-                cursor
-              }
-              pageInfo {
-                hasNextPage
-              }
+              ...PRCheckSuites
             }
             oid
           }
@@ -109,16 +136,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
         }
       }
       reviews(last: 100) {
-        nodes {
-          author {
-            login
-          }
-          state
-        }
-        pageInfo {
-          startCursor
-          hasPreviousPage
-        }
+       ...PRReviews
       }
       comments(last: 5) {
         nodes {
@@ -160,7 +178,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 }
 """
 
-GH_GET_PR_NEXT_CHECKSUITES = """
+GH_GET_PR_NEXT_CHECKSUITES = GH_CHECKSUITES_FRAGMENT + """
 query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
   repository(name: $name, owner: $owner) {
     pullRequest(number: $number) {
@@ -169,36 +187,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
           commit {
             oid
             checkSuites(first: 10, after: $cursor) {
-              edges {
-                node {
-                  app {
-                    name
-                    databaseId
-                  }
-                  workflowRun {
-                    workflow {
-                      name
-                    }
-                  }
-                  checkRuns(first: 50) {
-                    nodes {
-                      name
-                      conclusion
-                      detailsUrl
-                    }
-                    pageInfo {
-                      endCursor
-                      hasNextPage
-                    }
-                  }
-                  conclusion
-                  url
-                }
-                cursor
-              }
-              pageInfo {
-                hasNextPage
-              }
+              ...PRCheckSuites
             }
           }
         }
@@ -285,48 +274,24 @@ query($org: String!, $name: String!, $cursor: String) {
 }
 """
 
-GH_GET_PR_NEXT_AUTHORS_QUERY = """
+GH_GET_PR_NEXT_AUTHORS_QUERY = GH_COMMIT_AUTHORS_FRAGMENT + """
 query ($owner: String!, $name: String!, $number: Int!, $cursor: String) {
   repository(name: $name, owner: $owner) {
     pullRequest(number: $number) {
       commits_with_authors: commits(first: 100, after: $cursor) {
-        nodes {
-          commit {
-            author {
-              user {
-                login
-              }
-              email
-              name
-            }
-            oid
-          }
-        }
-        pageInfo {
-          endCursor
-          hasNextPage
-        }
+        ...CommitAuthors
       }
     }
   }
 }
 """
 
-GH_GET_PR_PREV_REVIEWS_QUERY = """
+GH_GET_PR_PREV_REVIEWS_QUERY = GH_PR_REVIEWS_FRAGMENT + """
 query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
   repository(name: $name, owner: $owner) {
     pullRequest(number: $number) {
       reviews(last: 100, before: $cursor) {
-        nodes {
-          author {
-            login
-          }
-          state
-        }
-        pageInfo {
-          startCursor
-          hasPreviousPage
-        }
+        ...PRReviews
       }
     }
   }
@@ -753,8 +718,11 @@ class GitHubPR:
         if not dry_run:
             gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
 
+
 class MandatoryChecksMissingError(Exception):
     pass
+
+
 @dataclass
 class MergeRule:
     name: str
@@ -819,7 +787,7 @@ def find_matching_merge_rule(pr: GitHubPR,
         if len(rule.approved_by) > 0 and len(approved_by) == 0:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
-                reject_reason = f"Matched rule {rule_name}, but PR has not been reviewed yet"
+                reject_reason = f"Matched rule {rule_name}, but PR #{pr.pr_num} has not been reviewed yet"
             continue
 
         rule_approvers_set = set()
@@ -834,7 +802,7 @@ def find_matching_merge_rule(pr: GitHubPR,
         if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
-                reject_reason = (f"Matched rule {rule_name}, but it was not reviewed yet by any of:" +
+                reject_reason = (f"Matched rule {rule_name}, but PR #{pr.pr_num} was not reviewed yet by any of:" +
                                  f"{','.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}")
             continue
         if rule.mandatory_checks_name is not None:
