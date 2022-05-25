@@ -17,6 +17,7 @@ TensorBase empty_cuda(
   const DeviceGuard device_guard(device);
   auto* allocator = at::cuda::getCUDADeviceAllocator();
   constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
+  at::detail::raise_warning_for_complex_half(dtype);
   return at::detail::empty_generic(
       size, allocator, cuda_dks, dtype, memory_format_opt);
 }
@@ -72,6 +73,7 @@ TensorBase empty_strided_cuda(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
   const auto dtype = dtype_or_default(dtype_opt);
+  at::detail::raise_warning_for_complex_half(dtype);
   return at::detail::empty_strided_cuda(size, stride, dtype, device_opt);
 }
 

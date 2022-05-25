@@ -168,6 +168,7 @@ TensorBase empty_cpu(
 
   auto pin_memory = pinned_memory_or_default(pin_memory_opt);
   auto dtype = dtype_or_default(dtype_opt);
+  at::detail::raise_warning_for_complex_half(dtype);
   return empty_cpu(size, dtype, pin_memory, memory_format_opt);
 }
 
@@ -203,6 +204,7 @@ TensorBase empty_strided_cpu(
 
   auto pin_memory = pinned_memory_or_default(pin_memory_opt);
   auto dtype = dtype_or_default(dtype_opt);
+  at::detail::raise_warning_for_complex_half(dtype);
   return at::detail::empty_strided_cpu(size, stride, dtype, pin_memory);
 }
 
