@@ -23,9 +23,14 @@ def broadcast(x):
     return x
 
 def all_reduce(x):
-    dist.all_reduce(x)
+    # AOT in general don't support in-place functions since
+    # it actually executes the function twice: one for shape inference,
+    # and one for tracing during the first time.
+    # So, let's work around by clone the input.
+    xc = x.clone()
+    dist.all_reduce(xc)
     print(f"{os.getpid()} all_reduce: {x}")
-    return x
+    return xc
 
 def all_gather(xs, x):
     dist.all_gather(xs, x)
@@ -57,8 +62,7 @@ def demo_basic(rank, world_size):
     aot_print_fn = aot_function(all_reduce, fw_compiler=compiler_fn, bw_compiler=compiler_fn)
     res = aot_print_fn(copy.deepcopy(x))
     ref = all_reduce(copy.deepcopy(x))
-    # all_reduce is executed twice in aot, not sure why.
-    # assert torch.allclose(ref, res)
+    assert torch.allclose(ref, res)
 
     #all_gather
     xs = [torch.zeros(2,3, dtype=torch.int64).to(device) for _ in range(dist.get_world_size())]
