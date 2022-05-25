@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import inspect
+import io
 import itertools
 import os
 import re
@@ -17,7 +18,6 @@ import warnings
 import zipfile
 from typing import (
     Any,
-    BinaryIO,
     Callable,
     Collection,
     Dict,
@@ -26,6 +26,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    Type,
     Union,
 )
 
@@ -156,7 +157,7 @@ def exporter_context(model, mode, verbose):
 def export(
     model: Union[torch.nn.Module, torch.jit.ScriptModule, torch.jit.ScriptFunction],
     args: Union[Tuple[Any, ...], torch.Tensor],
-    f: Union[str, BinaryIO],
+    f: Union[str, io.BytesIO],
     export_params: bool = True,
     verbose: bool = False,
     training: Optional[_C_onnx.TrainingMode] = None,
@@ -170,7 +171,7 @@ def export(
     ] = None,
     keep_initializers_as_inputs: Optional[bool] = None,
     custom_opsets: Optional[Mapping[str, int]] = None,
-    export_modules_as_functions: Union[bool, Collection[torch.nn.Module]] = False,
+    export_modules_as_functions: Union[bool, Collection[Type[torch.nn.Module]]] = False,
 ) -> None:
 
     _export(

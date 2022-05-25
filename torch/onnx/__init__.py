@@ -1,9 +1,9 @@
 """ONNX exporter."""
 from __future__ import annotations
 
+import io
 from typing import (
     Any,
-    BinaryIO,
     Callable,
     Collection,
     Dict,
@@ -11,6 +11,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    Type,
     Union,
 )
 
@@ -78,7 +79,7 @@ def _export(*args, **kwargs):
 def export(
     model: Union[torch.nn.Module, torch.jit.ScriptModule, torch.jit.ScriptFunction],
     args: Union[Tuple[Any, ...], torch.Tensor],
-    f: Union[str, BinaryIO],
+    f: Union[str, io.BytesIO],
     export_params: bool = True,
     verbose: bool = False,
     training: TrainingMode = TrainingMode.EVAL,
@@ -92,7 +93,7 @@ def export(
     ] = None,
     keep_initializers_as_inputs: Optional[bool] = None,
     custom_opsets: Optional[Mapping[str, int]] = None,
-    export_modules_as_functions: Union[bool, Collection[torch.nn.Module]] = False,
+    export_modules_as_functions: Union[bool, Collection[Type[torch.nn.Module]]] = False,
 ) -> None:
     r"""Exports a model into ONNX format.
 
@@ -462,12 +463,12 @@ def register_custom_op_symbolic(
     See "Custom Operators" in the module documentation for an example usage.
 
     Args:
-        symbolic_name: The name of the custom operator in "<domain>::<op>"
+        symbolic_name (str): The name of the custom operator in "<domain>::<op>"
             format.
-        symbolic_fn: A function that takes in the ONNX graph and
+        symbolic_fn (Callable): A function that takes in the ONNX graph and
             the input arguments to the current operator, and returns new
             operator nodes to add to the graph.
-        opset_version: The ONNX opset version in which to register.
+        opset_version (int): The ONNX opset version in which to register.
     """
     from torch.onnx import utils
 
@@ -480,9 +481,9 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int) -> Non
     See "Custom Operators" in the module documentation for an example usage.
 
     Args:
-        symbolic_name: The name of the custom operator in "<domain>::<op>"
+        symbolic_name (str): The name of the custom operator in "<domain>::<op>"
             format.
-        opset_version: The ONNX opset version in which to unregister.
+        opset_version (int): The ONNX opset version in which to unregister.
     """
 
     from torch.onnx import utils
@@ -509,7 +510,7 @@ def set_log_stream(stream_name: str = "stdout") -> None:
     r"""Sets output stream for ONNX logging.
 
     Args:
-        stream_name: Only 'stdout' and 'stderr' are supported
+        stream_name (str, default "stdout"): Only 'stdout' and 'stderr' are supported
             as ``stream_name``.
     """
     _C._jit_set_onnx_log_output_stream(stream_name)
