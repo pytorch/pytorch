@@ -726,6 +726,9 @@ def gen_functionalization_registration(
         if str(f.func.name) == "lift":
             # See Note [Functionalization <> torch.Tensor constructor]
             return []
+        if str(f.func.name) == "resize_":
+            # See Note [resize_ in Functionalization]
+            return []
         assert not f.is_view_op
         # functionalization needs to generate and register kernals for inplace ops.
         # We *also* need to directly register CompositeImplicitAUtograd kernels
