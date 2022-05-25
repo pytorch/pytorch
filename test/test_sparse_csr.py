@@ -2269,14 +2269,12 @@ class TestSparseCSR(TestCase):
         shapes = [(6, 10), (0, 10), (6, 0), (0, 0)]
 
         blocksizes = [(2, 2)]
+
         if layout is torch.sparse_bsr:
             blocksizes += [(3, 5), (6, 10)]
 
-        for shape, blocksize in itertools.product(shapes, blocksizes):
-            dense = make_tensor(shape, dtype=torch.float, device=device)
-            dense = dense.relu()  # Introduce some sparsity
+        def _test_matrix(pt_matrix, dense, layout, blocksize):
             sp_matrix = self._construct_sp_matrix(dense, layout, blocksize=blocksize)
-            pt_matrix = self._convert_to_layout(dense, layout, blocksize=blocksize)
 
             compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[layout]
 
@@ -2287,6 +2285,30 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 
             self.assertEqual(dense, pt_matrix.to_dense())
+
+        for shape, blocksize in itertools.product(shapes, blocksizes):
+            dense = make_tensor(shape, dtype=torch.float, device=device)
+            dense = dense.relu()  # Introduce some sparsity
+            pt_matrix = self._convert_to_layout(dense, layout, blocksize=blocksize)
+            _test_matrix(pt_matrix, dense, layout, blocksize)
+
+        # Test batch shapes (3D inputs)
+        shapes = [(3, 6, 10)]
+        # Case 1: Same sparsity pattern across matrices
+        for shape, blocksize in itertools.product(shapes, blocksizes):
+            # Create random sparsity pattern
+            dense = make_tensor((shape[1], shape[2]), dtype=torch.float, device=device)
+            dense = dense.relu()  # Introduce some sparsity
+            mask = (dense == 0)
+
+            # Repeat the same sparsity pattern across batch entries
+            dense = make_tensor(shape, dtype=torch.float, device=device)
+            dense = dense * mask.unsqueeze(0)
+            pt_matrix = self._convert_to_layout(dense, layout, blocksize=blocksize)
+            for d, matrix in zip(dense, pt_matrix):
+                _test_matrix(pt_matrix, d, layout, blocksize)
+
+        # TODO: Case 2: Different sparsity pattern across matrices
 
     @skipMeta
     @all_sparse_compressed_layouts()
