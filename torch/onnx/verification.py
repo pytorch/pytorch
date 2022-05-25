@@ -1,6 +1,6 @@
 """Functions to verify exported ONNX model is functionally equivalent to original PyTorch model.
 
-ONNXRuntime is required, serving as the ONNX backend for verification.
+ONNX Runtime is required, and is used as the ONNX backend for export verification.
 """
 
 import contextlib
@@ -9,7 +9,7 @@ import io
 import os
 import tempfile
 import warnings
-from typing import Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -84,13 +84,13 @@ def _run_ort(ort_session, inputs):
     return _inline_flatten_list(ort_outs, [])
 
 
-def _create_ort_session(
-    model: Union[str, io.BytesIO], ort_providers: Tuple[str, ...] = _ORT_PROVIDERS
+def _ort_session(
+    model: Union[str, io.BytesIO], ort_providers: Sequence[str] = _ORT_PROVIDERS
 ):
     try:
         import onnxruntime  # type: ignore[import]
     except ImportError:
-        raise ImportError("ONNXRuntime is required for export verification.")
+        raise ImportError("onnxruntime is required for export verification.")
 
     if ort_providers is None:
         ort_providers = _ORT_PROVIDERS
@@ -168,9 +168,9 @@ def _prepare_input_for_export(args, kwargs):
 
 
 def _prepare_input_for_ort(args, kwargs, remained_onnx_input_idx, flatten):
-    """Prepare input for ONNX model execution in ONNXRuntime.
+    """Prepare input for ONNX model execution in ONNX Runtime.
 
-    Any future changes/formatting to the input before dispatching to the ONNXRuntime
+    Any future changes/formatting to the input before dispatching to the ONNX Runtime
     InferenceSession run should be made in this function.
 
     Args:
@@ -178,7 +178,7 @@ def _prepare_input_for_ort(args, kwargs, remained_onnx_input_idx, flatten):
         kwargs: keyword arguments for PyTorch model forward method.
 
     Returns:
-        onnx_inputs: positional arguments for ONNX model execution in ONNXRuntime.
+        onnx_inputs: positional arguments for ONNX model execution in ONNX Runtime.
     """
     onnx_inputs = _prepare_input_for_export(args, kwargs)
     if flatten:
@@ -216,7 +216,7 @@ def _compare_ort_pytorch_model(
 ):
     """Compare outputs from ONNX model runs with outputs from PyTorch model runs.
 
-    ONNXRuntime is used for model execution backend for ONNX model.
+    ONNX Runtime is used for model execution backend for ONNX model.
 
     Raises:
         AssertionError: if outputs from ONNX model and PyTorch model are not
@@ -245,27 +245,29 @@ def _compare_ort_pytorch_model(
 
 def verify(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    input_args,
-    input_kwargs=None,
-    do_constant_folding=True,
-    dynamic_axes=None,
-    input_names=None,
-    output_names=None,
-    training=None,
-    opset_version=None,
-    keep_initializers_as_inputs=True,
-    verbose=False,
-    fixed_batch_size=False,
-    use_external_data=False,
-    additional_test_inputs=None,
-    remained_onnx_input_idx=None,
-    flatten=True,
-    ort_providers=_ORT_PROVIDERS,
-    rtol=0.001,
-    atol=1e-7,
+    input_args: Tuple[Any, ...],
+    input_kwargs: Optional[Dict[str, Any]] = None,
+    do_constant_folding: bool = True,
+    dynamic_axes: Optional[
+        Dict[str, Union[Dict[int, str], Dict[str, List[int]]]]
+    ] = None,
+    input_names: Optional[List[str]] = None,
+    output_names: Optional[List[str]] = None,
+    training: Optional[bool] = None,
+    opset_version: Optional[int] = None,
+    keep_initializers_as_inputs: bool = True,
+    verbose: bool = False,
+    fixed_batch_size: bool = False,
+    use_external_data: bool = False,
+    additional_test_inputs: Optional[List[Tuple[Any, ...]]] = None,
+    remained_onnx_input_idx: Optional[List[int]] = None,
+    flatten: bool = True,
+    ort_providers: Sequence[str] = _ORT_PROVIDERS,
+    rtol: float = 0.001,
+    atol: float = 1e-7,
     **kwargs,
 ):
-    """Verify model export to ONNX with ONNXRuntime.
+    """Verify model export to ONNX with ONNX Runtime.
 
     Args:
         model (torch.nn.Module or torch.jit.ScriptModule): See :func:`torch.onnx.export`.
@@ -291,7 +293,7 @@ def verify(
             inputs into a flattened list of Tensors for ONNX. Set this to False if nested
             structures are to be preserved for ONNX, which is usually the case with
             exporting ScriptModules.
-        ort_providers (sequence, optional): ONNXRuntime providers to use.
+        ort_providers (sequence, optional): ONNX Runtime providers to use.
         rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
         atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
 
@@ -328,7 +330,7 @@ def verify(
             verbose=verbose,
         )
 
-        ort_session = _create_ort_session(model_f, ort_providers)
+        ort_session = _ort_session(model_f, ort_providers)
 
         _compare_ort_pytorch_model(
             model_copy,
