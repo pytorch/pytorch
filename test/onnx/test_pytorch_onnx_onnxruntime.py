@@ -12427,7 +12427,7 @@ class _TestONNXRuntime:
     # MARK: Quantization Aware Training(QAT) module tests
     # TODO(justinchuby): Extract quantization related tests to a different test suit
     @common_utils.parametrize(
-        "module_names, modules, fuse_modules, initializers, input_",
+        "module_names,modules,fuse_modules,initializers,input_",
         [
             common_utils.subtest(
                 (
