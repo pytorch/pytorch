@@ -65,7 +65,12 @@ def enable_torch_dispatch_mode(mode, *, replace=None, ignore_preexisting=False) 
 def _wrap_torch_dispatch(f):
     @functools.wraps(f)
     def wrapped(self, *args, **kwargs):
-        with enable_torch_dispatch_mode(self.inner):
+        if hasattr(self, "inner"):
+            inner = self.inner
+        else:
+            inner = None
+
+        with enable_torch_dispatch_mode(inner):
             return f(self, *args, **kwargs)
     return wrapped
 
