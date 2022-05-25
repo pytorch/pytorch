@@ -3105,6 +3105,7 @@
     "i0e",
     "i1",
     "i1e",
+    "legendre_polynomial_p",
     "log1p",
     "log_ndtr",
     "log_softmax",
