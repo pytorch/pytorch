@@ -82,6 +82,9 @@ const char* SparseCsrTensorImpl::tensorimpl_type_name() const {
 }
 
 void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
+  TORCH_CHECK(
+      !has_symbolic_sizes_strides_,
+      "resize_ called on tensor with symbolic shape")
   auto rows = size[size.size() - 2];
   auto cols = size[size.size() - 1];
   auto old_crow_indices_size = crow_indices_.size(-1);
@@ -102,6 +105,9 @@ void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
 }
 
 void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
+  TORCH_CHECK(
+      !has_symbolic_sizes_strides_,
+      "resize_as_sparse_csr_tensor_ called on tensor with symbolic shape")
   set_layout(src.layout());
   crow_indices_ = at::empty_like(
       src.crow_indices(),
@@ -124,6 +130,9 @@ void SparseCsrTensorImpl::set_member_tensors(
     const Tensor& col_indices,
     const Tensor& values,
     IntArrayRef size) {
+  TORCH_CHECK(
+      !has_symbolic_sizes_strides_,
+      "set_member_tensors called on tensor with symbolic shape")
 
   // CSR Type Invariants
   TORCH_CHECK(
