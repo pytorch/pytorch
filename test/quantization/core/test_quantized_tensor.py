@@ -1151,6 +1151,9 @@ class TestQuantizedTensor(TestCase):
                        qparams=hu.qparams()),
            reduce_range=st.booleans()
            )
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_choose_qparams(self, X, reduce_range):
         X, (scale, zero_point, torch_type) = X
         X = torch.from_numpy(X)
