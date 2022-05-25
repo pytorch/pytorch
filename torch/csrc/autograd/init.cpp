@@ -269,9 +269,24 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         return e.nBytes();
       });
 
+  {
+    using torch::profiler::impl::Result;
+    py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
+        .def("name", &Result::name)
+        .def_property_readonly(
+            "id",
+            [](const Result& r) {
+              return reinterpret_cast<intptr_t>(r.shared_from_this().get());
+            })
+        .def_property_readonly(
+            "parent", [](const Result& r) { return r.parent_.lock(); })
+        .def_readonly("children", &Result::children_);
+  }
+
   py::class_<ProfilerResult>(m, "_ProfilerResult")
     .def("trace_start_us", &ProfilerResult::trace_start_us)
     .def("events", &ProfilerResult::events)
+    .def("experimental_event_tree", &ProfilerResult::event_tree)
 #ifdef USE_KINETO
     .def("save", &ProfilerResult::save)
 #endif // USE_KINETO
