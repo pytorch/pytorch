@@ -662,6 +662,60 @@ std::vector<Shape> compute_shape_cast(const Output& input, const at::ScalarType&
   return { shape };
 }
 
+
+// View Ops (TODO kill these)
+std::vector<Shape> compute_shape_as_strided_view_update(const Output& target, const Output& input, const std::vector<int64_t>& size, const std::vector<int64_t>& stride, const int64_t& storage_offset) {
+  TORCH_INTERNAL_ASSERT(false, "view ops should never be called now that functionalization is being used");
+  return { Shape(target.shape().scalar_type(), size) };
+}
+std::vector<Shape> compute_shape_as_strided(const Output& input, const std::vector<int64_t>& size, const std::vector<int64_t>& stride, const int64_t& storage_offset) {
+  TORCH_INTERNAL_ASSERT(false, "view ops should never be called now that functionalization is being used");
+  return { Shape(input.shape().scalar_type(), size) };
+}
+std::vector<Shape> compute_shape_diagonal_view_update(const Output& target, const Output& input, const int64_t& offset, const int64_t& dim1, const int64_t& dim2) {
+  TORCH_INTERNAL_ASSERT(false, "view ops should never be called now that functionalization is being used");
+  return { target.shape() };
+}
+std::vector<Shape> compute_shape_diagonal(const Output& input, const int64_t& offset, const int64_t& dim1, const int64_t& dim2) {
+  TORCH_INTERNAL_ASSERT(false, "view ops should never be called now that functionalization is being used");
+  return { MakeDiagonalShape(input.shape(), offset, dim1, dim2) };
+}
+std::vector<Shape> compute_shape_narrow_view_update(const Output& input, const Output& source, const std::vector<int64_t>& base_indices) {
+  TORCH_INTERNAL_ASSERT(false, "view ops should never be called now that functionalization is being used");
+  return { input.shape() };
+}
+std::vector<Shape> compute_shape_narrow(const Output& input, const std::vector<int64_t>& base_indices, const std::vector<int64_t>& sizes) {
+  TORCH_INTERNAL_ASSERT(false, "view ops should never be called now that functionalization is being used");
+  return { Shape(input.shape().scalar_type(), sizes) };
+}
+std::vector<Shape> compute_shape_permute(const Output& input, const std::vector<int64_t>& dims) {
+  TORCH_INTERNAL_ASSERT(false, "view ops should never be called now that functionalization is being used");
+  return { MakePermuteShape(input.shape(), dims) };
+}
+std::vector<Shape> compute_shape_resize(const Output& input, const std::vector<int64_t>& size) {
+  TORCH_INTERNAL_ASSERT(false, "view ops should never be called now that functionalization is being used");
+  return { Shape(input.shape().scalar_type(), size) };
+}
+std::vector<Shape> compute_shape_select_view_update(const Output& target, const Output& source, const int64_t& dim, const int64_t& start, const int64_t& end, const int64_t& stride) {
+  TORCH_INTERNAL_ASSERT(false, "view ops should never be called now that functionalization is being used");
+  return { target.shape() };
+}
+std::vector<Shape> compute_shape_select(const Output& input, const int64_t& dim, const int64_t& start, const int64_t& end, const int64_t& stride) {
+  TORCH_INTERNAL_ASSERT(false, "view ops should never be called now that functionalization is being used");
+  return { MakeSelectShape(input.shape(), dim, start, end, stride) };
+}
+std::vector<Shape> compute_shape_squeeze(const Output& input, const int& dim) {
+  TORCH_INTERNAL_ASSERT(false, "view ops should never be called now that functionalization is being used");
+  const auto& input_shape = input.shape();
+  return { torch::lazy::Shape(input_shape.scalar_type(), BuildSqueezedDimensions(input_shape.sizes(), dim)) };
+}
+std::vector<Shape> compute_shape_unsqueeze(const Output& input, const int& dim) {
+  TORCH_INTERNAL_ASSERT(false, "view ops should never be called now that functionalization is being used");
+  const auto& input_shape = input.shape();
+  return { torch::lazy::Shape(input_shape.scalar_type(), BuildUnsqueezedDimensions(input_shape.sizes(), dim)) };
+}
+
+
 std::vector<Shape> compute_shape_select_scatter(const at::Tensor & self, const at::Tensor & src, int64_t dim, int64_t index) {
   auto self_meta = at::native::empty_strided_meta(self.sizes(), self.strides(), /*dtype=*/c10::make_optional(self.scalar_type()), /*layout=*/c10::make_optional(self.layout()), /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
   auto src_meta = at::native::empty_strided_meta(src.sizes(), src.strides(), /*dtype=*/c10::make_optional(src.scalar_type()), /*layout=*/c10::make_optional(src.layout()), /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);

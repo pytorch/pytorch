@@ -17,6 +17,7 @@
 #include <ATen/native/utils/ParamsHash.h>
 #include <ATen/TensorUtils.h>
 #include <c10/core/ScalarType.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <cudnn_frontend.h>
 #include <torch/library.h>
@@ -75,7 +76,7 @@ void setLinearParams(
   params->deterministic = deterministic;
   params->allow_tf32 = allow_tf32;
 }
-std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
+std::unordered_map<CacheKey, cudnn_frontend::ExecutionPlan, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
 }
 // TODO: we can use cudnn_frontend::ExecutionPlanCache when it supports caching
 // multiple operators
@@ -142,9 +143,9 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   new_sizes[1] = weight_transposed.size(0);
   weight_transposed = weight_transposed.view(new_sizes);
 
-  auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
-    auto workspace_size = 0;
-    auto workspace = at::empty({workspace_size}, input.options().dtype(at::kByte));
+  auto run = [&](const cudnn_frontend::ExecutionPlan& plan_desc) {
+    auto workspace_size = plan_desc.getWorkspaceSize();
+    auto workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
     at::SmallVector<void *, 8> data_ptrs;
     at::SmallVector<int64_t, 8> uids;
     data_ptrs = {input.data_ptr<int8_t>(), weight_transposed.data_ptr<int8_t>(),
@@ -156,17 +157,17 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
       uids.insert(uids.end(), {'b', 'c', 'd', 'n'});
     }
     auto variantPack = cudnn_frontend::VariantPackBuilder()
-      .setWorkspacePointer(workspace.data_ptr())
+      .setWorkspacePointer(workspace_size ? workspace_ptr.get() : nullptr)
       .setDataPointers(uids.size(), data_ptrs.data())
       .setUids(uids.size(), uids.data())
       .build();
     auto variant_pack_desc = variantPack.get_raw_desc();
-    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan_desc->get_backend_descriptor(), variant_pack_desc));
+    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan_desc.get_raw_desc(), variant_pack_desc));
   };
 
   auto search = execution_plan_cache.find(key);
   if (search != execution_plan_cache.end()) {
-    cudnn_frontend::ManagedOpaqueDescriptor plan_desc = search->second;
+    cudnn_frontend::ExecutionPlan plan_desc = search->second;
     run(plan_desc);
     return;
   }
@@ -283,9 +284,8 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
         .setHandle(handle)
         .setEngineConfig(cfg)
         .build();
-      auto plan_desc = plan.get_desc();
-      run(plan_desc);
-      execution_plan_cache[key] = plan_desc;
+      run(plan);
+      execution_plan_cache.emplace(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }

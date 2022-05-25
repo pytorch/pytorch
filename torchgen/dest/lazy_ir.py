@@ -352,14 +352,14 @@ class GenTSLazyIR(GenLazyIR):
                     f"operand(i++) == {arg.name}.value_or(kNullValue)"
                 )
             else:
-                value_comparsion.append(f"operand(i++) == {arg.name}")
+                value_comparison.append(f"operand(i++) == {arg.name}")
         for arg in itertools.chain(schema.positional_scalars, schema.keyword_scalars):
             if isinstance(arg.lazy_type, OptionalCType):
-                value_comparsion.append(
+                value_comparison.append(
                     f"((!this->{arg.name}&&!{arg.name}) || (this->{arg.name}&&{arg.name} && *(this->{arg.name}) == *{arg.name}))"
                 )
             else:
-                value_comparsion.append(f"this->{arg.name} == {arg.name}")
+                value_comparison.append(f"this->{arg.name} == {arg.name}")
         value_comparison_str = " &&\n        ".join(value_comparison)
 
         return f"""{signature} {{
@@ -642,6 +642,7 @@ class GenLazyShapeInferenceDefinition:
         else:
             shape_sig = ComputeShapeSignature(metadata.kernel, f)
             return ["\n".join([f"{shape_sig.shape_decl};"])]
+
 
 def generate_non_native_lazy_ir_nodes(
     non_native: List[Dict[str, Any]], gen_lazy_ir: GenLazyIR

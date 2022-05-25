@@ -138,7 +138,11 @@ class TestLazyTensor(JitTestCase):
 
 class TestLazyOpInfo(TestCase):
 
-    @ops([op for op in op_db if op.name in LAZY_OPS_LIST and op.name not in SKIP_RUNTIME_ERROR_LIST and op.name not in FUNCTIONAL_DECOMPOSE_LIST], allowed_dtypes=(torch.float,))
+    @ops([op for op in op_db
+          if op.name in LAZY_OPS_LIST
+          and op.name not in SKIP_RUNTIME_ERROR_LIST
+          and op.name not in FUNCTIONAL_DECOMPOSE_LIST
+          ], allowed_dtypes=(torch.float,))
     def test_dispatched_to_lazy(self, device, dtype, op):
         def get_name(op):
             l = [op.name]
