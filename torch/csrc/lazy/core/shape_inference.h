@@ -39,6 +39,10 @@ TORCH_API std::vector<torch::lazy::Shape> compute_shape_l1_loss_backward(const a
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_log_sigmoid_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & buffer);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_log_sigmoid_forward(const at::Tensor & self);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_logdet(const at::Tensor & self);
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_logical_and(at::Tensor & self, const at::Tensor & other);
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_logical_not(at::Tensor & self);
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_logical_or(at::Tensor & self, const at::Tensor & other);
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_logical_xor(at::Tensor & self, const at::Tensor & other);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_masked_fill(const at::Tensor & self, const at::Tensor & mask, const at::Scalar & value);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_masked_fill(const at::Tensor & self, const at::Tensor & mask, const at::Tensor & value);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_max(const at::Tensor & self);
