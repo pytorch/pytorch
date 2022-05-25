@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 import os
 from pathlib import Path
+from itertools import chain
 
-from torch.jit._shape_functions import shape_compute_graph_mapping
+from torch.jit._shape_functions import (
+    shape_compute_graph_mapping,
+    bounded_compute_graph_mapping,
+)
 
 SHAPE_HEADER = r"""
 /**
@@ -14,8 +18,8 @@ SHAPE_HEADER = r"""
  */
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/runtime/serialized_shape_function_registry.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/runtime/serialized_shape_function_registry.h>
 
 // clang-format off
 
@@ -34,15 +38,9 @@ const std::string& GetSerializedShapeFunctions() {
   return shape_funcs;
 }
 
-const OperatorMap<std::string>& GetShapeFunctionMappings() {
- static const OperatorMap<std::string> shape_mappings {
 """
 
 DECOMP_END = r"""
-  };
-
-  return shape_mappings;
-}
 
 // clang-format on
 
@@ -57,7 +55,10 @@ SERIALIZED_SHAPE_UTIL_FILE_NAME = "serialized_shape_function_registry.cpp"
 def gen_serialized_decompisitions() -> str:
     already_serialized_names = set()
     unique_funcs = []
-    for scripted_func in shape_compute_graph_mapping.values():
+    all_funcs = chain(
+        shape_compute_graph_mapping.values(), *bounded_compute_graph_mapping.values()
+    )
+    for scripted_func in all_funcs:
         if scripted_func.name in already_serialized_names:
             continue
         already_serialized_names.add(scripted_func.name)
@@ -90,21 +91,58 @@ def gen_serialized_decompisitions() -> str:
     return final_output
 
 
+SHAPE_SCHEMA_START = r"""
+const OperatorMap<std::string>& GetShapeFunctionMappings() {
+ static const OperatorMap<std::string> shape_mappings {
+"""
+
+SHAPE_SCHEMA_END = r"""
+  };
+
+  return shape_mappings;
+}
+"""
+
+
 def gen_shape_mappings() -> str:
     shape_mappings = []
     for schema, scripted_func in shape_compute_graph_mapping.items():
         shape_mappings.append('    {"' + schema + '", "' + scripted_func.name + '"},')
-    return "\n".join(shape_mappings)
+    return SHAPE_SCHEMA_START + "\n".join(shape_mappings) + SHAPE_SCHEMA_END
+
+
+BOUNDED_SCHEMA_START = r"""
+const OperatorMap<std::pair<std::string, std::string>>& GetBoundedShapeMappings() {
+ static const OperatorMap<std::pair<std::string, std::string>> shape_mappings {
+"""
+
+
+def gen_bounded_mappings() -> str:
+    bounded_mappings = []
+    for schema, (lower_func, upper_func) in bounded_compute_graph_mapping.items():
+        map_str = (
+            '    {"'
+            + schema
+            + '", {"'
+            + lower_func.name
+            + '", "'
+            + upper_func.name
+            + '"}},'
+        )
+        bounded_mappings.append(map_str)
+    return BOUNDED_SCHEMA_START + "\n".join(bounded_mappings) + SHAPE_SCHEMA_END
 
 
 def write_decomposition_util_file(path: str) -> None:
     decomposition_str = gen_serialized_decompisitions()
     shape_mappings = gen_shape_mappings()
+    bounded_mappings = gen_bounded_mappings()
     file_components = [
         SHAPE_HEADER,
         decomposition_str,
         DECOMP_CENTER,
         shape_mappings,
+        bounded_mappings,
         DECOMP_END,
     ]
     print("writing file to : ", path + "/" + SERIALIZED_SHAPE_UTIL_FILE_NAME)
