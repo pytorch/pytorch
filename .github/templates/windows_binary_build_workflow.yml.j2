@@ -97,7 +97,7 @@ jobs:
     steps:
       !{{ common.setup_ec2_windows() }}
       !{{ set_runner_specific_vars() }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: !{{ common.download_artifact_s3_action }}
         name: Download Build Artifacts
         with:
           name: !{{ config["build_name"] }}
