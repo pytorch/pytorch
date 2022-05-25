@@ -106,6 +106,19 @@
       "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
+      "name": "MPS",
+      "patterns": [
+         "test/test_mps.py",
+         "aten/src/ATen/mps/**",
+         "aten/src/ATen/native/mps/**"
+      ],
+      "approved_by": ["kulinseth", "razarmehr"],
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint"
+      ]
+   },
+   {
       "name": "superuser",
       "patterns": ["*"],
       "approved_by": ["pytorch/metamates"],
