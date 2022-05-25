@@ -163,6 +163,7 @@ def parse_native_yaml_struct(
     valid_tags: Set[str],
     ignore_keys: Optional[Set[DispatchKey]] = None,
     path: str = "<stdin>",
+    skip_native_fns_gen: bool = False,
 ) -> ParsedYaml:
     assert isinstance(es, list)
     rs: List[NativeFunction] = []
@@ -186,7 +187,8 @@ def parse_native_yaml_struct(
             index={},
         )
     )
-    add_generated_native_functions(rs, bs)
+    if not skip_native_fns_gen:
+        add_generated_native_functions(rs, bs)
     for k, v in bs.items():
         # All structured in-tree operators are implemented in terms of their out operator.
         indices[k] = BackendIndex(
@@ -229,7 +231,11 @@ def parse_tags_yaml(path: str) -> Set[str]:
 
 
 def parse_native_yaml(
-    path: str, tags_yaml_path: str, ignore_keys: Optional[Set[DispatchKey]] = None
+    path: str,
+    tags_yaml_path: str,
+    ignore_keys: Optional[Set[DispatchKey]] = None,
+    *,
+    skip_native_fns_gen: bool = False,
 ) -> ParsedYaml:
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
@@ -237,7 +243,11 @@ def parse_native_yaml(
         with open(path, "r") as f:
             es = yaml.load(f, Loader=LineLoader)
         _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = parse_native_yaml_struct(
-            es, valid_tags, ignore_keys, path=path
+            es,
+            valid_tags,
+            ignore_keys,
+            path=path,
+            skip_native_fns_gen=skip_native_fns_gen,
         )
 
     return _GLOBAL_PARSE_NATIVE_YAML_CACHE[path]

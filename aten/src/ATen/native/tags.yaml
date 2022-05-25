@@ -8,3 +8,7 @@
           This tag indicates operators that are *_copy* variants
           of view/aliasing operators. If an operator has a view_copy tag,
           then it should have the name {op}_copy, where {op} is a view operator.
+- tag: generated
+  desc: |
+          This tag indicates that the operator doesn't have an explicit entry in
+          native_functions.yaml, and instead was generated automatically by the codegen.

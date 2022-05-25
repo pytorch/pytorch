@@ -42,6 +42,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
     onlyCUDA,
+    onlyCPU,
     onlyNativeDeviceTypes,
     OpDTypes,
     skipMeta,
@@ -52,7 +53,7 @@ from torch._prims.context import TorchRefsMode
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal import composite_compliance
 
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_flatten, tree_map
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -1340,10 +1341,61 @@ class TestMathBits(TestCase):
             torch.is_complex,
         )
 
+class WrapperToTestTags(torch.Tensor):
+    elem: torch.Tensor
+
+    __torch_function__ = torch._C._disabled_torch_function_impl
+
+    @staticmethod
+    def __new__(cls, elem, *args, **kwargs):
+        # The WrapperTensor shouldn't hold any
+        # memory for the class in question, but it should still
+        # advertise the same device as before
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            cls, elem.size(),
+            strides=elem.stride(), storage_offset=elem.storage_offset(),
+            dtype=elem.dtype, layout=elem.layout,
+            device=elem.device, requires_grad=kwargs.get("requires_grad", False)
+        )
+        # ...the real tensor is held as an element on the tensor.
+        r.elem = elem.detach() if r.requires_grad else elem
+        return r
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        def unwrap(e):
+            return e.elem if isinstance(e, cls) else e
+
+        def wrap(e):
+            return cls(e) if isinstance(e, torch.Tensor) else e
+
+        rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+
+        # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm.out
+        # which mutate not necessarily the first input.
+        if isinstance(rs, torch.Tensor) and isinstance(args[0], torch.Tensor):
+            if rs is args[0]:
+                unequal_size = rs.size() != args[0].size()
+                unequal_strides = rs.stride() != args[0].stride()
+                if unequal_size or unequal_strides:
+                    assert torch.Tags.inplace_view in func.tags
+        return rs
+
+class TestTags(TestCase):
+    @onlyCPU
+    @ops(ops_and_refs, dtypes=OpDTypes.any_one)
+    def test_tags(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample in samples:
+            # TODO: Test tags for ops that return a list of tensors
+            if isinstance(sample.input, torch.Tensor):
+                tensor = WrapperToTestTags(sample.input)
+                res = op(tensor, *sample.args, **sample.kwargs)
 
 instantiate_device_type_tests(TestCommon, globals())
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
+instantiate_device_type_tests(TestTags, globals())
 
 if __name__ == "__main__":
     run_tests()
