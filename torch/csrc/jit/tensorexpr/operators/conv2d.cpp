@@ -319,23 +319,23 @@ bool mkldnnPrepackedConvIsSupported(
 #if AT_MKLDNN_ENABLED()
   if (input.dtype != c10::ScalarType::Float ||
       weight.dtype != c10::ScalarType::Float) {
-    GRAPH_DEBUG("conv2dIsSupported: only float32 allowed");
+    GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: only float32 allowed");
     return false;
   }
   if (input.dims.size() != 4 || weight.dims.size() != 4) {
-    GRAPH_DEBUG("conv2dIsSupported: inputs are the wrong size");
+    GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: inputs are the wrong size");
     return false;
   }
   if (stride.size() != 2) {
-    GRAPH_DEBUG("conv2dIsSupported: unsupported stride");
+    GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: unsupported stride");
     return false;
   }
   if (pad.size() != 2) {
-    GRAPH_DEBUG("conv2dIsSupported: unsupported pad");
+    GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: unsupported pad");
     return false;
   }
   if (dilation.size() != 2) {
-    GRAPH_DEBUG("conv2dIsSupported: unsupported dilation");
+    GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: unsupported dilation");
     return false;
   }
 
@@ -350,7 +350,7 @@ bool mkldnnPrepackedConvIsSupported(
   bool use_mkldnn = params.groups > 1 ||
       (weight.dims[2] > 3 && weight.dims[3] > 3) || input.dims[0] > 1 ||
       input.dims[0] * input.dims[1] * input.dims[2] * input.dims[3] > 20480;
-  GRAPH_DEBUG("conv2dIsSupported: ", use_mkldnn);
+  GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: ", use_mkldnn);
   return use_mkldnn;
 #endif
   return false;

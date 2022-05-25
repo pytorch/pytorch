@@ -23,16 +23,21 @@ void insertPrePackedConvOpForNode(Node* n) {
   constexpr int POS_WEIGHT = 1;
   if (!tensorexpr::isContiguous(
           n->input(POS_INPUT), at::MemoryFormat::ChannelsLast)) {
+    GRAPH_DEBUG(
+        "insertPrePackedConvOpForNode: input is not ChannelsLast contiguous");
     return;
   }
 
   if (!tensorexpr::isContiguous(
           n->input(POS_WEIGHT), at::MemoryFormat::ChannelsLast)) {
+    GRAPH_DEBUG(
+        "insertPrePackedConvOpForNode: weight is not ChannelsLast contiguous");
     return;
   }
 
   // Leave depthwise conv2d to NNC
   if (tensorexpr::conv2dIsSupportedJit(n)) {
+    GRAPH_DEBUG("insertPrePackedConvOpForNode: leave depthwise conv2d to NNC");
     return;
   }
 

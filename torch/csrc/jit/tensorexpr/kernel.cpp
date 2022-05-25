@@ -290,14 +290,16 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
   // Weights and bias should be Constant when using mkldnn backend
   if (node->input(1)->node()->kind() != prim::Constant ||
       node->input(2)->node()->kind() != prim::Constant) {
-    GRAPH_DEBUG("conv2dIsSupported: weight is not Constant");
+    GRAPH_DEBUG(
+        "mkldnnPrepackedConvIsSupported: weight or bias is not Constant");
     return false;
   }
 
   // Input and weight should be NHWC contiguous.
   if (!(isContiguous(node->input(0), at::MemoryFormat::ChannelsLast) &&
         isContiguous(node->input(1), at::MemoryFormat::ChannelsLast))) {
-    GRAPH_DEBUG("conv2dIsSupported: some inputs are not contiguous");
+    GRAPH_DEBUG(
+        "mkldnnPrepackedConvIsSupported: input or weight is not ChannelsLast contiguous");
     return false;
   }
 
