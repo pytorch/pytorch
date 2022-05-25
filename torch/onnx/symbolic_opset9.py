@@ -413,7 +413,7 @@ def overload_by_arg_count(fn):
             arg_descriptors = overload._arg_descriptors
             if len(arg_descriptors) == len(args):
                 return overload(g, *args)
-        raise NotImplementedError(f"Unknown aten::{fn.__name__} signature")
+        raise NotImplementedError("Unknown aten::{} signature".format(fn.__name__))
 
     return wrapper
 
@@ -808,7 +808,9 @@ def prelu(g, self, weight):
     if self_rank is not None and weight_rank is not None:
         assert (
             self_rank >= weight_rank
-        ), f"rank(x) should be >= rank(slope) but got {self_rank} < {weight_rank}"
+        ), "rank(x) should be >= rank(slope) but got {} < {}".format(
+            self_rank, weight_rank
+        )
     return g.op("PRelu", self, weight)
 
 
@@ -1429,7 +1431,7 @@ def wrap_logical_op_with_cast_to(to_type):
 def wrap_logical_op_with_cast_to_and_from(to_type):
     def decorator(fn):
         def wrap_with_cast(g, input, other):
-            to_cast_func = globals()[f"_cast_{to_type}"]
+            to_cast_func = globals()["_cast_{}".format(to_type)]
             from_cast_func = wrap_logical_op_with_cast_to(input.type().scalarType())(fn)
             return from_cast_func(
                 g, to_cast_func(g, input, False), to_cast_func(g, other, False)
@@ -2468,7 +2470,7 @@ def _unique2(g, input, sorted, return_inverse, return_counts):
 # TODO(justinchuby): Clean up this function generation magic by defining the functions
 # explicitly.
 for k, v in symbolic_helper.cast_pytorch_to_onnx.items():
-    name = f"_cast_{k}"
+    name = "_cast_{}".format(k)
     globals()[name] = symbolic_helper.parse_args("v", "i")(
         functools.partial(symbolic_helper._cast_func_template, v)
     )
@@ -3303,9 +3305,9 @@ def _generic_rnn(
         if variant == "RNN":
             weight_ih, weight_hh = weights
         elif variant == "GRU" or variant == "LSTM":
-            weight_ih, weight_hh = (
+            weight_ih, weight_hh = [
                 reform_weights(g, w, hidden_size, reform_permutation) for w in weights
-            )
+            ]
         return tuple(
             symbolic_helper._unsqueeze_helper(g, x, [0]) for x in (weight_ih, weight_hh)
         )
@@ -3315,9 +3317,9 @@ def _generic_rnn(
         if variant == "RNN":
             weight_ih, weight_hh, bias_ih, bias_hh = weights
         elif variant == "GRU" or variant == "LSTM":
-            weight_ih, weight_hh, bias_ih, bias_hh = (
+            weight_ih, weight_hh, bias_ih, bias_hh = [
                 reform_weights(g, w, hidden_size, reform_permutation) for w in weights
-            )
+            ]
         bias_concat = g.op("Concat", bias_ih, bias_hh, axis_i=0)
         return tuple(
             symbolic_helper._unsqueeze_helper(g, x, [0])
@@ -5007,11 +5009,11 @@ class Prim:
     def device(ctx: torch.onnx.SymbolicContext, g, *inputs, **kwargs):
         n = ctx.cur_node
 
-        if n.output().type().kind() == "DeviceObjType":
+        if n.output().type().kind() == "_C.DeviceObjType":
             return None
 
         return symbolic_helper._unimplemented(
-            "prim::device", "output type is not `DeviceObjType`."
+            "prim::device", "output type is not `_C.DeviceObjType`."
         )
 
     @staticmethod
@@ -5117,7 +5119,8 @@ class Prim:
             for idx in range(len(if_output_list)):
                 if current_b_list[idx] not in env:
                     raise RuntimeError(
-                        f"The sub block ATen output {current_b_list[idx]} is not in env."
+                        "The sub block ATen output {}"
+                        " is not in env.".format(current_b_list[idx])
                     )  # type:ignore[operator]
                 onnx_b = env[current_b_list[idx]]
                 final_b_list.append(onnx_b)
@@ -5169,7 +5172,9 @@ class Prim:
             return g.op("Constant", value_t=torch.tensor(n["value"]))
         else:
             raise RuntimeError(
-                f"Unsupported prim::Constant kind: `{n.kindOf('value')}`. Send a bug report."
+                "Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
+                    n.kindOf("value")
+                )
             )
 
 

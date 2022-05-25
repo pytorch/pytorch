@@ -183,10 +183,6 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
   // We need to propagate that metadata mutation to the wrapper (new size).
   set_sizes_and_strides(value_.sizes(), value_.strides());
-  set_storage_offset(value_.storage_offset());
-  if (dtype() != value_.unsafeGetTensorImpl()->dtype() || layout() != value_.unsafeGetTensorImpl()->layout()) {
-    value_ = value_.to(c10::TensorOptions().dtype(dtype()).layout(layout()));
-  }
 }
 
 
@@ -194,8 +190,10 @@ void FunctionalTensorWrapper::sync_() {
   if (is_up_to_date()) {
     return;
   }
-  apply_updates();
-  regenerate_from_base();
+  auto any_updates = apply_updates();
+  if (any_updates) {
+    regenerate_from_base();
+  }
 }
 
 void FunctionalTensorWrapper::regenerate_from_base() {

@@ -132,4 +132,3 @@ Jiterator (beta)
     :nosignatures:
 
     jiterator._create_jit_fn
-    jiterator._create_multi_output_jit_fn

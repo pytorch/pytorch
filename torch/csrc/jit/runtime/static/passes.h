@@ -80,6 +80,8 @@ TORCH_API void RemoveUnnecessaryOutputs(std::shared_ptr<Graph>& graph);
 TORCH_API void RemoveUnnecessaryEmbeddingBagOutputs(
     std::shared_ptr<Graph>& graph);
 
+TORCH_API void QuantizedLinearReluFusion(std::shared_ptr<Graph>& graph);
+
 TORCH_API void FuseClampNaNToNum(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
