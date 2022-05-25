@@ -55,7 +55,7 @@ namespace meta {
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")"); \
  \
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self); \
-  set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
 
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   ADDMM_META();
@@ -73,7 +73,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
       self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   auto names = at::namedinference::compute_matmul_outnames(self, mat2);
-  set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output_raw_strided(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
 }
 
 TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
@@ -106,7 +106,7 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
   auto options = self.options()
                      .dtype(toRealValueType(opt_dtype.value_or(self.scalar_type())));
 
-  set_output(shape, options);
+  set_output_raw_strided(0, shape, {}, options);
 }
 
 template <typename Meta>
@@ -129,7 +129,7 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
 
   auto& result = meta.maybe_get_output(0);
   // 'set_output' does not resize for in-place calls
-  meta.set_output(output_size, batch2.options());
+  meta.set_output_raw_strided(0, output_size, {}, batch2.options());
   const auto result_sizes = result.sizes();
   // Error is raised if called from in-place overload with incorrect shape
   TORCH_CHECK(result_sizes == output_size,
@@ -1651,13 +1651,14 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return result.fill_(self.vdot(other));
 }
 
-namespace {
-bool should_fold_into_mm(const Tensor& tensor1, const Tensor& tensor2) {
-  auto dim_tensor1 = tensor1.dim();
-  auto dim_tensor2 = tensor2.dim();
+bool should_fold(const Tensor& tensor1, const int64_t dim_tensor2) {
+  const auto dim_tensor1 = tensor1.dim();
   if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
+    const auto t1_sizes_ptr = tensor1.sizes().cbegin();
+    const auto t1_strides = tensor1.strides();
     if (dim_tensor1 == 3 && dim_tensor2 == 2 &&
-        tensor1.stride(-1) != 1 && tensor1.stride(0) == tensor1.size(1) * tensor1.size(2)) {
+        t1_strides.back() != 1 &&
+        t1_strides.front() == t1_sizes_ptr[1] * t1_sizes_ptr[2]) {
       // First dim is slowest moving, and then the following two dims are
       // transposed. This can happen for example by permute(0, 2, 1).
       // First 2 dims could be folded to use mm but would require permutation
@@ -1675,34 +1676,35 @@ bool should_fold_into_mm(const Tensor& tensor1, const Tensor& tensor2) {
     return false;
   }
 }
-} // anonymous namespace
 
 /*
 Matrix product of two Tensors.
 The behavior depends on the dimensionality of the Tensors as follows:
-- If both Tensors are 1-dimensional, the dot product (scalar) is returned.
-- If both arguments are 2-dimensional, the matrix-matrix product is returned.
-- If the first argument is 1-dimensional and the second argument is 2-dimensional,
-  a 1 is prepended to its dimension for the purpose of the matrix multiply.
-  After the matrix multiply, the prepended dimension is removed.
-- If the first argument is 2-dimensional and the second argument is 1-dimensional,
-  the matrix-vector product is returned.
-- If both arguments are at least 1-dimensional and at least one argument is
-  N-dimensional (where N > 2), then a batched matrix multiply is returned.  If the first
-  argument is 1-dimensional, a 1 is prepended to its dimension for the purpose of the
-  batched matrix multiply and removed after.  If the second argument is 1-dimensional, a
-  1 is appended to its dimension for the purpose of the batched matrix multiple and removed after.
-  The non-matrix (i.e. batch) dimensions are broadcasted (and thus
-  must be broadcastable).  For example, if tensor1 is a (j x 1 x n x m) Tensor
-  and tensor2 is a (k x m x p) Tensor, the returned tensor will be an (j x k x n x p) Tensor.
+- If both Tensors are 1-dimensional, (1d) the dot product (scalar) is returned.
+- If the arguments are 2D - 1D or 1D - 2D, the matrix-vector product is returned.
+- If both arguments are 2D, the matrix-matrix product is returned.
+- If one of the arguments is ND with N >= 3 and the other is 1D or 2D, and some
+  conditions on the strides apply (see should_fold) we fold the first N-1 dimensions
+  of the ND argument to form a matrix, call mm or mv, reshape it back to ND and return it
+- Otherwise, we return bmm, after broadcasting and folding the batched dimensions if
+  there's more than one
 */
 Tensor _matmul_impl(
     Tensor& out,
     const Tensor& tensor1,
     const Tensor& tensor2) {
   NoNamesGuard guard;
-  auto dim_tensor1 = tensor1.dim();
-  auto dim_tensor2 = tensor2.dim();
+  const auto dim_tensor1 = tensor1.dim();
+  const auto dim_tensor2 = tensor2.dim();
+
+  // This is checked up here to simplify the logic below
+  // Note that the strings are just evaluated on failure, so almost always we just evaluate
+  // the condition and move on
+  TORCH_CHECK(dim_tensor1 != 0 && dim_tensor2 != 0,
+              "both arguments to matmul need to be at least 1D, but they are ",
+              dim_tensor1, "D and ", dim_tensor2, "D");
+
+
   const bool has_out = out.defined();
 
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
@@ -1713,86 +1715,100 @@ Tensor _matmul_impl(
     return has_out ? at::mv_out(out, tensor2.t(), tensor1) : tensor2.t().mv(tensor1);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
-  } else if (should_fold_into_mm(tensor1, tensor2)) {
-    // optimization: use mm instead of bmm by folding tensor1's batch into
-    // its leading matrix dimension.
+  } else if (should_fold(tensor1, dim_tensor2) || should_fold(tensor2, dim_tensor1)) {
+    // dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
+    // dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
+    // and some condition on the strides is fulfilled
 
-    Tensor t2 = dim_tensor2 == 1 ? tensor2.unsqueeze(-1) : tensor2;
-    auto size1 = tensor1.sizes();
-    auto size2 = t2.sizes();
-    DimVector output_size(size1.begin(), size1.end() - 1);
-    if (dim_tensor2 > 1) {
-      output_size.push_back(size2[dim_tensor2 - 1]);
-    }
+    // optimization: use mm instead of bmm by folding the batch of the larger tensor
+    // into its leading matrix dimension
+    const auto transpose = dim_tensor2 > dim_tensor1;
+    const auto t1 = transpose ? MaybeOwned<Tensor>::owned(tensor2.mT())
+                              : MaybeOwned<Tensor>::borrowed(tensor1);
+    const auto t2 = !transpose ? MaybeOwned<Tensor>::borrowed(tensor2)
+                               : dim_tensor1 == 2
+                                   ? MaybeOwned<Tensor>::owned(tensor1.t())
+                                   : MaybeOwned<Tensor>::borrowed(tensor1);
+    // Invariant: t1->dim() >= 3 && (t2->dim() == 1 || t2->dim() == 2)
+    //            and *t1 and *t2 are matmul-compatible
 
-    // fold the batch into the first dimension
-    // Why not tensor1.view(-1, size1[size1.size() -1])?
+    // Why not t1->view(-1, sizes_1.back())?
     // If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
     // This can happen in e.g. [3, 5, 0] @ [0, 0].
-    // So we manually compute the folding as a result.
-    const auto dim1_size = c10::multiply_integers(size1.begin(), size1.end() - 1);
-    auto t1 = tensor1.expect_contiguous()->view({dim1_size, size1[size1.size() - 1]});
-    Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1, t2), output_size)
-                            : at::_unsafe_view(t1.mm(t2), output_size);
-    return has_out ? out.set_(output) : output;
-  } else if ((dim_tensor1 == 1 || dim_tensor1 == 2) && dim_tensor2 >= 3) {
-    // optimization: transpose the inner dimensions of the arguments, call
-    // matmul on the swapped arguments, then transpose the inner dimensions
-    // of the result.
-    const int64_t n = dim_tensor1 == 2 ? tensor1.size(-2) : 1;
-    const int64_t m = tensor1.size(-1);
-    const int64_t p = tensor2.size(-1);
+    const auto sizes_1 = t1->sizes();
+    auto output_shape = DimVector(sizes_1.begin(), sizes_1.end() - 1);
+    const auto folded_dim1 = c10::multiply_integers(output_shape);
 
-    const Tensor t2_T = tensor2.transpose(-1, -2);
-    const Tensor t1_T = dim_tensor1 == 2 ? tensor1.t() : tensor1.reshape({n, m}).t();
-    const Tensor res_T = _matmul_impl(out, t2_T, t1_T);
-
-    if (dim_tensor1 == 2) {
-      Tensor res = res_T.transpose(-1, -2).contiguous();
-      return has_out ? out.set_(res) : res;
+    // Readjust output_shape if we are multiplying by a matrix
+    const auto t2_is_matrix = t2->dim() == 2;
+    if (t2_is_matrix) {
+      output_shape.push_back(t2->sizes()[1]);
     }
-    else {
-      c10::IntArrayRef shape_array = tensor2.sizes().slice(0, dim_tensor2 - 2);
-      DimVector shape(shape_array.begin(), shape_array.end());
-      shape.push_back(p);
+    const auto t1_folded = t1->reshape({folded_dim1, sizes_1.back()});
+    if (!has_out) {
+      if (t2_is_matrix) {
+        // FIXME This path always does an unnecessary copy when transpose == true as the returned
+        // result from BLAS is already C-transposed
+        const auto output = at::_unsafe_view(t1_folded.mm(*t2), output_shape);
+        return transpose ? output.mT().contiguous() : output;
+      } else {
+        return at::_unsafe_view(t1_folded.mv(*t2), output_shape);
+      }
+    } else {
+      // Resize output into the correct shape
+      const auto transpose_out = transpose && t2_is_matrix;
+      if (transpose_out) {
+        // Swap last two elements of output_shape
+        std::iter_swap(output_shape.end() - 2, output_shape.end() - 1);
+        at::native::resize_output(out, output_shape);
+        std::iter_swap(output_shape.end() - 2, output_shape.end() - 1);
+      } else {
+        at::native::resize_output(out, output_shape);
+      }
+      const auto out_ = transpose_out ? c10::MaybeOwned<Tensor>::owned(out.mT())
+                                      : c10::MaybeOwned<Tensor>::borrowed(out);
 
-      Tensor res = res_T.reshape(shape).contiguous();
-      return has_out ? out.set_(res) : res;
+      // We then reshape the output to the expected shape and call mm/mv
+      // and transpose back if necessary
+      auto reshaped_out = t2_is_matrix ? out_->reshape({folded_dim1, t2->sizes().back()})
+                                       : out_->reshape({folded_dim1});
+      if (t2_is_matrix) {
+        at::mm_out(reshaped_out, t1_folded, *t2);
+      } else {
+        at::mv_out(reshaped_out, t1_folded, *t2);
+      }
+      if (!reshaped_out.is_alias_of(out)) {
+        out_->copy_(reshaped_out.view_as(*out_));
+      }
+      return out;
     }
-  } else if ((dim_tensor1 >= 1 && dim_tensor2 >= 1) && (dim_tensor1 >= 3 || dim_tensor2 >= 3)) {
-    // We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
-    // we track m1 vs m2 separately even though they must match for nicer error messages
-    int64_t n = dim_tensor1 > 1 ? tensor1.size(-2) : 1;
-    int64_t m1 = tensor1.size(-1);
-    IntArrayRef batch_tensor1(tensor1.sizes().data(), std::max<int64_t>(dim_tensor1 - 2, 0));
-    int64_t m2 = dim_tensor2 > 1 ? tensor2.size(-2) : 1;
-    int64_t p = tensor2.size(-1);
-    IntArrayRef batch_tensor2(tensor2.sizes().data(), std::max<int64_t>(dim_tensor2 - 2, 0));
+  } else {
+    // dim_tensor1 >= 3 || dim_tensor2 >= 3
+    // We track m1 vs m2 separately even though they must match for nicer error messages
+    const int64_t n = dim_tensor1 > 1 ? tensor1.sizes().cend()[-2] : 1LL;
+    const int64_t m1 = tensor1.sizes().back();
+    const IntArrayRef batch_tensor1(tensor1.sizes().data(),
+                                    std::max<int64_t>(dim_tensor1 - 2, 0LL));
+    const int64_t m2 = dim_tensor2 > 1 ? tensor2.sizes().cend()[-2] : tensor2.sizes().back();
+    const int64_t p = dim_tensor2 > 1 ? tensor2.sizes().back() : 1LL;
+    const IntArrayRef batch_tensor2(tensor2.sizes().data(),
+                                    std::max<int64_t>(dim_tensor2 - 2, 0LL));
+    auto output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
 
-    // expand the batch portion (i.e. cut off matrix dimensions and expand rest)
-    DimVector expand_batch_portion = infer_size_dimvector(batch_tensor1, batch_tensor2);
+    const auto tensor1_expand_size = [&output_shape, n, m1]{ DimVector ret(output_shape);
+                                                             ret.append({n, m1});
+                                                             return ret; }();
+    const auto tensor2_expand_size = [&output_shape, m2, p]{ DimVector ret(output_shape);
+                                                             ret.append({m2, p});
+                                                             return ret; }();
 
-    DimVector tensor1_expand_size(expand_batch_portion);
-    tensor1_expand_size.push_back(n);
-    tensor1_expand_size.push_back(m1);
-
-    DimVector tensor2_expand_size(expand_batch_portion);
-    tensor2_expand_size.push_back(m2);
-    tensor2_expand_size.push_back(p);
-
-    const int64_t expand_batch_product =
-        c10::multiply_integers(expand_batch_portion);
-
-    std::array<int64_t, 3> tensor1_bmm_view = {expand_batch_product, n, m1};
-
-    std::array<int64_t, 3> tensor2_bmm_view = {expand_batch_product, m2, p};
+    const int64_t expand_batch_product = c10::multiply_integers(output_shape);
 
     // flatten expanded batches
-    Tensor tensor1_expanded = tensor1.expand(tensor1_expand_size).reshape(tensor1_bmm_view);
-    Tensor tensor2_expanded = tensor2.expand(tensor2_expand_size).reshape(tensor2_bmm_view);
-
-    // reshape batches back into result
-    DimVector output_shape(expand_batch_portion);
+    const auto tensor1_expanded = tensor1.expand(tensor1_expand_size)
+                                         .reshape({expand_batch_product, n, m1});
+    const auto tensor2_expanded = tensor2.expand(tensor2_expand_size)
+                                         .reshape({expand_batch_product, m2, p});
     if (dim_tensor1 > 1) {
       output_shape.push_back(n);
     }
@@ -1800,14 +1816,18 @@ Tensor _matmul_impl(
       output_shape.push_back(p);
     }
 
-    Tensor output = has_out ? at::_unsafe_view(at::bmm_out(out, tensor1_expanded, tensor2_expanded), output_shape)
-                            : at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded), output_shape);
-
-    return has_out ? out.set_(output) : output;
+    if (!has_out) {
+      return at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded), output_shape);
+    } else {
+      at::native::resize_output(out, output_shape);
+      auto reshaped_out = out.reshape({expand_batch_product, n, p});
+      at::bmm_out(reshaped_out, tensor1_expanded, tensor2_expanded);
+      if (!reshaped_out.is_alias_of(out)) {
+        out.copy_(reshaped_out.view_as(out));
+      }
+      return out;
+    }
   }
-
- AT_ERROR("both arguments to matmul need to be at least 1D, but they are ",
-          dim_tensor1, "D and ", dim_tensor2, "D");
 }
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
@@ -2390,18 +2410,21 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   auto dim = opt_dim.value_or(IntArrayRef{});
   // No need to handle opt_dtype explicitly as it is already encoded in the dtype of result
 
-  // Issue arising from the difference between vectorized and non-vectorized implementation on CPU
+  // https://github.com/pytorch/pytorch/issues/52648
+  // Reductions always use `std::abs` to compute the absolute value. In the backward of this
+  // function, we need to locate the index that was selected as the largest value. To do so
+  // we do self.abs() == result to locate the index of the largest element.
+  // Now, self.abs() may dispatch to a vectorized implementation which gives sliiightly different
+  // results to the std::abs(std::complex<T>) implementation.
+  // As such, to be able to compute the correct index in the backward, we need to use self.abs()
+  // both in the forward and in the backward
   Tensor self_;
-  if (self.device().type() == c10::kCPU &&
-      isComplexType(self.scalar_type()) &&
-      std::abs(ord) == INFINITY) {
-    // TODO: This at::abs() call is used so that the at::abs() call in the
-    // backward function produces an identical result for complex inputs.
-    // However, it would be ideal if we could incorporate this into
-    // linalg_vector_norm_stub. See issue:
-    // https://github.com/pytorch/pytorch/issues/52648
-    auto in_dtype = opt_dtype.value_or(self.scalar_type());
-    self_ = self.to(in_dtype).abs();
+  if (self.is_cpu() && self.is_complex() && std::abs(ord) == INFINITY) {
+    if (opt_dtype.has_value()) {
+      self_ = self.to(*opt_dtype).abs();
+    } else {
+      self_ = self.abs();
+    }
   } else {
     self_ = self;
   }
@@ -2493,7 +2516,6 @@ Tensor linalg_matrix_norm(
   TORCH_CHECK(ord == "fro" || ord == "nuc", "linalg.matrix_norm: Order ", ord, " not supported.");
 
   auto A_ = opt_dtype.has_value() ? A.to(*opt_dtype) : A;
-  using Int = IntArrayRef::value_type;
 
   if (ord == "fro") {
     return at::linalg_vector_norm(A_, 2, dim, keepdim);
@@ -2658,12 +2680,8 @@ Tensor &nuclear_norm_out(const Tensor& self, bool keepdim, Tensor& result) {
   return at::native::nuclear_norm_out(self, IntArrayRef({0, 1}), keepdim, result);
 }
 
-Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  Tensor result = at::empty({0}, self.options().dtype(toRealValueType(self.scalar_type())));
-  return at::native::nuclear_norm_out(self, dim, keepdim, result);
-}
-
-Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
+namespace {
+Tensor nuclear_norm_impl(const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
   auto dim_ = dim.vec();
   maybe_wrap_dims(dim_, self.dim());
@@ -2676,6 +2694,16 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
     auto permutation_reverse = create_reverse_permutation(permutation);
     result_ = result_.permute(permutation_reverse);
   }
+  return result_;
+}
+} // anonymous namespace
+
+Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
+  return nuclear_norm_impl(self, dim, keepdim).to(toRealValueType(self.scalar_type()));
+}
+
+Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
+  auto result_ = nuclear_norm_impl(self, dim, keepdim);
   at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
   return result;
