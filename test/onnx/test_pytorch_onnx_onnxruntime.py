@@ -9899,7 +9899,7 @@ class _TestONNXRuntime:
             opset_version=self.opset_version,
             training=torch.onnx.TrainingMode.TRAINING,
         )
-        ort_sess = verification._create_ort_session(model_onnx)
+        ort_sess = verification._ort_session(model_onnx)
         ort_outs = verification._run_ort(ort_sess, (x,))
         assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
 
@@ -9945,7 +9945,7 @@ class _TestONNXRuntime:
             opset_version=self.opset_version,
             training=torch.onnx.TrainingMode.TRAINING,
         )
-        ort_sess = verification._create_ort_session(model_onnx)
+        ort_sess = verification._ort_session(model_onnx)
         ort_outs = verification._run_ort(ort_sess, (x,))
 
         y = model(input)
@@ -9969,7 +9969,7 @@ class _TestONNXRuntime:
             opset_version=self.opset_version,
             training=torch.onnx.TrainingMode.TRAINING,
         )
-        ort_sess = verification._create_ort_session(model_onnx)
+        ort_sess = verification._ort_session(model_onnx)
         ort_outs = verification._run_ort(ort_sess, (x,))
         ort_mask = np.where(ort_outs[0] != 0, 1, 0)
         pyt_mask = np.where(output != 0, 1, 0)
@@ -11885,7 +11885,7 @@ class _TestONNXRuntime:
         torch.onnx.export(
             model_export, dummy_input, model_onnx, opset_version=self.opset_version
         )
-        ort_sess = verification._create_ort_session(model_onnx)
+        ort_sess = verification._ort_session(model_onnx)
         ort_out = verification._run_ort(ort_sess, inputs=dummy_input)
 
         actual_std = np.std(ort_out)
@@ -11928,7 +11928,7 @@ class _TestONNXRuntime:
         torch.onnx.export(
             model_export, dummy_input, model_onnx, opset_version=self.opset_version
         )
-        ort_sess = verification._create_ort_session(model_onnx)
+        ort_sess = verification._ort_session(model_onnx)
 
         ort_out = verification._run_ort(ort_sess, inputs=dummy_input)
         actual_min = np.min(ort_out)
