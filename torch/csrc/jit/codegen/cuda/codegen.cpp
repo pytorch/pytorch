@@ -1590,6 +1590,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       func_args.arg(read_pred);
     }
 
+    func_args.arg(genInline(grouped_grop->entrance_index()));
+    func_args.arg(genInline(grouped_grop->entrances()));
+
     addProfileArguments(func_args, grouped_grop);
 
     indent() << "reduction::gridReduceGroup<" << template_args << ">(\n";
