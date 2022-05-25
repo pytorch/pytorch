@@ -26,7 +26,6 @@ _device_not_kwarg_ops = (
 # this op is never actually used
 _non_kwarg_device_constructors = (torch.ops.aten._list_to_tensor,)
 
-
 def contains_tensor_types(type):
     tensor_type = torch._C.TensorType.get()
     return type.isSubtypeOf(tensor_type) or any(
@@ -55,15 +54,16 @@ class FakeTensorConverter(MetaConverter):
         self.tensor_memo = {}
         self.meta_converter = MetaConverter()
 
-    def fake_tensor(self, t, device):
+    def fake_tensor(self, t, device=None):
         if t not in self.tensor_memo:
             if device:
                 self.tensor_memo[t] = FakeTensor(t, device)
             else:
-                self.tensor_memo[t] = FakeTensor.from_tensor(t)
+                existing_device = t.device
+                self.tensor_memo[t] = FakeTensor(self.meta_converter(t), existing_device)
         return self.tensor_memo[t]
 
-    def __call__(self, t, device):
+    def __call__(self, t, device=None):
         return self.fake_tensor(t, device)
 
 
@@ -93,7 +93,9 @@ class FakeTensor(torch.Tensor):
 
     @staticmethod
     def __new__(cls, elem, device):
-        return torch.Tensor._make_subclass(cls, elem, elem.requires_grad, dispatch_device=True)
+        return torch.Tensor._make_subclass(
+            cls, elem, elem.requires_grad, dispatch_device=True
+        )
 
     def __init__(self, elem, device: Union[torch.device, str]):
         # elem does not need to be recorded, because FakeTensor *is a* elem
@@ -140,17 +142,31 @@ class FakeTensor(torch.Tensor):
             assert len(args) == 1 and isinstance(args[0], FakeTensor)
             return args[0].fake_device
 
-        def wrap(e, device=None):
+        def wrap(e, device=None, converter_fn=converter):
+            converter_fn = converter_fn if converter_fn is not None else converter
             if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
                 return converter(e, device)
             else:
                 return e
 
         # if we are in the dispatch mode, we will enter this function even if the inputs
-        # are not FakeTensors, and they need to be wrapped
+        # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
+        # and just support constructors. TODO: extend more broadly
         if cls == FakeTensorMode:
-            args = tree_map(wrap, args)
-            kwargs = tree_map(wrap, kwargs)
+            conversion_made = False
+
+            def check_non_fake_tensor(x):
+                nonlocal conversion_made
+                conversion_made = conversion_made or (isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor))
+
+            tree_map(check_non_fake_tensor, args)
+            tree_map(check_non_fake_tensor, kwargs)
+
+            if conversion_made:
+                raise Exception(
+                    "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
+                    f"Please convert all Tensors to FakeTensors first. Found in {func}"
+                )
 
         # _to_copy fails when run with FakeTensors to cuda device
         # TODO: debug
@@ -252,6 +268,7 @@ class FakeTensor(torch.Tensor):
         return common_device
 
     __torch_function__ = torch._C._disabled_torch_function_impl
+
 
 class FakeTensorMode(FakeTensor):
     pass

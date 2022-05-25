@@ -1,6 +1,6 @@
 import torch
 from torch._prims.utils import is_complex_dtype, corresponding_real_dtype
-from torch.testing._internal.logging_tensor import no_dispatch
+from torch.utils._mode_utils import no_dispatch
 
 def safe_is_leaf(t):
     try:

@@ -4,9 +4,8 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import itertools
 from torch.testing._internal.jit_utils import RUN_CUDA
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, FakeTensorConverter
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
-from torch.testing._internal.logging_tensor import LoggingTensorMode
 import unittest
 
 
@@ -59,39 +58,12 @@ class FakeTensorTest(TestCase):
         self.assertTrue(isinstance(x, FakeTensor))
         self.assertTrue(x.device.type == "cpu")
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_fake_mode_non_fake_inputs(self):
-        x = torch.tensor(0.1)
-        y = torch.rand([4, 4], device="cuda")
-
-        with enable_torch_dispatch_mode(FakeTensorMode):
-            out = x + y
-
-        self.assertTrue(isinstance(out, FakeTensor))
-        self.assertTrue(out.device.type == "cuda")
-
-    def test_fake_mode_caching(self):
+    def test_fake_mode_error(self):
         x = torch.rand([4, 4])
 
-        with enable_torch_dispatch_mode(FakeTensorMode):
-            y = x[0]
-            z = x[1]
-
-        self.assertEqual(torch._C._storage_id(y), torch._C._storage_id(z))
-        self.assertTrue(isinstance(y, FakeTensor))
-        self.assertTrue(isinstance(z, FakeTensor))
-
-    def test_nesting_modes(self):
-        x = torch.rand([4, 4])
-        with enable_torch_dispatch_mode(FakeTensorMode):
-            with enable_torch_dispatch_mode(LoggingTensorMode, ignore_preexisting=True):
-                with enable_torch_dispatch_mode(FakeTensorMode, ignore_preexisting=True):
-                    y = x[0]
-            z = x[1]
-        self.assertEqual(torch._C._storage_id(y), torch._C._storage_id(z))
-        with enable_torch_dispatch_mode(FakeTensorMode):
-            a = x[1]
-        self.assertNotEqual(torch._C._storage_id(a), torch._C._storage_id(y))
+        with self.assertRaisesRegex(Exception, "non-Fake Tensor inputs"):
+            with enable_torch_dispatch_mode(FakeTensorMode):
+                y = x[0]
 
 
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
@@ -99,6 +71,25 @@ def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
         contains_type(e, maybe_contained_type) for e in type.containedTypes()
     )
 
+
+class FakeTensorConverterTest(TestCase):
+    def memoized_conversion_to_meta(self):
+        x = torch.rand(2, 2, 2)
+        converter = FakeTensorConverter()
+        self.assertIs(converter(x), converter(x))
+
+    def memoized_conversion_from_meta(self):
+        x = torch.rand(2, 2).to(device='meta')
+        converter = FakeTensorConverter()
+        self.assertIs(converter(x, "cpu"), converter(x, "cpu"))
+
+    def test_separate_tensor_storages(self):
+        x = torch.rand(2, 2, 2)
+        y = x[0]
+        converter = FakeTensorConverter()
+        x_conv = converter(x)
+        y_conv = converter(y)
+        self.assertEqual(torch._C._storage_id(x_conv), torch._C._storage_id(y_conv))
 
 class FakeTensorOperatorInvariants(TestCase):
     @staticmethod
