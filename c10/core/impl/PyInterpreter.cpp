@@ -42,10 +42,6 @@ static c10::Device noop_device_fn(const PyInterpreter*, const TensorImpl*) {
       "attempted to device Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
-c10::Device PyInterpreter::device(const TensorImpl* self) const {
-  return (*device_fn_)(this, self);
-}
-
 void PyInterpreter::disarm() noexcept {
   name_fn_ = &noop_name_fn;
   decref_fn_ = &noop_decref_fn;

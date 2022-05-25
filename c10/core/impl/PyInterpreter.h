@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Device.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
@@ -13,7 +14,6 @@ struct IValue;
 class OperatorHandle;
 struct TensorImpl;
 struct SafePyObject;
-struct Device;
 } // namespace c10
 
 namespace torch {
@@ -188,7 +188,9 @@ struct C10_API PyInterpreter {
     return (*is_contiguous_fn_)(this, self);
   }
 
-  __ubsan_ignore_function__ c10::Device device(const TensorImpl* self) const;
+  __ubsan_ignore_function__ c10::Device device(const TensorImpl* self) const {
+    return (*device_fn_)(this, self);
+  }
 
   // Disarm this PyInterpreter, making all of its methods noops.
   // Because the function pointers are raw pointers (not atomics),
