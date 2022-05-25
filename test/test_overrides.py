@@ -1209,6 +1209,16 @@ class TestTorchFunctionMode(TestCase):
             with torch.overrides.enable_torch_function_mode(a2, ignore_preexisting=True):
                 self.assertEqual(bar(None), -41)
 
+    def test_ctor_no_inner(self):
+        class A(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                return torch.zeros([])
+
+        with torch.overrides.enable_torch_function_mode(A()):
+            x = torch.randn((3, 4))
+
+        self.assertEqual(x, torch.zeros([]))
+
     def test_with_mode(self):
         class ErrorA(RuntimeError):
             pass
