@@ -146,9 +146,7 @@ void FunctionalTensorWrapper::mutate_view_meta(at::functionalization::ViewMeta m
   // So, these ops are special - they're mutation AND view ops. They get special codegen.
   // An example is transpose_, e.g. `a.transpose_()`
   // Calling transpose_() should ensure that a gets an alias, and append the new ViewMeta to a's current list of ViewMetas.
-  // We also need to force a sync (even if a is already up to date), because a's underlying tensor hasn't actually
-  // been updated to reflect the new view yet.
-  regenerate_from_base();
+  value_ = meta.forward_fn(value_, meta.out_index);
 }
 
 // Note [Functionalization: Mutation Removal]
