@@ -108,7 +108,7 @@ Follow these examples of PR that updates the version and sets RC Candidate uploa
 * torchvision : https://github.com/pytorch/vision/pull/5400
 * torchaudio: https://github.com/pytorch/audio/pull/2210
 
-## Drafting RCs (Release Candidates) for `pytorch/pytorch` and domain libraries
+## Drafting RCs (Release Candidates) for PyTorch and domain libraries
 
 To draft RCs, a user with the necessary permissions can push a git tag to the main `pytorch/pytorch` git repository. Please note: exactly same process is used for each of the domain library
 
