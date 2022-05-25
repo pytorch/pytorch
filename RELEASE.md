@@ -85,7 +85,7 @@ Builder branch cut should be performed at the same time as Pytorch core branch c
 DRY_RUN=disabled GIT_BRANCH_TO_CUT_FROM=main RELEASE_VERSION=1.11 scripts/release/cut-release-branch.sh
 ```
 
-### Making release branch specific changes for pytorch
+### Making release branch specific changes for PyTorch
 
 These are examples of changes that should be made to release branches so that CI / tooling can function normally on
 them:
