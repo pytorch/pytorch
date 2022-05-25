@@ -2,10 +2,40 @@ import torch
 from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
-__all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'erf', 'erfc', 'erfinv',
-           'erfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py', 'xlogy',
-           'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log_ndtr', 'log1p', 'sinc', 'round', 'log_softmax',
-           'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'softmax']
+__all__ = [
+    'entr',
+    'psi',
+    'digamma',
+    'gammaln',
+    'polygamma',
+    'erf',
+    'erfc',
+    'erfinv',
+    'erfcx',
+    'logit',
+    'logsumexp',
+    'expit',
+    'exp2',
+    'expm1',
+    'xlog1py',
+    'xlogy',
+    'i0',
+    'i0e',
+    'i1',
+    'i1e',
+    'ndtr',
+    'ndtri',
+    'log_ndtr',
+    'log1p',
+    'sinc',
+    'round',
+    'log_softmax',
+    'zeta',
+    'multigammaln',
+    'gammainc',
+    'gammaincc',
+    'softmax',
+]
 
 Tensor = torch.Tensor
 
@@ -819,4 +849,28 @@ Example::
     >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
     tensor([1., 1., 1.])
 
+""".format(**common_args))
+
+beta = _add_docstr(_special.special_beta,
+                   r"""
+beta(x, y, *, out=None) -> Tensor
+
+Euler beta function :math:`\text{B}(x, y)`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example:
+    >>> a = torch.tensor([1.0, 2.0])
+    >>> torch.special.beta(a, 3.0)
+    tensor([0.3333, 0.0833])
+    >>> b = torch.tensor([2.0, 3.0])
+    >>> torch.special.beta(1.0, b)
+    tensor([0.5000, 0.3333])
+    >>> torch.special.beta(a, b)
+    tensor([0.5000, 0.0833])
 """.format(**common_args))

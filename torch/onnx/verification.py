@@ -1,8 +1,6 @@
 """Functions to verify exported ONNX model against original PyTorch model.
 
-ONNXRuntime is required, and is used as the ONNX backend for export verification.
-The goal is to verify that the exported ONNX model is functionally equivalent to the
-original PyTorch model.
+ONNX Runtime is required, and is used as the ONNX backend for export verification.
 """
 
 import contextlib

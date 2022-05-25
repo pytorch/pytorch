@@ -9576,7 +9576,6 @@ def reference_hardsigmoid(x):
     y = np.clip(intermediate, 0, None)
     return np.where(y > 1, 1, y).astype(x.dtype)
 
-
 def reference_lgamma(x):
     # scipy.special.gammaln returns `-inf` when input is `-inf`.
     # While Pytorch, C and C++, all return `inf` when input is `-inf`.
@@ -10705,7 +10704,7 @@ op_db: List[OpInfo] = [
            )),
     UnaryUfuncInfo('positive',
                    ref=np.positive,
-                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
                    supports_out=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -16242,7 +16241,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('long',
            op=lambda x, *args, **kwargs: x.long(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=False,
            sample_inputs_func=sample_inputs_conversion,
            supports_autograd=False,
@@ -16319,7 +16318,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
     OpInfo('zeros_like',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=False,
            sample_inputs_func=sample_inputs_like_fns,
            supports_autograd=False,
@@ -16329,7 +16328,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
     OpInfo('ones_like',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=False,
            sample_inputs_func=sample_inputs_like_fns,
            supports_autograd=False,
@@ -16339,7 +16338,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
     OpInfo('randn_like',
-           dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex64, torch.complex128),
+           dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex32, torch.complex64, torch.complex128),
            op=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.randn_like, inp, *args, **kwargs),
            supports_out=False,
@@ -16350,9 +16349,14 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Expected: randn_like is not comparable between dtypes"),
+                            'TestCommon', 'test_complex_half_reference_testing'),
+               # RuntimeError: "nonzero_count_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure,
+                            'TestSparseCSR', 'test_sparse_csr_consistency', dtypes=(torch.chalf,)),
            )),
     OpInfo('rand_like',
-           dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex64, torch.complex128),
+           dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex32, torch.complex64, torch.complex128),
            op=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.randn_like, inp, *args, **kwargs),
            supports_out=False,
@@ -16364,6 +16368,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+               DecorateInfo(unittest.skip("Expected: randn_like is not comparable between dtypes"),
+                            'TestCommon', 'test_complex_half_reference_testing'),
            )),
     OpInfo('randint_like',
            dtypes=all_types_and(torch.half, torch.bfloat16),
@@ -16391,7 +16397,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('new_zeros',
            op=lambda x, *args, **kwargs: x.new_zeros(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=False,
            sample_inputs_func=sample_inputs_new_fns,
            skips=(
@@ -16402,7 +16408,7 @@ op_db: List[OpInfo] = [
            supports_autograd=False),
     OpInfo('new_ones',
            op=lambda x, *args, **kwargs: x.new_ones(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=False,
            sample_inputs_func=sample_inputs_new_fns,
            skips=(
@@ -16413,7 +16419,7 @@ op_db: List[OpInfo] = [
            supports_autograd=False),
     OpInfo('new_empty',
            op=lambda x, *args, **kwargs: x.new_empty(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=False,
            sample_inputs_func=sample_inputs_new_fns,
            skips=(
@@ -16436,10 +16442,12 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+               DecorateInfo(unittest.skip("Expected: new_empty is not comparable"),
+                            'TestCommon', 'test_complex_half_reference_testing'),
            ),
            supports_autograd=False),
     OpInfo('empty',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_empty,
            supports_autograd=False,
            skips=(
@@ -16470,10 +16478,12 @@ op_db: List[OpInfo] = [
                             'test_out_warning'),
                DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                             'TestLazyOpInfo'),
+               DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                            'TestCommon', 'test_complex_half_reference_testing'),
            )),
     OpInfo('new_full',
            op=lambda x, *args, **kwargs: x.new_full(*args, **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=False,
            sample_inputs_func=sample_inputs_new_full,
            skips=(
@@ -17269,7 +17279,7 @@ op_db: List[OpInfo] = [
         variant_test_name='dtype',
         aliases=('special.log_softmax', 'nn.functional.log_softmax'),
         supports_out=True,
-        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
         supports_forward_ad=True,
         assert_autodiffed=True),
@@ -17398,6 +17408,68 @@ op_db: List[OpInfo] = [
         ref=lambda i0, i1, i2, i3, *, alpha=1, beta=1: alpha * i0 + beta * i1 + i2 + i3,
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.bool),
         sample_inputs_func=partial(sample_inputs_jiterator, num_inputs=4, alpha=3.14, beta=-4.20),
+        supports_out=False,
+        supports_autograd=False,  # jiterator ops doesn't have backward defined
+        decorators=[onlyCUDA, skipCUDAIfRocm],
+        skips=(
+            # Jiterator ops doesn't support neg or conj view
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+            # Jiterator ops doesn't suport CompositeCompliantTensor
+            # Following test should expectedFailure, but it's causing cascading failures in CUDA, thus skipped
+            DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
+            # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # Skip Nvfuser
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
+        )
+    ),
+    BinaryUfuncInfo(
+        'jiterator_binary_return_by_ref',
+        op=torch.cuda.jiterator._create_multi_output_jit_fn(
+            """
+            template <typename T>
+            T binary_return_by_ref(T i0, T i1, T& out0) {
+                out0 = i0 + i1;
+            }
+            """,
+            num_outputs=1),
+        ref=lambda i0, i1: i0 + i1,
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.bool),
+        sample_inputs_func=partial(sample_inputs_jiterator, num_inputs=2, alpha=-0.42),
+        supports_out=False,
+        supports_autograd=False,  # jiterator ops doesn't have backward defined
+        supports_rhs_python_scalar=False,
+        decorators=[onlyCUDA, skipCUDAIfRocm],
+        skips=(
+            # Jiterator ops doesn't support neg or conj view
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+            # Jiterator ops doesn't suport CompositeCompliantTensor
+            # Following test should expectedFailure, but it's causing cascading failures in CUDA, thus skipped
+            DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
+            # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # Skip Nvfuser
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
+        )
+    ),
+    OpInfo(
+        'jiterator_2inputs_2outputs',
+        op=torch.cuda.jiterator._create_multi_output_jit_fn(
+            """
+            template <typename T>
+            T binary_2outputs(T i0, T i1, T& out0, T& out1) {
+                out0 = i0 + i1;
+                out1 = i0 - i1;
+            }
+            """,
+            num_outputs=2),
+        ref=lambda i0, i1, *, alpha=1: (i0 + i1, i0 - i1),
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.bool),
+        sample_inputs_func=partial(sample_inputs_jiterator, num_inputs=2),
         supports_out=False,
         supports_autograd=False,  # jiterator ops doesn't have backward defined
         decorators=[onlyCUDA, skipCUDAIfRocm],
@@ -18676,7 +18748,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(
             torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64
         ),
-        backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.int8, torch.int16, torch.int32, torch.int64),
+        backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64),
         supports_out=False,
         check_batched_grad=False,
         supports_forward_ad=True,
@@ -18738,6 +18810,13 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
+    ),
+    BinaryUfuncInfo(
+        'special.beta',
+        dtypes=all_types_and(torch.bool),
+        promotes_int_to_float=True,
+        supports_one_python_scalar=True,
+        supports_autograd=False,
     ),
 ]
 
