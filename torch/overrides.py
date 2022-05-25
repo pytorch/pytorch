@@ -1733,7 +1733,12 @@ def is_tensor_like(inp):
 def _wrap_torch_function(f):
     @functools.wraps(f)
     def wrapped(self, *args, **kwargs):
-        with enable_torch_function_mode(self.inner):
+        if hasattr(self, "inner"):
+            inner = self.inner
+        else:
+            inner = None
+
+        with enable_torch_function_mode(inner):
             return f(self, *args, **kwargs)
     return wrapped
 
@@ -1749,8 +1754,6 @@ def _wrap_torch_function(f):
 # simplify the C++ API surface.  It would also have been valid to build in the
 # notion of mode stack directly into C++ but in this design it's substantially
 # more difficult to interact with TorchFunctionModeMeta.
-
-
 class TorchFunctionModeMeta(type):
     """
     Metaclass for :class:`TorchFunctionMode`; it does two things:

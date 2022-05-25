@@ -65,7 +65,12 @@ def enable_torch_dispatch_mode(mode, *, replace=None, ignore_preexisting=False) 
 def _wrap_torch_dispatch(f):
     @functools.wraps(f)
     def wrapped(self, *args, **kwargs):
-        with enable_torch_dispatch_mode(self.inner):
+        if hasattr(self, "inner"):
+            inner = self.inner
+        else:
+            inner = None
+
+        with enable_torch_dispatch_mode(inner):
             return f(self, *args, **kwargs)
     return wrapped
 
@@ -133,7 +138,7 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
     the next mode on the mode stack.  If you want recursively call back into
     your current ``__torch_dispatch__`` implementation, either explicitly
     invoke ``self.__torch_dispatch__(...)``, or use the context manager
-    ``__torch_dispatch__(self, replace=self.inner)`` to make PyTorch
+    ``__torch_dispatch__(self)`` to make PyTorch
     API self-referential (beware of infinite loops, in this case!)
     """
     # Force metaclass to generate constructor at the base of the hierarchy

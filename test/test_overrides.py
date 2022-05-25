@@ -1117,6 +1117,7 @@ class TestTorchFunctionWarning(TestCase):
                 # Function that handles torch_function in C++
                 torch.abs(a)
 
+@skipIfCrossRef
 class TestTorchFunctionMode(TestCase):
     def test_basic(self):
         class A(TorchFunctionMode):
@@ -1178,7 +1179,7 @@ class TestTorchFunctionMode(TestCase):
         class A(TorchFunctionMode):
             def __torch_function__(self, *args, **kwargs):
                 return -40
-        a = A(inner=None)
+        a = A()
         with torch.overrides.enable_torch_function_mode(a):
             with torch.overrides.enable_torch_function_mode(a):
                 self.assertEqual(bar(None), -40)
@@ -1190,8 +1191,8 @@ class TestTorchFunctionMode(TestCase):
 
             def __torch_function__(self, *args, **kwargs):
                 return self.val
-        a1 = A(-40, inner=None)
-        a2 = A(-41, inner=None)
+        a1 = A(-40)
+        a2 = A(-41)
         with torch.overrides.enable_torch_function_mode(a1):
             with torch.overrides.enable_torch_function_mode(a2, replace=a1):
                 self.assertEqual(bar(None), -41)
@@ -1203,8 +1204,8 @@ class TestTorchFunctionMode(TestCase):
 
             def __torch_function__(self, *args, **kwargs):
                 return self.val
-        a1 = A(-40, inner=None)
-        a2 = A(-41, inner=None)
+        a1 = A(-40)
+        a2 = A(-41)
         with torch.overrides.enable_torch_function_mode(a1):
             with torch.overrides.enable_torch_function_mode(a2, ignore_preexisting=True):
                 self.assertEqual(bar(None), -41)

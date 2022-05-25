@@ -801,7 +801,7 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
                     kwargs = {}
                 return func(*args, **kwargs)
 
-        x = TestMode(inner=None)
+        x = TestMode()
         y = torch.tensor([2.])
         with enable_torch_dispatch_mode(x):
             y + y

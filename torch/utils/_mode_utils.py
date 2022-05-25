@@ -8,15 +8,9 @@ from dataclasses import dataclass
 # Specifically, it has the helper functions for enable_ and push_X_mode and the
 # ModeInfo class, which is extended by each where they are different
 
-# used by both TorchFunctionMode and TorchDispatchMode, this will wrap the init
-# function to require an "inner" kwarg
 def _wrap_init(f):
-    undef = object()
-
     @functools.wraps(f)
-    def wrapped(self, *args, inner=undef, **kwargs):
-        if inner is not undef:
-            self.inner = inner
+    def wrapped(self, *args, **kwargs):
         return f(self, *args, **kwargs)
     return wrapped
 
