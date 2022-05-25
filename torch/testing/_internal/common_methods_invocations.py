@@ -9910,7 +9910,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
                    aliases=('absolute', ),
                    ref=np.abs,
-                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
+                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
                    skips=(
                        # Inplace abs doesn't support complex inputs
@@ -14750,7 +14750,8 @@ op_db: List[OpInfo] = [
                    )),
     UnaryUfuncInfo('sgn',
                    ref=reference_sgn,
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
                    backward_dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
