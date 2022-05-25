@@ -1257,7 +1257,7 @@ def skipCUDAIfRocmVersionLessThan(version=None):
                 if not TEST_WITH_ROCM:
                     reason = "ROCm not available"
                     raise unittest.SkipTest(reason)
-                rocm_version = str(torch.version.hip)
+                rocm_version = str(torch.version.rocm)
                 rocm_version = rocm_version.split("-")[0]    # ignore git sha
                 rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
                 if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
@@ -1316,10 +1316,10 @@ def skipCUDAIfNoCudnn(fn):
     return skipCUDAIfCudnnVersionLessThan(0)(fn)
 
 def skipCUDAIfMiopen(fn):
-    return skipCUDAIf(torch.version.hip is not None, "Marked as skipped for MIOpen")(fn)
+    return skipCUDAIf(torch.version.rocm is not None, "Marked as skipped for MIOpen")(fn)
 
 def skipCUDAIfNoMiopen(fn):
-    return skipCUDAIf(torch.version.hip is None, "MIOpen is not available")(skipCUDAIfNoCudnn(fn))
+    return skipCUDAIf(torch.version.rocm is None, "MIOpen is not available")(skipCUDAIfNoCudnn(fn))
 
 def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)

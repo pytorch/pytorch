@@ -29,7 +29,7 @@ if __name__ == '__main__':
                        "instead.")
 
 TEST_CUDA = torch.cuda.is_available()
-TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None
+TEST_ROCM = torch.cuda.is_available() and torch.version.rocm is not None
 TEST_CUDNN = False
 if TEST_CUDA and not TEST_ROCM:  # Skip ROCM
     torch.ones(1).cuda()  # initialize cuda context

@@ -4649,7 +4649,7 @@ else:
                 return self.tensor.__dlpack_device__()
 
             def __dlpack__(self, stream=None):
-                if torch.version.hip is None:
+                if torch.version.rocm is None:
                     assert stream == 1
                 else:
                     assert stream == 0

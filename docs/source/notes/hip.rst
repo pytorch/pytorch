@@ -64,7 +64,7 @@ Whether you are using PyTorch for CUDA or HIP, the result of calling
 that has been built with GPU support, it will return `True`. If you must check
 which version of PyTorch you are using, refer to this example below::
 
-    if torch.cuda.is_available() and torch.version.hip:
+    if torch.cuda.is_available() and torch.version.rocm:
         # do something specific for HIP
     elif torch.cuda.is_available() and torch.version.cuda:
         # do something specific for CUDA

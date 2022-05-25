@@ -2826,7 +2826,7 @@ class TestBinaryUfuncs(TestCase):
             if self.device_type == "cpu":
                 with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
                     fn(x, zero)
-            elif torch.version.hip is not None:
+            elif torch.version.rocm is not None:
                 # ROCm behavior: x % 0 is a no-op; x is returned
                 self.assertEqual(fn(x, zero), x)
             else:

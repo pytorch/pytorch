@@ -1175,7 +1175,7 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
         idx = self.device.index if self.device.index is not None else 0
-        if self.device.type == 'cuda' and torch.version.hip is not None:
+        if self.device.type == 'cuda' and torch.version.rocm is not None:
             device_type = DLDeviceType.kDLROCM
         elif self.device.type == 'cpu' and self.is_pinned():
             device_type = DLDeviceType.kDLCPUPinned

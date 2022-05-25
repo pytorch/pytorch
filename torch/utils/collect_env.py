@@ -132,7 +132,7 @@ def get_nvidia_driver_version(run_lambda):
 
 
 def get_gpu_info(run_lambda):
-    if get_platform() == 'darwin' or (TORCH_AVAILABLE and hasattr(torch.version, 'hip') and torch.version.hip is not None):
+    if get_platform() == 'darwin' or (TORCH_AVAILABLE and hasattr(torch.version, 'rocm') and torch.version.rocm is not None):
         if TORCH_AVAILABLE and torch.cuda.is_available():
             return torch.cuda.get_device_name(None)
         return None
@@ -323,14 +323,14 @@ def get_env_info():
         debug_mode_str = str(torch.version.debug)
         cuda_available_str = str(torch.cuda.is_available())
         cuda_version_str = torch.version.cuda
-        if not hasattr(torch.version, 'hip') or torch.version.hip is None:  # cuda version
+        if not hasattr(torch.version, 'hip') or torch.version.rocm is None:  # cuda version
             hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
         else:  # HIP version
             cfg = torch._C._show_config().split('\n')
             hip_runtime_version = [s.rsplit(None, 1)[-1] for s in cfg if 'HIP Runtime' in s][0]
             miopen_runtime_version = [s.rsplit(None, 1)[-1] for s in cfg if 'MIOpen' in s][0]
             cuda_version_str = 'N/A'
-            hip_compiled_version = torch.version.hip
+            hip_compiled_version = torch.version.rocm
     else:
         version_str = debug_mode_str = cuda_available_str = cuda_version_str = 'N/A'
         hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'

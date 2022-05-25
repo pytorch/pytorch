@@ -126,7 +126,7 @@ def _find_rocm_home() -> Optional[str]:
             rocm_home = '/opt/rocm'
             if not os.path.exists(rocm_home):
                 rocm_home = None
-    if rocm_home and torch.version.hip is None:
+    if rocm_home and torch.version.rocm is None:
         print(f"No ROCm runtime is found, using ROCM_HOME='{rocm_home}'")
     return rocm_home
 
@@ -191,10 +191,10 @@ environment variable or add NVCC to your system PATH. The extension compilation 
 ROCM_HOME = _find_rocm_home()
 MIOPEN_HOME = _join_rocm_home('miopen') if ROCM_HOME else None
 HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
-IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
+IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.rocm is not None)) else False
 ROCM_VERSION = None
-if torch.version.hip is not None:
-    ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
+if torch.version.rocm is not None:
+    ROCM_VERSION = tuple(int(v) for v in torch.version.rocm.split('.')[:2])
 
 CUDA_HOME = _find_cuda_home()
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')

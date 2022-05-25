@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import (TestCase, run_tests,
 from torch.testing._internal.common_cuda import CUDA11OrLater, TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
 import re
-HIP_VERSION = 0.0 if torch.version.hip is None else float(re.search(r"^\d+\.\d+", torch.version.hip)[0])
+HIP_VERSION = 0.0 if torch.version.rocm is None else float(re.search(r"^\d+\.\d+", torch.version.hip)[0])
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings

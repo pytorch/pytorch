@@ -1119,7 +1119,7 @@ class TestTensorCreation(TestCase):
         # Note: CUDA max float -> integer conversion is divergent on some dtypes
         vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2, max)
         if self.device_type == 'cuda':
-            if torch.version.hip:
+            if torch.version.rocm:
                 # HIP min float -> int64 conversion is divergent
                 vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
             else:
