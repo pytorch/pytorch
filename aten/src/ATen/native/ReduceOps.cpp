@@ -758,6 +758,12 @@ Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor&
     return input;
   }
   auto result = at::zeros(input.sizes(), input.options());
+
+  // for composite compliance, use out-of-place variant of
+  // `scatter_add` if `indices` or `grad` is a Tensor Subclass.
+  if (areAnyTensorSubclassLike({indices, grad})) {
+    return result.scatter_add(dim, indices, grad);
+  }
   return result.scatter_add_(dim, indices, grad);
 }
 
@@ -1325,7 +1331,7 @@ Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
     result_options = self.options();
   }
   auto result = at::empty({0}, result_options);
-  return at::native::logsumexp_out(self, dims, keepdim, result);
+  return at::logsumexp_outf(self, dims, keepdim, result);
 }
 
 Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim) {

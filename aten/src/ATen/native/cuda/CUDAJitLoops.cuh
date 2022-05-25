@@ -83,9 +83,8 @@ static inline void launch_jitted_unrolled_kernel(
     if (!fn_ptr->function) {
       constexpr int nInputs = array_t::size() - 1;
       constexpr int nOutputs = 1;  // fix me
-      constexpr bool dynamic_casting = !std::is_same<decltype(l),
-                                                     memory::LoadWithoutCast>() || !std::is_same<decltype(s),
-                                                     memory::StoreWithoutCast>();
+      constexpr bool dynamic_casting = !std::is_same<decltype(l), memory::LoadWithoutCast>() ||
+                                       !std::is_same<decltype(s), memory::StoreWithoutCast>();
       std::string string_name{name};
       std::string f_inputs_type_str = at::cuda::jit::typeName<f_inputs_type>();
       std::string compute_type_str = at::cuda::jit::typeName<at::opmath_type<f_inputs_type>>();
