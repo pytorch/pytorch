@@ -48,10 +48,10 @@ class SymbolicContext:
     """Extra context for symbolic functions.
 
     Attributes:
-        params_dict: Mapping from graph initializer name to IValue.
-        env: Mapping from Torch domain graph Value to ONNX domain graph Value.
-        cur_node: Current node being converted to ONNX domain.
-        onnx_block: Current ONNX block that converted nodes are being appended to.
+        params_dict (Dict[str, _C.IValue]): Mapping from graph initializer name to IValue.
+        env (Dict[_C.Value, _C.Value]): Mapping from Torch domain graph Value to ONNX domain graph Value.
+        cur_node (_C.Node): Current node being converted to ONNX domain.
+        onnx_block (_C.Block): Current ONNX block that converted nodes are being appended to.
     """
 
     def __init__(
