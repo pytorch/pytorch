@@ -1,6 +1,7 @@
 # Owner(s): ["module: onnx"]
 
-import copy
+from __future__ import annotations
+
 import io
 import itertools
 import os
@@ -48,6 +49,7 @@ from torchvision.models.detection.transform import GeneralizedRCNNTransform
 
 import torch
 import torch.nn.functional as F
+import torch.onnx.verification as verification
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
 from torch.nn.utils.rnn import PackedSequence
@@ -57,228 +59,24 @@ from torch.onnx import (
     unregister_custom_op_symbolic,
 )
 from torch.onnx.symbolic_helper import _unimplemented
-from torch.onnx.utils import unpack_quantized_tensor
 
 _ORT_PROVIDERS = ["CPUExecutionProvider"]
 
 
-def flatten_tuples(elem):
-    flattened = []
-    for t in elem:
-        if isinstance(t, tuple):
-            flattened.extend(flatten_tuples(t))
-        else:
-            flattened.append(t)
-    return flattened
-
-
-def to_numpy(elem):
-    if isinstance(elem, Tensor):
-        if elem.requires_grad:
-            return elem.detach().cpu().numpy()
-        else:
-            return elem.cpu().numpy()
-    elif isinstance(elem, (list, tuple)):
-        return [to_numpy(inp) for inp in elem]
-    elif isinstance(elem, bool):
-        return np.array(elem, dtype=bool)
-    elif isinstance(elem, int):
-        return np.array(elem, dtype=int)
-    elif isinstance(elem, float):
-        return np.array(elem, dtype=float)
-    elif isinstance(elem, dict):
-        flattened = []
-        for k in elem:
-            flattened += [to_numpy(k)] + [to_numpy(elem[k])]
-        return flattened
-    return elem
-
-
-def convert_to_onnx(
-    model,
-    input=None,
-    opset_version=9,
-    do_constant_folding=True,
-    keep_initializers_as_inputs=True,
-    dynamic_axes=None,
-    input_names=None,
-    output_names=None,
-    fixed_batch_size=False,
-    training=None,
-    verbose=False,
-):
-    f = io.BytesIO()
-    input_copy = copy.deepcopy(input)
-    torch.onnx._export(
-        model,
-        input_copy,
-        f,
-        opset_version=opset_version,
-        do_constant_folding=do_constant_folding,
-        keep_initializers_as_inputs=keep_initializers_as_inputs,
-        dynamic_axes=dynamic_axes,
-        input_names=input_names,
-        output_names=output_names,
-        fixed_batch_size=fixed_batch_size,
-        training=training,
-        verbose=verbose,
-    )
-
-    # compute onnxruntime output prediction
-    so = onnxruntime.SessionOptions()
-    # suppress ort warnings.
-    # 0:Verbose, 1:Info, 2:Warning. 3:Error, 4:Fatal. Default is 2.
-    so.log_severity_level = 3
-    ort_sess = onnxruntime.InferenceSession(f.getvalue(), so, providers=_ORT_PROVIDERS)
-    return ort_sess
-
-
-def inline_flatten_list(inputs, res_list):
-    for i in inputs:
-        res_list.append(i) if not isinstance(i, (list, tuple)) else inline_flatten_list(
-            i, res_list
-        )
-    return res_list
-
-
-def unpack_to_numpy(values):
-    value_unpacked = []
-    for value in values:
-        value_unpacked.extend(unpack_quantized_tensor(value))
-    return [to_numpy(v) for v in value_unpacked]
-
-
-def run_ort(ort_sess, inputs):
-    kw_inputs = {}
-    if inputs and isinstance(inputs[-1], dict):
-        kw_inputs = inputs[-1]
-        inputs = inputs[:-1]
-    inputs = unpack_to_numpy(flatten_tuples(inputs))
-    ort_inputs = {}
-    for input_name, input in kw_inputs.items():
-        ort_inputs[input_name] = to_numpy(input)
-    inputs = to_numpy(inputs)
-    ort_sess_inputs = ort_sess.get_inputs()
-    for i, input in enumerate(inputs):
-        if i == len(ort_sess_inputs) or ort_sess_inputs[i].name in ort_inputs:
-            raise ValueError(
-                f"got too many positional inputs. inputs: {inputs}. kw_inputs: {kw_inputs}"
-            )
-        ort_inputs[ort_sess_inputs[i].name] = input
-    ort_outs = ort_sess.run(None, ort_inputs)
-    return inline_flatten_list(ort_outs, [])
-
-
-def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
-    output, _ = torch.jit._flatten(output)
-    outputs = unpack_to_numpy(output)
-
-    # compare onnxruntime and PyTorch results
-    assert len(outputs) == len(ort_outs), "number of outputs differ"
-
-    # compare onnxruntime and PyTorch results
-    [
-        np.testing.assert_allclose(out, ort_out, rtol=rtol, atol=atol)
-        for out, ort_out in zip(outputs, ort_outs)
-    ]
-
-
 def run_model_test(
-    self,
-    model,
-    batch_size=2,
-    state_dict=None,
-    input=None,
-    use_gpu=True,
-    rtol=0.001,
-    atol=1e-7,
-    do_constant_folding=True,
-    dynamic_axes=None,
-    test_with_inputs=None,
-    input_names=None,
-    output_names=None,
-    fixed_batch_size=False,
-    dict_check=True,
-    training=None,
-    remained_onnx_input_idx=None,
-    flatten=True,
-    verbose=False,
+    test_suite: Union[_TestONNXRuntime, unittest.TestCase], *args, **kwargs
 ):
-    if training is not None and training == torch.onnx.TrainingMode.TRAINING:
-        model.train()
-    elif training is None or training == torch.onnx.TrainingMode.EVAL:
-        model.eval()
-    if input is None:
-        input = torch.randn(batch_size, 3, 224, 224, requires_grad=True)
-    with torch.no_grad():
-        if isinstance(input, (Tensor, dict)):
-            input = (input,)
-        # In-place operators will update input tensor data as well.
-        # Thus inputs are replicated before every forward call.
-        input_args = copy.deepcopy(input)
-        input_kwargs = {}
-        if dict_check and isinstance(input_args[-1], dict):
-            input_kwargs = input_args[-1]
-            input_args = input_args[:-1]
-        try:
-            model_copy = copy.deepcopy(model)
-            output = model_copy(*input_args, **input_kwargs)
-        except Exception:
-            output = model(*input_args, **input_kwargs)
-        if isinstance(output, Tensor):
-            output = (output,)
+    kwargs["ort_providers"] = _ORT_PROVIDERS
+    kwargs["opset_version"] = test_suite.opset_version
+    kwargs["keep_initializers_as_inputs"] = test_suite.keep_initializers_as_inputs
+    return verification.verify(*args, **kwargs)
 
-        if not dict_check and isinstance(input[-1], dict):
-            input = input + ({},)
 
-        ort_sess = convert_to_onnx(
-            model,
-            input=input,
-            opset_version=self.opset_version,
-            do_constant_folding=do_constant_folding,
-            keep_initializers_as_inputs=self.keep_initializers_as_inputs,
-            dynamic_axes=dynamic_axes,
-            input_names=input_names,
-            output_names=output_names,
-            fixed_batch_size=fixed_batch_size,
-            training=training,
-            verbose=verbose,
-        )
-        # compute onnxruntime output prediction
-        if remained_onnx_input_idx is not None:
-            input_onnx = []
-            for idx in remained_onnx_input_idx:
-                input_onnx.append(input[idx])
-            input = input_onnx
-
-        input_copy = copy.deepcopy(input)
-        if flatten:
-            input_copy, _ = torch.jit._flatten(input_copy)
-        elif input_copy and input_copy[-1] == {}:
-            # Handle empty kwargs (normally removed by flatten).
-            input_copy = input_copy[:-1]
-        ort_outs = run_ort(ort_sess, input_copy)
-        ort_compare_with_pytorch(ort_outs, output, rtol, atol)
-
-        # if additional test inputs are provided run the onnx
-        # model with these inputs and check the outputs
-        if test_with_inputs is not None:
-            for test_input in test_with_inputs:
-                if isinstance(test_input, Tensor):
-                    test_input = (test_input,)
-                test_input_copy = copy.deepcopy(test_input)
-                output = model(*test_input_copy)
-                if isinstance(output, Tensor):
-                    output = (output,)
-                if remained_onnx_input_idx is not None:
-                    test_input_onnx = []
-                    for idx in remained_onnx_input_idx:
-                        test_input_onnx.append(test_input[idx])
-                    test_input = test_input_onnx
-                if flatten:
-                    test_input, _ = torch.jit._flatten(test_input)
-                ort_outs = run_ort(ort_sess, test_input)
-                ort_compare_with_pytorch(ort_outs, output, rtol, atol)
+def run_model_test_with_external_data(
+    test_suite: Union[_TestONNXRuntime, unittest.TestCase], *args, **kwargs
+):
+    kwargs["use_external_data"] = True
+    return run_model_test(test_suite, *args, **kwargs)
 
 
 def _init_test_generalized_rcnn_transform():
@@ -424,7 +222,6 @@ class _TestONNXRuntime:
         atol=1e-7,
         do_constant_folding=True,
         batch_size=2,
-        use_gpu=True,
         dynamic_axes=None,
         test_with_inputs=None,
         input_names=None,
@@ -441,7 +238,6 @@ class _TestONNXRuntime:
                 m,
                 batch_size=batch_size,
                 input=input,
-                use_gpu=use_gpu,
                 rtol=rtol,
                 atol=atol,
                 do_constant_folding=do_constant_folding,
@@ -475,69 +271,6 @@ class _TestONNXRuntime:
         if not is_script:
             _run_test(model, tracing_remained_onnx_input_idx)
 
-    def run_model_test_with_external_data(
-        self,
-        model,
-        input,
-        rtol=0.001,
-        atol=1e-7,
-        do_constant_folding=True,
-        dynamic_axes=None,
-        input_names=None,
-        output_names=None,
-        ort_optim_on=True,
-        training=None,
-    ):
-        import os
-        import tempfile
-
-        if training is not None and training == torch.onnx.TrainingMode.TRAINING:
-            model.train()
-        elif training is None or training == torch.onnx.TrainingMode.EVAL:
-            model.eval()
-        with torch.no_grad():
-            if isinstance(input, Tensor):
-                input = (input,)
-            # In-place operators will update input tensor data as well.
-            # Thus inputs are replicated before every forward call.
-            input_copy = copy.deepcopy(input)
-            output = model(*input_copy)
-            if isinstance(output, Tensor):
-                output = (output,)
-
-            # export the model to ONNX
-            with tempfile.TemporaryDirectory() as tmpdirname:
-                model_file_name = os.path.join(tmpdirname, "model.onnx")
-                input_copy = copy.deepcopy(input)
-                torch.onnx.export(
-                    model,
-                    input_copy,
-                    model_file_name,
-                    opset_version=self.opset_version,
-                    verbose=False,
-                    do_constant_folding=do_constant_folding,
-                    keep_initializers_as_inputs=self.keep_initializers_as_inputs,
-                    dynamic_axes=dynamic_axes,
-                    input_names=input_names,
-                    output_names=output_names,
-                )
-                # compute onnxruntime output prediction
-                ort_sess_opt = onnxruntime.SessionOptions()
-                ort_sess_opt.graph_optimization_level = (
-                    onnxruntime.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
-                    if ort_optim_on
-                    else onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
-                )
-                # suppress ort warnings.
-                # 0:Verbose, 1:Info, 2:Warning. 3:Error, 4:Fatal. Default is 2.
-                ort_sess_opt.log_severity_level = 3
-                ort_sess = onnxruntime.InferenceSession(
-                    model_file_name, sess_options=ort_sess_opt, providers=_ORT_PROVIDERS
-                )
-                input_copy = copy.deepcopy(input)
-                ort_outs = run_ort(ort_sess, input_copy)
-                ort_compare_with_pytorch(ort_outs, output, rtol, atol)
-
     @skipIfUnsupportedMinOpsetVersion(
         9
     )  # Because external data format was released with Opset 9.
@@ -559,7 +292,7 @@ class _TestONNXRuntime:
 
         model = LargeModel()
         x = torch.tensor([2], dtype=torch.long)
-        self.run_model_test_with_external_data(model, x)
+        run_model_test_with_external_data(self, model, x)
 
     @skipIfUnsupportedMinOpsetVersion(
         9
@@ -581,7 +314,7 @@ class _TestONNXRuntime:
                 return self.seq(input)
 
         x = torch.tensor([2], dtype=torch.long)
-        self.run_model_test_with_external_data(LargeModel(), x)
+        run_model_test_with_external_data(self, LargeModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(
         9
@@ -10158,24 +9891,24 @@ class _TestONNXRuntime:
         x = torch.randn(10)
         model.train()
 
-        ort_sess = convert_to_onnx(
+        ort_sess = verification._convert_to_onnx(
             model,
             input=(x,),
             opset_version=self.opset_version,
             training=torch.onnx.TrainingMode.TRAINING,
         )
-        ort_outs = run_ort(ort_sess, (x,))
+        ort_outs = verification._run_ort(ort_sess, (x,))
         assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
 
         script_model = torch.jit.script(model)
         output = model(x)
-        ort_sess = convert_to_onnx(
+        ort_sess = verification._convert_to_onnx(
             script_model,
             input=(x,),
             opset_version=self.opset_version,
             training=torch.onnx.TrainingMode.TRAINING,
         )
-        ort_outs = run_ort(ort_sess, (x,))
+        ort_outs = verification._run_ort(ort_sess, (x,))
         assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
 
     @skipIfUnsupportedMinOpsetVersion(12)
@@ -10199,13 +9932,13 @@ class _TestONNXRuntime:
         nb_elements = torch.numel(input)
 
         model.train()
-        ort_sess = convert_to_onnx(
+        ort_sess = verification._convert_to_onnx(
             model,
             input=(x,),
             opset_version=self.opset_version,
             training=torch.onnx.TrainingMode.TRAINING,
         )
-        ort_outs = run_ort(ort_sess, (x,))
+        ort_outs = verification._run_ort(ort_sess, (x,))
 
         y = model(input)
         output = y.cpu().numpy()
@@ -10220,13 +9953,13 @@ class _TestONNXRuntime:
         script_model = torch.jit.script(model)
         y = model(input)
         output = y.cpu().numpy()
-        ort_sess = convert_to_onnx(
+        ort_sess = verification._convert_to_onnx(
             script_model,
             input=(x,),
             opset_version=self.opset_version,
             training=torch.onnx.TrainingMode.TRAINING,
         )
-        ort_outs = run_ort(ort_sess, (x,))
+        ort_outs = verification._run_ort(ort_sess, (x,))
         ort_mask = np.where(ort_outs[0] != 0, 1, 0)
         pyt_mask = np.where(output != 0, 1, 0)
 
@@ -10332,7 +10065,7 @@ class _TestONNXRuntime:
         proposal = [torch.randn(2, 4), torch.randn(2, 4)]
 
         with self.assertRaises(RuntimeError) as cm:
-            convert_to_onnx(model, input=(box_regression, proposal))
+            verification._convert_to_onnx(model, input=(box_regression, proposal))
 
     def test_initializer_sequence(self):
         class MyModule(torch.nn.Module):
@@ -12128,14 +11861,14 @@ class _TestONNXRuntime:
 
         model_export = M()
         dummy_input = (torch.tensor([expected_mean]), torch.tensor([expected_std]))
-        ort_sess = convert_to_onnx(
+        ort_sess = verification._convert_to_onnx(
             model_export,
             input=dummy_input,
             opset_version=self.opset_version,
             training=torch.onnx.TrainingMode.EVAL,
         )
 
-        ort_out = run_ort(ort_sess, inputs=dummy_input)
+        ort_out = verification._run_ort(ort_sess, inputs=dummy_input)
 
         actual_std = np.std(ort_out)
         actual_mean = np.mean(ort_out)
@@ -12173,14 +11906,14 @@ class _TestONNXRuntime:
 
         model_export = M()
         dummy_input = (torch.tensor([expected_min]), torch.tensor([expected_max]))
-        ort_sess = convert_to_onnx(
+        ort_sess = verification._convert_to_onnx(
             model_export,
             input=dummy_input,
             opset_version=self.opset_version,
             training=torch.onnx.TrainingMode.EVAL,
         )
 
-        ort_out = run_ort(ort_sess, inputs=dummy_input)
+        ort_out = verification._run_ort(ort_sess, inputs=dummy_input)
         actual_min = np.min(ort_out)
         actual_max = np.max(ort_out)
         actual_mean = np.mean(ort_out)
