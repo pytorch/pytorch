@@ -718,26 +718,22 @@ std::vector<Tensor> block_diag_backward(const Tensor & grad, const std::vector<s
   if (!grad.defined()) {
     return grad_inputs;
   }
-  Tensor grad_;
+  Tensor real_view_of_grad;
   bool grad_is_complex = grad.is_complex();
   if (grad_is_complex) {
-    grad_ = at::real(grad);
+    real_view_of_grad = at::real(grad);
   }
 
   int64_t cur_dim0 = 0;
   int64_t cur_dim1 = 0;
 
   for (const auto i : c10::irange(sizes.size())) {
-    Tensor grad_val;
-    if (!at::isComplexType(dtypes[i]) && grad_is_complex) {
-      // R -> C
-      grad_val = grad_;
-    } else {
-      grad_val = grad;
-    }
+    // R -> C
+    Tensor grad_val = (!at::isComplexType(dtypes[i]) && grad_is_complex) ? real_view_of_grad : grad;
+
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
-    if (shape == std::vector<int64_t>({0})) {
+    if (shape.size() == 1 && shape[0] == 0) {
       grad_inputs[i] = at::zeros({0}, grad_val.options());
       continue;
     }
@@ -4952,8 +4948,9 @@ Tensor block_diag_jvp(at::TensorList tensors) {
 
   if (any_defined) {
     std::vector<Tensor> fw_grads;
+    fw_grads.reserve(tensors.size());
 
-    for (auto& t: tensors) {
+    for (const auto& t: tensors) {
       fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
     }
 
