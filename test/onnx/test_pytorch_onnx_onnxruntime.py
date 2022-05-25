@@ -12367,6 +12367,13 @@ class _TestONNXRuntime:
         self.run_test(model, q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
+    def test_quantized_sigmoid(self):
+        model = torch.nn.Sigmoid()
+        input = torch.randn(2, 6)
+        q_input = torch.quantize_per_tensor(input, 0.26, 128, torch.quint8)
+        self.run_test(model, q_input)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_flatten(self):
         class FlattenModel(torch.nn.Module):
             def forward(self, input):
@@ -12594,6 +12601,36 @@ class _TestONNXRuntime:
 
         # Set fixed input to avoid flaky test.
         input = _construct_tensor_for_quantization_test((4, 4, 3, 2))
+        self.run_test(model, input)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_qat_avg_pool2d(self):
+        model = torch.nn.Sequential()
+        model.add_module("quant", torch.quantization.QuantStub())
+        model.add_module("avgpool", torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1))
+        model.add_module("dequant", torch.quantization.DeQuantStub())
+
+        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model = torch.quantization.prepare_qat(model.train())
+        model = torch.quantization.convert(model)
+
+        # Set fixed input to avoid flaky test.
+        input = _construct_tensor_for_quantization_test((4, 4, 3, 2))
+        self.run_test(model, input)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_qat_upsample_nearest2d(self):
+        model = torch.nn.Sequential()
+        model.add_module("quant", torch.quantization.QuantStub())
+        model.add_module("upsample_nearest2d", torch.nn.UpsamplingNearest2d(scale_factor=1.5))
+        model.add_module("dequant", torch.quantization.DeQuantStub())
+
+        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model = torch.quantization.prepare_qat(model.train())
+        model = torch.quantization.convert(model)
+
+        # Set fixed input to avoid flaky test.
+        input = _construct_tensor_for_quantization_test((4, 3, 2, 2))
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(9)
