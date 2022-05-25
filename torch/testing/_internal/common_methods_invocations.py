@@ -19139,6 +19139,10 @@ python_ref_db = [
         "_refs.nn.functional.elu",
         torch_opinfo_name="nn.functional.elu",
     ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.hardsigmoid",
+        torch_opinfo_name="nn.functional.hardsigmoid",
+    ),
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",

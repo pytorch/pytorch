@@ -19,6 +19,7 @@ __all__ = [
     "celu",
     "dropout",
     "elu",
+    "hardsigmoid",
     "mish",
     "selu",
     "softplus",
@@ -116,6 +117,23 @@ def elu(
         rhs = refs.expm1(a)
 
     return refs.where(refs.gt(a, 0), a, rhs)
+
+
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def hardsigmoid(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.hardsigmoid
+    """
+
+    if inplace:
+        raise NotImplementedError
+
+    rhs = refs.add(refs.true_divide(a, 6), 0.5)
+
+    return refs.where(refs.le(a, -3), 0, refs.where(refs.ge(a, 3), 1, rhs))
 
 
 @register_decomposition(torch.ops.aten.leaky_relu)
