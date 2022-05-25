@@ -1381,6 +1381,7 @@ class WrapperToTestTags(torch.Tensor):
                     assert torch.Tags.inplace_view in func.tags
         return rs
 
+# Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
 class TestTags(TestCase):
     @onlyCPU
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)

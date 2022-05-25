@@ -13678,8 +13678,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Works on some configs"), 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.bfloat16,)),
                # RuntimeError: The tensor has a non-zero number of elements, but its data is not allocated yet.
-               # Caffe2 uses a lazy allocation, so you will need to call mutable_data() or raw_mutable_data() to actually allocate memory
-               DecorateInfo(unittest.skip("lazy allocation,"), 'TestTags', 'test_tags'),
+               # Caffe2 uses a lazy allocation, so you will need to call mutable_data() or raw_mutable_data()
+               # to actually allocate memory
+               DecorateInfo(unittest.skip("Skipped!"), 'TestTags', 'test_tags'),
            ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool2d',
