@@ -291,6 +291,9 @@ struct TORCH_API RecordFunction {
       return;
     }
     inputs_ = args;
+#ifndef NDEBUG
+    inputs_valid_ = true;
+#endif
     before(fn, current_sequence_nr);
   }
 
@@ -474,8 +477,6 @@ struct TORCH_API RecordFunction {
 };
 
 TORCH_API StepCallbacks getStepCallbacks(RecordScope scope);
-
-TORCH_API c10::optional<StepCallbacks> getStepCallbacksUnlessEmpty(RecordScope scope);
 
 namespace detail {
 template <typename Inputs, typename F, typename... Args>
