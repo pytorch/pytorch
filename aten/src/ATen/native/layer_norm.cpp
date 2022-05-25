@@ -204,6 +204,16 @@ Tensor& layer_norm_out(
   // First check if the devices match (CPU vs GPU)
   TORCH_CHECK(input.device() == output.device());
 
+  // Check if we can do safe cast from input to output
+  TORCH_CHECK(canCast(
+      typeMetaToScalarType(input.dtype()),
+      typeMetaToScalarType(output.dtype())));
+
+  if (input.numel() == 0) {
+    resize_output(output, input.sizes());
+    return output;
+  }
+
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -224,10 +234,6 @@ Tensor& layer_norm_out(
   auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
   Tensor mean = at::empty({M}, X->options().dtype(acc_type));
   Tensor rstd = at::empty({M}, X->options().dtype(acc_type));
-
-  TORCH_CHECK(canCast(
-      typeMetaToScalarType(input.dtype()),
-      typeMetaToScalarType(output.dtype())));
 
   if (!output.is_contiguous()) {
     Tensor Y = at::native::empty_like(
