@@ -2,7 +2,6 @@ import copy
 import functools
 from typing import (
     Any,
-    cast,
     Dict,
     Iterable,
     Iterator,
