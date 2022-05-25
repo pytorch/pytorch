@@ -3089,7 +3089,6 @@
     "softmax"
   ],
   "torch.special": [
-    "beta",
     "digamma",
     "entr",
     "erf",

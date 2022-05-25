@@ -9,7 +9,7 @@ import io
 import os
 import tempfile
 import warnings
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -246,21 +246,21 @@ def _compare_ort_pytorch_model(
 def verify(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     input_args: Tuple[Any, ...],
-    input_kwargs: Optional[Dict[str, Any]] = None,
+    input_kwargs: Optional[Mapping[str, Any]] = None,
     do_constant_folding: bool = True,
     dynamic_axes: Optional[
-        Dict[str, Union[Dict[int, str], Dict[str, List[int]]]]
+        Mapping[str, Union[Mapping[int, str], Mapping[str, Sequence[int]]]]
     ] = None,
-    input_names: Optional[List[str]] = None,
-    output_names: Optional[List[str]] = None,
+    input_names: Optional[Sequence[str]] = None,
+    output_names: Optional[Sequence[str]] = None,
     training: Optional[bool] = None,
     opset_version: Optional[int] = None,
     keep_initializers_as_inputs: bool = True,
     verbose: bool = False,
     fixed_batch_size: bool = False,
     use_external_data: bool = False,
-    additional_test_inputs: Optional[List[Tuple[Any, ...]]] = None,
-    remained_onnx_input_idx: Optional[List[int]] = None,
+    additional_test_inputs: Optional[Sequence[Tuple[Any, ...]]] = None,
+    remained_onnx_input_idx: Optional[Sequence[int]] = None,
     flatten: bool = True,
     ort_providers: Sequence[str] = _ORT_PROVIDERS,
     rtol: float = 0.001,
