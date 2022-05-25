@@ -33,9 +33,10 @@ on:
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
 {%- for label in ciflow_config.labels | sort %}
-  {%- if label != "ciflow/default" %}
+    {%- if loop.first and branches != "nightly" %}
+    tags:
+    {%- endif %}
       - '!{{ label }}/*'
-  {%- endif %}
 {%- endfor %}
   workflow_dispatch:
 

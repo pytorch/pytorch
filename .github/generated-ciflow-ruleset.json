@@ -1,5 +1,0 @@
-{
-  "__comment": "@generated DO NOT EDIT MANUALLY, Generation script: .github/scripts/generate_ci_workflows.py",
-  "label_rules": {},
-  "version": "v1"
-}

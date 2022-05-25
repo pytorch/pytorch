@@ -7,7 +7,9 @@ inputs:
     description: If set to any value, upload GHA. Otherwise upload to S3.
     required: false
   file-suffix:
-    description: Suffix to add to the filename of the artifacts
+    description: |
+      Suffix to add to the filename of the artifacts. This should include the
+      workflow job id, see [Job id in artifacts].
     required: true
 
 runs:
@@ -75,7 +77,8 @@ runs:
       uses: actions/upload-artifact@v2
       if: inputs.use-gha
       with:
-        name: test-jsons-${{ inputs.file-suffix }}.zip
+        # Add the run attempt, see [Artifact run attempt]
+        name: test-jsons-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
         retention-days: 14
         if-no-files-found: warn
         path: test/**/*.json
@@ -84,7 +87,8 @@ runs:
       uses: actions/upload-artifact@v2
       if: inputs.use-gha
       with:
-        name: test-reports-${{ inputs.file-suffix }}.zip
+        # Add the run attempt, see [Artifact run attempt]
+        name: test-reports-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
         retention-days: 14
         if-no-files-found: error
         path: test/**/*.xml
