@@ -3,6 +3,9 @@
 set -ex
 
 if [ -n "$KATEX" ]; then
+  apt-get update
+  # Ignore error if gpg-agent doesn't exist (for Ubuntu 16.04)
+  apt-get install -y gpg-agent || :
 
   curl -sL https://deb.nodesource.com/setup_12.x | sudo -E bash -
   sudo apt-get install -y nodejs
@@ -13,6 +16,8 @@ if [ -n "$KATEX" ]; then
   apt-get update
   apt-get install -y --no-install-recommends yarn
   yarn global add katex --prefix /usr/local
+
+  sudo apt-get -y install doxygen
 
   apt-get autoclean && apt-get clean
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
