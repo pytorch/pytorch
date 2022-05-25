@@ -52,7 +52,13 @@ class SymbolicContext:
         onnx_block: Current ONNX block that converted nodes are being appended to.
     """
 
-    def __init__(self, params_dict, env, cur_node, onnx_block):
+    def __init__(
+        self,
+        params_dict: Dict[str, _C.IValue],
+        env: Dict[_C.Value, _C.Value],
+        cur_node: _C.Node,
+        onnx_block: _C.Block
+    ):
         self.params_dict: Dict[str, _C.IValue] = params_dict
         self.env: Dict[_C.Value, _C.Value] = env
         # Current node that is being converted.
@@ -405,7 +411,7 @@ def export_to_pretty_string(*args, **kwargs) -> str:
     return utils.export_to_pretty_string(*args, **kwargs)
 
 
-def _optimize_trace(graph, operator_export_type):
+def _optimize_trace(graph: _C.Graph, operator_export_type: OperatorExportTypes):
     from torch.onnx import utils
 
     return utils._optimize_graph(graph, operator_export_type)
@@ -467,15 +473,15 @@ def register_custom_op_symbolic(
     utils.register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version)
 
 
-def unregister_custom_op_symbolic(symbolic_name, opset_version):
+def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
     r"""Unregisters ``symbolic_name``.
 
     See "Custom Operators" in the module documentation for an example usage.
 
     Args:
-        symbolic_name (str): The name of the custom operator in "<domain>::<op>"
+        symbolic_name: The name of the custom operator in "<domain>::<op>"
             format.
-        opset_version (int): The ONNX opset version in which to unregister.
+        opset_version: The ONNX opset version in which to unregister.
     """
 
     from torch.onnx import utils
@@ -502,8 +508,8 @@ def set_log_stream(stream_name: str = "stdout"):
     r"""Sets output stream for ONNX logging.
 
     Args:
-        stream_name: Only ``stdout`` and ``stderr`` are supported
-            as `stream_name`.
+        stream_name: Only 'stdout' and 'stderr' are supported
+            as ``stream_name``.
     """
     _C._jit_set_onnx_log_output_stream(stream_name)
 
