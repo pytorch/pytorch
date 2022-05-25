@@ -424,6 +424,9 @@ Tensor sparse_compressed_to_dense(
       auto row_indices = indices.select(0, 0);
       auto col_indices = indices.select(0, 1);
       auto offsets = col_indices + row_indices * (self.size(-1) / blocksize[1]);
+      // NOTE: This only works because we're using the same indices
+      // per matrix entry. Generally BSR only supports 2 sparse dimensions,
+      // so this isn't likely to need to change any time soon.
       dense.index_add_(1, offsets, values);
       dense = dense.reshape(
           {self.size(0),
