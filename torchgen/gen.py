@@ -162,6 +162,7 @@ def parse_native_yaml_struct(
     valid_tags: Set[str],
     ignore_keys: Optional[Set[DispatchKey]] = None,
     path: str = "<stdin>",
+    skip_native_fns_gen: bool = False,
 ) -> ParsedYaml:
     assert isinstance(es, list)
     rs: List[NativeFunction] = []
@@ -185,7 +186,8 @@ def parse_native_yaml_struct(
             index={},
         )
     )
-    add_generated_native_functions(rs, bs)
+    if not skip_native_fns_gen:
+        add_generated_native_functions(rs, bs)
     for k, v in bs.items():
         # All structured in-tree operators are implemented in terms of their out operator.
         indices[k] = BackendIndex(
@@ -226,7 +228,11 @@ def parse_tags_yaml(path: str) -> Set[str]:
 
 
 def parse_native_yaml(
-    path: str, tags_yaml_path: str, ignore_keys: Optional[Set[DispatchKey]] = None
+    path: str,
+    tags_yaml_path: str,
+    ignore_keys: Optional[Set[DispatchKey]] = None,
+    *,
+    skip_native_fns_gen: bool = False,
 ) -> ParsedYaml:
     # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
@@ -235,7 +241,11 @@ def parse_native_yaml(
         with open(path, "r") as f:
             es = yaml.load(f, Loader=LineLoader)
         _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = parse_native_yaml_struct(
-            es, valid_tags, ignore_keys, path=path
+            es,
+            valid_tags,
+            ignore_keys,
+            path=path,
+            skip_native_fns_gen=skip_native_fns_gen,
         )
 
     return _GLOBAL_PARSE_NATIVE_YAML_CACHE[path]
@@ -392,22 +402,24 @@ def translate_args_dispatcher_to_cpp(
 def generate_static_dispatch_backend_call(
     f: NativeFunction,
     backend_index: BackendIndex,
+    ns: str = "at",
 ) -> str:
     name = DispatcherSignature.from_schema(f.func).name()
     exprs = translate_args_dispatcher_to_cpp(f)
-    return f"return at::{backend_index.dispatch_key.lower()}::{name}({exprs});"
+    return f"return {ns}::{backend_index.dispatch_key.lower()}::{name}({exprs});"
 
 
 def generate_static_dispatch_fallback_call(
     f: NativeFunction,
     backend_indices: List[BackendIndex],
+    ns: str = "at",
 ) -> str:
     name = DispatcherSignature.from_schema(f.func).name()
     exprs = translate_args_dispatcher_to_cpp(f)
     if f.has_composite_explicit_autograd_kernel:
-        return f"return at::{DispatchKey.CompositeExplicitAutograd.lower()}::{name}({exprs});"
+        return f"return {ns}::{DispatchKey.CompositeExplicitAutograd.lower()}::{name}({exprs});"
     elif f.has_composite_implicit_autograd_kernel:
-        return f"return at::{DispatchKey.CompositeImplicitAutograd.lower()}::{name}({exprs});"
+        return f"return {ns}::{DispatchKey.CompositeImplicitAutograd.lower()}::{name}({exprs});"
     else:
         return f"""TORCH_CHECK(false, "Static dispatch does not support {name} for\
 {', '.join([str(index.dispatch_key)for index in backend_indices])} ");"""
@@ -416,6 +428,7 @@ def generate_static_dispatch_fallback_call(
 def static_dispatch(
     f: NativeFunction,
     backend_indices: List[BackendIndex],
+    namespace: str = "at",
 ) -> str:
     if len(backend_indices) == 0 or f.manual_kernel_registration:
         return ""
@@ -430,9 +443,9 @@ def static_dispatch(
         )
     ]
     if len(keys) == 1:
-        return generate_static_dispatch_backend_call(f, keys[0])
+        return generate_static_dispatch_backend_call(f, keys[0], namespace)
     elif len(keys) == 0:
-        return generate_static_dispatch_fallback_call(f, backend_indices)
+        return generate_static_dispatch_fallback_call(f, backend_indices, namespace)
 
     sig = DispatcherSignature.from_schema(f.func)
     native_tensor_args = [
@@ -460,10 +473,10 @@ def static_dispatch(
     for index in keys:
         dispatch_code.append(f"""case DispatchKey::{index.dispatch_key}:""")
         dispatch_code.append(
-            f"""\t{generate_static_dispatch_backend_call(f, index)};"""
+            f"""\t{generate_static_dispatch_backend_call(f, index, namespace)};"""
         )
 
-    fallback = generate_static_dispatch_fallback_call(f, backend_indices)
+    fallback = generate_static_dispatch_fallback_call(f, backend_indices, namespace)
     connector = "\n\t\t"
 
     return f"""

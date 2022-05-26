@@ -18,8 +18,8 @@ SHAPE_HEADER = r"""
  */
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/runtime/serialized_shape_function_registry.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/runtime/serialized_shape_function_registry.h>
 
 // clang-format off
 
