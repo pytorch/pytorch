@@ -478,16 +478,6 @@
     "QuantType",
     "wrap_cpp_module"
   ],
-  "torch.ao.quantization.utils": [
-    "Any",
-    "Callable",
-    "Pattern",
-    "QuantType",
-    "Tuple",
-    "Union",
-    "is_parametrized",
-    "quant_type_to_str"
-  ],
   "torch.ao.sparsity.experimental.pruner.base_pruner": [
     "ActivationReconstruction",
     "BaseSparsifier",
