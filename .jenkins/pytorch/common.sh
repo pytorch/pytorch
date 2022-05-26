@@ -135,12 +135,8 @@ if [ -z "$COMPACT_JOB_NAME" ]; then
 fi
 
 # TODO: Renable libtorch testing for MacOS, see https://github.com/pytorch/pytorch/issues/62598
-if [[ "$BUILD_ENVIRONMENT" == *linux-trusty-py3.6-gcc7* ]]; then
-  BUILD_TEST_LIBTORCH=1
-else
-  # shellcheck disable=SC2034
-  BUILD_TEST_LIBTORCH=0
-fi
+# shellcheck disable=SC2034
+BUILD_TEST_LIBTORCH=0
 
 # Use conda cmake in some CI build. Conda cmake will be newer than our supported
 # min version (3.5 for xenial and 3.10 for bionic),
