@@ -64,7 +64,9 @@ class _TestJITIRToONNX:
         )
         ort_outs = verification._run_ort(ort_sess, example_inputs)
 
-        verification._ort_compare_with_pytorch(ort_outs, jit_outs, rtol=1e-3, atol=1e-7)
+        verification._compare_ort_pytorch_outputs(
+            ort_outs, jit_outs, rtol=1e-3, atol=1e-7
+        )
 
     def test_example_ir(self):
         graph_ir = """
