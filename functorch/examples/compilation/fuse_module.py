@@ -1,5 +1,5 @@
 import timeit
-from functorch import compiled_module, tvm_compile
+from functorch.compile import compiled_module, tvm_compile
 import torch.nn as nn
 import torch
 from functools import partial
@@ -9,8 +9,8 @@ def nop(f, _):
     return f
 
 
-fw_compiler = partial(tvm_compile, name='fw_keops')
-bw_compiler = partial(tvm_compile, name='bw_keops')
+fw_compiler = tvm_compile(target='llvm', tuning_logfile='fw_keops')
+bw_compiler = tvm_compile(target='llvm', tuning_logfile='bw_keops')
 fw_compiler = nop
 bw_compiler = nop
 
