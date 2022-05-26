@@ -467,7 +467,6 @@ void scan_dim(const TensorBase& self, const TensorBase& result,
 }
 
 void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase& self, int64_t dim) {
-  const auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "logcumsumexp_cuda",
@@ -485,7 +484,7 @@ void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase&
              return x;
           }
         };
-        scan_dim<scalar_t>(self, result, wrap_dim, init, log_add_exp);
+        scan_dim<scalar_t>(self, result, dim, init, log_add_exp);
       });
 }
 

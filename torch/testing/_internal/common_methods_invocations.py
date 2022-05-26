@@ -4302,6 +4302,14 @@ def error_inputs_index_select(op_info, device, **kwargs):
                      error_type=RuntimeError,
                      error_regex='unsupported operation')
 
+def error_inputs_logcumsumexp(op_info, device, **kwargs):
+    dim = 3
+    srcs = [torch.randn(5, 2, device=device), torch.randn(0, 2, device=device)]
+    for src in srcs:
+        yield ErrorInput(SampleInput(src, args=(dim,)),
+                         error_type=IndexError,
+                         error_regex='Dimension out of range')
+
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S), dtype=dtype, device=device,
                                     low=None, high=None,
@@ -17251,7 +17259,8 @@ op_db: List[OpInfo] = [
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='cuda'),
            ),
-           sample_inputs_func=sample_inputs_logcumsumexp),
+           sample_inputs_func=sample_inputs_logcumsumexp,
+           error_inputs_func=error_inputs_logcumsumexp),
     UnaryUfuncInfo('sigmoid',
                    aliases=('special.expit', 'nn.functional.sigmoid'),
                    aten_backward_name='sigmoid_backward',
