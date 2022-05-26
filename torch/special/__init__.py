@@ -856,7 +856,7 @@ legendre_polynomial_p = _add_docstr(_special.special_legendre_polynomial_p,
                                     r"""
 legendre_polynomial_p(input, n, *, out=None) -> Tensor
 
-Legendre polynomial :math:`L_{n}(\text{input})`.
+Legendre polynomial :math:`P_{n}(\text{input})`.
 
 If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
 is returned. Otherwise, the recursion:
