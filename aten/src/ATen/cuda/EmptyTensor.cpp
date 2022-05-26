@@ -72,7 +72,6 @@ TensorBase empty_strided_cuda(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
   const auto dtype = dtype_or_default(dtype_opt);
-  at::detail::raise_warning_for_complex_half(dtype);
   return at::detail::empty_strided_cuda(size, stride, dtype, device_opt);
 }
 
