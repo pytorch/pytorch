@@ -6,6 +6,30 @@
 #include <torch/library.h>
 #include "c10/util/Optional.h"
 
+
+// Steps to add op for MPS backend:
+// 1. Register the op in aten/src/ATen/native/native_functions.yaml with the "MPS" dispatch key
+// 2. Define the function interface for the MPS backend similar to other
+//    backends depending on whether its structured or non-structured
+// 3. Add boiler-plate error checking code as expected for the Op
+// 4. The code structure roughly follows the pattern
+//    a) get the MPS stream handle to encode work onto
+//    b) get an instance of MPSGraphCache and create a key unique to the Graph
+//       needed for implementing this Op. Any shape, dataType or parameter
+//       passed to the MPSGraph during its construction will need to be included
+//       here.
+//    c) Create the graph using make_mps_graph() and add operations to the
+//       instance of MPSGraph. This is if the Cache->lookup() fails.
+//    d) Store the MPSGraphTensors for inputs and output which are needed at
+//       runtime.
+//    e) Use the CachedGraph instance's inputs and output to create Placeholders
+//       You will need to pass in Tensor to create MPSGraphTensorData objects.
+//    f) Using MPSGraphTensor and MPSGraphTensorData instances create a feeds
+//       dictionary.
+//    g) Then call runMPSGraph() with input params and return the result.
+//
+
+
 namespace at {
 namespace native {
 
@@ -13,12 +37,6 @@ Tensor& eye_out_mps(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`
   return eye_out_mps(n, n, result);
 }
-
-// Steps to add op for MPS backend:
-// Register the op in aten/src/ATen/native/native_functions.yaml with the "MPS" dispatch key
-// Define the function interface for the MPS backend based on the interface as defined in the corresponding CPU/CUDA counterparts
-// Check in the native_functions.yaml if the function is structured or non-structured
-// Add boiler-plate error checking code as present in the CPU/CUDA counterparts
 
 Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
 
