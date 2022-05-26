@@ -283,7 +283,7 @@ def _single_tensor_adamw(params: List[Tensor],
             torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
             # Use the max. for normalizing running avg. of gradient
             if capturable:
-                # Folds in 1-elem divs by step_size_neg here to avoid extra param-set-sized read+write
+                # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
                 # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
                 denom = (max_exp_avg_sqs[i].sqrt() / (bias_correction2_sqrt * step_size_neg)).add_(eps / step_size_neg)
             else:
@@ -334,12 +334,16 @@ def _multi_tensor_adamw(params: List[Tensor],
     # update steps
     torch._foreach_add_(state_steps, 1)
 
+    # Given the capturable and non-capturable code divergence, maybe we should have separate functions.
     if capturable:
         # TODO: use foreach_pow if/when foreach_pow is added
         bias_correction1 = [torch.pow(beta1, step) for step in state_steps]
         bias_correction2 = [torch.pow(beta2, step) for step in state_steps]
-        bias_correction1 = torch._foreach_sub(1, bias_correction1)
-        bias_correction2 = torch._foreach_sub(1, bias_correction2)
+        # foreach_sub doesn't allow a scalar as the first arg
+        torch._foreach_sub_(bias_correction1, 1)
+        torch._foreach_sub_(bias_correction2, 1)
+        torch._foreach_neg_(bias_correction1)
+        torch._foreach_neg_(bias_correction2)
     else:
         bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
         bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
@@ -351,22 +355,44 @@ def _multi_tensor_adamw(params: List[Tensor],
     torch._foreach_mul_(exp_avg_sqs, beta2)
     torch._foreach_addcmul_(exp_avg_sqs, grads, grads, 1 - beta2)
 
+    if capturable:
+        # foreach_div doesn't allow a scalar as the first arg
+        step_size = torch._foreach_div(bias_correction1, lr)
+        torch._foreach_reciprocal_(step_size)
+        torch._foreach_neg_(step_size)
+    else:
+        step_size = [(lr / bc) * -1 for bc in bias_correction1]
+
+    bias_correction2_sqrt = torch._foreach_sqrt(bias_correction2) if capturable \
+        else [math.sqrt(bc) for bc in bias_correction2]
     if amsgrad:
         # Maintains the maximum of all 2nd moment running avg. till now
         max_exp_avg_sqs = torch._foreach_maximum(max_exp_avg_sqs, exp_avg_sqs)  # type: ignore[assignment]
 
         # Use the max. for normalizing running avg. of gradient
         max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
-        bias_correction_sqrt = [bc.sqrt() if (torch.is_tensor(bc) and bc.is_cuda) else math.sqrt(bc)
-                                for bc in bias_correction2]
-        torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
-        denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps)
+        if capturable:
+            # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
+            # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
+            torch._foreach_div_(max_exp_avg_sq_sqrt, torch._foreach_mul(bias_correction2_sqrt, step_size))
+            eps_over_step_size = torch._foreach_div(step_size, eps)
+            torch._foreach_reciprocal_(eps_over_step_size)
+            denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps_over_step_size)
+        else:
+            torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction2_sqrt)
+            denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps)
     else:
         exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
-        bias_correction_sqrt = [bc.sqrt() if (torch.is_tensor(bc) and bc.is_cuda) else math.sqrt(bc)
-                                for bc in bias_correction2]
-        torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
-        denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
+        if capturable:
+            torch._foreach_div_(exp_avg_sq_sqrt, torch._foreach_mul(bias_correction2_sqrt, step_size))
+            eps_over_step_size = torch._foreach_div(step_size, eps)
+            torch._foreach_reciprocal_(eps_over_step_size)
+            denom = torch._foreach_add(exp_avg_sq_sqrt, eps_over_step_size)
+        else:
+            torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
+            denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
-    step_size = [-1 * (lr / bc) for bc in bias_correction1]
-    torch._foreach_addcdiv_(params, exp_avgs, denom, step_size)
+    if capturable:
+        torch._foreach_addcdiv_(params, exp_avgs, denom)
+    else:
+        torch._foreach_addcdiv_(params, exp_avgs, denom, step_size)

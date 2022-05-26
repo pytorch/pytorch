@@ -3818,7 +3818,7 @@ torch.cuda.synchronize()
         OptClasses = (torch.optim.Adam, torch.optim.AdamW)
         cases = []
         # Needs generalization if we want to extend this test to non-Adam-like optimizers.
-        for Class, foreach, amsgrad in product(OptClasses, (False, False), (True, False)):
+        for Class, foreach, amsgrad in product(OptClasses, (False, True), (False, True)):
             cases.append((Class, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach, "amsgrad": amsgrad}))
 
         steps_warmup = 3
@@ -3832,12 +3832,16 @@ torch.cuda.synchronize()
 
                 grads = [[torch.randn_like(p) for p in params] for _ in range(steps_warmup + steps_train)]
 
-                opt = OptClass(params_control, **kwargs)
+                # Control (capturable=False)
+
+                opt = OptClass(params_control, capturable=False, **kwargs)
 
                 for i in range(steps_warmup + steps_train):
                     for j, p in enumerate(params_control):
                         p.grad = grads[i][j]
                     opt.step()
+
+                # capturable=True
 
                 opt = OptClass(params_graphed, capturable=True, **kwargs)
 
