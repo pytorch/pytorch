@@ -22,10 +22,7 @@ namespace torch {
 namespace jit {
 
 namespace {
-
-static auto workerInfo =
-    torch::class_<dist_rpc::WorkerInfo>("dist_rpc", "WorkerInfo")
-        .def(torch::init<std::string, int64_t>());
+distributed::rpc::RegisterWorkerInfoOnce workerInfo{};
 
 // prepare the rpc input arguments and call the C++ impls
 void prepare_and_call_rpc_op(
