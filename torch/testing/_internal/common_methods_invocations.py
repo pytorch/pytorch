@@ -18876,8 +18876,8 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
-          DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
-          DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
