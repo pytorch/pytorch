@@ -1135,8 +1135,7 @@ def check_training_mode(op_train_mode: int, op_name: str) -> None:
     # in training.
     warnings.warn(
         f"ONNX export mode is set to {GLOBALS.training_mode}, but operator '{op_name}' "
-        f"is set to {op_mode_text}. Exporting with {op_mode_text}. "
-        f"{op_mode_text}."
+        f"is set to {op_mode_text}. Exporting with {op_mode_text}."
     )
 
 
