@@ -123,11 +123,11 @@ TORCH_META_FUNC(signbit) (const Tensor& self) {
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
               "signbit does not support non-boolean outputs.");
   // NOTE: windows corecrt_math.h does not support signbit with integral arguments.
-  // The workaround is to promote integer inputs to float dtype.
+  // The config is derived from build_borrowing_unary_force_boolean_op.
   build(TensorIteratorConfig()
-      .set_check_mem_overlap(true)
       .promote_inputs_to_common_dtype(true)
       .promote_integer_inputs_to_float(true)
+      .set_check_mem_overlap(true)
       .check_all_same_dtype(false)
       .declare_static_dtype(at::kBool)
       .declare_static_device(self.device())
