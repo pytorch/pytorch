@@ -146,7 +146,6 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
   if (common_dtype == kComplexHalf) {
     using scalar_t = c10::complex<at::Half>;
     if (iter.is_cpu_scalar(1)) {
-      // if base is cpu scalar.
       const auto base = iter.scalar_value<scalar_t>(1);
       iter.remove_operand(1);
       pow_scalar_tensor_impl(iter, base);
@@ -160,14 +159,16 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
       TORCH_INTERNAL_ASSERT(
           iter.is_cpu_scalar(2) ||
           (!iter.is_cpu_scalar(1) && !iter.is_cpu_scalar(2)));
-    #if AT_USE_JITERATOR()
-      jitted_gpu_kernel<pow_name, scalar_t, scalar_t, 2>(iter, pow_kernel_string);
-    #else
-      opmath_gpu_kernel_with_scalars<scalar_t>(iter, [=] GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
-        using opmath_t = at::opmath_type<scalar_t>;
-        return pow_(opmath_t{base}, opmath_t{exp});
-      });
-    #endif
+#if AT_USE_JITERATOR()
+      jitted_gpu_kernel<pow_name, scalar_t, scalar_t, 2>(
+          iter, pow_kernel_string);
+#else
+      opmath_gpu_kernel_with_scalars<scalar_t>(
+          iter, [=] GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
+            using opmath_t = at::opmath_type<scalar_t>;
+            return pow_(opmath_t{base}, opmath_t{exp});
+          });
+#endif
     }
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
@@ -233,7 +234,7 @@ void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar
       return;
     }
     AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
-      auto exp = exp_scalar.to<scalar_t>();
+      const auto exp = exp_scalar.to<scalar_t>();
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
         return pow_(base, exp);
       });
