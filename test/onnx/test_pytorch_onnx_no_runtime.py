@@ -64,7 +64,7 @@ def export_to_onnx(
     return onnx_model
 
 
-class TestOptionalOutput(common_utils.TestCase):
+class TestOptionalOutput(unittest.TestCase):
     # TODO: Move these tests to test_pytorch_onnx_onnxruntime once
     # ONNX Runtime 1.11 is released and supports opset 16.
 
