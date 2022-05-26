@@ -45,7 +45,9 @@ __all__ = [
     "atan",
     "cos",
     "cosh",
+    "bessel_i0",
     "bessel_i0e",
+    "bessel_i1",
     "bessel_i1e",
     "bitwise_not",
     "cbrt",
@@ -104,6 +106,7 @@ __all__ = [
     "shift_right_arithmetic",
     "shift_right_logical",  # not implemented
     "sub",
+    "zeta",
     #
     # View prims
     #
@@ -134,6 +137,7 @@ __all__ = [
     "clone",
     "convert_element_type",
     "device_put",
+    "item",
     "to_dtype",
     #
     # Inplace prims
@@ -144,10 +148,8 @@ __all__ = [
     #
     # Reduction prims
     #
-    "all",
     "amax",
     "amin",
-    "any",
     "prod",
     "sum",
     "var",
@@ -358,16 +360,28 @@ def _not_impl(*args, **kwargs):
 # Elementwise unary operations
 #
 
+
+def _abs_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.abs(a)  # type: ignore[attr-defined]
+
+
 abs = _make_elementwise_unary_prim(
     "abs",
     impl_aten=torch.abs,
+    impl_nvfuser=_abs_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
 )
 
+
+def _acos_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.acos(a)  # type: ignore[attr-defined]
+
+
 acos = _make_elementwise_unary_prim(
     "acos",
     impl_aten=torch.acos,
+    impl_nvfuser=_acos_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -379,30 +393,61 @@ acosh = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _asin_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.asin(a)  # type: ignore[attr-defined]
+
+
 asin = _make_elementwise_unary_prim(
     "asin",
     impl_aten=torch.asin,
+    impl_nvfuser=_asin_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _atan_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.atan(a)  # type: ignore[attr-defined]
+
 
 atan = _make_elementwise_unary_prim(
     "atan",
     impl_aten=torch.atan,
+    impl_nvfuser=_atan_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _cos_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.cos(a)  # type: ignore[attr-defined]
+
 
 cos = _make_elementwise_unary_prim(
     "cos",
     impl_aten=torch.cos,
+    impl_nvfuser=_cos_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _cosh_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.cosh(a)  # type: ignore[attr-defined]
+
+
 cosh = _make_elementwise_unary_prim(
     "cosh",
     impl_aten=torch.cosh,
+    impl_nvfuser=_cosh_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+bessel_i0 = _make_elementwise_unary_prim(
+    "bessel_i0",
+    impl_aten=torch.i0,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -414,6 +459,13 @@ bessel_i0e = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+bessel_i1 = _make_elementwise_unary_prim(
+    "bessel_i1",
+    impl_aten=torch.special.i1,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 bessel_i1e = _make_elementwise_unary_prim(
     "bessel_i1e",
     impl_aten=torch.special.i1e,
@@ -421,9 +473,15 @@ bessel_i1e = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _bitwise_not_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.bitwise_not(a)  # type: ignore[attr-defined]
+
+
 bitwise_not = _make_elementwise_unary_prim(
     "bitwise_not",
     impl_aten=torch.bitwise_not,
+    impl_nvfuser=_bitwise_not_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -440,9 +498,15 @@ cbrt = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _ceil_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.ceil(a)  # type: ignore[attr-defined]
+
+
 ceil = _make_elementwise_unary_prim(
     "ceil",
     impl_aten=torch.ceil,
+    impl_nvfuser=_ceil_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -454,9 +518,15 @@ digamma = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _erf_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.erf(a)  # type: ignore[attr-defined]
+
+
 erf = _make_elementwise_unary_prim(
     "erf",
     impl_aten=torch.erf,
+    impl_nvfuser=_erf_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -468,23 +538,41 @@ erf_inv = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _erfc_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.erfc(a)  # type: ignore[attr-defined]
+
+
 erfc = _make_elementwise_unary_prim(
     "erfc",
     impl_aten=torch.special.erfc,
+    impl_nvfuser=_erfc_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _exp_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.exp(a)  # type: ignore[attr-defined]
+
 
 exp = _make_elementwise_unary_prim(
     "exp",
     impl_aten=torch.exp,
+    impl_nvfuser=_exp_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _expm1_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.expm1(a)  # type: ignore[attr-defined]
+
+
 expm1 = _make_elementwise_unary_prim(
     "expm1",
     impl_aten=torch.special.expm1,
+    impl_nvfuser=_expm1_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -520,16 +608,28 @@ fill = _make_prim(
     doc="",
 )
 
+
+def _floor_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.floor(a)  # type: ignore[attr-defined]
+
+
 floor = _make_elementwise_unary_prim(
     "floor",
     impl_aten=torch.floor,
+    impl_nvfuser=_floor_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _isfinite_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.isfinite(a)  # type: ignore[attr-defined]
+
+
 is_finite = _make_elementwise_unary_prim(
     "is_finite",
     impl_aten=torch.isfinite,
+    impl_nvfuser=_isfinite_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -548,51 +648,93 @@ lgamma = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _log_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.log(a)  # type: ignore[attr-defined]
+
+
 log = _make_elementwise_unary_prim(
     "log",
     impl_aten=torch.log,
+    impl_nvfuser=_log_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _log1p_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.log1p(a)  # type: ignore[attr-defined]
+
 
 log1p = _make_elementwise_unary_prim(
     "log1p",
     impl_aten=torch.log1p,
+    impl_nvfuser=_log1p_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _log2_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.log2(a)  # type: ignore[attr-defined]
+
 
 log2 = _make_elementwise_unary_prim(
     "log2",
     impl_aten=torch.log2,
+    impl_nvfuser=_log2_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _log10_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.log10(a)  # type: ignore[attr-defined]
+
 
 log10 = _make_elementwise_unary_prim(
     "log10",
     impl_aten=torch.log10,
+    impl_nvfuser=_log10_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _reciprocal_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.reciprocal(a)  # type: ignore[attr-defined]
+
 
 reciprocal = _make_elementwise_unary_prim(
     "reciprocal",
     impl_aten=torch.reciprocal,
+    impl_nvfuser=_reciprocal_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _neg_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.neg(a)  # type: ignore[attr-defined]
+
 
 neg = _make_elementwise_unary_prim(
     "neg",
     impl_aten=torch.neg,
+    impl_nvfuser=_neg_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _round_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.round(a)  # type: ignore[attr-defined]
+
+
 round = _make_elementwise_unary_prim(
     "round",
     impl_aten=torch.round,
+    impl_nvfuser=_round_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -604,23 +746,41 @@ sign = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _sin_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.sin(a)  # type: ignore[attr-defined]
+
+
 sin = _make_elementwise_unary_prim(
     "sin",
     impl_aten=torch.sin,
+    impl_nvfuser=_sin_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _sinh_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.sinh(a)  # type: ignore[attr-defined]
+
 
 sinh = _make_elementwise_unary_prim(
     "sinh",
     impl_aten=torch.sinh,
+    impl_nvfuser=_sinh_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _sqrt_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.sqrt(a)  # type: ignore[attr-defined]
+
+
 sqrt = _make_elementwise_unary_prim(
     "sqrt",
     impl_aten=torch.sqrt,
+    impl_nvfuser=_sqrt_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -632,16 +792,28 @@ square = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _tan_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.tan(a)  # type: ignore[attr-defined]
+
+
 tan = _make_elementwise_unary_prim(
     "tan",
     impl_aten=torch.tan,
+    impl_nvfuser=_tan_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _tanh_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.tanh(a)  # type: ignore[attr-defined]
+
+
 tanh = _make_elementwise_unary_prim(
     "tanh",
     impl_aten=torch.tanh,
+    impl_nvfuser=_tanh_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -899,6 +1071,13 @@ shift_right_logical = _not_impl
 sub = _make_elementwise_binary_prim(
     "sub",
     impl_aten=torch.sub,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+zeta = _make_elementwise_binary_prim(
+    "zeta",
+    impl_aten=torch.special.zeta,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1709,11 +1888,16 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
 
 
 def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
-    # TODO: update meta objects so this can be acquired directly
-    try:
-        requires_grad = a.requires_grad
-    except Exception as e:
+
+    # Propagates requires grad when possible
+    if not utils.is_grad_dtype(dtype):
         requires_grad = False
+    else:
+        # TODO: update meta objects so this can be acquired directly
+        try:
+            requires_grad = a.requires_grad
+        except Exception as e:
+            requires_grad = False
 
     result = torch.empty_like(
         a, device=a.device, dtype=dtype, requires_grad=requires_grad
@@ -1764,6 +1948,28 @@ device_put = _make_prim(
     impl_aten=_device_put_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_device_put_doc,
+)
+
+# NOTE: need to model meta scalars
+# See https://github.com/pytorch/pytorch/issues/78070
+def _item_meta(a: TensorLikeType) -> TensorMeta:
+    number_type = utils.dtype_to_type(a.dtype)
+    return TensorMeta(number_type(-1))
+
+
+_item_doc = """
+    Converts a tensor with one element to a Python number.
+"""
+
+# TODO: create a new return type for scalars?
+# FIXME: currently returns integers for boolean tensors
+# https://github.com/pytorch/pytorch/issues/78071
+item = _make_prim(
+    schema="item(Tensor a) -> Scalar",
+    meta=_item_meta,
+    impl_aten=torch.Tensor.item,
+    return_type=RETURN_TYPE.NEW,
+    doc=_item_doc,
 )
 
 # TODO: FIXME: strides are incorrect
@@ -1875,10 +2081,6 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
     )
 
 
-def _bool_return_reduction_meta(inp, dims):
-    return _reduction_meta(inp, dims, output_dtype=torch.bool)
-
-
 def _var_reduction_meta(inp, dims, *, correction):
     if utils.is_complex_dtype(inp.dtype):
         output_dtype = utils.corresponding_real_dtype(inp.dtype)
@@ -1930,17 +2132,6 @@ def _make_var_reduction_prim(name: str, impl_aten, doc):
     )
 
 
-def _make_bool_reduction_prim(name: str, impl_aten, doc):
-    """Creates a reduction prim that reduces to bool."""
-    return _make_prim(
-        schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType? output_dtype=None) -> Tensor",
-        meta=_bool_return_reduction_meta,
-        impl_aten=impl_aten,
-        return_type=RETURN_TYPE.NEW,
-        doc=doc,
-    )
-
-
 sum = _make_reduction_prim(
     name="sum",
     impl_aten=torch.sum,
@@ -1969,18 +2160,6 @@ amin = _make_reduction_prim(
     name="amin",
     impl_aten=torch.amin,
     doc=_amin_doc,
-)
-
-all = _make_bool_reduction_prim(
-    name="all",
-    impl_aten=torch.all,
-    doc="",
-)
-
-any = _make_bool_reduction_prim(
-    name="any",
-    impl_aten=torch.any,
-    doc="",
 )
 
 # TODO: layout, pin_memory, memory_format

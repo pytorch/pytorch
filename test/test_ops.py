@@ -7,6 +7,7 @@ import unittest
 import itertools
 import torch
 import contextlib
+from importlib import import_module
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -26,6 +27,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_FBCODE,
     first_sample,
+    parametrize,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -452,8 +454,8 @@ class TestCommon(TestCase):
                 torch_distance = torch_distance + _distance(a, b)
 
             # TODO: consider adding some tolerance to this comparison
-            msg = f"Reference result was farther ({ref_distance}) from the precise \
-                    computation than the torch result was ({torch_distance})!"
+            msg = f"Reference result was farther ({ref_distance}) from the precise " \
+                  "computation than the torch result was ({torch_distance})!"
             self.assertTrue(ref_distance <= torch_distance, msg=msg)
 
         # Reports numerical accuracy discrepancies
@@ -1341,9 +1343,44 @@ class TestMathBits(TestCase):
         )
 
 
+
+class TestRefsOpsInfo(TestCase):
+
+    import_paths = ["_refs", "_refs.special", "_refs.nn.functional"]
+    module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
+    ref_ops_names = itertools.chain.from_iterable(
+        [f"{path}.{op}" for op in module_all] for path, module_all in module_alls)
+    ref_db_names = set(ref_op.name for ref_op in python_ref_db)
+
+    # TODO: References that do not have an entry in python_ref_db
+    skip_ref_ops = {
+        '_refs.bitwise_right_shift',
+        '_refs.copy_to',
+        '_refs.empty_strided',
+        '_refs.equal',
+        '_refs.full',
+        '_refs.full_like',
+        '_refs.item',
+        '_refs.ones',
+        '_refs.ones_like',
+        '_refs.std_var',
+        '_refs.swap_axes',
+        '_refs.uniform',
+        '_refs.zeros',
+        '_refs.zeros_like'
+    }
+
+    @parametrize("op", ref_ops_names)
+    def test_refs_are_in_python_ref_db(self, op):
+        if op in self.skip_ref_ops:
+            raise unittest.SkipTest(f"{op} does not have an entry in python_ref_db")
+        self.assertIn(op, self.ref_db_names)
+
+
 instantiate_device_type_tests(TestCommon, globals())
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
+instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
