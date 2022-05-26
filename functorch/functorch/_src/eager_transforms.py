@@ -1305,6 +1305,20 @@ def _register_jit_decomposition(decomp, use_python=False):
     torch.jit._register_decomposition(decomp, graph)
 
 
+# use an alternate way to register an operator into the decomposition table
+# _register_jit_decomposition doesn't work for some operators, e.g. addr,
+#  because the Tensor types generated cannot be unioned by torchscript
+# decomp should be type OpOverload
+vmap_decompositions_lib = torch.library.Library("aten", "IMPL", "FuncTorchBatched")
+
+
+def _register_python_decomposition_vmap(decomp):
+    if decomp in decomposition_table:
+        vmap_decompositions_lib.impl(decomp, decomposition_table[decomp])
+    else:
+        raise RuntimeError(f"could not find decomposition for {decomp}")
+
+
 _register_jit_decomposition(torch.ops.aten.trace.default)
 _register_jit_decomposition(torch.ops.aten.nll_loss_backward.default)
 _register_jit_decomposition(torch.ops.aten.nll_loss2d_backward.default)
@@ -1316,3 +1330,4 @@ _register_jit_decomposition(torch.ops.aten.log_sigmoid_forward.default)
 _register_jit_decomposition(torch.ops.aten.binary_cross_entropy_backward.default)
 _register_jit_decomposition(torch.ops.aten.binary_cross_entropy.default)
 _register_jit_decomposition(torch.ops.aten.native_layer_norm_backward.default)
+_register_python_decomposition_vmap(torch.ops.aten.addr.default)
