@@ -1721,6 +1721,61 @@ REGISTER_OPERATOR_FUNCTOR(aten::repeat, aten_repeat, [](Node* n) -> SROperator {
   };
 });
 
+REGISTER_OPERATOR_FUNCTOR(aten::max, aten_max, [](Node* n) -> SROperator {
+  if (n->matches(torch::schema(
+          "aten::max.other(Tensor self, Tensor other) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto& other = p_node->Input(1).toTensor();
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = at::native::max(self, other);
+        return;
+      }
+      auto& out = p_node->Output(0).toTensor();
+      fastResizeToZero(out);
+      at::native::max_out(self, other, out);
+    };
+  }
+
+  if (n->matches(torch::schema(
+          "aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      auto dim = p_node->Input(1).toInt();
+      const auto keepdim = p_node->Input(2).toBool();
+
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = create_empty_from(self);
+      }
+
+      if (p_node->Output(1).isNone()) {
+        p_node->Output(1) = create_empty_from(self, at::kLong);
+      }
+
+      auto& values = p_node->Output(0).toTensor();
+      auto& indices = p_node->Output(1).toTensor();
+      fastResizeToZero(values);
+      fastResizeToZero(indices);
+      at::cpu::max_out(values, indices, self, dim, keepdim);
+    };
+  }
+
+  if (n->matches(torch::schema("aten::max(Tensor self) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = create_empty_from(self);
+      }
+      auto& value = p_node->Output(0).toTensor();
+      fastResizeToZero(value);
+      at::cpu::amax_out(value, self);
+    };
+  }
+
+  LogAndDumpSchema(n);
+  return nullptr;
+});
+
 REGISTER_OPERATOR_FUNCTOR(aten::sign, aten_sign, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema("aten::sign.Tensor(Tensor input) -> Tensor"))) {
     LogAndDumpSchema(n);

@@ -94,6 +94,43 @@ TEST(StaticRuntime, UnaryOps) {
   testStaticRuntime(aten_sum_1_true, args, args2);
 }
 
+TEST(StaticRuntime, Max) {
+  auto src_max_reduce = R"JIT(
+    def forward(self, input):
+        return torch.max(input).clone()
+  )JIT";
+
+  auto src_max_dim = R"JIT(
+    def forward(self, input, dim: int):
+        values, indices = torch.max(input, dim)
+        return values.clone(), indices.clone()
+  )JIT";
+
+  auto src_max_dim_keepdim = R"JIT(
+    def forward(self, input, dim: int):
+        values, indices = torch.max(input, dim, keepdim=True)
+        return values.clone(), indices.clone()
+  )JIT";
+
+  auto src_max_pointwise = R"JIT(
+    def forward(self, input, other):
+        return torch.max(input, other).clone()
+  )JIT";
+
+  auto input = at::randn({2, 3, 2});
+  auto input_other = at::randn({2, 3, 2});
+  auto large_input = at::randn({8, 9, 10});
+  auto large_input_other = at::randn({8, 9, 10});
+
+  testStaticRuntime(src_max_reduce, {input});
+  testStaticRuntime(src_max_dim, {input, 1});
+  testStaticRuntime(src_max_dim, {input, 1}, {large_input, 0});
+  testStaticRuntime(src_max_dim_keepdim, {input, 0});
+  testStaticRuntime(src_max_dim_keepdim, {input, 0}, {large_input, 2});
+  testStaticRuntime(src_max_pointwise, {input, input_other});
+  testStaticRuntime(src_max_pointwise, {input, input_other}, {large_input, large_input_other});
+}
+
 TEST(StaticRuntime, Sigmoid) {
   const auto sigmoid_script = R"JIT(
     def forward(self, inp: Tensor):
