@@ -802,8 +802,8 @@ def find_matching_merge_rule(pr: GitHubPR,
         if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
-                reject_reason = (f"Matched rule {rule_name}, but PR #{pr.pr_num} was not reviewed yet by any of:" +
-                                 f"{','.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}")
+                reject_reason = (f"Matched rule {rule_name}, but PR #{pr.pr_num} was not reviewed yet by any of: " +
+                                 f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}")
             continue
         if rule.mandatory_checks_name is not None:
             pending_checks: List[Tuple[str, Optional[str]]] = []
@@ -824,7 +824,7 @@ def find_matching_merge_rule(pr: GitHubPR,
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
-                reject_reason = ("Refusing to merge as mandatory check(s)" +
+                reject_reason = ("Refusing to merge as mandatory check(s) " +
                                  checks_to_str(failed_checks) + f" failed for rule {rule_name}")
             continue
         elif len(pending_checks) > 0:
