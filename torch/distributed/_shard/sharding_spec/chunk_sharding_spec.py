@@ -144,7 +144,7 @@ class ChunkShardingSpec(ShardingSpec):
         local_metadata = None
         tensors_to_scatter = [None] * dist.get_world_size(process_group)
 
-        sharding_dim_size = tensor.size(self.dim)  # type: ignore[index]
+        sharding_dim_size = tensor.size(self.dim)  # type: ignore[arg-type]
         chunks = len(self.placements)
         split_size = get_split_size(sharding_dim_size, chunks)
         scatter_shape = list(tensor.size())
