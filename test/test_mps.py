@@ -1323,6 +1323,7 @@ class TestMPS(TestCase):
             full_sh = (20,)
             #print('assert1')
             for val1, val2 in itertools.product(sample_vals[dtype1], sample_vals[dtype2]):
+                # TODO Test equality of dtype of result tensor, not only values
                 self.assertEqual(
                     getattr(torch.tensor(val1, dtype=dtype1, device='mps'), binop)
                            (torch.tensor(val2, dtype=dtype2, device='mps')),
