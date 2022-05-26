@@ -96,7 +96,7 @@ jobs:
         run: |
          # Since git apply will fix all the flags raised by the whitespace
          # errors and this will not raise any warinig or error
-         git commit --allow-empty
+         git commit --allow-empty -m "empty commit"
          git diff > patchname.patch
          file=$(patchname.patch)
          if [ -f "$file" ]; then
