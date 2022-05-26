@@ -437,7 +437,7 @@ frac = _make_elementwise_unary_reference(
 
 def _isfinite(a: TensorLikeType) -> TensorLikeType:
     if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
-        return prims.is_finite(a)
+        return prims.isfinite(a)
 
     return ones_like(a, dtype=torch.bool)
 
