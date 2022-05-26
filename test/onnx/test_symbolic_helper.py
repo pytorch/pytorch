@@ -30,11 +30,13 @@ class TestHelperFunctions(common_utils.TestCase):
             ),
         ],
     )
-    def test_check_training_mode_does_nothing_when(
+    def test_check_training_mode_does_not_warn_when(
         self, op_train_mode: int, export_mode: torch.onnx.TrainingMode
     ):
         GLOBALS.training_mode = export_mode
-        symbolic_helper.check_training_mode(op_train_mode, "testop")
+        self.assertNotWarn(
+            lambda: symbolic_helper.check_training_mode(op_train_mode, "testop")
+        )
 
     @common_utils.parametrize(
         "op_train_mode,export_mode",
