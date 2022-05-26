@@ -49,3 +49,19 @@ class TestAutodiffJit(JitTestCase):
         for x in grad_inputs:
             if x is not None:
                 self.assertEqual(0, torch.max(torch.abs(x)).item())
+
+    def test_requires_grad_outputs(self):
+        # outputs should require_grad only if eager outputs would require_grad.
+        def fn(a, b, c):
+            return a.relu() + b.relu(), c.relu()
+
+        a = torch.rand((10, 10), requires_grad=False)
+        b = torch.rand((10, 10), requires_grad=False)
+        c = torch.rand((10, 10), requires_grad=True)
+
+        fn_s = torch.jit.script(fn)
+
+        for i in range(4):
+            x, y = fn_s(a, b, c)
+            self.assertFalse(x.requires_grad)
+            self.assertTrue(y.requires_grad)
