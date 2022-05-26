@@ -89,6 +89,9 @@ __all__ = [
     # 'complex',  # needs custom meta
     "div",
     "eq",
+    "fmax",
+    "fmin",
+    "fmod",
     "ge",
     "gt",
     "igamma",
@@ -888,11 +891,51 @@ div = _make_elementwise_binary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 eq = _make_elementwise_binary_prim(
     "eq",
     impl_aten=torch.eq,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+)
+
+
+def _fmax_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.fmax(a, b)  # type: ignore[attr-defined]
+
+
+fmax = _make_elementwise_binary_prim(
+    "fmax",
+    impl_aten=torch.fmax,
+    impl_nvfuser=_fmax_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _fmin_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.fmin(a, b)  # type: ignore[attr-defined]
+
+
+fmin = _make_elementwise_binary_prim(
+    "fmin",
+    impl_aten=torch.fmin,
+    impl_nvfuser=_fmin_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _fmod_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.fmod(a, b)  # type: ignore[attr-defined]
+
+
+fmod = _make_elementwise_binary_prim(
+    "fmod",
+    impl_aten=torch.fmod,
+    impl_nvfuser=_fmod_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 

@@ -100,8 +100,9 @@ __all__ = [
     "eq",
     "float_power",
     # 'floor_divide', # requires floor
-    # 'fmax', # requires where
-    # 'fmod',
+    "fmax",
+    "fmin",
+    "fmod",
     # 'gcd',
     "ge",
     "gt",
@@ -115,7 +116,7 @@ __all__ = [
     "le",
     "logical_and",
     "logical_or",
-    # 'logical_xor',
+    "logical_xor",
     "lt",
     # 'max', # implement with reductions
     "maximum",
@@ -740,6 +741,27 @@ def float_power(
 
 
 # TODO: add docstring
+fmax = _make_elementwise_binary_reference(
+    prims.fmax,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmax,
+)
+
+# TODO: add docstring
+fmin = _make_elementwise_binary_reference(
+    prims.fmin,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmin,
+)
+
+# TODO: add docstring
+fmod = _make_elementwise_binary_reference(
+    prims.fmod,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmod,
+)
+
+# TODO: add docstring
 ge = _make_elementwise_binary_reference(
     prims.ge,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
@@ -855,6 +877,23 @@ logical_or = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.logical_or,
 )
+
+
+def _logical_xor(a: TensorLikeType, b: TensorLikeType):
+    if not utils.is_boolean_dtype(a.dtype):
+        a = ne(a, 0)
+    if not utils.is_boolean_dtype(b.dtype):
+        b = ne(b, 0)
+    return bitwise_xor(a, b)
+
+
+# TODO: skip unnecessary conversion of long to float
+logical_xor = _make_elementwise_binary_reference(
+    _logical_xor,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.logical_xor,
+)
+
 
 # TODO: add docstring
 lt = _make_elementwise_binary_reference(
