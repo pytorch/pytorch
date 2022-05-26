@@ -1115,7 +1115,7 @@ def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, na
 
 
 def check_training_mode(op_train_mode: int, op_name: str):
-    """Warning the user if the model's training mode and the export mode do not agree."""
+    """Warns the user if the model's training mode and the export mode do not agree."""
     if GLOBALS.training_mode == _C_onnx.TrainingMode.PRESERVE:
         # Do not modify the training mode
         return
@@ -1128,9 +1128,10 @@ def check_training_mode(op_train_mode: int, op_name: str):
         # The modes agree. Do nothing
         return
 
-    assert (
-        GLOBALS.training_mode not in {_C_onnx.TrainingMode.TRAINING, _C_onnx.TrainingMode.EVAL}
-    ), "Bug: training_mode should only be 'TRAINING' or 'EVAL' at this point"
+    assert GLOBALS.training_mode not in {
+        _C_onnx.TrainingMode.TRAINING,
+        _C_onnx.TrainingMode.EVAL,
+    }, "Bug: training_mode should only be 'TRAINING' or 'EVAL' at this point"
 
     op_mode_text = (
         "training" if op_mode_enum == _C_onnx.TrainingMode.TRAINING else "inference"
