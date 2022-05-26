@@ -2750,12 +2750,12 @@
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
 
-- name: special_legendre_polynomial_p(Tensor x, Tensor n) -> Tensor
+- name: special_hermite_polynomial_h(Tensor x, Tensor n) -> Tensor
   x: non_differentiable
   n: non_differentiable
 
-- name: special_legendre_polynomial_p.x_scalar(Scalar x, Tensor n) -> Tensor
+- name: special_hermite_polynomial_h.x_scalar(Scalar x, Tensor n) -> Tensor
   n: non_differentiable
 
-- name: special_legendre_polynomial_p.n_scalar(Tensor x, Scalar n) -> Tensor
+- name: special_hermite_polynomial_h.n_scalar(Tensor x, Scalar n) -> Tensor
   x: non_differentiable
