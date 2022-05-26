@@ -14,7 +14,7 @@ from torch.onnx import symbolic_helper, utils
 from torch.testing._internal import common_utils
 
 
-class TestOptionalOutput(common_utils.TestCase):
+class TestOptionalOutput(unittest.TestCase):
     # TODO: Move these tests to test_pytorch_onnx_onnxruntime once
     # ONNX Runtime 1.11 is released and supports opset 16.
 
@@ -105,7 +105,7 @@ class TestOptionalOutput(common_utils.TestCase):
         )
 
 
-class TestONNXExport(common_utils.TestCase):
+class TestONNXExport(unittest.TestCase):
     def test_fuse_addmm(self):
         class AddmmModel(torch.nn.Module):
             def forward(self, x):
@@ -333,7 +333,8 @@ class TestONNXExport(common_utils.TestCase):
         reference = torch.mm(
             torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4)
         )
-        self.assertEqual(result, reference)
+
+        assert torch.all(torch.eq(result, reference))
         torch.onnx.export_to_pretty_string(mte, (torch.ones(2, 3),), verbose=False)
 
     def test_onnx_export_speculate(self):
