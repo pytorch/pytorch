@@ -52,12 +52,13 @@ gcc --version
 # expecttest isn't on conda so it can't be a part of environment.yml :/
 pip install expecttest
 
+# TODO: also install torchvision when they have RC binaries.
 if [ "${CU_VERSION:-}" == cpu ] ; then
     # conda install -y pytorch torchvision cpuonly -c pytorch-nightly
     # use pip to install pytorch as conda can frequently pick older release
-    pip install torch torchvision -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html --pre
+    pip install torch~=1.12 -f https://download.pytorch.org/whl/test/cpu/torch_test.html --pre
     PYTORCH_VERSION="$(python -c "import torch; print(torch.__version__)")" python setup.py develop bdist_wheel -d $WHEELS_FOLDER
 else
-    conda install -y pytorch torchvision cudatoolkit=10.2 -c pytorch-nightly
+    pip install torch~=1.12 -f https://download.pytorch.org/whl/test/cpu/torch_test.html --pre
     PYTORCH_VERSION="$(python -c "import torch; print(torch.__version__)")" python setup.py develop bdist_wheel -d $WHEELS_FOLDER
 fi
