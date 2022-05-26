@@ -59,6 +59,8 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
               // TODO: Simply using value.toDouble() (1.0 for True) does not work!
               //       Results in outputTensor having value of 255,
               //       which displays as "False" in Python frontend! Whats going on...?
+              //       Am I simply using constantWithScalar incorrectly or is there a bug in MPSGraph?
+              //       dataType argument did not matter, tested float32 and int32,64
               inputTensor = [mpsGraph constantWithScalar:1.1 shape:input_shape dataType:MPSDataTypeFloat32];
             } else {
               inputTensor = [mpsGraph constantWithScalar:0.0 shape:input_shape dataType:MPSDataTypeFloat32];
