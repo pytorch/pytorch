@@ -3,6 +3,7 @@ import torch
 import torch._prims as prims
 import torch._prims.utils as utils
 from torch._prims.utils import (
+    check,
     DimsType,
     ShapeType,
     StrideType,
@@ -16,6 +17,8 @@ from torch._prims.utils import (
     NumberType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     REDUCTION_OUTPUT_TYPE_KIND,
+    is_weakly_lesser_type,
+    dtype_to_type,
 )
 from torch._prims.wrappers import (
     elementwise_type_promotion_wrapper,
@@ -97,8 +100,9 @@ __all__ = [
     "eq",
     "float_power",
     # 'floor_divide', # requires floor
-    # 'fmax', # requires where
-    # 'fmod',
+    "fmax",
+    "fmin",
+    "fmod",
     # 'gcd',
     "ge",
     "gt",
@@ -112,7 +116,7 @@ __all__ = [
     "le",
     "logical_and",
     "logical_or",
-    # 'logical_xor',
+    "logical_xor",
     "lt",
     # 'max', # implement with reductions
     "maximum",
@@ -156,6 +160,10 @@ __all__ = [
     "std_var",
     "sum",
     "var",
+    #
+    # Linear algebra ops
+    #
+    "addr",
     #
     # View & Shape Ops
     #
@@ -430,7 +438,7 @@ frac = _make_elementwise_unary_reference(
 
 def _isfinite(a: TensorLikeType) -> TensorLikeType:
     if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
-        return prims.is_finite(a)
+        return prims.isfinite(a)
 
     return ones_like(a, dtype=torch.bool)
 
@@ -733,6 +741,27 @@ def float_power(
 
 
 # TODO: add docstring
+fmax = _make_elementwise_binary_reference(
+    prims.fmax,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmax,
+)
+
+# TODO: add docstring
+fmin = _make_elementwise_binary_reference(
+    prims.fmin,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmin,
+)
+
+# TODO: add docstring
+fmod = _make_elementwise_binary_reference(
+    prims.fmod,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmod,
+)
+
+# TODO: add docstring
 ge = _make_elementwise_binary_reference(
     prims.ge,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
@@ -848,6 +877,23 @@ logical_or = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.logical_or,
 )
+
+
+def _logical_xor(a: TensorLikeType, b: TensorLikeType):
+    if not utils.is_boolean_dtype(a.dtype):
+        a = ne(a, 0)
+    if not utils.is_boolean_dtype(b.dtype):
+        b = ne(b, 0)
+    return bitwise_xor(a, b)
+
+
+# TODO: skip unnecessary conversion of long to float
+logical_xor = _make_elementwise_binary_reference(
+    _logical_xor,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.logical_xor,
+)
+
 
 # TODO: add docstring
 lt = _make_elementwise_binary_reference(
@@ -1354,6 +1400,61 @@ def var_mean(
     v = var(a, dim, unbiased, keepdim, correction=correction)
     m = mean(a, dim, keepdim)
     return v, m
+
+
+@register_decomposition(torch.ops.aten.addr)
+@out_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "vec1", "vec2"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def addr(
+    self: TensorLikeType,
+    vec1: TensorLikeType,
+    vec2: TensorLikeType,
+    beta: NumberType = 1,
+    alpha: NumberType = 1,
+) -> TensorLikeType:
+    check(
+        vec1.ndim == 1,
+        lambda: f"addr: Expected 1-D argument vec1, but got {vec1.ndim}-D",
+    )
+    check(
+        vec2.ndim == 1,
+        lambda: f"addr: Expected 1-D argument vec2, but got {vec2.ndim}-D",
+    )
+    self = self.expand(vec1.shape[0], vec2.shape[0])
+    if utils.is_boolean_dtype(self.dtype):
+        # Integers are accepted for booleans
+        check(
+            is_weakly_lesser_type(type(beta), int),
+            f"expected bool/int beta but got {type(beta)}",
+        )
+        check(
+            is_weakly_lesser_type(type(alpha), int),
+            f"expected bool/int alpha but got {type(beta)}",
+        )
+        if not beta:
+            return torch.outer(vec1, vec2) if alpha else torch.full_like(self, False)
+        else:
+            return torch.logical_or(
+                self,
+                torch.outer(vec1, vec2) if alpha else torch.full_like(self, False),
+            )
+    else:
+        check(
+            is_weakly_lesser_type(type(beta), dtype_to_type(self.dtype)),
+            f"cannot safely convert {type(beta)} to {self.dtype}",
+        )
+        check(
+            is_weakly_lesser_type(type(alpha), dtype_to_type(self.dtype)),
+            f"cannot safely convert {type(alpha)} to {self.dtype}",
+        )
+        if beta == 0:
+            # This means NaNs from self are dropped if beta is zero
+            return alpha * torch.outer(vec1, vec2)
+        else:
+            return beta * self + alpha * torch.outer(vec1, vec2)
 
 
 def as_strided(
