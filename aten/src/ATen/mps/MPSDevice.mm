@@ -40,8 +40,9 @@ MPSDevice::MPSDevice(): _mtl_device(nil) {
 }
 
 at::Allocator* getMPSSharedAllocator();
+at::Allocator* getMPSStaticAllocator();
 at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
-  return useSharedAllocator ? getMPSSharedAllocator() : GetAllocator(DeviceType::MPS);
+  return useSharedAllocator ? getMPSSharedAllocator() : getMPSStaticAllocator();
 }
 
 bool is_available() {
