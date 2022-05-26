@@ -1117,7 +1117,6 @@ def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, na
 def check_training_mode(op_train_mode: int, op_name: str) -> None:
     """Warns the user if the model's training mode and the export mode do not agree."""
     if GLOBALS.training_mode == _C_onnx.TrainingMode.PRESERVE:
-        # Do not modify the training mode
         return
 
     if op_train_mode:
@@ -1128,28 +1127,16 @@ def check_training_mode(op_train_mode: int, op_name: str) -> None:
         # The modes agree. Do nothing
         return
 
-    assert GLOBALS.training_mode in {
-        _C_onnx.TrainingMode.TRAINING,
-        _C_onnx.TrainingMode.EVAL,
-    }, "Bug: training_mode should only be 'TRAINING' or 'EVAL' at this point"
-
-    export_mode_text = (
-        "training"
-        if GLOBALS.training_mode == _C_onnx.TrainingMode.TRAINING
-        else "inference"
-    )
-    op_mode_text = (
-        "training" if op_mode_enum == _C_onnx.TrainingMode.TRAINING else "inference"
-    )
-    # setting the model mode could result in op_mode != _flags.training_mode
+    op_mode_text = f"train={bool(op_train_mode)}"
+    # Setting the model mode could result in op_mode != GLOBALS.training_mode
     # if the model is a FuncModule. In this case we warn the user of
     # the state and export depending on op_mode
     # This is to support use-cases of fixing certain layer weights
     # in training.
     warnings.warn(
-        f"ONNX export mode is set to {export_mode_text} mode, but operator '{op_name}' "
-        f"is set to {op_mode_text} mode. The operators will be exported in "
-        f"{op_mode_text}, as specified by the functional operator."
+        f"ONNX export mode is set to {GLOBALS.training_mode} mode, but operator '{op_name}' "
+        f"is set to {op_mode_text} mode. The operator will be exported in "
+        f"{op_mode_text}."
     )
 
 
