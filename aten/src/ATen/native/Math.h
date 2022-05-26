@@ -2178,7 +2178,7 @@ static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
 }
 
 template<typename T>
-static inline C10_HOST_DEVICE T hermite_polynomial_h(T x, int64_t n) {
+static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -2205,7 +2205,7 @@ static inline C10_HOST_DEVICE T hermite_polynomial_h(T x, int64_t n) {
 }
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T hermite_polynomial_h(T x, T m, T n) {
+static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T m, T n) {
     return hermite_polynomial_h(x, m, static_cast<int64_t>(n));
 }
 
