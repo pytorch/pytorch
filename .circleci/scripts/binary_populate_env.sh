@@ -23,50 +23,12 @@ tagged_version() {
   fi
 }
 
-# These are only relevant for CircleCI
-# TODO: Remove these later once migrated fully to GHA
-if [[ -z ${IS_GHA:-} ]]; then
-  # We need to write an envfile to persist these variables to following
-  # steps, but the location of the envfile depends on the circleci executor
-  if [[ "$(uname)" == Darwin ]]; then
-    # macos executor (builds and tests)
-    workdir="/Users/distiller/project"
-  elif [[ "$OSTYPE" == "msys" ]]; then
-    # windows executor (builds and tests)
-    workdir="/c/w"
-  elif [[ -d "/home/circleci/project" ]]; then
-    # machine executor (binary tests)
-    workdir="/home/circleci/project"
-  else
-    # docker executor (binary builds)
-    workdir="/"
-  fi
-  envfile="$workdir/env"
-  touch "$envfile"
-  chmod +x "$envfile"
-
-  # Parse the BUILD_ENVIRONMENT to package type, python, and cuda
-  configs=($BUILD_ENVIRONMENT)
-  export PACKAGE_TYPE="${configs[0]}"
-  export DESIRED_PYTHON="${configs[1]}"
-  export DESIRED_CUDA="${configs[2]}"
-  if [[ "${OSTYPE}" == "msys" ]]; then
-    export DESIRED_DEVTOOLSET=""
-    export LIBTORCH_CONFIG="${configs[3]:-}"
-    if [[ "$LIBTORCH_CONFIG" == 'debug' ]]; then
-      export DEBUG=1
-    fi
-  else
-    export DESIRED_DEVTOOLSET="${configs[3]:-}"
-  fi
+envfile=${BINARY_ENV_FILE:-/tmp/env}
+if [[ -n "${PYTORCH_ROOT}"  ]]; then
+  workdir=$(dirname "${PYTORCH_ROOT}")
 else
-  envfile=${BINARY_ENV_FILE:-/tmp/env}
-  if [[ -n "${PYTORCH_ROOT}"  ]]; then
-    workdir=$(dirname "${PYTORCH_ROOT}")
-  else
-    # docker executor (binary builds)
-    workdir="/"
-  fi
+  # docker executor (binary builds)
+  workdir="/"
 fi
 
 if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
