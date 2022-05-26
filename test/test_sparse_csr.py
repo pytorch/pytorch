@@ -2293,22 +2293,26 @@ class TestSparseCSR(TestCase):
             self.assertEqual(dense, pt_matrix.to_dense())
 
         # Test batch shapes (3D inputs)
-        shapes = [(b,) + s for b, s in itertools.product([3, 0], shapes)]
+
         # Case 1: Same sparsity pattern across matrices
         for shape, blocksize in itertools.product(shapes, blocksizes):
+            shape = (3,) + shape
             dense = make_tensor(shape, dtype=torch.float, device=device)
-            # Repeat the same sparsity pattern across batch entries
-            if shape[0] > 0:
-                mask = dense[0].relu().bool()
-                dense = dense * mask.unsqueeze(0)
-                pt_tensor = self._convert_to_layout(dense, layout, blocksize=blocksize)
-            else:
-                # TODO: Support zero sized batch dimensions
-                with self.assertRaisesRegex(RuntimeError, "to_sparse_bsr: Expected batch dimension 0 to be non-zero."):
-                    self._convert_to_layout(dense, layout, blocksize=blocksize)
+            mask = dense[0].relu().bool()
+            dense = dense * mask.unsqueeze(0)
+            pt_tensor = self._convert_to_layout(dense, layout, blocksize=blocksize)
             for i in range(shape[0]):
                 _test_matrix(pt_tensor[i], dense[i], layout, blocksize)
             self.assertEqual(dense, pt_tensor.to_dense())
+
+        # Verify exception when given 0 sized batch
+        for shape, blocksize in itertools.product(shapes, blocksizes):
+            dense = make_tensor((0,) + shape, dtype=torch.float, device=device)
+            # Repeat the same sparsity pattern across batch entries
+            if shape[0] == 0:
+                # TODO: Support zero sized batch dimensions
+                with self.assertRaisesRegex(RuntimeError, "to_sparse_bsr: Expected batch dimension 0 to be non-zero."):
+                    self._convert_to_layout(dense, layout, blocksize=blocksize)
 
         # TODO: Case 2: Different sparsity pattern across matrices, but same number of zeros
 
