@@ -105,7 +105,7 @@ class TestOptionalOutput(unittest.TestCase):
         )
 
 
-class TestONNXExport(unittest.TestCase):
+class TestONNXExport(common_utils.TestCase):
     def test_fuse_addmm(self):
         class AddmmModel(torch.nn.Module):
             def forward(self, x):
@@ -334,7 +334,7 @@ class TestONNXExport(unittest.TestCase):
             torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4)
         )
 
-        assert torch.all(torch.eq(result, reference))
+        self.assertEqual(result, reference)
         torch.onnx.export_to_pretty_string(mte, (torch.ones(2, 3),), verbose=False)
 
     def test_onnx_export_speculate(self):
