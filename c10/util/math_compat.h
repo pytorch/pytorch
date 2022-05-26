@@ -126,6 +126,10 @@ inline bool signbit(double x) {
 inline bool signbit(long double x) {
   return x < 0;
 }
+template <typename T>
+typename std::enable_if<std::is_integral<T>::value, bool>::type signbit(T x) {
+  return x < 0;
+}
 
 #if !defined(__NEWLIB__)
 // TODO: this function needs to be implemented and tested. Currently just throw
