@@ -70,38 +70,38 @@ TEST(MobileProfiler, ModuleHierarchy) {
   ASSERT_TRUE(checkMetaData("aten::add", metadata_name, "top(C)::<unknown>.aten::add", trace_file));
 }
 
-// TEST(MobileProfiler, Backend) {
-//   std::string filePath(__FILE__);
-//   auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
-//   testModelFile.append("test_backend_for_profiling.ptl");
+TEST(MobileProfiler, DISABLED_Backend) {
+  std::string filePath(__FILE__);
+  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  testModelFile.append("test_backend_for_profiling.ptl");
 
-//   std::vector<IValue> inputs;
-//   inputs.emplace_back(at::rand({64, 64}));
-//   inputs.emplace_back(at::rand({64, 64}));
-//   std::string trace_file_name("/tmp/test_trace_backend.trace");
+  std::vector<IValue> inputs;
+  inputs.emplace_back(at::rand({64, 64}));
+  inputs.emplace_back(at::rand({64, 64}));
+  std::string trace_file_name("/tmp/test_trace_backend.trace");
 
-//   mobile::Module bc = _load_for_mobile(testModelFile);
-//   {
-//     KinetoEdgeCPUProfiler profiler(
-//         bc,
-//         trace_file_name,
-//         false, // record input_shapes
-//         false, // profile memory
-//         true, // record callstack
-//         false, // record flops
-//         true); // record module hierarchy
-//     bc.forward(inputs);
-//   } // End of profiler
-//   std::ifstream trace_file(trace_file_name);
-//   std::string line;
-//   ASSERT_TRUE(trace_file.is_open());
-//   trace_file.seekg(0, std::ios_base::beg);
-//   std::string metadata_name("Module Hierarchy");
-//   ASSERT_TRUE(checkMetaData("aten::add", metadata_name, "top(m)::<unknown>.aten::add", trace_file));
-//   trace_file.seekg(0, std::ios_base::beg);
-//   metadata_name = "Backend";
-//   ASSERT_TRUE(checkMetaData("aten::add", metadata_name, "test_backend", trace_file));
-// }
+  mobile::Module bc = _load_for_mobile(testModelFile);
+  {
+    KinetoEdgeCPUProfiler profiler(
+        bc,
+        trace_file_name,
+        false, // record input_shapes
+        false, // profile memory
+        true, // record callstack
+        false, // record flops
+        true); // record module hierarchy
+    bc.forward(inputs);
+  } // End of profiler
+  std::ifstream trace_file(trace_file_name);
+  std::string line;
+  ASSERT_TRUE(trace_file.is_open());
+  trace_file.seekg(0, std::ios_base::beg);
+  std::string metadata_name("Module Hierarchy");
+  ASSERT_TRUE(checkMetaData("aten::add", metadata_name, "top(m)::<unknown>.aten::add", trace_file));
+  trace_file.seekg(0, std::ios_base::beg);
+  metadata_name = "Backend";
+  ASSERT_TRUE(checkMetaData("aten::add", metadata_name, "test_backend", trace_file));
+}
 
 } // namespace mobile
 } // namespace jit
