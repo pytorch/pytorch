@@ -54,6 +54,16 @@ struct PackedLinearWeightCudnn : public LinearPackedParamsBase {
     "parameter type");
   }
 
+  at::Tensor apply_leaky_relu(
+      at::Tensor input,
+      double negative_slope,
+      double output_scale,
+      int64_t output_zero_point) override {
+    throw std::runtime_error(
+    "apply_leaky_relu is not implemented for this packed "
+    "parameter type");
+  }
+
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
   c10::optional<at::Tensor> bias() override {
