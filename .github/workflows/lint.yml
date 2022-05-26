@@ -104,6 +104,7 @@ jobs:
             echo "ERROR: The file $file has trailing whitespace "
             echo "You can fix this issue using (git apply --whitespace=fix $file)"
             echo "The above command will remove the trailing whitespace from the file path"
+          fi
       - name: C++ docs check
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
