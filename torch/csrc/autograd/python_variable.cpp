@@ -215,6 +215,7 @@ void concrete_dispatch_fn(
     torch::jit::Stack* stack,
     const std::shared_ptr<SafePyObject>& type);
 bool concrete_is_contiguous_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
+c10::Device concrete_device_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
 
 class PyInterpreterHolder {
  public:
@@ -224,7 +225,8 @@ class PyInterpreterHolder {
             &concrete_decref_fn,
             &concrete_detach_fn,
             &concrete_dispatch_fn,
-            &concrete_is_contiguous_fn)) {}
+            &concrete_is_contiguous_fn,
+            &concrete_device_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -260,12 +262,12 @@ static const char* VOLATILE_WARNING =
 
 static bool check_has_torch_dispatch(PyObject *obj) {
   PyTypeObject *tp = Py_TYPE(obj);
+  if (THPVariable_CheckTypeExact(tp)) {
+    return false;
+  }
   py::object attr = PyObject_FastGetAttrString(obj, "__torch_dispatch__");
-  return (
-    !THPVariable_CheckTypeExact(tp) &&
-    // TODO: test if Python key is disabled
-    attr.ptr() != nullptr &&
-    attr.ptr() != torch::disabled_torch_dispatch_impl()
+  return (attr.ptr() != nullptr &&
+          attr.ptr() != torch::disabled_torch_dispatch_impl()
   );
 }
 
@@ -536,9 +538,9 @@ static PyObject* THPVariable_as_subclass(PyObject* _self, PyObject* args, PyObje
 static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, bool dispatch_strides=False)",
+    "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, bool dispatch_strides=False, bool dispatch_device=False)",
   });
-  ParsedArgs<4> parsed_args{};
+  ParsedArgs<5> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
@@ -560,6 +562,9 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   if (r.toBool(3)) {
     data.unsafeGetTensorImpl()->set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomStrides);
   }
+  if (r.toBool(4)) {
+    data.unsafeGetTensorImpl()->set_custom_device(true);
+  }
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       std::move(data),
@@ -572,9 +577,9 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   // NB: pin_memory doesn't actually do anything
   // TODO: strides variant?
   static PythonArgParser parser({
-    "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, bool dispatch_strides=False)",
+    "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, bool dispatch_strides=False, bool dispatch_device=False)",
   });
-  ParsedArgs<11> parsed_args{};
+  ParsedArgs<12> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
@@ -616,6 +621,9 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
 
   if (r.toBool(10)) {
     data.unsafeGetTensorImpl()->set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomStrides);
+  }
+  if (r.toBool(11)) {
+    data.unsafeGetTensorImpl()->set_custom_device(true);
   }
 
   return THPVariable_NewWithVar(
@@ -2008,6 +2016,24 @@ bool concrete_is_contiguous_fn(const c10::impl::PyInterpreter*, const c10::Tenso
   TORCH_CHECK(PyBool_Check(out.ptr()), "is_contiguous returned invalid type ", py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())), ", expected bool");
 
   return PyObject_IsTrue(out.ptr());
+}
+
+c10::Device concrete_device_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "device",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("prim")
+          .attr("device")
+          .attr("default")
+          .ptr(),
+      "torch.ops.prim");
+
+  return toDevice(out.ptr());
 }
 
 } // anonymous namespace

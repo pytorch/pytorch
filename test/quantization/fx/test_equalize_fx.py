@@ -274,9 +274,7 @@ class TestEqualizeFx(QuantizationTestCase):
 
         for (M, node_occurrence) in tests:
             m = M().eval()
-            # TODO[quant-example-inputs]: if shape is important we need to define a example_inputs for each test
-            # for now we do not need shape so this can be fixed later
-            example_inputs = (torch.randn(1, 1, 1, 1),)
+            example_inputs = m.get_example_inputs()
             prepared = prepare_fx(
                 m,
                 specific_qconfig_dict,
@@ -312,7 +310,7 @@ class TestEqualizeFx(QuantizationTestCase):
         }
 
         m = TestBranchingWithoutEqualizationModel().eval()
-        example_inputs = (torch.randn(1, 5),)
+        example_inputs = (torch.rand(1, 5),)
         prepared = prepare_fx(
             m, specific_qconfig_dict, example_inputs=example_inputs,
             equalization_qconfig_dict=default_equalization_qconfig_dict)
@@ -781,9 +779,7 @@ class TestEqualizeFx(QuantizationTestCase):
 
         for (M, node_list) in tests:
             m = M().eval()
-            # TODO[quant-example-inputs]: if shape is important we need to define a example_inputs for each test
-            # for now we do not need shape so this can be fixed later
-            example_inputs = (torch.randn(1, 1, 1, 1),)
+            example_inputs = m.get_example_inputs()
             prepared = prepare_fx(
                 m, specific_qconfig_dict,
                 example_inputs=example_inputs,
