@@ -129,7 +129,6 @@ def conv1d(input, weight, bias,
           a tuple `(dW,)`. Default: 1
         groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
           number of groups. Default: 1
-        padding_mode: the padding mode to use. Only "zeros" is supported for quantized convolution at the moment. Default: "zeros"
         scale: quantization scale for the output. Default: 1.0
         zero_point: quantization zero_point for the output. Default: 0
 
@@ -183,7 +182,6 @@ def conv2d(input, weight, bias,
           a tuple `(dH, dW)`. Default: 1
         groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
           number of groups. Default: 1
-        padding_mode: the padding mode to use. Only "zeros" is supported for quantized convolution at the moment. Default: "zeros"
         scale: quantization scale for the output. Default: 1.0
         zero_point: quantization zero_point for the output. Default: 0
 
@@ -239,8 +237,6 @@ def conv3d(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
           a tuple `(dD, dH, dW)`. Default: 1
         groups: split input into groups, :math:`\text{in\_channels}` should be
           divisible by the number of groups. Default: 1
-        padding_mode: the padding mode to use. Only "zeros" is supported for
-          quantized convolution at the moment. Default: "zeros"
         scale: quantization scale for the output. Default: 1.0
         zero_point: quantization zero_point for the output. Default: 0
 

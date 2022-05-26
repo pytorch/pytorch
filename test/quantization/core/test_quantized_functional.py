@@ -50,7 +50,7 @@ class TestQuantizedFunctionalOps(QuantizationTestCase):
             Y_exp, scale=Y_scale, zero_point=Y_zero_point, dtype=torch.quint8)
         Y_act = qconv_fn(
             X_q, W_q, b, stride, padding, dilation, groups,
-            padding_mode="zeros", scale=Y_scale, zero_point=Y_zero_point)
+            scale=Y_scale, zero_point=Y_zero_point)
 
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
