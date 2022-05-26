@@ -10162,6 +10162,7 @@ class _TestONNXRuntime:
             model,
             input=(x,),
             opset_version=self.opset_version,
+            do_constant_folding=False,
             training=torch.onnx.TrainingMode.TRAINING,
         )
         ort_outs = run_ort(ort_sess, (x,))
@@ -10173,6 +10174,7 @@ class _TestONNXRuntime:
             script_model,
             input=(x,),
             opset_version=self.opset_version,
+            do_constant_folding=False,
             training=torch.onnx.TrainingMode.TRAINING,
         )
         ort_outs = run_ort(ort_sess, (x,))
@@ -10203,6 +10205,7 @@ class _TestONNXRuntime:
             model,
             input=(x,),
             opset_version=self.opset_version,
+            do_constant_folding=False,
             training=torch.onnx.TrainingMode.TRAINING,
         )
         ort_outs = run_ort(ort_sess, (x,))
@@ -10224,6 +10227,7 @@ class _TestONNXRuntime:
             script_model,
             input=(x,),
             opset_version=self.opset_version,
+            do_constant_folding=False,
             training=torch.onnx.TrainingMode.TRAINING,
         )
         ort_outs = run_ort(ort_sess, (x,))

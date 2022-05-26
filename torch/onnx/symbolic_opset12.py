@@ -54,7 +54,7 @@ def dropout(g, input, p, train):
     if not train:
         return input
     p = g.op("Constant", value_t=torch.tensor(p))
-    t = g.op("Constant", value_t=torch.tensor(train))
+    t = g.op("Constant", value_t=torch.tensor(train, dtype=torch.bool))
     r, _ = g.op("Dropout", input, p, t, outputs=2)
     return r
 
