@@ -29,7 +29,7 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, tensor1, tensor2}, false) + ":" + getMPSTypeString(value_opt.type());
+    string key = op_name + getTensorsStringKey({self, tensor1, tensor2}, false);
 
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
@@ -44,7 +44,7 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
             newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
             newCachedGraph->firstTensor = mpsGraphRankedPlaceHolder(mpsGraph, tensor1);
             newCachedGraph->secondTensor = mpsGraphRankedPlaceHolder(mpsGraph, tensor2);
-            newCachedGraph->valueTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSScalarType(value_opt.type()));
+            newCachedGraph->valueTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSScalarType(self.scalar_type()));
 
             // the tensor to be optionally multiplied by value_scalar
             MPSGraphTensor *multiplicandTensor = nil;
@@ -81,7 +81,7 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
       selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
       tensor1Placeholder.getMPSGraphTensor() : tensor1Placeholder.getMPSGraphTensorData(),
       tensor2Placeholder.getMPSGraphTensor() : tensor2Placeholder.getMPSGraphTensorData(),
-      cachedGraph->valueTensor : getMPSGraphTensorFromScalar(mpsStream, value_opt, getMPSScalarType(value_opt.type())),
+      cachedGraph->valueTensor : getMPSGraphTensorFromScalar(mpsStream, value_opt, getMPSScalarType(self.scalar_type())),
     };
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
