@@ -16,6 +16,7 @@ from inspect import getfullargspec
 # see pattern.md for docs
 # TODO: not sure if typing supports recursive data types
 Pattern = Union[Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any]
+Pattern.__module__ = "torch.ao.quantization.utils"
 
 # TODO: maybe rename this to MatchInputNode
 class MatchAllNode:
@@ -99,6 +100,7 @@ method_list = {
     'view',
 }
 
+# TODO: not used now, remove
 def check_node(node, modules):
     # TODO: reuse is_fixed_qparam_node after we move this function to _lower_to_native_backend.py
     is_call_function = node.op == "call_function" and node.target in func_list
@@ -527,13 +529,28 @@ def get_fqn_to_example_inputs(
 
 
 __all__ = [
-    "Any",
-    "Callable",
     "Pattern",
-    "QuantType",
-    "Tuple",
-    "Union",
-    "is_parametrized",
-    "quant_type_to_str",
+    "MatchAllNode",
+    "check_node",
+    "get_combined_dict",
+    "is_per_tensor",
+    "is_per_channel",
+    "getattr_from_fqn",
+    "get_qparam_dict",
+    "get_swapped_custom_module_class",
+    "activation_dtype",
+    "weight_dtype",
+    "activation_is_statically_quantized",
+    "activation_is_dynamically_quantized",
+    "activation_is_int8_quantized",
+    "activation_is_int32_quantized",
+    "weight_is_quantized",
+    "weight_is_statically_quantized",
+    "op_is_int8_dynamically_quantized",
+    "get_qconfig_dtypes",
+    "get_quant_type",
+    "check_min_max_valid",
+    "calculate_qmin_qmax",
+    "has_no_children_ignoring_parametrizations",
     "get_fqn_to_example_inputs",
 ]
