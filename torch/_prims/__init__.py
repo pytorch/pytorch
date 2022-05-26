@@ -61,7 +61,7 @@ __all__ = [
     "exp2",
     "fill",
     "floor",
-    "is_finite",
+    "isfinite",
     "is_infinite",
     "lgamma",
     "log",
@@ -626,8 +626,8 @@ def _isfinite_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.isfinite(a)  # type: ignore[attr-defined]
 
 
-is_finite = _make_elementwise_unary_prim(
-    "is_finite",
+isfinite = _make_elementwise_unary_prim(
+    "isfinite",
     impl_aten=torch.isfinite,
     impl_nvfuser=_isfinite_nvfuser,
     doc="",
