@@ -10,13 +10,6 @@ inline void check_size_nonnegative(IntArrayRef size) {
   }
 }
 
-inline void raise_warning_for_complex_half(ScalarType dtype) {
-  if (dtype == kComplexHalf) {
-    TORCH_WARN_ONCE(
-        "ComplexHalf support is experimental and many operators don't support it yet.");
-  }
-}
-
 TORCH_API size_t computeStorageNbytesContiguous(
     IntArrayRef sizes, size_t itemsize, size_t storage_offset=0);
 TORCH_API size_t computeStorageNbytes(
