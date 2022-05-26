@@ -2074,6 +2074,7 @@ def generate_elementwise_binary_small_value_tensors(
     _unsigned_int_vals = (0, 1, 55, 127, 128, 190, 210, 220, 254)
     _int_vals = (0, -1, 1, -55, 55, -127, 127, -128)
     _float_vals = (
+        -0.0,
         0.0,
         -0.001,
         0.001,
@@ -2856,6 +2857,15 @@ class UnaryUfuncInfo(OpInfo):
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
         self._domain_eps = 1e-5
+
+def sample_inputs_signbit(op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs):
+    yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad, op_kwargs, kwargs)
+
+    if dtype.is_floating_point:
+        make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+        t = make_arg((S,))
+        t[0] = -0.
+        yield SampleInput(t, kwargs=op_kwargs)
 
 def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
