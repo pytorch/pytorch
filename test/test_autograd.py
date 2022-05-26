@@ -6619,6 +6619,14 @@ class TestAutogradForwardMode(TestCase):
             dual = fwAD.make_dual(a, b)
             dual[1:]
 
+    def test_metadata_check_check_conj(self):
+        x = torch.randn(2, 3, 4, dtype=torch.cdouble, requires_grad=True)
+        t = torch.randn(2, 3, 4, dtype=torch.cdouble, requires_grad=True).conj()
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, t)
+            torch.real(dual)
+
     # The following test functions want to ensure all the following behaviors:
     #   - Ensure that default level system in the python binding works
     #   - Ensure that only level 0 exists and nesting is properly disabled
