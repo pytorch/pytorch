@@ -262,12 +262,12 @@ static const char* VOLATILE_WARNING =
 
 static bool check_has_torch_dispatch(PyObject *obj) {
   PyTypeObject *tp = Py_TYPE(obj);
+  if (THPVariable_CheckTypeExact(tp)) {
+    return false;
+  }
   py::object attr = PyObject_FastGetAttrString(obj, "__torch_dispatch__");
-  return (
-    !THPVariable_CheckTypeExact(tp) &&
-    // TODO: test if Python key is disabled
-    attr.ptr() != nullptr &&
-    attr.ptr() != torch::disabled_torch_dispatch_impl()
+  return (attr.ptr() != nullptr &&
+          attr.ptr() != torch::disabled_torch_dispatch_impl()
   );
 }
 

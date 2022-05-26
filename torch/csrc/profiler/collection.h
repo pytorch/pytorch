@@ -131,6 +131,10 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
       ExtraFields<EventType::Allocation>>
       extra_fields_;
 
+  std::weak_ptr<Result> parent_;
+  std::vector<std::shared_ptr<Result>> children_;
+  bool finished_{false};
+
  private:
   template <EventType E>
   Result(
@@ -197,6 +201,50 @@ class InputOutputEncoder final {
   AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_;
 };
 
+namespace python_tracer {
+/*
+Libtorch does not depend on Python (e.g. cannot #include <Python.h>); however
+when we call the profiler from libtorch_python we need the profiler to be able
+to ingest the data that we collect from the Python tracer. (`PyEval_SetProfile`)
+
+In order to solve this dependency issue we define a virtual base and a function
+to register a getter. The python tracer then implements these functions and
+exposes itself by calling `registerTracer` from `torch/csrc/autograd/init.cpp`.
+This pattern of registration for faux python dependencies in libtorch is common
+in the PyTorch codebase.
+*/
+enum CallType { kPyCall = 0, kPyModuleCall, kCCall };
+
+struct TORCH_API PyTraceEvent {
+  int64_t startTime_;
+  int64_t endTime_;
+  std::string name_;
+
+  uint64_t thread_id_;
+  PyTraceEvent* parent_;
+  CallType call_type_;
+  size_t module_id_;  // Only set call_type_ == kPyModuleCall
+
+  // Index in the list of raw call and return events. This allows one to
+  // convert a vector of PyTraceEvents back into the constituent call and
+  // return events, even when events share the same timestamp.
+  size_t call_idx_;
+  size_t return_idx_;
+};
+
+struct TORCH_API PythonTracerBase {
+  static PythonTracerBase& get();
+  virtual ~PythonTracerBase() = default;
+
+  virtual void start() = 0;
+  virtual void stop() = 0;
+  virtual std::vector<std::unique_ptr<PyTraceEvent>> getEvents() = 0;
+  virtual void clear() = 0;
+};
+
+using GetFn = PythonTracerBase& (*)();
+TORCH_API void registerTracer(GetFn get_tracer);
+} // namespace python_tracer
 
 class TORCH_API ThreadLocalSubqueue {
  public:

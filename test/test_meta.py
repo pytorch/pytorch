@@ -621,7 +621,6 @@ sys.exit()
 
 meta_function_skips = {
     torch.Tensor.__getitem__: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8, c32},
-    torch.addr: {b8},
     torch.aminmax: {b8, f32, f64, i16, i32, i64, i8, u8},
     torch.conj_physical: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.cummax: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},
@@ -631,7 +630,6 @@ meta_function_skips = {
     torch.functional.tensordot: {bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.inner: {bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.logical_not: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
-    torch.logical_xor: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.nn.functional.cross_entropy: {bf16, f32, f64},
     torch.nn.functional.interpolate: {bf16, f32, f64, u8},
     # BEGIN TODO
@@ -831,7 +829,6 @@ meta_dispatch_expected_failures = {
     aten.logcumsumexp.out: {bf16, f64, f32},
     aten.logical_not.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.logical_not_.default: {bf16, f16, f64, f32},
-    aten.logical_xor.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.masked_select.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.masked_select.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.max_pool3d_with_indices.default: {f64, f32},
@@ -912,8 +909,6 @@ meta_dispatch_expected_failures = {
 # these sometimes pass and sometimes fail
 meta_dispatch_skips = {
     aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.addr.default: {b8},
-    aten.addr.out: {b8},
     aten.aminmax.default: {i64, u8, b8, f32, i8, f64, i16, i32},
     aten.cummax.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.cummin.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
