@@ -85,25 +85,5 @@ static AdvancedIndex make_info(Tensor self, const torch::List<c10::optional<at::
   return AdvancedIndex(self, indices);
 }
 
-static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
-  TORCH_CHECK(is_expandable_to(value.sizes(), info.src.sizes()), "shape mismatch: value tensor of shape ", value.sizes(),
-             " cannot be broadcast to indexing result of shape ", info.src.sizes());
-  TORCH_CHECK(value.scalar_type() == info.src.scalar_type(),
-              "Index put requires the source and destination dtypes match, "
-              "got ", info.src.scalar_type(), " for the destination "
-              "and ", value.scalar_type(), " for the source.");
-  TensorIteratorConfig config;
-  // info.src is restrided by restride_src with 0 strided dimensions
-  config.set_check_mem_overlap(false);
-  config.resize_outputs(false);
-  config.check_all_same_dtype(false);
-  config.add_output(info.src);
-  config.add_input(value);
-  for (auto& index : info.indices) {
-    config.add_input(index);
-  }
-  return config.build();
-}
-
 } // at
 } // native
