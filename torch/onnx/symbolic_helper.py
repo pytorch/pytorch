@@ -1114,27 +1114,42 @@ def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, na
     return padding
 
 
-def check_training_mode(op_train_mode, op_name):
-    op_train_mode = True if op_train_mode == 1 else False
-    if GLOBALS.training_mode is not None and op_train_mode != GLOBALS.training_mode:
-        op_mode = "training " if op_train_mode else "inference"
-        training_mode = "training " if GLOBALS.training_mode else "inference"
-        # setting the model mode could result in op_mode != _flags.training_mode
-        # if the model is a FuncModule. In this case we warn the user of
-        # the state and export depending on op_mode
-        # This is to support use-cases of fixing certain layer weights
-        # in training.
-        warnings.warn(
-            "ONNX export mode is set to "
-            + training_mode
-            + " mode, but operator "
-            + op_name
-            + " is set to "
-            + op_mode
-            + " mode. The operators will be exported in "
-            + op_mode
-            + ", as specified by the functional operator."
-        )
+def check_training_mode(op_train_mode: int, op_name: str):
+    """Warning the user if the model's training mode and the export mode do not agree."""
+    if GLOBALS.training_mode == _C_onnx.TrainingMode.PRESERVE:
+        # Do not modify the training mode
+        return
+
+    if op_train_mode:
+        op_mode_enum = _C_onnx.TrainingMode.TRAINING
+    else:
+        op_mode_enum = _C_onnx.TrainingMode.EVAL
+    if op_mode_enum == GLOBALS.training_mode:
+        # The modes agree. Do nothing
+        return
+
+    assert (
+        GLOBALS.training_mode not in {_C_onnx.TrainingMode.TRAINING, _C_onnx.TrainingMode.EVAL}
+    ), "Bug: training_mode should only be 'TRAINING' or 'EVAL' at this point"
+
+    op_mode_text = (
+        "training" if op_mode_enum == _C_onnx.TrainingMode.TRAINING else "inference"
+    )
+    export_mode_text = (
+        "training"
+        if GLOBALS.training_mode == _C_onnx.TrainingMode.TRAINING
+        else "inference"
+    )
+    # setting the model mode could result in op_mode != _flags.training_mode
+    # if the model is a FuncModule. In this case we warn the user of
+    # the state and export depending on op_mode
+    # This is to support use-cases of fixing certain layer weights
+    # in training.
+    warnings.warn(
+        f"ONNX export mode is set to {export_mode_text} mode, but operator {op_name} "
+        f"is set to {op_mode_text} mode. The operators will be exported in "
+        f"{op_mode_text}, as specified by the functional operator."
+    )
 
 
 def _flatten_helper(g, input, start_dim, end_dim, dim):
