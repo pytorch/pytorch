@@ -98,7 +98,7 @@ TensorBase empty_generic(
     ScalarType scalar_type,
     c10::optional<c10::MemoryFormat> memory_format_opt) {
   at::detail::check_size_nonnegative(size);
-
+  at::detail::raise_warning_for_complex_half(scalar_type);
   caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
   size_t size_bytes = computeStorageNbytesContiguous(size, dtype.itemsize());
   auto storage_impl = c10::make_intrusive<StorageImpl>(
@@ -132,7 +132,7 @@ TensorBase empty_strided_generic(
     c10::DispatchKeySet ks,
     ScalarType scalar_type) {
   at::detail::check_size_nonnegative(size);
-
+  at::detail::raise_warning_for_complex_half(scalar_type);
   caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
   size_t size_bytes = computeStorageNbytes(size, stride, dtype.itemsize());
   auto storage_impl = c10::make_intrusive<StorageImpl>(
@@ -168,7 +168,6 @@ TensorBase empty_cpu(
 
   auto pin_memory = pinned_memory_or_default(pin_memory_opt);
   auto dtype = dtype_or_default(dtype_opt);
-  at::detail::raise_warning_for_complex_half(dtype);
   return empty_cpu(size, dtype, pin_memory, memory_format_opt);
 }
 
@@ -204,7 +203,6 @@ TensorBase empty_strided_cpu(
 
   auto pin_memory = pinned_memory_or_default(pin_memory_opt);
   auto dtype = dtype_or_default(dtype_opt);
-  at::detail::raise_warning_for_complex_half(dtype);
   return at::detail::empty_strided_cpu(size, stride, dtype, pin_memory);
 }
 

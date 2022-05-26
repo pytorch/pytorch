@@ -17,7 +17,6 @@ TensorBase empty_cuda(
   const DeviceGuard device_guard(device);
   auto* allocator = at::cuda::getCUDADeviceAllocator();
   constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
-  at::detail::raise_warning_for_complex_half(dtype);
   return at::detail::empty_generic(
       size, allocator, cuda_dks, dtype, memory_format_opt);
 }
