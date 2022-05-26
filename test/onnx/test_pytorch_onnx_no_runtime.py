@@ -10,16 +10,11 @@ import onnx
 
 import torch
 from torch import Tensor
-from torch.onnx import OperatorExportTypes, symbolic_helper, utils
-from torch.testing._internal.common_utils import (
-    TestCase,
-    instantiate_parametrized_tests,
-    parametrize,
-    suppress_warnings,
-)
+from torch.onnx import symbolic_helper, utils
+from torch.testing._internal import common_utils
 
 
-class TestOptionalOutput(TestCase):
+class TestOptionalOutput(common_utils.TestCase):
     # TODO: Move these tests to test_pytorch_onnx_onnxruntime once
     # ONNX Runtime 1.11 is released and supports opset 16.
 
@@ -51,12 +46,12 @@ class TestOptionalOutput(TestCase):
                 y = None
             return y
 
-    @parametrize(
+    @common_utils.parametrize(
         "module_class",
         (IfNoneInput, IfNoneOutput, LoopNoneInput, LoopNoneOutput),
         name_fn=lambda module_class: module_class.__name__,
     )
-    @parametrize("x_size", (0, 1), name_fn=lambda x_size: str(x_size))
+    @common_utils.parametrize("x_size", (0, 1), name_fn=lambda x_size: str(x_size))
     def test_optional_output(self, module_class: Type[torch.nn.Module], x_size: int):
         # Need scripting to preserve control flow for this test to be
         # meaningful.
@@ -110,7 +105,7 @@ class TestOptionalOutput(TestCase):
         )
 
 
-class TestONNXExport(TestCase):
+class TestONNXExport(common_utils.TestCase):
     def test_fuse_addmm(self):
         class AddmmModel(torch.nn.Module):
             def forward(self, x):
@@ -165,7 +160,7 @@ class TestONNXExport(TestCase):
         mte = ModuleToExport()
         torch.onnx.export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), verbose=False)
 
-    @suppress_warnings
+    @common_utils.suppress_warnings
     def test_onnx_export_func_with_warnings(self):
         @torch.jit.script
         def func_with_warning(inp):
@@ -267,7 +262,7 @@ class TestONNXExport(TestCase):
         mte = ModuleToExport()
         torch.onnx.export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), verbose=False)
 
-    @suppress_warnings
+    @common_utils.suppress_warnings
     def test_onnx_export_script_truediv(self):
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):
@@ -401,7 +396,7 @@ class TestONNXExport(TestCase):
             (torch.rand(3, 4),),
             add_node_names=False,
             do_constant_folding=False,
-            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK,
+            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
         )
 
     def test_export_dynamic_slice(self):
@@ -448,7 +443,9 @@ class TestONNXExport(TestCase):
         mod = ExpandingModule()
 
         graph, _, _ = utils._model_to_graph(
-            mod, (torch.zeros(1),), operator_export_type=OperatorExportTypes.ONNX
+            mod,
+            (torch.zeros(1),),
+            operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
         )
 
         # Ensure that every node in the graph has a valid source range
@@ -456,7 +453,7 @@ class TestONNXExport(TestCase):
             self.assertTrue(node.sourceRange())
 
 
-instantiate_parametrized_tests(TestOptionalOutput)
+common_utils.instantiate_parametrized_tests(TestOptionalOutput)
 
 if __name__ == "__main__":
     unittest.main()
