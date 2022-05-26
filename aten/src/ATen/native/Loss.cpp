@@ -65,10 +65,6 @@ DEFINE_DISPATCH(mse_backward_stub);
 
 TORCH_IMPL_FUNC(smooth_l1_loss_out)
 (const Tensor& input, const Tensor& target, int64_t reduction, double beta, const Tensor& result) {
-  if (beta == 0) {
-      at::native::l1_loss_out(input, target, reduction, const_cast<Tensor&>(result));
-      return;
-  }
   if (reduction != Reduction::None) {
     Tensor loss;
     auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
@@ -516,35 +512,4 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
   return apply_loss_reduction((input - target).abs(), reduction);
 }
-
-Tensor& l1_loss_out(const Tensor& input, const Tensor& target, int64_t reduction, Tensor& result) {
-  // Need to do these checks as this is a composite function
-    TORCH_CHECK(
-      result.device() == input.device(),
-      "l1_loss: Expected result and input tensors to be on the same device, but got ",
-      "result on ", result.device(), " and input on ", input.device());
-    TORCH_CHECK(
-      result.device() == target.device(),
-      "l1_loss: Expected result and target tensors to be on the same device, but got ",
-      "result on ", result.device(), " and target on ", target.device());
-
-  // It just makes sense to perform the operations in-place if reduction = "none"
-  if (reduction == Reduction::None) {
-    if (input.is_complex() || target.is_complex()) {
-      at::abs_out(result, input - target);
-    } else {
-      at::sub_out(result, input, target);
-      result.abs_();
-    }
-  } else {
-    auto out = at::native::l1_loss(input, target, reduction);
-    TORCH_CHECK(out.scalar_type() == result.scalar_type(),
-                "l1_loss expected out tensor dtype ", out.scalar_type(),
-                " but got: ", result.scalar_type());
-    at::native::resize_output(result, out.sizes());
-    result.copy_(out);
-  }
-  return result;
-}
-
 }}  // namespace at::native

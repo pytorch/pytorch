@@ -9217,9 +9217,6 @@
     CPU, CUDA: mse_loss_backward
     MPS: mse_loss_backward_mps
 
-- func: l1_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: nn
-
 - func: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   python_module: nn
 
