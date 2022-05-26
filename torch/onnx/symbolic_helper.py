@@ -1114,7 +1114,7 @@ def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, na
     return padding
 
 
-def check_training_mode(op_train_mode: int, op_name: str):
+def check_training_mode(op_train_mode: int, op_name: str) -> None:
     """Warns the user if the model's training mode and the export mode do not agree."""
     if GLOBALS.training_mode == _C_onnx.TrainingMode.PRESERVE:
         # Do not modify the training mode
