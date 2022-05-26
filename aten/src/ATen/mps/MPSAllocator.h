@@ -98,7 +98,7 @@ struct HeapBlock
       d.type = MTLHeapTypeAutomatic;
       heap = [device newHeapWithDescriptor: d];
       if (heap) {
-        [heap setPurgeableState:MTLPurgeableStateNonVolatile];
+        [heap setPurgeableState:MTLPurgeableStateEmpty];
       }
       [d release];
     }
