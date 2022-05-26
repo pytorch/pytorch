@@ -631,11 +631,11 @@ _real_to_complex_dtype_map = {
 
 
 def corresponding_real_dtype(dtype: torch.dtype) -> torch.dtype:
-    return _complex_to_real_dtype_map[dtype]
+    return _complex_to_real_dtype_map.get(dtype, dtype)
 
 
 def corresponding_complex_dtype(dtype: torch.dtype) -> torch.dtype:
-    return _real_to_complex_dtype_map[dtype]
+    return _real_to_complex_dtype_map.get(dtype, dtype)
 
 
 def dtype_to_type(dtype: torch.dtype) -> type:
@@ -1010,7 +1010,7 @@ def elementwise_dtypes(
         for x in args:
             if isinstance(x, TensorLike) and filter(x.dtype):
                 _dtype = x.dtype
-                if float_as_complex and is_float_dtype(_dtype):
+                if float_as_complex:
                     _dtype = corresponding_complex_dtype(_dtype)
                 if x.ndim == 0:
                     zero_dim_tensor_dtype = get_higher_dtype(
@@ -1059,8 +1059,7 @@ def elementwise_dtypes(
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
         # NOTE: computation can still occur in a complex dtype
         computation_dtype = get_computation_dtype(result_dtype)
-        if is_complex_dtype(result_dtype):
-            result_dtype = corresponding_real_dtype(result_dtype)
+        result_dtype = corresponding_real_dtype(result_dtype)
         return computation_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG:
         if is_boolean_dtype(result_dtype):
@@ -1089,10 +1088,7 @@ def reduction_dtypes(
         or output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
     ):
         result_dtype = dtype if dtype else arg.dtype
-        if (
-            output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
-            and is_complex_dtype(result_dtype)
-        ):
+        if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT:
             result_dtype = corresponding_real_dtype(result_dtype)
     elif output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.KEEP_PROMOTED_TYPE:
         result_dtype = None

@@ -772,11 +772,11 @@ def isclose(
         msg = "Attempting to compare tensors of different dtypes {0} and {1}!".format(
             a.dtype, b.dtype
         )
-        raise ValueError(a, b)
     if rtol < 0:
         msg = "rtol must be greater than or equal to zero, but got {0}!".format(rtol)
     if atol < 0:
         msg = "atol must be greater than or equal to zero, but got {0}!".format(atol)
+    raise ValueError(msg)
 
     close = eq(a, b)
     if equal_nan and (utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype)):
@@ -911,7 +911,7 @@ def sub(
     alpha: Optional[NumberType] = None,
 ):
     """
-    Reference implementation of torch.add
+    Reference implementation of torch.sub
     """
 
     if isinstance(a, Number) and isinstance(b, Number):

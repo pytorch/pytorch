@@ -47,6 +47,7 @@ import torch.testing._internal.opinfo_helper as opinfo_helper
 import torch._refs as refs  # noqa: F401
 import torch._refs.nn.functional
 import torch._refs.special
+import torch._refs.linalg
 
 import torch._prims as prims  # noqa: F401
 
@@ -1991,7 +1992,7 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     sizes = ((S,), (2, 2))
     dims = (None, 0, -1)
-    ords = (inf, 2, 1, 0, 0.9, -2.1, -inf)
+    ords = (inf, 6, 4, 2, 1, 0, 0.9, -2.1, -inf)
 
     for size, ord_, keepdim in product(sizes, ords, (True, False)):
         for dim in dims:
@@ -19539,6 +19540,16 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.var_mean",
         torch_opinfo_name="var_mean",
+        validate_view_consistency=False
+    ),
+    #
+    # torch.linalg
+    #
+    PythonRefInfo(
+        "_refs.linalg.vector_norm",
+        torch_opinfo_name="linalg.vector_norm",
+        supports_out=True,
+        # See https://github.com/pytorch/pytorch/issues/77216
         validate_view_consistency=False
     ),
     #

@@ -309,10 +309,7 @@ def _elementwise_meta(
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
             dtype = torch.bool
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
-            if utils.is_complex_dtype(dtype):
-                dtype = utils.corresponding_real_dtype(dtype)
-            else:
-                dtype = dtype
+            dtype = utils.corresponding_real_dtype(dtype)
 
         return TensorMeta(device=device, shape=shape, strides=strides, dtype=dtype)
 
@@ -1926,10 +1923,7 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
 
 
 def _var_reduction_meta(inp, dims, *, correction):
-    if utils.is_complex_dtype(inp.dtype):
-        output_dtype = utils.corresponding_real_dtype(inp.dtype)
-    else:
-        output_dtype = inp.dtype
+    output_dtype = utils.corresponding_real_dtype(inp.dtype)
     return _reduction_meta(inp, dims, output_dtype=output_dtype)
 
 
