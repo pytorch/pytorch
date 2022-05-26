@@ -122,7 +122,17 @@ TORCH_META_FUNC(signbit) (const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "signbit is not implemented for complex tensors.");
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
               "signbit does not support non-boolean outputs.");
-  build_borrowing_unary_force_boolean_op(maybe_get_output(), self);
+  // NOTE: windows corecrt_math.h does not support signbit with integral arguments.
+  // The workaround is to promote integer inputs to float dtype.
+  build(TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .promote_inputs_to_common_dtype(true)
+      .promote_integer_inputs_to_float(true)
+      .check_all_same_dtype(false)
+      .declare_static_dtype(at::kBool)
+      .declare_static_device(self.device())
+      .add_output(maybe_get_output())
+      .add_input(self));
 }
 
 TORCH_META_FUNC(ceil) (const Tensor& self) {
