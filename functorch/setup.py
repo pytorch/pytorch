@@ -43,7 +43,9 @@ def write_version_file():
 # if os.getenv('PYTORCH_VERSION'):
 #     pytorch_dep += "==" + os.getenv('PYTORCH_VERSION')
 requirements = [
-    "torch>=1.12,<1.13",
+    # This represents a nightly version of PyTorch.
+    # It can be installed as a binary or from source.
+    "torch>=1.10.0.dev",
 ]
 
 extras = {}
