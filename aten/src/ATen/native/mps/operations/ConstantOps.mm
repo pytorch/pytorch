@@ -51,13 +51,35 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
           MPSGraph *mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          // TODO: Does not work for MPSDataTypeBool
-          MPSGraphTensor* inputTensor = [mpsGraph constantWithScalar:value.toDouble()
-                                                               shape:input_shape
-                                                            dataType:getMPSScalarType(self.scalar_type())];
-          MPSGraphTensor* outputTensor = [mpsGraph identityWithTensor:inputTensor
-                                                                 name:nil];
-
+          MPSDataType self_dtype = getMPSScalarType(self.scalar_type());
+          MPSGraphTensor* outputTensor;
+          if (self_dtype == MPSDataTypeBool) {
+            MPSGraphTensor* inputTensor;
+            if (value.toDouble()) {
+              // TODO: Simply using value.toDouble() (1.0 for True) does not work!
+              //       Results in outputTensor having value of 255,
+              //       which displays as "False" in Python frontend! Whats going on...?
+              inputTensor = [mpsGraph constantWithScalar:1.1 shape:input_shape dataType:MPSDataTypeFloat32];
+            } else {
+              inputTensor = [mpsGraph constantWithScalar:0.0 shape:input_shape dataType:MPSDataTypeFloat32];
+            }
+            outputTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeBool name:@"castToBool"];
+          } else {
+            // TODO: constantWithScalar output is incorrect for large integers because 
+            //       it only accepts double scalars and furthermore MPS only supports single precision...
+            //       therefore bottlenecked by float32 precision even for ints, test:
+            //       >>> torch.tensor(16777217, dtype=torch.float32, device="mps")
+            //       >>> torch.full((1,), 16777217, dtype=torch.int32, device="mps")
+            //       Returning tensor([16777216.], device='mps:0') and
+            //       tensor([16777216], device='mps:0', dtype=torch.int32), respectively.
+            //       The first one is expected while the second one is not, and works on CPU as well as with
+            //       torch.tensor(16777217, device="mps"), which I think goes through CPU first and then
+            //       copies over to the MPS device.
+            MPSGraphTensor* inputTensor = [mpsGraph constantWithScalar:value.toDouble()
+                                                                 shape:input_shape
+                                                              dataType:self_dtype];
+            outputTensor = [mpsGraph identityWithTensor:inputTensor name:nil];
+          }
           newCachedGraph->outputTensor_ = outputTensor;
         }
         return newCachedGraph;
