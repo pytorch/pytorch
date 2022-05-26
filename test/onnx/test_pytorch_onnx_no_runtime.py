@@ -12,17 +12,9 @@ import onnx
 
 import torch
 from torch import Tensor
-from torch.onnx import OperatorExportTypes, symbolic_helper, utils, symbolic_registry
+from torch.onnx import symbolic_helper, utils, symbolic_registry
 from torch.onnx._globals import GLOBALS
-from torch.onnx.symbolic_helper import _onnx_unsupported
-from torch.testing._internal.common_utils import (
-    TestCase,
-    instantiate_parametrized_tests,
-    parametrize,
-    suppress_warnings,
-    custom_op,
-    skipIfCaffe2,
-)
+from torch.testing._internal import common_utils
 
 
 def export_to_onnx(
@@ -34,7 +26,7 @@ def export_to_onnx(
         ]
     ] = None,
     mocks: Optional[Iterable] = None,
-    operator_export_type: OperatorExportTypes = OperatorExportTypes.ONNX,
+    operator_export_type: torch.onnx.OperatorExportTypes = torch.onnx.OperatorExportTypes.ONNX,
     opset_version: int = GLOBALS.export_onnx_opset_version,
 ) -> onnx.ModelProto:
     """Exports `model(input)` to ONNX and returns it.
@@ -72,7 +64,7 @@ def export_to_onnx(
     return onnx_model
 
 
-class TestOptionalOutput(TestCase):
+class TestOptionalOutput(common_utils.TestCase):
     # TODO: Move these tests to test_pytorch_onnx_onnxruntime once
     # ONNX Runtime 1.11 is released and supports opset 16.
 
@@ -104,12 +96,12 @@ class TestOptionalOutput(TestCase):
                 y = None
             return y
 
-    @parametrize(
+    @common_utils.parametrize(
         "module_class",
         (IfNoneInput, IfNoneOutput, LoopNoneInput, LoopNoneOutput),
         name_fn=lambda module_class: module_class.__name__,
     )
-    @parametrize("x_size", (0, 1), name_fn=lambda x_size: str(x_size))
+    @common_utils.parametrize("x_size", (0, 1), name_fn=lambda x_size: str(x_size))
     def test_optional_output(self, module_class: Type[torch.nn.Module], x_size: int):
         # Need scripting to preserve control flow for this test to be
         # meaningful.
@@ -163,7 +155,7 @@ class TestOptionalOutput(TestCase):
         )
 
 
-class TestONNXExport(TestCase):
+class TestONNXExport(common_utils.TestCase):
     def test_fuse_addmm(self):
         class AddmmModel(torch.nn.Module):
             def forward(self, x):
@@ -218,7 +210,7 @@ class TestONNXExport(TestCase):
         mte = ModuleToExport()
         torch.onnx.export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), verbose=False)
 
-    @suppress_warnings
+    @common_utils.suppress_warnings
     def test_onnx_export_func_with_warnings(self):
         @torch.jit.script
         def func_with_warning(inp):
@@ -320,7 +312,7 @@ class TestONNXExport(TestCase):
         mte = ModuleToExport()
         torch.onnx.export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), verbose=False)
 
-    @suppress_warnings
+    @common_utils.suppress_warnings
     def test_onnx_export_script_truediv(self):
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):
@@ -454,7 +446,7 @@ class TestONNXExport(TestCase):
             (torch.rand(3, 4),),
             add_node_names=False,
             do_constant_folding=False,
-            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK,
+            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
         )
 
     def test_export_dynamic_slice(self):
@@ -501,17 +493,19 @@ class TestONNXExport(TestCase):
         mod = ExpandingModule()
 
         graph, _, _ = utils._model_to_graph(
-            mod, (torch.zeros(1),), operator_export_type=OperatorExportTypes.ONNX
+            mod,
+            (torch.zeros(1),),
+            operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
         )
 
         # Ensure that every node in the graph has a valid source range
         for node in graph.nodes():
             self.assertTrue(node.sourceRange())
 
-    @skipIfCaffe2
+    @common_utils.skipIfCaffe2
     def test_clip_aten_fallback_due_exception(self):
         def bad_clamp(g, self, min, max):
-            return _onnx_unsupported("Bad boy!")
+            return symbolic_helper._onnx_unsupported("Bad boy!")
 
         class MyClip(torch.nn.Module):
             def forward(self, x):
@@ -520,12 +514,12 @@ class TestONNXExport(TestCase):
         onnx_model = export_to_onnx(
             MyClip(),
             torch.randn(3, 4, requires_grad=True),
-            custom_ops=[custom_op("aten::clamp", bad_clamp, 9)],
-            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK,
+            custom_ops=[common_utils.custom_op("aten::clamp", bad_clamp, 9)],
+            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
         )
         self.assertAtenOp(onnx_model, "clamp", "Tensor")
 
-    @skipIfCaffe2
+    @common_utils.skipIfCaffe2
     def test_clip_aten_fallback_explicit_request(self):
         class MyClip(torch.nn.Module):
             def forward(self, x):
@@ -550,7 +544,7 @@ class TestONNXExport(TestCase):
                     side_effect=break_is_registered_op_api,
                 )
             ],
-            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK,
+            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
         )
         self.assertAtenOp(onnx_model, "clamp", "Tensor")
 
@@ -581,7 +575,7 @@ class TestONNXExport(TestCase):
         self._helper_test_to_(cast_device_cpu_string)
 
 
-instantiate_parametrized_tests(TestOptionalOutput)
+common_utils.instantiate_parametrized_tests(TestOptionalOutput)
 
 if __name__ == "__main__":
     unittest.main()
