@@ -209,11 +209,6 @@ Tensor& layer_norm_out(
       typeMetaToScalarType(input.dtype()),
       typeMetaToScalarType(output.dtype())));
 
-  if (input.numel() == 0) {
-    resize_output(output, input.sizes());
-    return output;
-  }
-
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -221,15 +216,20 @@ Tensor& layer_norm_out(
       at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
+  TORCH_CHECK(!weight.defined() || input.device() == weight.device());
+  TORCH_CHECK(!bias.defined() || input.device() == bias.device());
+
+  if (input.numel() == 0) {
+    resize_output(output, input.sizes());
+    return output;
+  }
+
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto M = M_N.first;
   auto N = M_N.second;
   auto X = input.expect_contiguous();
   auto gamma = weight.expect_contiguous();
   auto beta = bias.expect_contiguous();
-
-  TORCH_CHECK(!gamma->defined() || input.device() == gamma->device());
-  TORCH_CHECK(!beta->defined() || input.device() == beta->device());
 
   auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
   Tensor mean = at::empty({M}, X->options().dtype(acc_type));
