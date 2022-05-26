@@ -996,7 +996,6 @@ class TestQuantizedTensor(TestCase):
         # now we will check masked_fill for subset of indices
         mask = torch.randint(0, 2, (numel, ))
         mask = mask.bool()
-        print(mask)
         x = torch.rand(numel)
         qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=qtype)
         for qtype, fill_with in itertools.product(types, fills):
