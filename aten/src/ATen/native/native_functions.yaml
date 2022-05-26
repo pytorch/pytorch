@@ -1151,6 +1151,8 @@
 
 - func: block_diag(Tensor[] tensors) -> Tensor
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: block_diag
 
 - func: ceil(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
