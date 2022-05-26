@@ -3360,6 +3360,7 @@ def sample_inputs_margin_ranking_loss(op_info, device, dtype, requires_grad, **k
                               kwargs=kwargs)
 
 def reference_inputs_margin_ranking_loss(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_margin_ranking_loss(op, device, dtype, requires_grad, **kwargs)
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     for reduction in ('sum', 'mean', 'none'):
@@ -3368,14 +3369,18 @@ def reference_inputs_margin_ranking_loss(op, device, dtype, requires_grad, **kwa
             inp1 = make_input((10, ))
             inp1[2] = float('nan')
             inp2 = make_input((10, ))
+            inp2[4] = float('nan')
             target = make_input((10, ))
+            inp2[9] = float('nan')
             yield SampleInput(inp1, args=(inp2, target), kwargs={'reduction': reduction})
 
             # Inf handling
             inp1 = make_input((10, ))
+            inp2[1] = float('inf')
             inp2 = make_input((10, ))
             inp2[4] = float('inf')
             target = make_input((10, ))
+            inp2[7] = float('inf')
             yield SampleInput(inp1, args=(inp2, target), kwargs={'reduction': reduction})
 
         # Broadcasting
@@ -9158,6 +9163,7 @@ def error_inputs_hinge_embedding_loss(op, device, **kwargs):
                      error_type=ValueError, error_regex='is not a valid value')
 
 def reference_inputs_hinge_embedding_loss(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_hinge_embedding_loss(op, device, dtype, requires_grad, **kwargs)
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     for reduction in ('sum', 'mean', 'none'):

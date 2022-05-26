@@ -20,8 +20,8 @@ __all__ = [
     "dropout",
     "elu",
     "hinge_embedding_loss",
-    "mish",
     "margin_ranking_loss",
+    "mish",
     "selu",
     "softplus",
 ]
