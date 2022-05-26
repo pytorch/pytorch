@@ -6620,8 +6620,15 @@ class TestAutogradForwardMode(TestCase):
             dual[1:]
 
     def test_metadata_check_check_conj(self):
-        x = torch.randn(2, 3, 4, dtype=torch.cdouble, requires_grad=True)
-        t = torch.randn(2, 3, 4, dtype=torch.cdouble, requires_grad=True).conj()
+        x = torch.randn(2, 3, 4, dtype=torch.cdouble)
+        t = torch.randn(2, 3, 4, dtype=torch.cdouble).conj()
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, t)
+            torch.real(dual)
+
+        x = torch.randn(2, 3, 4, dtype=torch.cdouble).conj()
+        t = torch.randn(2, 3, 4, dtype=torch.cdouble)
 
         with fwAD.dual_level():
             dual = fwAD.make_dual(x, t)

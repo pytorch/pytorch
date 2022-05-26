@@ -105,8 +105,10 @@ namespace {
 
   Tensor maybe_flip_conj(const Tensor& other, const Tensor& base) {
     // If conj-ness is not same, flip the conj of other
-    if (base.is_conj() != other.is_conj()) {
+    if (base.is_conj() && !other.is_conj()) {
       return other.conj_physical().conj();
+    } else if (!base.is_conj() && other.is_conj()) {
+      return other.resolve_conj();
     } else {
       return other;
     }
