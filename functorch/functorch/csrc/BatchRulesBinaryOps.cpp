@@ -264,14 +264,6 @@ std::tuple<Tensor,optional<int64_t>> masked_select_backward_batch_rule(
   return std::make_tuple(result, 0);
 }
 
-Tensor addr_decomposition(
-    const Tensor& self, const Tensor& vec1, const Tensor& vec2,
-    const Scalar& beta, const Scalar& alpha) {
-
-  auto outer = alpha * vec1.unsqueeze(-1) * vec2.unsqueeze(-2);
-  return self * beta + outer;
-}
-
 std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
     const Tensor& grad, optional<int64_t> grad_bdim,
     const Tensor& x1, optional<int64_t> x1_bdim,
@@ -369,7 +361,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   BINARY_SCALAR_2(add, Tensor, Scalar);
   POINTWISE_BOXED(addcdiv);
   POINTWISE_BOXED(addcmul);
-  m.impl("addr", addr_decomposition);
   BINARY_POINTWISE(atan2);
   BINARY_SCALAR_2(bitwise_and, Tensor, Scalar);
   BINARY_POINTWISE2(bitwise_or, Tensor);
