@@ -21,6 +21,20 @@ MPSDevice::~MPSDevice() {
 }
 
 MPSDevice::MPSDevice(): _mtl_device(nil) {
+  // Check that MacOS 12.3+ version of MPS framework is available
+  // Create the MPSGraph and check method introduced in 12.3+
+  // which is used by MPS backend.
+  id mpsCD = NSClassFromString(@"MPSGraph");
+  if ([mpsCD instancesRespondToSelector:@selector(LSTMWithSourceTensor:
+                                                       recurrentWeight:
+                                                           inputWeight:
+                                                                  bias:
+                                                             initState:
+                                                              initCell:
+                                                            descriptor:
+                                                                  name:)] == NO) {
+    return;
+  }
   NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0 ; i < [devices count] ; i++) {
     id<MTLDevice>  device = devices[i];
@@ -33,8 +47,9 @@ MPSDevice::MPSDevice(): _mtl_device(nil) {
 }
 
 at::Allocator* getMPSSharedAllocator();
+at::Allocator* getMPSStaticAllocator();
 at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
-  return useSharedAllocator ? getMPSSharedAllocator() : GetAllocator(DeviceType::MPS);
+  return useSharedAllocator ? getMPSSharedAllocator() : getMPSStaticAllocator();
 }
 
 bool is_available() {
