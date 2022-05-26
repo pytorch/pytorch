@@ -21,11 +21,11 @@ class TestHelperFunctions(common_utils.TestCase):
                 [1, torch.onnx.TrainingMode.PRESERVE], name="export_mode_is_preserve"
             ),
             common_utils.subtest(
-                [0, torch.onnx.TrainingMode.TRAINING],
+                [0, torch.onnx.TrainingMode.EVAL],
                 name="modes_match_op_train_mode_0_export_mode_eval",
             ),
             common_utils.subtest(
-                [0, torch.onnx.TrainingMode.TRAINING],
+                [1, torch.onnx.TrainingMode.TRAINING],
                 name="modes_match_op_train_mode_1_export_mode_training",
             ),
         ],
