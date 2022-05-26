@@ -1,6 +1,5 @@
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/cpu/IndexKernelUtils.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/quantized/IndexKernel.h>
 #include <ATen/native/TensorIterator.h>
