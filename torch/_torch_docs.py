@@ -2710,6 +2710,10 @@ Example::
     >>> torch.copysign(a, b)
     tensor([-1.])
 
+.. note::
+    copysign handles signed zeros. If the other argument has a negative zero (-0),
+    the corresponding output value will be negative.
+
 """.format(**common_args))
 
 add_docstr(torch.cos,
@@ -8834,12 +8838,12 @@ Example::
     >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
     >>> torch.signbit(a)
     tensor([ False, True,  False,  False])
-
-.. note::
-    signbit handles signed zeros, so negative zero (-0) returns True
     >>> a = torch.tensor([-0.0, 0.0])
     >>> torch.signbit(a)
     tensor([ True,  False])
+
+.. note::
+    signbit handles signed zeros, so negative zero (-0) returns True.
 
 """.format(**common_args))
 
