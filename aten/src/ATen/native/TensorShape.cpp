@@ -343,7 +343,8 @@ TORCH_IMPL_FUNC(cat_out_cpu)
   // fast path for single thread when both inputs and result are contiguous and not empty
   bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
   ScalarType dtype = materialized[valid].get().scalar_type();
-  bool serial_dtype = (dtype == ScalarType::Double || dtype == ScalarType::Float || dtype == ScalarType::BFloat16);
+#define CHECK_DTYPE(_, type) || (dtype == (ScalarType::type))
+  bool serial_dtype = true AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CHECK_DTYPE);
   if (use_serial_kernel && all_contiguous && all_same_dtype && serial_dtype) {
     cat_serial_stub(kCPU, result, materialized, dim);
     return;
