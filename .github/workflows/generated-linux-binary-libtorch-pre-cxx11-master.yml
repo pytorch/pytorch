@@ -9,7 +9,6 @@ on:
     branches:
       - master
     tags:
-      - 'ciflow/all/*'
       - 'ciflow/trunk/*'
   workflow_dispatch:
 
