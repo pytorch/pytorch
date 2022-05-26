@@ -12620,7 +12620,7 @@ class _TestONNXRuntime:
         input = _construct_tensor_for_quantization_test((4, 4, 3, 2))
         self.run_test(model, input)
 
-    @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_qat_upsample_nearest2d(self):
         model = torch.nn.Sequential()
         model.add_module("quant", torch.quantization.QuantStub())

@@ -3,7 +3,7 @@ import functools
 import inspect
 import sys
 import warnings
-from typing import Set, Optional
+from typing import Optional, Set
 
 import torch
 import torch._C._onnx as _C_onnx
