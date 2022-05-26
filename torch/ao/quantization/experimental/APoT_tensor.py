@@ -7,7 +7,6 @@ class TensorAPoT(torch.Tensor):
     def quantize_APoT(tensor2quantize: Tensor) -> Tensor:
         raise NotImplementedError
 
-    @staticmethod
     def dequantize(self) -> Tensor:
         raise NotImplementedError
 
