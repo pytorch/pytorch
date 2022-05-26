@@ -565,7 +565,7 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
   return torch::special_softmax(self, dim, dtype);
 }
 
-/// Legendre polynomial.
+/// Laguerre polynomial.
 ///
 /// See https://pytorch.org/docs/master/special.html#torch.special.laguerre_polynomial_l.
 ///
