@@ -595,6 +595,18 @@ c10::optional<OperatorName> RecordFunction::operator_name() const {
       fn_);
 }
 
+c10::optional<c10::FunctionSchema> RecordFunction::operator_schema() const {
+  return c10::visit(
+      c10::overloaded(
+          [&](const std::string&) -> c10::optional<c10::FunctionSchema> {
+            return c10::nullopt;
+          },
+          [](const schema_ref_t schema) -> c10::optional<c10::FunctionSchema> {
+            return schema.get();
+          }),
+      fn_);
+}
+
 StepCallbacks getStepCallbacks(RecordScope scope) {
   return LocalCallbackManager::get().getActiveCallbacks(scope);
 }
