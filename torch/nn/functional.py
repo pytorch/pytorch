@@ -41,6 +41,9 @@ See :class:`~torch.nn.Conv1d` for details and output shape.
 
 Note:
     {cudnn_reproducibility_note}
+
+Note:
+    This operator supports complex data types i.e. ``complex32, complex64, complex128``.
 """.format(
         **reproducibility_notes, **tf32_notes
     )
@@ -89,6 +92,9 @@ See :class:`~torch.nn.Conv2d` for details and output shape.
 
 Note:
     {cudnn_reproducibility_note}
+
+Note:
+    This operator supports complex data types i.e. ``complex32, complex64, complex128``.
 """.format(
         **reproducibility_notes, **tf32_notes
     )
@@ -139,6 +145,9 @@ See :class:`~torch.nn.Conv3d` for details and output shape.
 
 Note:
     {cudnn_reproducibility_note}
+
+Note:
+    This operator supports complex data types i.e. ``complex32, complex64, complex128``.
 """.format(
         **reproducibility_notes, **tf32_notes
     )

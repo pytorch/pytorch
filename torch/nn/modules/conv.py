@@ -218,6 +218,9 @@ class Conv1d(_ConvNd):
         the input so the output has the shape as the input. However, this mode
         doesn't support any stride values other than 1.
 
+    Note:
+        This module supports complex data types i.e. ``complex32, complex64, complex128``.
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -359,6 +362,9 @@ class Conv2d(_ConvNd):
         the input so the output has the shape as the input. However, this mode
         doesn't support any stride values other than 1.
 
+    Note:
+        This module supports complex data types i.e. ``complex32, complex64, complex128``.
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -497,6 +503,9 @@ class Conv3d(_ConvNd):
         ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
         the input so the output has the shape as the input. However, this mode
         doesn't support any stride values other than 1.
+
+    Note:
+        This module supports complex data types i.e. ``complex32, complex64, complex128``.
 
     Args:
         in_channels (int): Number of channels in the input image
