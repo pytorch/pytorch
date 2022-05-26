@@ -2705,6 +2705,10 @@ Example::
             [ 0.0059,  0.2600,  0.4475, -1.3948],
             [ 0.3667,  0.9567,  2.5757, -0.1751],
             [ 0.2046,  0.0742,  0.2998, -0.1054]])
+    >>> a = torch.tensor([1.])
+    >>> b = torch.tensor([-0.])
+    >>> torch.copysign(a, b)
+    tensor([-1.])
 
 """.format(**common_args))
 
@@ -8830,6 +8834,13 @@ Example::
     >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
     >>> torch.signbit(a)
     tensor([ False, True,  False,  False])
+
+.. note::
+    signbit handles signed zeros, so negative zero (-0) returns True
+    >>> a = torch.tensor([-0.0, 0.0])
+    >>> torch.signbit(a)
+    tensor([ True,  False])
+
 """.format(**common_args))
 
 add_docstr(torch.sgn,

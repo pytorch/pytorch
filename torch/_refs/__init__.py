@@ -598,22 +598,9 @@ sign = _make_elementwise_unary_reference(
 )
 
 
-# https://github.com/pytorch/pytorch/issues/53963
-# signbit behavior is incorrect in eager mode, which this reference follows.
-# TODO update signbit after fixing eager mode behavior
-def _signbit(a: TensorLikeType) -> TensorLikeType:
-    if a.dtype.is_complex:
-        raise RuntimeError("signbit is not implemented for complex tensors.")
-    elif a.dtype.is_signed is False:
-        return full_like(a, False)
-    else:
-        return lt(a, 0)
-
-
 signbit = _make_elementwise_unary_reference(
-    _signbit,
+    prims.signbit,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
-    aten_op=torch.ops.aten.signbit,
 )
 
 sin = _make_elementwise_unary_reference(

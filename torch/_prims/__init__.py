@@ -72,6 +72,7 @@ __all__ = [
     "reciprocal",
     "round",
     "sign",
+    "signbit",
     "sin",
     "sinh",
     "sqrt",
@@ -618,6 +619,13 @@ round = _make_elementwise_unary_prim(
 sign = _make_elementwise_unary_prim(
     "sign",
     impl_aten=torch.sign,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+signbit = _make_elementwise_unary_prim(
+    "signbit",
+    impl_aten=torch.signbit,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
