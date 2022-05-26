@@ -199,6 +199,34 @@ class TestShardingPlan(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
+    def test_sharding_plan_simple_megatron_with_meta(self):
+        colwise_sharding_spec = generate_chunk_sharding_specs_for_test(0)
+        rowwise_sharding_spec = generate_chunk_sharding_specs_for_test(1)
+        for spec in zip(colwise_sharding_spec, rowwise_sharding_spec):
+            # test each sharding spec pair and see if we can apply sharding
+            sharding_plan = ShardingPlan(
+                plan={
+                    "fc1.weight": spec[0],
+                    "fc2.weight": spec[1]
+                },
+            )
+
+            # Use same seed.
+            torch.manual_seed(0)
+            megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], device='meta')
+
+            # shard the module with the provided sharding plan
+            shard_module(megatron_lm, sharding_plan)
+
+            # check to make sure the module already been sharded
+            self.assertTrue(isinstance(megatron_lm.fc1.weight, ShardedTensor))
+            self.assertTrue(isinstance(megatron_lm.fc2.weight, ShardedTensor))
+            self.assertEqual(megatron_lm.fc1.weight.sharding_spec(), spec[0])
+            self.assertEqual(megatron_lm.fc2.weight.sharding_spec(), spec[1])
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
     def test_reshard_to_ddp_sharding_plan(self):
         colwise_sharding_spec = generate_chunk_sharding_specs_for_test(0)[0]
         rowwise_sharding_spec = generate_chunk_sharding_specs_for_test(1)[0]

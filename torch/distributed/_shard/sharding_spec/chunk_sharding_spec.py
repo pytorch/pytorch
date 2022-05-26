@@ -113,6 +113,19 @@ class ChunkShardingSpec(ShardingSpec):
 
 
     def shard(self, tensor: torch.Tensor, src_rank: int = 0, process_group=None) -> "ShardedTensor":
+        if tensor.is_meta:
+            # Just create an empty ShardedTensor to materialize the meta tensor.
+            return torch.distributed._shard.sharded_tensor.empty(
+                self,
+                tensor.size(),
+                dtype=tensor.dtype,
+                layout=tensor.layout,
+                requires_grad=tensor.requires_grad,
+                pin_memory=tensor.is_pinned(),
+                process_group=process_group
+            )
+
+        local_shards = []
         # relative imports to avoid circular dependency
         from torch.distributed._shard.sharded_tensor import (
             ShardedTensor
@@ -126,12 +139,12 @@ class ChunkShardingSpec(ShardingSpec):
         )
         current_rank = dist.get_rank(process_group)
         tensor_meta = self.build_metadata(tensor.size(), tensor_properties)
-        local_shards = []
+
         local_tensor = None
         local_metadata = None
         tensors_to_scatter = [None] * dist.get_world_size(process_group)
 
-        sharding_dim_size = tensor.size()[self.dim]  # type: ignore[index]
+        sharding_dim_size = tensor.size(self.dim)  # type: ignore[index]
         chunks = len(self.placements)
         split_size = get_split_size(sharding_dim_size, chunks)
         scatter_shape = list(tensor.size())
@@ -182,12 +195,8 @@ class ChunkShardingSpec(ShardingSpec):
 
         local_shards.append(Shard(tensor=local_tensor, metadata=local_metadata))
 
-        st = ShardedTensor._init_from_local_shards_and_global_metadata(
+        return ShardedTensor._init_from_local_shards_and_global_metadata(
             local_shards,
             tensor_meta,
-            process_group=process_group)
-
-        # Manually set sharding_spec
-        st._sharding_spec = self
-
-        return st
+            process_group=process_group,
+            sharding_spec=self)

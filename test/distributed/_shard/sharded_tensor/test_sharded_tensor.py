@@ -213,6 +213,32 @@ class TestShardParameter(ShardedTensorTestBase):
         with self.assertRaisesRegex(NotImplementedError, 'not implemented yet!'):
             shard_parameter(fc, 'weight', spec)
 
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_shard_parameter_with_meta(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+
+        fc = torch.nn.Linear(12, 12, device='meta')
+        weight_og = fc.weight.clone()
+        shard_parameter(fc, 'weight', spec)
+
+        # Verify.
+        self.assertTrue(isinstance(fc.weight, ShardedTensor))
+        local_shards = fc.weight.local_shards()
+        self.assertEqual(1, len(local_shards))
+        self.assertEqual(torch.Size([3, 12]), local_shards[0].tensor.size())
+        self.assertEqual(3, local_shards[0].tensor.size(0))
+        self.assertEqual(12, local_shards[0].tensor.size(1))
+
 
 class TestShardTensor(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
@@ -288,6 +314,51 @@ class TestShardTensor(ShardedTensorTestBase):
             NotImplementedError, 'not implemented yet!'
         ):
             _shard_tensor(tensor, spec)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_shard_tensor_with_meta(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        tensor = torch.rand(12, 12, device='meta')
+        st = _shard_tensor(tensor, spec)
+
+        # Verify.
+        self.assertTrue(isinstance(st, sharded_tensor.ShardedTensor))
+        local_shard = st.local_tensor()
+        self.assertEqual(1, len(st.local_shards()))
+        self.assertEqual(torch.Size([3, 12]), local_shard.size())
+
+        # Test with multiple local shards.
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+                "rank:3/cuda:3",
+            ],
+        )
+        tensor = torch.rand(16, 12, device='meta')
+        st = _shard_tensor(tensor, spec)
+
+        # Verify.
+        self.assertTrue(isinstance(st, sharded_tensor.ShardedTensor))
+        self.assertEqual(2, len(st.local_shards()))
+        for local_shard in st.local_shards():
+            self.assertEqual(torch.Size([2, 12]), local_shard.tensor.size())
 
 
 class TestModuleHookApi(ShardedTensorTestBase):

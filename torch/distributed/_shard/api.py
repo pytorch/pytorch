@@ -26,6 +26,9 @@ def _shard_tensor(
     used as the ground truth of the data which would be scattered as shards
     across the rest of the ranks.
 
+    If the passed in ``tensor`` is a MetaTensor, then an empty ShardedTensor is
+    materialized as per the provided ``sharding_spec`` and ``src_rank`` is ignored.
+
     Args:
         tensor (:class:`torch.Tensor`): Tensor needs to be sharded.
         sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`): The specification
@@ -86,6 +89,11 @@ def shard_parameter(
 
     This method replaces ``module.param_name`` with a
     :class:`torch.distributed._sharded_tensor.ShardedTensor`
+
+    If the parameter is a MetaTensor, then an empty ShardedTensor is
+    materialized as per the provided ``sharding_spec`` and ``src_rank`` is ignored.
+    In this case, it is the user's responsibility to appropriately initialize
+    the ShardedTensor as desired.
 
     Args:
         module (:class:`torch.nn.Module`): Module whose parameter needs to be sharded.
@@ -243,6 +251,11 @@ def shard_module(
     output back to data parallel according to `return_local_tensor`.
 
     Needs to be called on all ranks in an SPMD fashion.
+
+    If the parameter is a MetaTensor, then an empty ShardedTensor is
+    materialized as per the provided ``sharding_spec`` and ``src_rank`` is ignored.
+    In this case, it is the user's responsibility to appropriately initialize
+    the ShardedTensor as desired.
 
     Args:
         module (:class:`torch.nn.Module`): The module to apply sharding to
