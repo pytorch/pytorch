@@ -110,9 +110,7 @@ def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList2[int]) -> T
 
 def conv1d(input, weight, bias,
            stride=1, padding=0, dilation=1, groups=1,
-           padding_mode='zeros',
-           scale=1.0, zero_point=0,
-           dtype=torch.quint8):
+           scale=1.0, zero_point=0):
     r"""
     Applies a 1D convolution over a quantized 1D input composed of several input
     planes.
@@ -134,7 +132,6 @@ def conv1d(input, weight, bias,
         padding_mode: the padding mode to use. Only "zeros" is supported for quantized convolution at the moment. Default: "zeros"
         scale: quantization scale for the output. Default: 1.0
         zero_point: quantization zero_point for the output. Default: 0
-        dtype: quantization data type to use. Default: ``torch.quint8``
 
     Examples::
 
@@ -151,8 +148,6 @@ def conv1d(input, weight, bias,
         >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype_inputs)
         >>> qF.conv1d(q_inputs, q_filters, bias, padding=1, scale=scale, zero_point=zero_point)
     """  # noqa: E501
-    if padding_mode != 'zeros':
-        raise NotImplementedError("Only zero-padding is supported!")
     if input.dtype != torch.quint8:
         raise NotImplementedError("Only torch.quint8 is supported for activation tensor!")
     if weight.dtype != torch.qint8:
@@ -169,9 +164,7 @@ def conv1d(input, weight, bias,
 
 def conv2d(input, weight, bias,
            stride=1, padding=0, dilation=1, groups=1,
-           padding_mode='zeros',
-           scale=1.0, zero_point=0,
-           dtype=torch.quint8):
+           scale=1.0, zero_point=0):
     r"""
     Applies a 2D convolution over a quantized 2D input composed of several input
     planes.
@@ -193,7 +186,6 @@ def conv2d(input, weight, bias,
         padding_mode: the padding mode to use. Only "zeros" is supported for quantized convolution at the moment. Default: "zeros"
         scale: quantization scale for the output. Default: 1.0
         zero_point: quantization zero_point for the output. Default: 0
-        dtype: quantization data type to use. Default: ``torch.quint8``
 
     Examples::
 
@@ -210,8 +202,6 @@ def conv2d(input, weight, bias,
         >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype_inputs)
         >>> qF.conv2d(q_inputs, q_filters, bias, padding=1, scale=scale, zero_point=zero_point)
     """  # noqa: E501
-    if padding_mode != 'zeros':
-        raise NotImplementedError("Only zero-padding is supported!")
     if input.dtype != torch.quint8:
         raise NotImplementedError("Only torch.quint8 is supported for activation tensor!")
     if weight.dtype != torch.qint8:
@@ -227,7 +217,7 @@ def conv2d(input, weight, bias,
     return torch.ops.quantized.conv2d(input, packed_params, scale, zero_point)
 
 def conv3d(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
-           padding_mode='zeros', scale=1.0, zero_point=0, dtype=torch.quint8):
+           scale=1.0, zero_point=0):
     r"""
     Applies a 3D convolution over a quantized 3D input composed of several input
     planes.
@@ -253,7 +243,6 @@ def conv3d(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
           quantized convolution at the moment. Default: "zeros"
         scale: quantization scale for the output. Default: 1.0
         zero_point: quantization zero_point for the output. Default: 0
-        dtype: quantization data type to use. Default: ``torch.quint8``
 
     Examples::
 
@@ -270,8 +259,6 @@ def conv3d(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
         >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype_inputs)
         >>> qF.conv3d(q_inputs, q_filters, bias, padding=1, scale=scale, zero_point=zero_point)
     """  # noqa: E501
-    if padding_mode != 'zeros':
-        raise NotImplementedError("Only zero-padding is supported!")
     if input.dtype != torch.quint8:
         raise NotImplementedError("Only torch.quint8 is supported for activation tensor!")
     if weight.dtype != torch.qint8:
