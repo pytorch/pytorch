@@ -1312,9 +1312,9 @@ class TestMPS(TestCase):
             torch.float32: [-1.0, 0, 0.1, 111.99]
         }
         # Test all combinations of dtypes, operations, dimensionality
-        # TODO: 'div' operation broken, needs special rules currently not implement
-        #       because div is the only arithmetic operation that can result in a floats result
-        #       with integer or bool inputs. Also infinities can occur.
+        # TODO: 'div' operation broken, needs special rules currently not implemented
+        #       because div is the only arithmetic operation that can result in a float result
+        #       with integer or bool inputs. Infinities can also occur.
         for dtype1, dtype2, binop in itertools.product(
                 sample_vals.keys(), sample_vals.keys(), ['add', 'sub', 'mul']):
             if binop == 'sub' and (dtype1 == torch.bool or dtype2 == torch.bool):
