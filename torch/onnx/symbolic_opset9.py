@@ -4978,11 +4978,10 @@ class Prim:
         """
         if not inputs:
             return None
-        first_input = inputs[0]
-        if len(inputs) == 1 and first_input.node().kind() == "prim::ListConstruct":
+        if len(inputs) == 1 and inputs[0].node().kind() == "prim::ListConstruct":
             # Cancel the previous node if it is ListConstruct by returning its inputs
             # TODO(justinchuby): Use a public method in the helper module
-            return symbolic_helper._unpack_list(first_input)
+            return symbolic_helper._unpack_list(inputs[0])
 
         return None
 
