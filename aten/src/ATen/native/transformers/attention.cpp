@@ -122,7 +122,7 @@ Tensor masked_softmax(
   if (query.is_nested() && !attn_mask) {
     // TODO: maybe we could do better than generating a mask every time?
 
-    attn_mask = NestedTensor_to_mask(query, 2);
+    attn_mask = NestedTensor_to_mask(query, 2, attn_scores.size(2));
     // TODO: CPU path does not support transformer mask yet.
     if (attn_scores.is_cpu()) {
       attn_mask = attn_mask->view({-1, 1, 1, attn_scores.sizes()[3]});
