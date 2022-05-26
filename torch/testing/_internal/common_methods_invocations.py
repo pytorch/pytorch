@@ -4209,8 +4209,8 @@ def error_inputs_logcumsumexp(op_info, device, **kwargs):
     srcs = [torch.randn(5, 2, device=device), torch.randn(0, 2, device=device)]
     for src in srcs:
         yield ErrorInput(SampleInput(src, args=(dim,)),
-                        error_type=IndexError,
-                        error_regex='Dimension out of range')
+                         error_type=IndexError,
+                         error_regex='Dimension out of range')
 
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S), dtype=dtype, device=device,
