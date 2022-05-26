@@ -96,12 +96,14 @@ jobs:
         run: |
          # Since git apply will fix all the flags raised by the whitespace
          # errors and this will not raise any warinig or error
+         git commit --allow-empty
          git diff > patchname.patch
-         git apply --whitespace=warn patchname.patch
          file=$(patchname.patch)
-         echo "The file $file has trailing whitespace "
-         echo "To fix this issue use git apply --whitespace=fix filename.file"
-         echo "The above command will remove the trailing whitespace from the file path"
+         if [ -f "$file" ]; then
+            git apply --whitespace=warn patchname.patch
+            echo "ERROR: The file $file has trailing whitespace "
+            echo "You can fix this issue using (git apply --whitespace=fix $file)"
+            echo "The above command will remove the trailing whitespace from the file path"
       - name: C++ docs check
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
