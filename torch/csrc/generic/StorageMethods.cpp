@@ -1,8 +1,3 @@
-#include <torch/csrc/StorageMethods.h>
-
-#include <torch/csrc/THP.h>
-#include <fmt/format.h>
-
 #include <ATen/ATen.h>
 #include <ATen/MapAllocator.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -23,7 +18,7 @@
 #define LSEEK lseek
 #endif
 
-static PyObject * THPStorage_nbytes(PyObject *_self, PyObject *noargs)
+static PyObject * THPStorage_(nbytes)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
@@ -31,15 +26,15 @@ static PyObject * THPStorage_nbytes(PyObject *_self, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_dataPtr(PyObject *_self, PyObject *noargs)
+static PyObject * THPStorage_(dataPtr)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
-  return PyLong_FromVoidPtr(self->cdata->data<uint8_t>());
+  return PyLong_FromVoidPtr(self->cdata->data<scalar_t>());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_copy_(PyObject *self, PyObject *args, PyObject *kwargs)
+static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
 
@@ -64,27 +59,27 @@ static PyObject * THPStorage_copy_(PyObject *self, PyObject *args, PyObject *kwa
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_isPinned(PyObject *_self, PyObject *noargs)
+static PyObject * THPStorage_(isPinned)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
 #if defined(USE_CUDA)
-  return PyBool_FromLong(at::globalContext().isPinnedPtr(self->cdata->data<uint8_t>()));
+  return PyBool_FromLong(at::globalContext().isPinnedPtr(self->cdata->data<scalar_t>()));
 #else
   Py_RETURN_FALSE;
 #endif
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_elementSize(PyObject *_self, PyObject *noargs)
+static PyObject * THPStorage_(elementSize)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
-  return THPUtils_packInt64(sizeof(uint8_t));
+  return THPUtils_packInt64(sizeof(scalar_t));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_new(PyObject *_self, PyObject *noargs)
+static PyObject * THPStorage_(new)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
@@ -96,11 +91,11 @@ static PyObject * THPStorage_new(PyObject *_self, PyObject *noargs)
     /*resizable=*/true);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  return THPStorage_New(std::move(new_storage));
+  return THPStorage_(New)(std::move(new_storage));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_resize_(PyObject *_self, PyObject *number_arg)
+static PyObject * THPStorage_(resize_)(PyObject *_self, PyObject *number_arg)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
@@ -128,22 +123,22 @@ static PyObject * THPStorage_resize_(PyObject *_self, PyObject *number_arg)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_fill_(PyObject *_self, PyObject *number_arg)
+static PyObject * THPStorage_(fill_)(PyObject *_self, PyObject *number_arg)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
-  THPUtils_assert(THPByteUtils_checkReal(number_arg), "fill_ expects %s, "
-      "but got %s", THPUtils_typeTraits<uint8_t>::python_type_str,
+  THPUtils_assert(THPUtils_(checkReal)(number_arg), "fill_ expects %s, "
+      "but got %s", THPUtils_typeTraits<scalar_t>::python_type_str,
       THPUtils_typename(number_arg));
   storage_fill(
     at::unsafeStorageFromTH(self->cdata, /*retain=*/true),
-    THPByteUtils_unpackReal(number_arg));
+    THPUtils_(unpackReal)(number_arg));
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_fromBuffer(PyObject *_unused, PyObject *args, PyObject *keywds)
+static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyObject *keywds)
 {
   HANDLE_TH_ERRORS
   PyObject *obj = nullptr;
@@ -281,11 +276,11 @@ static PyObject * THPStorage_fromBuffer(PyObject *_unused, PyObject *args, PyObj
   }
 
   PyBuffer_Release(&buffer);
-  return (PyObject*)THPStorage_New(storage);
+  return (PyObject*)THPStorage_(New)(storage);
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_fromFile(PyObject *_unused, PyObject *args, PyObject *keywds)
+static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObject *keywds)
 {
   HANDLE_TH_ERRORS
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -314,11 +309,11 @@ static PyObject * THPStorage_fromFile(PyObject *_unused, PyObject *args, PyObjec
     storage->set_nbytes(actual_nbytes);
   }
 
-  return (PyObject*)THPStorage_New(std::move(storage));
+  return (PyObject*)THPStorage_(New)(std::move(storage));
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THPStorage_writeFile(PyObject *_self, PyObject *args)
+PyObject * THPStorage_(writeFile)(PyObject *_self, PyObject *args)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
@@ -332,19 +327,19 @@ PyObject * THPStorage_writeFile(PyObject *_self, PyObject *args)
   uint64_t element_size = THPUtils_unpackUInt64(element_size_obj);
 
   if (!is_real_file) {
-    THPStorage_writeFileRaw<PyObject*>(self->cdata, file, save_size, element_size);
+    THPStorage_(writeFileRaw<PyObject*>)(self->cdata, file, save_size, element_size);
     Py_RETURN_NONE;
   }
 
   int fd = PyObject_AsFileDescriptor(file);
   THPUtils_assert(fd != -1, "_write_file couldn't retrieve a file descriptor "
       "from given object");
-  THPStorage_writeFileRaw(self->cdata, fd, save_size, element_size);
+  THPStorage_(writeFileRaw)(self->cdata, fd, save_size, element_size);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THPStorage_newWithFile(PyObject *_unused, PyObject *args)
+PyObject * THPStorage_(newWithFile)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   TORCH_CHECK(PyTuple_Size(args) == 2,
@@ -358,14 +353,14 @@ PyObject * THPStorage_newWithFile(PyObject *_unused, PyObject *args)
                   "_new_with_file: need to specify element size");
   uint64_t element_size = THPUtils_unpackUInt64(element_size_obj);
 
-  auto storage = THPStorage_readFileRaw<int>(fd, {}, element_size);
+  auto storage = THPStorage_(readFileRaw<int>)(fd, {}, element_size);
   if (!storage.defined())
     return nullptr;
-  return THPStorage_New(std::move(storage));
+  return THPStorage_(New)(std::move(storage));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject *THPStorage_setFromFile(PyObject *_self, PyObject *args)
+static PyObject *THPStorage_(setFromFile)(PyObject *_self, PyObject *args)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
@@ -386,7 +381,7 @@ static PyObject *THPStorage_setFromFile(PyObject *_self, PyObject *args)
                     "_set_from_file: offset is NYI for filelike objects");
 
     auto self_storage = c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(self->cdata);
-    auto storage = THPStorage_readFileRaw<PyObject*>(file, std::move(self_storage), element_size);
+    auto storage = THPStorage_(readFileRaw<PyObject*>)(file, std::move(self_storage), element_size);
     if (!storage.defined()) {
       return nullptr;
     }
@@ -403,7 +398,7 @@ static PyObject *THPStorage_setFromFile(PyObject *_self, PyObject *args)
   THPUtils_assert(fd != -1, "_set_from_file couldn't retrieve a file "
       "descriptor from given object");
   auto self_storage = c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(self->cdata);
-  auto storage = THPStorage_readFileRaw<int>(fd, self_storage, element_size);
+  auto storage = THPStorage_(readFileRaw<int>)(fd, self_storage, element_size);
   if (!storage.defined())
     return nullptr;
   Py_INCREF(self);
@@ -423,7 +418,7 @@ static PyObject *THPStorage_setFromFile(PyObject *_self, PyObject *args)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THPStorage__setCdata(PyObject *_self, PyObject *new_cdata)
+PyObject * THPStorage_(_setCdata)(PyObject *_self, PyObject *new_cdata)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
@@ -444,27 +439,23 @@ PyObject * THPStorage__setCdata(PyObject *_self, PyObject *new_cdata)
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static PyMethodDef THPStorage_methods[] = {
-  {"copy_", castPyCFunctionWithKeywords(THPStorage_copy_),
+static PyMethodDef THPStorage_(methods)[] = {
+  {"copy_", castPyCFunctionWithKeywords(THPStorage_(copy_)),
     METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"element_size", THPStorage_elementSize, METH_NOARGS, nullptr},
-  {"fill_", THPStorage_fill_, METH_O, nullptr},
-  {"new", THPStorage_new, METH_NOARGS, nullptr},
-  {"resize_", THPStorage_resize_, METH_O, nullptr},
-  {"nbytes", THPStorage_nbytes, METH_NOARGS, nullptr},
-  {"data_ptr", THPStorage_dataPtr, METH_NOARGS, nullptr},
-  {"is_pinned", THPStorage_isPinned, METH_NOARGS, nullptr},
-  {"_write_file", THPStorage_writeFile, METH_VARARGS, nullptr},
-  {"_new_with_file", THPStorage_newWithFile, METH_VARARGS | METH_STATIC, nullptr},
-  {"_set_from_file", THPStorage_setFromFile, METH_VARARGS, nullptr},
-  {"from_buffer", castPyCFunctionWithKeywords(THPStorage_fromBuffer),
+  {"element_size", THPStorage_(elementSize), METH_NOARGS, nullptr},
+  {"fill_", THPStorage_(fill_), METH_O, nullptr},
+  {"new", THPStorage_(new), METH_NOARGS, nullptr},
+  {"resize_", THPStorage_(resize_), METH_O, nullptr},
+  {"nbytes", THPStorage_(nbytes), METH_NOARGS, nullptr},
+  {"data_ptr", THPStorage_(dataPtr), METH_NOARGS, nullptr},
+  {"is_pinned", THPStorage_(isPinned), METH_NOARGS, nullptr},
+  {"_write_file", THPStorage_(writeFile), METH_VARARGS, nullptr},
+  {"_new_with_file", THPStorage_(newWithFile), METH_VARARGS | METH_STATIC, nullptr},
+  {"_set_from_file", THPStorage_(setFromFile), METH_VARARGS, nullptr},
+  {"from_buffer", castPyCFunctionWithKeywords(THPStorage_(fromBuffer)),
     METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
-  {"from_file", castPyCFunctionWithKeywords(THPStorage_fromFile),
+  {"from_file", castPyCFunctionWithKeywords(THPStorage_(fromFile)),
     METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
-  {"_set_cdata", THPStorage__setCdata, METH_O, nullptr},
+  {"_set_cdata", THPStorage_(_setCdata), METH_O, nullptr},
   {nullptr}
 };
-
-PyMethodDef* THPStorage_getMethods() {
-  return THPStorage_methods;
-}
