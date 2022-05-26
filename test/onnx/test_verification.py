@@ -50,7 +50,7 @@ class TestVerification(unittest.TestCase):
             r"First diverging operator:(.|\n)*"
             r"onnx::Constant(.|\n)*"
             r"Reference source location:(.|\n)*"
-            r"Check source location:"
+            r"Check source location:",
         )
 
     def test_check_jit_model_no_diff(self):
