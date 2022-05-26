@@ -2292,6 +2292,10 @@ class TestSparseCSR(TestCase):
             _test_matrix(pt_matrix, dense, layout, blocksize)
             self.assertEqual(dense, pt_matrix.to_dense())
 
+        if layout is not torch.sparse_bsr:
+            # TODO: Remove this once support has been enabled
+            return
+
         # Test batch shapes (3D inputs)
 
         # Case 1: Same sparsity pattern across matrices
