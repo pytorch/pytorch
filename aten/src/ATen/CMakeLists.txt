@@ -34,7 +34,9 @@ set_bool(AT_MAGMA_ENABLED USE_MAGMA)
 set_bool(CAFFE2_STATIC_LINK_CUDA_INT CAFFE2_STATIC_LINK_CUDA)
 
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
-if(USE_CUDA)
+# TODO: Do not generate CUDAConfig.h for ROCm BUILDS
+# At the moment, `jit_macors.h` include CUDAConfig.h for both CUDA and HIP builds
+if(USE_CUDA OR USE_ROCM)
   configure_file(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
 endif()
 if(USE_ROCM)
