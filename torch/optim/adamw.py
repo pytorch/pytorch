@@ -171,7 +171,8 @@ class AdamW(Optimizer):
                   weight_decay=group['weight_decay'],
                   eps=group['eps'],
                   maximize=group['maximize'],
-                  foreach=group['foreach'])
+                  foreach=group['foreach'],
+                  capturable=group['capturable'])
 
         return loss
 
@@ -185,6 +186,7 @@ def adamw(params: List[Tensor],
           # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
           # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
           foreach: bool = None,
+          capturable: bool = False,
           *,
           amsgrad: bool,
           beta1: float,
@@ -225,7 +227,8 @@ def adamw(params: List[Tensor],
          lr=lr,
          weight_decay=weight_decay,
          eps=eps,
-         maximize=maximize)
+         maximize=maximize,
+         capturable=capturable)
 
 
 def _single_tensor_adamw(params: List[Tensor],
@@ -241,51 +244,57 @@ def _single_tensor_adamw(params: List[Tensor],
                          lr: float,
                          weight_decay: float,
                          eps: float,
-                         maximize: bool):
+                         maximize: bool,
+                         capturable: bool):
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
+
+        if capturable:
+            assert param.is_cuda and step_t.is_cuda, "If capturable=True, params and state_steps must be CUDA tensors."
+        else:
+            assert not step_t.is_cuda, "If capturable=False, state_steps should not be CUDA tensors."
+
         # update step
         step_t += 1
-        step_is_cuda = step_t.is_cuda
-        step = step_t if step_is_cuda else step_t.item()
+        step = step_t if capturable else step_t.item()
 
         # Perform stepweight decay
         param.mul_(1 - lr * weight_decay)
 
         # 1 - beta1 ** step can't be captured in a CUDA graph, even if step is a CUDA tensor
         # (incurs "RuntimeError: CUDA error: operation not permitted when stream is capturing")
-        bias_correction1 = 1 - torch.pow(beta1, step) if step_is_cuda else 1 - beta1 ** step
-        bias_correction2 = 1 - torch.pow(beta2, step) if step_is_cuda else 1 - beta2 ** step
+        bias_correction1 = 1 - torch.pow(beta1, step) if capturable else 1 - beta1 ** step
+        bias_correction2 = 1 - torch.pow(beta2, step) if capturable else 1 - beta2 ** step
 
         step_size = lr / bias_correction1
-        if step_is_cuda:
+        if capturable:
             step_size_neg = step_size.neg()
 
         # Decay the first and second moment running average coefficient
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-        bias_correction2_sqrt = bias_correction2.sqrt() if step_is_cuda else math.sqrt(bias_correction2)
+        bias_correction2_sqrt = bias_correction2.sqrt() if capturable else math.sqrt(bias_correction2)
         if amsgrad:
             # Maintains the maximum of all 2nd moment running avg. till now
             torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
             # Use the max. for normalizing running avg. of gradient
-            if step_is_cuda:
+            if capturable:
                 # Folds in 1-elem divs by step_size_neg here to avoid extra param-set-sized read+write
                 # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
                 denom = (max_exp_avg_sqs[i].sqrt() / (bias_correction2_sqrt * step_size_neg)).add_(eps / step_size_neg)
             else:
                 denom = (max_exp_avg_sqs[i].sqrt() / bias_correction2_sqrt).add_(eps)
         else:
-            if step_is_cuda:
+            if capturable:
                 denom = (exp_avg_sq.sqrt() / (bias_correction2_sqrt * step_size_neg)).add_(eps / step_size_neg)
             else:
                 denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
 
-        if step_is_cuda:
+        if capturable:
             param.addcdiv_(exp_avg, denom)
         else:
             param.addcdiv_(exp_avg, denom, value=-step_size)
@@ -304,10 +313,17 @@ def _multi_tensor_adamw(params: List[Tensor],
                         lr: float,
                         weight_decay: float,
                         eps: float,
-                        maximize: bool):
-
+                        maximize: bool,
+                        capturable: bool):
     if len(params) == 0:
         return
+
+    if capturable:
+        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
+            "If capturable=True, params and state_steps must be CUDA tensors."
+    else:
+        assert all(not step.is_cuda for step in state_steps), \
+            "If capturable=False, state_steps should not be CUDA tensors."
 
     if maximize:
         grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
@@ -318,8 +334,15 @@ def _multi_tensor_adamw(params: List[Tensor],
     # update steps
     torch._foreach_add_(state_steps, 1)
 
-    bias_correction1 = [1 - beta1 ** (step if step.is_cuda else step.item()) for step in state_steps]
-    bias_correction2 = [1 - beta2 ** (step if step.is_cuda else step.item()) for step in state_steps]
+    if capturable:
+        # TODO: use foreach_pow if/when foreach_pow is added
+        bias_correction1 = [torch.pow(beta1, step) for step in state_steps]
+        bias_correction2 = [torch.pow(beta2, step) for step in state_steps]
+        bias_correction1 = torch._foreach_sub(1, bias_correction1)
+        bias_correction2 = torch._foreach_sub(1, bias_correction2)
+    else:
+        bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
+        bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
 
     # Decay the first and second moment running average coefficient
     torch._foreach_mul_(exp_avgs, beta1)
