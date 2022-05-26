@@ -1133,13 +1133,13 @@ def check_training_mode(op_train_mode: int, op_name: str):
         _C_onnx.TrainingMode.EVAL,
     }, "Bug: training_mode should only be 'TRAINING' or 'EVAL' at this point"
 
-    op_mode_text = (
-        "training" if op_mode_enum == _C_onnx.TrainingMode.TRAINING else "inference"
-    )
     export_mode_text = (
         "training"
         if GLOBALS.training_mode == _C_onnx.TrainingMode.TRAINING
         else "inference"
+    )
+    op_mode_text = (
+        "training" if op_mode_enum == _C_onnx.TrainingMode.TRAINING else "inference"
     )
     # setting the model mode could result in op_mode != _flags.training_mode
     # if the model is a FuncModule. In this case we warn the user of
@@ -1147,7 +1147,7 @@ def check_training_mode(op_train_mode: int, op_name: str):
     # This is to support use-cases of fixing certain layer weights
     # in training.
     warnings.warn(
-        f"ONNX export mode is set to {export_mode_text} mode, but operator {op_name} "
+        f"ONNX export mode is set to {export_mode_text} mode, but operator '{op_name}' "
         f"is set to {op_mode_text} mode. The operators will be exported in "
         f"{op_mode_text}, as specified by the functional operator."
     )
