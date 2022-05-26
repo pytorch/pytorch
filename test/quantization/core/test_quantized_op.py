@@ -565,6 +565,9 @@ class TestQuantizedOps(TestCase):
     """Tests the correctness of the quantized::qnnpack_tanh op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_qtanh(self, X):
         # Note: QNNPACK is tested separately in TestQNNPackOps
         X, (scale, zero_point, torch_type) = X
@@ -4775,6 +4778,9 @@ class TestQuantizedConv(TestCase):
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans())
     @override_qengines
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_qconv_transpose2d(
             self,
             batch_size,
@@ -4902,6 +4908,9 @@ class TestQuantizedConv(TestCase):
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans())
     @override_qengines
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_qconv_transpose3d(
             self,
             batch_size,
