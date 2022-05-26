@@ -2212,7 +2212,7 @@ static inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, std::int64_t 
     return r;
 }
 
-template<typename T>
+template<typename T, bool is_cuda=false>
 static inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, T n) {
     return legendre_polynomial_p_forward(x, static_cast<std::int64_t>(n));
 }
