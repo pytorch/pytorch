@@ -24,13 +24,13 @@ from torch.testing._internal.common_utils import (
 class TestQuantizedFunctionalOps(QuantizationTestCase):
     def test_relu_api(self):
         print("success")
-        # X = torch.arange(-5, 5, dtype=torch.float)
-        # scale = 2.0
-        # zero_point = 1
-        # qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
-        # qY = torch.relu(qX)
-        # qY_hat = F.relu(qX)
-        # self.assertEqual(qY, qY_hat)
+        X = torch.arange(-5, 5, dtype=torch.float)
+        scale = 2.0
+        zero_point = 1
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        qY = torch.relu(qX)
+        qY_hat = F.relu(qX)
+        self.assertEqual(qY, qY_hat)
 
     def _test_conv_api_impl(
         self, qconv_fn, conv_fn, batch_size, in_channels_per_group,
