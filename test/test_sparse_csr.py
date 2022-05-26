@@ -2308,15 +2308,40 @@ class TestSparseCSR(TestCase):
         # Verify exception when given 0 sized batch
         for shape, blocksize in itertools.product(shapes, blocksizes):
             dense = make_tensor((0,) + shape, dtype=torch.float, device=device)
-            # Repeat the same sparsity pattern across batch entries
-            if shape[0] == 0:
-                # TODO: Support zero sized batch dimensions
-                with self.assertRaisesRegex(RuntimeError, "to_sparse_bsr: Expected batch dimension 0 to be non-zero."):
-                    self._convert_to_layout(dense, layout, blocksize=blocksize)
+            # TODO: Support zero sized batch dimensions
+            with self.assertRaisesRegex(RuntimeError, "to_sparse_bsr: Expected batch dimension 0 to be non-zero."):
+                self._convert_to_layout(dense, layout, blocksize=blocksize)
 
         # TODO: Case 2: Different sparsity pattern across matrices, but same number of zeros
+        # NOTE: For blocksparse formats this applies at a per-block level
+        shape = (2,) + shape
+        dense = make_tensor((2, 4, 4), dtype=torch.float, device=device)
+        blocksize = (2, 2)
+        mask = torch.tensor(
+            [[[True, True], [False, True]],
+             [[True, False], [True, True]]],
+            device=device).view((2, 2, 2, 1, 1))
+        mask = mask.expand((2, 2, 2, 2, 2))
+        mask = mask.transpose(2, 3)
+        mask = mask.reshape_as(dense)
+        dense = dense * mask
+        with self.assertRaisesRegex(RuntimeError, "Expect the same sparsity pattern across matrices for 3D input."):
+            self._convert_to_layout(dense, layout, blocksize=blocksize)
 
         # TODO: Case 3: Different sparsity pattern across matrices, but different number of zeros
+        shape = (2,) + shape
+        dense = make_tensor((2, 4, 4), dtype=torch.float, device=device)
+        blocksize = (2, 2)
+        mask = torch.tensor(
+            [[[True, True], [False, False]],
+             [[True, False], [True, True]]],
+            device=device).view((2, 2, 2, 1, 1))
+        mask = mask.expand((2, 2, 2, 2, 2))
+        mask = mask.transpose(2, 3)
+        mask = mask.reshape_as(dense)
+        dense = dense * mask
+        with self.assertRaisesRegex(RuntimeError, "Expect the same sparsity pattern across matrices for 3D input."):
+            self._convert_to_layout(dense, layout, blocksize=blocksize)
 
     @skipMeta
     @all_sparse_compressed_layouts()
