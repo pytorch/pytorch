@@ -1265,45 +1265,47 @@ const auto erfcx_string = jiterator_stringify(
   }
 ); // erfcx_string
 
-template<typename T>
-T legendre_polynomial_p_forward(T x, int64_t n) {
-    if (n < 0) {
-        return T(0.0);
-    }
+const auto legendre_polynomial_p_string = jiterator_stringify(
+    template<typename T>
+    T legendre_polynomial_p_forward(T x, int64_t n) {
+        if (n < 0) {
+            return T(0.0);
+        }
 
-    if (abs(x) == T(1.0)) {
-        if (x > T(0.0) || n % 2 == 0) {
+        if (abs(x) == T(1.0)) {
+            if (x > T(0.0) || n % 2 == 0) {
+                return T(1.0);
+            }
+
+            return T(-1.0);
+        }
+
+        if (n == 0) {
             return T(1.0);
         }
 
-        return T(-1.0);
-    }
+        if (n == 1) {
+            return x;
+        }
 
-    if (n == 0) {
-        return T(1.0);
-    }
+        T p = T(1.0);
+        T q = x;
+        T r;
 
-    if (n == 1) {
-        return x;
-    }
+        for (int64_t k = 1; k < n; k++) {
+            r = ((k + k + 1) * x * q - k * p) / (k + 1);
+            p = q;
+            q = r;
+        }
 
-    T p = T(1.0);
-    T q = x;
-    T r;
+        return r;
+    } // legendre_polynomial_p_forward(T x, int64_t n)
 
-    for (int64_t k = 1; k < n; k++) {
-        r = ((k + k + 1) * x * q - k * p) / (k + 1);
-        p = q;
-        q = r;
-    }
-
-    return r;
-} // legendre_polynomial_p_forward(T x, int64_t n)
-
-template<typename T>
-T legendre_polynomial_p_forward(T x, T n) {
-    return legendre_polynomial_p_forward(x, static_cast<int64_t>(n));
-} // legendre_polynomial_p_forward(T x, T n)
+    template<typename T>
+    T legendre_polynomial_p_forward(T x, T n) {
+        return legendre_polynomial_p_forward(x, static_cast<int64_t>(n));
+    } // legendre_polynomial_p_forward(T x, T n)
+); // legendre_polynomial_p_string
 
 #else // !AT_USE_JITERATOR() -- kernels must be precompiled
 
