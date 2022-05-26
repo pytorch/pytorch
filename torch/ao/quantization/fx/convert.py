@@ -562,7 +562,7 @@ def convert(
         warnings.warn(
             "Passing a QConfig dictionary to convert is deprecated and will not be supported "
             "in a future version. Please pass in a QConfigMapping instead.")
-        qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping)
+        qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping) if qconfig_mapping else None
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
     assert(qconfig_mapping is None or isinstance(qconfig_mapping, QConfigMapping))
 
