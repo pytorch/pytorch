@@ -32,7 +32,7 @@ MPSDevice::MPSDevice(): _mtl_device(nil) {
                                                                  initState:
                                                                   initCell:
                                                                 descriptor:
-                                                           name:)] == NO)) {
+                                                           name:)] == NO) {
     return;
   }
   NSArray* devices = [MTLCopyAllDevices() autorelease];
