@@ -713,6 +713,54 @@ std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<
   return grad_inputs;
 }
 
+std::vector<Tensor> block_diag_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, const std::vector<ScalarType> &dtypes) {
+  std::vector<Tensor> grad_inputs(sizes.size());
+  if (!grad.defined()) {
+    return grad_inputs;
+  }
+  Tensor real_view_of_grad;
+  bool grad_is_complex = grad.is_complex();
+  if (grad_is_complex) {
+    real_view_of_grad = at::real(grad);
+  }
+
+  int64_t cur_dim0 = 0;
+  int64_t cur_dim1 = 0;
+
+  for (const auto i : c10::irange(sizes.size())) {
+    // R -> C
+    Tensor grad_val = (!at::isComplexType(dtypes[i]) && grad_is_complex) ? real_view_of_grad : grad;
+
+    auto& shape = sizes[i];
+    // If input was empty tensor, gradInput should be empty tensor.
+    if (shape.size() == 1 && shape[0] == 0) {
+      grad_inputs[i] = at::zeros({0}, grad_val.options());
+      continue;
+    }
+    // 0d case
+    auto dim0 = 1;
+    auto dim1 = 1;
+    // 2d case
+    if (shape.size() == 2) {
+      dim0 = shape[0];
+      dim1 = shape[1];
+    // 1d case
+    } else if (shape.size() == 1) {
+      dim1 = shape[0];
+    }
+    auto slice = grad_val.slice(0, cur_dim0, cur_dim0 + dim0).slice(1, cur_dim1, cur_dim1 + dim1);
+    if (shape.size() == 1) {
+      slice = slice.squeeze(-1);
+    } else if (shape.size() == 0) {
+      slice = slice.squeeze(-1).squeeze(-1);
+    }
+    grad_inputs[i] = slice;
+    cur_dim0 += dim0;
+    cur_dim1 += dim1;
+  }
+  return grad_inputs;
+}
+
 Tensor clamp_backward(const Tensor & grad, const Tensor &self, const optional<Scalar> & min, const optional<Scalar> & max) {
   // clamp: gradients not defined on min and max, so we return the subgradient 1 for these cases.
   if (max && min) {
@@ -1720,8 +1768,6 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   }
   if (reduction == at::Reduction::Mean) {
     return ggO / input.numel();
-  } else if (reduction == at::Reduction::Sum) {
-    return ggO.sum();
   }
   return ggO;
 }
@@ -2371,6 +2417,22 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntArrayR
   }
   // Step (4): return as_strided view of the storage tensor with input geometry
   return storage.as_strided(inp_sizes, inp_strides, inp_effective_offset);
+}
+
+Tensor as_strided_scatter_backward(Tensor grad, TensorGeometry input_geometry, TensorGeometry src_geometry, IntArrayRef sizes, IntArrayRef strides, optional<int64_t> storage_offset) {
+  // Note [as_strided_scatter backward support]
+  // as_strided_scatter handling for autograd is a beast, and is non-trivial to implement for arbitrarily strided inputs.
+  // Most uses for as_strided with functionalization only care about the contiguous case anyway,
+  // So for now this is not implemented.
+  // When autograd is being used, we ban non-contiguous inputs.
+  // We can assume that the input was a contiguous tensor.
+  // Also, we'll take the perf hit and contiguify grad for now.
+  auto grad_ = grad.contiguous();
+  auto grad_slice = grad_.as_strided(sizes, strides, storage_offset);
+  auto result = grad_.new_empty_strided(input_geometry.sizes(), input_geometry.strides());
+  auto result_slice = result.as_strided(sizes, strides, storage_offset);
+  result_slice.copy_(grad_slice);
+  return result;
 }
 
 std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self, const Tensor& other, std::array<bool, 2> output_mask) {
@@ -4869,6 +4931,28 @@ Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
     }
 
     out_fw_grad = at::cat(fw_grads, dim);
+  }
+
+  return out_fw_grad;
+}
+
+Tensor block_diag_jvp(at::TensorList tensors) {
+  Tensor out_fw_grad;
+
+  auto any_defined = false;
+  for (const auto& t: tensors) {
+    any_defined |= isFwGradDefined(t);
+  }
+
+  if (any_defined) {
+    std::vector<Tensor> fw_grads;
+    fw_grads.reserve(tensors.size());
+
+    for (const auto& t: tensors) {
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
+    }
+
+    out_fw_grad = at::block_diag(fw_grads);
   }
 
   return out_fw_grad;
