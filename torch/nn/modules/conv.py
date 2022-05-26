@@ -219,7 +219,7 @@ class Conv1d(_ConvNd):
         doesn't support any stride values other than 1.
 
     Note:
-        This module supports complex datatypes.
+        This module supports complex data types i.e. ``complex32, complex64, complex128``.
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -363,7 +363,7 @@ class Conv2d(_ConvNd):
         doesn't support any stride values other than 1.
 
     Note:
-        This module supports complex datatypes.
+        This module supports complex data types i.e. ``complex32, complex64, complex128``.
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -505,7 +505,7 @@ class Conv3d(_ConvNd):
         doesn't support any stride values other than 1.
 
     Note:
-        This module supports complex datatypes.
+        This module supports complex data types i.e. ``complex32, complex64, complex128``.
 
     Args:
         in_channels (int): Number of channels in the input image
