@@ -1128,7 +1128,7 @@ def check_training_mode(op_train_mode: int, op_name: str) -> None:
         # The modes agree. Do nothing
         return
 
-    assert GLOBALS.training_mode not in {
+    assert GLOBALS.training_mode in {
         _C_onnx.TrainingMode.TRAINING,
         _C_onnx.TrainingMode.EVAL,
     }, "Bug: training_mode should only be 'TRAINING' or 'EVAL' at this point"
