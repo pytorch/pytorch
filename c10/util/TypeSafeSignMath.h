@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
-#include <cmath>
 #include <limits>
 #include <type_traits>
 
@@ -138,20 +137,6 @@ template <typename Limit, typename T>
 inline constexpr bool less_than_lowest(const T& x) {
   return less_than_lowest<Limit>(
       x, std::is_unsigned<Limit>(), std::is_unsigned<T>());
-}
-
-template <
-    typename T,
-    typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
-static inline constexpr bool signbit_wrapper(T a) {
-  return a < 0;
-}
-
-template <
-    typename T,
-    typename std::enable_if<!std::is_integral<T>::value, int>::type = 0>
-static inline constexpr bool signbit_wrapper(T a) {
-  return std::signbit(a);
 }
 
 } // namespace c10

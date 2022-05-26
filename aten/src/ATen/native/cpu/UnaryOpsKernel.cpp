@@ -20,7 +20,6 @@
 #include <c10/util/MathConstants.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/irange.h>
-#include <c10/util/TypeSafeSignMath.h>
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
@@ -297,10 +296,20 @@ void sign_kernel(TensorIteratorBase& iter){
   }
 }
 
-static void signbit_kernel(TensorIteratorBase& iter){
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
-    cpu_kernel(iter, [](scalar_t a) -> bool { return c10::signbit_wrapper(a); });
-  });
+static void signbit_kernel(TensorIteratorBase& iter) {
+  auto dtype = iter.input_dtype();
+  if (at::isFloatingType(dtype)) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16, ScalarType::Half, dtype, "signbit_cpu", [&]() {
+          cpu_kernel(iter, [](scalar_t a) -> bool { return std::signbit(a); });
+        });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(dtype, "signbit_cpu", [&]() {
+      // don't use std::signbit for integral as it unnecessarily upcasts
+      // it to double
+      cpu_kernel(iter, [](scalar_t a) -> bool { return a < 0; });
+    });
+  }
 }
 
 static void sgn_kernel(TensorIteratorBase& iter) {
