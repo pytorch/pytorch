@@ -1,6 +1,7 @@
 name: Rebase PR
 
 on:
+  pull_request:
   repository_dispatch:
     types: [try-rebase]
 
@@ -32,9 +33,4 @@ jobs:
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           STABLE: ${{ github.event.client_payload.stable}}
         run: |
-          set -ex
-          if [ -n "${STABLE}" ]; then
-            python3 .github/scripts/tryrebase.py --stable "${PR_NUM}"
-          else
-            python3 .github/scripts/tryrebase.py "${PR_NUM}"
-          fi
+          python3 .github/scripts/tryrebase.py --stable 78360
