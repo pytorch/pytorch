@@ -1,7 +1,6 @@
 name: Rebase PR
 
 on:
-  pull_request:
   repository_dispatch:
     types: [try-rebase]
 
@@ -19,6 +18,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
+          token: ${{ secrets.MERGEBOT_TOKEN }}
 
       - name: Setup committer id
         run: |
@@ -27,8 +27,14 @@ jobs:
 
       - name: Rebase
         env:
+          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           STABLE: ${{ github.event.client_payload.stable}}
         run: |
-          python3 .github/scripts/tryrebase.py --stable 78360
+          set -ex
+          if [ -n "${STABLE}" ]; then
+            python3 .github/scripts/tryrebase.py --stable "${PR_NUM}"
+          else
+            python3 .github/scripts/tryrebase.py "${PR_NUM}"
+          fi
