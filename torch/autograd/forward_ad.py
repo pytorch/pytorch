@@ -72,6 +72,11 @@ def make_dual(tensor, tangent, *, level=None):
         raise RuntimeError("Trying to create a dual Tensor for forward AD but no level "
                            "exists, make sure to enter_dual_level() first.")
 
+    assert tensor.is_floating_point() or tensor.is_complex(), (
+        f"Expected primal to be floating point or complex, but got: {tensor.dtype}")
+    assert tangent.is_floating_point() or tangent.is_complex(), (
+        f"Expected tangent to be floating point or complex, but got: {tangent.dtype}")
+
     return torch._VF._make_dual(tensor, tangent, level=level)
 
 _UnpackedDualTensor = namedtuple('_UnpackedDualTensor', ['primal', 'tangent'])
