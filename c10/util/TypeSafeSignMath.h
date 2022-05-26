@@ -1,9 +1,9 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
+#include <cmath>
 #include <limits>
 #include <type_traits>
-#include <cmath>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wstring-conversion")
@@ -140,14 +140,16 @@ inline constexpr bool less_than_lowest(const T& x) {
       x, std::is_unsigned<Limit>(), std::is_unsigned<T>());
 }
 
-template <typename T,
-          typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+template <
+    typename T,
+    typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
 static inline constexpr bool signbit_wrapper(T a) {
   return a < 0;
 }
 
-template <typename T,
-          typename std::enable_if<!std::is_integral<T>::value, int>::type = 0>
+template <
+    typename T,
+    typename std::enable_if<!std::is_integral<T>::value, int>::type = 0>
 static inline constexpr bool signbit_wrapper(T a) {
   return std::signbit(a);
 }
