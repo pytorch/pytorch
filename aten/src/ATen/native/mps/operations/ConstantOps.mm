@@ -71,10 +71,10 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
             //       it only accepts double scalars and furthermore MPS only supports single precision...
             //       therefore bottlenecked by float32 precision even for ints, test:
             //       >>> torch.tensor(16777217, dtype=torch.float32, device="mps")
+            //       tensor([16777216.], device='mps:0')
             //       >>> torch.full((1,), 16777217, dtype=torch.int32, device="mps")
-            //       Returning tensor([16777216.], device='mps:0') and
-            //       tensor([16777216], device='mps:0', dtype=torch.int32), respectively.
-            //       The first one is expected while the second one is not, and works on CPU as well as with
+            //       tensor([16777216], device='mps:0', dtype=torch.int32)
+            //       The first one is expected while the second one is not. On CPU it works, what also works is
             //       torch.tensor(16777217, device="mps"), which I think goes through CPU first and then
             //       copies over to the MPS device.
             MPSGraphTensor* inputTensor = [mpsGraph constantWithScalar:value.toDouble()
