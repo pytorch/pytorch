@@ -1,5 +1,4 @@
 import torch
-from torch import Tensor
 from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
 import unittest
 

@@ -4,12 +4,11 @@ the values observed during calibration (PTQ) or training (QAT).
 """
 
 import torch
-from torch import Tensor
 from torch.ao.quantization.observer import ObserverBase
 from typing import Tuple
 
 class NonUniformQuantizationObserverBase(ObserverBase):
-    def _calculate_qparams() -> Tuple[torch.Tensor, torch.Tensor]:
+    def _calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
         pass
 
 class APoTObserver(NonUniformQuantizationObserverBase):
@@ -18,8 +17,8 @@ class APoTObserver(NonUniformQuantizationObserverBase):
     #     self.gamma = gamma
     #     self.level_indices = level_indices
 
-    def calculate_qparams():
+    def calculate_qparams(self):
         NonUniformQuantizationObserverBase._calculate_qparams()
 
-    def _calculate_qparams():
+    def _calculate_qparams(self):
         raise NotImplementedError
