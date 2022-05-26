@@ -4,7 +4,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from functorch import nnc_jit, make_functional
+from functorch import make_functional
+from functorch.compile import nnc_jit
 import torch
 import torch.nn as nn
 import time
