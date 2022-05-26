@@ -1134,8 +1134,8 @@ def check_training_mode(op_train_mode: int, op_name: str) -> None:
     # This is to support use-cases of fixing certain layer weights
     # in training.
     warnings.warn(
-        f"ONNX export mode is set to {GLOBALS.training_mode} mode, but operator '{op_name}' "
-        f"is set to {op_mode_text} mode. The operator will be exported in "
+        f"ONNX export mode is set to {GLOBALS.training_mode}, but operator '{op_name}' "
+        f"is set to {op_mode_text}. The operator will be exported in "
         f"{op_mode_text}."
     )
 
