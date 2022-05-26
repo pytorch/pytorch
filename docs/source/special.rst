@@ -44,11 +44,3 @@ Functions
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta
-
-Orthogonal Polynomials
-----------------------
-
-Chebyshev Polynomials
-^^^^^^^^^^^^^^^^^^^^^
-
-.. autofunction:: chebyshev_polynomial_u

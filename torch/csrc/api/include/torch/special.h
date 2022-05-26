@@ -637,6 +637,4 @@ inline Tensor& chebyshev_polynomial_u_out(Tensor& output, const Tensor& x, const
   return torch::special_chebyshev_polynomial_u_out(output, x, n);
 }
 
-}
-
 }} // torch::special
