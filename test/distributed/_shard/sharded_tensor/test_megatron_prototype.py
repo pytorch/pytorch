@@ -56,9 +56,7 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
 
         # Use same seed.
         torch.manual_seed(0)
-        local_megatron_lm = SimpleMegatronLM(linear_size, rank=self.rank).cuda(
-            self.rank
-        )
+        local_megatron_lm = SimpleMegatronLM(linear_size, device=self.rank)
         sharded_megatron_lm = SimpleMegatronLM(linear_size)
         _weight_override(sharded_megatron_lm, local_megatron_lm)
 

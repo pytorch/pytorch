@@ -240,7 +240,7 @@ class TestShardingPlan(ShardedTensorTestBase):
         class MyModule(nn.Module):
             def __init__(self, rank=None):
                 super().__init__()
-                self.megatron = SimpleMegatronLM([[17, 12], [12, 29]], rank=rank)
+                self.megatron = SimpleMegatronLM([[17, 12], [12, 29]], device=rank)
                 self.relu = nn.ReLU()
 
             def forward(self, input):
@@ -295,7 +295,7 @@ class TestShardingPlan(ShardedTensorTestBase):
             },
         )
 
-        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]]).cuda(self.rank)
+        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], device=self.rank)
 
         with self.assertRaisesRegex(
             TypeError, "Only `ShardingSpec` and `Sharder` are supported to shard"
@@ -344,9 +344,7 @@ class TestShardingPlan(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_custom_sharding_planner(self):
-        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).cuda(
-            self.rank
-        )
+        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], device=self.rank)
         planner = ChunkAllShardingPlanner(device_count=TEST_GPU_NUM)
         sharding_plan = planner.build_plan(megatron_lm)
 
