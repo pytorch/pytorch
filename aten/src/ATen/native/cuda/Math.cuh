@@ -1267,7 +1267,7 @@ const auto erfcx_string = jiterator_stringify(
 
 const auto chebyshev_polynomial_t_string = jiterator_stringify(
     template<typename T>
-    T chebyshev_polynomial_t(T x, int64_t n) {
+    T chebyshev_polynomial_t_forward(T x, int64_t n) {
         if (n < 0) {
             return T(0.0);
         }
@@ -1303,17 +1303,17 @@ const auto chebyshev_polynomial_t_string = jiterator_stringify(
         }
 
         return r;
-    } // chebyshev_polynomial_t(T x, int64_t n)
+    } // chebyshev_polynomial_t_forward(T x, int64_t n)
 
     template<typename T>
-    T chebyshev_polynomial_t(T x, T n) {
-        return chebyshev_polynomial_t(x, static_cast<int64_t>(n));
-    } // chebyshev_polynomial_t(T x, T n)
+    T chebyshev_polynomial_t_forward(T x, T n) {
+        return chebyshev_polynomial_t_forward(x, static_cast<int64_t>(n));
+    } // chebyshev_polynomial_t_forward(T x, T n)
 ); // chebyshev_polynomial_t_string
 
 const auto chebyshev_polynomial_u_string = jiterator_stringify(
     template<typename T>
-    T chebyshev_polynomial_u(T x, int64_t n) {
+    T chebyshev_polynomial_u_forward(T x, int64_t n) {
         if (n < 0) {
             return T(0.0);
         }
@@ -1353,17 +1353,17 @@ const auto chebyshev_polynomial_u_string = jiterator_stringify(
         }
 
         return r;
-    } // chebyshev_polynomial_u(T x, int64_t n)
+    } // chebyshev_polynomial_u_forward(T x, int64_t n)
 
     template<typename T>
-    T chebyshev_polynomial_u(T x, T n) {
-        return chebyshev_polynomial_u(x, static_cast<int64_t>(n));
-    } // chebyshev_polynomial_u(T x, T n)
+    T chebyshev_polynomial_u_forward(T x, T n) {
+        return chebyshev_polynomial_u_forward(x, static_cast<int64_t>(n));
+    } // chebyshev_polynomial_u_forward(T x, T n)
 ); // chebyshev_polynomial_u_string
 
 const auto hermite_polynomial_h_string = jiterator_stringify(
     template<typename T>
-    T hermite_polynomial_h(T x, int64_t n) {
+    T hermite_polynomial_h_forward(T x, int64_t n) {
         if (n < 0) {
             return T(0.0);
         }
@@ -1387,12 +1387,12 @@ const auto hermite_polynomial_h_string = jiterator_stringify(
         }
 
         return r;
-    } // hermite_polynomial_h(T x, int64_t n)
+    } // hermite_polynomial_h_forward(T x, int64_t n)
 
     template<typename T>
-    T hermite_polynomial_h(T x, T n) {
-        return hermite_polynomial_h(x, static_cast<int64_t>(n));
-    } // hermite_polynomial_h(T x, T n)
+    T hermite_polynomial_h_forward(T x, T n) {
+        return hermite_polynomial_h_forward(x, static_cast<int64_t>(n));
+    } // hermite_polynomial_h_forward(T x, T n)
 ); // hermite_polynomial_h_string
 
 #else // !AT_USE_JITERATOR() -- kernels must be precompiled
