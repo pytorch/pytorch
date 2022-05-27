@@ -1306,12 +1306,23 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
 # aten.norms supports any dimension
 @register_decomposition(aten.norm)
 #Scalar? p, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-def norm(self: Tensor, p: float, dim: List[int] = None, keepdim: bool = False, out:Tensor = None):
+def norm(self: Tensor, p: float, dim: List[int] = [], keepdim: bool = False, out:Tensor = None):
+    # import pdb; pdb.set_trace()
+    self_ = self.abs()
     if p==0: 
-        return (self != 0).sum().type(self.type())
+        result = (self_ != 0).sum(dim, keepdim = keepdim)
     elif p==float('inf'):
-        return self.abs().max()
+        result = self_.max(dim, keepdim = keepdim)
     elif p==-float('inf'):
-        return self.abs().min()
+        result = self_.min(dim, keepdim = keepdim)
     else:
-        return self.abs().pow(p).sum().pow(1/p)  
+        result = self_.pow(p).sum(dim, keepdim = keepdim).pow(1/p)
+
+    if not self.is_complex():
+        result = result.type(self.type())
+    else:
+        result = result.type(self_.type()) # faster way to get scalar type?
+    
+    if out:
+        out = result
+    return result
