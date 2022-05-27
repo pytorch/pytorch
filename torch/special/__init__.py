@@ -4,6 +4,7 @@ from torch._torch_docs import common_args, multi_dim_common
 
 __all__ = [
     'chebyshev_polynomial_t',
+    'chebyshev_polynomial_u',
     'digamma',
     'entr',
     'erf',
@@ -875,6 +876,33 @@ is evaluated.
 Args:
     {input}
 
+Keyword args:
+    {out}
+""".format(**common_args))
+
+chebyshev_polynomial_u = _add_docstr(_special.special_chebyshev_polynomial_u,
+                                     r"""
+chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the second kind :math:`U_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`,
+:math:`2 \times \text{input}` is returned. If :math:`n < 6` or
+:math:`|\text{input}| > 1`, the recursion:
+
+.. math::
+    T_{n + 1}(\text{input}) = 2 \times \text{input} \times T_{n}(\text{input}) - T_{n - 1}(\text{input})
+
+is evaluated. Otherwise, the explicit trigonometric formula:
+
+.. math::
+    \frac{\text{sin}((n + 1) \times \text{arccos}(\text{input}))}{\text{sin}(\text{arccos}(\text{input}))}
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
 Keyword args:
     {out}
 """.format(**common_args))
