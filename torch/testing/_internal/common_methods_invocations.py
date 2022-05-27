@@ -2074,7 +2074,6 @@ def generate_elementwise_binary_small_value_tensors(
     _unsigned_int_vals = (0, 1, 55, 127, 128, 190, 210, 220, 254)
     _int_vals = (0, -1, 1, -55, 55, -127, 127, -128)
     _float_vals = (
-        -0.0,
         0.0,
         -0.001,
         0.001,
@@ -2091,6 +2090,9 @@ def generate_elementwise_binary_small_value_tensors(
         -math.pi - 0.00001,
         math.pi + 0.00001,
     )
+
+    # Ref: https://github.com/pytorch/pytorch/pull/78349
+    _float_vals = (-0.,) if op.name != 'angle' else () + _float_vals
 
     l_vals = []
     r_vals = []
