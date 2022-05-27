@@ -1425,25 +1425,32 @@ def addr(
             return beta * self + alpha * torch.outer(vec1, vec2)
 
 
-def atleast_1d(*args: TensorLikeType) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
+def atleast_1d(
+    *args: TensorLikeType,
+) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_1d`."""
     args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
     res = tuple(a if a.ndim >= 1 else unsqueeze(a, 0) for a in args_)
     return res if len(res) > 1 else res[0]
 
 
-def atleast_2d(*args: TensorLikeType) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
+def atleast_2d(
+    *args: TensorLikeType,
+) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_2d`."""
     args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
     res = tuple(a if a.ndim >= 2 else unsqueeze(atleast_1d(a), 0) for a in args_)
     return res if len(res) > 1 else res[0]
 
 
-def atleast_3d(*args: TensorLikeType) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
+def atleast_3d(
+    *args: TensorLikeType,
+) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_3d`."""
     args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
     res = tuple(a if a.ndim >= 3 else unsqueeze(atleast_2d(a), -1) for a in args_)
     return res if len(res) > 1 else res[0]
+
 
 def as_strided(
     a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int = 0
