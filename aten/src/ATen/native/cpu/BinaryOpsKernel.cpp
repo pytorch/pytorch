@@ -1116,7 +1116,15 @@ void chebyshev_polynomial_t_kernel(TensorIteratorBase& iterator) {
             return chebyshev_polynomial_t_forward(x, n);
         });
     });
-}
+} // chebyshev_polynomial_t_kernel(TensorIteratorBase& iterator)
+
+void chebyshev_polynomial_u_kernel(TensorIteratorBase& iterator) {
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "chebyshev_polynomial_u_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x, scalar_t n) -> scalar_t {
+            return chebyshev_polynomial_u_forward(x, n);
+        });
+    });
+} // chebyshev_polynomial_u_kernel(TensorIteratorBase& iterator)
 
 } // namespace
 
@@ -1166,6 +1174,7 @@ REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel);
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel);
 REGISTER_DISPATCH(zeta_stub, &zeta_kernel);
 REGISTER_DISPATCH(chebyshev_polynomial_t_stub, &chebyshev_polynomial_t_kernel);
+REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel);
 
 } // namespace native
 } // namespace at

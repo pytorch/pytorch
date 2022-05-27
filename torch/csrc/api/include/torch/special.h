@@ -601,4 +601,40 @@ inline Tensor& chebyshev_polynomial_t_out(Tensor& output, const Tensor& x, const
   return torch::special_chebyshev_polynomial_t_out(output, x, n);
 }
 
+/// Chebyshev polynomial of the second kind.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.chebyshev_polynomial_u.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto n = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::chebyshev_polynomial_u(x, n);
+/// ```
+inline Tensor chebyshev_polynomial_u(const Tensor& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_u(x, n);
+}
+
+inline Tensor chebyshev_polynomial_u(const Scalar& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_u(x, n);
+}
+
+inline Tensor chebyshev_polynomial_u(const Tensor& x, const Scalar& n) {
+  return torch::special_chebyshev_polynomial_u(x, n);
+}
+
+inline Tensor& chebyshev_polynomial_u_out(Tensor& output, const Tensor& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_u_out(output, x, n);
+}
+
+inline Tensor& chebyshev_polynomial_u_out(Tensor& output, const Scalar& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_u_out(output, x, n);
+}
+
+inline Tensor& chebyshev_polynomial_u_out(Tensor& output, const Tensor& x, const Scalar& n) {
+  return torch::special_chebyshev_polynomial_u_out(output, x, n);
+}
+
 }} // torch::special

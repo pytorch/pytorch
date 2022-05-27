@@ -2214,11 +2214,59 @@ static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, std::int64_t
     }
 
     return r;
-}
+} // chebyshev_polynomial_t_forward(T x, std::int64_t n)
 
 template<typename T, bool is_cuda=false>
 static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, T n) {
     return chebyshev_polynomial_t_forward(x, static_cast<std::int64_t>(n));
-}
+} // chebyshev_polynomial_t_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, std::int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (std::abs(x) == T(1.0)) {
+        if (x > T(0.0) || n % 2 == 0) {
+            return n + 1;
+        }
+
+        return -(n + 1);
+    }
+
+    if ((n > 8) && (std::abs(x) < T(1.0))) {
+        if (std::sin(std::acos(x)) != T(0.0)) {
+            return std::sin((n + 1) * std::acos(x)) / std::sin(std::acos(x));
+        }
+
+        return (n + 1) * std::cos((n + 1) * std::acos(x)) / x;
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x + x;
+    }
+
+    T p = T(1.0);
+    T q = x + x;
+    T r;
+
+    for (int64_t k = 2; k <= n; k++) {
+        r = (x + x) * q - p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // chebyshev_polynomial_u_forward(T x, std::int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, T n) {
+    return chebyshev_polynomial_u_forward(x, static_cast<std::int64_t>(n));
+} // chebyshev_polynomial_u_forward(T x, T n)
 
 C10_CLANG_DIAGNOSTIC_POP()
