@@ -1129,17 +1129,11 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
     # use op_info.generate_args_kwargs directly.
     generate_args_kwargs = kwargs.get('generate_args_kwargs', lambda *args, **kwargs: (yield tuple(), {}))
 
-    inputs: List[SampleInput] = []
     for t in _generate_reduction_inputs(device, dtype, requires_grad):
         for reduction_kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims):
             for args, kwargs in generate_args_kwargs(t, **reduction_kwargs):
                 kwargs.update(reduction_kwargs)
-                inputs.append(SampleInput(
-                    t.clone().requires_grad_(requires_grad),
-                    args=args,
-                    kwargs=kwargs))
-
-    return inputs
+                yield SampleInput(t.clone().requires_grad_(requires_grad), args=args, kwargs=kwargs)
 
 
 def _generate_masked_op_mask(input_shape, device, **kwargs):
@@ -1366,6 +1360,9 @@ class ReductionOpInfo(OpInfo):
         # the dtype according to the type promotion rules above.
         result_dtype: Optional[torch.dtype] = None,
 
+        # Casts complex results to real (e.g. linalg.norm or torch.var)
+        complex_to_real: bool = False,
+
         # ReductionOpInfo tests generate their own input, dim and keepdim
         # arguments and call this function to generate tuples of extra args and
         # kwargs to use when calling the op. This is required for operators that
@@ -1381,6 +1378,7 @@ class ReductionOpInfo(OpInfo):
         # These are mutually exclusive options
         assert not (result_dtype and promotes_int_to_float)
         assert not (result_dtype and promotes_int_to_int64)
+        assert not (result_dtype and complex_to_real)
         assert not (promotes_int_to_float and promotes_int_to_int64)
 
         # Default sample_inputs_func for ReductionOpInfo which augments sample
@@ -1401,6 +1399,7 @@ class ReductionOpInfo(OpInfo):
         self.supports_multiple_dims = supports_multiple_dims
         self.promotes_int_to_float = promotes_int_to_float
         self.promotes_int_to_int64 = promotes_int_to_int64
+        self.complex_to_real = complex_to_real
         self.result_dtype = result_dtype
         self.generate_args_kwargs = generate_args_kwargs
 
@@ -18044,6 +18043,7 @@ op_db: List[OpInfo] = [
         'std',
         nan_policy='propagate',
         supports_out=False,
+        complex_to_real=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         assert_autodiffed=True,
@@ -18062,9 +18062,6 @@ op_db: List[OpInfo] = [
             # FIXME: dim=[] reduces all dimensions
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # TODO(@heitorschueroff) std return float for complex types
-            # need to find a better way to model result dtype
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_result_dtype'),
             # FIXME: improve precision
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
@@ -18078,6 +18075,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         assert_autodiffed=True,
         promotes_int_to_float=True,
+        complex_to_real=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -18094,9 +18092,6 @@ op_db: List[OpInfo] = [
             # FIXME: dim=[] reduces all dimensions
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # TODO(@heitorschueroff) std return float for complex types
-            # need to find a better way to model result dtype
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_result_dtype'),
             # FIXME: improve precision
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
