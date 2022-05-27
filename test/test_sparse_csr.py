@@ -573,6 +573,34 @@ class TestSparseCSR(TestCase):
         with self.assertRaisesRegex(TypeError, "Cannot assign to a sparse tensor"):
             sparse[0, 0, 0, 0] = 99.0
 
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    def test_sparse_bsr_select(self, device, dtype, index_dtype):
+        shape = (3, 6, 10)
+        nnz = 6
+        sparse = self.genSparseBSRTensor(shape, (2, 2), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+
+        # select from batch dimensions
+        sparse_selected12 = sparse.select(0, 2)
+        expected_sparse_selected12 = torch.sparse_bsr_tensor(sparse.crow_indices().select(0, 2).contiguous(),
+                                                             sparse.col_indices().select(0, 2).contiguous(),
+                                                             sparse.values().select(0, 2).contiguous(),
+                                                             size=(1, 6, 10),
+                                                             dtype=dtype,
+                                                             device=device)
+        self.assertEqual(expected_sparse_selected12, sparse_selected12)
+
+        # selecting from rows or columns for batched CSR is not yet implemented
+        with self.assertRaisesRegex(RuntimeError, "selecting rows or columns is not implemented for batched"):
+            sparse.select(-2, 0)
+
+        with self.assertRaisesRegex(RuntimeError, "selecting rows or columns is not implemented for batched"):
+            sparse.select(-1, 0)
+
+        # assigning to sparse via indexing is disabled
+        with self.assertRaisesRegex(TypeError, "Cannot assign to a sparse tensor"):
+            sparse[0, 0, 0, 0] = 99.0
+
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_resize(self, device, dtype):
