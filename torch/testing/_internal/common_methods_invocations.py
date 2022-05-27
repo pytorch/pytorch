@@ -8152,8 +8152,8 @@ def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
     if dtype is not torch.chalf:
         # "index_select_cuda" not implemented for 'ComplexHalf'
         samples = samples + (SampleInput(make_tensor((S, S, S), dtype=dtype, device=device,
-                                       low=None, high=None,
-                                       requires_grad=requires_grad, noncontiguous=True)),)
+                                                     low=None, high=None,
+                                                     requires_grad=requires_grad, noncontiguous=True)),)
     return samples
 
 
