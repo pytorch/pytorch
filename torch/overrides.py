@@ -987,6 +987,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.swapaxes: lambda input, dim0, dim1: -1,
         torch.swapdims: lambda input, axis0, axis1: -1,
         torch.special.chebyshev_polynomial_t: lambda input, n, out=None: -1,
+        torch.special.chebyshev_polynomial_u: lambda input, n, out=None: -1,
         torch.special.digamma: lambda input: -1,
         torch.special.entr: lambda input: -1,
         torch.special.erf: lambda input: -1,
