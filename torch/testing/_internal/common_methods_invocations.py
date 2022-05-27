@@ -1134,7 +1134,7 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
         for reduction_kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims):
             for args, kwargs in generate_args_kwargs(t, **reduction_kwargs):
                 kwargs.update(reduction_kwargs)
-                yield SampleInput(t.clone().requires_grad_(requires_grad), args=args, kwargs=kwargs)
+                yield SampleInput(t.detach().requires_grad_(requires_grad), args=args, kwargs=kwargs)
 
 
 def _generate_masked_op_mask(input_shape, device, **kwargs):
