@@ -25,7 +25,7 @@ __all__ = [
     "mish",
     "selu",
     "softplus",
-    "softshrink"
+    "softshrink",
 ]
 
 # celu is implemented specially because it has an alpha argument
@@ -239,6 +239,7 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     # TODO: Replace with refs.logical_not when it exists!
     def logical_not(x):
         return refs.logical_xor(refs.full_like(x, True), x)
+
     zero_mask = logical_not(refs.logical_or(ge_mask, le_mask))
     return refs.where(zero_mask, 0, a)
 
