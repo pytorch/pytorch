@@ -6136,7 +6136,10 @@ class _TestONNXRuntime:
 
         class TensorSplitModel2(torch.nn.Module):
             def forward(self, input):
-                return input.tensor_split([1, 3, 4], -2), input.tensor_split([0, 2], -2)[-1]
+                return (
+                    input.tensor_split([1, 3, 4], -2),
+                    input.tensor_split([0, 2], -2)[-1],
+                )
 
         x = torch.randn(5, 4, 3)
         self.run_test(TensorSplitModel2(), x)
@@ -6147,7 +6150,7 @@ class _TestONNXRuntime:
 
         x = torch.randn(5, 4, 3)
         self.run_test(TensorSplitModel3(), x)
-    
+
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_tensor_split_scalar(self):
         class TensorSplitModel(torch.nn.Module):
