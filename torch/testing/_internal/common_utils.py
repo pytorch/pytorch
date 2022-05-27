@@ -38,7 +38,7 @@ import json
 import __main__  # type: ignore[import]
 import errno
 import ctypes
-from typing import Any, Dict, Iterable, Iterator, Optional, Union, List, Tuple, Type, TypeVar
+from typing import Any, Dict, Iterable, Iterator, Optional, Union, List, Tuple, Type, TypeVar, Callable
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -1816,11 +1816,13 @@ class TestCase(expecttest.TestCase):
     # When report_only is True, flaky tests are only reported, but the signal remains the same (the test will still
     # show up red).
     # Otherwise, the flaky test will show up green while its stats are captured by test reports.
-    def _run_with_retry(self, result=None, num_runs_left=0, report_only=True):
-        if num_runs_left == 0:
-            return
-
+    def _run_with_retry(self, result=None, num_runs_left=0, report_only=True, num_red=0, num_green=0):
         using_unittest = isinstance(result, unittest.TestResult)
+        if num_runs_left == 0:
+            if num_green > 0 and num_red > 0 and using_unittest:
+                result.addSkip(self, f'{{"flaky": {True}, "num_red": {num_red}, "num_green": {num_green},' +
+                                     f'"max_num_retries": {MAX_NUM_RETRIES}}}')
+            return
 
         if using_unittest:
             failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
@@ -1853,19 +1855,29 @@ class TestCase(expecttest.TestCase):
         if failures_before < len(result.failures):
             print(f"    {self._testMethodName} failed - num_retries_left: {num_retries_left}")
             if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
-                result.failures.pop(-1)
+                _, traceback_str = result.failures.pop(-1)
+                print(traceback_str)
                 result.addExpectedFailure(self, err)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
+                                 num_red=num_red + 1, num_green=num_green)
         elif errors_before < len(result.errors):
             print(f"    {self._testMethodName} errored - num_retries_left: {num_retries_left}")
             if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
-                result.errors.pop(-1)
+                _, traceback_str = result.errors.pop(-1)
+                print(traceback_str)
                 result.addExpectedFailure(self, err)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
+                                 num_red=num_red + 1, num_green=num_green)
         elif report_only and num_retries_left < MAX_NUM_RETRIES:
             print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
             result.addUnexpectedSuccess(self)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
+                                 num_red=num_red, num_green=num_green + 1)
+        elif not report_only and num_retries_left < MAX_NUM_RETRIES:
+            # in this case, our test was rerun (as a retry has been used) and it just passed.
+            # we incur one more recursive call with num_runs_left = 0 to allow for accurate flaky reporting
+            self._run_with_retry(result=result, num_runs_left=0, report_only=report_only,
+                                 num_red=num_red, num_green=num_green + 1)
 
 
     def run(self, result=None):
@@ -1873,7 +1885,12 @@ class TestCase(expecttest.TestCase):
             if TEST_WITH_CROSSREF:
                 stack.enter_context(torch.overrides.push_torch_function_mode(CrossRefMode))
             num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
-            self._run_with_retry(result=result, num_runs_left=num_runs, report_only=not OVERRIDE_FLAKY_SIGNAL)
+            self._run_with_retry(
+                result=result,
+                num_runs_left=num_runs,
+                report_only=not OVERRIDE_FLAKY_SIGNAL,
+                num_red=0,
+                num_green=0)
 
     def setUp(self):
         check_if_enable(self)
@@ -2059,7 +2076,8 @@ class TestCase(expecttest.TestCase):
             n_compressed_dims, n_plain_dims = size[-1], size[-2]
         sparse_tensors = [random_sparse_compressed(n_compressed_dims, n_plain_dims, nnz) for _ in range(n_batch)]
         sparse_tensors_it = map(list, zip(*sparse_tensors))
-        values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
+
+        values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, nnz, *block_size)
         compressed_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
         plain_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
 
@@ -2178,7 +2196,7 @@ class TestCase(expecttest.TestCase):
             self,
             x,
             y,
-            msg: Optional[str] = None,
+            msg: Optional[Union[str, Callable[[str], str]]] = None,
             *,
             atol: Optional[float] = None,
             rtol: Optional[float] = None,
@@ -2192,15 +2210,6 @@ class TestCase(expecttest.TestCase):
     ):
         # Hide this function from `pytest`'s traceback
         __tracebackhide__ = True
-
-        # TODO: the Tensor compare uses bunch of operations which is currently not
-        # supported by MPS. We will remove this move to CPU after all the
-        # support is added. https://github.com/pytorch/pytorch/issues/77144
-        if isinstance(x, torch.Tensor) and (x.is_mps):
-            x = x.to('cpu')
-
-        if isinstance(y, torch.Tensor) and (y.is_mps):
-            y = y.to('cpu')
 
         # numpy's dtypes are a superset of what PyTorch supports. In case we encounter an unsupported dtype, we fall
         # back to an elementwise comparison. Note that this has to happen here and not for example in
@@ -2255,7 +2264,10 @@ class TestCase(expecttest.TestCase):
             check_layout=exact_layout,
             check_stride=exact_stride,
             check_is_coalesced=exact_is_coalesced,
-            msg=msg,
+            # This emulates unittest.TestCase's behavior if a custom message passed and
+            # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
+            # is True (default)
+            msg=(lambda generated_msg: f"{generated_msg} : {msg}") if isinstance(msg, str) and self.longMessage else msg,
         )
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]

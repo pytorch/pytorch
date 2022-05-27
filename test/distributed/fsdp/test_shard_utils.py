@@ -13,7 +13,7 @@ from torch.distributed._shard.sharding_spec import (
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp.shard_utils import (
     _offsets_to_split_sizes,
-    reshard_flatten_tensor,
+    _reshard_flatten_tensor,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
@@ -153,7 +153,7 @@ class TestShardUtilsDistributed(FSDPTest):
 
         tensor = self._create_tensor()
 
-        shard = reshard_flatten_tensor(
+        shard = _reshard_flatten_tensor(
             self._create_local_chunk(tensor),
             self._create_enumerate_spec(tensor),
             self.world_size,
@@ -165,7 +165,7 @@ class TestShardUtilsDistributed(FSDPTest):
         shard = Shard.from_tensor_and_offsets(shard, offsets, self.rank)
         uneven_sharded_tensor = init_from_local_shards([shard], tensor.numel())
 
-        shard = reshard_flatten_tensor(
+        shard = _reshard_flatten_tensor(
             uneven_sharded_tensor,
             self._create_chunk_spec(),
             self.world_size,
