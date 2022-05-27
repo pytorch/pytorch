@@ -3079,6 +3079,8 @@
     "softmax"
   ],
   "torch.special": [
+    "chebyshev_polynomial_t",
+    "chebyshev_polynomial_u",
     "digamma",
     "entr",
     "erf",
