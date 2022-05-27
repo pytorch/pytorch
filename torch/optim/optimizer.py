@@ -82,18 +82,19 @@ class Optimizer(object):
 
     # Currently needed by Adam and AdamW
     def _cuda_graph_capture_health_check(self):
-        capturing = torch.cuda.is_current_stream_capturing()
+        if torch.has_cuda and torch.cuda.is_available():
+            capturing = torch.cuda.is_current_stream_capturing()
 
-        if capturing and not self.defaults['capturable']:
-            raise RuntimeError("Attempting CUDA graph capture of step() for an instance of " +
-                               self.__class__.__name__ +
-                               " but this instance was constructed with capturable=False.")
+            if capturing and not self.defaults['capturable']:
+                raise RuntimeError("Attempting CUDA graph capture of step() for an instance of " +
+                                   self.__class__.__name__ +
+                                   " but this instance was constructed with capturable=False.")
 
-        if (not self._warned_capturable_if_run_uncaptured) and self.defaults['capturable'] and (not capturing):
-            print("Warning: This instance was constructed with capturable=True, but step() " +
-                  "is running without CUDA graph capture. If you never intend to graph-capture this " +
-                  "instance, capturable=True can impair performance, and you should set capturable=False.")
-            self._warned_capturable_if_run_uncaptured = True
+            if (not self._warned_capturable_if_run_uncaptured) and self.defaults['capturable'] and (not capturing):
+                print("Warning: This instance was constructed with capturable=True, but step() " +
+                      "is running without CUDA graph capture. If you never intend to graph-capture this " +
+                      "instance, capturable=True can impair performance, and you should set capturable=False.")
+                self._warned_capturable_if_run_uncaptured = True
 
     def _hook_for_profile(self):
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
