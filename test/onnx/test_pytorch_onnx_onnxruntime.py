@@ -6125,6 +6125,53 @@ class _TestONNXRuntime:
         )
         self.run_test(TensorFactory(), x, remained_onnx_input_idx=[])
 
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_tensor_split(self):
+        class TensorSplitModel(torch.nn.Module):
+            def forward(self, input):
+                return input.tensor_split([1, 3]), input.tensor_split([2, 4])[0]
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(TensorSplitModel(), x)
+
+        class TensorSplitModel2(torch.nn.Module):
+            def forward(self, input):
+                return input.tensor_split([1, 3, 4], -2), input.tensor_split([0, 2], -2)[-1]
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(TensorSplitModel2(), x)
+
+        class TensorSplitModel3(torch.nn.Module):
+            def forward(self, input):
+                return input.tensor_split([2, 3, 5])
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(TensorSplitModel3(), x)
+    
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_tensor_split_scalar(self):
+        class TensorSplitModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.tensor_split(x, x.size(1))
+
+        x = torch.randn(1, 2, 3, requires_grad=True)
+        self.run_test(TensorSplitModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_tensor_split_dynamic_axes(self):
+        class TensorSplitModel(torch.nn.Module):
+            def forward(self, x):
+                return x.tensor_split(1, dim=-1)
+
+        x = torch.randn(4, 384, 2)
+        input_names = ["logits"]
+        self.run_test(
+            TensorSplitModel(),
+            x,
+            input_names=input_names,
+            dynamic_axes={input_names[0]: {0: "batch"}},
+        )
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_eye(self):
         class TensorFactory(torch.nn.Module):
