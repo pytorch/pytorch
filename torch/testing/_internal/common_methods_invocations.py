@@ -19398,6 +19398,14 @@ python_ref_db = [
         "_refs.nn.functional.hinge_embedding_loss",
         torch_opinfo_name="nn.functional.hinge_embedding_loss",
     ),
+    PythonRefInfo(
+        "_refs.nn.functional.hardshrink",
+        torch_opinfo_name="nn.functional.hardshrink",
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.softshrink",
+        torch_opinfo_name="nn.functional.softshrink",
+    ),
     #
     # Elementwise Binary Reference OpInfos
     #

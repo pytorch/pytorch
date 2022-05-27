@@ -19,11 +19,13 @@ __all__ = [
     "celu",
     "dropout",
     "elu",
+    "hardshrink",
     "hinge_embedding_loss",
     "margin_ranking_loss",
     "mish",
     "selu",
     "softplus",
+    "softshrink"
 ]
 
 # celu is implemented specially because it has an alpha argument
@@ -211,6 +213,34 @@ def softplus(
         rhs = refs.log1p(refs.exp(scaled_input))
 
     return refs.where(refs.gt(scaled_input, threshold), a, rhs)
+
+
+@out_wrapper
+def hardshrink(a: TensorLikeType, lambd: float = 0.5):
+    # Formula for reference,
+    # hardshrink(x) = x if x > lambd
+    #               = x if x < -lambd
+    #               = 0 otherwise
+    zero_mask = refs.logical_and(refs.ge(a, -lambd), refs.le(a, lambd))
+    return refs.where(zero_mask, 0, a)
+
+
+@out_wrapper
+def softshrink(a: TensorLikeType, lambd: float = 0.5):
+    # Formula for reference,
+    # softshrink(x) = x - lambd if x > lambd
+    #               = x + lambd if x < -lambd
+    #               = 0 otherwise
+    ge_mask = refs.ge(a, lambd)
+    a = refs.where(ge_mask, refs.sub(a, lambd), a)
+    le_mask = refs.le(a, -lambd)
+    a = refs.where(le_mask, refs.add(a, lambd), a)
+
+    # TODO: Replace with refs.logical_not when it exists!
+    def logical_not(x):
+        return refs.logical_xor(refs.full_like(x, True), x)
+    zero_mask = logical_not(refs.logical_or(ge_mask, le_mask))
+    return refs.where(zero_mask, 0, a)
 
 
 # Losses
