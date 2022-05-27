@@ -641,6 +641,52 @@ class TORCH_CUDA_CU_API LoadStoreOp : public Expr {
   Val* const in_ = nullptr;
 };
 
+// Convenience utility to initialize IterDomain's without having to sort through
+// all the default values. Intended to be used with
+// IterDomain::IterDomain(IrBuilderPasskey IterDomainBuildArgs)
+class TORCH_CUDA_CU_API IterDomainBuilder {
+ public:
+  // Match legacy constructor
+  IterDomainBuilder(Val* _start, Val* _extent);
+
+  // Grab all the parameters from id to set the IterDomainBuilder
+  IterDomainBuilder(const IterDomain* id);
+
+  // Resets defaults for rfactor, is padded dim, padded to size, and is mma
+  // swizzle which should only be set during scheduling.
+  IterDomainBuilder& resetSchedulingParams();
+
+  // Resets is_rfactor_domain
+  IterDomainBuilder& resetRfactor();
+
+  IterDomainBuilder& start(Val* _start);
+  IterDomainBuilder& extent(Val* _extent);
+  IterDomainBuilder& stop_offset(Val* _stop_offset);
+  IterDomainBuilder& parallel_type(ParallelType _parallel_type);
+  IterDomainBuilder& iter_type(IterType _iter_type);
+  IterDomainBuilder& is_rfactor_domain(bool _is_rfactor_domain);
+  IterDomainBuilder& is_padded_dimension(bool _is_padded_dimension);
+  IterDomainBuilder& padded_to_size(c10::optional<int64_t> _padded_to_size);
+  IterDomainBuilder& is_mma_swizzled(bool _is_mma_swizzled);
+
+  IterDomain* build() const;
+
+  // Must have start and extent at least
+  IterDomainBuilder() = delete;
+
+  Val* start_ = nullptr;
+  Val* extent_ = nullptr;
+  Val* stop_offset_ = nullptr;
+  ParallelType parallel_type_ = ParallelType::Serial;
+  IterType iter_type_ = IterType::Iteration;
+
+  // Only relevant at scheduling time or compile time.
+  bool is_rfactor_domain_ = false;
+  bool is_padded_dimension_ = false;
+  c10::optional<int64_t> padded_to_size_ = c10::nullopt;
+  bool is_mma_swizzled_ = false;
+};
+
 // Friends for direct access to split
 class TensorDomain;
 class ReplayTransformations;
@@ -651,29 +697,21 @@ class IndexReferenceReplay;
 //! on IterDomains.
 class TORCH_CUDA_CU_API IterDomain : public Val {
  public:
-  IterDomain(
-      IrBuilderPasskey,
-      Val* start,
-      Val* extent,
-      ParallelType parallel_type = ParallelType::Serial,
-      IterType iter_type = IterType::Iteration,
-      bool is_rfactor_domain = false,
-      bool is_padded_dimension = false,
-      c10::optional<int64_t> padded_to_size_ = c10::nullopt,
-      bool is_mma_swizzled = false);
+  IterDomain(IrBuilderPasskey, const IterDomainBuilder& args);
 
-  // Same as the above but can set the offset of the stop point
+  // Legacy constructor, TODO: should start moving to use IterDomainBuildArgs
+  // constructor Same as the above but can set the offset of the stop point
   IterDomain(
       IrBuilderPasskey,
       Val* start,
       Val* extent,
       Val* stop_offset,
-      ParallelType parallel_type = ParallelType::Serial,
-      IterType iter_type = IterType::Iteration,
-      bool is_rfactor_domain = false,
-      bool is_padded_dimension = false,
-      c10::optional<int64_t> padded_to_size_ = c10::nullopt,
-      bool is_mma_swizzled = false);
+      ParallelType parallel_type,
+      IterType iter_type,
+      bool is_rfactor_domain,
+      bool is_padded_dimension,
+      c10::optional<int64_t> padded_to_size_,
+      bool is_mma_swizzled);
 
   IterDomain(const IterDomain* src, IrCloner* ir_cloner);
 

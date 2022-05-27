@@ -65,12 +65,13 @@ class Instrumentor : private kir::IrVisitor {
     // Allocate two integers for each entry. One is used for accumulating
     // cycles, and another for couting the number of hits
     const std::vector<IterDomain*> new_buffer_ids = {
-        IrBuilder::create<IterDomain>(
+        IterDomainBuilder(
             GpuLower::current()->kernel()->zeroVal(),
-            IrBuilder::create<Int>(num_profile_entries)),
-        IrBuilder::create<IterDomain>(
-            GpuLower::current()->kernel()->zeroVal(),
-            IrBuilder::create<Int>(2))};
+            IrBuilder::create<Int>(num_profile_entries))
+            .build(),
+        IterDomainBuilder(
+            GpuLower::current()->kernel()->zeroVal(), IrBuilder::create<Int>(2))
+            .build()};
 
     const auto buffer_domain = IrBuilder::create<TensorDomain>(new_buffer_ids);
 

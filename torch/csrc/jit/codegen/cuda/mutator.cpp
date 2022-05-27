@@ -63,20 +63,13 @@ void OptOutMutator::mutate(IterDomain* id) {
       stop_offset->sameAs(id->stopOffset())) {
     return;
   }
-
-  Val* mutated_val = IrBuilder::create<IterDomain>(
-      id->container(),
-      start,
-      extent,
-      stop_offset,
-      id->getParallelType(),
-      id->getIterType(),
-      id->isRFactorProduct());
-  if (id->hasPaddingToMultipleOfWarp()) {
-    mutated_val->as<IterDomain>()->padToMultipleOfWarp(
-        id->getMaybeSizeAfterPadding());
-  }
-  registerMutation(id, mutated_val);
+  registerMutation(
+      id,
+      IterDomainBuilder(id)
+          .start(start)
+          .extent(extent)
+          .stop_offset(stop_offset)
+          .build());
 }
 
 void OptOutMutator::mutate(TensorDomain* td) {

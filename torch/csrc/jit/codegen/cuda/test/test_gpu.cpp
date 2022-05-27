@@ -5158,19 +5158,9 @@ TEST_F(NVFuserTest, FusionSimpleBCast3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  // Set up your input tensor views
-  std::vector<IterDomain*> dom;
-  dom.push_back(IrBuilder::create<IterDomain>(
-      IrBuilder::create<Int>(0), IrBuilder::create<Int>()));
-  dom.push_back(IrBuilder::create<IterDomain>(
-      IrBuilder::create<Int>(0),
-      IrBuilder::create<Int>(1),
-      ParallelType::Serial,
-      IterType::BroadcastWithStride));
-
+  // Set up input tensor views
   // tv0[I1, B{1}]
-  TensorView* tv0 = IrBuilder::create<TensorView>(
-      IrBuilder::create<TensorDomain>(dom), DataType::Float);
+  TensorView* tv0 = makeConcreteTensor({-1, 1});
   fusion.addInput(tv0);
 
   // tv1[I0, I1, I2]
@@ -5213,16 +5203,7 @@ TEST_F(NVFuserTest, FusionSimpleBCast4_CUDA) {
   FusionGuard fg(&fusion);
 
   // Set up your input tensor views
-  std::vector<IterDomain*> dom;
-  dom.push_back(IrBuilder::create<IterDomain>(
-      IrBuilder::create<Int>(0),
-      IrBuilder::create<Int>(1),
-      ParallelType::Serial,
-      IterType::BroadcastWithStride));
-  dom.push_back(IrBuilder::create<IterDomain>(
-      IrBuilder::create<Int>(0), IrBuilder::create<Int>()));
-  TensorView* tv0 = IrBuilder::create<TensorView>(
-      IrBuilder::create<TensorDomain>(dom), DataType::Float);
+  TensorView* tv0 = makeConcreteTensor({1, -1});
 
   TensorView* tv1 = makeSymbolicTensor(3);
   fusion.addInput(tv0);
@@ -5270,23 +5251,8 @@ TEST_F(NVFuserTest, FusionSimpleBCast5_CUDA) {
   FusionGuard fg(&fusion);
 
   constexpr int m = 2, k = 3, n = 4;
-
-  auto zero = IrBuilder::create<Int>(0);
-  auto M = IrBuilder::create<IterDomain>(zero, IrBuilder::create<Int>(m));
-  auto K = IrBuilder::create<IterDomain>(zero, IrBuilder::create<Int>(k));
-  auto N = IrBuilder::create<IterDomain>(zero, IrBuilder::create<Int>(n));
-
-  // Set up your input tensor views
-  TensorView* tv0 = IrBuilder::create<TensorView>(
-      IrBuilder::create<TensorDomain>(
-          std::vector<IterDomain*>({M, K}), std::vector<bool>({true, true})),
-      DataType::Float);
-  // Note: IterDomain must not be reused, so K needs to be cloned.
-  TensorView* tv1 = IrBuilder::create<TensorView>(
-      IrBuilder::create<TensorDomain>(
-          std::vector<IterDomain*>({K->cloneWithoutRFactor(), N}),
-          std::vector<bool>({true, true})),
-      DataType::Float);
+  auto tv0 = makeConcreteTensor({m, k});
+  auto tv1 = makeConcreteTensor({k, n});
 
   fusion.addInput(tv0);
   fusion.addInput(tv1);

@@ -910,27 +910,92 @@ LoadStoreOp::LoadStoreOp(const LoadStoreOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)) {}
 
-IterDomain::IterDomain(
-    IrBuilderPasskey passkey,
-    Val* start,
-    Val* extent,
-    ParallelType parallel_type,
-    IterType iter_type,
-    bool is_rfactor_domain,
-    bool is_padded_dimension,
-    c10::optional<int64_t> padded_to_size,
-    bool is_mma_swizzled)
-    : IterDomain(
-          passkey,
-          start,
-          extent,
-          nullptr,
-          parallel_type,
-          iter_type,
-          is_rfactor_domain,
-          is_padded_dimension,
-          padded_to_size,
-          is_mma_swizzled) {}
+IterDomainBuilder::IterDomainBuilder(Val* _start, Val* _extent)
+    : start_(_start), extent_(_extent) {
+  TORCH_INTERNAL_ASSERT(
+      start_ != nullptr && extent_ != nullptr,
+      "Start and extent are required to build an iter domain.");
+}
+
+IterDomainBuilder::IterDomainBuilder(const IterDomain* id)
+    : start_(id->start()),
+      extent_(id->extent()),
+      stop_offset_(id->stopOffset()),
+      parallel_type_(id->getParallelType()),
+      iter_type_(id->getIterType()),
+      is_rfactor_domain_(id->isRFactorProduct()),
+      is_padded_dimension_(id->hasPaddingToMultipleOfWarp()),
+      padded_to_size_(id->getMaybeSizeAfterPadding()),
+      is_mma_swizzled_(id->isMmaSwizzled()) {}
+
+IterDomainBuilder& IterDomainBuilder::resetSchedulingParams() {
+  parallel_type_ = ParallelType::Serial;
+  is_rfactor_domain_ = false;
+  is_padded_dimension_ = false;
+  padded_to_size_ = c10::nullopt;
+  is_mma_swizzled_ = false;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::resetRfactor() {
+  return is_rfactor_domain(false);
+}
+
+IterDomainBuilder& IterDomainBuilder::start(Val* _start) {
+  start_ = _start;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::extent(Val* _extent) {
+  extent_ = _extent;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::stop_offset(Val* _stop_offset) {
+  stop_offset_ = _stop_offset;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::parallel_type(
+    ParallelType _parallel_type) {
+  parallel_type_ = _parallel_type;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::iter_type(IterType _iter_type) {
+  iter_type_ = _iter_type;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::is_rfactor_domain(
+    bool _is_rfactor_domain) {
+  is_rfactor_domain_ = _is_rfactor_domain;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::is_padded_dimension(
+    bool _is_padded_dimension) {
+  is_padded_dimension_ = _is_padded_dimension;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::padded_to_size(
+    c10::optional<int64_t> _padded_to_size) {
+  padded_to_size_ = _padded_to_size;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::is_mma_swizzled(bool _is_mma_swizzled) {
+  is_mma_swizzled_ = _is_mma_swizzled;
+  return *this;
+}
+
+IterDomain* IterDomainBuilder::build() const {
+  TORCH_INTERNAL_ASSERT(
+      start_ != nullptr && extent_ != nullptr,
+      "Start and extent are required to build an iter domain.");
+  return IrBuilder::create<IterDomain>(start_->container(), *this);
+}
 
 IterDomain::IterDomain(
     IrBuilderPasskey passkey,
@@ -972,6 +1037,20 @@ IterDomain::IterDomain(
       " .");
 }
 
+IterDomain::IterDomain(IrBuilderPasskey passkey, const IterDomainBuilder& args)
+
+    : IterDomain(
+          passkey,
+          args.start_,
+          args.extent_,
+          args.stop_offset_,
+          args.parallel_type_,
+          args.iter_type_,
+          args.is_rfactor_domain_,
+          args.is_padded_dimension_,
+          args.padded_to_size_,
+          args.is_mma_swizzled_) {}
+
 IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner),
       start_(ir_cloner->clone(src->start_)),
@@ -1009,17 +1088,7 @@ bool IterDomain::sameAs(const Statement* other) const {
 // Returns a new IterDomain matching properties of this except for
 // is_rfactor_domain_
 IterDomain* IterDomain::cloneWithoutRFactor() const {
-  auto cloned = IrBuilder::create<IterDomain>(
-      ir_container_,
-      start(),
-      extent(),
-      stopOffset(),
-      getParallelType(),
-      getIterType(),
-      false,
-      is_padded_dimension_,
-      padded_to_size_,
-      is_mma_swizzled_);
+  auto cloned = IterDomainBuilder(this).resetRfactor().build();
 
   return cloned;
 }
@@ -1076,12 +1145,12 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
     itype = IterType::Iteration;
   }
 
-  IterDomain* merged_id = IrBuilder::create<IterDomain>(
-      outer->container(),
-      outer->container()->zeroVal(),
-      merged_id_size->as<Int>(),
-      outer->getParallelType(),
-      itype);
+  IterDomain* merged_id =
+      IterDomainBuilder(
+          outer->container()->zeroVal(), merged_id_size->as<Int>())
+          .parallel_type(outer->getParallelType())
+          .iter_type(itype)
+          .build();
 
   IrBuilder::create<Merge>(outer->container(), merged_id, outer, inner);
 
@@ -1129,20 +1198,20 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
         "Partial split is only allowed with root domains");
   }
   // outer loop IterDomain
-  IterDomain* ido = IrBuilder::create<IterDomain>(
-      in->container(),
-      in->container()->zeroVal(),
-      inner_split ? remainder->as<Int>() : factor,
-      in->getParallelType(),
-      in->getIterType());
+  IterDomain* ido = IterDomainBuilder(
+                        in->container()->zeroVal(),
+                        inner_split ? remainder->as<Int>() : factor)
+                        .parallel_type(in->getParallelType())
+                        .iter_type(in->getIterType())
+                        .build();
 
   // inner loop IterDomain
-  IterDomain* idi = IrBuilder::create<IterDomain>(
-      in->container(),
-      in->container()->zeroVal(),
-      inner_split ? factor : remainder->as<Int>(),
-      in->getParallelType(),
-      in->getIterType());
+  IterDomain* idi = IterDomainBuilder(
+                        in->container()->zeroVal(),
+                        inner_split ? factor : remainder->as<Int>())
+                        .parallel_type(in->getParallelType())
+                        .iter_type(in->getIterType())
+                        .build();
 
   IrBuilder::create<Split>(
       in->container(),
@@ -1735,13 +1804,12 @@ TensorDomain* TensorDomain::flatten(int64_t start_dim, int64_t end_dim) {
 
   IterDomain* merged_id = new_root_domain[start_dim];
   for (auto i : c10::irange(start_dim + 1, end_dim + 1)) {
-    IterDomain* new_merged_id = IrBuilder::create<IterDomain>(
-        merged_id->container(),
-        merged_id->container()->zeroVal(),
-        mul(merged_id->extent(), new_root_domain[i]->extent()),
-        ParallelType::Serial,
-        IterType::Iteration,
-        true);
+    IterDomain* new_merged_id =
+        IterDomainBuilder(
+            merged_id->container()->zeroVal(),
+            mul(merged_id->extent(), new_root_domain[i]->extent()))
+            .is_rfactor_domain(true)
+            .build();
     IrBuilder::create<Merge>(new_merged_id, merged_id, new_root_domain[i]);
     merged_id = new_merged_id;
   }

@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
@@ -187,6 +188,8 @@ void replaceSymbolicSizes(Fusion* fusion) {
           (id->getIterType() == IterType::BroadcastWithoutStride)) {
         continue;
       } else if (
+          // TODO: Is `id->isRFactorProduct()` needed here? Seems wrong, have to
+          // check the tests.
           id->isRFactorProduct() ||
           // NOLINTNEXTLINE(bugprone-branch-clone)
           (id->getIterType() == IterType::BroadcastWithStride) ||

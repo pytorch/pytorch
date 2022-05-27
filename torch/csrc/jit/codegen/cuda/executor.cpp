@@ -622,7 +622,7 @@ std::vector<at::Tensor> FusionExecutor::allocOutputs(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> outputs;
   for (const auto out_i : c10::irange(kernel->outputs().size())) {
-    // Dummy output.
+    // If the output is just trivially the input, just "copy" it over.
     if (kernel->outputs()[out_i]->isFusionInput()) {
       for (auto inp_i : c10::irange(kernel->inputs().size())) {
         if (kernel->inputs()[inp_i] == kernel->outputs()[out_i]) {
@@ -641,13 +641,14 @@ std::vector<at::Tensor> FusionExecutor::allocOutputs(
           kernel->outputs()[out_i]->isA<TensorView>(),
           "Cannot allocate outputs that are not tensors.");
       auto output = kernel->outputs()[out_i]->as<TensorView>();
-      if (alias_indices.count(out_i) == 0) {
-        outputs.push_back(
-            inferAndAllocOutput(output, expr_eval, options_, false));
-      } else {
+      if (alias_indices.count(out_i) != 0) {
         // aliasing to inputs, no need to allocate real output
         outputs.push_back(
             inferAndAlloc(output, {}, expr_eval, options_, false));
+      } else {
+        // Allocate a real output
+        outputs.push_back(
+            inferAndAllocOutput(output, expr_eval, options_, false));
       }
     }
   }

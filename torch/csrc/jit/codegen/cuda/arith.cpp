@@ -82,7 +82,7 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
     auto dom = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
     TORCH_INTERNAL_ASSERT(
         dom.size() == out_domain.size(),
-        "Invalid tensor view found while producing and output, it has ",
+        "Invalid tensor view found while producing an output, it has ",
         dom.size(),
         " dimensions but expected ",
         out_domain.size());
@@ -110,12 +110,12 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
   }
   for (const auto dim_i : c10::irange(out_domain.size())) {
     if (extent_vals[dim_i] != nullptr) {
-      out_domain[dim_i] = IrBuilder::create<IterDomain>(
-          IrBuilder::create<Int>(start_offsets[dim_i]),
-          extent_vals[dim_i],
-          IrBuilder::create<Int>(stop_offsets[dim_i]),
-          ParallelType::Serial,
-          iter_types[dim_i]);
+      out_domain[dim_i] =
+          IterDomainBuilder(
+              IrBuilder::create<Int>(start_offsets[dim_i]), extent_vals[dim_i])
+              .stop_offset(IrBuilder::create<Int>(stop_offsets[dim_i]))
+              .iter_type(iter_types[dim_i])
+              .build();
     } else {
       IterType itype = IterType::BroadcastWithoutStride;
       for (const auto tv : tvs) {
@@ -128,11 +128,11 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
           break;
         }
       }
-      out_domain[dim_i] = IrBuilder::create<IterDomain>(
-          FusionGuard::getCurFusion()->zeroVal(),
-          FusionGuard::getCurFusion()->oneVal(),
-          ParallelType::Serial,
-          itype);
+      out_domain[dim_i] = IterDomainBuilder(
+                              FusionGuard::getCurFusion()->zeroVal(),
+                              FusionGuard::getCurFusion()->oneVal())
+                              .iter_type(itype)
+                              .build();
     }
   }
 
@@ -733,12 +733,11 @@ static TensorView* newForReduction(
         " of tensor ",
         tv);
 
-    new_domain.push_back(IrBuilder::create<IterDomain>(
-        id->start(),
-        id->extent(),
-        id->stopOffset(),
-        ParallelType::Serial,
-        isReduction ? IterType::Reduction : id->getIterType()));
+    new_domain.push_back(
+        IterDomainBuilder(id)
+            .resetSchedulingParams()
+            .iter_type(isReduction ? IterType::Reduction : id->getIterType())
+            .build());
   }
 
   TensorDomain* td = IrBuilder::create<TensorDomain>(
@@ -899,18 +898,14 @@ TensorView* broadcast(
   size_t iinp = 0, ibdim = 0;
   while (ibdim < is_broadcast_dim.size()) {
     if (is_broadcast_dim[ibdim]) {
-      out_domain.push_back(IrBuilder::create<IterDomain>(
-          FusionGuard::getCurFusion()->zeroVal(),
-          FusionGuard::getCurFusion()->oneVal(),
-          ParallelType::Serial,
-          IterType::BroadcastWithoutStride));
+      out_domain.push_back(IterDomainBuilder(
+                               FusionGuard::getCurFusion()->zeroVal(),
+                               FusionGuard::getCurFusion()->oneVal())
+                               .iter_type(IterType::BroadcastWithoutStride)
+                               .build());
     } else {
-      out_domain.push_back(IrBuilder::create<IterDomain>(
-          inp_domain[iinp]->start(),
-          inp_domain[iinp]->extent(),
-          inp_domain[iinp]->stopOffset(),
-          inp_domain[iinp]->getParallelType(),
-          inp_domain[iinp]->getIterType()));
+      out_domain.push_back(
+          IterDomainBuilder(inp_domain[iinp]).resetSchedulingParams().build());
       iinp++;
     }
     ibdim++;
@@ -1476,12 +1471,12 @@ TensorView* shift(
           ".");
     }
 
-    out_dom.push_back(IrBuilder::create<IterDomain>(
-        IrBuilder::create<Int>(out_start_offset),
-        inp_axis->extent(),
-        IrBuilder::create<Int>(out_stop_offset),
-        ParallelType::Serial,
-        inp_axis->getIterType()));
+    out_dom.push_back(
+        IterDomainBuilder(
+            IrBuilder::create<Int>(out_start_offset), inp_axis->extent())
+            .stop_offset(IrBuilder::create<Int>(out_stop_offset))
+            .iter_type(inp_axis->getIterType())
+            .build());
   }
 
   out = IrBuilder::create<TensorView>(
@@ -1614,18 +1609,18 @@ TensorView* gather(
         ". Padding right: ",
         pad_right);
     const auto out_stop_offset = inp_stop_offset.value() + extent_adjustment;
-    out_root_domains.push_back(IrBuilder::create<IterDomain>(
-        FusionGuard::getCurFusion()->zeroVal(),
-        inp_axis->extent(),
-        IrBuilder::create<Int>(out_stop_offset),
-        ParallelType::Serial,
-        inp_axis->getIterType()));
+    out_root_domains.push_back(
+        IterDomainBuilder(
+            FusionGuard::getCurFusion()->zeroVal(), inp_axis->extent())
+            .stop_offset(IrBuilder::create<Int>(out_stop_offset))
+            .iter_type(inp_axis->getIterType())
+            .build());
     // create a new axis for the gathered domain
-    out_gather_dom.push_back(IrBuilder::create<IterDomain>(
-        FusionGuard::getCurFusion()->zeroVal(),
-        IrBuilder::create<Int>(window_dim),
-        ParallelType::Serial,
-        IterType::Gather));
+    out_gather_dom.push_back(IterDomainBuilder(
+                                 FusionGuard::getCurFusion()->zeroVal(),
+                                 IrBuilder::create<Int>(window_dim))
+                                 .iter_type(IterType::Gather)
+                                 .build());
   }
 
   out_root_domains.insert(
@@ -1666,13 +1661,11 @@ TORCH_CUDA_CU_API TensorView* viewAsScalar(TensorView* inp) {
     out_domain.push_back(d->cloneWithoutRFactor());
   }
 
-  IterDomain* id = IrBuilder::create<IterDomain>(
-      inp_domain[0]->container(),
-      inp_domain[0]->container()->zeroVal(),
-      IrBuilder::create<Int>(vec_size),
-      ParallelType::Serial,
-      IterType::VectorComponent,
-      false);
+  IterDomain* id = IterDomainBuilder(
+                       inp_domain[0]->container()->zeroVal(),
+                       IrBuilder::create<Int>(vec_size))
+                       .iter_type(IterType::VectorComponent)
+                       .build();
   out_domain.push_back(id);
 
   auto out = IrBuilder::create<TensorView>(
@@ -1739,12 +1732,11 @@ static TensorView* newForMma(
         "and",
         tv_b);
 
-    new_domain.push_back(IrBuilder::create<IterDomain>(
-        id->start(),
-        id->extent(),
-        id->stopOffset(),
-        ParallelType::Serial,
-        isReduction ? IterType::Reduction : id->getIterType()));
+    new_domain.push_back(
+        IterDomainBuilder(id->start(), id->extent())
+            .stop_offset(id->stopOffset())
+            .iter_type(isReduction ? IterType::Reduction : id->getIterType())
+            .build());
   }
 
   TensorDomain* td = IrBuilder::create<TensorDomain>(
