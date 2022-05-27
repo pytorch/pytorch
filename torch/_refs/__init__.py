@@ -1434,12 +1434,23 @@ def atleast_1d(
     return res if len(res) > 1 else res[0]
 
 
+# Helper function with assert to avoid MyPy error
+# of incompatible type passed to unsqueeze
+def _unsqueeze_atleast(
+    at_least_fn: Callable, dim: int, arg: TensorLikeType
+) -> TensorLikeType:
+    arg_ = at_least_fn(arg)
+    assert isinstance(arg_, TensorLike)
+    return unsqueeze(arg_, 0)
+
+
 def atleast_2d(
     *args: TensorLikeType,
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_2d`."""
     args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
-    res = tuple(a if a.ndim >= 2 else unsqueeze(atleast_1d(a), 0) for a in args_)
+    unsqueeze_atleast_1d = partial(_unsqueeze_atleast, atleast_1d, 0)
+    res = tuple(a if a.ndim >= 2 else unsqueeze_atleast_1d(a) for a in args_)
     return res if len(res) > 1 else res[0]
 
 
@@ -1448,7 +1459,8 @@ def atleast_3d(
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_3d`."""
     args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
-    res = tuple(a if a.ndim >= 3 else unsqueeze(atleast_2d(a), -1) for a in args_)
+    unsqueeze_atleast_2d = partial(_unsqueeze_atleast, atleast_2d, -1)
+    res = tuple(a if a.ndim >= 3 else unsqueeze_atleast_2d(a) for a in args_)
     return res if len(res) > 1 else res[0]
 
 
