@@ -2,17 +2,6 @@
 
 #include <cmath>
 
-#ifdef _WIN32
-namespace std {
-// NOTE: windows corecrt_math.h does not support signbit with integral
-// arguments.
-template <typename T>
-typename std::enable_if<std::is_integral<T>::value, bool>::type signbit(T x) {
-  return x < 0;
-}
-} // namespace std
-#endif
-
 // Android NDK platform < 21 with libstdc++ has spotty C++11 support.
 // Various hacks in this header allow the rest of the codebase to use
 // standard APIs.
@@ -135,10 +124,6 @@ inline bool signbit(double x) {
   return x < 0;
 }
 inline bool signbit(long double x) {
-  return x < 0;
-}
-template <typename T>
-typename std::enable_if<std::is_integral<T>::value, bool>::type signbit(T x) {
   return x < 0;
 }
 
