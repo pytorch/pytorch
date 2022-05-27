@@ -22,17 +22,10 @@ MPSDevice::~MPSDevice() {
 
 MPSDevice::MPSDevice(): _mtl_device(nil) {
   // Check that MacOS 12.3+ version of MPS framework is available
-  // Create the MPSGraph and check method introduced in 12.3+
-  // which is used by MPS backend.
-  id mpsCD = NSClassFromString(@"MPSGraph");
-  if ([mpsCD instancesRespondToSelector:@selector(LSTMWithSourceTensor:
-                                                           recurrentWeight:
-                                                               inputWeight:
-                                                                      bias:
-                                                                 initState:
-                                                                  initCell:
-                                                                descriptor:
-                                                           name:)] == NO)) {
+  id mpsCD = NSClassFromString(@"MPSGraphCompilationDescriptor");
+  if (![mpsCD instancesRespondToSelector:@selector(optimizationLevel)]) {
+    // According to https://developer.apple.com/documentation/metalperformanceshadersgraph/mpsgraphcompilationdescriptor/3922624-optimizationlevel
+    // this means we are running on older MacOS
     return;
   }
   NSArray* devices = [MTLCopyAllDevices() autorelease];
