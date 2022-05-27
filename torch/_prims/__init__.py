@@ -2184,7 +2184,7 @@ sum = _make_reduction_prim(
 prod = _make_reduction_prim(
     name="prod",
     impl_aten=torch.prod,
-    doc=_sum_doc,
+    doc=_prod_doc,
 )
 
 var = _make_var_reduction_prim(
