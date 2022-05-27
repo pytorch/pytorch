@@ -768,8 +768,14 @@ int THPVariable_set_data(THPVariable *self, PyObject *data, void *unused)
   if (!THPVariable_Check(data)) {
     throw torch::TypeError("Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
   }
-
-  THPVariable_Unpack(self).set_data(THPVariable_Unpack(data));
+  const auto& var = THPVariable_Unpack(self);
+  const auto& other = THPVariable_Unpack(data);
+  auto self_requires_grad = var.requires_grad();
+  auto is_differentiable = isDifferentiableType(at::typeMetaToScalarType((other.dtype())));
+  THPUtils_assertRet(-1, !self_requires_grad || is_differentiable,
+      "data set to a tensor that requires gradient must be "
+      "floating point and complex dtype that support gradients");
+  var.set_data(other);
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
