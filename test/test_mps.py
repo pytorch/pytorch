@@ -3532,12 +3532,12 @@ class TestNLLLoss(TestCase):
             self.assertEqual(result, cpu_result)
 
         for dtype in [torch.float32, torch.int32, torch.int64]:
-            helper(2,2, dtype)
-            helper(2,3, dtype)
-            helper(0,2, dtype)
-            helper(0,0, dtype)
-            helper(3,8, dtype)
-            helper(8,3, dtype)
+            helper(2, 2, dtype)
+            helper(2, 3, dtype)
+            helper(0, 2, dtype)
+            helper(0, 0, dtype)
+            helper(3, 8, dtype)
+            helper(8, 3, dtype)
 
     # Test diag
     def test_diag(self):
@@ -4100,7 +4100,9 @@ exit(len(w))
     def _get_not_implemented_op(self):
         # This can be changed once we actually implement `torch.bincount`
         # Should return fn, args, kwargs, string_version
-        return torch.bincount, (torch.tensor([4, 3, 6, 3, 4], device='mps')), {}, "torch.bincount(torch.tensor([4, 3, 6, 3, 4], device='mps'))"
+        return (torch.bincount,
+                (torch.tensor([4, 3, 6, 3, 4], device='mps')), {},
+                "torch.bincount(torch.tensor([4, 3, 6, 3, 4], device='mps'))")
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
