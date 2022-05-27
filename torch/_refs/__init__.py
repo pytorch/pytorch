@@ -1776,7 +1776,10 @@ def rot90(
     a: TensorLikeType, k: int = 1, dims: DimsSequenceType = (0, 1)
 ) -> TensorLikeType:
     """Reference implementation of :func:`torch.rot90`."""
-    dims = utils.canonicalize_dims(a.ndim, dims)
+    dims_ = utils.canonicalize_dims(a.ndim, dims)
+    # Required to silence MyPy errors
+    assert isinstance(dims_, (tuple, list))
+    dims = dims_
     if len(dims) != 2:
         raise RuntimeError(
             f"expected total rotation dims == 2, but got dims = {len(dims)}"
