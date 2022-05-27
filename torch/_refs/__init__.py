@@ -1441,7 +1441,7 @@ def _unsqueeze_atleast(
 ) -> TensorLikeType:
     arg_ = at_least_fn(arg)
     assert isinstance(arg_, TensorLike)
-    return unsqueeze(arg_, 0)
+    return unsqueeze(arg_, dim)
 
 
 def atleast_2d(
