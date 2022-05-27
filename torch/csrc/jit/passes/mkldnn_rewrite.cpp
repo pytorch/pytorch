@@ -11,18 +11,6 @@
 namespace torch {
 namespace jit {
 
-namespace mkldnn {
-namespace detail {
-
-#if AT_MKLDNN_ENABLED()
-bool mkldnn_fuser_enabled = true;
-#else
-bool mkldnn_fuser_enabled = false;
-#endif // AT_MKLDNN_ENABLED()
-
-} // namespace detail
-} // namespace mkldnn
-
 #if AT_MKLDNN_ENABLED()
 
 c10::VaryingShape<int64_t> getSizesOf(Node* n, size_t idx) {
@@ -77,21 +65,17 @@ void insertPrePackedConvOpForNode(Node* n) {
   n->output()->replaceAllUsesWith(prepack_conv->output());
 }
 
-bool canFuseOnDevice(Value* v) {
-  auto type = v->type()->cast<TensorType>();
-  if (!type) {
-    return true;
-  }
-  auto device = type->device();
-  if (!device) {
-    return false;
-  }
-  return device->is_cpu() && mkldnn::detail::mkldnn_fuser_enabled;
-}
-
-bool isFusableOnDevice(Node* node) {
+bool isTensorTypeCPU(Node* node) {
   for (const auto& input : node->inputs()) {
-    if (!canFuseOnDevice(input)) {
+    auto type = input->type()->cast<TensorType>();
+    if (!type) {
+      continue;
+    }
+    auto device = type->device();
+    if (!device) {
+      return false;
+    }
+    if (!device->is_cpu()) {
       return false;
     }
   }
@@ -105,7 +89,7 @@ void insertPrePackedConvOp(Block* b) {
     }
 
     if (n->kind() == aten::conv2d) {
-      if (isFusableOnDevice(n)) {
+      if (isTensorTypeCPU(n)) {
         insertPrePackedConvOpForNode(n);
       }
     }
