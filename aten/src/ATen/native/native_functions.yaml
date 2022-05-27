@@ -542,7 +542,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: addr
-    CompositeImplicitAutograd: math_addr
+    CompositeExplicitAutograd: math_addr
 
 - func: addr_(Tensor(a!) self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
@@ -552,7 +552,7 @@
 - func: addr.out(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: addr_out
-    CompositeImplicitAutograd: math_addr_out
+    CompositeExplicitAutograd: math_addr_out
 
 - func: affine_grid_generator(Tensor theta, int[] size, bool align_corners) -> Tensor
   variants: function
@@ -1151,6 +1151,8 @@
 
 - func: block_diag(Tensor[] tensors) -> Tensor
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: block_diag
 
 - func: ceil(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator

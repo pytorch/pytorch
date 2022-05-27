@@ -585,6 +585,7 @@ def extract_shape_from_varargs(
 
 
 _integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+_half_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
 _float_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 _complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
 
@@ -597,6 +598,11 @@ def is_boolean_dtype(dtype: torch.dtype) -> bool:
 def is_integer_dtype(dtype: torch.dtype) -> bool:
     assert isinstance(dtype, torch.dtype)
     return dtype in _integer_dtypes
+
+
+def is_half_dtype(dtype: torch.dtype) -> bool:
+    assert isinstance(dtype, torch.dtype)
+    return dtype in _half_dtypes
 
 
 def is_float_dtype(dtype: torch.dtype) -> bool:
@@ -1183,3 +1189,14 @@ def check_in_bounds_for_storage(
             )
         )
         raise ValueError(msg)
+
+
+def check(b, s):
+    """
+    Helper function for raising a RuntimeError if a boolean condition fails.
+    Error message is a callable producing a string (to avoid wasting time
+    string formatting in non-error case, and also to make it easier for torchdynamo
+    to trace.)
+    """
+    if not b:
+        raise RuntimeError(s())

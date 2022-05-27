@@ -5,6 +5,7 @@ import torch._refs as refs
 from torch._prims.wrappers import out_wrapper
 
 from torch._prims.utils import (
+    check,
     DimsType,
     TensorLikeType,
     NumberType,
@@ -35,7 +36,7 @@ def vector_norm(
     dtype: Optional[torch.dtype] = None,
 ):
     # Checks
-    linalg.utils.check_fp_or_complex(x, "linalg.vector_norm", half=True)
+    linalg.utils.check_fp_or_complex(x.dtype, "linalg.vector_norm", half=True)
 
     if isinstance(dim, int):
         dim = [dim]  # type: ignore[assignment]
@@ -43,22 +44,21 @@ def vector_norm(
         # refs.sum just accepts List rather than DimType
         dim = list(dim)  # type: ignore[assignment]
 
-    # TODO These things are TORCH_CHECKS, replace them with check(a,b)
-    # once https://github.com/pytorch/pytorch/pull/78014 is merged
     if x.numel() == 0 and (ord < 0.0 or ord == float("inf")):
-        if dim is None or len(dim) == 0:
-            raise RuntimeError(
-                "linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
-                "because the operation does not have an identity"
+        check(
+            dim is not None and len(dim) != 0,
+            f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
+            "because the operation does not have an identity",
+        )
+        shape = x.shape
+        assert dim is not None  # mypy does not seem to be able to see through check?
+        for d in dim:
+            check(
+                shape[d] != 0,
+                f"linalg.vector_norm cannot compute the {ord} norm on the "
+                f"dimension {d} because this dimension is empty and the "
+                "operation does not have an identity",
             )
-        else:
-            for d in dim:
-                if x.size(d) == 0:
-                    raise RuntimeError(
-                        f"linalg.vector_norm cannot compute the {ord} norm on the "
-                        "dimension {d} because this dimension is empty and the "
-                        "operation does not have an identity"
-                    )
     linalg.utils.check_norm_dtype(dtype, x.dtype, "linalg.vector_norm")
 
     computation_dtype, result_dtype = reduction_dtypes(

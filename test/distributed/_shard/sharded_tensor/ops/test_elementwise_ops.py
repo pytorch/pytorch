@@ -3,7 +3,7 @@
 import sys
 
 import torch
-from torch.distributed._shard import sharded_tensor
+from torch.distributed._shard import sharded_tensor, _shard_tensor
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
@@ -19,6 +19,9 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 )
 from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common import (
     generate_chunk_sharding_specs_for_test,
+)
+from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common import (
+    _chunk_sharding_specs_list_for_test,
 )
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -102,6 +105,20 @@ class TestShardedTensorElementWiseOps(ShardedTensorTestBase):
                 spec, [17, 23], dropout, reset_seed=_reset_random_seed
             )
 
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_sharded_tensor_nan_to_num(self):
+        specs = _chunk_sharding_specs_list_for_test([0, 1], seed=10)
+        for spec in specs:
+            tensor = torch.rand(16, 12).cuda(self.rank)
+            tensor[:, :2] = float('nan')
+            tensor[:, 4:5] = float('inf')
+            tensor[:, 10:] = -float('inf')
+            st = _shard_tensor(tensor, spec)
+            st_expected = _shard_tensor(torch.nan_to_num(tensor), spec)
+            st = torch.nan_to_num(st)
+            self.assertTrue(torch.allclose(st, st_expected))
 
 if __name__ == "__main__":
     run_tests()

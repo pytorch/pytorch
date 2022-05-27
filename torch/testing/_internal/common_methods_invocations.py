@@ -1130,17 +1130,11 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
     # use op_info.generate_args_kwargs directly.
     generate_args_kwargs = kwargs.get('generate_args_kwargs', lambda *args, **kwargs: (yield tuple(), {}))
 
-    inputs: List[SampleInput] = []
     for t in _generate_reduction_inputs(device, dtype, requires_grad):
         for reduction_kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims):
             for args, kwargs in generate_args_kwargs(t, **reduction_kwargs):
                 kwargs.update(reduction_kwargs)
-                inputs.append(SampleInput(
-                    t.clone().requires_grad_(requires_grad),
-                    args=args,
-                    kwargs=kwargs))
-
-    return inputs
+                yield SampleInput(t.clone().requires_grad_(requires_grad), args=args, kwargs=kwargs)
 
 
 def _generate_masked_op_mask(input_shape, device, **kwargs):
@@ -1367,6 +1361,9 @@ class ReductionOpInfo(OpInfo):
         # the dtype according to the type promotion rules above.
         result_dtype: Optional[torch.dtype] = None,
 
+        # Casts complex results to real (e.g. linalg.norm or torch.var)
+        complex_to_real: bool = False,
+
         # ReductionOpInfo tests generate their own input, dim and keepdim
         # arguments and call this function to generate tuples of extra args and
         # kwargs to use when calling the op. This is required for operators that
@@ -1382,6 +1379,7 @@ class ReductionOpInfo(OpInfo):
         # These are mutually exclusive options
         assert not (result_dtype and promotes_int_to_float)
         assert not (result_dtype and promotes_int_to_int64)
+        assert not (result_dtype and complex_to_real)
         assert not (promotes_int_to_float and promotes_int_to_int64)
 
         # Default sample_inputs_func for ReductionOpInfo which augments sample
@@ -1402,6 +1400,7 @@ class ReductionOpInfo(OpInfo):
         self.supports_multiple_dims = supports_multiple_dims
         self.promotes_int_to_float = promotes_int_to_float
         self.promotes_int_to_int64 = promotes_int_to_int64
+        self.complex_to_real = complex_to_real
         self.result_dtype = result_dtype
         self.generate_args_kwargs = generate_args_kwargs
 
@@ -1986,25 +1985,23 @@ def sample_inputs_norm_inf(op_info, device, dtype, requires_grad, **kwargs):
     for shape, args, name in cases:
         yield SampleInput(make_arg(shape), args=args, name=name)
 
+def sample_kwargs_vector_norm(t, **kwargs):
+    # orders with / without identity
+    def ords():
+        has_id = (6, 4, 2, 1, 0, 0.9)
+        no_id = (inf, -2.1, -inf)
+        if t.numel() == 0:
+            dim = kwargs.get("dim")
+            if dim is None:
+                return has_id
+            if not isinstance(dim, Iterable):
+                dim = (dim,)
+            for d in dim:
+                if t.size(d) == 0:
+                    return has_id
+        return has_id + no_id
 
-def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    sizes = ((S,), (2, 2))
-    dims = (None, 0, -1)
-    ords = (inf, 6, 4, 2, 1, 0, 0.9, -2.1, -inf)
-
-    for size, ord_, keepdim in product(sizes, ords, (True, False)):
-        for dim in dims:
-            yield SampleInput(make_arg(size), args=(ord_,), kwargs=dict(keepdim=keepdim, dim=dim))
-            if dtype == torch.float32:
-                yield SampleInput(make_arg(size), args=(ord_,), kwargs=dict(keepdim=keepdim, dim=dim, dtype=torch.float64))
-            if dtype == torch.complex64:
-                yield SampleInput(make_arg(size), args=(ord_,), kwargs=dict(keepdim=keepdim, dim=dim, dtype=torch.complex128))
-
-        # Test several dims
-        if len(size) == 2:
-            yield SampleInput(make_arg(size), args=(ord_,), kwargs=dict(keepdim=keepdim, dim=(-1, 0)))
+    return (((), dict(ord=o)) for o in ords())
 
 # The following functions and classes are for testing elementwise binary operators.
 
@@ -3166,13 +3163,13 @@ def sample_inputs_multilabel_soft_margin_loss(op_info, device, dtype, requires_g
                           kwargs={'weight': _make_tensor(shape, requires_grad=False)})
 
 def sample_inputs_addr(op_info, device, dtype, requires_grad, **kwargs):
-    input1 = SampleInput(
+    yield SampleInput(
         make_tensor((S, M), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
         args=(
             make_tensor((S, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
             make_tensor((M, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)))
 
-    input2 = SampleInput(
+    yield SampleInput(
         make_tensor((), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
         args=(
             make_tensor((S, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
@@ -3186,14 +3183,14 @@ def sample_inputs_addr(op_info, device, dtype, requires_grad, **kwargs):
     else:
         alpha, beta = 2, 3
 
-    input3 = SampleInput(
+    yield SampleInput(
         make_tensor((S, M), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
         args=(
             make_tensor((S, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
             make_tensor((M, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)),
         kwargs=dict(beta=beta, alpha=alpha))
 
-    input4 = SampleInput(
+    yield SampleInput(
         make_tensor((), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
         args=(
             make_tensor((S, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
@@ -3201,7 +3198,25 @@ def sample_inputs_addr(op_info, device, dtype, requires_grad, **kwargs):
         kwargs=dict(beta=beta, alpha=alpha),
         broadcasts_input=True)
 
-    return (input1, input2, input3, input4)
+    # These samples fail gradcheck
+    if dtype.is_floating_point and not requires_grad:
+        yield SampleInput(
+            torch.tensor([[math.nan]], device=device, requires_grad=requires_grad),
+            args=(
+                torch.tensor([0.0], device=device, requires_grad=requires_grad),
+                torch.tensor([0.0], device=device, requires_grad=requires_grad),
+            ),
+            kwargs=dict(beta=0.0, alpha=0.0),
+            broadcasts_input=True)
+
+        yield SampleInput(
+            torch.tensor([[0.0]], device=device, requires_grad=requires_grad),
+            args=(
+                torch.tensor([math.nan], device=device, requires_grad=requires_grad),
+                torch.tensor([math.nan], device=device, requires_grad=requires_grad),
+            ),
+            kwargs=dict(beta=0.0, alpha=0.0),
+            broadcasts_input=True)
 
 def sample_inputs_zero_(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -3776,11 +3791,21 @@ def reference_inputs_broadcast_tensors(op, device, dtype, requires_grad, **kwarg
 
 def sample_inputs_block_diag(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
-    test_cases: Tuple[tuple] = (((1, S), (2, S), (3, S),),)
+    test_cases: Tuple[tuple] = (
+        ((1, S), (2, S), (3, S),),
+        ((S, 1), (S, 2), (S, 3),),
+        ((1,), (2,), (3,),),
+        ((2, S), (S,))
+    )
 
     samples: List[SampleInput] = []
     for shape, *other_shapes in test_cases:
         samples.append(SampleInput(make_arg(shape), args=tuple(make_arg(s) for s in other_shapes)))
+        # We also want to test mixed complex-non-complex inputs to block_diag
+        if dtype == torch.complex32 or dtype == torch.complex64:
+            non_complex_dtype = torch.float32 if dtype == torch.complex32 else torch.float64
+            make_arg_non_complex = partial(make_tensor, dtype=non_complex_dtype, device=device, requires_grad=requires_grad)
+            samples.append(SampleInput(make_arg_non_complex(shape), args=tuple(make_arg(s) for s in other_shapes)))
 
     return samples
 
@@ -6639,23 +6664,22 @@ def sample_inputs_linalg_solve_triangular(op_info, device, dtype, requires_grad=
     ks = (1, 3, 0)
 
     for b, n, k, (left, upper, uni) in product(bs, ns, ks, product((True, False), repeat=3)):
-        with torch.no_grad():
-            if b == 1:
-                A = make_arg((n, n)) if left else make_arg((k, k))
-                B = make_arg((n, k))
-            else:
-                A = make_arg((b, n, n)) if left else make_arg((b, k, k))
-                B = make_arg((b, n, k))
-            if uni:
-                # Not really necessary, but writing it for consistency
-                A.diagonal(0, -2, -1).fill_(1.)
-            else:
-                d = A.diagonal(0, -2, -1)
-                d[d.abs() < 1e-6] = 1.
-            if upper:
-                A.triu_()
-            else:
-                A.tril_()
+        if b == 1:
+            A = make_arg((n, n)) if left else make_arg((k, k))
+            B = make_arg((n, k))
+        else:
+            A = make_arg((b, n, n)) if left else make_arg((b, k, k))
+            B = make_arg((b, n, k))
+        if uni:
+            # Not really necessary, but writing it for consistency
+            A.diagonal(0, -2, -1).fill_(1.)
+        else:
+            d = A.diagonal(0, -2, -1)
+            d[d.abs() < 1e-6] = 1.
+        if upper:
+            A.triu_()
+        else:
+            A.tril_()
         kwargs = {"upper": upper, "left": left, "unitriangular": uni}
         if requires_grad:
             for grad_A, grad_B in product((True, False), repeat=2):
@@ -9111,12 +9135,11 @@ def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwar
                     t1 = _make_tensor(s, low=0)
                     t2 = _make_tensor(s, low=0)
 
-                    with torch.no_grad():
-                        if not li:
-                            i1.abs_()
-                            i2.abs_()
-                        t1.abs_()
-                        t2.abs_()
+                    if not li:
+                        i1.abs_()
+                        i2.abs_()
+                    t1.abs_()
+                    t2.abs_()
 
                     yield (
                         i1, t1,
@@ -10542,6 +10565,8 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           # Default batching rule in core doesn't work for ops with TensorList args
+           check_batched_forward_grad=False,
            skips=(
                # https://github.com/pytorch/pytorch/issues/64997
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -10550,10 +10575,6 @@ op_db: List[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":252,
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
-               # Problem; should be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ),
            sample_inputs_func=sample_inputs_block_diag),
     UnaryUfuncInfo('bitwise_not',
@@ -12142,20 +12163,28 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            sample_inputs_func=sample_inputs_linalg_vander),
-    OpInfo('linalg.vector_norm',
-           op=torch.linalg.vector_norm,
-           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           sample_inputs_func=sample_inputs_linalg_vector_norm,
-           aten_name='linalg_vector_norm',
-           supports_forward_ad=True,
-           # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
-           # got: Could not allocate memory to change Tensor SizesAndStrides!
-           check_batched_forward_grad=False,
-           supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                            dtypes=[torch.complex128]),
-           )),
+    ReductionOpInfo(
+        'linalg.vector_norm',
+        op=torch.linalg.vector_norm,
+        identity=0,
+        nan_policy='propagate',
+        supports_multiple_dims=True,
+        complex_to_real=True,
+        supports_forward_ad=True,
+        # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
+        # got: Could not allocate memory to change Tensor SizesAndStrides!
+        check_batched_forward_grad=False,
+        supports_fwgrad_bwgrad=True,
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        generate_args_kwargs=sample_kwargs_vector_norm,
+        aten_name='linalg_vector_norm',
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                         dtypes=[torch.complex128]),
+            # FIXME: sum reduces all dimensions when dim=[]
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+        )),
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, None),
@@ -14280,7 +14309,7 @@ op_db: List[OpInfo] = [
         gradcheck_fast_mode=False,
         supports_autograd=True,
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=False,
+        supports_fwgrad_bwgrad=True,
         decorators=(
             # RuntimeError: expected int at position 0, but got: Tensor
             DecorateInfo(
@@ -18021,6 +18050,7 @@ op_db: List[OpInfo] = [
         'std',
         nan_policy='propagate',
         supports_out=False,
+        complex_to_real=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         assert_autodiffed=True,
@@ -18039,9 +18069,6 @@ op_db: List[OpInfo] = [
             # FIXME: dim=[] reduces all dimensions
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # TODO(@heitorschueroff) std return float for complex types
-            # need to find a better way to model result dtype
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_result_dtype'),
             # FIXME: improve precision
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
@@ -18055,6 +18082,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         assert_autodiffed=True,
         promotes_int_to_float=True,
+        complex_to_real=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -18071,9 +18099,6 @@ op_db: List[OpInfo] = [
             # FIXME: dim=[] reduces all dimensions
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # TODO(@heitorschueroff) std return float for complex types
-            # need to find a better way to model result dtype
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_result_dtype'),
             # FIXME: improve precision
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
@@ -19543,14 +19568,24 @@ python_ref_db = [
         validate_view_consistency=False
     ),
     #
-    # torch.linalg
+    # Linear Algebra Operators
     #
     PythonRefInfo(
+        "_refs.addr",
+        torch_opinfo_name="addr",
+        decorators=(
+            # RuntimeError: no _refs support for torch.outer
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
+        ),
+    ),
+    #
+    # torch.linalg
+    #
+    ReductionPythonRefInfo(
         "_refs.linalg.vector_norm",
         torch_opinfo_name="linalg.vector_norm",
         supports_out=True,
-        # See https://github.com/pytorch/pytorch/issues/77216
-        validate_view_consistency=False
     ),
     #
     # Tensor Creation Reference OpInfos
