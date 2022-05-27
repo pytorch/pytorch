@@ -1335,11 +1335,11 @@
   result: auto_element_wise
 
 - name: sgn(Tensor self) -> Tensor
-  self: sgn_backward(self, grad, result)
-  # Cannot use auto_element_wise here because the Jacobian is *not* Hermitian
+  self: "self.is_complex() ? sgn_backward_c(self, grad, result) : Tensor{}"
+  # Cannot use auto_element_wise here because the Jacobian is *not* Hermitian (in fact, it is symmetric)
   # The function is not holomorphic, so there's no reason for its Jacobian to be Hermitian
   # auto_element_wise has a name that's a bit deceiving in the complex case
-  result: sgn_jvp(self_p, self_t, result)
+  result: "self_p.is_complex() ? sgn_backward_c(self_p, self_t, result) : at::_efficientzerotensor(self_p.sizes(), self_p.options())"
 
 - name: sin(Tensor self) -> Tensor
   self: grad * self.cos().conj()

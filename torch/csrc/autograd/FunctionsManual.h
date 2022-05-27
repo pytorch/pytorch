@@ -111,8 +111,7 @@ at::Tensor _fused_dropout_backward(at::Tensor grad, at::Tensor mask, double p1m)
 at::Tensor infinitely_differentiable_native_dropout_backward(const at::Tensor& grad, const at::Tensor& mask, double scale);
 at::Tensor native_dropout_double_backward(const at::Tensor& ggI, const at::Tensor& grad, const at::Tensor& mask, double scale);
 at::Tensor evenly_distribute_backward(at::Tensor grad, const at::Tensor & input, const at::Tensor & value);
-Tensor sgn_jvp(const Tensor& x, const Tensor& dx, const Tensor& sgn);
-Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn);
+Tensor sgn_backward_c(const Tensor& x, const Tensor& gx, const Tensor& sgn);
 Tensor mean_backward(const Tensor& grad, IntArrayRef shape, IntArrayRef dim, int64_t numel, bool keepdim);
 at::Tensor var_backward(at::Tensor grad, const at::Tensor& self, at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim);
 at::Tensor std_backward(const at::Tensor& result, const at::Tensor& grad, const at::Tensor& self, at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim);

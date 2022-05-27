@@ -382,23 +382,9 @@ Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
   return grad * args.digamma_().sum(-1);
 }
 
-Tensor sgn_jvp(const Tensor& x, const Tensor& dx, const Tensor& sgn) {
-  if (x.is_complex()) {
-    auto abs = x.abs();
-    return ((dx - sgn * sgn * dx.conj()) / (2 * abs)).masked_fill_(abs == 0., 0.);
-
-  } else {
-    return at::_efficientzerotensor(sgn.sizes(), sgn.options());
-  }
-}
-
-Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn) {
-  if (x.is_complex()) {
-    auto abs = x.abs();
-    return ((gx - (sgn * sgn) * gx.conj()) / (2. * abs)).masked_fill_(abs == 0., 0.);
-  } else {
-    return {};
-  }
+Tensor sgn_backward_c(const Tensor& x, const Tensor& gx, const Tensor& sgn) {
+  auto abs = x.abs();
+  return ((gx - (sgn * sgn) * gx.conj()) / (2. * abs)).masked_fill_(abs == 0., 0.);
 }
 
 Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
