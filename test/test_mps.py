@@ -4098,7 +4098,7 @@ exit(len(w))
             self.assertTrue(False, "There was a warning when importing torch.")
 
     def _get_not_implemented_op(self):
-        # This can be changed once we actually implement `torch.eye`
+        # This can be changed once we actually implement `torch.bincount`
         # Should return fn, args, kwargs, string_version
         return torch.bincount, (torch.tensor([4, 3, 6, 3, 4], device='mps')), {}, "torch.bincount(torch.tensor([4, 3, 6, 3, 4], device='mps'))"
 
