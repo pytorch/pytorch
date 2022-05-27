@@ -542,7 +542,6 @@ meta_function_expected_failures = {
     torch.mode: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::mode
     torch.multinomial: {bf16, f32, f64},  # aten::multinomial, aten::multinomial.out
     torch.mvlgamma: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense, aten::mvlgamma.out
-    torch.nan_to_num: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nan_to_num.out
     torch.nanmean: {bf16, f16, f32, f64},
     torch.nanmedian: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::nanmedian, aten::nanmedian.dim_values
     torch.nanquantile: {f32, f64},
@@ -843,8 +842,6 @@ meta_dispatch_expected_failures = {
     aten.multinomial.out: {bf16, f64, f32},
     aten.mvlgamma.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.mvlgamma.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.nan_to_num.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.nan_to_num.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.nanmedian.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.nanmedian.dim: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.nansum.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},

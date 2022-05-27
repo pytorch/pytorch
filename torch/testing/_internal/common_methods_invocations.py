@@ -2774,7 +2774,8 @@ def _reference_inputs_elementwise_unary(op, device, dtype, requires_grad, **kwar
         yield from generate_elementwise_unary_large_value_tensors(
             op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
         )
-    if dtype.is_floating_point or dtype.is_complex:
+
+    if dtype.is_floating_point or (op.handles_complex_extremal_values and dtype.is_complex):
         yield from generate_elementwise_unary_extremal_value_tensors(
             op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
         )
@@ -2824,6 +2825,7 @@ class UnaryUfuncInfo(OpInfo):
         dtypesIfCUDA=None,
         dtypesIfROCM=None,
         domain=(None, None),  # the [low, high) domain of the function
+        handles_complex_extremal_values=True,  # whether the op correctly handles extremal values (like nan/inf)
         handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
         supports_complex_to_float=False,  # op supports casting from complex input to real output safely eg. angle
         sample_inputs_func=sample_inputs_elementwise_unary,
@@ -2847,6 +2849,7 @@ class UnaryUfuncInfo(OpInfo):
         )
         self.ref = ref
         self.domain = domain
+        self.handles_complex_extremal_values = handles_complex_extremal_values
         self.handles_large_floats = handles_large_floats
         self.supports_complex_to_float = supports_complex_to_float
         self.reference_numerics_filter = reference_numerics_filter
@@ -19285,8 +19288,16 @@ python_ref_db = [
         torch_opinfo_name="log2",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.nan_to_num",
+        torch_opinfo_name="nan_to_num",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
         torch_opinfo_name="neg",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.positive",
+        torch_opinfo_name="positive",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.reciprocal",
@@ -19297,8 +19308,19 @@ python_ref_db = [
         torch_opinfo_name="round",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.sigmoid",
+        torch_opinfo_name="sigmoid",
+        # Reference: https://github.com/pytorch/pytorch/issues/56012
+        handles_complex_extremal_values=False,
+        handles_large_floats=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.sign",
         torch_opinfo_name="sign",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.signbit",
+        torch_opinfo_name="signbit",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sin",
@@ -19408,6 +19430,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.hinge_embedding_loss",
         torch_opinfo_name="nn.functional.hinge_embedding_loss",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.tanhshrink",
+        torch_opinfo_name="nn.functional.tanhshrink",
     ),
     #
     # Elementwise Binary Reference OpInfos
