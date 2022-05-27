@@ -1302,7 +1302,6 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
         buffer = z
     return min - torch.log1p(z), buffer
 
-
 # torch.ops.aten.norm only supports numeric p, does not support Frobenius norm or nuclear norm
 # aten.norms supports any dimension
 @register_decomposition(aten.norm)
@@ -1315,4 +1314,4 @@ def norm(self: Tensor, p: float, dim: List[int] = None, keepdim: bool = False, o
     elif p==-float('inf'):
         return self.abs().min()
     else:
-        return self.abs().pow(p).sum().pow(1/p)   
+        return self.abs().pow(p).sum().pow(1/p)  
