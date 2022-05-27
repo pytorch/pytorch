@@ -19163,6 +19163,10 @@ python_ref_db = [
         "_refs.nn.functional.softplus",
         torch_opinfo_name="nn.functional.softplus",
     ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.softsign",
+        torch_opinfo_name="nn.functional.softsign",
+    ),
     #
     # Elementwise Binary Reference OpInfos
     #

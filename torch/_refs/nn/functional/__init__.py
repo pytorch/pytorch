@@ -23,6 +23,7 @@ __all__ = [
     "mish",
     "selu",
     "softplus",
+    "softsign",
 ]
 
 # celu is implemented specially because it has an alpha argument
@@ -227,3 +228,16 @@ def softplus(
         rhs = refs.log1p(refs.exp(scaled_input))
 
     return refs.where(refs.gt(scaled_input, threshold), a, rhs)
+
+
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def softsign(a: TensorLikeType) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.softsign
+    """
+
+    rhs = refs.add(refs.abs(a), 1)
+    return refs.true_divide(a, rhs)
