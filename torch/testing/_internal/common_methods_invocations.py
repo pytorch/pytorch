@@ -1164,32 +1164,27 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
     mask optional argument. A mask is a bool tensor with the same
     shape as input or a shape that is broadcastable to input shape.
     """
-    inputs: List[SampleInput] = []
     kwargs['supports_multiple_dims'] = op_info.supports_multiple_dims
 
     for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
         for mask in _generate_masked_op_mask(sample_input.input.shape, device, **kwargs):
             sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
-            inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
-                                      args=sample_input_args, kwargs=sample_input_kwargs))
+            yield SampleInput(sample_input.input.detach().requires_grad_(requires_grad),
+                              args=sample_input_args, kwargs=sample_input_kwargs)
             if(not requires_grad and dtype.is_floating_point and
                sample_input.input.ndim == 2 and mask is not None and
                mask.shape == sample_input.input.shape):
                 for v in [torch.inf, -torch.inf, torch.nan]:
-                    t = sample_input.input.clone()
-                    t.diagonal()[:] = v
-                    inputs.append(SampleInput(t.detach().requires_grad_(requires_grad),
-                                              args=sample_input_args,
-                                              kwargs=sample_input_kwargs))
-    return inputs
+                    t = sample_input.input.detach()
+                    t.diagonal(0, -2, -1).fill_(v)
+                    yield SampleInput(t.requires_grad_(requires_grad),
+                                      args=sample_input_args, kwargs=sample_input_kwargs)
 
 
 def sample_inputs_sparse_coo_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked reduction operators that support inputs
     with sparse coo layouts.
     """
-    inputs: List[SampleInput] = []
-
     if op_info.supports_sparse:
         op_name = op_info.name.replace('_masked.', '')
         for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
@@ -1197,8 +1192,8 @@ def sample_inputs_sparse_coo_masked_reduction(op_info, device, dtype, requires_g
             if mask is not None:
                 sample_input_kwargs = sample_input.kwargs.copy()
                 sample_input_kwargs.update(mask=mask.to_sparse())
-                inputs.append(SampleInput(sample_input.input.to_sparse(),
-                                          args=sample_input.args, kwargs=sample_input_kwargs))
+                yield SampleInput(sample_input.input.to_sparse(),
+                                  args=sample_input.args, kwargs=sample_input_kwargs)
             else:
                 if op_name in {'prod', 'amax', 'amin'}:
                     # FIXME: for now reductions with non-zero reduction identity and
@@ -1206,16 +1201,14 @@ def sample_inputs_sparse_coo_masked_reduction(op_info, device, dtype, requires_g
                     # tensors, see torch._masked.prod implementation
                     # for details.
                     continue
-                inputs.append(SampleInput(sample_input.input.to_sparse(),
-                                          args=sample_input.args, kwargs=sample_input.kwargs))
-    return inputs
+                yield SampleInput(sample_input.input.to_sparse(),
+                                  args=sample_input.args, kwargs=sample_input.kwargs)
 
 
 def sample_inputs_sparse_csr_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked reduction operators that support inputs
     with sparse csr layouts.
     """
-    inputs: List[SampleInput] = []
     if op_info.supports_sparse_csr:
         for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
             if not (sample_input.input.ndim == 2 and sample_input.kwargs.get('keepdim')):
@@ -1226,8 +1219,8 @@ def sample_inputs_sparse_csr_masked_reduction(op_info, device, dtype, requires_g
             if mask is not None:
                 sample_input_kwargs = sample_input.kwargs.copy()
                 sample_input_kwargs.update(mask=mask.to_sparse_csr())
-                inputs.append(SampleInput(sample_input.input.to_sparse_csr(),
-                                          args=sample_input.args, kwargs=sample_input_kwargs))
+                yield SampleInput(sample_input.input.to_sparse_csr(),
+                                  args=sample_input.args, kwargs=sample_input_kwargs)
             else:
                 if op_info.name.lstrip('_masked.') in ['prod']:
                     # reductions with non-zero reduction identity and
@@ -1235,8 +1228,8 @@ def sample_inputs_sparse_csr_masked_reduction(op_info, device, dtype, requires_g
                     # tensors, see torch._masked.prod implementation
                     # for details.
                     continue
-                inputs.append(SampleInput(sample_input.input.to_sparse_csr(),
-                                          args=sample_input.args, kwargs=sample_input.kwargs))
+                yield SampleInput(sample_input.input.to_sparse_csr(),
+                                  args=sample_input.args, kwargs=sample_input.kwargs)
             if sample_input.kwargs['dim'] == 0:
                 # Reductions of CSR tensors use different implementations for
                 # inner and/or outer dimensions. So, as a minimum of testing CSR
@@ -1248,27 +1241,23 @@ def sample_inputs_sparse_csr_masked_reduction(op_info, device, dtype, requires_g
                 sample_input = inputs[-1]
                 sample_input_kwargs = sample_input.kwargs.copy()
                 sample_input_kwargs.update(dim=1)
-                inputs.append(SampleInput(sample_input.input.clone(),
-                                          args=sample_input.args, kwargs=sample_input_kwargs))
-    return inputs
+                yield SampleInput(sample_input.input.clone(),
+                                  args=sample_input.args, kwargs=sample_input_kwargs)
 
 
 def sample_inputs_masked_norm(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked norm.
     """
-    inputs: List[SampleInput] = []
     for ord in [2.0, 1, float('inf'), float('-inf'), 0]:
         for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
             sample_input_args, sample_input_kwargs = (ord,) + sample_input.args, sample_input.kwargs.copy()
-            inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
-                                      args=sample_input_args, kwargs=sample_input_kwargs))
-    return inputs
+            yield SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
+                              args=sample_input_args, kwargs=sample_input_kwargs)
 
 
 def sample_inputs_masked_std_var(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked std/var.
     """
-    inputs: List[SampleInput] = []
     for unbiased in [False, True]:
         for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
             if sample_input.args:
@@ -1293,9 +1282,8 @@ def sample_inputs_masked_std_var(op_info, device, dtype, requires_grad, **kwargs
                     # correctly. Also, skip samples when the autograd output
                     # for std could not be handled correctly due to torch.sqrt
                     continue
-            inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
-                                      args=sample_input_args, kwargs=sample_input_kwargs))
-    return inputs
+            yield SampleInput(sample_input.input.detach().requires_grad_(requires_grad),
+                              args=sample_input_args, kwargs=sample_input_kwargs)
 
 # NOTE [Reductions]:
 #
@@ -1388,7 +1376,7 @@ class ReductionOpInfo(OpInfo):
         def sample_inputs_func(*args, **kwargs):
             kwargs['supports_multiple_dims'] = supports_multiple_dims
             kwargs['generate_args_kwargs'] = generate_args_kwargs
-            return sample_inputs_reduction(*args, **kwargs)
+            yield from sample_inputs_reduction(*args, **kwargs)
 
         # Override OpInfo defaults and call base class __init__
         kwargs.setdefault('inplace_variant', None)
@@ -5422,11 +5410,10 @@ def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad, **kw
 
 def sample_inputs_reduction_count_nonzero(*args, **kwargs):
     """Sample inputs for count_nonzero"""
-    samples: List[SampleInput] = sample_inputs_reduction(*args, **kwargs)
     # count_nonzero does not support keepdim yet
-    for sample in samples:
+    for sample in sample_inputs_reduction(*args, **kwargs):
         sample.kwargs.pop('keepdim', None)
-    return samples
+        yield sample
 
 def sample_inputs_leaky_relu(op_info, device, dtype, requires_grad, **kwargs):
     N = 10
