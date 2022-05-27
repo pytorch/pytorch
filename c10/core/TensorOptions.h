@@ -643,6 +643,8 @@ inline DispatchKey computeDispatchKey(
           }
           return DispatchKey::CUDA;
         }
+        case DeviceType::DML:
+          return DispatchKey::DML;
         case DeviceType::IPU: {
           return DispatchKey::IPU;
         }
@@ -796,6 +798,8 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
       return DeviceType::Meta;
 
     // stuff that people are actively developing
+    case DispatchKey::DML:
+      return DeviceType::DML;
     case DispatchKey::IPU:
     case DispatchKey::AutogradIPU:
       return DeviceType::IPU;

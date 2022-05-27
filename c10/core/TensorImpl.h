@@ -824,6 +824,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has_any(cuda_bits_ks);
   }
 
+  bool is_dml() const {
+    constexpr auto dml_ks = DispatchKeySet(DispatchKey::DML);
+    return key_set_.has_all(dml_ks);
+  }
+
   bool is_xpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.

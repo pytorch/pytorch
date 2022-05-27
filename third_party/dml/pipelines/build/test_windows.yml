@@ -1,0 +1,187 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+parameters:
+- name: agentPool
+  type: string
+  default: DirectML
+- name: testArtifacts
+  type: object
+  default: []
+- name: testPythonVersions
+  type: string
+  default: 3.6,3.7,3.8
+
+jobs:
+#-------------------------------------------------------------------------------------------------------------------
+# Create Test Matrix
+#-------------------------------------------------------------------------------------------------------------------
+  - job: createTestMatrixWindows
+    variables:
+      skipComponentGovernanceDetection: true
+    displayName: Create Test Matrix
+    pool: DirectML_Pytorch_Windows
+    steps:
+    - task: PowerShell@2
+      inputs:
+        targetType: filePath
+        filePath: third_party/dml/pipelines/build/scripts/CreateTestMatrix.ps1
+        arguments: >
+          -AccessToken "$(accessToken)"
+          -AgentPoolNames DirectML
+          -Artifacts ${{join(', ', parameters.testArtifacts)}}
+          -PythonVersions ${{parameters.testPythonVersions}}
+          -OutputFilePath "$(System.ArtifactsDirectory)/matrix_win.json"
+          -OutputVariableName "testMatrixWin"
+      name: matrix_windows
+      displayName: Create Test Matrix Windows
+
+    - task: PublishBuildArtifacts@1
+      displayName: Upload Test Matrix
+      inputs:
+        pathToPublish: "$(System.ArtifactsDirectory)/matrix_win.json"
+        artifactName: test
+
+#-------------------------------------------------------------------------------------------------------------------
+# Test
+#-------------------------------------------------------------------------------------------------------------------
+
+  - job: Pytorch_DML_Test_Windows
+    variables:
+      skipComponentGovernanceDetection: true
+    dependsOn: createTestMatrixWindows
+    workspace:
+        clean: all
+    timeoutInMinutes: 120
+    strategy:
+      matrix: $[dependencies.createTestMatrixWindows.outputs['matrix_windows.testMatrixWin']]
+    pool:
+      name: $(agentPool)
+      demands:
+      - agent.name -equals $(agentName)
+    steps:
+    - checkout: self
+    
+    - task: PowerShell@2
+      displayName: Gather Agent Info
+      inputs:
+        targetType: inline
+        script: |
+          $OutputDir = "$(System.ArtifactsDirectory)/agent_info/$(agentName)"
+          New-Item -ItemType Directory -Path $OutputDir | Out-Null
+          Start-Process dxdiag -ArgumentList "/x $OutputDir/dxdiag.xml" -Wait
+          $EnvironmentVariables = @{}
+          Get-ChildItem "env:" | ForEach-Object { $EnvironmentVariables[$_.Name] = $_.Value }
+          $EnvironmentVariables | ConvertTo-Json | Out-File "$OutputDir\environment_vars.json" -Encoding utf8
+    - task: PublishBuildArtifacts@1
+      displayName: Upload Agent Info
+      inputs:
+        pathToPublish: $(System.ArtifactsDirectory)/agent_info
+        artifactName: test
+
+    - task: InstallPython@1
+      condition: succeededOrFailed()
+      inputs:
+        version: 'python==$(agentTestPythonVersion)'
+        dependencies: 'torchvision==0.9.0 pandas tensorboard opencv-python matplotlib tqdm wget seaborn pyyaml'
+
+    - task: DownloadBuildArtifacts@1
+      displayName: Download $(agentTestArtifact)-Py_$(agentTestPythonVersion)
+      condition: succeededOrFailed()
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: '$(agentTestArtifact)-Py_$(agentTestPythonVersion)'
+        downloadPath: '$(System.ArtifactsDirectory)'
+
+    - task: PowerShell@2
+      displayName: 'Reinstall torch from wheel'
+      condition: succeededOrFailed()
+      inputs:
+        targetType: 'inline'
+        script: |
+          $wheel_file = Get-ChildItem *.whl
+          $wheel_path = $wheel_file.name
+          python -m  pip install --upgrade --force-reinstall $wheel_path
+        workingDirectory: '$(System.ArtifactsDirectory)/$(agentTestArtifact)-Py_$(agentTestPythonVersion)/'
+
+    - task: PowerShell@2
+      displayName: 'Run Benchmark Tests'
+      condition: and(succeededOrFailed(), contains(variables['agentTestArtifact'], 'Release'))
+      inputs:
+        targetType: 'inline'
+        script: |
+          $(System.ArtifactsDirectory)/$(agentTestArtifact)-Py_$(agentTestPythonVersion)/RunBenchmarkTests.ps1 -OutputPerformanceFile $(System.ArtifactsDirectory)/performance_results.csv
+        workingDirectory: '$(System.ArtifactsDirectory)/$(agentTestArtifact)-Py_$(agentTestPythonVersion)/pytorch-benchmark'
+
+    - task: PowerShell@2
+      displayName: 'Add device information to performance file'
+      condition: and(succeededOrFailed(), contains(variables['agentTestArtifact'], 'Release'))
+      name: addDeviceInfoPerfFileStep
+      inputs:
+        targetType: 'inline'
+        script: |
+          $dxdiagPath = "$(System.ArtifactsDirectory)/agent_info/$(agentName)/dxdiag.xml"
+          $gpuUsedByPytorch = python -c "import torch; print(torch.dml.device_name(torch.dml.default_device()))"
+          $dxDiag = ([xml](Get-Content $dxdiagPath -Raw)).DxDiag
+          $gpuDriverVersion = "Not found"
+          foreach($graphicsCard in @($DxDiag.DisplayDevices.DisplayDevice)) {
+              if($graphicsCard.CardName -eq $gpuUsedByPytorch) {
+                  $gpuDriverVersion = $graphicsCard.DriverVersion
+                  break
+              }
+          }
+          $dateNaming = Get-Date -Format yyMMdd_HHmm
+          $buildBranch = "$(Build.SourceBranchName)".Replace("/", "-").Replace("_","-")
+          $agentNameSuffix = $gpuUsedByPytorch.trim().Replace(" ","-")
+          $csvFileName = "$(agentName)($($agentNameSuffix))_$($dateNaming.trim())_$(agentTestPythonVersion)_$($buildBranch.trim())_$(Build.SourceVersion).csv"
+          echo "##vso[task.setvariable variable=outputVar;isOutput=true]$csvFileName"
+          ./CompilePerformanceFile.ps1 -BenchmarkPerformanceFile $(System.ArtifactsDirectory)/performance_results.csv -OutputFilePath $(System.ArtifactsDirectory)/$csvFileName -gpuModel $gpuUsedByPytorch -gpuDriverVersion $gpuDriverVersion
+        workingDirectory: '$(System.ArtifactsDirectory)/$(agentTestArtifact)-Py_$(agentTestPythonVersion)'
+
+    - task: PublishBuildArtifacts@1
+      displayName: Upload Performance File to artifacts
+      condition: and(succeededOrFailed(), contains(variables['agentTestArtifact'], 'Release'))
+      inputs:
+        pathToPublish: $(System.ArtifactsDirectory)/$(addDeviceInfoPerfFileStep.outputVar)
+        artifactName: PerformanceResults
+
+    - task: PowerShell@2
+      displayName: 'Copy over to network share'
+      condition: and(eq(variables['Build.SourceBranch'], 'refs/heads/dmldev'), contains(variables['agentTestArtifact'], 'Release'))
+      inputs:
+        targetType: 'inline'
+        script: |
+          Copy-Item "./$(addDeviceInfoPerfFileStep.outputVar)" \\grfxshare\Sigma-GRFX\WindowsAI\WinML\Performance\Pytorch_Performance
+        workingDirectory: '$(System.ArtifactsDirectory)/'
+
+    - task: PowerShell@2
+      displayName: 'Run DirectML/Pytorch Samples'
+      condition: succeededOrFailed()
+      inputs:
+        targetType: 'inline'
+        script: |
+          # Bug 37159924: CPU yolov3 ultralytics has tensor problems https://microsoft.visualstudio.com/OS/_workitems/edit/37159842/
+          # python detect.py --source .\data\images --conf 0.25 --device 'cpu'
+          # Bug 37159842: silu.out not implemented. This is needed for yolov3 ultralytics dml eval https://microsoft.visualstudio.com/OS/_workitems/edit/37159842
+          # python detect.py --source .\data\images --conf 0.25 --device 'dml'
+          # Training on CPU takes forever, commenting out for now
+          # python train.py --data coco128.yaml --cfg yolov3.yaml --weights yolov3.pt --batch-size 8 --epochs 1 --device 'cpu'
+          # python train.py --data coco128.yaml --cfg yolov3.yaml --weights yolov3.pt --batch-size 4 --epochs 1 --device 'dml'
+          python data\cifar.py
+          python resnet50\train.py --epochs 1
+          python squeezenet\train.py --epochs 1
+          python yolov3\train.py --batch-size 4 --epochs 1 --device 'dml'
+          python torchvision_classification\train.py --batch_size 4 --ci_train True
+        workingDirectory: '$(System.ArtifactsDirectory)/$(agentTestArtifact)-Py_$(agentTestPythonVersion)/DirectML/PyTorch'
+
+    - task: PowerShell@2
+      displayName: 'Run Operator Tests'
+      condition: and(succeededOrFailed(), contains(variables['agentTestArtifact'], 'Release'))
+      inputs:
+        targetType: 'inline'
+        script: |
+          python -m pip install pytest pytest-azurepipelines
+          python -m pip install pytest-cov
+          python -m pytest ./aten_unittests.py
+        workingDirectory: '$(System.ArtifactsDirectory)/$(agentTestArtifact)-Py_$(agentTestPythonVersion)'

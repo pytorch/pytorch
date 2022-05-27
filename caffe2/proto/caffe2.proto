@@ -221,8 +221,9 @@ enum DeviceTypeProto {
   PROTO_ORT = 8; // ONNX Runtime
   PROTO_XLA = 9; // XLA / TPU
   PROTO_MPS = 10; // MPS
+  PROTO_DML = 11; // DirectML
   // Change the following number if you add more devices in the code.
-  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 11;
+  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 12;
 }
 
 // Device-specific options. We do not distinguish DeviceOption protos for

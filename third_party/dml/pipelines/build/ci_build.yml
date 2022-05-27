@@ -1,0 +1,220 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+name: $(Date:yyMMdd-HHmm)$(Rev:.r).$(SourceBranchName)
+
+trigger:
+- dmldev
+parameters:
+- name: testWindowsPythonVersions
+  type: string
+  default: "3.6,3.7,3.8"
+
+- name: testWslPythonVersions
+  type: string
+  default: "3.8"
+
+stages:
+- stage: buildStage
+  displayName: Build
+  pool: DirectML_Pytorch_Windows
+  jobs:
+  - job: Windows_build
+    variables:
+      skipComponentGovernanceDetection: true
+
+    # Make sure to always be running in a new workspace
+    workspace:
+      clean: all
+    timeoutInMinutes: 145
+    strategy:
+      matrix:
+          x64_win_debug_cp36:   {Configuration: Debug, PythonVersion: "3.6"}
+          x64_win_release_cp36:   {Configuration: Release, PythonVersion: "3.6"}
+          x64_win_relwithdebinfo_cp36:   {Configuration: RelWithDebInfo, PythonVersion: "3.6"}
+          x64_win_debug_cp37:   {Configuration: Debug, PythonVersion: "3.7"}
+          x64_win_release_cp37:   {Configuration: Release, PythonVersion: "3.7"}
+          x64_win_relwithdebinfo_cp37:   {Configuration: RelWithDebInfo, PythonVersion: "3.7"}
+          x64_win_debug_cp38:   {Configuration: Debug, PythonVersion: "3.8"}
+          x64_win_release_cp38:   {Configuration: Release, PythonVersion: "3.8"}
+          x64_win_relwithdebinfo_cp38:   {Configuration: RelWithDebInfo, PythonVersion: "3.8"}
+    steps:
+    - checkout: self
+    - checkout: git://WindowsAI/pytorch-benchmark@refs/heads/dmldev
+
+    - task: PowerShell@2
+      displayName: "Clone DirectML github repo"
+      inputs:
+        targetType: 'inline'
+        script: 'git clone https://github.com/microsoft/DirectML.git'
+        workingDirectory: '$(Build.SourcesDirectory)'
+
+    - task: PowerShell@2
+      displayName: "Update submodules"
+      inputs:
+        targetType: 'inline'
+        script: 'git submodule update --init --recursive'
+        workingDirectory: '$(Build.SourcesDirectory)/pytorch-directml'
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '$(PythonVersion)'
+      displayName: Use Python $(PythonVersion)
+    - script: |
+        pip install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses wheel
+      displayName: Install python dependencies
+    - task: PowerShell@2
+      displayName: List out installed python packages
+      inputs:
+        targetType: 'inline'
+        script: 'python -m pip freeze'
+
+    - task: PowerShell@2
+      displayName: "Build pytorch"
+      inputs:
+        filePath: '$(Build.SourcesDirectory)\pytorch-directml\third_party\dml\scripts\build.ps1'
+        arguments: '-Configuration "$(Configuration)" -Clean -BuildWheel'
+        workingDirectory: '$(Build.SourcesDirectory)/pytorch-directml'
+
+    - task: CopyFiles@2
+      displayName: Copy Entire Directml/pytorch folder
+      inputs:
+        SourceFolder: '$(Build.SourcesDirectory)/DirectML/PyTorch'
+        Contents: '**'
+        TargetFolder: '$(Build.SourcesDirectory)/pytorch-directml/dist/DirectML/PyTorch'
+
+    - task: CopyFiles@2
+      displayName: Copy Entire Pytorch-Benchmark folder
+      inputs:
+        SourceFolder: '$(Build.SourcesDirectory)/pytorch-benchmark'
+        Contents: '**'
+        TargetFolder: '$(Build.SourcesDirectory)/pytorch-directml/dist/pytorch-benchmark'
+
+    - task: CopyFiles@2
+      displayName: Copy Run Benchmark Tests script
+      inputs:
+        SourceFolder: '$(Build.SourcesDirectory)/pytorch-directml/third_party/dml/pipelines/build/scripts'
+        Contents: 'RunBenchmarkTests.ps1'
+        TargetFolder: '$(Build.SourcesDirectory)/pytorch-directml/dist'
+
+    - task: CopyFiles@2
+      displayName: Copy compile performance file script
+      inputs:
+        SourceFolder: '$(Build.SourcesDirectory)/pytorch-directml/third_party/dml/pipelines/build/scripts'
+        Contents: 'CompilePerformanceFile.ps1'
+        TargetFolder: '$(Build.SourcesDirectory)/pytorch-directml/dist'
+
+    - task: CopyFiles@2
+      displayName: Copy operator tests script
+      inputs:
+        SourceFolder: '$(Build.SourcesDirectory)/pytorch-directml/third_party/dml/tests'
+        Contents: 'aten_unittests.py'
+        TargetFolder: '$(Build.SourcesDirectory)/pytorch-directml/dist'
+
+    - task: PublishBuildArtifacts@1
+      displayName: "Publish Artifacts"
+      inputs:
+        PathtoPublish: '$(Build.SourcesDirectory)/pytorch-directml/dist'
+        ArtifactName: 'x64-win-$(Configuration)-Py_$(PythonVersion)'
+
+    - task: PowerShell@2
+      displayName: 'Publish to Azure Blob storage'
+      condition: and(contains(variables.Configuration, 'Release'), eq(variables['Build.SourceBranch'], 'refs/heads/dmldev'))
+      inputs:
+        targetType: 'inline'
+        script: |
+          $outputFolderName = "$(Build.BuildNumber).$(Build.SourceVersion)"
+          $artifactName = "x64-win-$(Configuration)-Py_$(PythonVersion)"
+          $artifactsFolder = "$(Build.SourcesDirectory)/pytorch-directml/dist/"
+          $azureBlobLink = "$(azureBlobUri)/$($outputFolderName)/"
+          ./SubmitArtifactsToAzureBlob.ps1 -AzureBlobLink $azureBlobLink -AzureBlobLinkToken "$(blobStorageToken)" -ArtifactsFolder $artifactsFolder -ArtifactName $artifactName
+        workingDirectory: '$(Build.SourcesDirectory)/pytorch-directml/third_party/dml/pipelines/build/scripts'
+
+  - job: Linux_build
+    variables:
+      skipComponentGovernanceDetection: true
+    pool:
+      vmImage: ubuntu-latest
+    timeoutInMinutes: 145
+    strategy:
+      matrix:
+          linux_release_cp36:   {Configuration: Release, PythonVersion: "3.6"}
+          linux_relwithdebinfo_cp36:   {Configuration: RelWithDebInfo, PythonVersion: "3.6"}
+          linux_release_cp37:   {Configuration: Release, PythonVersion: "3.7"}
+          linux_relwithdebinfo_cp37:   {Configuration: RelWithDebInfo, PythonVersion: "3.7"}
+          linux_release_cp38:   {Configuration: Release, PythonVersion: "3.8"}
+          linux_relwithdebinfo_cp38:   {Configuration: RelWithDebInfo, PythonVersion: "3.8"}
+    steps:
+    - checkout: self
+      clean: true
+      fetchDepth: 200
+      submodules: recursive
+      persistCredentials: True
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '$(PythonVersion)'
+      displayName: Use Python $(PythonVersion)
+    - script: |
+        pip install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses wheel
+      displayName: Install python dependencies
+    - script: |
+        sed -i '4 i #include <limits>' third_party/benchmark/src/benchmark_register.h
+      displayName: Apply patches
+    - script: |
+        set -eo pipefail
+        cd third_party/dml/pipelines/build/d3d12_wsl_stubs
+        shared_flags='-shared -Wl,--gc-sections -Wl,-s -fPIC -flto -Wall -Wextra'
+        for f in d3d12.c d3d12core.c ; do
+          clang $shared_flags -Wl,--version-script=symver.map $f -o lib${f/.c/.so}
+        done
+        clang $shared_flags dxcore.c -o libdxcore.so  # dxcore's API isn't versioned
+        sudo mkdir -p /usr/lib/wsl/lib
+        sudo mv *.so /usr/lib/wsl/lib
+      displayName: Compile D3D stubs
+    - script: |
+        set -eo pipefail
+        python3 -m venv --system-site-packages venv
+        . venv/bin/activate
+        USE_DIRECTML=1 USE_CUDA=0 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 CC=clang CXX=clang++ CMAKE_BUILD_TYPE=$(Configuration) BUILD_TEST=0 pip install -vvv -e .
+        python setup.py bdist_wheel
+      displayName: Build
+    - script: |
+        set -eo pipefail
+        . venv/bin/activate
+        python -c 'import torch'
+      displayName: Test
+    - script: |
+        TARGET_BRANCH=${SYSTEM_PULLREQUEST_TARGETBRANCH#refs/heads/}
+        TARGET_BRANCH=${TARGET_BRANCH:-dmldev}
+        git fetch origin $TARGET_BRANCH
+        python3 tools/clang_tidy.py -d build/ --diff origin/$TARGET_BRANCH
+      displayName: Run clang_tidy
+      continueOnError: true
+    - script: |
+        TARGET_BRANCH=${SYSTEM_PULLREQUEST_TARGETBRANCH#refs/heads/}
+        TARGET_BRANCH=${TARGET_BRANCH:-dmldev}
+        python3 tools/git-clang-format origin/$TARGET_BRANCH --diff
+      displayName: Run clang_format
+      continueOnError: true
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.SourcesDirectory)/dist'
+        ArtifactName: 'linux-$(Configuration)-Py_$(PythonVersion)'
+      displayName: 'Publish Linux $(PythonVersion)'
+
+#-------------------------------------------------------------------------------------------------------------------
+# Test on machines
+#-------------------------------------------------------------------------------------------------------------------
+- stage: testWinStage
+  displayName: Test
+  jobs:
+  - template: test_windows.yml
+    parameters:
+      agentPool: "DirectML"
+      testArtifacts: ["x64-win-Debug", "x64-win-Release"]
+      testPythonVersions: ${{parameters.testWindowsPythonVersions}}
+
+  - template: test_wsl.yml
+    parameters:
+      agentPool: "DirectML"
+      testArtifacts: ["linux-Release"]
+      testPythonVersions: ${{parameters.testWslPythonVersions}}

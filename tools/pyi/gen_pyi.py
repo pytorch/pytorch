@@ -662,6 +662,7 @@ def gen_pyi(
             ],
             "_is_view": ["def _is_view(self) -> _bool: ..."],
             "is_cuda": ["is_cuda: _bool"],
+            "is_dml": ["is_dml: _bool"],
             "is_leaf": ["is_leaf: _bool"],
             "is_nested": ["is_nested: _bool"],
             "is_sparse": ["is_sparse: _bool"],

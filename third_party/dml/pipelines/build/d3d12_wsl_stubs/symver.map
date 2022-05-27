@@ -1,0 +1,6 @@
+VER_1 {
+global:
+    D3D12*;
+local:
+    *;
+};

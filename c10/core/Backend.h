@@ -29,6 +29,7 @@ namespace c10 {
 enum class Backend {
   CPU,
   CUDA,
+  DML,
   HIP,
   VE,
   FPGA,
@@ -62,6 +63,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::CPU;
   } else if (t == DispatchKey::CUDA || t == DispatchKey::AutogradCUDA) {
     return Backend::CUDA;
+  } else if (t == DispatchKey::DML) {
+    return Backend::DML;
   } else if (t == DispatchKey::HIP) {
     return Backend::HIP;
   } else if (t == DispatchKey::VE) {
@@ -123,6 +126,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::CPU;
     case Backend::CUDA:
       return DispatchKey::CUDA;
+    case Backend::DML:
+      return DispatchKey::DML;
     case Backend::HIP:
       return DispatchKey::HIP;
     case Backend::VE:
@@ -241,6 +246,8 @@ static inline const char* toString(Backend b) {
       return "CPU";
     case Backend::CUDA:
       return "CUDA";
+    case Backend::DML:
+      return "DML";
     case Backend::HIP:
       return "HIP";
     case Backend::VE:

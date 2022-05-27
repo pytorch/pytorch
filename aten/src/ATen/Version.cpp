@@ -191,6 +191,10 @@ std::string show_config() {
     ss << detail::getCUDAHooks().showConfig();
   }
 
+  if (hasDML()) {
+    ss << detail::getDMLHooks().showConfig();
+  }
+
   if (hasORT()) {
     ss << detail::getORTHooks().showConfig();
   }

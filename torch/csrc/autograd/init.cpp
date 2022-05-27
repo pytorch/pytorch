@@ -162,6 +162,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   py::enum_<c10::DeviceType>(m, "DeviceType")
       .value("CPU", c10::DeviceType::CPU)
       .value("CUDA", c10::DeviceType::CUDA)
+      .value("DML", c10::DeviceType::DML)
       .value("MKLDNN", c10::DeviceType::MKLDNN)
       .value("OPENGL", c10::DeviceType::OPENGL)
       .value("OPENCL", c10::DeviceType::OPENCL)

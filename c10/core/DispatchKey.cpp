@@ -48,6 +48,8 @@ const char* toString(DispatchKey t) {
       return "CPU";
     case DispatchKey::CUDA:
       return "CUDA";
+    case DispatchKey::DML:
+      return "DML";
     case DispatchKey::HIP:
       return "HIP";
     case DispatchKey::VE:

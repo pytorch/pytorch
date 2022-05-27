@@ -1,0 +1,129 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+parameters:
+- name: agentPool
+  type: string
+  default: DirectML
+- name: testArtifacts
+  type: object
+  default: []
+- name: testPythonVersions
+  type: string
+  default: 3.8
+
+jobs:
+#-------------------------------------------------------------------------------------------------------------------
+# Create Test Matrix
+#-------------------------------------------------------------------------------------------------------------------
+  - job: createTestMatrixWsl
+    variables:
+      skipComponentGovernanceDetection: true
+    displayName: Create Test Matrix
+    pool: DirectML_Pytorch_Windows
+    steps:
+    - task: PowerShell@2
+      inputs:
+        targetType: filePath
+        filePath: third_party/dml/pipelines/build/scripts/CreateTestMatrix.ps1
+        arguments: >
+          -AccessToken "$(accessToken)"
+          -AgentPoolNames DirectML
+          -Artifacts ${{join(', ', parameters.testArtifacts)}}
+          -PythonVersions ${{parameters.testPythonVersions}}
+          -OutputFilePath "$(System.ArtifactsDirectory)/matrix_wsl.json"
+          -OutputVariableName "testMatrixWsl"
+      name: matrix_wsl
+      displayName: Create Test Matrix Windows
+
+    - task: PublishBuildArtifacts@1
+      displayName: Upload Test Matrix
+      inputs:
+        pathToPublish: "$(System.ArtifactsDirectory)/matrix_wsl.json"
+        artifactName: test
+
+#-------------------------------------------------------------------------------------------------------------------
+# Test
+#-------------------------------------------------------------------------------------------------------------------
+  - job: Pytorch_DML_Test_WSL
+    variables:
+      skipComponentGovernanceDetection: true
+    dependsOn: createTestMatrixWsl
+    workspace:
+        clean: all
+    timeoutInMinutes: 150
+    strategy:
+      matrix: $[dependencies.createTestMatrixWsl.outputs['matrix_wsl.testMatrixWsl']]
+    pool:
+      name: $(agentPool)
+      demands:
+      - agent.name -equals $(agentName)
+    steps:
+    - checkout: self
+    - checkout: git://WindowsAI/pytorch-benchmark@refs/heads/dmldev
+
+    - task: PowerShell@2
+      displayName: "Clone DirectML github repo"
+      inputs:
+        targetType: 'inline'
+        script: 'git clone https://github.com/microsoft/DirectML.git'
+        workingDirectory: '$(Build.SourcesDirectory)'
+  
+    - task: PowerShell@2
+      displayName: Gather Agent Info
+      inputs:
+        targetType: inline
+        script: |
+          $OutputDir = "$(System.ArtifactsDirectory)/agent_info/$(agentName)"
+          New-Item -ItemType Directory -Path $OutputDir | Out-Null
+          Start-Process dxdiag -ArgumentList "/x $OutputDir/dxdiag.xml" -Wait
+          $EnvironmentVariables = @{}
+          Get-ChildItem "env:" | ForEach-Object { $EnvironmentVariables[$_.Name] = $_.Value }
+          $EnvironmentVariables | ConvertTo-Json | Out-File "$OutputDir\environment_vars.json" -Encoding utf8
+    - task: PublishBuildArtifacts@1
+      displayName: Upload Agent Info
+      inputs:
+        pathToPublish: $(System.ArtifactsDirectory)/agent_info
+        artifactName: test
+    
+    - task: DownloadBuildArtifacts@1
+      displayName: Download $(agentTestArtifact)-Py_$(agentTestPythonVersion)
+      condition: succeededOrFailed()
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: '$(agentTestArtifact)-Py_$(agentTestPythonVersion)'
+        downloadPath: '$(System.ArtifactsDirectory)'
+    
+    - task: PowerShell@2
+      displayName: Create test environment
+      inputs:
+        targetType: 'inline'
+        script: |
+          $BuildArtifactsPath = "$(System.ArtifactsDirectory)/$(agentTestArtifact)-Py_$(agentTestPythonVersion)/"
+          $ArtfactsDirInWsl = wsl wslpath -a ($BuildArtifactsPath -replace '\\','/')
+          $MinicondaInstallationDir = "$ArtfactsDirInWsl" + "miniconda_installation"
+          $WhlPath = $(Get-ChildItem $BuildArtifactsPath/*.whl -File)[0].FullName
+          $WhlPathWinAsWsl = wsl wslpath -a ($WhlPath -replace '\\','/')
+          $EnvScriptPath = "$(Build.SourcesDirectory)/pytorch-directml/third_party/dml/pipelines/build/scripts/create_environment.sh"
+          $EnvScriptPathWinAsWsl = wsl wslpath -a ($EnvScriptPath -replace '\\','/')
+          ((Get-Content $EnvScriptPath) -join "`n") + "`n" | Set-Content -NoNewline $EnvScriptPath # this converts CRLF endings to LF
+          wsl wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O $ArtfactsDirInWsl/miniconda.sh
+          bash $ArtfactsDirInWsl/miniconda.sh -b -p $MinicondaInstallationDir
+          bash $EnvScriptPathWinAsWsl -c $MinicondaInstallationDir -e test_env -p $(agentTestPythonVersion) -P "torchvision==0.9.0 pandas tensorboard opencv-python matplotlib tqdm wget seaborn pyyaml" -a $WhlPathWinAsWsl
+    
+    - task: PowerShell@2
+      displayName: Run Tests
+      inputs:
+        targetType: 'inline'
+        script: |
+          wsl -l -v
+          $BuildArtifactsPath = "$(System.ArtifactsDirectory)/$(agentTestArtifact)-Py_$(agentTestPythonVersion)/"
+          $ArtfactsDirInWsl = wsl wslpath -a ($BuildArtifactsPath -replace '\\','/')
+          $MinicondaInstallationDir = "$ArtfactsDirInWsl" + "miniconda_installation"
+          $TestScriptPath = "$(Build.SourcesDirectory)/pytorch-directml/third_party/dml/pipelines/build/scripts/run_wsl_tests.sh"
+          $TestScriptPathWinAsWsl = wsl wslpath -a ($TestScriptPath -replace '\\','/')
+          ((Get-Content $TestScriptPath) -join "`n") + "`n" | Set-Content -NoNewline $TestScriptPath # this converts CRLF endings to LF
+          $SourcesDirectory = "$(Build.SourcesDirectory)"
+          $SourceDirPathAsWsl = wsl wslpath -a ($SourcesDirectory -replace '\\','/')
+          bash $TestScriptPathWinAsWsl -c $MinicondaInstallationDir -e test_env -p $SourceDirPathAsWsl

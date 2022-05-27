@@ -7,6 +7,7 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/detail/DMLHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/ORTHooksInterface.h>
 #include <c10/util/Exception.h>
@@ -78,6 +79,9 @@ class TORCH_API Context {
   }
   static bool hasCuSOLVER() {
     return detail::getCUDAHooks().hasCuSOLVER();
+  }
+  static bool hasDML() {
+    return detail::getDMLHooks().hasDML();
   }
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
@@ -301,6 +305,10 @@ static inline DeprecatedTypeProperties& MPS(ScalarType s) {
 
 static inline bool hasCUDA() {
   return globalContext().hasCUDA();
+}
+
+static inline bool hasDML() {
+  return globalContext().hasDML();
 }
 
 static inline bool hasHIP() {

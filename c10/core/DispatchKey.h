@@ -145,6 +145,9 @@ enum class DispatchKey : uint16_t {
   FPGA, // Xilinx support lives out of tree at
   // https://gitlab.com/pytorch-complex/vitis_kernels
 
+  DML, // DirectML support lives out of tree at
+  // https://github.com/microsoft/directml 
+
   // ONNX Runtime, lives out of tree at https://github.com/pytorch/ort and
   // https://github.com/microsoft/onnxruntime, and is also used to test general
   // backend/extension machinery in the core. cf:
