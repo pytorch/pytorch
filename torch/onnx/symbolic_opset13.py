@@ -116,15 +116,21 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
         axis = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
         axis = opset11.unsqueeze(g, axis, 0)
 
-        if symbolic_helper._is_tensor(indices_or_sections) and not is_scalar: # 1-d tensor
+        if (
+            symbolic_helper._is_tensor(indices_or_sections) and not is_scalar
+        ):  # 1-d tensor
             # loop conditions
             const_1 = g.op("Constant", value_t=torch.tensor(1, dtype=torch.long))
-            loop_len = symbolic_helper._size_helper(g, indices_or_sections, g.op("Constant", value_t=torch.tensor(0)))
+            loop_len = symbolic_helper._size_helper(
+                g, indices_or_sections, g.op("Constant", value_t=torch.tensor(0))
+            )
             loop_len = opset11.unsqueeze(g, loop_len, 0)
             loop_condition = g.op("Cast", const_1, to_i=9)
 
             padding_0 = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
-            indices_or_sections = g.op("Concat", padding_0, indices_or_sections, axis_i=0)
+            indices_or_sections = g.op(
+                "Concat", padding_0, indices_or_sections, axis_i=0
+            )
 
             # Create an empty sequence to store final expansions
             final_splits = g.op("SequenceEmpty")
@@ -136,8 +142,15 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
             cond = utils._add_input_to_block(loop_block)
             final_splits = utils._add_input_to_block(loop_block)
 
-            start = loop_block.op("Gather", indices_or_sections, block_input_iter, axis_i=0)
-            end = loop_block.op("Gather", indices_or_sections, loop_block.op("Add", block_input_iter, const_1), axis_i=0)
+            start = loop_block.op(
+                "Gather", indices_or_sections, block_input_iter, axis_i=0
+            )
+            end = loop_block.op(
+                "Gather",
+                indices_or_sections,
+                loop_block.op("Add", block_input_iter, const_1),
+                axis_i=0,
+            )
 
             slice = loop_block.op("Slice", self, start, end, axis)
             final_splits = loop_block.op("SequenceInsert", final_splits, slice)
@@ -148,22 +161,39 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
             utils._add_output_to_block(loop_block, final_splits)
 
             loop_out = loop.node().output()
-            start = g.op("Gather", indices_or_sections, g.op("Constant", value_t=torch.tensor(-1, dtype=torch.long)), axis_i=0)
+            start = g.op(
+                "Gather",
+                indices_or_sections,
+                g.op("Constant", value_t=torch.tensor(-1, dtype=torch.long)),
+                axis_i=0,
+            )
             start = opset11.unsqueeze(g, start, 0)
             end = symbolic_helper._size_helper(g, self, axis)
-            
+
             last_slice = g.op("Slice", self, start, end, axis)
 
             return g.op("SequenceInsert", loop_out, last_slice)
 
-        elif symbolic_helper._is_tensor(indices_or_sections): # scalar tensor
-            dim_size = symbolic_helper._size_helper(g, self, axis) # [5] [6]
-            min_split_size = g.op("Div", dim_size, indices_or_sections) # [2] [2]
-            min_split_size_plus_1 = g.op("Add", min_split_size, g.op("Constant", value_t=torch.tensor(1, dtype=torch.long))) # [3] [3]
-            num_splits_one_extra = g.op("Mod", dim_size, indices_or_sections) # [1] [0]
-            splits = g.op("Tile", min_split_size_plus_1, num_splits_one_extra) # []
-            leftover = g.op("Tile", min_split_size, g.op("Sub", opset11.unsqueeze(g, indices_or_sections, 0), num_splits_one_extra)) # [2] [2] [2]
-            
+        elif symbolic_helper._is_tensor(indices_or_sections):  # scalar tensor
+            dim_size = symbolic_helper._size_helper(g, self, axis)
+            min_split_size = g.op("Div", dim_size, indices_or_sections)
+            min_split_size_plus_1 = g.op(
+                "Add",
+                min_split_size,
+                g.op("Constant", value_t=torch.tensor(1, dtype=torch.long)),
+            )
+            num_splits_one_extra = g.op("Mod", dim_size, indices_or_sections)
+            splits = g.op("Tile", min_split_size_plus_1, num_splits_one_extra)
+            leftover = g.op(
+                "Tile",
+                min_split_size,
+                g.op(
+                    "Sub",
+                    opset11.unsqueeze(g, indices_or_sections, 0),
+                    num_splits_one_extra,
+                ),
+            )
+
             splits = g.op("Concat", splits, leftover, axis_i=0)
             if _outputs is None:
                 return g.op("SplitToSequence", self, splits, axis_i=dim)
@@ -172,7 +202,8 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
         else:
             if (
                 symbolic_helper._is_packed_list(indices_or_sections)
-                and len(symbolic_helper._unpack_list(indices_or_sections)) == _outputs - 1
+                and len(symbolic_helper._unpack_list(indices_or_sections))
+                == _outputs - 1
             ):
 
                 start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
@@ -181,7 +212,6 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
                     end = g.op("Gather", indices_or_sections, i, axis)
                     res.append(g.op("Slice", self, start, end, axis))
                     start = end
-                
 
                 end = symbolic_helper._size_helper(g, self, axis)
                 res.append(g.op("Slice", self, start, end, axis))
@@ -203,8 +233,8 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
 
     min_split_size = size // split_size
     num_splits_one_extra = size % split_size
-    
-    splits = num_splits_one_extra  * [min_split_size + 1]
+
+    splits = num_splits_one_extra * [min_split_size + 1]
     leftover = (split_size - num_splits_one_extra) * [min_split_size]
     if leftover:
         splits.append(leftover)
