@@ -15,6 +15,7 @@ import itertools
 from torch._six import inf
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, TestCase, download_file, TEST_WITH_UBSAN
+from torch.testing._internal.common_device_type import dtypes
 import torch.backends.mps
 from torch.distributions import Uniform
 
@@ -1299,6 +1300,20 @@ class TestMPS(TestCase):
                          torch.tensor(4, dtype=torch.int32))
         self.assertEqual(torch.tensor(-8.34, device='cpu').to('mps', torch.int),
                          torch.tensor(-8.34, device='cpu').to('mps').to(torch.int))
+
+    @dtypes(torch.int32, torch.float32, torch.int64, device_type="mps")
+    def test_setitem_scalar(self, device, dtype) -> None:
+        for i in range(3, 6):
+            for j in range(3, 6):
+                t = torch.zeros(i, j, dtype=dtype, device=device)
+                self.assertEqual(t.sum(), 0)
+                t[1, 1] = 1
+                t[2, 1] = j
+                t[2, 1] = i
+                assertEqual(t[1, 1], 1)
+                assertEqual(t[1, 2], i)
+                assertEqual(t[2, 1], j)
+                self.assertEqual(t.sum(), 1 + i + j)
 
 
 class TestSmoothL1Loss(TestCase):
