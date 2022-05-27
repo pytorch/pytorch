@@ -1429,10 +1429,12 @@ def as_strided(
 def broadcast_tensors(*tensors) -> List[TensorLikeType]:
     return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
 
-def broadcast_to(a : TensorLikeType, size: ShapeType) -> TensorLikeType:
+
+def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
     start = len(size) - len(a.shape)
     dims = tuple(range(start, len(a.shape) + start))
     return prims.broadcast_in_dim(a, size, dims)
+
 
 @out_wrapper
 @elementwise_type_promotion_wrapper(
@@ -1467,10 +1469,15 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
     return prims.cat(filtered, dim)
 
+
 @out_wrapper
 def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
-    aligned_tensors = [x if x.ndim > 1 else torch._prims.expand_dims(x, range(x.ndim, 2)) for x in tensors]
+    aligned_tensors = [
+        x if x.ndim > 1 else torch._prims.expand_dims(x, range(x.ndim, 2))
+        for x in tensors
+    ]
     return prims.cat(aligned_tensors, 1)
+
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
     if chunks <= 0:
