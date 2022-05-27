@@ -131,7 +131,7 @@ def unsafe_split_with_sizes(g, self, split_sizes, dim, _outputs=None):
 @parse_args("v", "v", "i", "i")
 def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
     if not sym_help._is_split_static(indices_or_sections, _outputs):
-        is_scalar = sym_help._get_tensor_rank(indices_or_sections)
+        is_scalar = sym_help._get_tensor_rank(indices_or_sections) == 0
         axis = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
         axis = unsqueeze(g, axis, 0)
 
@@ -174,8 +174,20 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
             last_slice = g.op("Slice", self, start, end, axis)
 
             return g.op("SequenceInsert", loop_out, last_slice)
+
         elif sym_help._is_tensor(indices_or_sections): # scalar tensor
-            pass
+            dim_size = sym_help._size_helper(g, self, axis) # [5] [6]
+            min_split_size = g.op("Div", dim_size, indices_or_sections) # [2] [2]
+            min_split_size_plus_1 = g.op("Add", min_split_size, g.op("Constant", value_t=torch.tensor(1, dtype=torch.long))) # [3] [3]
+            num_splits_one_extra = g.op("Mod", dim_size, indices_or_sections) # [1] [0]
+            splits = g.op("Tile", min_split_size_plus_1, num_splits_one_extra) # []
+            leftover = g.op("Tile", min_split_size, g.op("Sub", unsqueeze(g, indices_or_sections, 0), num_splits_one_extra)) # [2] [2] [2]
+            
+            splits = g.op("Concat", splits, leftover, axis_i=0)
+            if _outputs is None:
+                return g.op("SplitToSequence", self, splits, axis_i=dim)
+            return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
+
         else:
             if (
                 sym_help._is_packed_list(indices_or_sections)
@@ -208,8 +220,11 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
     if size % split_size == 0:
         return g.op("Split", self, split_size, axis_i=dim, outputs=_outputs)
 
-    splits = size % split_size * [size // split_size + 1]
-    leftover = (split_size - size % split_size) * [size // split_size]
+    min_split_size = size // split_size
+    num_splits_one_extra = size % split_size
+    
+    splits = num_splits_one_extra  * [min_split_size + 1]
+    leftover = (split_size - num_splits_one_extra) * [min_split_size]
     if leftover:
         splits.append(leftover)
     splits = g.op("Constant", value_t=torch.tensor(splits))
