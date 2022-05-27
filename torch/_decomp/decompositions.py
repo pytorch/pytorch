@@ -1301,3 +1301,18 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     else:
         buffer = z
     return min - torch.log1p(z), buffer
+
+
+# torch.ops.aten.norm only supports numeric p, does not support Frobenius norm or nuclear norm
+# aten.norms supports any dimension
+@register_decomposition(aten.norm)
+#Scalar? p, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+def norm(self: Tensor, p: float, dim: List[int] = None, keepdim: bool = False, out:Tensor = None):
+    if p==0: 
+        return (self != 0).sum().type(self.type())
+    elif p==float('inf'):
+        return self.abs().max()
+    elif p==-float('inf'):
+        return self.abs().min()
+    else:
+        return self.abs().pow(p).sum().pow(1/p)   
