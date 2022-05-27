@@ -122,8 +122,8 @@ Zeta Functions
 
 .. autofunction:: zeta
 
-Probabilistic Functions
------------------------
+Probability Theoretic Functions
+-------------------------------
 
 Cumulative Distribution Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
