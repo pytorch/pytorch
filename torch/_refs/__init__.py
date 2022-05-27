@@ -175,6 +175,7 @@ __all__ = [
     "flip",
     "fliplr",
     "flipud",
+    "hsplit",
     "narrow",
     "permute",
     "reshape",
@@ -185,6 +186,7 @@ __all__ = [
     "transpose",
     "unsqueeze",
     "view",
+    "vsplit",
     #
     # Tensor Creation
     #
