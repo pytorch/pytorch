@@ -74,8 +74,9 @@ void sign_kernel_cuda(TensorIteratorBase& iter){
 }
 
 void signbit_kernel_cuda(TensorIteratorBase& iter){
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.common_dtype(), "signbit_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return signbit(a); });
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cuda", [&]() {
+    using opmath_t = at::opmath_type<scalar_t>;
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return signbit(opmath_t{a}); });
   });
 }
 

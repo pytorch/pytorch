@@ -4,10 +4,12 @@
 
 #ifdef _WIN32
 namespace std {
-  template <typename T>
-  typename std::enable_if<std::is_integral<T>::value, bool>::type signbit(T x) {
-    return x < 0;
-  }
+// NOTE: windows corecrt_math.h does not support signbit with integral
+// arguments.
+template <typename T>
+typename std::enable_if<std::is_integral<T>::value, bool>::type signbit(T x) {
+  return x < 0;
+}
 } // namespace std
 #endif
 
