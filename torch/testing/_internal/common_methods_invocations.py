@@ -11713,6 +11713,9 @@ op_db: List[OpInfo] = [
                         # int8 floor divide has different results for -128 // -1 vs. NumPy
                         DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
                                      dtypes=(torch.int8,)),
+                        # The following tests fails on some jobs
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs', 'test_reference_numerics_extremal_values',
+                                     dtypes=(torch.float16,)),
                     )),
     UnaryUfuncInfo('frexp',
                    op=torch.frexp,

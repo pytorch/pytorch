@@ -1901,8 +1901,6 @@ class TestBinaryUfuncs(TestCase):
     def test_div_and_floordiv_vs_python(self, device):
         # Tests torch division ops which can handle both arguments being
         #   scalars.
-        # NOTE: torch.floor_divide currently truncates instead of flooring.
-        #   the quotient. See https://github.com/pytorch/pytorch/issues/43874.
         def _scalar_helper(python_op, torch_op):
             for a, b in product(range(-10, 10), range(-10, 10)):
                 for op in (lambda x: x * 0.5, lambda x: math.floor(x)):
@@ -1925,16 +1923,15 @@ class TestBinaryUfuncs(TestCase):
                         actual_first_tensor = torch_op(a_t, b)
                         actual_second_tensor = torch_op(a, b_t)
 
-                        self.assertEqual(actual_scalar, expected_div)
-                        self.assertEqual(actual_tensor.item(), expected_div)
+                        self.assertEqual(actual_scalar, expected)
+                        self.assertEqual(actual_tensor.item(), expected)
                         self.assertEqual(actual_first_tensor, actual_tensor)
                         self.assertEqual(actual_second_tensor, actual_tensor)
 
             _scalar_helper(operator.truediv, operator.truediv)
             _scalar_helper(operator.truediv, torch.true_divide)
-            with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
-                _scalar_helper(lambda a, b: math.trunc(a / b), operator.floordiv)
-                _scalar_helper(lambda a, b: math.trunc(a / b), torch.floor_divide)
+            _scalar_helper(lambda a, b: math.floor(a / b), operator.floordiv)
+            _scalar_helper(lambda a, b: math.floor(a / b), torch.floor_divide)
 
     @onlyNativeDeviceTypes
     def test_div_and_floordiv_script_vs_python(self, device):
@@ -2727,7 +2724,7 @@ class TestBinaryUfuncs(TestCase):
         y = torch.arange(1, 11, dtype=dtype, device=device)
 
         z = x // y
-        z_alt = torch.trunc(x.double() / y.double()).to(dtype)
+        z_alt = torch.floor(x.double() / y.double()).to(dtype)
 
         self.assertEqual(z.dtype, x.dtype)
         self.assertEqual(z, z_alt)
@@ -2741,7 +2738,7 @@ class TestBinaryUfuncs(TestCase):
 
         z = x // 3
         z_alt = torch.tensor(
-            [math.trunc(v.item() / 3.0) for v in x], dtype=x.dtype, device=device
+            [math.floor(v.item() / 3.0) for v in x], dtype=x.dtype, device=device
         )
 
         self.assertEqual(z.dtype, x.dtype)
