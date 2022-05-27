@@ -483,9 +483,9 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_,
         id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
         id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
         [blitEncoder copyFromBuffer:sourceBuffer
-                      sourceOffset:0
+                      sourceOffset:src_byte_offset
                           toBuffer:destBuffer
-                 destinationOffset:0
+                 destinationOffset:dst_byte_offset
                               size:size];
         [blitEncoder endEncoding];
         stream->commitAndWait();
