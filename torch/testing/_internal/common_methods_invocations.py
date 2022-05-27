@@ -19663,6 +19663,14 @@ python_ref_db = [
         )
     ),
     PythonRefInfo(
+        "_refs.hsplit",
+        torch_opinfo_name="hsplit",
+    ),
+    PythonRefInfo(
+        "_refs.vsplit",
+        torch_opinfo_name="vsplit",
+    ),
+    PythonRefInfo(
         "_refs.transpose",
         torch_opinfo_name="transpose",
     ),
