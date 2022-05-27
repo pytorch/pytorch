@@ -1851,7 +1851,8 @@ def hsplit(
         split_sizes = indices_or_sections
         return tensor_split(a, split_sizes, dim)
     else:
-        raise ValueError(
+        raise TypeError(
+            "hsplit(): received an invalid combination of arguments. "
             "Expected indices_or_sections to be of type int, list of ints or tuple of ints"
         )
 
@@ -1882,7 +1883,8 @@ def vsplit(
         split_sizes = indices_or_sections
         return tensor_split(a, split_sizes, 0)
     else:
-        raise ValueError(
+        raise TypeError(
+            "vsplit(): received an invalid combination of arguments. "
             "Expected indices_or_sections to be of type int, list of ints or tuple of ints"
         )
 
