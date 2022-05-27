@@ -13,11 +13,11 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vml.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/Math.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/OpMathType.h>
 
+#include <c10/util/math_compat.h>
 #include <c10/util/MathConstants.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/irange.h>
@@ -298,9 +298,9 @@ void sign_kernel(TensorIteratorBase& iter){
 }
 
 static void signbit_kernel(TensorIteratorBase& iter){
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.common_dtype(), "signbit_cpu", [&]() {
-    cpu_kernel(iter, [](scalar_t a) -> bool { return std::signbit(a); });
-  });
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
+    using opmath_t = at::opmath_type<scalar_t>;
+    cpu_kernel(iter, [](scalar_t a) -> bool { return std::signbit(opmath_t{a}); }); });
 }
 
 static void sgn_kernel(TensorIteratorBase& iter) {
