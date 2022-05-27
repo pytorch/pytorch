@@ -1849,8 +1849,10 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 def view(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=False)
 
+
 def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
+
 
 @out_wrapper
 def empty(
