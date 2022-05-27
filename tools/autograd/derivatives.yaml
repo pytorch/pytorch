@@ -484,6 +484,10 @@
   self: _det_lu_based_helper_backward(grad, det, self, lu, pivs)
   output_differentiability: [True, False, False]
 
+- name: block_diag(Tensor[] tensors) -> Tensor
+  tensors: block_diag_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors))
+  result: block_diag_jvp(tensors)
+
 - name: diag_embed(Tensor self, int offset=0, int dim1=-2, int dim2=-1) -> Tensor
   self: grad.diagonal(offset, dim1, dim2)
   result: auto_linear
@@ -592,7 +596,7 @@
   result: auto_linear
 
 - name: expand.SymInt(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
-  self: at::sum_to(grad, c10::expectIntArrayRef(self.sym_sizes()))
+  self: at::sum_to(grad, c10::asIntArrayRefSlow(self.sym_sizes()))
   result: auto_linear
 
 - name: fake_quantize_per_tensor_affine_cachemask(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> (Tensor output, Tensor mask)
@@ -1335,11 +1339,11 @@
   result: auto_element_wise
 
 - name: sgn(Tensor self) -> Tensor
-  self: "self.is_complex() ? sgn_backward_c(self, grad, result) : Tensor{}"
+  self: sgn_backward(self, grad, result)
   # Cannot use auto_element_wise here because the Jacobian is *not* Hermitian (in fact, it is symmetric)
   # The function is not holomorphic, so there's no reason for its Jacobian to be Hermitian
   # auto_element_wise has a name that's a bit deceiving in the complex case
-  result: "self_p.is_complex() ? sgn_backward_c(self_p, self_t, result) : at::_efficientzerotensor(self_p.sizes(), self_p.options())"
+  self: sgn_backward(self_p, self_t, result)
 
 - name: sin(Tensor self) -> Tensor
   self: grad * self.cos().conj()
@@ -1725,6 +1729,9 @@
   self: binary_cross_entropy_double_backward(grad_output, grad, self, target, weight, reduction)
   target: binary_cross_entropy_double_backward_target(grad, grad_output, self, target, weight, reduction)
   grad_output: binary_cross_entropy_double_backward_grad_output(grad, self, target, weight, reduction)
+  result: " binary_cross_entropy_double_backward(grad_output_p, self_t, self_p, target_p, weight, reduction)
+          + binary_cross_entropy_double_backward_target(target_t, grad_output_p, self_p, target_p, weight, reduction)
+          + binary_cross_entropy_double_backward_grad_output(grad_output_t, self_p, target_p, weight, reduction)"
 
 - name: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_with_logits_backward(grad, self, target, weight, pos_weight, reduction)

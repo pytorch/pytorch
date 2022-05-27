@@ -382,9 +382,13 @@ Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
   return grad * args.digamma_().sum(-1);
 }
 
-Tensor sgn_backward_c(const Tensor& x, const Tensor& gx, const Tensor& sgn) {
-  auto abs = x.abs();
-  return ((gx - (sgn * sgn) * gx.conj()) / (2. * abs)).masked_fill_(abs == 0., 0.);
+Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn) {
+  if (x.is_complex()) {
+    auto abs = x.abs();
+    return ((gx - (sgn * sgn) * gx.conj()) / (2. * abs)).masked_fill_(abs == 0., 0.);
+  } else {
+    return at::_efficientzerotensor(sgn.sizes(), sgn.options());
+  }
 }
 
 Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
@@ -706,6 +710,54 @@ std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<
     auto size = shape[dim];
     accumulate += size;
     grad_inputs[i] = grad_val.narrow(dim, accumulate - size, size);
+  }
+  return grad_inputs;
+}
+
+std::vector<Tensor> block_diag_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, const std::vector<ScalarType> &dtypes) {
+  std::vector<Tensor> grad_inputs(sizes.size());
+  if (!grad.defined()) {
+    return grad_inputs;
+  }
+  Tensor real_view_of_grad;
+  bool grad_is_complex = grad.is_complex();
+  if (grad_is_complex) {
+    real_view_of_grad = at::real(grad);
+  }
+
+  int64_t cur_dim0 = 0;
+  int64_t cur_dim1 = 0;
+
+  for (const auto i : c10::irange(sizes.size())) {
+    // R -> C
+    Tensor grad_val = (!at::isComplexType(dtypes[i]) && grad_is_complex) ? real_view_of_grad : grad;
+
+    auto& shape = sizes[i];
+    // If input was empty tensor, gradInput should be empty tensor.
+    if (shape.size() == 1 && shape[0] == 0) {
+      grad_inputs[i] = at::zeros({0}, grad_val.options());
+      continue;
+    }
+    // 0d case
+    auto dim0 = 1;
+    auto dim1 = 1;
+    // 2d case
+    if (shape.size() == 2) {
+      dim0 = shape[0];
+      dim1 = shape[1];
+    // 1d case
+    } else if (shape.size() == 1) {
+      dim1 = shape[0];
+    }
+    auto slice = grad_val.slice(0, cur_dim0, cur_dim0 + dim0).slice(1, cur_dim1, cur_dim1 + dim1);
+    if (shape.size() == 1) {
+      slice = slice.squeeze(-1);
+    } else if (shape.size() == 0) {
+      slice = slice.squeeze(-1).squeeze(-1);
+    }
+    grad_inputs[i] = slice;
+    cur_dim0 += dim0;
+    cur_dim1 += dim1;
   }
   return grad_inputs;
 }
@@ -1710,8 +1762,6 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   }
   if (reduction == at::Reduction::Mean) {
     return ggO / input.numel();
-  } else if (reduction == at::Reduction::Sum) {
-    return ggO.sum();
   }
   return ggO;
 }
@@ -4847,6 +4897,28 @@ Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
     }
 
     out_fw_grad = at::cat(fw_grads, dim);
+  }
+
+  return out_fw_grad;
+}
+
+Tensor block_diag_jvp(at::TensorList tensors) {
+  Tensor out_fw_grad;
+
+  auto any_defined = false;
+  for (const auto& t: tensors) {
+    any_defined |= isFwGradDefined(t);
+  }
+
+  if (any_defined) {
+    std::vector<Tensor> fw_grads;
+    fw_grads.reserve(tensors.size());
+
+    for (const auto& t: tensors) {
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
+    }
+
+    out_fw_grad = at::block_diag(fw_grads);
   }
 
   return out_fw_grad;

@@ -92,6 +92,7 @@ at::Tensor unbind_backward(const variable_list& grads, int64_t dim);
 at::Tensor unsqueeze_to(const at::Tensor & self, at::IntArrayRef sizes);
 at::Tensor unsqueeze_to(const at::Tensor & self, int64_t dim, at::IntArrayRef sizes);
 std::vector<at::Tensor> cat_tensors_backward(const at::Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, const std::vector<ScalarType> &dtypes, int64_t dim);
+std::vector<at::Tensor> block_diag_backward(const at::Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, const std::vector<ScalarType> &dtypes);
 at::Tensor clamp_backward(const at::Tensor & grad, const at::Tensor &self, const optional<at::Scalar>& min, const optional<at::Scalar>& max);
 at::Tensor clamp_backward(const at::Tensor & grad, const at::Tensor &self, const at::Tensor& min, const at::Tensor& max);
 std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(const at::Tensor& grad, const at::Tensor& self, const at::Tensor& min, const at::Tensor& max, const std::array<bool, 2>&);
@@ -111,7 +112,7 @@ at::Tensor _fused_dropout_backward(at::Tensor grad, at::Tensor mask, double p1m)
 at::Tensor infinitely_differentiable_native_dropout_backward(const at::Tensor& grad, const at::Tensor& mask, double scale);
 at::Tensor native_dropout_double_backward(const at::Tensor& ggI, const at::Tensor& grad, const at::Tensor& mask, double scale);
 at::Tensor evenly_distribute_backward(at::Tensor grad, const at::Tensor & input, const at::Tensor & value);
-Tensor sgn_backward_c(const Tensor& x, const Tensor& gx, const Tensor& sgn);
+Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn);
 Tensor mean_backward(const Tensor& grad, IntArrayRef shape, IntArrayRef dim, int64_t numel, bool keepdim);
 at::Tensor var_backward(at::Tensor grad, const at::Tensor& self, at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim);
 at::Tensor std_backward(const at::Tensor& result, const at::Tensor& grad, const at::Tensor& self, at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim);
@@ -484,6 +485,7 @@ Tensor _convolution_jvp(
 Tensor convolution_backward_jvp_grad_bias(const Tensor& grad_out_t, const Tensor& grad_bias);
 
 Tensor cat_jvp(at::TensorList tensors, int64_t dim);
+Tensor block_diag_jvp(at::TensorList tensors);
 Tensor stack_jvp(at::TensorList tensors, int64_t dim);
 Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
 Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Tensor& indices, bool keepdim);
