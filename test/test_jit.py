@@ -7099,9 +7099,6 @@ a")
             for j in range(-8, 8):
                 if j != 0:
                     self.assertEqual(foo(i, j), i // j)
-                else:
-                    with self.assertRaisesRegex(RuntimeError, 'division by 0'):
-                        foo(i, j)
 
     # Testing bitwise shorthand aug assignment
     def test_bool_augassign_bitwise_or(self):
