@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import enum
 import functools
 import inspect
 import sys
 import warnings
-from typing import Set
+from typing import Optional, Set
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -1187,7 +1189,11 @@ def _handle_reduce_dim_none(g, self, op_name):
     return g.op(op_name, self, keepdims_i=0)
 
 
-def dequantize_helper(g, qtensor, qdtype=None):
+def dequantize_helper(
+    g: _C.Graph,
+    qtensor: _C.Value,
+    qdtype: Optional[torch.onnx.TensorProtoDataType] = None,
+):
     """Appends to graph `g` ONNX nodes that dequantizes `qtensor` into `tensor`.
 
     Args:
