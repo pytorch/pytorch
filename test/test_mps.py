@@ -316,10 +316,9 @@ class TestMPS(TestCase):
             output_cpu = torch.baddbmm(M_cpu, batch1_cpu, batch2_cpu, beta=beta, alpha=alpha)
             output_mps = torch.baddbmm(M_mps, batch1_mps, batch2_mps, beta=beta, alpha=alpha)
 
-            print(output_cpu.shape)
-            print(output_mps.shape)
             self.assertEqual(output_cpu, output_mps)
             self.assertEqual(output_cpu.size(), output_mps.size())
+
         helper(input_shape=(3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
         helper(input_shape=(10, 3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
         helper(input_shape=(1, 77, 77), batch1_shape=(8, 77, 64), batch2_shape=(8, 64, 77))
@@ -1222,6 +1221,68 @@ class TestMPS(TestCase):
         cpu_slice4 = cpu_x[1, :]
         mps_slice4 = mps_x[1, :].to('cpu')
         self.assertEqual(cpu_slice4, mps_slice4)
+
+    def test_slice_contiguous_view(self):
+        # https://github.com/pytorch/pytorch/issues/77750
+
+        def helper(operator):
+            t_mps = torch.tensor([1, 2, 3, 4], device="mps")
+            t_cpu = torch.tensor([1, 2, 3, 4], device="cpu")
+
+            # contiguous view
+            x_mps = t_mps[2:] # 3, 4
+            y_mps = t_mps[:2] # 1, 2
+
+            x_cpu = t_cpu[2:]
+            y_cpu = t_cpu[:2]
+
+            res_mps = res_cpu = None
+            if operator == "<=":
+                res_mps = x_mps <= y_mps
+                res_cpu = x_cpu <= y_cpu
+            if operator == "<":
+                res_mps = x_mps < y_mps
+                res_cpu = x_cpu < y_cpu
+            if operator == ">=":
+                res_mps = x_mps >= y_mps
+                res_cpu = x_cpu >= y_cpu
+            if operator == ">":
+                res_mps = x_mps >= y_mps
+                res_cpu = x_cpu >= y_cpu
+            if operator == "==":
+                res_mps = x_mps == y_mps
+                res_cpu = x_cpu == y_cpu
+            if operator == "!=":
+                res_mps = x_mps != y_mps
+                res_cpu = x_cpu != y_cpu
+
+            self.assertEqual(res_mps, res_cpu)
+
+        for op in ["<=", "<", ">=", ">", "==", "!="]:
+            helper(op)
+    
+    def test_index_storage_offset(self):
+        # https://github.com/pytorch/pytorch/issues/78107
+
+        a = torch.tensor([8.2670e-01,-1.0293e+00])
+        b_cpu = a[0]
+        c_cpu = a[1]
+
+        # both 'b' and 'c' are views of 'a'
+        # 'b' has a storage offset of 0, while 'c' has a storage offset of 1
+        # when copying from 'cpu' to 'mps', c will have a storage_offset of 1 which needs to be taking into account, 
+        # otherwise it ends with same value as 'b'
+        b = b_cpu.to('mps')
+        c = c_cpu.to('mps')
+
+        res_mps = b > c
+        res_cpu = b_cpu > c_cpu
+        self.assertEqual(res_mps, res_cpu)
+
+        
+        res_mps = c > b
+        res_cpu = c_cpu > b_cpu
+        self.assertEqual(res_mps, res_cpu)
 
     def test_flatten(self):
         values = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
