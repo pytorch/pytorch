@@ -111,10 +111,23 @@ def unsafe_split_with_sizes(g, self, split_sizes, dim, _outputs=None):
 
 @symbolic_helper.parse_args("v", "v", "i", "i")
 def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
+    axis = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
+    axis = opset11.unsqueeze(g, axis, 0)
+
+    def static_tensor_split(self, indices):
+        start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+        res = []
+        for i in range(_outputs - 1):
+            end = g.op("Gather", indices_or_sections, i, axis)
+            res.append(g.op("Slice", self, start, end, axis))
+            start = end
+
+        end = symbolic_helper._size_helper(g, self, axis)
+        res.append(g.op("Slice", self, start, end, axis))
+        return res
+
     if not symbolic_helper._is_split_static(indices_or_sections, _outputs):
         is_scalar = symbolic_helper._get_tensor_rank(indices_or_sections) == 0
-        axis = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
-        axis = opset11.unsqueeze(g, axis, 0)
 
         if (
             symbolic_helper._is_tensor(indices_or_sections) and not is_scalar
@@ -174,7 +187,7 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
 
             return g.op("SequenceInsert", loop_out, last_slice)
 
-        elif symbolic_helper._is_tensor(indices_or_sections):  # scalar tensor
+        else:  # scalar tensor
             dim_size = symbolic_helper._size_helper(g, self, axis)
             min_split_size = g.op("Div", dim_size, indices_or_sections)
             min_split_size_plus_1 = g.op(
@@ -199,28 +212,12 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
                 return g.op("SplitToSequence", self, splits, axis_i=dim)
             return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
 
-        else:
-            if (
-                symbolic_helper._is_packed_list(indices_or_sections)
-                and len(symbolic_helper._unpack_list(indices_or_sections))
-                == _outputs - 1
-            ):
-
-                start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
-                res = []
-                for i in range(_outputs - 1):
-                    end = g.op("Gather", indices_or_sections, i, axis)
-                    res.append(g.op("Slice", self, start, end, axis))
-                    start = end
-
-                end = symbolic_helper._size_helper(g, self, axis)
-                res.append(g.op("Slice", self, start, end, axis))
-                return res
-
     split_val = indices_or_sections.node()["value"]
     if split_val.dim() > 0:
-        return g.op("Split", self, indices_or_sections, axis_i=dim, outputs=_outputs)
-    split_size = symbolic_helper._get_const(indices_or_sections, "i", "split_size")
+        return static_tensor_split(self, indices_or_sections)
+    split_size = symbolic_helper._get_const(
+        indices_or_sections, "i", "indices_or_sections"
+    )
 
     size = symbolic_helper._get_tensor_dim_size(self, dim)
     if size is None:
