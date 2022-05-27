@@ -3079,6 +3079,7 @@
     "softmax"
   ],
   "torch.special": [
+    "bessel_j0",
     "chebyshev_polynomial_t",
     "digamma",
     "entr",

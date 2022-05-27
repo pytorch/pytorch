@@ -2766,3 +2766,6 @@
 
 - name: special_chebyshev_polynomial_t.n_scalar(Tensor x, Scalar n) -> Tensor
   x: non_differentiable
+
+- name: special_bessel_j0(Tensor self) -> Tensor
+  self: non_differentiable

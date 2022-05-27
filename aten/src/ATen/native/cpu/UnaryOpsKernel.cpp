@@ -559,6 +559,16 @@ void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
       });
 }
 
+static void bessel_j0_kernel(TensorIteratorBase& iterator) {
+    TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return bessel_j0_forward(x);
+        });
+    });
+} // bessel_j0_kernel(TensorIteratorBase& iterator)
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -649,7 +659,7 @@ REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
 REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
 REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
-
+REGISTER_DISPATCH(special_bessel_j0_stub, &CPU_CAPABILITY::bessel_j0_kernel);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(acos)

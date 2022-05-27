@@ -18989,6 +18989,19 @@ op_db: List[OpInfo] = [
         supports_one_python_scalar=True,
         supports_autograd=False,
     ),
+    UnaryUfuncInfo(
+        'special.bessel_j0',
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.j0 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
 ]
 
 # NOTE [Python References]

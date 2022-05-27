@@ -601,4 +601,23 @@ inline Tensor& chebyshev_polynomial_t_out(Tensor& output, const Tensor& x, const
   return torch::special_chebyshev_polynomial_t_out(output, x, n);
 }
 
+/// Bessel function of the first kind of order 0.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.bessel_j0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::bessel_j0(x);
+/// ```
+inline Tensor bessel_j0(const Tensor& self) {
+  return torch::special_bessel_j0(self);
+}
+
+inline Tensor& bessel_j0_out(Tensor& result, const Tensor& self) {
+  return torch::special_bessel_j0_out(result, self);
+}
+
 }} // torch::special
