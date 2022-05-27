@@ -368,19 +368,12 @@ class TestSparseCompressed(TestCase):
             self.maxDiff = orig_maxDiff
             raise
 
-    def _smallest_divisor(self, n):
-        for i in range(2, int(n ** 0.5) + 1):
-            if n % i == 0:
-                return i
-        return n
-
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_copy(self, layout, device, dtype):
 
-        def run_test(shape, nnz, index_type):
-            blocksize = tuple(map(self._smallest_divisor, shape[-2:])) if layout in {torch.sparse_bsr, torch.sparse_bsc} else ()
+        def run_test(shape, blocksize, nnz, index_type):
             a = self.genSparseCompressedTensor(shape, nnz, dtype=dtype, layout=layout, device=device,
                                                index_dtype=index_dtype, blocksize=blocksize)
             b = self.genSparseCompressedTensor(shape, nnz, dtype=dtype, layout=layout, device=device,
@@ -390,11 +383,12 @@ class TestSparseCompressed(TestCase):
 
             self.assertEqual(a, b)
 
-        ns = [9, 2, 0]
+        ns = [(9, 3), (2, 1), (0, 0)]  # (number of dimensions, the corresponding block size)
         batch_shapes = [(), (2,), (2, 3)]
-        for (m, n, b), index_dtype in zip(itertools.product(ns, ns, batch_shapes), [torch.int32, torch.int64]):
-            run_test((*b, m, n), 0, index_dtype)
-            run_test((*b, m, n), m * n, index_dtype)
+        for ((m, bm), (n, bn), b), index_dtype in zip(itertools.product(ns, ns, batch_shapes), [torch.int32, torch.int64]):
+            blocksize = (bm, bn) if layout in {torch.sparse_bsr, torch.sparse_bsc} else ()
+            run_test((*b, m, n), blocksize, 0, index_dtype)
+            run_test((*b, m, n), blocksize, m * n, index_dtype)
 
     @skipMeta
     @all_sparse_compressed_layouts()
@@ -433,6 +427,12 @@ class TestSparseCompressed(TestCase):
                 with self.assertRaisesRegex(RuntimeError,
                                             "copy of sparse compressed tensors having different block sizes is not supported"):
                     b.copy_(d)
+
+    def _smallest_divisor(self, n):
+        for i in range(2, int(n ** 0.5) + 1):
+            if n % i == 0:
+                return i
+        return n
 
     @all_sparse_compressed_layouts()
     @ops(_sparse_compressed_ops)
@@ -630,7 +630,7 @@ class TestSparseCSR(TestCase):
                                     torch.tensor([1, 2, 3, 4]),
                                     device=device)
 
-        with self.assertRaisesRegex(RuntimeError, r"\"validate_sparse_compressed_tensor_args\" not implemented for 'Short'"):
+        with self.assertRaisesRegex(RuntimeError, "crow_indices and col_indices must be an int32 or int64 type"):
             torch.sparse_csr_tensor(torch.tensor([0, 2, 4], dtype=torch.int16),
                                     torch.tensor([0, 1, 0, 1], dtype=torch.int16),
                                     torch.tensor([1, 2, 3, 4]),
