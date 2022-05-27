@@ -4100,7 +4100,7 @@ exit(len(w))
     def _get_not_implemented_op(self):
         # This can be changed once we actually implement `torch.eye`
         # Should return fn, args, kwargs, string_version
-        return torch.eye, (2,), {"device": "mps"}, "torch.eye(2, device='mps')"
+        return torch.bincount, (torch.tensor([4, 3, 6, 3, 4], device='mps')), {}, "torch.bincount(torch.tensor([4, 3, 6, 3, 4], device='mps'))"
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
