@@ -30,6 +30,7 @@ from . import (
 from ._constants import ONNX_ARCHIVE_MODEL_PROTO_NAME
 from ._exporter_states import ExportTypes, SymbolicContext
 
+# Names may be accessible from torch.onnx but not meant for public use are not listed.
 __all__ = [
     # Modules
     "symbolic_helper",
@@ -47,27 +48,14 @@ __all__ = [
     "symbolic_opset15",
     "symbolic_opset16",
     # Enums
-    "ExportTypes",
     "OperatorExportTypes",
-    "TensorProtoDataType",
     "TrainingMode",
-    # Constants
-    "ONNX_ARCHIVE_MODEL_PROTO_NAME",
-    "producer_name",
-    "producer_version",
-    # Classes
-    "SymbolicContext",
     # Public functions
     "export",
     "export_to_pretty_string",
-    "disable_log",
-    "enable_log",
     "is_in_onnx_export",
-    "is_onnx_log_enabled",
-    "log",
-    "register_custom_op_symbolic",
     "select_model_mode_for_export",
-    "set_log_stream",
+    "register_custom_op_symbolic",
     "unregister_custom_op_symbolic",
 ]
 
