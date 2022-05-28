@@ -4,8 +4,6 @@ import unittest
 
 import numpy as np
 import onnx
-
-import torch.onnx._exporter_states
 from test_pytorch_onnx_caffe2 import do_export
 from test_pytorch_onnx_onnxruntime import run_model_test
 
@@ -112,7 +110,7 @@ class TestCustomAutogradFunction(unittest.TestCase):
                 h = self.relu(h)
                 return h
 
-        def symbolic_pythonop(ctx: torch.onnx._exporter_states.SymbolicContext, g, *args, **kwargs):
+        def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
             n = ctx.cur_node
             name = kwargs["name"]
             if name == "MyClip":

@@ -15,8 +15,6 @@ import numpy as np
 import onnx
 import onnxruntime
 import torchvision
-
-import torch.onnx._exporter_states
 from model_defs.lstm_flattening_result import (
     LstmFlatteningResultWithoutSeqLength,
     LstmFlatteningResultWithSeqLength,
@@ -3839,7 +3837,7 @@ class _TestONNXRuntime:
                 return input.clamp(min=0)
 
         def symbolic_python_op(
-            ctx: torch.onnx._exporter_states.SymbolicContext, g: torch._C.Graph, *args, **kwargs
+            ctx: torch.onnx.SymbolicContext, g: torch._C.Graph, *args, **kwargs
         ):
             n = ctx.cur_node
             name = kwargs["name"]

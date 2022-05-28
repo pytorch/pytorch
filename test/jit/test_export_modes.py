@@ -8,7 +8,6 @@ import tempfile
 
 import torch
 import torch.nn as nn
-import torch.onnx._exporter_states
 from torch.onnx import OperatorExportTypes
 from torch.autograd import Variable
 
@@ -37,28 +36,28 @@ class TestExportModes(JitTestCase):
         fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
         f = io.BytesIO()
         torch.onnx._export(torch_model, (fake_input), f, verbose=False,
-                           export_type=torch.onnx._exporter_states.ExportTypes.PROTOBUF_FILE)
+                           export_type=torch.onnx.ExportTypes.PROTOBUF_FILE)
 
     def test_zipfile(self):
         torch_model = TestExportModes.MyModel()
         fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
         f = io.BytesIO()
         torch.onnx._export(torch_model, (fake_input), f, verbose=False,
-                           export_type=torch.onnx._exporter_states.ExportTypes.ZIP_ARCHIVE)
+                           export_type=torch.onnx.ExportTypes.ZIP_ARCHIVE)
 
     def test_compressed_zipfile(self):
         torch_model = TestExportModes.MyModel()
         fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
         f = io.BytesIO()
         torch.onnx._export(torch_model, (fake_input), f, verbose=False,
-                           export_type=torch.onnx._exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE)
+                           export_type=torch.onnx.ExportTypes.COMPRESSED_ZIP_ARCHIVE)
 
     def test_directory(self):
         torch_model = TestExportModes.MyModel()
         fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
         d = tempfile.mkdtemp()
         torch.onnx._export(torch_model, (fake_input), d, verbose=False,
-                           export_type=torch.onnx._exporter_states.ExportTypes.DIRECTORY)
+                           export_type=torch.onnx.ExportTypes.DIRECTORY)
         shutil.rmtree(d)
 
     def test_onnx_multiple_return(self):
