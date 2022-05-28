@@ -20,11 +20,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch._C._onnx as _C_onnx
 import torch.jit._trace
-import torch.onnx._exporter_states
 import torch.serialization
 from torch import _C
 from torch.onnx import (  # noqa: F401
     _constants,
+    _exporter_states,
     _patch_torch,
     symbolic_caffe2,
     symbolic_helper,
@@ -1005,7 +1005,7 @@ def _export(
     export_modules_as_functions=False,
 ):
     if export_type is None:
-        export_type = torch.onnx._exporter_states.ExportTypes.PROTOBUF_FILE
+        export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(
@@ -1084,7 +1084,7 @@ def _export(
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = (
-                    export_type is not torch.onnx._exporter_states.ExportTypes.PROTOBUF_FILE
+                export_type is not _exporter_states.ExportTypes.PROTOBUF_FILE
             )
             if custom_opsets is None:
                 custom_opsets = {}
@@ -1141,24 +1141,25 @@ def _export(
                 torch.onnx.log(
                     "Exported graph: ", _assign_onnx_node_name(graph, node_names)
                 )
-            if export_type == torch.onnx._exporter_states.ExportTypes.PROTOBUF_FILE:
+            if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
                 assert len(export_map) == 0
                 with torch.serialization._open_file_like(f, "wb") as opened_file:
                     opened_file.write(proto)
             elif export_type in [
-                torch.onnx._exporter_states.ExportTypes.ZIP_ARCHIVE,
-                torch.onnx._exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE,
+                _exporter_states.ExportTypes.ZIP_ARCHIVE,
+                _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE,
             ]:
                 compression = (
                     zipfile.ZIP_DEFLATED
-                    if export_type == torch.onnx._exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE
+                    if export_type
+                    == _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE
                     else zipfile.ZIP_STORED
                 )
                 with zipfile.ZipFile(f, "w", compression=compression) as z:
                     z.writestr(torch.onnx.ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
                     for k, v in export_map.items():
                         z.writestr(k, v)
-            elif export_type == torch.onnx._exporter_states.ExportTypes.DIRECTORY:
+            elif export_type == _exporter_states.ExportTypes.DIRECTORY:
                 if os.path.exists(f):
                     assert os.path.isdir(f)
                 else:
@@ -1332,7 +1333,7 @@ def _need_symbolic_context(symbolic_fn) -> bool:
     if first_param_name not in type_hints:
         return False
     param_type = type_hints[first_param_name]
-    return issubclass(param_type, torch.onnx._exporter_states.SymbolicContext)
+    return issubclass(param_type, _exporter_states.SymbolicContext)
 
 
 def _get_aten_op_overload_name(n: _C.Node) -> str:
@@ -1395,7 +1396,7 @@ def _run_symbolic_function(
 
             attrs = {k: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
             if _need_symbolic_context(symbolic_fn):
-                ctx = torch.onnx._exporter_states.SymbolicContext(_params_dict, env, n, block)
+                ctx = _exporter_states.SymbolicContext(_params_dict, env, n, block)
                 return symbolic_fn(ctx, g, *inputs, **attrs)
             # PythonOp symbolic need access to the node to resolve the name conflict,
             # this is inconsistent with regular op symbolic.
