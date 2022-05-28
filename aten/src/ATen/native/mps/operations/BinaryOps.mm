@@ -143,8 +143,11 @@ void div_mode_template(const Tensor& self, const Tensor& other,
                        const Tensor& output, const string op_name)
 {
   BinaryOpBlock div_mode_op_block = ^BinaryOpFn() {
-    MPSGraphTensor* divTensor =  [mpsGraph divisionWithPrimaryTensor:primary
-                                                     secondaryTensor:secondary
+    // Division needs float inputs, result should also always be float32
+    MPSGraphTensor* primaryFloat32 = [mpsGraph castTensor:primary toType:MPSDataTypeFloat32 name:@"castPrimary"];
+    MPSGraphTensor* secondaryFloat32 = [mpsGraph castTensor:secondary toType:MPSDataTypeFloat32 name:@"castSecondary"];
+    MPSGraphTensor* divTensor =  [mpsGraph divisionWithPrimaryTensor:primaryFloat32
+                                                     secondaryTensor:secondaryFloat32
                                                                 name:nil];
     if (!rounding_mode.has_value()) {
       return divTensor;
