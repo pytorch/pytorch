@@ -18,6 +18,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
+#include <c10/util/SmallVector.h>
 
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
@@ -32,22 +33,22 @@ Tensor index_select_mps(const Tensor & self,
   IntArrayRef input_shape = self.sizes();
   auto num_input_dims = input_shape.size();
 
-  IntArrayRef index_shape = index.sizes();
   auto num_indices = index.numel();
   TORCH_CHECK_INDEX(index.dim() <= 1, "index_select(): Index is supposed to be a vector");
 
   dim = maybe_wrap_dim(dim, self.dim());
-  int64_t* shape_data = (int64_t*)malloc(num_input_dims * sizeof(int64_t));
+  std::vector<int64_t> shape_data(num_input_dims);
 
   // Calculate new shape
-  for(int i = 0; i < num_input_dims; i++) {
-    if(i == dim)
+  for(auto i : c10::irange(num_input_dims)) {
+    if (i == dim) {
       shape_data[i] = num_indices;
-    else
+    } else {
       shape_data[i] = input_shape[i];
+    }
   }
 
-  IntArrayRef output_shape = IntArrayRef(shape_data, num_input_dims);
+  IntArrayRef output_shape = IntArrayRef(shape_data.data(), num_input_dims);
 
   Tensor result = at::native::empty_mps(
                       output_shape,
@@ -56,8 +57,6 @@ Tensor index_select_mps(const Tensor & self,
                       kMPS,
                       c10::nullopt,
                       c10::nullopt);
-
-  free(shape_data);
 
   index_select_out_mps(self, dim, index, result);
   return result;
@@ -245,13 +244,12 @@ Tensor embedding_dense_backward_mps(
     IntArrayRef indices_shape = indices.sizes();
     int64_t num_indices_dims = indices_shape.size();
 
-    int64_t* outgoing_gradient_shape = (int64_t *) malloc(sizeof(int64_t) * 2);
+    c10::SmallVector<int64_t, 2> outgoing_gradient_shape;
     int64_t D = incoming_gradient_shape[num_incoming_gradient_dims - 1];
     outgoing_gradient_shape[0] = num_weights;
     outgoing_gradient_shape[1] = D;
-    int64_t num_outgoing_gradient_dims = 2;
     Tensor outgoing_gradient = at::native::empty_mps(
-                                IntArrayRef(outgoing_gradient_shape, num_outgoing_gradient_dims),
+                                IntArrayRef(outgoing_gradient_shape.data(), outgoing_gradient_shape.size()),
                                 grad_.scalar_type(),
                                 c10::nullopt,
                                 kMPS,
@@ -288,7 +286,7 @@ Tensor embedding_dense_backward_mps(
             MPSGraphTensor *outgoingGradTensor;
             outgoingGradTensor = [mpsGraph scatterNDWithUpdatesTensor:incomingGradTensor
                             indicesTensor:reshapedIndicesTensor
-                                    shape:native_mps::getMPSShape(IntArrayRef(outgoing_gradient_shape, num_outgoing_gradient_dims))
+                                    shape:native_mps::getMPSShape(IntArrayRef(outgoing_gradient_shape.data(), outgoing_gradient_shape.size()))
                           batchDimensions:0
                                      mode:MPSGraphScatterModeAdd
                                      name:@"edb"];
@@ -316,7 +314,6 @@ Tensor embedding_dense_backward_mps(
       };
       native_mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
     }
-    free(outgoing_gradient_shape);
     return outgoing_gradient;
 }
 

@@ -2705,6 +2705,14 @@ Example::
             [ 0.0059,  0.2600,  0.4475, -1.3948],
             [ 0.3667,  0.9567,  2.5757, -0.1751],
             [ 0.2046,  0.0742,  0.2998, -0.1054]])
+    >>> a = torch.tensor([1.])
+    >>> b = torch.tensor([-0.])
+    >>> torch.copysign(a, b)
+    tensor([-1.])
+
+.. note::
+    copysign handles signed zeros. If the other argument has a negative zero (-0),
+    the corresponding output value will be negative.
 
 """.format(**common_args))
 
@@ -3289,6 +3297,47 @@ Examples::
     tensor([[0., 1., 0.],
             [0., 0., 1.],
             [0., 0., 0.]])
+""".format(**common_args))
+
+add_docstr(torch.as_strided_scatter,
+           r"""
+as_strided_scatter(input, src, size, stride, storage_offset=0) -> Tensor
+
+Embeds the values of the :attr:`src` tensor into :attr:`input` along
+the elements corresponding to the result of calling
+input.as_strided(size, stride, storage_offset).
+
+This function returns a tensor with fresh storage; it does not
+return a view.
+
+Args:
+    {input}
+    size (tuple or ints): the shape of the output tensor
+    stride (tuple or ints): the stride of the output tensor
+    storage_offset (int, optional): the offset in the underlying storage of the output tensor
+
+.. note::
+
+    :attr:`src` must be of the proper size in order to be embedded
+    into :attr:`input`. Specifically, it should have the same shape as
+    `torch.as_strided(input, size, stride, storage_offset)`
+
+Example::
+
+    >>> a = torch.arange(4).reshape(2, 2) + 1
+    >>> a
+    tensor([[1, 2],
+            [3, 4]])
+    >>> b = torch.zeros(3, 3)
+    >>> b
+    tensor([[0., 0., 0.],
+            [0., 0., 0.],
+            [0., 0., 0.]])
+    >>> torch.as_strided_scatter(b, a, (2, 2), (1, 2))
+    tensor([[1., 3., 2.],
+            [4., 0., 0.],
+            [0., 0., 0.]])
+
 """.format(**common_args))
 
 add_docstr(torch.diff, r"""
@@ -8789,6 +8838,13 @@ Example::
     >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
     >>> torch.signbit(a)
     tensor([ False, True,  False,  False])
+    >>> a = torch.tensor([-0.0, 0.0])
+    >>> torch.signbit(a)
+    tensor([ True,  False])
+
+.. note::
+    signbit handles signed zeros, so negative zero (-0) returns True.
+
 """.format(**common_args))
 
 add_docstr(torch.sgn,
