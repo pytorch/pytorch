@@ -1,8 +1,13 @@
-#include <torch/csrc/jit/backends/backend.h>
-#include <torch/csrc/jit/backends/coreml/cpp/context.h>
-#include <torch/csrc/jit/backends/coreml/objc/PTMCoreMLExecutor.h>
-#include <torch/script.h>
+#import <torch/csrc/jit/backends/backend.h>
+#import <torch/csrc/jit/backends/coreml/cpp/context.h>
+#import <torch/csrc/jit/backends/coreml/objc/PTMCoreMLExecutor.h>
+#import <torch/csrc/jit/backends/coreml/objc/PTMCoreMLCompiler.h>
+#import <torch/csrc/jit/backends/coreml/objc/PTMCoreMLConfig.h>
+#import <torch/csrc/jit/backends/coreml/objc/PTMTensorSpec.h>
+#import <torch/csrc/jit/backends/coreml/objc/PTMCoreMLFeatureProvider.h>
+#import <torch/csrc/jit/backends/coreml/observer/PTMCoreMLObserver.h>
 
+#import <torch/script.h>
 #import <CoreML/CoreML.h>
 
 #if C10_IOS
@@ -16,15 +21,8 @@ namespace jit {
 namespace mobile {
 namespace coreml {
 
-static constexpr int SUPPORTED_COREML_VER = 4;
-
-enum TensorType {
-  Float,
-  Double,
-  Int,
-  Long,
-  Undefined,
-};
+static const int32_t kSampleThreshold = static_cast<int32_t>(1.0 / 1000.0 * static_cast<double>(RAND_MAX));
+static const int32_t kSampleEvery = 500;
 
 static inline c10::ScalarType scalarType(TensorType type) {
   switch (type) {
@@ -43,102 +41,124 @@ static inline c10::ScalarType scalarType(TensorType type) {
   }
 }
 
-static id parse(NSString* jsonStr) {
-  NSData* data = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
-  NSError* error = nil;
-  id result = [NSJSONSerialization JSONObjectWithData:data
-                                              options:0
-                                                error:&error];
-  if (error || !result) {
-    TORCH_CHECK(
-        false,
-        "parsing JSON string failed!",
-        error.localizedDescription.UTF8String);
-  }
-
-  return result;
-}
-
-struct TensorSpec {
+// Wrap the MLModel into a struct to be able to pack into IValue
+struct MLModelWrapper: public CustomClassHolder {
  public:
-  TensorSpec() = delete;
-  TensorSpec(NSArray<NSString*>* spec) {
-    TORCH_CHECK(spec.count == 3);
-    name_ = spec[0];
-    dtype_ = (TensorType)spec[1].intValue;
-  }
-  NSString* name() {
-    return name_;
-  }
-  TensorType dtype() {
-    return dtype_;
-  }
-
- private:
-  NSString* name_ = @"";
-  TensorType dtype_ = TensorType::Float;
+  MLModelWrapper(
+    MLModel* mlModel,
+    std::vector<TensorSpec>& inputs,
+    std::vector<TensorSpec>& outputs,
+    int64_t coreMLVersion,
+    int32_t modelLoadID,
+    size_t initialMemLimit)
+    : mlModel(mlModel),
+      inputs(inputs),
+      outputs(outputs),
+      coreMLVersion(coreMLVersion),
+      modelLoadID(modelLoadID),
+      initialMemLimit(initialMemLimit) {}
+  MLModel *mlModel = nullptr;
+  std::vector<TensorSpec> inputs;
+  std::vector<TensorSpec> outputs;
+  int64_t coreMLVersion;
+  int32_t modelLoadID;
+  int32_t inferences = 0;
+  size_t initialMemLimit;
 };
 
-struct CoreMLConfig {
+class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
+
  public:
-  CoreMLConfig() = delete;
-  CoreMLConfig(NSDictionary* dict)
-      : coreMLVersion_([dict[@"spec_ver"] intValue]),
-        backend_([dict[@"backend"] lowercaseString]),
-        allow_low_precision_([dict[@"allow_low_precision"] boolValue]) {
-    TORCH_CHECK(
-        coreMLVersion_ >= SUPPORTED_COREML_VER,
-        "Only Core ML version 4 or above are supported");
-  }
-  int64_t coreMLVersion() const {
-    return coreMLVersion_;
-  }
-  NSString* backend() const {
-    return backend_;
-  }
-  bool allowLowPrecision() const {
-    return allow_low_precision_;
+  c10::impl::GenericDict compile(c10::IValue processed, c10::impl::GenericDict method_compile_spec) override {
+    auto modelDict = processed.toGenericDict();
+    const char *specs = modelDict.at("extra").toStringRef().c_str();
+    const std::string& model = modelDict.at("model").toStringRef();
+    const std::string& sha256 = modelDict.at("hash").toStringRef();
+
+    int32_t modelLoadID = std::rand();
+    int32_t instanceKey = std::rand();
+    size_t initialMemLimit = 0;
+
+    PTMCoreMLObserver *observer = coreMLObserverConfig().getCoreMLObserver();
+    if (observer) {
+      initialMemLimit = observer->getRemainingMemory();
+      observer->onEnterCompileModel(instanceKey, modelLoadID);
+    }
+
+    NSError *compileError;
+    NSDictionary *dict = [PTMCoreMLCompiler parseSpecs:specs error:&compileError];
+    if (!dict || compileError) {
+      if (observer) {
+        observer->onExitCompileModel(instanceKey, false, true);
+      }
+      TORCH_CHECK(false, "Parsing spec json failed!");
+    }
+
+    CoreMLConfig config = CoreMLConfig(dict[@"config"]);
+    int64_t coreMLVersion = config.coreMLVersion();
+    NSString *backend = config.backend();
+    BOOL allowLowPrecision = config.allowLowPrecision();
+
+    MLModel *compiledModel =
+      [PTMCoreMLCompiler
+       compileMLModel:model
+       identifier:sha256
+       backend:backend
+       allowLowPrecision:allowLowPrecision
+       error:&compileError];
+
+    if (!compiledModel || compileError) {
+      if (observer) {
+        observer->onExitCompileModel(instanceKey, false, true);
+      }
+      TORCH_CHECK(false, "Compiling MLModel failed!");
+    }
+
+    if (observer) {
+      bool shouldLog = modelLoadID < kSampleThreshold;
+      observer->onExitCompileModel(instanceKey, true, shouldLog);
+    }
+
+    NSArray<NSArray *> *inputs = dict[@"inputs"];
+    NSArray<NSArray *> *outputs = dict[@"outputs"];
+    std::vector<TensorSpec> inputSpecs, outputSpecs;
+    for (NSArray *input in inputs) {
+      inputSpecs.emplace_back(TensorSpec(input));
+    }
+    for (NSArray *output in outputs) {
+      outputSpecs.emplace_back(TensorSpec(output));
+    }
+
+    auto modelWrapper =
+      c10::make_intrusive<MLModelWrapper>(
+        compiledModel,
+        inputSpecs,
+        outputSpecs,
+        coreMLVersion,
+        modelLoadID,
+        initialMemLimit);
+
+    auto handle = IValue::make_capsule(modelWrapper);
+    c10::Dict<IValue, IValue> ret(StringType::get(), c10::AnyType::get());
+    ret.insert("forward", handle);
+    return c10::impl::toGenericDict(ret);
   }
 
- private:
-  int64_t coreMLVersion_ = SUPPORTED_COREML_VER;
-  NSString* backend_ = @"CPU";
-  bool allow_low_precision_ = true;
-};
+  c10::impl::GenericList execute(c10::IValue handle, c10::impl::GenericList inputs) override {
+    int32_t instanceKey = std::rand();
 
-struct MetaData {
- public:
-  MetaData(NSDictionary* dict)
-      : torchVer_(dict[@"torch_ver"]),
-        coremltoolVer_(dict[@"coremltool_ver"]) {}
-  NSString* torchVer() const {
-    return torchVer_;
-  }
-  NSString* coremltoolVer() const {
-    return coremltoolVer_;
-  }
+    auto modelWrapper = c10::static_intrusive_pointer_cast<MLModelWrapper>(handle.toCapsule());
 
- private:
-  NSString* torchVer_ = @"";
-  NSString* coremltoolVer_ = @"";
-};
+    PTMCoreMLObserver *observer = coreMLObserverConfig().getCoreMLObserver();
+    if (observer) {
+      observer->onEnterExecuteModel(
+        instanceKey,
+        modelWrapper->modelLoadID,
+        modelWrapper->initialMemLimit,
+        modelWrapper->inferences);
+    }
 
-// Wrap the Objective-C executor into a C++ to be able to pack into IValue
-struct API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLExecutorWrapper
-    : public CustomClassHolder {
- public:
-  CoreMLExecutorWrapper(
-      PTMCoreMLExecutor* executor,
-      std::vector<TensorSpec>& inputs,
-      std::vector<TensorSpec>& outputs,
-      CoreMLConfig config)
-      : executor_(executor),
-        inputs_(inputs),
-        outputs_(outputs),
-        config_(config) {}
-  c10::List<torch::Tensor> execute(const c10::impl::GenericList& inputs) {
     std::vector<PTMCoreMLFeatureSpecs> inputSpecs;
-    std::vector<PTMCoreMLFeatureSpecs> outputSpecs;
     int inputSpecIndex = 0;
     // pack the inputs
     for (int i = 0; i < inputs.size(); ++i) {
@@ -149,7 +169,7 @@ struct API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLExecutorWrapper
           TORCH_CHECK(ival.isTensor());
           auto tensor = ival.toTensor();
           PTMCoreMLFeatureSpecs spec{
-              .name = inputs_[inputSpecIndex].name(),
+              .name = modelWrapper->inputs[inputSpecIndex].name(),
               .tensor = tensor,
           };
           inputSpecs.emplace_back(spec);
@@ -159,18 +179,37 @@ struct API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLExecutorWrapper
         TORCH_CHECK(val.isTensor());
         auto tensor = val.toTensor();
         PTMCoreMLFeatureSpecs spec{
-            .name = inputs_[inputSpecIndex].name(),
+            .name = modelWrapper->inputs[inputSpecIndex].name(),
             .tensor = tensor,
         };
         inputSpecs.emplace_back(spec);
         ++inputSpecIndex;
       }
     }
+
+    NSError *error;
+    auto outputFeature = [PTMCoreMLExecutor forward:inputSpecs model:modelWrapper->mlModel coreMLVersion:modelWrapper->coreMLVersion error:&error];
+
+    modelWrapper->inferences++;
+
+    if (observer) {
+      if (!outputFeature || error) {
+        observer->onExitExecuteModel(instanceKey, modelWrapper->inferences, false, true);
+      } else {
+        // Check if this inference session is being logged.
+        // If so, only log every N inferences
+        bool shouldLog = modelWrapper->modelLoadID < kSampleThreshold && modelWrapper->inferences > 1;
+        if (shouldLog) {
+          shouldLog = modelWrapper->inferences % kSampleEvery == 0;
+        }
+        observer->onExitExecuteModel(instanceKey, modelWrapper->inferences, true, shouldLog);
+      }
+    }
+
     // pack the outputs
     c10::List<torch::Tensor> outputs;
-    id<MLFeatureProvider> results = [executor_ forwardWithInputs:inputSpecs];
-    for (auto& spec : outputs_) {
-      MLFeatureValue* val = [results featureValueForName:spec.name()];
+    for (auto& spec : modelWrapper->outputs) {
+      MLFeatureValue* val = [outputFeature featureValueForName:spec.name()];
       TORCH_CHECK(val.multiArrayValue);
       // Currently, only Float type is supported
       TORCH_CHECK(val.multiArrayValue.dataType == MLMultiArrayDataTypeFloat32);
@@ -187,82 +226,25 @@ struct API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLExecutorWrapper
           count * sizeof(float));
       outputs.push_back(tensor);
     }
-    return outputs;
-  }
 
- private:
-  PTMCoreMLExecutor* executor_ = nullptr;
-  std::vector<TensorSpec> inputs_;
-  std::vector<TensorSpec> outputs_;
-  CoreMLConfig config_;
-};
-
-class API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLBackend
-    : public torch::jit::PyTorchBackendInterface {
- public:
-  c10::impl::GenericDict compile(
-      c10::IValue processed,
-      c10::impl::GenericDict method_compile_spec) override {
-    auto modelDict = processed.toGenericDict();
-    NSString* specs = [[NSString alloc]
-        initWithCString:modelDict.at("extra").toStringRef().c_str()
-               encoding:NSUTF8StringEncoding];
-    NSDictionary* dict = parse(specs);
-    NSArray<NSArray*>* inputs = dict[@"inputs"];
-    NSArray<NSArray*>* outputs = dict[@"outputs"];
-    std::vector<TensorSpec> inputSpecs, outputSpecs;
-    for (NSArray* input in inputs) {
-      inputSpecs.emplace_back(TensorSpec(input));
-    }
-    for (NSArray* output in outputs) {
-      outputSpecs.emplace_back(TensorSpec(output));
-    }
-    auto config = CoreMLConfig(dict[@"config"]);
-    const std::string& model = modelDict.at("model").toStringRef();
-    const std::string& sha256 = modelDict.at("hash").toStringRef();
-    PTMCoreMLExecutor* executor = [PTMCoreMLExecutor new];
-    executor.backend = config.backend();
-    executor.allowLowPrecision = config.allowLowPrecision();
-    executor.coreMLVersion = config.coreMLVersion();
-    bool result = [executor compileMLModel:model identifier:sha256];
-    TORCH_CHECK(result, "Compiling MLModel failed!");
-    auto executorWrapper = c10::make_intrusive<CoreMLExecutorWrapper>(
-        executor, inputSpecs, outputSpecs, config);
-    auto handle = IValue::make_capsule(executorWrapper);
-    c10::Dict<IValue, IValue> ret(StringType::get(), c10::AnyType::get());
-    ret.insert("forward", handle);
-    return c10::impl::toGenericDict(ret);
-  }
-
-  c10::impl::GenericList execute(
-      c10::IValue handle,
-      c10::impl::GenericList inputs) override {
-    auto executor = c10::static_intrusive_pointer_cast<CoreMLExecutorWrapper>(
-        handle.toCapsule());
-    auto outputs = executor->execute(inputs);
     return c10::impl::toList(outputs);
   }
-  bool is_available() override {
-    return [PTMCoreMLExecutor isAvailable];
-  }
-};
 
-struct API_AVAILABLE(ios(11.0), macos(10.13)) ContextImpl
-    : public ContextInterface {
-  bool isCoreMLAvailable() const override {
-    return [PTMCoreMLExecutor isAvailable];
-  }
-  void setModelCacheDirectory(std::string dir) override {
-    [PTMCoreMLExecutor
-        setModelCacheDirectory:[NSString stringWithCString:dir.c_str()]];
+  bool is_available() override {
+#if !defined(__APPLE__)
+    return false;
+#elif TARGET_OS_IPHONE
+    return [UIDevice currentDevice].systemVersion.floatValue > 14.0;
+#elif TARGET_OS_MAC
+    NSOperatingSystemVersion supportedVer = {10, 13, 0};
+    return [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:supportedVer];
+#endif
+    return false;
   }
 };
 
 API_AVAILABLE(ios(11.0), macos(10.13))
 static auto cls = torch::jit::backend<CoreMLBackend>("coreml");
-
-API_AVAILABLE(ios(11.0), macos(10.13))
-static BackendRegistrar g_coreml_backend(new ContextImpl());
 
 } // namespace
 }

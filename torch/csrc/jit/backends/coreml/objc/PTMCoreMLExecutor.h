@@ -1,36 +1,19 @@
-#import <CoreML/CoreML.h>
-#include <torch/script.h>
+#import <torch/csrc/jit/backends/coreml/objc/PTMCoreMLFeatureProvider.h>
 
-#include <string>
+#import <CoreML/CoreML.h>
+
 #include <vector>
 
-struct PTMCoreMLFeatureSpecs {
-  NSString* name;
-  at::Tensor tensor;
-};
+NS_ASSUME_NONNULL_BEGIN
 
-API_AVAILABLE(ios(11.0), macos(10.13))
-@interface PTMCoreMLFeatureProvider : NSObject<MLFeatureProvider>
-- (instancetype)initWithFeatureSpecs:
-                    (const std::vector<PTMCoreMLFeatureSpecs>&)specs
-                       CoreMLVersion:(NSUInteger)ver;
-@end
-
-API_AVAILABLE(ios(11.0), macos(10.13))
 @interface PTMCoreMLExecutor : NSObject
 
-@property(nonatomic, copy) NSString* backend;
-@property(nonatomic, assign) BOOL allowLowPrecision;
-@property(nonatomic, assign) NSUInteger coreMLVersion;
-
-+ (BOOL)isAvailable;
-+ (void)setModelCacheDirectory:(NSString*)dir;
-+ (NSString*)modelCacheDirectory;
-
-- (BOOL)compileMLModel:(const std::string&)modelSpecs
-            identifier:(const std::string&)identifier;
-- (id<MLFeatureProvider>)forwardWithInputs:
-    (const std::vector<PTMCoreMLFeatureSpecs>&)inputs;
-- (BOOL)cleanup;
++ (nullable id<MLFeatureProvider>)
+          forward:(const std::vector<PTMCoreMLFeatureSpecs>&)inputs
+            model:(MLModel*)model
+    coreMLVersion:(NSUInteger)coreMLVersion
+            error:(NSError**)error;
 
 @end
+
+NS_ASSUME_NONNULL_END
