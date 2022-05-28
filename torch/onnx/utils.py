@@ -26,6 +26,7 @@ from torch.onnx import (  # noqa: F401
     _constants,
     _exporter_states,
     _patch_torch,
+    exceptions,
     symbolic_caffe2,
     symbolic_helper,
     symbolic_registry,
@@ -1156,7 +1157,7 @@ def _export(
                     else zipfile.ZIP_STORED
                 )
                 with zipfile.ZipFile(f, "w", compression=compression) as z:
-                    z.writestr(torch.onnx.ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
+                    z.writestr(_constants.ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
                     for k, v in export_map.items():
                         z.writestr(k, v)
             elif export_type == _exporter_states.ExportTypes.DIRECTORY:
@@ -1166,7 +1167,7 @@ def _export(
                     os.makedirs(f)
 
                 model_proto_file = os.path.join(
-                    f, torch.onnx.ONNX_ARCHIVE_MODEL_PROTO_NAME
+                    f, _constants.ONNX_ARCHIVE_MODEL_PROTO_NAME
                 )
                 with torch.serialization._open_file_like(
                     model_proto_file, "wb"
@@ -1193,7 +1194,7 @@ def _export(
                 try:
                     _C._check_onnx_proto(proto, full_check=True)
                 except RuntimeError as e:
-                    raise torch.onnx.CheckerError(e)
+                    raise exceptions.CheckerError(e)
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False

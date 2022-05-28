@@ -1,20 +1,14 @@
 import torch._C as _C
+from torch.onnx._constants import ONNX_ARCHIVE_MODEL_PROTO_NAME
+from torch.onnx.exceptions import CheckerError
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
 TrainingMode = _C._onnx.TrainingMode
 _CAFFE2_ATEN_FALLBACK = _C._onnx._CAFFE2_ATEN_FALLBACK
 
-ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
-
 producer_name = "pytorch"
 producer_version = _C._onnx.PRODUCER_VERSION
-
-
-class CheckerError(Exception):
-    r"""Raised when ONNX checker detects an invalid model."""
-
-    pass
 
 
 def _export(*args, **kwargs):
