@@ -2786,3 +2786,13 @@
 
 - name: special_hermite_polynomial_h.n_scalar(Tensor x, Scalar n) -> Tensor
   x: non_differentiable
+
+- name: special_hermite_polynomial_he(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_hermite_polynomial_he.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_hermite_polynomial_he.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
