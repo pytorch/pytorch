@@ -90,6 +90,18 @@ TORCH_META_FUNC(special_zeta) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC(special_chebyshev_polynomial_t) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_chebyshev_polynomial_u) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_hermite_polynomial_h) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
 TORCH_META_FUNC(special_hermite_polynomial_he) (const Tensor& self, const Tensor& n) {
   build_borrowing_binary_float_op(maybe_get_output(), self, n);
 }
@@ -280,6 +292,9 @@ DEFINE_DISPATCH(copysign_stub);
 DEFINE_DISPATCH(xlogy_stub);
 DEFINE_DISPATCH(xlog1py_stub);
 DEFINE_DISPATCH(zeta_stub);
+DEFINE_DISPATCH(chebyshev_polynomial_t_stub);
+DEFINE_DISPATCH(chebyshev_polynomial_u_stub);
+DEFINE_DISPATCH(hermite_polynomial_h_stub);
 DEFINE_DISPATCH(hermite_polynomial_he_stub);
 
 TORCH_IMPL_FUNC(sub_out) (
@@ -325,6 +340,18 @@ TORCH_IMPL_FUNC(special_xlog1py_out) (const Tensor& self, const Tensor& other, c
 
 TORCH_IMPL_FUNC(special_zeta_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
   zeta_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_chebyshev_polynomial_t_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  chebyshev_polynomial_t_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_chebyshev_polynomial_u_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  chebyshev_polynomial_u_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_hermite_polynomial_h_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  hermite_polynomial_h_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(special_hermite_polynomial_he_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
@@ -389,6 +416,54 @@ Tensor& special_zeta_out(const Scalar& self, const Tensor& other, Tensor& result
 
 Tensor& special_zeta_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::special_zeta_out(result, self, wrapped_scalar_tensor(other));
+}
+
+Tensor special_chebyshev_polynomial_t(const Scalar& x, const Tensor& n) {
+  return at::special_chebyshev_polynomial_t(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_chebyshev_polynomial_t(const Tensor& x, const Scalar& n) {
+  return at::special_chebyshev_polynomial_t(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_chebyshev_polynomial_t_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_t_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_chebyshev_polynomial_t_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_t_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_chebyshev_polynomial_u(const Scalar& x, const Tensor& n) {
+  return at::special_chebyshev_polynomial_u(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_chebyshev_polynomial_u(const Tensor& x, const Scalar& n) {
+  return at::special_chebyshev_polynomial_u(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_chebyshev_polynomial_u_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_u_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_chebyshev_polynomial_u_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_u_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_hermite_polynomial_h(const Scalar& x, const Tensor& n) {
+  return at::special_hermite_polynomial_h(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_hermite_polynomial_h(const Tensor& x, const Scalar& n) {
+  return at::special_hermite_polynomial_h(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_hermite_polynomial_h_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_hermite_polynomial_h_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_hermite_polynomial_h_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_hermite_polynomial_h_out(result, self, wrapped_scalar_tensor(n));
 }
 
 Tensor special_hermite_polynomial_he(const Scalar& x, const Tensor& n) {

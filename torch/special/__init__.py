@@ -3,6 +3,8 @@ from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
 __all__ = [
+    'chebyshev_polynomial_t',
+    'chebyshev_polynomial_u',
     'digamma',
     'entr',
     'erf',
@@ -15,11 +17,12 @@ __all__ = [
     'gammainc',
     'gammaincc',
     'gammaln',
+    'hermite_polynomial_h',
+    'hermite_polynomial_he',
     'i0',
     'i0e',
     'i1',
     'i1e',
-    'hermite_polynomial_he',
     'log_ndtr',
     'log_softmax',
     'log1p',
@@ -850,6 +853,83 @@ Example::
     >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
     tensor([1., 1., 1.])
 
+""".format(**common_args))
+
+chebyshev_polynomial_t = _add_docstr(_special.special_chebyshev_polynomial_t,
+                                     r"""
+chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the first kind :math:`T_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. If :math:`n < 6` or :math:`|\text{input}| > 1` the recursion:
+
+.. math::
+    T_{n + 1}(\text{input}) = 2 \times \text{input} \times T_{n}(\text{input}) - T_{n - 1}(\text{input})
+
+is evaluated. Otherwise, the explicit trigonometric formula:
+
+.. math::
+    T_{n}(\text{input}) = \text{cos}(n \times \text{arccos}(x))
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+chebyshev_polynomial_u = _add_docstr(_special.special_chebyshev_polynomial_u,
+                                     r"""
+chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the second kind :math:`U_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`,
+:math:`2 \times \text{input}` is returned. If :math:`n < 6` or
+:math:`|\text{input}| > 1`, the recursion:
+
+.. math::
+    T_{n + 1}(\text{input}) = 2 \times \text{input} \times T_{n}(\text{input}) - T_{n - 1}(\text{input})
+
+is evaluated. Otherwise, the explicit trigonometric formula:
+
+.. math::
+    \frac{\text{sin}((n + 1) \times \text{arccos}(\text{input}))}{\text{sin}(\text{arccos}(\text{input}))}
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+hermite_polynomial_h = _add_docstr(_special.special_hermite_polynomial_h,
+                                   r"""
+hermite_polynomial_h(input, n, *, out=None) -> Tensor
+
+Physicist’s Hermite polynomial :math:`H_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    H_{n + 1}(\text{input}) = 2 \times \text{input} \times H_{n}(\text{input}) - H_{n - 1}(\text{input})
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
 """.format(**common_args))
 
 hermite_polynomial_he = _add_docstr(_special.special_hermite_polynomial_he,
