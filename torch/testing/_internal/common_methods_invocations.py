@@ -11705,11 +11705,9 @@ op_db: List[OpInfo] = [
                     skips=(
                         # AssertionError: Results of original model and exported/imported version of model differed
                         DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
-                        # There appears to be some slight bfloat16 discrepancy in floor division on CPU
-                        # likely because the CPU doesn't use opmath, but NumPy doesn't have bfloat16
-                        # so it computes in float32
+                        # bfloat16 floor_divide compared with a float32 reference works inconsistently
                         DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs',
-                                     dtypes=(torch.bfloat16,), device_type='cpu'),
+                                     dtypes=(torch.bfloat16,)),
                         # int8 floor divide has different results for -128 // -1 vs. NumPy
                         DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
                                      dtypes=(torch.int8,)),
