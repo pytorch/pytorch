@@ -13,10 +13,9 @@ import datetime
 import os
 import pathlib
 import re
-import sys
 import subprocess
+import sys
 from subprocess import DEVNULL
-
 
 pytorch_dir = pathlib.Path(__file__).parent.parent.parent.resolve()
 onnx_dir = pytorch_dir / "third_party" / "onnx"
@@ -79,8 +78,8 @@ def read_sub_write(path: str, prefix_pat: str) -> None:
 
 
 read_sub_write(
-    os.path.join("torch", "onnx", "symbolic_helper.py"),
-    r"(_default_onnx_opset_version = )\d+",
+    os.path.join("torch", "onnx", "_constants.py"),
+    r"(onnx_default_opset = )\d+",
 )
 read_sub_write(
     os.path.join("torch", "onnx", "__init__.py"), r"(opset_version \(int, default )\d+"

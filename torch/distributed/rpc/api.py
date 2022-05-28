@@ -200,8 +200,20 @@ def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
         sequence_id = concat_names + str(sequence_num)
 
     is_leader = leader_name == self_name
+
     if timeout == UNSET_RPC_TIMEOUT:
-        timeout = get_rpc_timeout()
+        # Timeout is specified by agent for RPC calls
+        rpc_timeout = get_rpc_timeout()
+        # No timeout for signal
+        signal_timeout = None
+    elif timeout == DEFAULT_SHUTDOWN_TIMEOUT:
+        # No timeout for RPC
+        rpc_timeout = timeout
+        # No timeout for signal
+        signal_timeout = None
+    else:
+        # Signal and RPC timeout use the same timeout
+        signal_timeout = rpc_timeout = timeout
 
     # Phase 1: Followers send it's object to the leader
     if is_leader:
@@ -211,12 +223,14 @@ def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
             leader_name,
             _gather_to_leader,
             args=(sequence_id, self_name, obj, worker_names),
-            timeout=timeout,
+            timeout=rpc_timeout,
         )
 
     with _all_gather_dict_lock:
         states = _all_gather_sequence_id_to_states[sequence_id]
-    states.proceed_signal.wait()
+
+    # Timeout is either set by function parameter or None (which is indefinite)
+    states.proceed_signal.wait(timeout=signal_timeout)
 
     # Phase 2: Leader broadcast gathered results to all followers
     # Leader's signal is the first to be unblocked, after receiving all
@@ -228,7 +242,7 @@ def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
                 follower_name,
                 _broadcast_to_followers,
                 args=(sequence_id, states.gathered_objects),
-                timeout=timeout
+                timeout=rpc_timeout
             )
             worker_name_to_response_future_dict[follower_name] = fut
 
@@ -242,7 +256,7 @@ def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
         if errors:
             raise RuntimeError(
                 f"Followers {[e[0] for e in errors]} timed out in _all_gather "
-                f"after {timeout:.2f} seconds. The first exception is {errors[0][1]}"
+                f"after {rpc_timeout:.2f} seconds. The first exception is {errors[0][1]}"
             )
 
     # Clean up for the states using the sequence_id
@@ -343,7 +357,7 @@ def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
             if not isinstance(agent, TensorPipeAgent) or agent.is_static_group:
                 _wait_all_workers(timeout)
                 _delete_all_user_and_unforked_owner_rrefs()
-                agent.join(shutdown=True)
+                agent.join(shutdown=True, timeout=timeout)
             else:
                 # This is a dynamic group so we need to grab the token for the operation
                 my_worker_info = agent.get_worker_info()
@@ -353,7 +367,7 @@ def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
                     for worker in all_worker_infos:
                         if worker.name != my_name:
                             rpc_sync(worker.name, _update_group_membership, args=(my_worker_info, [], {}, False))
-                    agent.join(shutdown=True)
+                    agent.join(shutdown=True, timeout=timeout)
         finally:
             # In case of errors, continue to complete the local shutdown.
             _finalize_shutdown()
@@ -470,7 +484,8 @@ def method_factory(method_name, docstring):
     def method(self, *args, **kwargs):
         return getattr(super(RRef, self), method_name)(*args, **kwargs)
 
-    method.__doc__ = docstring
+    if method.__doc__:
+        method.__doc__ = docstring
     return method
 
 

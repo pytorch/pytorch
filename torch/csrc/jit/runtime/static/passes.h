@@ -17,6 +17,10 @@ TORCH_API void ReplaceWithCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable = true);
 
+TORCH_API void ReplacePermuteWithCopy(
+    std::shared_ptr<torch::jit::Graph>& graph,
+    bool outputs_are_immutable = true);
+
 void ReplaceWithMaybeCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable = true);
@@ -63,6 +67,8 @@ TORCH_API void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph);
 
 TORCH_API void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph);
 
+TORCH_API void EliminateNoOpSlice(std::shared_ptr<Graph>& graph);
+
 TORCH_API void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph);
 
 // [Remove unnecessary outputs]]
@@ -73,6 +79,8 @@ TORCH_API void RemoveUnnecessaryOutputs(std::shared_ptr<Graph>& graph);
 
 TORCH_API void RemoveUnnecessaryEmbeddingBagOutputs(
     std::shared_ptr<Graph>& graph);
+
+TORCH_API void FuseClampNaNToNum(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

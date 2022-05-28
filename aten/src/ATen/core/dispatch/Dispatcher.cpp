@@ -356,18 +356,14 @@ int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchK
   return seq_num;
 }
 
-void Dispatcher::runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, const torch::jit::Stack &stack) {
-  guard.before(op, stack, sequenceNumberForRunningRecordFunction(dispatchKey));
+void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, c10::ArrayRef<const c10::IValue> args) {
+  guard.before(schema_ref, args, sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 
-void Dispatcher::runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, torch::jit::Stack &&stack) {
-  guard.before(op, std::move(stack), sequenceNumberForRunningRecordFunction(dispatchKey));
-}
-
-void Dispatcher::runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey) {
+void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey) {
   // Setting sequence number in the Autograd case to associate
   // the forward range with the coresponding Autograd's node
-  guard.before(op, sequenceNumberForRunningRecordFunction(dispatchKey));
+  guard.before(schema_ref, sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 
 }

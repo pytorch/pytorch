@@ -4,7 +4,10 @@
 
 #include <c10/core/TensorOptions.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/env.h>
 
+#include <algorithm>
+#include <cctype>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -17,6 +20,10 @@
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
+
+#ifdef USE_MPS
+#include <ATen/mps/MPSDevice.h>
+#endif
 
 namespace at {
 
@@ -138,11 +145,44 @@ void Context::setBenchmarkCuDNN(bool b) {
 }
 
 bool Context::allowTF32CuBLAS() const {
-  return allow_tf32_cublas;
+  static bool allow_tf32_cublas_override = c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true;
+  return allow_tf32_cublas_override || float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
-  allow_tf32_cublas = b;
+  float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
+}
+
+Float32MatmulPrecision Context::float32MatmulPrecision() const {
+  return float32_matmul_precision;
+}
+
+void Context::setFloat32MatmulPrecision(Float32MatmulPrecision p) {
+  float32_matmul_precision = p;
+}
+
+void Context::setFloat32MatmulPrecision(const std::string &s) {
+  auto match = [this](const std::string & s_) {
+    // TODO: consider if CuDNN field needs to also be set for potential future CuDNN ops like multi-headed attention
+    if (s_ == "highest") {
+      float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;
+      return true;
+    } else if (s_ == "high") {
+      float32_matmul_precision = at::Float32MatmulPrecision::HIGH;
+      return true;
+    } else if (s_ == "medium") {
+      float32_matmul_precision = at::Float32MatmulPrecision::MEDIUM;
+      return true;
+    }
+    return false;
+  };
+  if (match(s)) { return; }
+  std::string sl;
+  std::transform(s.begin(), s.end(), sl.begin(),
+                 [](unsigned char c) -> unsigned char { return std::tolower(c); });
+  if (match(sl)) { return; }
+  TORCH_WARN(s, " is not one of 'highest', 'high', or 'medium'; the current"
+    "setFloat32MatmulPrecision call has no effect.");
 }
 
 at::LinalgBackend Context::linalgPreferredBackend() const {
@@ -189,12 +229,8 @@ bool Context::hasMKLDNN() {
 }
 
 bool Context::hasMPS() {
-#if defined(__APPLE__) and defined(TARGET_ON_MAC)
-  if (@available(macOS 12.3, *)) {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::MPS);
-  } else {
-    return false;
-  }
+#if USE_MPS
+  return at::mps::is_available();
 #else
   return false;
 #endif
@@ -308,6 +344,26 @@ NoTF32Guard::~NoTF32Guard() {
 bool NoTF32Guard::should_disable_tf32() {
   return override_allow_tf32_flag;
 }
+
+#ifdef USE_ROCM
+// Ops can query this flag to know they are in the backward pass.
+// This information can be used, for example, to select implementations
+// with different numerical or performance characteristics.
+// See https://pytorch.org/docs/stable/notes/numerical_accuracy.html for details.
+thread_local bool ROCmBackwardPassGuard::is_backward_pass_;
+
+ROCmBackwardPassGuard::ROCmBackwardPassGuard() {
+  is_backward_pass_ = true;
+}
+
+ROCmBackwardPassGuard::~ROCmBackwardPassGuard() {
+  is_backward_pass_ = false;
+}
+
+bool ROCmBackwardPassGuard::is_backward_pass() {
+  return is_backward_pass_;
+}
+#endif
 
 bool Context::areVmapFallbackWarningsEnabled() const {
   return display_vmap_fallback_warnings_;
