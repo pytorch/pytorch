@@ -7,7 +7,6 @@ from typing import Set
 
 import torch
 import torch._C._onnx as _C_onnx
-import torch.onnx
 from torch import _C
 
 # This import monkey-patches graph manipulation methods on Graph, used for the
