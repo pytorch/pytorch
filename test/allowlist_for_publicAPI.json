@@ -3080,6 +3080,7 @@
   ],
   "torch.special": [
     "chebyshev_polynomial_t",
+    "chebyshev_polynomial_u",
     "digamma",
     "entr",
     "erf",
@@ -3092,6 +3093,8 @@
     "gammainc",
     "gammaincc",
     "gammaln",
+    "hermite_polynomial_h",
+    "hermite_polynomial_he",
     "i0",
     "i0e",
     "i1",
