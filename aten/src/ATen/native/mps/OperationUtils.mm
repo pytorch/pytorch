@@ -358,7 +358,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src,
       srcBuf = __builtin_bit_cast(id<MTLBuffer>, src_.storage().data());
     }
   }
-  
+
   const size_t buf_size = [srcBuf length];
 
   // tensor.numel() could be zero, but tensor is valid as long as the buffer size is non-zero.

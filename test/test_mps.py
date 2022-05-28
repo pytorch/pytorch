@@ -15,7 +15,6 @@ import itertools
 from torch._six import inf
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, TestCase, download_file, TEST_WITH_UBSAN
-from torch.testing._internal.common_device_type import dtypes
 import torch.backends.mps
 from torch.distributions import Uniform
 
@@ -1230,8 +1229,8 @@ class TestMPS(TestCase):
             t_cpu = torch.tensor([1, 2, 3, 4], device="cpu")
 
             # contiguous view
-            x_mps = t_mps[2:] # 3, 4
-            y_mps = t_mps[:2] # 1, 2
+            x_mps = t_mps[2:]  # 3, 4
+            y_mps = t_mps[:2]  # 1, 2
 
             x_cpu = t_cpu[2:]
             y_cpu = t_cpu[:2]
@@ -1260,17 +1259,17 @@ class TestMPS(TestCase):
 
         for op in ["<=", "<", ">=", ">", "==", "!="]:
             helper(op)
-    
+
     def test_index_storage_offset(self):
         # https://github.com/pytorch/pytorch/issues/78107
 
-        a = torch.tensor([8.2670e-01,-1.0293e+00])
+        a = torch.tensor([8.2670e-01, -1.0293e+00])
         b_cpu = a[0]
         c_cpu = a[1]
 
         # both 'b' and 'c' are views of 'a'
         # 'b' has a storage offset of 0, while 'c' has a storage offset of 1
-        # when copying from 'cpu' to 'mps', c will have a storage_offset of 1 which needs to be taking into account, 
+        # when copying from 'cpu' to 'mps', c will have a storage_offset of 1 which needs to be taking into account,
         # otherwise it ends with same value as 'b'
         b = b_cpu.to('mps')
         c = c_cpu.to('mps')
@@ -1279,7 +1278,6 @@ class TestMPS(TestCase):
         res_cpu = b_cpu > c_cpu
         self.assertEqual(res_mps, res_cpu)
 
-        
         res_mps = c > b
         res_cpu = c_cpu > b_cpu
         self.assertEqual(res_mps, res_cpu)
@@ -1362,19 +1360,20 @@ class TestMPS(TestCase):
         self.assertEqual(torch.tensor(-8.34, device='cpu').to('mps', torch.int),
                          torch.tensor(-8.34, device='cpu').to('mps').to(torch.int))
 
-    @dtypes(torch.int32, torch.float32, torch.int64, device_type="mps")
-    def test_setitem_scalar(self, device, dtype) -> None:
-        for i in range(3, 6):
-            for j in range(3, 6):
-                t = torch.zeros(i, j, dtype=dtype, device=device)
-                self.assertEqual(t.sum(), 0)
-                t[1, 1] = 1
-                t[2, 1] = j
-                t[2, 1] = i
-                assertEqual(t[1, 1], 1)
-                assertEqual(t[1, 2], i)
-                assertEqual(t[2, 1], j)
-                self.assertEqual(t.sum(), 1 + i + j)
+    def test_setitem_scalar(self) -> None:
+        device = 'mps'
+        for dtype in [torch.int32, torch.float32, torch.int64]:
+            for i in range(3, 6):
+                for j in range(3, 6):
+                    t = torch.zeros(i, j, dtype=dtype, device=device)
+                    self.assertEqual(t.sum(), 0)
+                    t[1, 1] = 1
+                    t[2, 1] = j
+                    t[1, 2] = i
+                    self.assertEqual(t[1, 1], 1)
+                    self.assertEqual(t[1, 2], i)
+                    self.assertEqual(t[2, 1], j)
+                    self.assertEqual(t.sum(), 1 + i + j)
 
 
 class TestSmoothL1Loss(TestCase):
@@ -4221,7 +4220,7 @@ exit(len(w))
         # This can be changed once we actually implement `torch.bincount`
         # Should return fn, args, kwargs, string_version
         return (torch.bincount,
-                (torch.tensor([4, 3, 6, 3, 4], device='mps')), {},
+                torch.tensor([4], device='mps'), {},
                 "torch.bincount(torch.tensor([4, 3, 6, 3, 4], device='mps'))")
 
     def test_error_on_not_implemented(self):
