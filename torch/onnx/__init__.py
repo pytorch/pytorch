@@ -1,20 +1,88 @@
-import torch._C as _C
+"""ONNX exporter."""
 
-from . import utils
+import warnings
+
+from torch import _C
+from torch._C import _onnx as _C_onnx
+from torch._C._onnx import (
+    _CAFFE2_ATEN_FALLBACK,
+    OperatorExportTypes,
+    TensorProtoDataType,
+    TrainingMode,
+)
+
+from . import (
+    symbolic_caffe2,
+    symbolic_helper,
+    symbolic_opset7,
+    symbolic_opset8,
+    symbolic_opset9,
+    symbolic_opset10,
+    symbolic_opset11,
+    symbolic_opset12,
+    symbolic_opset13,
+    symbolic_opset14,
+    symbolic_opset15,
+    symbolic_opset16,
+    symbolic_registry,
+    utils,
+)
 from ._constants import ONNX_ARCHIVE_MODEL_PROTO_NAME
 from ._exporter_states import ExportTypes, SymbolicContext
-from .exceptions import CheckerError
 
-TensorProtoDataType = _C._onnx.TensorProtoDataType
-OperatorExportTypes = _C._onnx.OperatorExportTypes
-TrainingMode = _C._onnx.TrainingMode
-_CAFFE2_ATEN_FALLBACK = _C._onnx._CAFFE2_ATEN_FALLBACK
+__all__ = [
+    # Modules
+    "symbolic_helper",
+    "symbolic_registry",
+    # All opsets
+    "symbolic_caffe2",
+    "symbolic_opset7",
+    "symbolic_opset8",
+    "symbolic_opset9",
+    "symbolic_opset10",
+    "symbolic_opset11",
+    "symbolic_opset12",
+    "symbolic_opset13",
+    "symbolic_opset14",
+    "symbolic_opset15",
+    "symbolic_opset16",
+    # Enums
+    "ExportTypes",
+    "OperatorExportTypes",
+    "TensorProtoDataType",
+    "TrainingMode",
+    # Constants
+    "_CAFFE2_ATEN_FALLBACK",
+    "ONNX_ARCHIVE_MODEL_PROTO_NAME",
+    "producer_name",
+    "producer_version",
+    # Classes
+    "SymbolicContext",
+    # Public functions
+    "export",
+    "export_to_pretty_string",
+    "disable_log",
+    "enable_log",
+    "is_in_onnx_export",
+    "is_onnx_log_enabled",
+    "log",
+    "register_custom_op_symbolic",
+    "select_model_mode_for_export",
+    "set_log_stream",
+    "unregister_custom_op_symbolic",
+    # Deprecated. Do not use.
+    "_export",  # TODO(justinchuby): Remove when verification.py removes references to this.
+]
 
 producer_name = "pytorch"
-producer_version = _C._onnx.PRODUCER_VERSION
+producer_version = _C_onnx.PRODUCER_VERSION
 
 
 def _export(*args, **kwargs):
+    warnings.warn(
+        "`torch.onnx._export` is deprecated. Please use `export` instead.",
+        DeprecationWarning,
+    )
     return utils._export(*args, **kwargs)
 
 
