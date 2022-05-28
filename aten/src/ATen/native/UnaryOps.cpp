@@ -71,6 +71,10 @@ CREATE_UNARY_FLOAT_META_FUNC(special_log_ndtr)
 CREATE_UNARY_FLOAT_META_FUNC(sqrt)
 CREATE_UNARY_FLOAT_META_FUNC(tan)
 CREATE_UNARY_FLOAT_META_FUNC(tanh)
+CREATE_UNARY_FLOAT_META_FUNC(special_bessel_j0)
+CREATE_UNARY_FLOAT_META_FUNC(special_bessel_j1)
+CREATE_UNARY_FLOAT_META_FUNC(special_bessel_y0)
+CREATE_UNARY_FLOAT_META_FUNC(special_bessel_y1)
 
 TORCH_META_FUNC(polygamma)(int64_t n, const Tensor& self) {
   TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
@@ -190,6 +194,10 @@ CREATE_UNARY_TORCH_IMPL_FUNC(sqrt_out, sqrt_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan_out, tan_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh_out, tanh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(trunc_out, trunc_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_bessel_j0_out, special_bessel_j0_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_bessel_j1_out, special_bessel_j1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_bessel_y0_out, special_bessel_y0_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_bessel_y1_out, special_bessel_y1_stub)
 
 TORCH_IMPL_FUNC(round_decimals_out)
 (const Tensor& self, int64_t decimals, const Tensor& result) {
@@ -863,6 +871,10 @@ DEFINE_DISPATCH(tanh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-v
 DEFINE_DISPATCH(trigamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(trunc_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lgamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_bessel_j0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_bessel_j1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_bessel_y0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_bessel_y1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 } // namespace native
 } // namespace at

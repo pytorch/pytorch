@@ -70,6 +70,10 @@ DECLARE_DISPATCH(unary_fn, tanh_stub);
 DECLARE_DISPATCH(unary_fn, trigamma_stub);
 DECLARE_DISPATCH(unary_fn, trunc_stub);
 DECLARE_DISPATCH(unary_fn, lgamma_stub);
+DECLARE_DISPATCH(unary_fn, special_bessel_j0_stub);
+DECLARE_DISPATCH(unary_fn, special_bessel_j1_stub);
+DECLARE_DISPATCH(unary_fn, special_bessel_y0_stub);
+DECLARE_DISPATCH(unary_fn, special_bessel_y1_stub);
 
 // NB: these are actually defined in Distribution
 DECLARE_DISPATCH(void(*)(const TensorBase&, const TensorBase&, c10::optional<Generator>), bernoulli_tensor_stub);
