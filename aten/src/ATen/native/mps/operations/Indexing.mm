@@ -244,10 +244,8 @@ Tensor embedding_dense_backward_mps(
     IntArrayRef indices_shape = indices.sizes();
     int64_t num_indices_dims = indices_shape.size();
 
-    c10::SmallVector<int64_t, 2> outgoing_gradient_shape;
     int64_t D = incoming_gradient_shape[num_incoming_gradient_dims - 1];
-    outgoing_gradient_shape[0] = num_weights;
-    outgoing_gradient_shape[1] = D;
+    c10::SmallVector<int64_t, 2> outgoing_gradient_shape{num_weights, D};
     Tensor outgoing_gradient = at::native::empty_mps(
                                 IntArrayRef(outgoing_gradient_shape.data(), outgoing_gradient_shape.size()),
                                 grad_.scalar_type(),
