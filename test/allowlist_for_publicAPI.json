@@ -3079,6 +3079,7 @@
     "softmax"
   ],
   "torch.special": [
+    "airy_ai",
     "chebyshev_polynomial_t",
     "chebyshev_polynomial_u",
     "digamma",

@@ -18990,6 +18990,19 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
+    UnaryUfuncInfo(
+        'special.airy_ai',
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: scipy.special.airy(x)[0] if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
     BinaryUfuncInfo(
         'special.chebyshev_polynomial_t',
         dtypes=all_types_and(torch.bool),

@@ -3,6 +3,7 @@ from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
 __all__ = [
+    'airy_ai',
     'chebyshev_polynomial_t',
     'chebyshev_polynomial_u',
     'digamma',
@@ -853,6 +854,20 @@ Example::
     >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
     tensor([1., 1., 1.])
 
+""".format(**common_args))
+
+airy_ai = _add_docstr(_special.special_airy_ai,
+                      r"""
+airy_ai(input, *, out=None) -> Tensor
+
+Airy function :math:`Ai(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
 """.format(**common_args))
 
 chebyshev_polynomial_t = _add_docstr(_special.special_chebyshev_polynomial_t,

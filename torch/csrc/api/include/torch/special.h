@@ -565,6 +565,25 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
   return torch::special_softmax(self, dim, dtype);
 }
 
+/// Bessel function of the first kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.airy_ai.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::airy_ai(x);
+/// ```
+inline Tensor airy_ai(const Tensor& self) {
+  return torch::special_airy_ai(self);
+}
+
+inline Tensor& airy_ai_out(Tensor& result, const Tensor& self) {
+  return torch::special_airy_ai_out(result, self);
+}
+
 /// Chebyshev polynomial of the first kind.
 ///
 /// See https://pytorch.org/docs/master/special.html#torch.special.chebyshev_polynomial_t.
