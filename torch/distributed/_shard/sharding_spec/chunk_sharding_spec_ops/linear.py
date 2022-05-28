@@ -323,7 +323,6 @@ def _handle_row_wise_sharding_sharded_tensor(
     Returns:
         A :class:`_PartialTensor` object which stores the partial local result.
     """
-    results = []
     local_shard = input.local_shards()[0].tensor
     if input.sharding_spec().dim not in (-1, len(input.size()) - 1):
         raise NotImplementedError(
@@ -331,13 +330,10 @@ def _handle_row_wise_sharding_sharded_tensor(
             "linear is not supported for row-wise sharded linear."
         )
 
-    for tensor in torch.tensor_split(local_shard, world_size):
-        results.append(
-            tensor.matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias)
-        )
+    result = local_shard.matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias)
 
     # Return the partial local result.
-    return _PartialTensor(torch.cat(results), pg)
+    return _PartialTensor(result, pg)
 
 
 class _BiasTensorNarrow(Function):
