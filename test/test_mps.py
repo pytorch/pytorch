@@ -1309,7 +1309,7 @@ class TestMPS(TestCase):
             torch.int16: [-15, 0, 1, 10],
             torch.int32: [-376, 0, 1, 13],
             torch.int64: [-8, 0, 1, 77],
-            # torch.float16: [-234.5, 0.0, 1.0, 2.0],  # TODO: Broken, currently unknown why
+            # torch.float16: [-234.5, 0.0, 1.0, 2.0],  # TODO: Only add/sub work correctly, currently unknown why
             torch.float32: [-1.0, 0.0, 0.1, 111.99],
         }
         # Test all combinations of dtypes, operations, dimensionality
@@ -1353,6 +1353,7 @@ class TestMPS(TestCase):
                 # Multiple problems with [MPSGraph constantWithScalar:shape:dataType:] prevent
                 # these tests from completing successfully currently
                 # TODO: Research problem with int16, is it also related to constantWithScalar?
+                #         - Likely, getting result tensor with 5/10 correct entries
                 # TODO: Stateful bug with False, False, add in assert5? Related to the cache key
                 #       or more serious problem?
                 #         - Cache key looks correct, behavior currently completely unexplained
