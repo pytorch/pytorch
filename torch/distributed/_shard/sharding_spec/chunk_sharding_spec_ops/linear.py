@@ -353,8 +353,9 @@ class _BiasTensorNarrow(Function):
     @staticmethod
     def backward(ctx, grad_output):
         results = []
+        grad_output_cloned = grad_output.clone()
         for idx in range(ctx.world_size):
-            results.append(grad_output.clone())
+            results.append(grad_output_cloned)
         return (None, None, None, None, None) + (
             _result_distribute_with_col_rearrange(
                 results, grad_output, ctx.world_size, ctx.weight, ctx.pg
