@@ -52,7 +52,6 @@ __all__ = [
     "TensorProtoDataType",
     "TrainingMode",
     # Constants
-    "_CAFFE2_ATEN_FALLBACK",
     "ONNX_ARCHIVE_MODEL_PROTO_NAME",
     "producer_name",
     "producer_version",
@@ -70,8 +69,6 @@ __all__ = [
     "select_model_mode_for_export",
     "set_log_stream",
     "unregister_custom_op_symbolic",
-    # Deprecated. Do not use.
-    "_export",  # TODO(justinchuby): Remove when verification.py removes references to this.
 ]
 
 producer_name = "pytorch"
