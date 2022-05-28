@@ -411,8 +411,7 @@ void InferShapeTypeForUninitializedOutput(
       const_node->output()->setType(other_output->type());
     } else {
       TORCH_WARN(
-        "UninitializedOutput - Invalid elem Type of ListTensor found."
-      );
+          "UninitializedOutput - Invalid elem Type of ListTensor found.");
       const_node->output()->setType(other_output->type());
     }
   } else if (auto output_type = other_output->type()->cast<OptionalType>()) {

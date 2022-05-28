@@ -70,9 +70,8 @@ c10::optional<at::Tensor> runTorchSlice_opset9(
   assert(inputTensorValues.size() == 1);
   if (inputTensorValues.size() != 1) {
     TORCH_WARN(
-      "Constant folding - Invalid number of inputs found for opset 9 "
-      "onnx::Slice op. Constant folding not applied."
-    );
+        "Constant folding - Invalid number of inputs found for opset 9 "
+        "onnx::Slice op. Constant folding not applied.");
     return c10::nullopt;
   }
   if (!(node->hasAttributeS("starts") && node->hasAttributeS("ends"))) {
@@ -113,18 +112,16 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
   if (inputTensorValues.size() < minSliceInputCount ||
       inputTensorValues.size() > maxSliceInputCount) {
     TORCH_WARN(
-      "Constant folding - Invalid number of inputs found for opset opset >= 10 onnx::Slice op. "
-      "Constant folding not applied."
-    );
+        "Constant folding - Invalid number of inputs found for opset opset >= 10 onnx::Slice op. "
+        "Constant folding not applied.");
     return c10::nullopt;
   }
   // Checking validity of 'starts' and 'ends' input
   if (inputTensorValues[1].sizes().size() != 1 ||
       inputTensorValues[2].sizes().size() != 1) {
     TORCH_WARN(
-      "Constant folding - Invalid 'starts' or 'ends' inputs found for opset >= 10 onnx::Slice op. "
-      "Constant folding not applied."
-    );
+        "Constant folding - Invalid 'starts' or 'ends' inputs found for opset >= 10 onnx::Slice op. "
+        "Constant folding not applied.");
     return c10::nullopt;
   }
   if (inputTensorValues[1].sizes()[0] != inputTensorValues[2].sizes()[0]) {
@@ -137,18 +134,16 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
   if (inputTensorValues.size() > 3) {
     if (inputTensorValues[3].sizes().size() != 1) {
       TORCH_WARN(
-        "Constant folding - Invalid 'axes' input found for opset >= 10 onnx::Slice op. "
-        "Constant folding not applied."
-      );
+          "Constant folding - Invalid 'axes' input found for opset >= 10 onnx::Slice op. "
+          "Constant folding not applied.");
       return c10::nullopt;
     }
     if (inputTensorValues[3].sizes()[0] != inputTensorValues[1].sizes()[0]) {
       // Number of elements of 'axes' and 'ends' 1-D input tensors should be the
       // same
       TORCH_WARN(
-        "Constant folding - Invalid 'axes' or 'ends' inputs found for opset >= 10 onnx::Slice op. "
-        "Constant folding not applied."
-      );
+          "Constant folding - Invalid 'axes' or 'ends' inputs found for opset >= 10 onnx::Slice op. "
+          "Constant folding not applied.");
       return c10::nullopt;
     }
     auto axes_a = inputTensorValues[3].accessor<int64_t, 1>();
@@ -165,18 +160,16 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
   if (inputTensorValues.size() > 4) {
     if (inputTensorValues[4].sizes().size() != 1) {
       TORCH_WARN(
-        "Constant folding - Invalid 'steps' input found for opset >= 10 onnx::Slice op. "
-        "Constant folding not applied."
-      );
+          "Constant folding - Invalid 'steps' input found for opset >= 10 onnx::Slice op. "
+          "Constant folding not applied.");
       return c10::nullopt;
     }
     if (inputTensorValues[4].sizes()[0] != inputTensorValues[1].sizes()[0]) {
       // Number of elements of 'steps' and 'ends' 1-D input tensors should be
       // the same
       TORCH_WARN(
-        "Constant folding - Invalid 'steps' or 'ends' inputs found for opset >= 10 onnx::Slice op. "
-        "Constant folding not applied."
-      );
+          "Constant folding - Invalid 'steps' or 'ends' inputs found for opset >= 10 onnx::Slice op. "
+          "Constant folding not applied.");
       return c10::nullopt;
     }
     auto steps_a = inputTensorValues[4].accessor<int64_t, 1>();
@@ -184,9 +177,8 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
       // Only steps == 1 are supported for constant-folding.
       if (steps_a[i] != 1) {
         TORCH_WARN(
-          "Constant folding - Only steps=1 can be constant folded for opset >= 10 onnx::Slice op. "
-          "Constant folding not applied."
-        );
+            "Constant folding - Only steps=1 can be constant folded for opset >= 10 onnx::Slice op. "
+            "Constant folding not applied.");
         return c10::nullopt;
       }
     }
@@ -250,7 +242,8 @@ at::Tensor runTorchArange_opset11(
       break;
     }
     default: {
-      TORCH_WARN("Constant folding - ONNX Range type: ", dtype, " is not supported.");
+      TORCH_WARN(
+          "Constant folding - ONNX Range type: ", dtype, " is not supported.");
     }
   }
   return updated_val;
@@ -278,8 +271,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       return runTorchSlice_opset10(node, inputTensorValues);
     } else {
       TORCH_WARN(
-        "Constant folding - unsupported opset version. Constant folding not applied."
-      );
+          "Constant folding - unsupported opset version. Constant folding not applied.");
       return c10::nullopt;
     }
   } else if (node->kind() == onnx::Concat) {
@@ -316,9 +308,8 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       // Checking validity of 'axes' input
       if (inputTensorValues[1].sizes().size() != 1) {
         TORCH_WARN(
-          "Constant folding - Invalid 'axes' inputs found for opset 13 onnx::Unsqueeze op. "
-          "Constant folding not applied."
-        );
+            "Constant folding - Invalid 'axes' inputs found for opset 13 onnx::Unsqueeze op. "
+            "Constant folding not applied.");
         return c10::nullopt;
       }
       auto axes_a = inputTensorValues[1].accessor<int64_t, 1>();
@@ -352,9 +343,8 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       return c10::optional<at::Tensor>(updated_val);
     } else {
       TORCH_WARN(
-        "Constant folding - unsupported opset version. "
-        "Constant folding not applied."
-      );
+          "Constant folding - unsupported opset version. "
+          "Constant folding not applied.");
       return c10::nullopt;
     }
   } else if (node->kind() == onnx::Squeeze) {
@@ -367,9 +357,8 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         // Checking validity of 'axes' input
         if (inputTensorValues[1].sizes().size() != 1) {
           TORCH_WARN(
-            "Constant folding - Invalid 'axes' inputs found for opset 13 onnx::Squeeze op. "
-            "Constant folding not applied."
-          );
+              "Constant folding - Invalid 'axes' inputs found for opset 13 onnx::Squeeze op. "
+              "Constant folding not applied.");
           return c10::nullopt;
         }
         auto axes_a = inputTensorValues[1].accessor<int64_t, 1>();
@@ -398,9 +387,8 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       return c10::optional<at::Tensor>(updated_val);
     } else {
       TORCH_WARN(
-        "Constant folding - unsupported opset version. "
-        "Constant folding not applied."
-      );
+          "Constant folding - unsupported opset version. "
+          "Constant folding not applied.");
       return c10::nullopt;
     }
   } else if (node->kind() == onnx::Transpose) {
@@ -617,9 +605,8 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
 void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
   if (opset_version < ONNX_OPSET_9) {
     TORCH_WARN(
-      "Constant folding supported for only opsets >= 9. "
-      "Constant folding not applied."
-    );
+        "Constant folding supported for only opsets >= 9. "
+        "Constant folding not applied.");
     return;
   }
   AT_ASSERT(b->param_node());
