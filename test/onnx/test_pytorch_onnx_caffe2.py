@@ -51,7 +51,7 @@ from caffe2.python.operator_test.torch_integration_test import (
 from torch import nn
 from torch.autograd import Variable, function
 from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import ExportTypes
+from torch.onnx._exporter_states import ExportTypes
 
 skip = unittest.skip
 

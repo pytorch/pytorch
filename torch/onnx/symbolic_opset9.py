@@ -14,6 +14,7 @@ import torch
 import torch._C._onnx as _C_onnx
 import torch.nn.modules.utils
 import torch.onnx
+import torch.onnx._exporter_states
 from torch import _C
 
 # This import monkey-patches graph manipulation methods on Graph, used for the
@@ -5004,7 +5005,7 @@ class Prim:
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
     @staticmethod
-    def device(ctx: torch.onnx.SymbolicContext, g, *inputs, **kwargs):
+    def device(ctx: torch.onnx._exporter_states.SymbolicContext, g, *inputs, **kwargs):
         n = ctx.cur_node
 
         if n.output().type().kind() == "DeviceObjType":
@@ -5015,7 +5016,7 @@ class Prim:
         )
 
     @staticmethod
-    def Loop(ctx: torch.onnx.SymbolicContext, g, *inputs, **attrs):
+    def Loop(ctx: torch.onnx._exporter_states.SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
         env = ctx.env
         params_dict = ctx.params_dict
@@ -5061,7 +5062,7 @@ class Prim:
         return new_op_outputs
 
     @staticmethod
-    def If(ctx: torch.onnx.SymbolicContext, g, *inputs, **attrs):
+    def If(ctx: torch.onnx._exporter_states.SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
         block = ctx.onnx_block
         env = ctx.env
@@ -5149,7 +5150,7 @@ class Prim:
             return new_op_outputs
 
     @staticmethod
-    def Constant(ctx: torch.onnx.SymbolicContext, g, *inputs, **attrs):
+    def Constant(ctx: torch.onnx._exporter_states.SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
 
         if n.mustBeNone():
@@ -5180,7 +5181,7 @@ class Onnx:
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
     @staticmethod
-    def Placeholder(ctx: torch.onnx.SymbolicContext, g, *inputs, **attrs):
+    def Placeholder(ctx: torch.onnx._exporter_states.SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
         block = ctx.onnx_block
         env = ctx.env
