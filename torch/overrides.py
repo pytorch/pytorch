@@ -1001,6 +1001,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.gammaincc: lambda input, other, out=None: -1,
         torch.special.gammaln: lambda input: -1,
         torch.special.hermite_polynomial_h: lambda input, n, out=None: -1,
+        torch.special.hermite_polynomial_he: lambda input, n, out=None: -1,
         torch.special.i0: lambda input: -1,
         torch.special.i0e: lambda input: -1,
         torch.special.i1: lambda input: -1,

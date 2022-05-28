@@ -1134,6 +1134,14 @@ void hermite_polynomial_h_kernel(TensorIteratorBase& iterator) {
     });
 } // hermite_polynomial_h_kernel(TensorIteratorBase& iterator)
 
+void hermite_polynomial_he_kernel(TensorIteratorBase& iterator) {
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "hermite_polynomial_he_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x, scalar_t n) -> scalar_t {
+            return hermite_polynomial_he_forward(x, n);
+        });
+    });
+} // hermite_polynomial_he_kernel
+
 } // namespace
 
 REGISTER_DISPATCH(add_clamp_stub, &add_clamp_kernel);
@@ -1184,6 +1192,7 @@ REGISTER_DISPATCH(zeta_stub, &zeta_kernel);
 REGISTER_DISPATCH(chebyshev_polynomial_t_stub, &chebyshev_polynomial_t_kernel);
 REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel);
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel);
+REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel);
 
 } // namespace native
 } // namespace at
