@@ -315,10 +315,9 @@ class TestMPS(TestCase):
             output_cpu = torch.baddbmm(M_cpu, batch1_cpu, batch2_cpu, beta=beta, alpha=alpha)
             output_mps = torch.baddbmm(M_mps, batch1_mps, batch2_mps, beta=beta, alpha=alpha)
 
-            print(output_cpu.shape)
-            print(output_mps.shape)
             self.assertEqual(output_cpu, output_mps)
             self.assertEqual(output_cpu.size(), output_mps.size())
+
         helper(input_shape=(3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
         helper(input_shape=(10, 3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
         helper(input_shape=(1, 77, 77), batch1_shape=(8, 77, 64), batch2_shape=(8, 64, 77))
@@ -1222,6 +1221,67 @@ class TestMPS(TestCase):
         mps_slice4 = mps_x[1, :].to('cpu')
         self.assertEqual(cpu_slice4, mps_slice4)
 
+    def test_slice_contiguous_view(self):
+        # https://github.com/pytorch/pytorch/issues/77750
+
+        def helper(operator):
+            t_mps = torch.tensor([1, 2, 3, 4], device="mps")
+            t_cpu = torch.tensor([1, 2, 3, 4], device="cpu")
+
+            # contiguous view
+            x_mps = t_mps[2:]  # 3, 4
+            y_mps = t_mps[:2]  # 1, 2
+
+            x_cpu = t_cpu[2:]
+            y_cpu = t_cpu[:2]
+
+            res_mps = res_cpu = None
+            if operator == "<=":
+                res_mps = x_mps <= y_mps
+                res_cpu = x_cpu <= y_cpu
+            if operator == "<":
+                res_mps = x_mps < y_mps
+                res_cpu = x_cpu < y_cpu
+            if operator == ">=":
+                res_mps = x_mps >= y_mps
+                res_cpu = x_cpu >= y_cpu
+            if operator == ">":
+                res_mps = x_mps >= y_mps
+                res_cpu = x_cpu >= y_cpu
+            if operator == "==":
+                res_mps = x_mps == y_mps
+                res_cpu = x_cpu == y_cpu
+            if operator == "!=":
+                res_mps = x_mps != y_mps
+                res_cpu = x_cpu != y_cpu
+
+            self.assertEqual(res_mps, res_cpu)
+
+        for op in ["<=", "<", ">=", ">", "==", "!="]:
+            helper(op)
+
+    def test_index_storage_offset(self):
+        # https://github.com/pytorch/pytorch/issues/78107
+
+        a = torch.tensor([8.2670e-01, -1.0293e+00])
+        b_cpu = a[0]
+        c_cpu = a[1]
+
+        # both 'b' and 'c' are views of 'a'
+        # 'b' has a storage offset of 0, while 'c' has a storage offset of 1
+        # when copying from 'cpu' to 'mps', c will have a storage_offset of 1 which needs to be taking into account,
+        # otherwise it ends with same value as 'b'
+        b = b_cpu.to('mps')
+        c = c_cpu.to('mps')
+
+        res_mps = b > c
+        res_cpu = b_cpu > c_cpu
+        self.assertEqual(res_mps, res_cpu)
+
+        res_mps = c > b
+        res_cpu = c_cpu > b_cpu
+        self.assertEqual(res_mps, res_cpu)
+
     def test_flatten(self):
         values = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
         cpu_x = torch.tensor(values, device='cpu')
@@ -1299,6 +1359,21 @@ class TestMPS(TestCase):
                          torch.tensor(4, dtype=torch.int32))
         self.assertEqual(torch.tensor(-8.34, device='cpu').to('mps', torch.int),
                          torch.tensor(-8.34, device='cpu').to('mps').to(torch.int))
+
+    def test_setitem_scalar(self) -> None:
+        device = 'mps'
+        for dtype in [torch.int32, torch.float32, torch.int64]:
+            for i in range(3, 6):
+                for j in range(3, 6):
+                    t = torch.zeros(i, j, dtype=dtype, device=device)
+                    self.assertEqual(t.sum(), 0)
+                    t[1, 1] = 1
+                    t[2, 1] = j
+                    t[1, 2] = i
+                    self.assertEqual(t[1, 1], 1)
+                    self.assertEqual(t[1, 2], i)
+                    self.assertEqual(t[2, 1], j)
+                    self.assertEqual(t.sum(), 1 + i + j)
 
 
 class TestSmoothL1Loss(TestCase):
@@ -3089,6 +3164,50 @@ class TestNLLLoss(TestCase):
 
         helper((2, 16, 16), (4, 4), False)
 
+    # Test max avg pool2d - when the input size is a multiple of output size
+    # Not testing for channels last right now
+    def test_adaptive_max_pool2d_simple(self):
+        def helper(input_shape, out_shape, return_indices, dtype, channels_last=False):
+            cpu_x = None
+            if(dtype in [torch.float16, torch.float32]):
+                cpu_x = torch.randn(input_shape, device='cpu', dtype=dtype, requires_grad=True)
+            else:
+                cpu_x = torch.randint(50, input_shape, device='cpu', dtype=dtype, requires_grad=True)
+            if(channels_last):
+                cpu_x = cpu_x.to(memory_format=torch.channels_last)
+                cpu_x.retain_grad()
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            max_result, max_indices = None, None
+            max_result_cpu, max_indices_cpu = None, None
+
+            if(return_indices):
+                max_result, max_indices = torch.nn.AdaptiveMaxPool2d(out_shape, return_indices)(x)
+                max_result_cpu, max_indices_cpu = torch.nn.AdaptiveMaxPool2d(out_shape, return_indices)(cpu_x)
+            else:
+                max_result = torch.nn.AdaptiveMaxPool2d(out_shape, return_indices)(x)
+                max_result_cpu = torch.nn.AdaptiveMaxPool2d(out_shape, return_indices)(cpu_x)
+
+            cpu_grad = torch.randn(max_result_cpu.shape)
+            grad = cpu_grad.to('mps')
+
+            max_result.backward(gradient=grad)
+            max_result_cpu.backward(gradient=cpu_grad)
+
+            self.assertEqual(max_result, max_result_cpu)
+            if(return_indices):
+                self.assertEqual(max_indices, max_indices_cpu)
+            self.assertEqual(x.grad, cpu_x.grad)
+
+        for dtype in [torch.float32]:
+            for return_indices in [False, True]:
+                helper((2, 2, 4, 4), (2, 2), return_indices, dtype)
+                helper((2, 2, 9, 9), (3, 3), return_indices, dtype)
+                helper((2, 2, 9, 9), (9, 9), return_indices, dtype)
+                helper((2, 2, 16, 16), (2, 2), return_indices, dtype)
+                helper((2, 2, 16, 16), (2, 16), return_indices, dtype)
+                helper((2, 16, 16), (4, 4), return_indices, dtype)
+
     def test_gelu_simple(self):
         def helper(shape):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
@@ -3515,6 +3634,29 @@ class TestNLLLoss(TestCase):
         helper((2, 8, 4, 5), diag=-1)
         helper((2, 8, 4, 5), diag=-2)
         helper((2, 8, 4, 5), diag=-3)
+
+    # test eye
+    def test_eye(self):
+        def helper(n, m, dtype):
+            cpu_result = None
+            result = None
+
+            if(n == m):
+                cpu_result = torch.eye(n, dtype=dtype, device='cpu')
+                result = torch.eye(n, dtype=dtype, device='mps')
+            else:
+                cpu_result = torch.eye(n, m, device='cpu')
+                result = torch.eye(n, m, device='mps')
+
+            self.assertEqual(result, cpu_result)
+
+        for dtype in [torch.float32, torch.int32, torch.int64]:
+            helper(2, 2, dtype)
+            helper(2, 3, dtype)
+            helper(0, 2, dtype)
+            helper(0, 0, dtype)
+            helper(3, 8, dtype)
+            helper(8, 3, dtype)
 
     # Test diag
     def test_diag(self):
@@ -4075,9 +4217,11 @@ exit(len(w))
             self.assertTrue(False, "There was a warning when importing torch.")
 
     def _get_not_implemented_op(self):
-        # This can be changed once we actually implement `torch.eye`
+        # This can be changed once we actually implement `torch.bincount`
         # Should return fn, args, kwargs, string_version
-        return torch.eye, (2,), {"device": "mps"}, "torch.eye(2, device='mps')"
+        return (torch.bincount,
+                torch.tensor([4], device='mps'), {},
+                "torch.bincount(torch.tensor([4, 3, 6, 3, 4], device='mps'))")
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
