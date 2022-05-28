@@ -67,6 +67,8 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
       at::globalContext().lazyInitCUDA();
       allocator = c10::cuda::CUDACachingAllocator::get();
 #endif
+    } else if (device.type() == at::DeviceType::Meta) {
+      allocator = c10::GetAllocator(device.type());
     } else {
       TORCH_CHECK(false,
         THPStorageStr, "(): Storage device not recognized: ", device.type());
