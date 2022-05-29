@@ -165,6 +165,10 @@ __all__ = [
     #
     "addr",
     #
+    # Interpolation ops
+    #
+    "lerp",
+    #
     # View & Shape Ops
     #
     "as_strided",
@@ -314,6 +318,10 @@ def _make_elementwise_unary_reference(
         register_decomposition(aten_op, disable_meta=disable_meta)(_ref)
 
     return _ref
+
+
+# Saves Python abs
+py_abs = abs
 
 
 abs = _make_elementwise_unary_reference(
@@ -1455,6 +1463,33 @@ def addr(
             return alpha * torch.outer(vec1, vec2)
         else:
             return beta * self + alpha * torch.outer(vec1, vec2)
+
+
+@out_wrapper
+def lerp(
+    input: TensorLikeType,
+    end: TensorLikeType,
+    weight: Union[float, complex, TensorLikeType],
+):
+    if input.dtype != end.dtype:
+        raise RuntimeError(
+            f"expected dtype {input.dtype} for `end` but got dtype {end.dtype}"
+        )
+
+    if isinstance(weight, TensorLikeType) and input.dtype != weight.dtype:
+        raise RuntimeError(
+            f"expected dtype {input.dtype} for `weight` but got dtype {weight.dtype}"
+        )
+
+    if isinstance(weight, (float, complex)):
+        if py_abs(weight) < 0.5:
+            return add(input, mul(weight, sub(end, input)))
+        return sub(end, mul(1.0 - weight, sub(end, input)))
+    else:  # weight is TensorLikeType
+        ge_half = ge(abs(weight), 0.5)
+        le_half_computation = add(input, mul(weight, sub(end, input)))
+        ge_half_computation = sub(end, mul(sub(1.0, weight), sub(end, input)))
+        return where(ge_half, ge_half_computation, le_half_computation)
 
 
 def as_strided(

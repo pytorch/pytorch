@@ -19675,6 +19675,13 @@ python_ref_db = [
         torch_opinfo_name="view",
     ),
     #
+    # Interpolation Reference OpInfos
+    #
+    PythonRefInfo(
+        "_refs.lerp",
+        torch_opinfo_name="lerp",
+    ),
+    #
     # Reduction Reference OpInfos
     #
     ReductionPythonRefInfo(
