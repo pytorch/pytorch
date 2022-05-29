@@ -4,7 +4,7 @@ import torch
 import torch.distributed as dist
 from torch.autograd import Function
 from torch.distributed.nn.functional import (
-    all_gather,
+    _all_gather_base,
     all_to_all_single,
 )
 from torch.distributed._shard.partial_tensor import _PartialTensor
@@ -196,22 +196,24 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
         A :class:`ShardedTensor` object which filled with local intermediate results.
     """
     # allgather the inputs first.
-    gathered_inputs = all_gather(input, group=pg)
+    out_size = list(input.size())
+    out_size[0] = input.size(0) * dist.get_world_size(pg)
+    output = torch.empty(out_size, device=input.device)
+    output = _all_gather_base(output, input, group=pg)
+
+    # Adjust bias and perform local matmul.
     (start_pos, chunk_size) = get_chunk_sharding_params(
         bias.size(0), world_size, weight._sharding_spec, rank
     )
     local_bias = _BiasTensorNarrow.apply(
         world_size, start_pos, chunk_size, weight, pg, bias
     )
-    results = []
-    for i, inp in enumerate(gathered_inputs):
-        results.append(inp.matmul(local_shard_t) + local_bias)
-    # When the local result only has one dimension, we need to make sure
-    # it does not shard by dim 0. So reshard can work properly.
-    if results[0].dim() == 1:  # type: ignore[attr-defined]
-        result = torch.stack(results)  # type: ignore[arg-type]
-    else:
-        result = torch.cat(results)  # type: ignore[arg-type]
+
+    if output.dim() == 1:
+        output = output.view(dist.get_world_size(pg), -1)
+    result = output.matmul(local_shard_t) + local_bias
+
+    # Build ShardedTensor as result.
     st_size = list(result.size())
     st_size[-1] = weight.size(0)
     new_sharding_spec = ChunkShardingSpec(
