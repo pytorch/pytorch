@@ -2859,7 +2859,8 @@ the tensor won't share its storage with the returned ndarray.
 Setting :attr:`force` to ``True`` can be a useful shorthand.
 
 Args:
-    force (bool): if ``True``, it allows the ndarray to be a copy of the tensor instead of always sharing its memory, defaults to ``False``.
+    force (bool): if ``True``, the ndarray may be a copy of the tensor
+               instead of always sharing memory, defaults to ``False``.
 """)
 
 add_docstr_all('orgqr',
