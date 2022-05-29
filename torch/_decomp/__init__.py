@@ -103,5 +103,3 @@ def get_decompositions(
 # populate the table
 import torch._decomp.decompositions
 import torch._refs
-import torch._refs.nn.functional
-import torch._refs.special
