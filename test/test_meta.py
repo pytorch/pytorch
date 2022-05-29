@@ -542,7 +542,6 @@ meta_function_expected_failures = {
     torch.mode: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::mode
     torch.multinomial: {bf16, f32, f64},  # aten::multinomial, aten::multinomial.out
     torch.mvlgamma: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense, aten::mvlgamma.out
-    torch.nan_to_num: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nan_to_num.out
     torch.nanmean: {bf16, f16, f32, f64},
     torch.nanmedian: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::nanmedian, aten::nanmedian.dim_values
     torch.nanquantile: {f32, f64},
@@ -630,7 +629,6 @@ meta_function_skips = {
     torch.functional.tensordot: {bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.inner: {bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.logical_not: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
-    torch.logical_xor: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.nn.functional.cross_entropy: {bf16, f32, f64},
     torch.nn.functional.interpolate: {bf16, f32, f64, u8},
     # BEGIN TODO
@@ -830,7 +828,6 @@ meta_dispatch_expected_failures = {
     aten.logcumsumexp.out: {bf16, f64, f32},
     aten.logical_not.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.logical_not_.default: {bf16, f16, f64, f32},
-    aten.logical_xor.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.masked_select.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.masked_select.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.max_pool3d_with_indices.default: {f64, f32},
@@ -845,8 +842,6 @@ meta_dispatch_expected_failures = {
     aten.multinomial.out: {bf16, f64, f32},
     aten.mvlgamma.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.mvlgamma.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.nan_to_num.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.nan_to_num.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.nanmedian.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.nanmedian.dim: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.nansum.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
