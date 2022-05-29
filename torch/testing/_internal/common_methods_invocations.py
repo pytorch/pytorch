@@ -2774,7 +2774,8 @@ def _reference_inputs_elementwise_unary(op, device, dtype, requires_grad, **kwar
         yield from generate_elementwise_unary_large_value_tensors(
             op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
         )
-    if dtype.is_floating_point or dtype.is_complex:
+
+    if dtype.is_floating_point or (op.handles_complex_extremal_values and dtype.is_complex):
         yield from generate_elementwise_unary_extremal_value_tensors(
             op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
         )
@@ -2824,6 +2825,7 @@ class UnaryUfuncInfo(OpInfo):
         dtypesIfCUDA=None,
         dtypesIfROCM=None,
         domain=(None, None),  # the [low, high) domain of the function
+        handles_complex_extremal_values=True,  # whether the op correctly handles extremal values (like nan/inf)
         handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
         supports_complex_to_float=False,  # op supports casting from complex input to real output safely eg. angle
         sample_inputs_func=sample_inputs_elementwise_unary,
@@ -2847,6 +2849,7 @@ class UnaryUfuncInfo(OpInfo):
         )
         self.ref = ref
         self.domain = domain
+        self.handles_complex_extremal_values = handles_complex_extremal_values
         self.handles_large_floats = handles_large_floats
         self.supports_complex_to_float = supports_complex_to_float
         self.reference_numerics_filter = reference_numerics_filter
@@ -4301,6 +4304,14 @@ def error_inputs_index_select(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(y, args=(1, ind,), kwargs=dict(out=x)),
                      error_type=RuntimeError,
                      error_regex='unsupported operation')
+
+def error_inputs_logcumsumexp(op_info, device, **kwargs):
+    dim = 3
+    srcs = [torch.randn(5, 2, device=device), torch.randn(0, 2, device=device)]
+    for src in srcs:
+        yield ErrorInput(SampleInput(src, args=(dim,)),
+                         error_type=IndexError,
+                         error_regex='Dimension out of range')
 
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S), dtype=dtype, device=device,
@@ -17251,7 +17262,8 @@ op_db: List[OpInfo] = [
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='cuda'),
            ),
-           sample_inputs_func=sample_inputs_logcumsumexp),
+           sample_inputs_func=sample_inputs_logcumsumexp,
+           error_inputs_func=error_inputs_logcumsumexp),
     UnaryUfuncInfo('sigmoid',
                    aliases=('special.expit', 'nn.functional.sigmoid'),
                    aten_backward_name='sigmoid_backward',
@@ -18978,17 +18990,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
-    BinaryUfuncInfo(
-        'special.chebyshev_polynomial_t',
-        dtypes=all_types_and(torch.bool),
-        promotes_int_to_float=True,
-        skips=(
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
-        ),
-        supports_one_python_scalar=True,
-        supports_autograd=False,
-    ),
     UnaryUfuncInfo(
         'special.bessel_j0',
         decorators=(
@@ -19000,6 +19001,50 @@ op_db: List[OpInfo] = [
         ),
         dtypes=all_types_and(torch.bool),
         ref=scipy.special.j0 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    BinaryUfuncInfo(
+        'special.chebyshev_polynomial_t',
+        dtypes=all_types_and(torch.bool),
+        promotes_int_to_float=True,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
+        ),
+        supports_one_python_scalar=True,
+        supports_autograd=False,
+    ),
+    BinaryUfuncInfo(
+        'special.chebyshev_polynomial_u',
+        dtypes=all_types_and(torch.bool),
+        promotes_int_to_float=True,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
+        ),
+        supports_one_python_scalar=True,
+        supports_autograd=False,
+    ),
+    BinaryUfuncInfo(
+        'special.hermite_polynomial_h',
+        dtypes=all_types_and(torch.bool),
+        promotes_int_to_float=True,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
+        ),
+        supports_one_python_scalar=True,
+        supports_autograd=False,
+    ),
+    BinaryUfuncInfo(
+        'special.hermite_polynomial_he',
+        dtypes=all_types_and(torch.bool),
+        promotes_int_to_float=True,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
+        ),
+        supports_one_python_scalar=True,
         supports_autograd=False,
     ),
 ]
@@ -19278,8 +19323,16 @@ python_ref_db = [
         torch_opinfo_name="log2",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.nan_to_num",
+        torch_opinfo_name="nan_to_num",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
         torch_opinfo_name="neg",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.positive",
+        torch_opinfo_name="positive",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.reciprocal",
@@ -19290,8 +19343,19 @@ python_ref_db = [
         torch_opinfo_name="round",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.sigmoid",
+        torch_opinfo_name="sigmoid",
+        # Reference: https://github.com/pytorch/pytorch/issues/56012
+        handles_complex_extremal_values=False,
+        handles_large_floats=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.sign",
         torch_opinfo_name="sign",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.signbit",
+        torch_opinfo_name="signbit",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sin",
@@ -19401,6 +19465,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.hinge_embedding_loss",
         torch_opinfo_name="nn.functional.hinge_embedding_loss",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.tanhshrink",
+        torch_opinfo_name="nn.functional.tanhshrink",
     ),
     #
     # Elementwise Binary Reference OpInfos

@@ -2,6 +2,7 @@ import torch
 
 import torch._prims.utils as utils
 from torch._prims.utils import (
+    TensorLike,
     TensorLikeType,
     NumberType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -10,7 +11,12 @@ import torch._refs as refs
 from torch._decomp import register_decomposition
 from torch._prims.wrappers import (
     elementwise_type_promotion_wrapper,
+    elementwise_unary_scalar_wrapper,
     out_wrapper,
+)
+from torch._refs import (
+    _make_elementwise_unary_reference,
+    _make_elementwise_binary_reference,
 )
 
 from typing import Optional
@@ -24,6 +30,7 @@ __all__ = [
     "mish",
     "selu",
     "softplus",
+    "tanhshrink",
 ]
 
 # celu is implemented specially because it has an alpha argument
@@ -270,3 +277,20 @@ def hinge_embedding_loss(
     output_self = refs.where(refs.ne(target, -1), input, 0)
     loss = refs.add(output_margin, output_self)
     return _apply_loss_reduction(loss, reduction)
+
+
+# tanhshrink does not use _make_elementwise_unary_reference because it does not support out
+@elementwise_unary_scalar_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def tanhshrink(a: TensorLikeType) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.tanhshrink
+    """
+    if not isinstance(a, TensorLike):
+        raise RuntimeError(
+            "Expected a tensor input for an elementwise unary operation!"
+        )
+    return refs.sub(a, refs.tanh(a))
