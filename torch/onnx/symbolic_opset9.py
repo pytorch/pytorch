@@ -2468,7 +2468,7 @@ def _unique2(g, input, sorted, return_inverse, return_counts):
 
 # TODO(justinchuby): Clean up this function generation magic by defining the functions
 # explicitly.
-for k, v in symbolic_helper.cast_pytorch_to_onnx.items():
+for k, v in symbolic_helper.cast_pytorch_to_onnx.items():  # type: ignore[has-type]
     name = f"_cast_{k}"
     globals()[name] = symbolic_helper.parse_args("v", "i")(
         functools.partial(symbolic_helper._cast_func_template, v)
