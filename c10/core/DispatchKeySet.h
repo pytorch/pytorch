@@ -676,7 +676,6 @@ constexpr DispatchKeySet autogradother_backends =
          DispatchKey::SparseCsrCUDA,
          DispatchKey::CustomRNGKeyId,
          DispatchKey::MkldnnCPU,
-         DispatchKey::Meta,
          // Sparse and Quantized backends also live here.
          DispatchKey::Sparse,
          DispatchKey::Quantized})

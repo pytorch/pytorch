@@ -1414,18 +1414,23 @@ def std(
     if dim == () or dim == []:
         dim = None
 
+    opmath_dtype = utils.get_computation_dtype(a.dtype)
+    dtype = a.dtype
+    if utils.is_complex_dtype(dtype):
+        dtype = utils.corresponding_real_dtype(dtype)
+
     result = _reduction(
         a,
         partial(prims.var, correction=correction),
         dims=dim,
         keepdims=keepdim,
-        dtype=None,
+        dtype=opmath_dtype,
         out=None,
         has_identity=True,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
     )
     result = sqrt(result)
-    return result
+    return _maybe_convert_to_dtype(result, dtype)
 
 
 def mean(
