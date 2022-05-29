@@ -1,7 +1,7 @@
 import torch
 import torch._ops
 import torch.library
-from typing import Callable, Union, Dict, Sequence, List
+from typing import Callable, Union, Dict, Sequence
 from torch.utils._pytree import tree_map
 from collections import defaultdict
 
@@ -103,3 +103,5 @@ def get_decompositions(
 # populate the table
 import torch._decomp.decompositions
 import torch._refs
+import torch._refs.nn.functional
+import torch._refs.special
