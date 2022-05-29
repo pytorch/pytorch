@@ -57,7 +57,6 @@ from torch.onnx import (
     register_custom_op_symbolic,
     unregister_custom_op_symbolic,
 )
-from torch.onnx import exceptions
 from torch.onnx.symbolic_helper import _unimplemented
 
 _ORT_PROVIDERS = ["CPUExecutionProvider"]
@@ -11979,7 +11978,7 @@ class _TestONNXRuntime:
         f = io.BytesIO()
 
         try:
-            with self.assertRaises(exceptions.CheckerError) as cm:
+            with self.assertRaises(torch.onnx.errors.CheckerError):
                 torch.onnx.export(test_model, (x, y), f)
         finally:
             unregister_custom_op_symbolic("::add", 1)
