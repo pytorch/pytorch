@@ -12,6 +12,7 @@ from torch._C._onnx import (
 )
 
 from . import (
+    errors,
     symbolic_caffe2,
     symbolic_helper,
     symbolic_opset7,
@@ -29,12 +30,14 @@ from . import (
 )
 from ._constants import ONNX_ARCHIVE_MODEL_PROTO_NAME
 from ._exporter_states import ExportTypes, SymbolicContext
+from .errors import CheckerError  # Backwards compatibility
 
 # Names may be accessible from torch.onnx but not meant for public use are not listed.
 __all__ = [
     # Modules
     "symbolic_helper",
     "symbolic_registry",
+    "errors",
     # All opsets
     "symbolic_caffe2",
     "symbolic_opset7",

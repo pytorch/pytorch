@@ -26,7 +26,7 @@ from torch.onnx import (  # noqa: F401
     _constants,
     _exporter_states,
     _patch_torch,
-    exceptions,
+    errors,
     symbolic_caffe2,
     symbolic_helper,
     symbolic_registry,
@@ -1194,7 +1194,7 @@ def _export(
                 try:
                     _C._check_onnx_proto(proto, full_check=True)
                 except RuntimeError as e:
-                    raise exceptions.CheckerError(e)
+                    raise errors.CheckerError(e)
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
