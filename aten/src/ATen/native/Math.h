@@ -2482,7 +2482,7 @@ static inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
             yq = yq * (x * x) + YQ[index];
         }
 
-        return yp / yq + (T(0.636619772367581343075535053490057448) * std::log(x) * bessel_j0(x));
+        return yp / yq + (T(0.636619772367581343075535053490057448) * std::log(x) * bessel_j0_forward(x));
     }
 
     T pp = 0.0;
