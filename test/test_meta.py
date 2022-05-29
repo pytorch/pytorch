@@ -1096,9 +1096,9 @@ if __name__ == "__main__":
                 op = OperatorName.parse(op_str)
                 packet = getattr(torch.ops.aten, str(op.name))
                 overload = getattr(packet, op.overload_name if op.overload_name else "default")
-                if overload in meta_dispatch_skips:
+                if any(overload in d for d in [meta_dispatch_skips, meta_dispatch_device_skips['cuda']]):
                     print(f"{overload}  # SKIP")
-                if overload in meta_dispatch_expected_failures:
+                if any(overload in d for d in [meta_dispatch_expected_failures, meta_dispatch_device_expected_failures['cuda']]):
                     print(overload)
         sys.exit(0)
 
