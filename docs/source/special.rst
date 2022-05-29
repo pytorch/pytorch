@@ -22,6 +22,8 @@ Piecewise Functions
     Many piecewise functions can be found in the ``torch`` module:
 
     * ``torch.abs``
+    * ``torch.ceil``
+    * ``torch.floor``
     * ``torch.heaviside``
     * ``torch.max``
     * ``torch.min``
