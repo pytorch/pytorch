@@ -2589,67 +2589,68 @@ class FullyShardedDataParallel(nn.Module):
         Returns:
             outputs: new outputs with hooks registered if they requires gradient.
         """
-        # Reset before each backward pass
-        self._need_rebuild_full_params = False
+        with torch.autograd.profiler.record_function("FullyShardedDataParallel._register_pre_backward_hooks"):
+            # Reset before each backward pass
+            self._need_rebuild_full_params = False
 
-        if not torch.is_grad_enabled():
-            return outputs  # don't register hooks if grad isn't enabled
+            if not torch.is_grad_enabled():
+                return outputs  # don't register hooks if grad isn't enabled
 
-        if self._is_root:
-            # This actually means that only root instance has
-            # _post_backward_callback_queued defined. Accidentally accessing this field
-            # will assert on all other instances, giving us a nice bug checker.
-            self._post_backward_callback_queued = False
-
-        # Reset before each backward pass
-        self._pre_backward_hook_has_run = False
-
-        def _pre_backward_hook(*unused: Any) -> None:
-            # Run ``_pre_backward_hook`` only once per backward pass
-            if self._pre_backward_hook_has_run:
-                return
-            # try to queue final backward callback only once for root, so
-            # that final backward callback is attached to the outer most
-            # backward graph task and called after all the backward
-            # calls are completed.
             if self._is_root:
-                self._queue_wait_for_post_backward()
+                # This actually means that only root instance has
+                # _post_backward_callback_queued defined. Accidentally accessing this field
+                # will assert on all other instances, giving us a nice bug checker.
+                self._post_backward_callback_queued = False
 
-            if self._need_prefetch_pre_backward_hook():
-                # Always wait for all_gather before rebuilding full params, just
-                # in case full params have already been prefetched in previous layer's
-                # pre-backward hook.
+            # Reset before each backward pass
+            self._pre_backward_hook_has_run = False
+
+            def _pre_backward_hook(*unused: Any) -> None:
+                # Run ``_pre_backward_hook`` only once per backward pass
+                if self._pre_backward_hook_has_run:
+                    return
+                # try to queue final backward callback only once for root, so
+                # that final backward callback is attached to the outer most
+                # backward graph task and called after all the backward
+                # calls are completed.
+                if self._is_root:
+                    self._queue_wait_for_post_backward()
+
+                if self._need_prefetch_pre_backward_hook():
+                    # Always wait for all_gather before rebuilding full params, just
+                    # in case full params have already been prefetched in previous layer's
+                    # pre-backward hook.
+                    torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
+                # Start of a backward pass for the first time in an backward pass.
+                self._assert_state([TrainingState_.IDLE])
+                self.training_state = TrainingState_.BACKWARD_PRE
+
+                # All-gather full parameters, moving them to compute device if
+                # necessary.
+                self._rebuild_full_params()
+                # Wait for all_gather to finish before computation
                 torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
-            # Start of a backward pass for the first time in an backward pass.
-            self._assert_state([TrainingState_.IDLE])
-            self.training_state = TrainingState_.BACKWARD_PRE
+                # Prefetch next layer's full params in backward pass,
+                # since it is prefetching, no need to wait for all_gather stream.
+                if self._need_prefetch_pre_backward_hook():
+                    self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
 
-            # All-gather full parameters, moving them to compute device if
-            # necessary.
-            self._rebuild_full_params()
-            # Wait for all_gather to finish before computation
-            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+                self._pre_backward_hook_has_run = True
+                # Prepare p.grad so that it is in the right shape, device, accumulated values, etc.
+                self._prep_grads_for_backward()
 
-            # Prefetch next layer's full params in backward pass,
-            # since it is prefetching, no need to wait for all_gather stream.
-            if self._need_prefetch_pre_backward_hook():
-                self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
+            def _register_hook(t: torch.Tensor) -> torch.Tensor:
+                if t.requires_grad:
+                    t.register_hook(_pre_backward_hook)
+                    self._need_rebuild_full_params = True
+                return t
 
-            self._pre_backward_hook_has_run = True
-            # Prepare p.grad so that it is in the right shape, device, accumulated values, etc.
-            self._prep_grads_for_backward()
+            # Attach hooks to Tensor outputs.
+            outputs = _apply_to_tensors(_register_hook, outputs)
 
-        def _register_hook(t: torch.Tensor) -> torch.Tensor:
-            if t.requires_grad:
-                t.register_hook(_pre_backward_hook)
-                self._need_rebuild_full_params = True
-            return t
-
-        # Attach hooks to Tensor outputs.
-        outputs = _apply_to_tensors(_register_hook, outputs)
-
-        return outputs
+            return outputs
 
     def _register_post_backward_hooks(self) -> None:
         """
@@ -2681,26 +2682,27 @@ class FullyShardedDataParallel(nn.Module):
         backward pass. Otherwise, the next forward pass will not register
         a new hook, which is needed for a new forward pass.
         """
-        if not torch.is_grad_enabled():
-            return  # don't register grad hooks if grad isn't enabled
-        for p in self.params:
-            if p.requires_grad:
-                if hasattr(p, "_shard_bwd_hook"):
-                    continue
-                # Register a hook on the first call, empirically, autograd
-                # fires it at the end for this param, which makes sense.
-                p_tmp = p.expand_as(p)  # Get a grad_fn on p_tmp.
-                assert (
-                    p_tmp.grad_fn is not None
-                ), "p_tmp grad_fn should not be None, it is used to access \
-                    p's AccumulateGrad object and register post hook on it."
-                grad_acc = p_tmp.grad_fn.next_functions[0][
-                    0
-                ]  # Gets its AccumulateGrad object.
-                handle = grad_acc.register_hook(
-                    functools.partial(self._post_backward_hook, p)
-                )
-                p._shard_bwd_hook = (grad_acc, handle)  # type: ignore[attr-defined]
+        with torch.autograd.profiler.record_function("FullyShardedDataParallel._register_post_backward_hooks"):
+            if not torch.is_grad_enabled():
+                return  # don't register grad hooks if grad isn't enabled
+            for p in self.params:
+                if p.requires_grad:
+                    if hasattr(p, "_shard_bwd_hook"):
+                        continue
+                    # Register a hook on the first call, empirically, autograd
+                    # fires it at the end for this param, which makes sense.
+                    p_tmp = p.expand_as(p)  # Get a grad_fn on p_tmp.
+                    assert (
+                        p_tmp.grad_fn is not None
+                    ), "p_tmp grad_fn should not be None, it is used to access \
+                        p's AccumulateGrad object and register post hook on it."
+                    grad_acc = p_tmp.grad_fn.next_functions[0][
+                        0
+                    ]  # Gets its AccumulateGrad object.
+                    handle = grad_acc.register_hook(
+                        functools.partial(self._post_backward_hook, p)
+                    )
+                    p._shard_bwd_hook = (grad_acc, handle)  # type: ignore[attr-defined]
 
     @torch.no_grad()
     def _post_backward_hook(self, param: Parameter, *unused: Any) -> None:
