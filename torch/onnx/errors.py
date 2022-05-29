@@ -1,5 +1,6 @@
 """ONNX exporter exceptions."""
 
+
 class OnnxExporterError(RuntimeError):
     """Errors raised by the ONNX exporter."""
 
