@@ -113,8 +113,8 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force/*=false*/) {
 
   TORCH_CHECK_TYPE(tensor.layout() == Layout::Strided,
       "can't convert ", c10::str(tensor.layout()).c_str(),
-      " layout tensor to numpy.",
-                   "convert the tensor to a strided layout first.");
+      " layout tensor to numpy. ",
+      "Use Tensor.dense() first.");
 
   if (!force){
     TORCH_CHECK_TYPE(tensor.device().type() == DeviceType::CPU,
