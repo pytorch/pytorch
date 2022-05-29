@@ -674,16 +674,8 @@ Tensor& true_divide_(Tensor& self, const Scalar& divisor) {
 }
 
 Tensor& floor_divide_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  TORCH_WARN_ONCE(
-    "floor_divide is deprecated, and will be removed in a future version of pytorch. "
-    "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
-    "This results in incorrect rounding for negative values.\n"
-    "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
-    "or for actual floor division, use torch.div(a, b, rounding_mode='floor')."
-  );
-  // FIXME: Not actually doing floor division (#43874)
   auto iter = TensorIterator::binary_op(result, self, other);
-  div_trunc_stub(iter.device_type(), iter);
+  div_floor_stub(iter.device_type(), iter);
   if (!result.defined()) {
     result = iter.output();
   }
@@ -691,17 +683,9 @@ Tensor& floor_divide_out(const Tensor& self, const Tensor& other, Tensor& result
 }
 
 Tensor floor_divide(const Tensor& self, const Tensor& other) {
-  TORCH_WARN_ONCE(
-    "floor_divide is deprecated, and will be removed in a future version of pytorch. "
-    "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
-    "This results in incorrect rounding for negative values.\n"
-    "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
-    "or for actual floor division, use torch.div(a, b, rounding_mode='floor')."
-  );
-  // FIXME: Not actually doing floor division (#43874)
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
-  div_trunc_stub(iter.device_type(), iter);
+  div_floor_stub(iter.device_type(), iter);
   return iter.output();
 }
 
