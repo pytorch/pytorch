@@ -354,7 +354,7 @@ class _AllGatherBase(Function):
             out_size = list(grad_output.size())
             out_size[0] = grad_output[0].size() // dist.get_world_size(group=ctx.group)
             gx = torch.empty(out_size, device=grad_output.device)
-            dist._reduce_scatter_base(gx, grad_output, ReduceOP.SUM, ctx.group)
+            dist._reduce_scatter_base(gx, grad_output, ReduceOp.SUM, ctx.group)
         else:
             raise RuntimeError("Backed not supported!")
         return (None, gx, None)
