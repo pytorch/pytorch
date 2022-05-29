@@ -2853,10 +2853,10 @@ storage, so changes to the tensor will be reflected in the ndarray
 and vice versa.
 
 If :attr:`force` is ``True`` this is equivalent to
-calling ``t.detach().cpu().resolve_conj().numpy()``. If the tensor
-isn't on the CPU or its conjugate bit is set, the tensor won't share
-its storage with the returned ndarray. Setting :attr:`force` to
-``True`` can be a useful shorthand.
+calling ``t.detach().cpu().resolve_conj().resolve_neg().numpy()``.
+If the tensor isn't on the CPU or the conjugate or negative bit is set,
+the tensor won't share its storage with the returned ndarray.
+Setting :attr:`force` to ``True`` can be a useful shorthand.
 
 Args:
     force (bool): if ``True``, it allows the ndarray to be a copy of the tensor instead of always sharing its memory, defaults to ``False``.
