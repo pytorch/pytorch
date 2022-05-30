@@ -790,9 +790,15 @@ round = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _rsqrt_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.rsqrt(a)  # type: ignore[attr-defined]
+
+
 rsqrt = _make_elementwise_unary_prim(
     "rsqrt",
     impl_aten=torch.rsqrt,
+    impl_nvfuser=_rsqrt_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
