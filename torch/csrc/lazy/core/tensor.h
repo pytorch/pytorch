@@ -6,7 +6,7 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/lazy_view.h>
 #include <torch/csrc/lazy/core/util.h>
-#include <ATen/core/SymbolicIntNode.h>
+#include <c10/core/SymbolicIntNode.h>
 
 
 namespace torch {

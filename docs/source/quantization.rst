@@ -604,7 +604,7 @@ The following table compares the differences between Eager Mode Quantization and
 |                 |Static, Dynamic,   |Static, Dynamic,   |
 |                 |Weight Only        |Weight Only        |
 |                 |                   |                   |
-|                 |Quantiztion Aware  |Quantiztion Aware  |
+|                 |Quantization Aware |Quantization Aware |
 |                 |Training:          |Training:          |
 |                 |Static             |Static             |
 +-----------------+-------------------+-------------------+
@@ -717,8 +717,6 @@ and supported quantized modules and functions.
     :hidden:
 
     quantization-support
-    torch.ao.ns._numeric_suite
-    torch.ao.ns._numeric_suite_fx
 
 Quantization Backend Configuration
 ----------------------------------
@@ -730,6 +728,17 @@ on how to configure the quantization workflows for various backends.
     :hidden:
 
     quantization-backend-configuration
+
+Quantization Accuracy Debugging
+-------------------------------
+
+The :doc:`Quantization Accuracy Debugging <quantization-accuracy-debugging>` contains documentation
+on how to debug quantization accuracy.
+
+.. toctree::
+    :hidden:
+
+    quantization-accuracy-debugging
 
 Quantization Customizations
 ---------------------------
@@ -1018,17 +1027,6 @@ Symbolic traceability is a requirement for `(Prototype) FX Graph Mode Quantizati
   torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
 
 Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pytorch.org/76223/fx.html#limitations-of-symbolic-tracing>`_ and use - `User Guide on Using FX Graph Mode Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_quant_guide.html>`_ to workaround the problem.
-
-Numerical Debugging (prototype)
--------------------------------
-
-.. warning ::
-     Numerical debugging tooling is early prototype and subject to change.
-
-* :ref:`torch_ao_ns_numeric_suite`
-  Eager mode numeric suite
-* :ref:`torch_ao_ns_numeric_suite_fx`
-  FX numeric suite
 
 
 .. torch.ao is missing documentation. Since part of it is mentioned here, adding them here for now.
