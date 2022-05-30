@@ -3099,6 +3099,7 @@
     "i0e",
     "i1",
     "i1e",
+    "laguerre_polynomial_l",
     "log1p",
     "log_ndtr",
     "log_softmax",
