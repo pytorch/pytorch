@@ -1430,7 +1430,7 @@ def std(
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
     )
     result = sqrt(result)
-    return _maybe_convert_to_dtype(result, dtype)
+    return _maybe_convert_to_dtype(result, dtype)  # type: ignore[return-value]
 
 
 def mean(
