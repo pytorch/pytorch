@@ -143,7 +143,10 @@ class DispatchlessComposite:
         # bail if we have found no registered kernel.
         return None
 
-    def _header_set(self, header_from_fn: Callable) -> List[str]:
+    def _header_set(
+        self,
+        header_from_fn: Callable[[NativeFunction, Optional[NativeFunctionsGroup]], str],
+    ) -> List[str]:
         return list(
             {
                 header_from_fn(dep_f, dep_g)
