@@ -1006,6 +1006,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.i0e: lambda input: -1,
         torch.special.i1: lambda input: -1,
         torch.special.i1e: lambda input: -1,
+        torch.special.laguerre_polynomial_l: lambda input, n, out=None: -1,
         torch.special.log1p: lambda input: -1,
         torch.special.log_ndtr: lambda input: -1,
         torch.special.log_softmax: lambda input, dim, dtype=None: -1,
