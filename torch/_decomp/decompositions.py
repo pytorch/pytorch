@@ -444,9 +444,8 @@ def nll_loss_forward(
 
     result = -torch.gather(self, channel_dim, target_).squeeze(channel_dim)
 
-    has_ignore_index = ignore_index >= 0
     ignore_index_mask = None
-    if has_ignore_index:
+    if ignore_index >= 0:
         ignore_index_mask = target != ignore_index
         result = result * ignore_index_mask
 
@@ -460,7 +459,7 @@ def nll_loss_forward(
         if ignore_index_mask is not None:
             wsum = wsum * ignore_index_mask
         total_weight = wsum.sum()
-    elif has_ignore_index:
+    elif ignore_index_mask is not None:
         total_weight = ignore_index_mask.sum().to(self)
     else:
         total_weight = torch.tensor(1.0 * result.numel(), dtype=self.dtype, device=self.device)
@@ -470,7 +469,7 @@ def nll_loss_forward(
             result = result.sum()
         elif reduction == Reduction.MEAN.value:
             if weight is None:
-                result = result.sum() / total_weight if has_ignore_index else result.mean()
+                result = result.sum() / total_weight if ignore_index >= 0 else result.mean()
             else:
                 result = result.sum() / total_weight
 
