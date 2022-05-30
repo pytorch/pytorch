@@ -415,19 +415,19 @@ TORCH_IMPL_FUNC(special_legendre_polynomial_p_out) (const Tensor& self, const Te
 }
 
 TORCH_IMPL_FUNC(special_shifted_chebyshev_polynomial_t_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
-  chebyshev_shifted_polynomial_t_stub(device_type(), *this);
+  shifted_chebyshev_polynomial_t_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(special_shifted_chebyshev_polynomial_u_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
-  chebyshev_shifted_polynomial_u_stub(device_type(), *this);
+  shifted_chebyshev_polynomial_u_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(special_shifted_chebyshev_polynomial_v_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
-  chebyshev_shifted_polynomial_v_stub(device_type(), *this);
+  shifted_chebyshev_polynomial_v_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(special_shifted_chebyshev_polynomial_w_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
-  chebyshev_shifted_polynomial_w_stub(device_type(), *this);
+  shifted_chebyshev_polynomial_w_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(tanh_backward_out) (const Tensor& grad_output, const Tensor& output, const Tensor& result) {
