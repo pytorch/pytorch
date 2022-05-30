@@ -2,6 +2,7 @@
 set -eux -o pipefail
 export TZ=UTC
 
+
 tagged_version() {
   # Grabs version from either the env variable CIRCLE_TAG
   # or the pytorch git described version
