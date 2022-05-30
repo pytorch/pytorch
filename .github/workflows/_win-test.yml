@@ -48,7 +48,7 @@ jobs:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download PyTorch Build Artifacts
-        uses: seemethere/download-artifact-s3@v3
+        uses: seemethere/download-artifact-s3@v4
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\${{ github.run_id }}\build-results
