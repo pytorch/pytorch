@@ -21,8 +21,8 @@
 #include <ATen/ops/_test_serialization_subcmul_native.h>
 #include <ATen/ops/_to_copy.h>
 #include <ATen/ops/add.h>
-#include <ATen/ops/add_ops.h>
 #include <ATen/ops/add_native.h>
+#include <ATen/ops/add_ops.h>
 #include <ATen/ops/and_native.h>
 #include <ATen/ops/arctan2_native.h>
 #include <ATen/ops/atan2.h>
@@ -40,8 +40,8 @@
 #include <ATen/ops/copysign.h>
 #include <ATen/ops/copysign_native.h>
 #include <ATen/ops/div.h>
-#include <ATen/ops/div_ops.h>
 #include <ATen/ops/div_native.h>
+#include <ATen/ops/div_ops.h>
 #include <ATen/ops/divide_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/eq_native.h>
@@ -72,6 +72,8 @@
 #include <ATen/ops/le_native.h>
 #include <ATen/ops/less_equal_native.h>
 #include <ATen/ops/less_native.h>
+#include <ATen/ops/linalg_cross_meta_dispatch.h>
+#include <ATen/ops/linalg_cross_native.h>
 #include <ATen/ops/logaddexp2_native.h>
 #include <ATen/ops/logaddexp_native.h>
 #include <ATen/ops/logical_and.h>
@@ -91,8 +93,8 @@
 #include <ATen/ops/minimum.h>
 #include <ATen/ops/minimum_native.h>
 #include <ATen/ops/mul.h>
-#include <ATen/ops/mul_ops.h>
 #include <ATen/ops/mul_native.h>
+#include <ATen/ops/mul_ops.h>
 #include <ATen/ops/multiply_native.h>
 #include <ATen/ops/ne.h>
 #include <ATen/ops/ne_native.h>
@@ -105,8 +107,14 @@
 #include <ATen/ops/rshift_native.h>
 #include <ATen/ops/rsub_native.h>
 #include <ATen/ops/sigmoid_backward_native.h>
+#include <ATen/ops/special_chebyshev_polynomial_t.h>
+#include <ATen/ops/special_chebyshev_polynomial_t_native.h>
+#include <ATen/ops/special_chebyshev_polynomial_u.h>
+#include <ATen/ops/special_chebyshev_polynomial_u_native.h>
 #include <ATen/ops/special_gammainc_native.h>
 #include <ATen/ops/special_gammaincc_native.h>
+#include <ATen/ops/special_hermite_polynomial_h.h>
+#include <ATen/ops/special_hermite_polynomial_h_native.h>
 #include <ATen/ops/special_xlog1py.h>
 #include <ATen/ops/special_xlog1py_native.h>
 #include <ATen/ops/special_xlogy_native.h>
@@ -132,10 +140,11 @@ namespace native {
 static void check_convert(const Scalar& scalar, ScalarType scalarType) {
   // Validate that is possible to convert scalar to tensor dtype without
   // overflow
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       at::ScalarType::Bool,
       at::ScalarType::BFloat16,
       at::ScalarType::Half,
+      at::ScalarType::ComplexHalf,
       scalarType,
       "check_convert",
       [&] { scalar.to<scalar_t>(); });
@@ -198,6 +207,18 @@ TORCH_META_FUNC(special_xlog1py) (const Tensor& self, const Tensor& other) {
 
 TORCH_META_FUNC(special_zeta) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_float_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC(special_chebyshev_polynomial_t) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_chebyshev_polynomial_u) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_hermite_polynomial_h) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
 }
 
 TORCH_META_FUNC2(copysign, Tensor) (
@@ -386,6 +407,9 @@ DEFINE_DISPATCH(copysign_stub);
 DEFINE_DISPATCH(xlogy_stub);
 DEFINE_DISPATCH(xlog1py_stub);
 DEFINE_DISPATCH(zeta_stub);
+DEFINE_DISPATCH(chebyshev_polynomial_t_stub);
+DEFINE_DISPATCH(chebyshev_polynomial_u_stub);
+DEFINE_DISPATCH(hermite_polynomial_h_stub);
 
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -430,6 +454,18 @@ TORCH_IMPL_FUNC(special_xlog1py_out) (const Tensor& self, const Tensor& other, c
 
 TORCH_IMPL_FUNC(special_zeta_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
   zeta_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_chebyshev_polynomial_t_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  chebyshev_polynomial_t_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_chebyshev_polynomial_u_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  chebyshev_polynomial_u_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_hermite_polynomial_h_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  hermite_polynomial_h_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(tanh_backward_out) (const Tensor& grad_output, const Tensor& output, const Tensor& result) {
@@ -490,6 +526,54 @@ Tensor& special_zeta_out(const Scalar& self, const Tensor& other, Tensor& result
 
 Tensor& special_zeta_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::special_zeta_out(result, self, wrapped_scalar_tensor(other));
+}
+
+Tensor special_chebyshev_polynomial_t(const Scalar& x, const Tensor& n) {
+  return at::special_chebyshev_polynomial_t(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_chebyshev_polynomial_t(const Tensor& x, const Scalar& n) {
+  return at::special_chebyshev_polynomial_t(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_chebyshev_polynomial_t_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_t_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_chebyshev_polynomial_t_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_t_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_chebyshev_polynomial_u(const Scalar& x, const Tensor& n) {
+  return at::special_chebyshev_polynomial_u(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_chebyshev_polynomial_u(const Tensor& x, const Scalar& n) {
+  return at::special_chebyshev_polynomial_u(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_chebyshev_polynomial_u_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_u_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_chebyshev_polynomial_u_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_u_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_hermite_polynomial_h(const Scalar& x, const Tensor& n) {
+  return at::special_hermite_polynomial_h(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_hermite_polynomial_h(const Tensor& x, const Scalar& n) {
+  return at::special_hermite_polynomial_h(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_hermite_polynomial_h_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_hermite_polynomial_h_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_hermite_polynomial_h_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_hermite_polynomial_h_out(result, self, wrapped_scalar_tensor(n));
 }
 
 Tensor& special_gammainc_out(const Tensor& self, const Tensor& other, Tensor& result) {
@@ -752,8 +836,6 @@ Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
 }
 
 Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
-  TORCH_INTERNAL_ASSERT(self._is_zerotensor() || other._is_zerotensor());
-
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
@@ -812,6 +894,25 @@ Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alp
 
 Tensor sub_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   return maybe_add_maybe_sub(self, other, -alpha);
+}
+
+Tensor linalg_cross_zerotensor(
+  const Tensor& input,
+  const Tensor& other,
+  const int64_t dim)
+{
+  auto out_device = correct_out_device(input, other);
+  // hack to use the TensorIterator to get the correct broadcasting and type
+  // promotion logic (see add_zerotensor)
+  auto device = Device(DeviceType::Meta);
+  auto meta_out = at::meta::linalg_cross(
+    input.to(device),
+    other.to(device),
+    dim);
+
+  return at::_efficientzerotensor(
+    meta_out.sizes(),
+    meta_out.options().device(out_device));
 }
 
 // multiply, alias for mul
@@ -910,6 +1011,10 @@ Tensor bitwise_and(const Tensor& self, const Scalar& other) {
   return at::bitwise_and(self, wrapped_scalar_tensor(other));
 }
 
+Tensor bitwise_and(const Scalar& self, const Tensor& other) {
+  return at::bitwise_and(wrapped_scalar_tensor(self), other);
+}
+
 Tensor& bitwise_and_(Tensor& self, const Scalar& other) {
   return self.bitwise_and_(wrapped_scalar_tensor(other));
 }
@@ -939,6 +1044,10 @@ Tensor bitwise_or(const Tensor& self, const Scalar& other) {
   return at::bitwise_or(self, wrapped_scalar_tensor(other));
 }
 
+Tensor bitwise_or(const Scalar& self, const Tensor& other) {
+  return at::bitwise_or(wrapped_scalar_tensor(self), other);
+}
+
 Tensor& bitwise_or_(Tensor& self, const Scalar& other) {
   return self.bitwise_or_(wrapped_scalar_tensor(other));
 }
@@ -966,6 +1075,10 @@ Tensor& bitwise_xor_out(const Tensor& self, const Scalar& other, Tensor& result)
 
 Tensor bitwise_xor(const Tensor& self, const Scalar& other) {
   return at::bitwise_xor(self, wrapped_scalar_tensor(other));
+}
+
+Tensor bitwise_xor(const Scalar& self, const Tensor& other) {
+  return at::bitwise_xor(wrapped_scalar_tensor(self), other);
 }
 
 Tensor& bitwise_xor_(Tensor& self, const Scalar& other) {
@@ -998,7 +1111,7 @@ Tensor __lshift__(const Tensor& self, const Tensor& other) {
 
 Tensor __lshift__(const Tensor& self, const Scalar& other) {
   Tensor result;
-  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto wrapper = wrapped_scalar_tensor(other);
   auto iter = TensorIterator::binary_op(result, self, wrapper);
   lshift_stub(iter.device_type(), iter);
   return iter.output();
@@ -1011,7 +1124,7 @@ Tensor& __ilshift__(Tensor& self, const Tensor& other) {
 }
 
 Tensor& __ilshift__(Tensor& self, const Scalar& other) {
-  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto wrapper = wrapped_scalar_tensor(other);
   auto iter = TensorIterator::binary_op(self, self, wrapper);
   lshift_stub(iter.device_type(), iter);
   return self;
@@ -1022,19 +1135,19 @@ TORCH_IMPL_FUNC(bitwise_left_shift_out) (const Tensor& self, const Tensor& other
 }
 
 Tensor& bitwise_left_shift_out(const Tensor& self, const Scalar& other, Tensor& result) {
-  return at::bitwise_left_shift_out(result, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_left_shift_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor bitwise_left_shift(const Tensor& self, const Scalar& other) {
-  return at::bitwise_left_shift(self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_left_shift(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& bitwise_left_shift_(Tensor& self, const Scalar& other) {
-  return at::bitwise_left_shift_out(self, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_left_shift_out(self, self, wrapped_scalar_tensor(other));
 }
 
 Tensor bitwise_left_shift(const Scalar& self, const Tensor& other) {
-  return at::bitwise_left_shift(wrapped_scalar_tensor(self).toType(other.scalar_type()), other);
+  return at::bitwise_left_shift(wrapped_scalar_tensor(self), other);
 }
 
 Tensor __rshift__(const Tensor& self, const Tensor& other) {
@@ -1046,7 +1159,7 @@ Tensor __rshift__(const Tensor& self, const Tensor& other) {
 
 Tensor __rshift__(const Tensor& self, const Scalar& other) {
   Tensor result;
-  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto wrapper = wrapped_scalar_tensor(other);
   auto iter = TensorIterator::binary_op(result, self, wrapper);
   rshift_stub(iter.device_type(), iter);
   return iter.output();
@@ -1059,7 +1172,7 @@ Tensor& __irshift__(Tensor& self, const Tensor& other) {
 }
 
 Tensor& __irshift__(Tensor& self, const Scalar& other) {
-  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto wrapper = wrapped_scalar_tensor(other);
   auto iter = TensorIterator::binary_op(self, self, wrapper);
   rshift_stub(iter.device_type(), iter);
   return self;
@@ -1070,19 +1183,19 @@ TORCH_IMPL_FUNC(bitwise_right_shift_out) (const Tensor& self, const Tensor& othe
 }
 
 Tensor& bitwise_right_shift_out(const Tensor& self, const Scalar& other, Tensor& result) {
-  return at::bitwise_right_shift_out(result, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_right_shift_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor bitwise_right_shift(const Tensor& self, const Scalar& other) {
-  return at::bitwise_right_shift(self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_right_shift(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& bitwise_right_shift_(Tensor& self, const Scalar& other) {
-  return at::bitwise_right_shift_out(self, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_right_shift_out(self, self, wrapped_scalar_tensor(other));
 }
 
 Tensor bitwise_right_shift(const Scalar& self, const Tensor& other) {
-  return at::bitwise_right_shift(wrapped_scalar_tensor(self).toType(other.scalar_type()), other);
+  return at::bitwise_right_shift(wrapped_scalar_tensor(self), other);
 }
 
 template <typename Stub>
