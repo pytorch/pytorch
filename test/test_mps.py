@@ -3963,6 +3963,13 @@ class TestNNMPS(NNTestCase):
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 
+    def test_conv_expand(self):
+        device = 'mps'
+        input_ = torch.rand(2, 3, 16, 16, device=device)
+        kernel = torch.rand(1, 1, 3, 11, device=device)
+        tmp_kernel = kernel.expand(-1, 3, -1, -1)
+        output = F.conv2d(input_, tmp_kernel, groups=1, padding=0, stride=1)
+
     def test_zero_grad(self):
         i = torch.randn(2, 5, requires_grad=True)
         module = nn.Linear(5, 5)
