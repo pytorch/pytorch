@@ -455,7 +455,7 @@ class TestCommon(TestCase):
 
             # TODO: consider adding some tolerance to this comparison
             msg = f"Reference result was farther ({ref_distance}) from the precise " \
-                  "computation than the torch result was ({torch_distance})!"
+                  f"computation than the torch result was ({torch_distance})!"
             self.assertTrue(ref_distance <= torch_distance, msg=msg)
 
         # Reports numerical accuracy discrepancies
