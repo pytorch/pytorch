@@ -96,6 +96,7 @@ Indexing, Slicing, Joining, Mutating Ops
     hstack
     index_add
     index_copy
+    index_reduce
     index_select
     masked_select
     movedim
@@ -577,7 +578,6 @@ BLAS and LAPACK Operations
     outer
     pinverse
     qr
-    solve
     svd
     svd_lowrank
     pca_lowrank
