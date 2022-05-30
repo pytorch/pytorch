@@ -74,6 +74,12 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
 
   TORCH_CHECK(repeats.size() >= (size_t)self.dim(),
            "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
+
+  if (self.sizes() == repeats) {
+    // Nothing to be done
+    return self.clone();
+  }
+
   struct CachedGraph : public MPSCachedGraph
   {
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}

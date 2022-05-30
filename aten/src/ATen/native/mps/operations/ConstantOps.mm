@@ -23,6 +23,8 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
     return self;
   }
 
+  TORCH_CHECK(self.scalar_type() != ScalarType::Bool, "Calling fill on a bool Tensor is not supported in MPS");
+
   MPSStream* stream = getCurrentMPSStream();
 
   struct CachedGraph : public MPSCachedGraph

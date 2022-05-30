@@ -20134,10 +20134,12 @@ reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswit
 sparse_masked_reduction_ops = [op for op in sparse_reduction_ops if op.name.startswith('_masked.')]
 
 # TODO: review porting these to make_tensor
-def index_variable(shape, max_indices, device=torch.device('cpu')):
+def index_variable(shape, max_indices, device='cpu'):
     if not isinstance(shape, tuple):
         shape = (shape,)
-    index = torch.rand(*shape, dtype=torch.double, device=device).mul_(max_indices).floor_().long()
+    # mps doesn't support float64
+    dtype = torch.float32 if device == "mps" else torch.float64
+    index = torch.rand(*shape, dtype=dtype, device=device).mul_(max_indices).floor_().long()
     return index
 
 def gather_variable(shape, index_dim, max_indices, duplicate=False, device=torch.device('cpu')):

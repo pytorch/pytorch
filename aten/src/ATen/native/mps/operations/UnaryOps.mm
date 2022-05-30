@@ -122,6 +122,8 @@ CREATE_MPS_UNARY_TORCH_IMPL_FUNC(abs_out_mps, absolute)
 
 TORCH_IMPL_FUNC(log1p_out_mps) (const Tensor& self, const Tensor& output)
 {
+    TORCH_CHECK(self.scalar_type() != ScalarType::Bool, "log1p does not support bool on MPS")
+
     using namespace mps;
     if (!output.is_same_size(self)) {
       output.resize_(self.sizes());

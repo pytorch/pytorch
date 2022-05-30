@@ -107,6 +107,8 @@ void div_mode_template(const Tensor& self, const Tensor& other,
 
 void add_sub_template(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output, std::string op_name)
 {
+  TORCH_CHECK(self.dtype() == other.dtype(), "tensors must have the same dtype");
+
   BinaryOpBlock add_sub_op_block = ^BinaryOpFn() {
     double alpha_val = alpha.toDouble();
     MPSGraphTensor* secondaryTensor = secondary;
