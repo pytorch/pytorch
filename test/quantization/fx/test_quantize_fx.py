@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
+from collections import OrderedDict
 import os
 import torch
 import torch.nn.functional as F
@@ -70,6 +71,21 @@ from torch.ao.quantization import (
     default_embedding_qat_qconfig,
 )
 
+from torch.ao.quantization.qconfig_mapping import (
+    GLOBAL_DICT_KEY,
+    MODULE_NAME_DICT_KEY,
+    MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY,
+    MODULE_NAME_REGEX_DICT_KEY,
+    OBJECT_TYPE_DICT_KEY,
+    QConfigMapping,
+)
+
+from torch.ao.quantization.qconfig_mapping_utils import (
+    get_object_type_qconfig,
+    get_module_name_qconfig,
+    get_module_name_regex_qconfig,
+)
+
 from torch.ao.quantization.fx.pattern_utils import (
     DEFAULT_FUSION_PATTERNS,
     DEFAULT_QUANTIZATION_PATTERNS,
@@ -78,6 +94,10 @@ from torch.ao.quantization.fx.pattern_utils import (
     register_fusion_pattern,
     register_quant_pattern,
     get_default_output_activation_post_process_map
+)
+
+from torch.ao.quantization.fx.qconfig_utils import (
+    maybe_adjust_qconfig_for_module_name_object_type_order,
 )
 
 from torch.ao.quantization.fx.utils import NodeInfo
@@ -1834,14 +1854,145 @@ class TestQuantizeFx(QuantizationTestCase):
                 # should not crash as in https://github.com/pytorch/pytorch/issues/75825
                 prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 3, 3, 3),))
 
-    def test_qconfig_dict_validity(self):
-        r"""
-        Verifies that if a user passes an invalid key or makes a typo when
-        constructing a qconfig_dict, an error will be thrown and users will be
-        notified of what keys are supported.
+    def test_qconfig_mapping_set_global(self):
+        qconfig = get_default_qconfig()
+        qconfig_mapping = QConfigMapping()
+        self.assertEqual(qconfig_mapping.global_qconfig, None)
+        qconfig_mapping.set_global(qconfig)
+        self.assertEqual(qconfig_mapping.global_qconfig, qconfig)
+
+    def test_qconfig_mapping_set_object_type(self):
+        qconfig1 = get_default_qconfig()
+        qconfig2 = get_default_qconfig()
+        qconfig3 = get_default_qconfig()
+        self.assertNotEqual(qconfig1, qconfig2)
+        self.assertNotEqual(qconfig1, qconfig3)
+        qconfig_mapping = QConfigMapping()
+        self.assertEqual(len(qconfig_mapping.object_type_qconfigs), 0)
+        # Insert some entries
+        qconfig_mapping.set_object_type(torch.nn.Linear, qconfig1)
+        qconfig_mapping.set_object_type(torch.nn.ReLU, qconfig2)
+        self.assertEqual(len(qconfig_mapping.object_type_qconfigs), 2)
+        self.assertEqual(qconfig_mapping.object_type_qconfigs[torch.nn.Linear], qconfig1)
+        self.assertEqual(qconfig_mapping.object_type_qconfigs[torch.nn.ReLU], qconfig2)
+        # Override existing key
+        qconfig_mapping.set_object_type(torch.nn.Linear, qconfig3)
+        self.assertEqual(qconfig_mapping.object_type_qconfigs[torch.nn.Linear], qconfig3)
+        self.assertEqual(qconfig_mapping.object_type_qconfigs[torch.nn.ReLU], qconfig2)
+        self.assertEqual(get_object_type_qconfig(qconfig_mapping, torch.nn.Linear, None), qconfig3)
+        self.assertEqual(get_object_type_qconfig(qconfig_mapping, torch.nn.ReLU, None), qconfig2)
+        self.assertEqual(get_object_type_qconfig(qconfig_mapping, "nomatch", None), None)
+
+    def test_qconfig_mapping_set_module_name_regex(self):
+        qconfig1 = get_default_qconfig()
+        qconfig2 = get_default_qconfig()
+        qconfig3 = get_default_qconfig()
+        self.assertNotEqual(qconfig1, qconfig2)
+        self.assertNotEqual(qconfig1, qconfig3)
+        qconfig_mapping = QConfigMapping()
+        self.assertEqual(len(qconfig_mapping.module_name_regex_qconfigs), 0)
+        # Insert some entries
+        qconfig_mapping.set_module_name_regex("foo.*bar", qconfig1)
+        qconfig_mapping.set_module_name_regex("foo.*", qconfig2)
+        self.assertEqual(len(qconfig_mapping.module_name_regex_qconfigs), 2)
+        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs["foo.*bar"], qconfig1)
+        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs["foo.*"], qconfig2)
+        # Override existing key
+        qconfig_mapping.set_module_name_regex("foo.*bar", qconfig3)
+        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs["foo.*bar"], qconfig3)
+        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs["foo.*"], qconfig2)
+        self.assertEqual(get_module_name_regex_qconfig(qconfig_mapping, "foo123bar", None), qconfig3)
+        self.assertEqual(get_module_name_regex_qconfig(qconfig_mapping, "foobar", None), qconfig3)
+        self.assertEqual(get_module_name_regex_qconfig(qconfig_mapping, "foobaz", None), qconfig2)
+        self.assertEqual(get_module_name_regex_qconfig(qconfig_mapping, "foo", None), qconfig2)
+        self.assertEqual(get_module_name_regex_qconfig(qconfig_mapping, "nomatch", None), None)
+
+    def test_qconfig_mapping_set_module_name(self):
+        qconfig1 = get_default_qconfig()
+        qconfig2 = get_default_qconfig()
+        qconfig3 = get_default_qconfig()
+        self.assertNotEqual(qconfig1, qconfig2)
+        self.assertNotEqual(qconfig1, qconfig3)
+        qconfig_mapping = QConfigMapping()
+        self.assertEqual(len(qconfig_mapping.module_name_qconfigs), 0)
+        # Insert some entries
+        qconfig_mapping.set_module_name("mod1", qconfig1)
+        qconfig_mapping.set_module_name("mod2", qconfig2)
+        self.assertEqual(len(qconfig_mapping.module_name_qconfigs), 2)
+        self.assertEqual(qconfig_mapping.module_name_qconfigs["mod1"], qconfig1)
+        self.assertEqual(qconfig_mapping.module_name_qconfigs["mod2"], qconfig2)
+        # Override existing key
+        qconfig_mapping.set_module_name("mod1", qconfig3)
+        self.assertEqual(qconfig_mapping.module_name_qconfigs["mod1"], qconfig3)
+        self.assertEqual(qconfig_mapping.module_name_qconfigs["mod2"], qconfig2)
+        self.assertEqual(get_module_name_qconfig(qconfig_mapping, "mod1", None), qconfig3)
+        self.assertEqual(get_module_name_qconfig(qconfig_mapping, "mod2", None), qconfig2)
+        self.assertEqual(get_module_name_qconfig(qconfig_mapping, "nomatch", None), None)
+
+    def test_qconfig_mapping_set_module_name_object_type_order(self):
+        qconfig1 = get_default_qconfig()
+        qconfig2 = get_default_qconfig()
+        qconfig3 = get_default_qconfig()
+        self.assertNotEqual(qconfig1, qconfig2)
+        self.assertNotEqual(qconfig1, qconfig3)
+        qconfig_mapping = QConfigMapping()
+        self.assertEqual(len(qconfig_mapping.module_name_object_type_order_qconfigs), 0)
+        # Insert some entries
+        qconfig_mapping.set_module_name_object_type_order("mod1", torch.nn.Linear, 0, qconfig1)
+        qconfig_mapping.set_module_name_object_type_order("mod2", torch.nn.ReLU, 1, qconfig2)
+        self.assertEqual(len(qconfig_mapping.module_name_object_type_order_qconfigs), 2)
+        key1 = ("mod1", torch.nn.Linear, 0)
+        key2 = ("mod2", torch.nn.ReLU, 1)
+        self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[0], key1)
+        self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[1], key2)
+        self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key1], qconfig1)
+        self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key2], qconfig2)
+        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+                         qconfig_mapping, "mod1", torch.nn.Linear, 0, None), qconfig1)
+        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+                         qconfig_mapping, "mod2", torch.nn.ReLU, 1, None), qconfig2)
+        # Override existing key
+        qconfig_mapping.set_module_name_object_type_order("mod1", torch.nn.Linear, 0, qconfig3)
+        self.assertEqual(len(qconfig_mapping.module_name_object_type_order_qconfigs), 2)
+        self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[0], key1)
+        self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[1], key2)
+        self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key1], qconfig3)
+        self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key2], qconfig2)
+        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+                         qconfig_mapping, "mod1", torch.nn.Linear, 0, None), qconfig3)
+        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+                         qconfig_mapping, "mod2", torch.nn.ReLU, 1, None), qconfig2)
+        # No match
+        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+                         qconfig_mapping, "mod123", torch.nn.Linear, 0, None), None)
+        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+                         qconfig_mapping, "mod1", torch.nn.Linear, 35, None), None)
+        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+                         qconfig_mapping, "mod2", torch.nn.Conv2d, 1, None), None)
+
+    def _get_qconfig_dict_for_qconfig_mapping_test(self, global_qconfig, qconfig1, qconfig2):
         """
-        m = ConvModel().eval()
-        qconfig_dict = {"object_typo": [(torch.nn.Conv2d, default_qconfig)]}
+        Return a dummy qconfig_dict to test QConfigMapping's to_dict and from_dict methods.
+        """
+        return {
+            GLOBAL_DICT_KEY: global_qconfig,
+            OBJECT_TYPE_DICT_KEY: [
+                (torch.nn.Linear, qconfig1),
+                (torch.nn.ReLU, qconfig2),
+            ],
+            MODULE_NAME_REGEX_DICT_KEY: [
+                ("foo.*bar", qconfig1),
+                ("foo.*", qconfig2),
+            ],
+            MODULE_NAME_DICT_KEY: [
+                ("bazbaz", qconfig1),
+                ("borbor", qconfig2),
+            ],
+            MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY: [
+                ("bazbaz", torch.nn.Linear, 0, qconfig1),
+                ("foofoo", torch.nn.ReLU, 1, qconfig2),
+            ],
+        }
 
         with self.assertRaises(ValueError) as context:
             m = prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 3, 3, 3),))
@@ -1849,6 +2000,47 @@ class TestQuantizeFx(QuantizationTestCase):
             'Expected qconfig_dict to have the following keys:' in str(context.exception)
         )
         self.assertTrue('But found \'object_typo\' instead.' in str(context.exception))
+
+    def test_qconfig_mapping_from_dict(self):
+        global_qconfig = QConfig(123, "global")
+        qconfig1 = QConfig(1, "one")
+        qconfig2 = QConfig(2, "two")
+        qconfig_dict = self._get_qconfig_dict_for_qconfig_mapping_test(global_qconfig, qconfig1, qconfig2)
+        qconfig_dict["undefined_dict_key"] = [(123, qconfig1), (234, qconfig2)]
+        qconfig_mapping = QConfigMapping.from_dict(qconfig_dict)
+        self.assertEqual(qconfig_mapping.global_qconfig, global_qconfig)
+        self.assertEqual(qconfig_mapping.object_type_qconfigs, OrderedDict({
+            torch.nn.Linear: qconfig1,
+            torch.nn.ReLU: qconfig2,
+        }))
+        self.assertEqual(qconfig_mapping.module_name_regex_qconfigs, OrderedDict({
+            "foo.*bar": qconfig1,
+            "foo.*": qconfig2,
+        }))
+        self.assertEqual(qconfig_mapping.module_name_qconfigs, OrderedDict({
+            "bazbaz": qconfig1,
+            "borbor": qconfig2,
+        }))
+        self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs, OrderedDict({
+            ("bazbaz", torch.nn.Linear, 0): qconfig1,
+            ("foofoo", torch.nn.ReLU, 1): qconfig2,
+        }))
+
+    def test_qconfig_mapping_to_dict(self):
+        global_qconfig = QConfig(123, "global")
+        qconfig1 = QConfig(1, "one")
+        qconfig2 = QConfig(2, "two")
+        qconfig_mapping = QConfigMapping().set_global(global_qconfig) \
+            .set_object_type(torch.nn.Linear, qconfig1) \
+            .set_object_type(torch.nn.ReLU, qconfig2) \
+            .set_module_name_regex("foo.*bar", qconfig1) \
+            .set_module_name_regex("foo.*", qconfig2) \
+            .set_module_name("bazbaz", qconfig1) \
+            .set_module_name("borbor", qconfig2) \
+            .set_module_name_object_type_order("bazbaz", torch.nn.Linear, 0, qconfig1) \
+            .set_module_name_object_type_order("foofoo", torch.nn.ReLU, 1, qconfig2)
+        qconfig_dict = self._get_qconfig_dict_for_qconfig_mapping_test(global_qconfig, qconfig1, qconfig2)
+        self.assertEqual(qconfig_mapping.to_dict(), qconfig_dict)
 
     def test_prepare_custom_config_dict_validity(self):
         r"""
@@ -4033,7 +4225,7 @@ class TestQuantizeFx(QuantizationTestCase):
             # checking result match
             self.assertTrue(torch.equal(out_ref, out))
 
-    def test_convert_qconfig_dict(self):
+    def test_convert_qconfig_mapping(self):
         class Linear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -4124,7 +4316,7 @@ class TestQuantizeFx(QuantizationTestCase):
                     ns.call_module(nn.Linear),
                 ]
 
-            converted = convert_fx(prepared, qconfig_dict=convert_qconfig_dict)
+            converted = convert_fx(prepared, qconfig_mapping=convert_qconfig_dict)
             converted(torch.rand(5, 5))
             self.checkGraphModuleNodes(
                 converted,
@@ -7031,7 +7223,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict, example_inputs=(train_indices[0][0],))
             test_only_train_fn(prepared_fx_model, train_indices)
             quant_model = convert_fx(prepared_fx_model,
-                                     qconfig_dict=qconfig_dict)
+                                     qconfig_mapping=qconfig_dict)
 
             def checkQuantized(model):
                 # Make sure EmbeddingBag is now a quantized EmbeddingBag.
@@ -7071,7 +7263,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict, example_inputs=(train_indices[0][0],))
             test_only_train_fn(prepared_fx_model, train_indices)
             quant_model = convert_fx(prepared_fx_model,
-                                     qconfig_dict=qconfig_dict)
+                                     qconfig_mapping=qconfig_dict)
 
             def checkQuantized(model):
                 # Make sure EmbeddingBag is now a quantized EmbeddingBag.
