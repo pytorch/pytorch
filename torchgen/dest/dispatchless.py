@@ -144,11 +144,13 @@ class DispatchlessComposite:
         return None
 
     def _header_set(self, header_from_fn: Callable) -> List[str]:
-        return list({
-            header_from_fn(dep_f, dep_g)
-            for _, info in self.graph.items()
-            for dep_f, dep_g in info.dependencies
-        })
+        return list(
+            {
+                header_from_fn(dep_f, dep_g)
+                for _, info in self.graph.items()
+                for dep_f, dep_g in info.dependencies
+            }
+        )
 
     def aggregated_headers(self) -> List[str]:
         def header_from(
