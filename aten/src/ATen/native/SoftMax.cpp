@@ -53,7 +53,7 @@ TORCH_META_FUNC(_softmax)
       dim_ >= 0 && dim_ < input_dim,
       "dim must be non-negative and less than input dimensions");
 
-  set_output(input.sizes(), output_options);
+  set_output_raw_strided(0, input.sizes(), {}, output_options);
 }
 
 TORCH_META_FUNC(_log_softmax) (
@@ -74,7 +74,7 @@ TORCH_META_FUNC(_log_softmax) (
       dim_ >= 0 && dim_ < input_dim,
       "dim must be non-negative and less than input dimensions");
 
-  set_output(input.sizes(), output_options);
+  set_output_raw_strided(0, input.sizes(), {}, output_options);
 }
 
 TORCH_META_FUNC(_softmax_backward_data)
@@ -110,7 +110,7 @@ TORCH_META_FUNC(_softmax_backward_data)
       dim_ >= 0 && dim_ < grad_dim,
       "dim must be non-negative and less than input dimensions");
 
-  set_output(grad.sizes(), grad_input_options);
+  set_output_raw_strided(0, grad.sizes(), {}, grad_input_options);
 }
 
 TORCH_META_FUNC(_log_softmax_backward_data)
@@ -142,7 +142,7 @@ TORCH_META_FUNC(_log_softmax_backward_data)
       dim_ >= 0 && dim_ < grad_dim,
       "dim must be non-negative and less than input dimensions");
 
-  set_output(grad.sizes(), grad_input_options);
+  set_output_raw_strided(0, grad.sizes(), {}, grad_input_options);
 }
 }
 
