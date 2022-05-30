@@ -58,9 +58,9 @@ TORCH_META_FUNC(replication_pad1d) (
       " Calculated output W: ", owidth);
 
   if (input.ndimension() == 2) {
-    set_output({nslices, owidth}, input.options());
+    set_output_raw_strided(0, {nslices, owidth}, {}, input.options());
   } else {
-    set_output({nbatch, nslices, owidth}, input.options());
+    set_output_raw_strided(0, {nbatch, nslices, owidth}, {}, input.options());
   }
 }
 
@@ -93,7 +93,7 @@ TORCH_META_FUNC(replication_pad1d_backward) (
       "gradOutput width unexpected. Expected: ", owidth,
       " Got: ", gradOutput.size(dimw));
 
-  set_output(input.sizes(), input.options());
+  set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
 
 TORCH_META_FUNC(replication_pad2d) (
@@ -137,9 +137,9 @@ TORCH_META_FUNC(replication_pad2d) (
       " Calculated output H: ", oheight, " W: ", owidth);
 
   if (input.dim() == 3) {
-    set_output({nslices, oheight, owidth}, input.options());
+    set_output_raw_strided(0, {nslices, oheight, owidth}, {}, input.options());
   } else {
-    set_output({nbatch, nslices, oheight, owidth}, input.options());
+    set_output_raw_strided(0, {nbatch, nslices, oheight, owidth}, {}, input.options());
   }
 }
 
@@ -228,9 +228,9 @@ TORCH_META_FUNC(replication_pad3d) (
 
   /* resize output */
   if (input.dim() == 4) {
-    set_output({nslices, odepth, oheight, owidth}, input.options());
+    set_output_raw_strided(0, {nslices, odepth, oheight, owidth}, {}, input.options());
   } else {
-    set_output({nbatch, nslices, odepth, oheight, owidth}, input.options());
+    set_output_raw_strided(0, {nbatch, nslices, odepth, oheight, owidth}, {}, input.options());
   }
 }
 

@@ -2,6 +2,7 @@ import io
 import pickle
 
 from torch.utils.data import IterDataPipe, MapDataPipe
+from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
 from typing import Any, Dict, Set, Tuple, Type, Union
 
@@ -19,6 +20,11 @@ def _stub_unpickler():
 def _list_connected_datapipes(scan_obj, only_datapipe, cache):
     f = io.BytesIO()
     p = pickle.Pickler(f)  # Not going to work for lambdas, but dill infinite loops on typing and can't be used as is
+    if DILL_AVAILABLE:
+        from dill import Pickler as dill_Pickler
+        d = dill_Pickler(f)
+    else:
+        d = None
 
     def stub_pickler(obj):
         return _stub_unpickler, ()
@@ -46,14 +52,21 @@ def _list_connected_datapipes(scan_obj, only_datapipe, cache):
             cls.set_reduce_ex_hook(reduce_hook)
             if only_datapipe:
                 cls.set_getstate_hook(getstate_hook)
-        p.dump(scan_obj)
-    except AttributeError:  # unpickable DataPipesGraph
-        pass  # TODO(VitalyFedyunin): We need to tighten this requirement after migrating from old DataLoader
+        try:
+            p.dump(scan_obj)
+        except (pickle.PickleError, AttributeError, TypeError):
+            if DILL_AVAILABLE:
+                d.dump(scan_obj)
+            else:
+                raise
     finally:
         for cls in datapipe_classes:
             cls.set_reduce_ex_hook(None)
             if only_datapipe:
                 cls.set_getstate_hook(None)
+        if DILL_AVAILABLE:
+            from dill import extend as dill_extend
+            dill_extend(False)  # Undo change to dispatch table
     return captured_connections
 
 

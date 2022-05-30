@@ -1087,6 +1087,16 @@ class TestDisabledTorchFunction(TestCase):
         self.assertEqual(torch.nn.functional.linear(inp, t1, t2), "called")
         self.assertEqual(torch.nn.functional.linear(inp, t2, t1), "called")
 
+class TestResolveName(TestCase):
+    def test_resolve_name(self):
+        for cs in get_overridable_functions().values():
+            for c in cs:
+                self.assertEqual(
+                    eval(torch.overrides.resolve_name(c)),
+                    c,
+                    msg=f"{c}, {torch.overrides.resolve_name(c)}"
+                )
+
 class TestTorchFunctionWarning(TestCase):
     def test_warn_on_invalid_torch_function(self):
         class Bad1():

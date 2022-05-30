@@ -2091,6 +2091,7 @@ TEST(LiteInterpreterUpgraderTest, Upgrader) {
   std::vector<mobile::Function> upgrader_functions;
 
   for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    byteCodeFunctionWithOperator.function.initialize_operators(true);
     ASSERT_EQ(
         byteCodeFunctionWithOperator.function.get_code().operators_.size(),
         byteCodeFunctionWithOperator.function.get_code().op_names_.size());
