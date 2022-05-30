@@ -116,7 +116,8 @@ $1 = torch._ops.prims.sin.default($0)""")
         assert (
             len(ops_without_nvfuser_impl) == 0
         ), (f"The following prims do not have 'impl_nvfuser' defined: {ops_without_nvfuser_impl} ",
-             "while there exists nvfuser implementations for them.")
+            "while there exists nvfuser implementations for them.")
+
 
 instantiate_device_type_tests(TestPrims, globals())
 
