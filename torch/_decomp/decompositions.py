@@ -415,6 +415,68 @@ def huber_loss_backward(
     )
 
 
+@register_decomposition(aten.nll_loss_forward)
+def nll_loss_forward(
+    self: Tensor,
+    target: Tensor,
+    weight: Optional[Tensor],
+    reduction: int,
+    ignore_index: int
+) -> Tuple[Tensor, Tensor]:
+    # self can be [N, C] or [C]
+    # target can be [N] or []
+
+    n_dims = self.dim()
+    channel_dim = 1
+    if n_dims < 2:
+        channel_dim = 0
+
+    if weight is not None:
+        # Here is a specific case with reduction mean and non-batched tensors
+        # https://github.com/pytorch/pytorch/issues/61309
+        # In this case weight is cancelled: w * x[t] / w -> x[t]
+        if not (reduction == Reduction.MEAN.value and n_dims < 2):
+            w = weight.unsqueeze(0) if n_dims > 1 else weight
+            self = self * w
+
+    target_ = target.unsqueeze(channel_dim)
+    # target can be [N, 1] or [1]
+
+    result = -torch.gather(self, channel_dim, target_).squeeze(channel_dim)
+
+    has_ignore_index = ignore_index >= 0
+    ignore_index_mask = None
+    if has_ignore_index:
+        ignore_index_mask = target != ignore_index
+        result = result * ignore_index_mask
+
+    if reduction == Reduction.NONE.value and n_dims > 1:
+        total_weight = torch.tensor(0.0, dtype=self.dtype, device=self.device)
+        return result, total_weight
+
+    if weight is not None:
+        w = weight.unsqueeze(0).expand(self.shape) if n_dims > 1 else weight
+        wsum = torch.gather(w, channel_dim, target_).squeeze(channel_dim)
+        if ignore_index_mask is not None:
+            wsum = wsum * ignore_index_mask
+        total_weight = wsum.sum()
+    elif has_ignore_index:
+        total_weight = ignore_index_mask.sum().to(self)
+    else:
+        total_weight = torch.tensor(1.0 * result.numel(), dtype=self.dtype, device=self.device)
+
+    if result.dim() > 0:
+        if reduction == Reduction.SUM.value:
+            result = result.sum()
+        elif reduction == Reduction.MEAN.value:
+            if weight is None:
+                result = result.sum() / total_weight if has_ignore_index else result.mean()
+            else:
+                result = result.sum() / total_weight
+
+    return result, total_weight
+
+
 def _nll_loss_backward(
         grad_output: Tensor,
         self: Tensor,
