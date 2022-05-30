@@ -666,25 +666,17 @@ void ReplaceWithMaybeCopy(
 #endif
 }
 
-void ReplaceWithCopy(
+void ReplaceWithCopyImpl(
     std::shared_ptr<Graph>& graph,
+    const FastMap<c10::Symbol, c10::Symbol>& supported,
+    const std::vector<std::pair<c10::FunctionSchema, c10::Symbol>>&
+        supported_schema,
+    const std::function<bool(Node*)>& f_extra_checks,
     bool outputs_are_immutable) {
   AliasDb db(graph);
-  const FastMap<c10::Symbol, c10::Symbol> supported = {
-#ifdef FBCODE_CAFFE2
-      OP_PAIR("aten::permute", "static_runtime::permute_copy"),
-      OP_PAIR("fb::expand_dims", "static_runtime::expand_dims_copy"),
-#endif
-      OP_PAIR("aten::narrow", "aten::narrow_copy"),
-      OP_PAIR("aten::reshape", "static_runtime::reshape_copy"),
-      OP_PAIR("aten::flatten", "static_runtime::flatten_copy")};
 
-  static const std::array<std::pair<c10::FunctionSchema, c10::Symbol>, 1>
-      supported_schema = {
-          {{torch::schema("aten::dequantize.self(Tensor self) -> Tensor"),
-            fromQualString("static_runtime::dequantize_copy")}}};
-
-  auto match_schema = [](const Node* node, c10::Symbol& out_matched_symbol) {
+  auto match_schema = [&supported_schema](
+                          const Node* node, c10::Symbol& out_matched_symbol) {
     for (auto& schema : supported_schema) {
       if (node->matches(schema.first)) {
         out_matched_symbol = schema.second;
@@ -732,11 +724,14 @@ void ReplaceWithCopy(
     if (!outputs_are_immutable && db.mayContainAlias(out, graph->outputs())) {
       continue;
     }
+    if (!f_extra_checks(n)) {
+      continue;
+    }
     auto* new_node = graph->create(new_symbol, n->outputs().size());
     for (auto* input : n->inputs()) {
       new_node->addInput(input);
     }
-    replacement.emplace_back(std::make_pair(n, new_node));
+    replacement.emplace_back(n, new_node);
   }
 
   for (const auto& p : replacement) {
@@ -752,6 +747,56 @@ void ReplaceWithCopy(
   AliasDb db2(graph);
   torch::jit::Lint(&db2);
 #endif
+}
+
+// replace aten::permute with copy version only when it's followed by
+// reshape/flatten. It's only enabled when ReplaceWithCopy is off.
+void ReplacePermuteWithCopy(
+    std::shared_ptr<Graph>& graph,
+    bool outputs_are_immutable) {
+  AliasDb db(graph);
+  const FastMap<c10::Symbol, c10::Symbol> supported = {
+#ifdef FBCODE_CAFFE2
+      OP_PAIR("aten::permute", "static_runtime::permute_copy"),
+#endif
+  };
+  auto f_extra_checks = [](Node* n) {
+    Value* out = n->output();
+    Node* next_node = out->uses()[0].user;
+    if (next_node->kind() != aten::reshape ||
+        next_node->kind() != aten::flatten) {
+      return true;
+    }
+    return false;
+  };
+  ReplaceWithCopyImpl(
+      graph, supported, {}, f_extra_checks, outputs_are_immutable);
+}
+
+void ReplaceWithCopy(
+    std::shared_ptr<Graph>& graph,
+    bool outputs_are_immutable) {
+  AliasDb db(graph);
+  const FastMap<c10::Symbol, c10::Symbol> supported = {
+#ifdef FBCODE_CAFFE2
+      OP_PAIR("aten::permute", "static_runtime::permute_copy"),
+      OP_PAIR("fb::expand_dims", "static_runtime::expand_dims_copy"),
+#endif
+      OP_PAIR("aten::narrow", "aten::narrow_copy"),
+      OP_PAIR("aten::reshape", "static_runtime::reshape_copy"),
+      OP_PAIR("aten::flatten", "static_runtime::flatten_copy")};
+
+  static const std::vector<std::pair<c10::FunctionSchema, c10::Symbol>>
+      supported_schema = {
+          {{torch::schema("aten::dequantize.self(Tensor self) -> Tensor"),
+            fromQualString("static_runtime::dequantize_copy")}}};
+
+  ReplaceWithCopyImpl(
+      graph,
+      supported,
+      supported_schema,
+      [](Node* n) { return true; },
+      outputs_are_immutable);
 }
 
 void EliminateTrivialEquallySplit(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -1302,21 +1347,6 @@ void EliminateNoOpSlice(std::shared_ptr<Graph>& graph) {
   for (auto* node : to_delete) {
     node->destroy();
   }
-}
-
-void QuantizedLinearReluFusion(std::shared_ptr<Graph>& graph) {
-  std::string pattern = R"IR(
-    graph(%input, %packed_params):
-        %x : Tensor = quantized::linear_dynamic_fp16(%input, %packed_params)
-        %y : Tensor = aten::relu(%x)
-        return (%y))IR";
-  std::string fused_pattern = R"IR(
-    graph(%input, %packed_params):
-        %x : Tensor = quantized::linear_relu_dynamic_fp16(%input, %packed_params)
-        return (%x))IR";
-  SubgraphRewriter fuse;
-  fuse.RegisterRewritePattern(pattern, fused_pattern);
-  fuse.runOnGraph(graph);
 }
 
 void FuseClampNaNToNum(std::shared_ptr<Graph>& graph) {

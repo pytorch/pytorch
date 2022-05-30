@@ -18,9 +18,7 @@ struct LoadImpl<bool> {
     static_assert(sizeof(bool) == sizeof(char), "");
     // Protect against invalid boolean values by loading as a byte
     // first, then converting to bool (see gh-54789).
-    unsigned char tmp = 0;
-    std::memcpy(&tmp, src, sizeof(bool));
-    return tmp;
+    return *reinterpret_cast<const unsigned char*>(src);
   }
 };
 
