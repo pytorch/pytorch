@@ -45,6 +45,12 @@ bool resize_output(const Tensor& output, IntArrayRef shape) {
   }
 }
 
+const Tensor& _resize_output_(const Tensor& self, IntArrayRef shape, c10::Device device) {
+  TORCH_CHECK(self.device() == device, "out Tensor doesn't have the correct device set");
+  at::native::resize_output(self, shape);
+  return self;
+}
+
 void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes) {
   TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
 

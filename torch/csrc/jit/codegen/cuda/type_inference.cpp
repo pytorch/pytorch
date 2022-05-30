@@ -158,6 +158,17 @@ class NaiveTypePropagator {
         unary_float_type(node);
         break;
       }
+      // unary is
+      case aten::isfinite:
+      case aten::isinf:
+      case aten::isnan:
+      case aten::isneginf:
+      case aten::isposinf:
+      case aten::isreal: {
+        copyScalarTypeAndDeviceToOutput(
+            c10::ScalarType::Bool, c10::nullopt, node);
+        break;
+      }
       // binary float
       case aten::atan2: {
         binary_type(node, TypePromotion::float_op_config);
@@ -181,33 +192,18 @@ class NaiveTypePropagator {
       // TODO: Include alpha check for add/sub
       case aten::add:
       case aten::sub:
-      case aten::rsub: {
-        binary_type(node);
-        break;
-      }
-      // Type can be int or bool for "and" and "or", if both are bool should be
-      // bool, if both int should be int, otherwise would have errored
+      case aten::rsub:
+      case aten::bitwise_and:
       case aten::__and__:
-      case aten::__or__: {
-        binary_broadcast_type(
-            node,
-            getInputTensorType(node, 0, true),
-            getInputTensorType(node, 1, true),
-            node->input(0)->type()->cast<TensorType>()->scalarType() ==
-                    at::ScalarType::Bool
-                ? at::ScalarType::Bool
-                : at::ScalarType::Int);
-        break;
-      }
-      // Real int ops
+      case aten::bitwise_or:
+      case aten::__or__:
+      case aten::bitwise_xor:
       case aten::__xor__:
+      case aten::bitwise_left_shift:
       case aten::__lshift__:
+      case aten::bitwise_right_shift:
       case aten::__rshift__: {
-        binary_broadcast_type(
-            node,
-            getInputTensorType(node, 0, true),
-            getInputTensorType(node, 1, true),
-            at::ScalarType::Int);
+        binary_type(node);
         break;
       }
       // binary comparison
@@ -454,7 +450,8 @@ class NaiveTypePropagator {
       case prim::unsqueeze_copy:
       case prim::squeeze_copy:
       case prim::reshape_copy:
-      case prim::view_copy: {
+      case prim::view_copy:
+      case prim::flatten_copy: {
         auto out_type = node->input(0)->type()->cast<TensorType>();
         copyScalarTypeAndDeviceToOutput(out_type, node);
         break;

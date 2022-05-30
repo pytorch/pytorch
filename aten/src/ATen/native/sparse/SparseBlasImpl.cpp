@@ -73,7 +73,7 @@ void triangular_solve_out_sparse_csr(
       "Calling triangular_solve on a sparse CPU tensor requires compiling PyTorch with MKL. ",
       "Please use PyTorch built MKL support.");
 #else
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.layout() == kSparseCsr || A.layout() == kSparseBsr);
   sparse::impl::mkl::triangular_solve_out_sparse_csr(A, B, X, upper, transpose, unitriangular);
 #endif
 }

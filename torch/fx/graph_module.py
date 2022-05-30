@@ -160,7 +160,8 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
 
     com = CodeOnlyModule(body)
 
-    graph = KeepModules().trace(com)
+    tracer_extras = body.get('_tracer_extras', {})
+    graph = KeepModules().trace(com, **tracer_extras)
 
     # Manually set Tracer class on the reconstructed Graph, to avoid
     # referencing the private local subclass KeepModules.
@@ -372,6 +373,10 @@ class GraphModule(torch.nn.Module):
         self._tracer_cls = None
         if self.graph._tracer_cls and '<locals>' not in self.graph._tracer_cls.__qualname__:
             self._tracer_cls = self.graph._tracer_cls
+
+        self._tracer_extras = {}
+        if self.graph._tracer_extras:
+            self._tracer_extras = self.graph._tracer_extras
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
