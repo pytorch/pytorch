@@ -10,9 +10,9 @@ from dataclasses import dataclass
 import functools
 
 from torchgen.model import (
+    COMPOSITE_DISPATCH_KEYS,
     STRUCTURED_DISPATCH_KEYS,
     Argument,
-    CompositeGraph,
     DispatchKey,
     FunctionSchema,
     Location,
@@ -1331,60 +1331,6 @@ def get_grouped_by_view_native_functions(
     return list(concatMap(maybe_create_view_group, grouped_by_views.values()))
 
 
-def get_composite_graph(
-    grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]]
-) -> CompositeGraph:
-    def nativefunction_with_group(
-        g: Union[NativeFunction, NativeFunctionsGroup]
-    ) -> List[Tuple[NativeFunction, Optional[NativeFunctionsGroup]]]:
-        if isinstance(g, NativeFunction):
-            fs = [g]
-            group = None
-        elif isinstance(g, NativeFunctionsGroup):
-            fs = list(g.functions())
-            group = g
-        else:
-            assert_never(g)
-        return [(f, group) for f in fs]
-
-    graph: CompositeGraph = {}
-    nativefunction_for = {
-        f.func.name: (f, group)
-        for g in grouped_native_functions
-        for f, group in nativefunction_with_group(g)
-    }
-
-    for g in grouped_native_functions:
-        for f, _ in nativefunction_with_group(g):
-            if len(f.composite) == 0:
-                continue
-
-            for c in f.composite:
-                assert (
-                    c in nativefunction_for
-                ), f"composite function {c} not found in NativeFunction list."
-
-                name = f.func.name
-                if name not in graph:
-                    graph[name] = []
-                graph[name].append(nativefunction_for[c])
-
-    return graph
-
-
-def get_composite_headers(
-    native_functions: Sequence[NativeFunction],
-    b: BackendIndex,
-) -> List[str]:
-    def maybe_get_header(f: NativeFunction) -> Optional[str]:
-        if not b.should_gen_dispatchless_composite(f):
-            return None
-        name = f.func.name.remove_inplace().name
-        return f"#include <ATen/native/composite/{name}.h>"
-
-    return sorted(set(mapMaybe(maybe_get_header, native_functions)))
-
-
 def get_grouped_native_functions(
     native_functions: Sequence[NativeFunction],
 ) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
@@ -1533,7 +1479,6 @@ def gen_aggregated_headers(
                                 cpp_namespace="at::native",
                                 class_method_name=None,
                                 skip_dispatcher_op_registration=False,
-                                composite_graph={},
                             ),
                             grouped_native_functions,
                         )
@@ -1694,7 +1639,6 @@ def gen_per_operator_headers(
                         cpp_namespace="at::native",
                         class_method_name=None,
                         skip_dispatcher_op_registration=False,
-                        composite_graph={},
                     ),
                     grouped_functions,
                 )
@@ -1916,8 +1860,6 @@ def gen_source_files(
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>"""
 
-    composite_graph = get_composite_graph(grouped_native_functions)
-
     for dispatch_key in dispatch_keys:
         fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
 
@@ -1983,7 +1925,6 @@ def gen_source_files(
                             cpp_namespace="at::native",
                             class_method_name=None,
                             skip_dispatcher_op_registration=skip_dispatcher_op_registration,
-                            composite_graph={},
                         ),
                         grouped_native_functions,
                     )
@@ -2013,9 +1954,6 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                     backend_index, per_operator_headers, rocm
                 ),
                 "ops_headers": operator_headers(),
-                "composite_headers": get_composite_headers(
-                    native_functions, backend_index
-                ),
                 "DispatchKey": dispatch_key,
                 "dispatch_namespace": dispatch_key.lower(),
                 "dispatch_helpers": dest.gen_registration_helpers(backend_index),
@@ -2029,7 +1967,6 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                             cpp_namespace="at::native",
                             class_method_name=None,
                             skip_dispatcher_op_registration=skip_dispatcher_op_registration,
-                            composite_graph={},
                         ),
                         grouped_native_functions,
                     )
@@ -2044,7 +1981,6 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                             cpp_namespace="at::native",
                             class_method_name=None,
                             skip_dispatcher_op_registration=skip_dispatcher_op_registration,
-                            composite_graph=composite_graph,
                         ),
                         grouped_native_functions,
                     )
@@ -2098,6 +2034,23 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                 )
             else:
                 raise AssertionError(f"unrecognized {dispatch_key} for ufunc")
+
+        if dispatch_key in COMPOSITE_DISPATCH_KEYS:
+            dispatchless = dest.DispatchlessComposite.new(
+                dispatch_key, backend_indices, grouped_native_functions
+            )
+            fm.write_with_template(
+                f"Dispatchless{dispatch_key}.cpp",
+                "DispatchlessCompositeKernels.cpp",
+                lambda: {
+                    "aggregated_headers": dispatchless.aggregated_headers(),
+                    "operator_headers": dispatchless.operator_headers(),
+                    "kernel_headers": dispatchless.headers(),
+                    "kernel_definitions": list(
+                        mapMaybe(dispatchless.definition, native_functions)
+                    ),
+                },
+            )
 
         del fm
 
