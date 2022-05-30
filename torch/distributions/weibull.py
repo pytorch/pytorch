@@ -53,6 +53,10 @@ class Weibull(TransformedDistribution):
         return self.scale * torch.exp(torch.lgamma(1 + self.concentration_reciprocal))
 
     @property
+    def mode(self):
+        return self.scale * ((self.concentration - 1) / self.concentration) ** self.concentration.reciprocal()
+
+    @property
     def variance(self):
         return self.scale.pow(2) * (torch.exp(torch.lgamma(1 + 2 * self.concentration_reciprocal)) -
                                     torch.exp(2 * torch.lgamma(1 + self.concentration_reciprocal)))

@@ -6,6 +6,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
+#include <ATen/native/mps/Copy.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
@@ -98,7 +99,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
 // (e.g. XLA) may be supported by overriding copy_ and _copy_from.
 bool is_supported_device(Device device) {
   DeviceType device_type = device.type();
-  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal;
+  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal || device_type == kMPS;
 }
 
 } // namespace
@@ -211,6 +212,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return at::metal::metal_copy_(self, src);
   }
 
+
   auto iter = TensorIteratorConfig()
     .add_output(self)
     .add_input(src)
@@ -228,6 +230,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     device_type = kCUDA;
   } else if (iter.device_type(1) == kHIP) {
     device_type = kHIP;
+  } else if (iter.device_type(1) == kMPS) {
+    device_type = kMPS;
   }
 
   // TODO: if we need to, we can also enable this path for quantized tensor
@@ -235,6 +239,12 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     copy_same_type_transpose_(self, src);
     return self;
   }
+
+#ifdef USE_MPS
+  if (self.device().type() == at::kMPS || src.device().type() == at::kMPS) {
+    return at::native::mps::mps_copy_(self, src, non_blocking);
+  }
+#endif
 
   if(!self.is_complex() && src.is_complex()) {
     TORCH_WARN_ONCE("Casting complex values to real discards the imaginary part");
