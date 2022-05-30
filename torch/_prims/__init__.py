@@ -692,9 +692,15 @@ is_infinite = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
+
+def _lgamma_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.lgamma(a)  # type: ignore[attr-defined]
+
+
 lgamma = _make_elementwise_unary_prim(
     "lgamma",
     impl_aten=torch.lgamma,
+    impl_nvfuser=_lgamma_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
