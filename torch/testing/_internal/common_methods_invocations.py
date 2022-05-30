@@ -7952,11 +7952,11 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad, **kwargs):
         # no broadcast
         SampleInput(make_arg((S, S)), args=(make_arg((S, S)), 0.4)),
         # broadcast rhs
-        SampleInput(make_arg((S, S)), args=(make_arg((S,)), 0.4)),
+        SampleInput(make_arg((S, S)), args=(make_arg((S,)), 0.6)),
         # scalar tensor
         SampleInput(make_arg(()), args=(make_arg(()), 0.4)),
         # broadcast rhs scalar-tensor
-        SampleInput(make_arg((S, S)), args=(make_arg(()), 0.4)),
+        SampleInput(make_arg((S, S)), args=(make_arg(()), 0.6)),
         # broadcast rhs with weight tensor
         SampleInput(make_arg((S, S)), args=(make_arg((S,)), make_arg((S, S)))),
         # broadcast rhs and weight tensor
@@ -7964,7 +7964,7 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad, **kwargs):
         # broadcast lhs
         SampleInput(make_arg((S,)), args=(make_arg((S, S)), 0.4), broadcasts_input=True),
         # scalar broadcast_lhs
-        SampleInput(make_arg(()), args=(make_arg((S, S)), 0.4), broadcasts_input=True),
+        SampleInput(make_arg(()), args=(make_arg((S, S)), 0.9), broadcasts_input=True),
         # broadcast all
         SampleInput(make_arg((S, 1)), args=(make_arg((S, S)), 0.4), broadcasts_input=True),
         # tensor broadcast all
@@ -7997,6 +7997,62 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad, **kwargs):
         )
 
     return samples
+
+
+def reference_inputs_lerp(op, device, dtype, requires_grad, **kwargs):
+    S = 3
+    yield from sample_inputs_lerp(op, device, dtype, requires_grad, **kwargs)
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    for val in (float('nan'), float('inf')):
+        # `start` with `nan`/`inf`
+        start = make_arg((S, S))
+        if dtype.is_floating_point:
+            start[0] = val
+        yield SampleInput(start, args=(make_arg((S, S)), 0.4))
+
+        # `start` and `end` with `nan`/`inf`
+        start = make_arg((S, S))
+        if dtype.is_floating_point:
+            start[0] = val
+
+        end = make_arg((S, S))
+        if dtype.is_floating_point:
+            end[0] = val
+        yield SampleInput(start, args=(end, 0.6))
+
+        # `start`, `end` and `weight` with `nan`/`inf`
+        start = make_arg((S, S))
+        if dtype.is_floating_point:
+            start[0] = val
+
+        end = make_arg((S, S))
+        if dtype.is_floating_point:
+            end[1] = val
+
+        weight = make_arg((S, S))
+        if dtype.is_floating_point:
+            weight[2] = val
+        yield SampleInput(start, args=(end, weight))
+
+
+def error_inputs_lerp(op, device, **kwargs):
+    make_float_t = partial(make_tensor, dtype=torch.float, device=device, requires_grad=False)
+    make_long_t = partial(make_tensor, dtype=torch.long, device=device, requires_grad=False)
+
+    # mismatch in start and end dtype
+    si = SampleInput(make_float_t(10,), args=(make_long_t(10,), 0.4))
+    yield ErrorInput(si, error_regex="for `end` but got dtype")
+
+    # mismatch in start and weight dtype
+    si = SampleInput(make_float_t(10,), args=(make_float_t(10,), make_long_t(10,)))
+    yield ErrorInput(si, error_regex="for `weight` but got dtype")
+
+    # invalid shapes
+    si = SampleInput(make_float_t(10, 2), args=(make_float_t(10, 1), make_long_t(10, 5)))
+    yield ErrorInput(si, error_regex="for `weight` but got dtype")
+
 
 def sample_inputs_tensordot(self, device, dtype, requires_grad, **kwargs):
     cases = (
@@ -15521,8 +15577,9 @@ op_db: List[OpInfo] = [
     OpInfo('lerp',
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_lerp,
+           error_inputs_func=error_inputs_lerp,
+           reference_inputs_func=reference_inputs_lerp,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True),
