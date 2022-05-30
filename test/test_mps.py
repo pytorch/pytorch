@@ -377,16 +377,16 @@ class TestMPS(TestCase):
         self._linear_helper(in_features=2, out_features=3, shape=((4, 2)), bias=False, backward_pass=True)
 
     def test_linear3D(self):
-        self._linear_helper(in_features=200, out_features=33278, shape=((35, 20, 200)), bias=True, backward_pass=False)
+        self._linear_helper(in_features=2, out_features=3, shape=((4, 5, 2)), bias=True, backward_pass=False)
 
     def test_linear3D_backward(self):
-        self._linear_helper(in_features=200, out_features=33278, shape=((35, 20, 200)), bias=True, backward_pass=True)
+        self._linear_helper(in_features=2, out_features=3, shape=((4, 5, 2)), bias=True, backward_pass=True)
 
     def test_linear3D_no_bias(self):
-        self._linear_helper(in_features=200, out_features=33278, shape=((35, 20, 200)), bias=True, backward_pass=False)
+        self._linear_helper(in_features=2, out_features=3, shape=((4, 5, 2)), bias=True, backward_pass=False)
 
     def test_linear3D_no_bias_backward(self):
-        self._linear_helper(in_features=200, out_features=33278, shape=((35, 20, 200)), bias=True, backward_pass=True)
+        self._linear_helper(in_features=2, out_features=3, shape=((4, 5, 2)), bias=True, backward_pass=True)
 
     def test_uniform(self):
         low = torch.zeros(5, 5, requires_grad=True)
@@ -463,36 +463,36 @@ class TestMPS(TestCase):
         # Test with no batch dimension
         helper((8, 4, 4), ks=2)
         helper((2, 8, 4, 4), ks=2)
-        helper((1, 100000, 32, 32), ks=4)
-        helper((1, 100000, 1, 4), ks=(1, 4))  # test for max_pool1d
+        helper((1, 1000, 32, 32), ks=4)
+        helper((1, 1000, 1, 4), ks=(1, 4))  # test for max_pool1d
         # Test padding
-        helper((1, 100000, 32, 32), ks=4, padding=1)
-        helper((1, 100000, 1, 4), ks=(1, 4), padding=(0, 1))  # test for max_pool1d
+        helper((1, 1000, 32, 32), ks=4, padding=1)
+        helper((1, 1000, 1, 4), ks=(1, 4), padding=(0, 1))  # test for max_pool1d
         # Test dilation
-        helper((1, 100000, 32, 32), ks=4, dilation=2)
-        helper((1, 100000, 1, 4), ks=(1, 4), padding=(0, 2))  # test for max_pool1d
+        helper((1, 1000, 32, 32), ks=4, dilation=2)
+        helper((1, 1000, 1, 4), ks=(1, 4), padding=(0, 2))  # test for max_pool1d
         # Test ceil mode
-        helper((1, 100000, 32, 32), ks=4, ceil_mode=True)
-        helper((1, 100000, 1, 4), ks=(1, 4), ceil_mode=True)  # test for max_pool1d
+        helper((1, 1000, 32, 32), ks=4, ceil_mode=True)
+        helper((1, 1000, 1, 4), ks=(1, 4), ceil_mode=True)  # test for max_pool1d
 
         # Test return indices
         for test_ties in [False, True]:
             # Test with no batch dimension
             helper((8, 4, 4), ks=2, return_indices=True, test_ties=test_ties)
             helper((2, 8, 4, 4), ks=2, return_indices=True, test_ties=test_ties)
-            helper((1, 100000, 32, 32), ks=4, return_indices=True, test_ties=test_ties)
-            helper((1, 100000, 1, 4), ks=(1, 4), return_indices=True, test_ties=test_ties)  # test for max_pool1d
+            helper((1, 1000, 32, 32), ks=4, return_indices=True, test_ties=test_ties)
+            helper((1, 1000, 1, 4), ks=(1, 4), return_indices=True, test_ties=test_ties)  # test for max_pool1d
             # Test padding
-            helper((1, 100000, 32, 32), ks=4, padding=1, return_indices=True, test_ties=test_ties)
-            helper((1, 100000, 1, 4), ks=(1, 4), padding=(0, 1),
+            helper((1, 1000, 32, 32), ks=4, padding=1, return_indices=True, test_ties=test_ties)
+            helper((1, 1000, 1, 4), ks=(1, 4), padding=(0, 1),
                    return_indices=True, test_ties=test_ties)  # test for max_pool1d
             # Test dilation
-            helper((1, 100000, 32, 32), ks=4, dilation=2, return_indices=True, test_ties=test_ties)
-            helper((1, 100000, 1, 4), ks=(1, 4), padding=(0, 2),
+            helper((1, 1000, 32, 32), ks=4, dilation=2, return_indices=True, test_ties=test_ties)
+            helper((1, 1000, 1, 4), ks=(1, 4), padding=(0, 2),
                    return_indices=True, test_ties=test_ties)  # test for max_pool1d
             # Test ceil mode
-            helper((1, 100000, 32, 32), ks=4, ceil_mode=True, return_indices=True, test_ties=test_ties)
-            helper((1, 100000, 1, 4), ks=(1, 4), ceil_mode=True,
+            helper((1, 1000, 32, 32), ks=4, ceil_mode=True, return_indices=True, test_ties=test_ties)
+            helper((1, 1000, 1, 4), ks=(1, 4), ceil_mode=True,
                    return_indices=True, test_ties=test_ties)  # test for max_pool1d
 
     def test_adaptive_avg_pool2d_output_size_one(self):
@@ -1016,7 +1016,7 @@ class TestMPS(TestCase):
             #  self.assertEqual(bias.grad, cpu_bias.grad)
 
         N = 4
-        C_in = 16
+        C_in = 2
         H = 32
         W = 32
 
@@ -2752,13 +2752,12 @@ class TestNLLLoss(TestCase):
             inputCPU = torch.arange(N * C * H * W, device='cpu', dtype=torch.float,
                                     requires_grad=True).reshape(N, C, H, W)
             inputCPU.retain_grad()
-            inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
+            inputMPS = inputCPU.detach().to('mps').requires_grad_()
 
-            x_max = 40
-            y_max = 40
+            values = [1, 2, 5, 10, 40]
 
-            for i in range(1, x_max):
-                for j in range(1, y_max):
+            for i in values:
+                for j in values:
                     upsample_nearest2d = nn.UpsamplingNearest2d(scale_factor=(i, j))
 
                     outputCPU = upsample_nearest2d(inputCPU)
@@ -2787,11 +2786,10 @@ class TestNLLLoss(TestCase):
             inputCPU.retain_grad()
             inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
 
-            x_max = 40
-            y_max = 40
+            values = [1, 2, 5, 10, 40]
 
-            for i in range(1, x_max):
-                for j in range(1, y_max):
+            for i in values:
+                for j in values:
                     upsample_bilinear2d = nn.UpsamplingBilinear2d(scale_factor=(i, j))
 
                     outputCPU = upsample_bilinear2d(inputCPU)
@@ -3240,8 +3238,8 @@ class TestNLLLoss(TestCase):
                 ref = (X.to(numpy_dtype).cpu().detach().numpy())
                 self.assertEqual(res, ref, rtol=rtol, atol=atol, exact_dtype=False)
 
-        for n in range(1, 10):
-            for m in range(1, 10):
+        for n in [1, 5, 10]:
+            for m in [1, 5, 10]:
                 _test_gelu(n, m, torch.float32, True)
                 _test_gelu(n, m, torch.float32, False)
 
