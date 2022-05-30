@@ -36,11 +36,8 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Tensor& outpu
   const bool is_self_scalar = self.dim() == 0;
   const bool is_other_scalar = other.dim() == 0;
 
-  Tensor self = is_self_scalar ? self_t : self_t.contiguous(at::MemoryFormat::Contiguous);
-  Tensor other = is_other_scalar ? other_t : other_t.contiguous(at::MemoryFormat::Contiguous);
-
-  const MPSDataType self_dtype = getMPSScalarType(self_t.scalar_type());
-  const MPSDataType other_dtype = getMPSScalarType(other_t.scalar_type());
+  const MPSDataType self_dtype = getMPSScalarType(self.scalar_type());
+  const MPSDataType other_dtype = getMPSScalarType(other.scalar_type());
 
   // In case of two different dtypes, cast by the following precedence rules:
   //   bool,int{8,16,32,64},float16 -> float32
