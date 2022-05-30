@@ -15,6 +15,7 @@ import itertools
 from torch._six import inf
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, TestCase, download_file, TEST_WITH_UBSAN
+from torch.testing._internal.common_device_type import dtypes
 import torch.backends.mps
 from torch.distributions import Uniform
 
@@ -382,7 +383,7 @@ class TestMPS(TestCase):
     def test_linear3D(self):
         self._linear_helper(in_features=200, out_features=33278, shape=((35, 20, 200)), bias=True, backward_pass=False)
 
-    def test_linear3D_backwarwd(self):
+    def test_linear3D_backward(self):
         self._linear_helper(in_features=200, out_features=33278, shape=((35, 20, 200)), bias=True, backward_pass=True)
 
     def test_linear3D_no_bias(self):
@@ -1299,6 +1300,20 @@ class TestMPS(TestCase):
                          torch.tensor(4, dtype=torch.int32))
         self.assertEqual(torch.tensor(-8.34, device='cpu').to('mps', torch.int),
                          torch.tensor(-8.34, device='cpu').to('mps').to(torch.int))
+
+    @dtypes(torch.int32, torch.float32, torch.int64, device_type="mps")
+    def test_setitem_scalar(self, device, dtype) -> None:
+        for i in range(3, 6):
+            for j in range(3, 6):
+                t = torch.zeros(i, j, dtype=dtype, device=device)
+                self.assertEqual(t.sum(), 0)
+                t[1, 1] = 1
+                t[2, 1] = j
+                t[2, 1] = i
+                assertEqual(t[1, 1], 1)
+                assertEqual(t[1, 2], i)
+                assertEqual(t[2, 1], j)
+                self.assertEqual(t.sum(), 1 + i + j)
 
 
 class TestSmoothL1Loss(TestCase):
@@ -3089,6 +3104,50 @@ class TestNLLLoss(TestCase):
 
         helper((2, 16, 16), (4, 4), False)
 
+    # Test max avg pool2d - when the input size is a multiple of output size
+    # Not testing for channels last right now
+    def test_adaptive_max_pool2d_simple(self):
+        def helper(input_shape, out_shape, return_indices, dtype, channels_last=False):
+            cpu_x = None
+            if(dtype in [torch.float16, torch.float32]):
+                cpu_x = torch.randn(input_shape, device='cpu', dtype=dtype, requires_grad=True)
+            else:
+                cpu_x = torch.randint(50, input_shape, device='cpu', dtype=dtype, requires_grad=True)
+            if(channels_last):
+                cpu_x = cpu_x.to(memory_format=torch.channels_last)
+                cpu_x.retain_grad()
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            max_result, max_indices = None, None
+            max_result_cpu, max_indices_cpu = None, None
+
+            if(return_indices):
+                max_result, max_indices = torch.nn.AdaptiveMaxPool2d(out_shape, return_indices)(x)
+                max_result_cpu, max_indices_cpu = torch.nn.AdaptiveMaxPool2d(out_shape, return_indices)(cpu_x)
+            else:
+                max_result = torch.nn.AdaptiveMaxPool2d(out_shape, return_indices)(x)
+                max_result_cpu = torch.nn.AdaptiveMaxPool2d(out_shape, return_indices)(cpu_x)
+
+            cpu_grad = torch.randn(max_result_cpu.shape)
+            grad = cpu_grad.to('mps')
+
+            max_result.backward(gradient=grad)
+            max_result_cpu.backward(gradient=cpu_grad)
+
+            self.assertEqual(max_result, max_result_cpu)
+            if(return_indices):
+                self.assertEqual(max_indices, max_indices_cpu)
+            self.assertEqual(x.grad, cpu_x.grad)
+
+        for dtype in [torch.float32]:
+            for return_indices in [False, True]:
+                helper((2, 2, 4, 4), (2, 2), return_indices, dtype)
+                helper((2, 2, 9, 9), (3, 3), return_indices, dtype)
+                helper((2, 2, 9, 9), (9, 9), return_indices, dtype)
+                helper((2, 2, 16, 16), (2, 2), return_indices, dtype)
+                helper((2, 2, 16, 16), (2, 16), return_indices, dtype)
+                helper((2, 16, 16), (4, 4), return_indices, dtype)
+
     def test_gelu_simple(self):
         def helper(shape):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
@@ -3515,6 +3574,29 @@ class TestNLLLoss(TestCase):
         helper((2, 8, 4, 5), diag=-1)
         helper((2, 8, 4, 5), diag=-2)
         helper((2, 8, 4, 5), diag=-3)
+
+    # test eye
+    def test_eye(self):
+        def helper(n, m, dtype):
+            cpu_result = None
+            result = None
+
+            if(n == m):
+                cpu_result = torch.eye(n, dtype=dtype, device='cpu')
+                result = torch.eye(n, dtype=dtype, device='mps')
+            else:
+                cpu_result = torch.eye(n, m, device='cpu')
+                result = torch.eye(n, m, device='mps')
+
+            self.assertEqual(result, cpu_result)
+
+        for dtype in [torch.float32, torch.int32, torch.int64]:
+            helper(2, 2, dtype)
+            helper(2, 3, dtype)
+            helper(0, 2, dtype)
+            helper(0, 0, dtype)
+            helper(3, 8, dtype)
+            helper(8, 3, dtype)
 
     # Test diag
     def test_diag(self):
@@ -4075,9 +4157,11 @@ exit(len(w))
             self.assertTrue(False, "There was a warning when importing torch.")
 
     def _get_not_implemented_op(self):
-        # This can be changed once we actually implement `torch.eye`
+        # This can be changed once we actually implement `torch.bincount`
         # Should return fn, args, kwargs, string_version
-        return torch.eye, (2,), {"device": "mps"}, "torch.eye(2, device='mps')"
+        return (torch.bincount,
+                (torch.tensor([4, 3, 6, 3, 4], device='mps')), {},
+                "torch.bincount(torch.tensor([4, 3, 6, 3, 4], device='mps'))")
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
