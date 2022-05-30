@@ -3,13 +3,14 @@ import argparse
 import os
 import pathlib
 from dataclasses import dataclass
+from torchgen.api import cpp
 from torchgen.api import unboxing
 from torchgen.api.translate import translate
 from torchgen.api.types import CppSignatureGroup
 from torchgen.api.unboxing import convert_arguments
 from torchgen.context import method_with_native_function
-from torchgen.gen import parse_native_yaml, cpp_string
-from torchgen.model import NativeFunction, NativeFunctionsGroup, Variant
+from torchgen.gen import parse_native_yaml, cpp_string, get_custom_build_selector
+from torchgen.model import NativeFunction, NativeFunctionsGroup, Variant, Argument
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import Target, FileManager, mapMaybe, make_file_manager
 from typing import Union, Sequence
@@ -103,12 +104,20 @@ class ComputeCodegenUnboxedKernels:
         connector = ",\n\t\t"
         args_code = []
         for arg in args:
-            if not arg.default:
+            # Using method=False faithful C++ API, so we should not see SelfArgument/TensorOptionsArgument
+            assert isinstance(arg.argument, Argument)
+            if not arg.argument.default:
                 arg_cpp = "c10::IValue(c10::nullopt)"
-            elif arg.default.startswith("{"):
-                arg_cpp = f"c10::IntArrayRef({arg.default})"
             else:
-                arg_cpp = f"c10::IValue({arg.default})"
+                # The unboxing code uses the faithful C++ API to avoid the overhead
+                # from wrapping/unwrapping TensorOptios.
+                # However, we would look to include default args for schema parsing.
+                # Default args only show up in the nonfaithful C++ API,
+                arg_default = cpp.default_expr(arg.argument.default, arg.argument.type)
+                if arg_default.startswith("{"):
+                    arg_cpp = f"c10::IntArrayRef({arg_default})"
+                else:
+                    arg_cpp = f"c10::IValue({arg_default})"
             args_code.append(
                 f"""c10::Argument("{arg.name}", nullptr, c10::nullopt, {arg_cpp})"""
             )
@@ -208,13 +217,20 @@ def main() -> None:
         "full operator name with overload or just a bare operator name. "
         "The operator names also contain the namespace prefix (e.g. aten::)",
     )
+    parser.add_argument(
+        "--op_registration_allowlist",
+        nargs="*",
+        help="filter op registrations by the allowlist (if set); "
+        "each item is `namespace`::`operator name` without overload name; "
+        "e.g.: aten::empty aten::conv2d ...",
+    )
 
     options = parser.parse_args()
 
-    if options.op_selection_yaml_path is not None:
-        selector = SelectiveBuilder.from_yaml_path(options.op_selection_yaml_path)
-    else:
-        selector = SelectiveBuilder.get_nop_selector()
+    selector = get_custom_build_selector(
+        options.op_registration_allowlist,
+        options.op_selection_yaml_path,
+    )
 
     native_yaml_path = os.path.join(options.source_path, "native/native_functions.yaml")
     tags_yaml_path = os.path.join(options.source_path, "native/tags.yaml")

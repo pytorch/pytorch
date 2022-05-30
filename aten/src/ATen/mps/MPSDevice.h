@@ -21,7 +21,11 @@ using namespace std;
 namespace at {
 namespace mps {
 
+//-----------------------------------------------------------------
+//  MPSDevice
+//
 // MPSDevice is a singleton class that returns the default device
+//-----------------------------------------------------------------
 
 class TORCH_API MPSDevice {
  public:
@@ -51,6 +55,8 @@ class TORCH_API MPSDevice {
   MTLDevice_t _mtl_device;
   MPSDevice();
 };
+
+TORCH_API bool is_available();
 
 at::Allocator* GetMPSAllocator(bool useSharedAllocator = false);
 
