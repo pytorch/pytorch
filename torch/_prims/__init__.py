@@ -173,6 +173,51 @@ __all__ = [
 # Common datastructures and helpers
 #
 
+_nvfuser_binary_ops = {
+    "add",
+    "atan2",
+    "bitwise_and",
+    "bitwise_or",
+    "bitwise_xor",
+    "div",
+    "eq",
+    "fmod",
+    "ge",
+    "gt",
+    "le",
+    "lt",
+    "mul",
+    "ne",
+    "pow",
+    "sub",
+}
+
+for fname in _nvfuser_binary_ops:
+    exec(
+        f"""
+# Ensure that the nvfuser implementation exists
+assert getattr(torch._C._nvfuser.FusionDefinition.Ops, "{fname}")
+
+def _{fname}_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.{fname}(a, b)  # type: ignore[attr-defined]
+"""
+    )
+
+_nvfuser_ternary_ops = {
+    "where",
+}
+
+for fname in _nvfuser_ternary_ops:
+    exec(
+        f"""
+# Ensure that the nvfuser implementation exists
+assert getattr(torch._C._nvfuser.FusionDefinition.Ops, "{fname}")
+
+def _{fname}_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType, c: TensorLikeType):
+    return fd.Ops.{fname}(a, b, c)  # type: ignore[attr-defined]
+"""
+    )
+
 # Describes the return type of the primitive:
 #
 #   - NEW, a new tensor is created
@@ -837,36 +882,6 @@ tanh = _make_elementwise_unary_prim(
 # TODO: we should be able to stamp these out but it's a little tricky with FX's name resolution
 def _add_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
     return fd.Ops.add(a, b)  # type: ignore[attr-defined]
-
-_nvfuser_binary_ops = {
-    "add",
-    "atan2",
-    "bitwise_and",
-    "bitwise_or",
-    "bitwise_xor",
-    "div",
-    "eq",
-    "fmod",
-    "ge",
-    "gt",
-    "le",
-    "lt",
-    "mul",
-    "ne",
-    "pow",
-    "sub",
-}
-
-for fname in _nvfuser_binary_ops:
-    exec(
-        f"""
-# Ensure that the nvfuser implementation exists
-assert getattr(torch._C._nvfuser.FusionDefinition.Ops, "{fname}")
-
-def _{fname}_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
-    return fd.Ops.{fname}(a, b)  # type: ignore[attr-defined]
-"""
-    )
 
 add = _make_elementwise_binary_prim(
     name="add",
@@ -1887,6 +1902,7 @@ where = _make_prim(
     schema="where(Tensor pred, Tensor a, Tensor b) -> Tensor",
     meta=_where_meta,
     impl_aten=torch.where,
+    impl_nvfuser=_where_nvfuser,
     return_type=RETURN_TYPE.NEW,
     doc=_where_doc,
 )
