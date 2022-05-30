@@ -3988,7 +3988,7 @@ def reference_inputs_cat(op, device, dtype, requires_grad, **kwargs):
     yield SampleInput((a, b, a))
     yield SampleInput((a, a, a))
 
-def _elementwise_type_promo_np(*args):
+def _elementwise_type_promo_np(*args, type_promotion_kind):
     def _maybe_torch(x):
         if isinstance(x, np.ndarray):
             return torch.from_numpy(x)
@@ -3998,17 +3998,30 @@ def _elementwise_type_promo_np(*args):
     transformed = tuple(_maybe_torch(a) for a in flattened)
     result_dtype, _ = prims.utils.elementwise_dtypes(
         *transformed,
-        type_promotion_kind=prims.utils.ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH)
+        type_promotion_kind=type_promotion_kind)
     return torch_to_numpy_dtype_dict[result_dtype]
 
 def _cat_np(input_seq, dim=0):
     inputs = tuple(a for a in input_seq if not (a.ndim == 1 and a.size == 0))
 
     if len(inputs) == 0:
-        np_dtype = _elementwise_type_promo_np(input_seq)
+        np_dtype = _elementwise_type_promo_np(
+            input_seq,
+            type_promotion_kind=prims.utils.ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH)
         return np.empty(0, dtype=np_dtype)
 
     return np.concatenate(inputs, axis=dim)
+
+def _floor_divide_np(a, b):
+    dtype = _elementwise_type_promo_np(
+        a,
+        b,
+        type_promotion_kind=prims.utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+    if isinstance(a, np.ndarray):
+        a = a.astype(dtype)
+    if isinstance(b, np.ndarray):
+        b = b.astype(dtype)
+    return np.floor_divide(a, b)
 
 def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad, **kwargs):
     tensors = [
@@ -11784,6 +11797,7 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
                    )),
     BinaryUfuncInfo('floor_divide',
+                    ref=_floor_divide_np,
                     dtypes=all_types_and(torch.half, torch.bfloat16),
                     supports_autograd=False,
                     rhs_make_tensor_kwargs=dict(exclude_zero=True),
@@ -11791,6 +11805,15 @@ op_db: List[OpInfo] = [
                     skips=(
                         # AssertionError: Results of original model and exported/imported version of model differed
                         DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+                        # bfloat16 floor_divide compared with a float32 reference works inconsistently
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs',
+                                     dtypes=(torch.bfloat16,)),
+                        # int8 floor divide has different results for -128 // -1 vs. NumPy
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
+                                     dtypes=(torch.int8,)),
+                        # The following tests fails on some jobs
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs', 'test_reference_numerics_extremal_values',
+                                     dtypes=(torch.float16,)),
                     )),
     UnaryUfuncInfo('frexp',
                    op=torch.frexp,
