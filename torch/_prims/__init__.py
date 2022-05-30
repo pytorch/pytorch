@@ -2244,12 +2244,13 @@ _var_doc = """
     """
 
 
-def _make_reduction_prim(name: str, impl_aten, doc):
+def _make_reduction_prim(name: str, impl_aten, doc, impl_nvfuser=None):
     """Creates a reduction prim."""
     return _make_prim(
         schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType? output_dtype=None) -> Tensor",
         meta=_reduction_meta,
         impl_aten=impl_aten,
+        impl_nvfuser=impl_nvfuser,
         return_type=RETURN_TYPE.NEW,
         doc=doc,
     )
@@ -2266,9 +2267,21 @@ def _make_var_reduction_prim(name: str, impl_aten, doc):
     )
 
 
+def _sum_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    dims: DimsSequenceType,
+    *,
+    output_dtype: Optional[torch.dtype] = None
+):
+    keep_dims = False
+    return fd.Ops.sum(a, dims, keep_dims, output_dtype)
+
+
 sum = _make_reduction_prim(
     name="sum",
     impl_aten=torch.sum,
+    impl_nvfuser=_sum_nvfuser,
     doc=_sum_doc,
 )
 
