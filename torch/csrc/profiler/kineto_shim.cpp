@@ -60,18 +60,36 @@ TraceWrapper::TraceWrapper(const int64_t start_time, const std::string& name)
 }
 #endif // USE_KINETO
 
+#ifdef USE_KINETO
+namespace {
+libkineto::ActivityType toActivityType(const KinetoActivityType type) {
+  switch (type) {
+    case KinetoActivityType::CPU_OP:
+      return libkineto::ActivityType::CPU_OP;
+    case KinetoActivityType::CPU_INSTANT_EVENT:
+      return libkineto::ActivityType::CPU_INSTANT_EVENT;
+    default:
+      TORCH_INTERNAL_ASSERT(
+          type == KinetoActivityType::USER_ANNOTATION,
+          "Invalid KinetoActivityType: ",
+          (int)type);
+      return libkineto::ActivityType::USER_ANNOTATION;
+  }
+}
+} // namespace
+#endif // USE_KINETO
+
 void TraceWrapper::addCPUActivity(
     const std::string& name,
-    const uint8_t scope,
+    const KinetoActivityType kineto_type,
     const DeviceAndResource device_and_resource,
     const uint64_t correlation_id,
     const int64_t start_time,
-    const int64_t end_time) {
+    const int64_t end_time,
+    const annotation_t& annotations) {
 #ifdef USE_KINETO
   TORCH_CHECK((bool)(*this), "Cannot add event to non-existent trace.");
-  auto type = ((at::RecordScope)scope == at::RecordScope::USER_SCOPE)
-    ? libkineto::ActivityType::USER_ANNOTATION
-    : libkineto::ActivityType::CPU_OP;
+  auto type = toActivityType(kineto_type);
   cpu_trace_->activities.emplace_back(libkineto::GenericTraceActivity(
     cpu_trace_->span, type, name));
   auto& act = cpu_trace_->activities.back();
@@ -79,36 +97,11 @@ void TraceWrapper::addCPUActivity(
   act.resource = device_and_resource.resource;
   act.id = correlation_id;
   act.startTime = start_time;
-  act.endTime = end_time;
-#endif // USE_KINETO
-}
-
-void TraceWrapper::addMemoryUsageActivity(
-    const std::string& name,
-    const DeviceAndResource device_and_resource,
-    const int64_t time,
-    const c10::Device device,
-    const void* ptr,
-    const int64_t alloc_size,
-    const int64_t total_allocated,
-    const int64_t total_reserved) {
-#ifdef USE_KINETO
-  TORCH_CHECK((bool)(*this), "Cannot add event to non-existent trace.");
-  cpu_trace_->activities.emplace_back(libkineto::GenericTraceActivity(
-    cpu_trace_->span, libkineto::ActivityType::CPU_INSTANT_EVENT, name));
-  auto& act = cpu_trace_->activities.back();
-  act.device = device_and_resource.device;
-  act.resource = device_and_resource.resource;
-  act.startTime = time;
-  act.addMetadata("Device Type", std::to_string((int8_t)device.type()));
-  act.addMetadata("Device Id", std::to_string(device.index()));
-  act.addMetadata("Addr", std::to_string(reinterpret_cast<intptr_t>(ptr)));
-  act.addMetadata("Bytes", std::to_string(alloc_size));
-  if (total_allocated >= 0) {
-    act.addMetadata("Total Allocated", std::to_string(total_allocated));
+  if (type != libkineto::ActivityType::CPU_INSTANT_EVENT) {
+    act.endTime = end_time;
   }
-  if (total_reserved >= 0) {
-    act.addMetadata("Total Reserved", std::to_string(total_reserved));
+  for (const auto& i : annotations) {
+    act.addMetadata(i.first, i.second);
   }
 #endif // USE_KINETO
 }
