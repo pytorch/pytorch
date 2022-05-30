@@ -164,6 +164,36 @@ Tensor NestedTensor_gelu(const Tensor& self, c10::string_view approximate) {
       });
 }
 
+Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask) {
+    TORCH_CHECK(mask.scalar_type() == at::ScalarType::Bool, "Expected mask to be of ScalarType Bool, but got ", mask.scalar_type(), " instead.");
+    TORCH_CHECK(mask.dim() == 2, "Padding mask should be 2D");
+    TORCH_CHECK(t.dim() == 3, "Input should be a 3D tensor, N * L * D");
+    auto N = t.size(0), L = t.size(1), D = t.size(2);
+    auto NN = mask.size(0), LL = mask.size(1);
+    TORCH_CHECK(N == NN && L == LL, "Mask size should match input size");
+
+    // N * L
+    Tensor sizes = mask;
+    Tensor tmp_pad = at::zeros({N, 1}, mask.options());
+    // Make sure padding is only added at the end of mask
+    Tensor nums = at::cat({sizes, tmp_pad}, 1).to(kInt).argmin(1);
+
+    // N, ([size1, size2, ... sizeN])
+    sizes = sizes.cumsum(1).select(1, L - 1);
+    nums = nums.to(sizes.options());
+
+    TORCH_CHECK(sizes.equal(nums), "Mask must be left-aligned without gaps");
+
+    sizes = sizes.reshape({N, 1});
+    // N, ([d1=D, d2=D, ... dN=D])
+    Tensor d = at::full_like(sizes, D);
+
+    // N * 2, ([[size1, D], [size2, D], ..., [sizeN, D]])
+    sizes = at::cat({sizes, d}, 1).to(kCPU);
+
+    return at::_nested_from_padded(t, sizes, false);
+}
+
 Tensor nested_tensor(
     TensorList list,
     c10::optional<ScalarType> dtype,
@@ -286,7 +316,17 @@ Tensor nested_from_padded_generic(
            padded.size(2),
            padded.size(1) * padded.size(3)});
   }
-  const auto target_size = NestedTensor_get_max_size_from_size_tensor(sizes);
+  auto target_size = NestedTensor_get_max_size_from_size_tensor(sizes);
+  // There may be extra padding on padded beyond the max size in the nested tensor.
+  // Make the mask size match.
+  const size_t dim = padded_transformed.dim();
+  TORCH_CHECK(dim - 1 == target_size.size(), "dim: ", dim, "target_size: ", target_size.size());
+  for (size_t ii = 0; ii < dim - 1; ++ii) {
+    const auto padded_size_i = padded_transformed.sizes()[ii + 1];
+    if (target_size[ii] < padded_size_i) {
+      target_size[ii] = padded_size_i;
+    }
+  }
   IntArrayRef target_size_arr(target_size);
   std::vector<at::Tensor> masks;
   std::vector<at::Tensor> all_sizes = sizes.unbind();
@@ -298,7 +338,7 @@ Tensor nested_from_padded_generic(
     masks.push_back(pad_tensor_to_shape(mask_i, target_size_arr));
   }
   at::Tensor final_mask = at::stack(masks);
-  at::Tensor new_buffer = padded_transformed.masked_select(final_mask);
+  at::Tensor new_buffer = padded_transformed.masked_select(final_mask).to(padded.device());
   return at::detail::make_tensor<NestedTensorImpl>(
       std::move(new_buffer), sizes);
 }

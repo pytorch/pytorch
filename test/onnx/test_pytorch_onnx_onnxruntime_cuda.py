@@ -9,16 +9,18 @@ from test_pytorch_common import (
     skipIfUnsupportedMinOpsetVersion,
     skipScriptTest,
 )
+
+# TODO(justinchuby): Remove reference to other unit tests.
 from test_pytorch_onnx_onnxruntime import TestONNXRuntime
 
 import torch
 from torch.cuda.amp import autocast
+from torch.onnx._globals import GLOBALS
 
 
 class TestONNXRuntime_cuda(unittest.TestCase):
-    from torch.onnx.symbolic_helper import _export_onnx_opset_version
 
-    opset_version = _export_onnx_opset_version
+    opset_version = GLOBALS.export_onnx_opset_version
     keep_initializers_as_inputs = True
     onnx_shape_inference = True
 
@@ -46,7 +48,7 @@ class TestONNXRuntime_cuda(unittest.TestCase):
     def test_layer_norm_fp16(self):
         class LayerNormModel(torch.nn.Module):
             def __init__(self):
-                super(LayerNormModel, self).__init__()
+                super().__init__()
                 self.layer_norm = torch.nn.LayerNorm([10, 10])
 
             @autocast()
@@ -70,7 +72,7 @@ class TestONNXRuntime_cuda(unittest.TestCase):
     def test_softmaxCrossEntropy_fusion_fp16(self):
         class FusionModel(torch.nn.Module):
             def __init__(self):
-                super(FusionModel, self).__init__()
+                super().__init__()
                 self.loss = torch.nn.NLLLoss(reduction="none")
                 self.m = torch.nn.LogSoftmax(dim=1)
 
@@ -94,7 +96,7 @@ class TestONNXRuntime_cuda(unittest.TestCase):
     def test_apex_o2(self):
         class LinearModel(torch.nn.Module):
             def __init__(self):
-                super(LinearModel, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(3, 5)
 
             def forward(self, x):

@@ -2,7 +2,6 @@
 
 import copy
 import io
-import unittest
 
 import onnx
 import torchvision
@@ -33,8 +32,6 @@ from torch.onnx.symbolic_helper import (
     _unpack_list,
     parse_args,
 )
-
-skip = unittest.skip
 
 
 class _BaseTestCase(TestCase):
@@ -321,7 +318,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
     def test_constant_fold_unsqueeze_multi_axies(self):
         class PReluModel(torch.nn.Module):
             def __init__(self):
-                super(PReluModel, self).__init__()
+                super().__init__()
                 self.prelu = torch.nn.PReLU()
 
             def forward(self, x):
@@ -418,7 +415,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
     def test_constant_fold_lstm(self):
         class GruNet(torch.nn.Module):
             def __init__(self):
-                super(GruNet, self).__init__()
+                super().__init__()
                 self.mygru = torch.nn.GRU(7, 3, 1, bidirectional=False)
 
             def forward(self, input, initial_state):
@@ -449,7 +446,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
     def test_constant_fold_transpose_matmul(self):
         class MatMulNet(torch.nn.Module):
             def __init__(self):
-                super(MatMulNet, self).__init__()
+                super().__init__()
                 self.B = torch.nn.Parameter(torch.ones(5, 3))
 
             def forward(self, A):
@@ -471,7 +468,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             def __init__(
                 self,
             ):
-                super(ReshapeModule, self).__init__()
+                super().__init__()
                 self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
@@ -494,7 +491,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             def __init__(
                 self,
             ):
-                super(Module, self).__init__()
+                super().__init__()
                 self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
@@ -517,7 +514,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             def __init__(
                 self,
             ):
-                super(Module, self).__init__()
+                super().__init__()
                 self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
@@ -540,7 +537,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             def __init__(
                 self,
             ):
-                super(Module, self).__init__()
+                super().__init__()
                 self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
@@ -572,7 +569,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             def __init__(
                 self,
             ):
-                super(Module, self).__init__()
+                super().__init__()
                 self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
@@ -604,7 +601,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             def __init__(
                 self,
             ):
-                super(Module, self).__init__()
+                super().__init__()
                 self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
@@ -624,7 +621,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
     def test_constant_fold_shape(self):
         class ShapeModule(torch.nn.Module):
             def __init__(self):
-                super(ShapeModule, self).__init__()
+                super().__init__()
                 self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
@@ -1243,7 +1240,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
     def test_unused_initializers(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv2 = torch.nn.ConvTranspose2d(
                     16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1)
                 )
@@ -1270,7 +1267,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
     def test_scripting_param(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     3, 16, kernel_size=1, stride=2, padding=3, bias=True
                 )
@@ -1306,7 +1303,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
     def test_modifying_params(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
-                super(MyModel, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.tensor([2.0]))
 
             def forward(self, x):
@@ -1324,7 +1321,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
     def test_fuse_conv_bn(self):
         class Fuse(torch.nn.Module):
             def __init__(self):
-                super(Fuse, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     3, 2, kernel_size=1, stride=2, padding=3, bias=True
                 )
@@ -1370,7 +1367,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, x, y):
                 return f(x, y)
@@ -1481,7 +1478,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         model = torch.jit.script(MyModule()) if torchscript else MyModule()
 
         x = torch.randn(3, 3)
-        param_name_set = set([k for k, _ in model.named_parameters()])
+        param_name_set = {k for k, _ in model.named_parameters()}
 
         # Test training mode.
         model.train()
@@ -1494,9 +1491,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             opset_version=self.opset_version,
         )
         graph = onnx.load(io.BytesIO(f.getvalue()))
-        self.assertSetEqual(
-            set([i.name for i in graph.graph.initializer]), param_name_set
-        )
+        self.assertSetEqual({i.name for i in graph.graph.initializer}, param_name_set)
 
         model.train()
         f = io.BytesIO()
@@ -1508,9 +1503,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             opset_version=self.opset_version,
         )
         graph = onnx.load(io.BytesIO(f.getvalue()))
-        self.assertSetEqual(
-            set([i.name for i in graph.graph.initializer]), param_name_set
-        )
+        self.assertSetEqual({i.name for i in graph.graph.initializer}, param_name_set)
 
         # Test eval mode.
         model.eval()
@@ -1518,9 +1511,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         torch.onnx.export(model, (x,), f, opset_version=self.opset_version)
         graph = onnx.load(io.BytesIO(f.getvalue()))
         param_name_set.remove("param2")
-        self.assertSetEqual(
-            set([i.name for i in graph.graph.initializer]), param_name_set
-        )
+        self.assertSetEqual({i.name for i in graph.graph.initializer}, param_name_set)
 
     def test_deduplicate_initializers(self):
         self._test_deduplicate_initializers(torchscript=False)
@@ -1548,12 +1539,12 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         f = io.BytesIO()
         torch.onnx.export(Model(), (x, y), f, opset_version=self.opset_version)
         graph = onnx.load(io.BytesIO(f.getvalue()))
-        self.assertSetEqual(set([i.name for i in graph.graph.initializer]), {"w_cpu"})
+        self.assertSetEqual({i.name for i in graph.graph.initializer}, {"w_cpu"})
 
     def test_duplicated_output_node(self):
         class DuplicatedOutputNet(torch.nn.Module):
             def __init__(self, input_size, num_classes):
-                super(DuplicatedOutputNet, self).__init__()
+                super().__init__()
                 self.fc1 = torch.nn.Linear(input_size, num_classes)
 
             def forward(self, input0, input1):
