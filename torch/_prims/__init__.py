@@ -913,7 +913,7 @@ add = _make_elementwise_binary_prim(
 atan2 = _make_elementwise_binary_prim(
     name="atan2",
     impl_aten=torch.atan2,
-    impl_nvfuser=_atan2_nvfuser,
+    impl_nvfuser=_atan2_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -921,7 +921,7 @@ atan2 = _make_elementwise_binary_prim(
 bitwise_and = _make_elementwise_binary_prim(
     "bitwise_and",
     impl_aten=torch.bitwise_and,
-    impl_nvfuser=_bitwise_and_nvfuser,
+    impl_nvfuser=_bitwise_and_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -929,7 +929,7 @@ bitwise_and = _make_elementwise_binary_prim(
 bitwise_or = _make_elementwise_binary_prim(
     "bitwise_or",
     impl_aten=torch.bitwise_or,
-    impl_nvfuser=_bitwise_or_nvfuser,
+    impl_nvfuser=_bitwise_or_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -937,7 +937,7 @@ bitwise_or = _make_elementwise_binary_prim(
 bitwise_xor = _make_elementwise_binary_prim(
     "bitwise_xor",
     impl_aten=torch.bitwise_xor,
-    impl_nvfuser=_bitwise_xor_nvfuser,
+    impl_nvfuser=_bitwise_xor_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -959,7 +959,7 @@ def _div_aten(a, b):
 div = _make_elementwise_binary_prim(
     "div",
     impl_aten=_div_aten,
-    impl_nvfuser=_div_nvfuser,
+    impl_nvfuser=_div_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -967,7 +967,7 @@ div = _make_elementwise_binary_prim(
 eq = _make_elementwise_binary_prim(
     "eq",
     impl_aten=torch.eq,
-    impl_nvfuser=_eq_nvfuser,
+    impl_nvfuser=_eq_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -989,7 +989,7 @@ fmin = _make_elementwise_binary_prim(
 fmod = _make_elementwise_binary_prim(
     "fmod",
     impl_aten=torch.fmod,
-    impl_nvfuser=_fmod_nvfuser,
+    impl_nvfuser=_fmod_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -997,7 +997,7 @@ fmod = _make_elementwise_binary_prim(
 ge = _make_elementwise_binary_prim(
     "ge",
     impl_aten=torch.ge,
-    impl_nvfuser=_ge_nvfuser,
+    impl_nvfuser=_ge_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -1005,7 +1005,7 @@ ge = _make_elementwise_binary_prim(
 gt = _make_elementwise_binary_prim(
     "gt",
     impl_aten=torch.gt,
-    impl_nvfuser=_gt_nvfuser,
+    impl_nvfuser=_gt_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -1027,7 +1027,7 @@ igammac = _make_elementwise_binary_prim(
 le = _make_elementwise_binary_prim(
     "le",
     impl_aten=torch.le,
-    impl_nvfuser=_le_nvfuser,
+    impl_nvfuser=_le_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -1035,7 +1035,7 @@ le = _make_elementwise_binary_prim(
 lt = _make_elementwise_binary_prim(
     "lt",
     impl_aten=torch.lt,
-    impl_nvfuser=_lt_nvfuser,
+    impl_nvfuser=_lt_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -1093,7 +1093,7 @@ minimum = _make_elementwise_binary_prim(
 mul = _make_elementwise_binary_prim(
     "mul",
     impl_aten=torch.mul,
-    impl_nvfuser=_mul_nvfuser,
+    impl_nvfuser=_mul_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1101,7 +1101,7 @@ mul = _make_elementwise_binary_prim(
 ne = _make_elementwise_binary_prim(
     "ne",
     impl_aten=torch.ne,
-    impl_nvfuser=_ne_nvfuser,
+    impl_nvfuser=_ne_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -1116,7 +1116,7 @@ nextafter = _make_elementwise_binary_prim(
 pow = _make_elementwise_binary_prim(
     "pow",
     impl_aten=torch.pow,
-    impl_nvfuser=_pow_nvfuser,
+    impl_nvfuser=_pow_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1140,7 +1140,7 @@ shift_right_logical = _not_impl
 sub = _make_elementwise_binary_prim(
     "sub",
     impl_aten=torch.sub,
-    impl_nvfuser=_sub_nvfuser,
+    impl_nvfuser=_sub_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1914,7 +1914,7 @@ where = _make_prim(
     schema="where(Tensor pred, Tensor a, Tensor b) -> Tensor",
     meta=_where_meta,
     impl_aten=torch.where,
-    impl_nvfuser=_where_nvfuser,
+    impl_nvfuser=_where_nvfuser,  # type: ignore[name-defined]
     return_type=RETURN_TYPE.NEW,
     doc=_where_doc,
 )
