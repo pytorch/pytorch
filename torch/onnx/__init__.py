@@ -37,6 +37,7 @@ __all__ = [
     # Modules
     "symbolic_helper",
     "symbolic_registry",
+    "utils",
     "errors",
     # All opsets
     "symbolic_caffe2",
