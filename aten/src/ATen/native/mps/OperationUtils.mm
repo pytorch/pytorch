@@ -357,8 +357,6 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSS
       srcBuf = __builtin_bit_cast(id<MTLBuffer>, src_.storage().data());
     }
   }
-  const size_t buf_size = [srcBuf length];
-
   // tensor.numel() could be zero, but tensor is valid as long as the buffer size is non-zero.
   // if buffer size is zero in here, it's not a user error. It could be a missing check for
   // tensor.numel() == 0 in our internal implementations of ops.
