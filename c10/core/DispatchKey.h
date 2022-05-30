@@ -219,6 +219,18 @@ enum class DispatchKey : uint16_t {
   // See https://pytorch.org/torchdistx/latest/fake_tensor.html
   Fake,
 
+  // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
+  // is to insert code after the "autograd subsystem" runs, so this key should
+  // be directly after ADInplaceOrView and all of the autograd keys.
+  FuncTorchDynamicLayerBackMode,
+
+  // Alias and mutation removal.
+  // If some backends want to opt into only alias removal or only mutation
+  // removal,
+  // we can consider adding separate keys dedicated to those individual passes.
+  // See Note [Functionalization Pass In Core] for details.
+  Functionalize,
+
   // The named dispatch key is set for any tensors with named dimensions.
   // Although we have a dispatch key for named tensors, for historical reasons,
   // this dispatch key doesn't do any of the substantive functionality for named
@@ -244,11 +256,6 @@ enum class DispatchKey : uint16_t {
   Negative,
 
   ZeroTensor, // registered at build/aten/src/ATen/RegisterZeroTensor.cpp
-
-  // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
-  // is to insert code after the "autograd subsystem" runs, so this key should
-  // be directly after ADInplaceOrView and all of the autograd keys.
-  FuncTorchDynamicLayerBackMode,
 
   // Note [ADInplaceOrView key]
   // ADInplaceOrView key is used by inplace or view ops to register a kernel
@@ -352,13 +359,6 @@ enum class DispatchKey : uint16_t {
   VmapMode,
 
   FuncTorchGradWrapper, // See Note [Out-of-tree vmap+grad prototype]
-
-  // Alias and mutation removal.
-  // If some backends want to opt into only alias removal or only mutation
-  // removal,
-  // we can consider adding separate keys dedicated to those individual passes.
-  // See Note [Functionalization Pass In Core] for details.
-  Functionalize,
 
   // Out-of-core key for Deferred Module Initialization in torchdistx.
   // See https://pytorch.org/torchdistx/latest/deferred_init.html

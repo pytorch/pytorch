@@ -162,6 +162,26 @@ class TORCH_CUDA_CU_API TransformPropagator {
 
  private:
   std::unordered_map<TensorView*, unsigned int> replayed_pos;
+
+  // This example comes from a BN kernel, the domain:
+  //
+  // [ iS{ceilDiv(ceilDiv(ceilDiv(i4, 128), 4), 1)}, iS{1}, iS{4}, iS{128},
+  // iS{i0}, iS{i2}, iS{i3} ]
+  //
+  // and
+  //
+  // [ iS{ceilDiv(ceilDiv(ceilDiv(i5*i6*i7*i8, 128), 4), 1)}, iS252{1},
+  // iS250{4}, iS248{128} ]
+  //
+  // Have the same number of replayed dimensions, however the second one
+  // involves more root domains. The second one is also likely the prefered
+  // replay. Therefore keep track of how many root domains were part of the
+  // replay and prefer transformations with more root domains. We could probably
+  // fix this instances of this occuring by changing the traversal pattern so
+  // that once propagating towards roots through broadcast axes, it can't come
+  // back through another broadcast, losing the transformation on those axes.
+  // However, this should work for existing cases.
+  std::unordered_map<TensorView*, unsigned int> n_replayed_root_dims;
   TensorView* starting_tv = nullptr;
 
  public:

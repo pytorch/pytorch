@@ -723,7 +723,7 @@ class TestQuantizedTensor(TestCase):
             data = data.view(-1, dims[axis], np.prod(dims[axis + 1:]))
             qtensor_size = math.ceil(data.numel() / 2)
             res = torch.empty(qtensor_size, dtype=torch.uint8)
-            elem_per_byte = 8 / bit_width
+            elem_per_byte = 8 // bit_width
             quant_min, quant_max = _get_qranges(bit_width)
             for i in range(data.size()[0]):
                 for j in range(data.size()[1]):
@@ -1151,6 +1151,9 @@ class TestQuantizedTensor(TestCase):
                        qparams=hu.qparams()),
            reduce_range=st.booleans()
            )
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_choose_qparams(self, X, reduce_range):
         X, (scale, zero_point, torch_type) = X
         X = torch.from_numpy(X)

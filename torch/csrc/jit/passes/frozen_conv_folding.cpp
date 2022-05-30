@@ -45,10 +45,11 @@ bool supportedConvNode(Node* n) {
   }
 }
 
-void FoldFrozenConvBatchnorm(Block* b) {
+bool FoldFrozenConvBatchnorm(Block* b) {
+  bool graph_modified = false;
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      FoldFrozenConvBatchnorm(block);
+      graph_modified |= FoldFrozenConvBatchnorm(block);
     }
 
     if (n->kind() == aten::batch_norm &&
@@ -79,7 +80,18 @@ void FoldFrozenConvBatchnorm(Block* b) {
       // implementation taken from torch/nn/utils/fusion.py
       Tensor conv_b;
       if (conv->namedInput("bias")->type() == NoneType::get()) {
-        conv_b = at::zeros_like(bn_rm);
+        // If this is on GPU and bias is none and weight was half/bfloat, but
+        // bn_rm was float, then probably this was a case where autocasting
+        // casted inputs to conv. And since CUDA conv implementation requires
+        // all the inputs to have the same scalar dtype, we need to make this
+        // placeholder have the same type as conv_w.
+        at::ScalarType bias_dtype = bn_rm.scalar_type();
+        at::ScalarType weight_dtype = conv_w.scalar_type();
+        if ((weight_dtype == at::kHalf || weight_dtype == at::kBFloat16) &&
+            bias_dtype == at::kFloat) {
+          bias_dtype = weight_dtype;
+        }
+        conv_b = at::zeros_like(bn_rm, at::TensorOptions().dtype(bias_dtype));
       } else {
         conv_b = constant_as<Tensor>(conv->namedInput("bias")).value();
       }
@@ -118,8 +130,10 @@ void FoldFrozenConvBatchnorm(Block* b) {
       conv->replaceInputWith(conv_b_value, fused_conv_b);
 
       bn->output()->replaceAllUsesWith(conv->output());
+      graph_modified = true;
     }
   }
+  return graph_modified;
 }
 
 bool supportedAddOrSub(Node* n) {
@@ -225,10 +239,11 @@ Tensor resizeConstantScalarOrTensorToShape(
   return ret_tensor;
 }
 
-void FoldFrozenConvAddOrSub(Block* b) {
+bool FoldFrozenConvAddOrSub(Block* b) {
+  bool graph_modified = false;
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      FoldFrozenConvAddOrSub(block);
+      graph_modified |= FoldFrozenConvAddOrSub(block);
     }
 
     if (supportedAddOrSub(n) && supportedConvNode(n->inputs().at(0)->node())) {
@@ -272,9 +287,11 @@ void FoldFrozenConvAddOrSub(Block* b) {
           add_or_sub->kind().toUnqualString());
       conv->replaceInputWith(conv_b_value, fused_conv_b);
       add_or_sub->output()->replaceAllUsesWith(conv->output());
+      graph_modified = true;
       // DCE run after cleans up nodes
     }
   }
+  return graph_modified;
 }
 
 bool supportedMulOrDiv(Node* n) {
@@ -288,10 +305,11 @@ bool supportedMulOrDiv(Node* n) {
   return n->isMemberOf(add_set);
 }
 
-void FoldFrozenConvMulOrDiv(Block* b) {
+bool FoldFrozenConvMulOrDiv(Block* b) {
+  bool graph_modified = false;
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      FoldFrozenConvMulOrDiv(block);
+      graph_modified |= FoldFrozenConvMulOrDiv(block);
     }
 
     if (supportedMulOrDiv(n) && supportedConvNode(n->inputs().at(0)->node())) {
@@ -363,26 +381,31 @@ void FoldFrozenConvMulOrDiv(Block* b) {
             mul_or_div->kind().toUnqualString());
         conv->replaceInputWith(conv_b_value, fused_conv_bias);
       }
+      graph_modified = true;
       // DCE run after cleans up nodes
     }
   }
+  return graph_modified;
 }
 
 } // namespace
 
-void FoldFrozenConvBatchnorm(std::shared_ptr<Graph>& graph) {
-  FoldFrozenConvBatchnorm(graph->block());
+bool FoldFrozenConvBatchnorm(std::shared_ptr<Graph>& graph) {
+  bool graph_modified = FoldFrozenConvBatchnorm(graph->block());
   EliminateDeadCode(graph);
+  return graph_modified;
 }
 
-void FoldFrozenConvAddOrSub(std::shared_ptr<Graph>& graph) {
-  FoldFrozenConvAddOrSub(graph->block());
+bool FoldFrozenConvAddOrSub(std::shared_ptr<Graph>& graph) {
+  bool graph_modified = FoldFrozenConvAddOrSub(graph->block());
   EliminateDeadCode(graph);
+  return graph_modified;
 }
 
-void FoldFrozenConvMulOrDiv(std::shared_ptr<Graph>& graph) {
-  FoldFrozenConvMulOrDiv(graph->block());
+bool FoldFrozenConvMulOrDiv(std::shared_ptr<Graph>& graph) {
+  bool graph_modified = FoldFrozenConvMulOrDiv(graph->block());
   EliminateDeadCode(graph);
+  return graph_modified;
 }
 
 } // namespace jit
