@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+import warnings
 from contextlib import suppress
 
 import torch
@@ -109,7 +110,7 @@ class TestFSDPExecOrder(FSDPTest):
             fsdp_model.flip_path()
         inp = fsdp_model.module.get_input(self.device)
         # Match the error message with the following prefix
-        error_regex = "^(All-gather order differs across ranks)"
+        error_regex = "^(Forward order differs across ranks)"
         with self.assertRaisesRegex(RuntimeError, error_regex):
             fsdp_model(*inp)
 
@@ -135,7 +136,7 @@ class TestFSDPExecOrder(FSDPTest):
             loss = fsdp_model.module.get_loss(inp, output).to(self.device)
             fsdp_model.module.run_backward(loss)
         # Match the warning message with the following prefix
-        regex = "^(All-gather order differs from that of the first iteration " \
+        regex = "^(Forward order differs from that of the first iteration " \
             f"on rank {self.rank} -- collectives are unchecked and may give " \
             "incorrect results or hang)"
         context = self.assertWarnsRegex(
@@ -154,6 +155,37 @@ class TestFSDPExecOrder(FSDPTest):
         output = fsdp_model(*inp)
         loss = fsdp_model.module.get_loss(inp, output).to(self.device)
         fsdp_model.module.run_backward(loss)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "sharding_strategy",
+        [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
+    )
+    def test_train_eval(self, sharding_strategy: ShardingStrategy):
+        fsdp_model = Model.wrap(sharding_strategy, self.device)
+        NUM_ITERS = 3
+        NUM_EPOCHS = 2
+        with warnings.catch_warnings(record=True) as w:  # records warnings to `w`
+            for _ in range(NUM_EPOCHS):
+                fsdp_model.train()
+                for _ in range(NUM_ITERS):
+                    inp = fsdp_model.module.get_input(self.device)
+                    output = fsdp_model(*inp)
+                    loss = fsdp_model.module.get_loss(inp, output).to(self.device)
+                    fsdp_model.module.run_backward(loss)
+                fsdp_model.eval()
+                for _ in range(NUM_ITERS):
+                    inp = fsdp_model.module.get_input(self.device)
+                    output = fsdp_model(*inp)
+                    fsdp_model.module.get_loss(inp, output).to(self.device)
+        # Check that the order validation warning was not issued (errors do not
+        # need to be checked since they will be directly reported)
+        warning_prefix = "Forward order differs"
+        for warning in w:
+            if str(warning.message).startswith(warning_prefix):
+                raise AssertionError(f"Warning was incorrectly issued: {warning.message}")
+        # If we still validate the forward execution order in eval mode, then
+        # an `AssertionError` will be raised above for both sharding strategies
 
 
 instantiate_parametrized_tests(TestFSDPExecOrder)
