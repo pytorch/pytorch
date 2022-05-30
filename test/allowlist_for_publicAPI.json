@@ -478,16 +478,6 @@
     "QuantType",
     "wrap_cpp_module"
   ],
-  "torch.ao.quantization.utils": [
-    "Any",
-    "Callable",
-    "Pattern",
-    "QuantType",
-    "Tuple",
-    "Union",
-    "is_parametrized",
-    "quant_type_to_str"
-  ],
   "torch.ao.sparsity.experimental.pruner.base_pruner": [
     "ActivationReconstruction",
     "BaseSparsifier",
@@ -3083,13 +3073,14 @@
     "IntTensor",
     "LongTensor",
     "ShortTensor",
-    "_csr_to_block_csr",
     "addmm",
     "log_softmax",
     "mm",
     "softmax"
   ],
   "torch.special": [
+    "chebyshev_polynomial_t",
+    "chebyshev_polynomial_u",
     "digamma",
     "entr",
     "erf",
@@ -3102,6 +3093,7 @@
     "gammainc",
     "gammaincc",
     "gammaln",
+    "hermite_polynomial_h",
     "i0",
     "i0e",
     "i1",
@@ -3548,7 +3540,7 @@
     "_validate_sparse_csr_tensor_args",
     "_values_copy",
     "_weight_norm",
-    "_weight_norm_cuda_interface",
+    "_weight_norm_interface",
     "autocast",
     "broadcast_shapes",
     "candidate",
