@@ -11,23 +11,23 @@
 namespace at {
     namespace native {
         namespace {
-            const char legendre_polynomial_p_name[] = "legendre_polynomial_p_forward";
+            const char laguerre_polynomial_l_name[] = "laguerre_polynomial_l_forward";
 
-            void legendre_polynomial_p_kernel_cuda(TensorIteratorBase& iterator) {
+            void laguerre_polynomial_l_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()
-                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "legendre_polynomial_p_cuda", [&]() {
-                    opmath_jitted_gpu_kernel_with_scalars<legendre_polynomial_p_name, scalar_t, scalar_t>(iterator, legendre_polynomial_p_string);
+                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "laguerre_polynomial_l_cuda", [&]() {
+                    opmath_jitted_gpu_kernel_with_scalars<laguerre_polynomial_l_name, scalar_t, scalar_t>(iterator, laguerre_polynomial_l_string);
                 });
 #else
-                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "legendre_polynomial_p_cuda", [&]() {
+                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "laguerre_polynomial_l_cuda", [&]() {
                     gpu_kernel_with_scalars(iterator, []GPU_LAMBDA(scalar_t x, scalar_t n) -> scalar_t {
-                        return legendre_polynomial_p_forward<scalar_t, true>(x, n);
+                        return laguerre_polynomial_l_forward<scalar_t, true>(x, n);
                     });
                 });
 #endif
-            } // legendre_polynomial_p_kernel_cuda
+            } // laguerre_polynomial_l_kernel_cuda
         } // namespace (anonymous)
 
-        REGISTER_DISPATCH(legendre_polynomial_p_stub, &legendre_polynomial_p_kernel_cuda);
+        REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_kernel_cuda);
     } // namespace native
 } // namespace at
