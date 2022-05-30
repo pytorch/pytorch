@@ -69,7 +69,7 @@ namespace {
 // * Integers are promoted to the default floating type
 // * If require_complex=True, all types are promoted to complex
 // * Raises an error for half-precision dtypes to allow future support
-ScalarType promote_type_fft(ScalarType type, bool require_complex) {
+ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device) {
   if (at::isComplexType(type)) {
     return type;
   }
@@ -78,7 +78,11 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex) {
     type = c10::typeMetaToScalarType(c10::get_default_dtype());
   }
 
-  TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
+  if (device.is_cuda() && !at::detail::getCUDAHooks().hasROCM()) {
+    TORCH_CHECK(type == kHalf || type == kFloat || type == kDouble, "Unsupported dtype ", type);
+  } else {
+    TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
+  }
 
   if (!require_complex) {
     return type;
@@ -86,6 +90,7 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex) {
 
   // Promote to complex
   switch (type) {
+  case kHalf: return kComplexHalf;
   case kFloat: return kComplexFloat;
   case kDouble: return kComplexDouble;
   default: TORCH_INTERNAL_ASSERT(false, "Unhandled dtype");
@@ -95,7 +100,7 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex) {
 // Promote a tensor's dtype according to promote_type_fft
 Tensor promote_tensor_fft(const Tensor& t, bool require_complex=false) {
   auto cur_type = t.scalar_type();
-  auto new_type = promote_type_fft(cur_type, require_complex);
+  auto new_type = promote_type_fft(cur_type, require_complex, t.device());
   return (cur_type == new_type) ? t : t.to(new_type);
 }
 
@@ -957,6 +962,17 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   }
 }
 
+Tensor stft(
+    const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
+    const optional<int64_t> win_lengthOpt, const c10::optional<Tensor>& window_opt,
+    const bool normalized,
+    const optional<bool> onesidedOpt, const optional<bool> return_complexOpt) {
+  return at::stft(
+      self, n_fft, hop_lengthOpt, win_lengthOpt, window_opt,
+      /*center=*/false, /*mode=*/"constant", normalized, onesidedOpt,
+      return_complexOpt);
+}
+
 // Create complex tensor from the old style of real tensor with size=(..., 2)
 // This is to support istft in the transition to requiring complex input.
 // NOTE: This may return a view of the input tensor, or might clone if necessary
@@ -1148,6 +1164,15 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   return y;
 
   #undef REPR
+}
+
+Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
+             const optional<int64_t> win_lengthOpt, const Tensor& window,
+             const bool center, const bool normalized, const optional<bool> onesidedOpt,
+             const optional<int64_t> lengthOpt) {
+  return at::native::istft(
+      self, n_fft, hop_lengthOpt, win_lengthOpt, window, center, normalized,
+      onesidedOpt, lengthOpt, /*return_complex=*/false);
 }
 
 void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
