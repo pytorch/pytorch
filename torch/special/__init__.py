@@ -14,6 +14,7 @@ __all__ = [
     'exp2',
     'expit',
     'expm1',
+    'gamma',
     'gammainc',
     'gammaincc',
     'gammaln',
@@ -24,9 +25,9 @@ __all__ = [
     'i1',
     'i1e',
     'laguerre_polynomial_l',
+    'log1p',
     'log_ndtr',
     'log_softmax',
-    'log1p',
     'logit',
     'logsumexp',
     'multigammaln',
@@ -902,6 +903,20 @@ is evaluated. Otherwise, the explicit trigonometric formula:
     \frac{\text{sin}((n + 1) \times \text{arccos}(\text{input}))}{\text{sin}(\text{arccos}(\text{input}))}
 
 is evaluated.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+gamma = _add_docstr(_special.special_gamma,
+                    r"""
+gamma(input, *, out=None) -> Tensor
+
+Gamma function :math:`\Gamma(\text{input})`.
 
 """ + r"""
 Args:

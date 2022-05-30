@@ -637,6 +637,25 @@ inline Tensor& chebyshev_polynomial_u_out(Tensor& output, const Tensor& x, const
   return torch::special_chebyshev_polynomial_u_out(output, x, n);
 }
 
+/// Gamma function.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.gamma.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::gamma(x);
+/// ```
+inline Tensor gamma(const Tensor& self) {
+  return torch::special_gamma(self);
+}
+
+inline Tensor& gamma_out(Tensor& result, const Tensor& self) {
+  return torch::special_gamma_out(result, self);
+}
+
 /// Physicist’s Hermite polynomial.
 ///
 /// See https://pytorch.org/docs/master/special.html#torch.special.hermite_polynomial_h.

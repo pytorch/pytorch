@@ -2966,6 +2966,7 @@
     "exp2",
     "expit",
     "expm1",
+    "gamma",
     "gammainc",
     "gammaincc",
     "gammaln",

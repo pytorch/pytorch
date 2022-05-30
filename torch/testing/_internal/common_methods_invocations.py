@@ -19035,6 +19035,20 @@ op_db: List[OpInfo] = [
         supports_one_python_scalar=True,
         supports_autograd=False,
     ),
+    UnaryUfuncInfo(
+        'special.gamma',
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float32: 1e-04,
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.gamma if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
     BinaryUfuncInfo(
         'special.hermite_polynomial_h',
         dtypes=all_types_and(torch.bool),
