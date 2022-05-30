@@ -54,8 +54,6 @@ public:
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
 
-  IntArrayRef strides() const override;
-  int64_t stride(int64_t d) const override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
   void set_storage_offset(int64_t storage_offset) override;
@@ -68,6 +66,9 @@ public:
   // respect to indices and values
   void raw_resize_(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size) {
     TORCH_CHECK(allow_tensor_metadata_change(), "raw_resize_ ", err_msg_tensor_metadata_change_not_allowed);
+    TORCH_CHECK(
+        !has_symbolic_sizes_strides_,
+        "raw_resize_ called on tensor with symbolic shape")
     sizes_and_strides_.set_sizes(size);
     sparse_dim_ = sparse_dim;
     dense_dim_ = dense_dim;
@@ -98,6 +99,9 @@ public:
   // (this could make some of the stored indices out-of-bound and thus unsafe).
   void resize_(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size) {
     TORCH_CHECK(allow_tensor_metadata_change(), "resize_ ", err_msg_tensor_metadata_change_not_allowed);
+    TORCH_CHECK(
+        !has_symbolic_sizes_strides_,
+        "resize_ called on tensor with symbolic shape")
     TORCH_CHECK(sparse_dim + dense_dim == static_cast<int64_t>(size.size()), "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
     if (nnz() > 0) {
       auto alt_options_msg = "You could try the following options:\n\
@@ -138,7 +142,8 @@ public:
         "shrinking the size of dense dimensions (from ", dense_size_original, " to ", dense_size_new, ") on a non-empty sparse tensor is not supported.\n", alt_options_msg);
     }
 
-    const bool size_equals_sizes = std::equal(size.begin(), size.end(), sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+    IntArrayRef sizes_and_strides = asIntArrayRefSlow(sizes_and_strides_.sizes_arrayref());
+    const bool size_equals_sizes = std::equal(size.begin(), size.end(), sizes_and_strides.begin(), sizes_and_strides.end());
     if ((!size_equals_sizes) || (sparse_dim != sparse_dim_) || (dense_dim != dense_dim_)) {
       auto nnz = values().size(0);
       std::vector<int64_t> values_size = {nnz};
@@ -159,6 +164,9 @@ public:
   // NOTE: this function will resize the sparse tensor and also set `indices` and `values` to empty.
   void resize_and_clear_(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size) {
     TORCH_CHECK(allow_tensor_metadata_change(), "resize_and_clear_ ", err_msg_tensor_metadata_change_not_allowed);
+    TORCH_CHECK(
+        !has_symbolic_sizes_strides_,
+        "resize_and_clear_ called on tensor with symbolic shape")
     TORCH_CHECK(sparse_dim + dense_dim == static_cast<int64_t>(size.size()), "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
 
     sizes_and_strides_.set_sizes(size);
