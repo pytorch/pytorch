@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    skipIfNotRegistered, bytes_to_scalar, parametrize, noncontiguous_like)
+    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -646,7 +646,8 @@ class TestTorchDeviceType(TestCase):
             warning = w[0]
 
             # Checks for cpp context in the warning message
-            self.assertTrue(re.search(s, str(warning.message)) is not None)
+            escaped_warning_message = str(warning.message).encode('unicode_escape')
+            self.assertTrue(re.search(s, str(escaped_warning_message), re.IGNORECASE) is not None)
 
             # Checks the Python features of the warning
             # Note: the eager mode warning refers to the line in the function
@@ -661,7 +662,8 @@ class TestTorchDeviceType(TestCase):
             warning = w[0]
 
             # Checks for cpp context in the warning message
-            self.assertTrue(re.search(s, str(warning.message)) is not None)
+            escaped_warning_message = str(warning.message).encode('unicode_escape')
+            self.assertTrue(re.search(s, str(escaped_warning_message), re.IGNORECASE) is not None)
 
             # Checks the Python features of the warning
             # Note: the jitted warning's lineno refers to the call to the jitted
@@ -777,6 +779,7 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(t2.is_set_to(t1))
 
     # See https://github.com/pytorch/pytorch/issues/72650
+    @skipIfMps
     @skipMeta
     @parametrize(
         "fn",
@@ -1002,6 +1005,7 @@ else:
 
     # FIXME: update OpInfos to support "nondeterministic samples" and port these tests
     #   to that architecture
+    @skipIfMps
     def test_nondeterministic_alert_AvgPool3d(self, device):
         module = torch.nn.AvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1014,6 +1018,7 @@ else:
 
         backward_func(self, device)
 
+    @skipIfMps
     def test_nondeterministic_alert_AdaptiveAvgPool2d(self, device):
         module = torch.nn.AdaptiveAvgPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
@@ -1026,6 +1031,7 @@ else:
 
         backward_func(self, device)
 
+    @skipIfMps
     def test_nondeterministic_alert_AdaptiveAvgPool3d(self, device):
         module = torch.nn.AdaptiveAvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1038,6 +1044,7 @@ else:
 
         backward_func(self, device)
 
+    @skipIfMps
     def test_nondeterministic_alert_MaxPool3d(self, device):
         module = torch.nn.MaxPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1050,6 +1057,7 @@ else:
 
         backward_func(self, device)
 
+    @skipIfMps
     def test_nondeterministic_alert_AdaptiveMaxPool2d(self, device):
         module = torch.nn.AdaptiveMaxPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
@@ -1062,6 +1070,7 @@ else:
 
         backward_func(self, device)
 
+    @skipIfMps
     def test_nondeterministic_alert_FractionalMaxPool2d(self, device):
         module = torch.nn.FractionalMaxPool2d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1074,6 +1083,7 @@ else:
 
         backward_func(self, device)
 
+    @skipIfMps
     def test_nondeterministic_alert_FractionalMaxPool3d(self, device):
         module = torch.nn.FractionalMaxPool3d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, 3, requires_grad=True, device=device)
@@ -1086,6 +1096,7 @@ else:
 
         backward_func(self, device)
 
+    @skipIfMps
     def test_nondeterministic_alert_interpolate_linear(self, device):
         input = torch.randn(1, 2, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1116,6 +1127,7 @@ else:
 
         backward_func(self, device)
 
+    @skipIfMps
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1131,6 +1143,7 @@ else:
 
         backward_func(self, device)
 
+    @skipIfMps
     def test_nondeterministic_alert_interpolate_trilinear(self, device):
         input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1146,6 +1159,7 @@ else:
 
         backward_func(self, device)
 
+    @skipIfMps
     def test_nondeterministic_alert_ReflectionPad1d(self, device):
         module = torch.nn.ReflectionPad1d((1, 2))
         input = torch.randn(2, 3, 8, device=device, requires_grad=True)
@@ -1170,6 +1184,7 @@ else:
 
         backward_func(self, device)
 
+    @skipIfMps
     def test_nondeterministic_alert_ReflectionPad3d(self, device):
         module = torch.nn.ReflectionPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 8, 8, 8, device=device, requires_grad=True)
@@ -1182,6 +1197,7 @@ else:
 
         backward_func(self, device)
 
+    @skipIfMps
     def test_nondeterministic_alert_ReplicationPad1d(self, device):
         module = torch.nn.ReplicationPad1d((1, 2))
         input = torch.randn(2, 3, 4, device=device, requires_grad=True)
@@ -1206,6 +1222,7 @@ else:
 
         backward_func(self, device)
 
+    @skipIfMps
     def test_nondeterministic_alert_ReplicationPad3d(self, device):
         module = torch.nn.ReplicationPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 4, 4, 4, device=device, requires_grad=True)
@@ -1307,6 +1324,7 @@ else:
         test_func(torch.Tensor.put)
         test_func(torch.Tensor.put_)
 
+    @skipIfMps
     def test_nondeterministic_alert_histc(self, device):
         def test_func(op_call):
             a = torch.tensor([], device=device)
@@ -1320,6 +1338,7 @@ else:
         test_func(torch.histc)
         test_func(torch.Tensor.histc)
 
+    @skipIfMps
     def test_nondeterministic_alert_bincount(self, device):
         def test_func(op_call):
             a = torch.tensor([], device=device, dtype=torch.long)
@@ -1374,6 +1393,7 @@ else:
         test_func(torch.gather)
         test_func(torch.Tensor.gather)
 
+    @skipIfMps
     def test_nondeterministic_alert_grid_sample_2d(self, device):
         input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, device=device)
@@ -1386,6 +1406,7 @@ else:
 
         backward_func(self, device)
 
+    @skipIfMps
     def test_nondeterministic_alert_grid_sample_3d(self, device):
         input = torch.empty(1, 1, 2, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, 3, device=device)
@@ -1616,17 +1637,20 @@ else:
 
 
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     def test_log_normal(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).log_normal_()
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
 
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     def test_geometric(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).geometric_(0.5)
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
 
+    @skipIfMps
     def test_repeat_interleave(self, device):
         y = torch.tensor([[1, 2], [3, 4]], device=device)
         # exercise single argument function signature
@@ -1717,6 +1741,7 @@ else:
         self.assertEqual(num_zeros, 0)
 
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     def test_exponential(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).exponential_(0.5)
         self.assertEqual(a.dtype, dtype)
@@ -1806,6 +1831,7 @@ else:
                 res = stats.kstest(t.cpu().to(torch.double), 'norm', args=(mean, std))
                 self.assertTrue(res.statistic < 0.1)
 
+    @skipIfMps
     @skipIfNoSciPy
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_lognormal_kstest(self, device, dtype):
@@ -1820,6 +1846,7 @@ else:
                 else:
                     self.assertTrue(res.statistic < 0.1)
 
+    @skipIfMps
     @skipIfNoSciPy
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_exponential_kstest(self, device, dtype):
@@ -1830,6 +1857,7 @@ else:
             res = stats.kstest(t.cpu().to(torch.double), 'expon', args=(0, 1 / lambd,))
             self.assertTrue(res.statistic < 0.1)
 
+    @skipIfMps
     @skipIfNoSciPy
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_cauchy_kstest(self, device, dtype):
@@ -1851,6 +1879,7 @@ else:
             x.cauchy_()
             self.assertFalse(x.isinf().sum())
 
+    @skipIfMps
     @skipIfNoSciPy
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_geometric_kstest(self, device, dtype):
@@ -1915,6 +1944,7 @@ else:
             return torch.empty(r1, r2, device=x.device)
         return torch.norm(x[..., None, :] - y[..., None, :, :], p=p, dim=-1)
 
+    @skipIfMps
     def test_cdist_norm(self, device):
         for r1 in [3, 4, 5, 6]:
             for m in [2, 3, 4, 10]:
@@ -1932,6 +1962,7 @@ else:
                             expected = self._brute_cdist(x, y, p=p)
                             self.assertEqual(expected, actual)
 
+    @skipIfMps
     def test_cdist_norm_batch(self, device):
         for r1 in [3, 4, 5, 6]:
             for m in [2, 3, 4, 10]:
@@ -2066,6 +2097,7 @@ else:
         _test_euclidean_large_cdist((2000, 5))
 
     # Ensure that cdist backward with p<1 does not produce NaNs
+    @skipIfMps
     def test_cdist_grad_p_lt_1_no_nan(self, device):
         for p in [0.99, 0.7, 0.5, 0.1, 0.01]:
             x = torch.randn(1, 2, device=device)
@@ -2093,6 +2125,7 @@ else:
             # values such as nan or inf
             assert torch.isfinite(x.grad).all()
 
+    @skipIfMps
     def test_cumsum(self, device):
         x = torch.rand(100, 100, device=device)
         res1 = torch.cumsum(x, 1)
@@ -2143,6 +2176,7 @@ else:
         # Check that output maintained correct shape
         self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
 
+    @skipIfMps
     def test_cumprod(self, device):
         x = torch.rand(100, 100, device=device)
         res1 = torch.cumprod(x, 1)
@@ -2193,6 +2227,7 @@ else:
         # Check that output maintained correct shape
         self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
 
+    @skipIfMps
     def test_cummax_cummin(self, device):
         def test_ops(op, string_of_function_name, expected_output1, expected_output2):
             x = torch.rand(100, 100, device=device)
@@ -2259,6 +2294,7 @@ else:
                                                        [0, 0, 0],
                                                        [0, 0, 0]]), expected_out)
 
+    @skipIfMps
     def test_logcumsumexp(self, device):
         def logcumsumexp(a, axis):
             return torch.cumsum(a.exp(), axis=axis).log_()
@@ -2553,6 +2589,7 @@ else:
         x[2::3] = .5
         self._test_large_cum_fn_helper(x, lambda x: torch.cumprod(x, 0))
 
+    @skipIfMps
     def test_discontiguous_out_cumsum(self, device):
         x = torch.randn(4, 8, device=device)
         y = torch.empty(4, 16, device=device)[:, ::2]
@@ -2573,12 +2610,14 @@ else:
         self.assertEqual(out_val, expected_val, atol=0, rtol=0)
         self.assertEqual(out_ind, expected_ind, atol=0, rtol=0)
 
+    @skipIfMps
     def test_cummax_discontiguous(self, device):
         x = torch.tensor([[0, 1, 2, 3, 2, 1], [4, 5, 6, 5, 6, 7]], device=device, dtype=torch.float).t().contiguous().t()
         expected_val = torch.tensor([[0, 1, 2, 3, 3, 3], [4, 5, 6, 6, 6, 7]], device=device, dtype=torch.float)
         expected_ind = torch.tensor([[0, 1, 2, 3, 3, 3], [0, 1, 2, 2, 4, 5]], device=device, dtype=torch.long)
         self._test_cumminmax_helper(x, torch.cummax, expected_val, expected_ind)
 
+    @skipIfMps
     def test_cummin_discontiguous(self, device):
         x = torch.tensor([[3, 2, 1, 0, 1, 2], [7, 6, 5, 4, 5, 2]], device=device, dtype=torch.float).t().contiguous().t()
         expected_val = torch.tensor([[3, 2, 1, 0, 0, 0], [7, 6, 5, 4, 4, 2]], device=device, dtype=torch.float)
@@ -2755,7 +2794,6 @@ else:
             self.assertEqual(sz, y.size())
 
     # FIXME: move to indexing test suite
-    @onlyCPU
     @parametrize("reduce", ['prod', 'amin', 'amax', 'mean'])
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_index_reduce(self, device, dtype, reduce):
@@ -2774,12 +2812,14 @@ else:
                         dest = make_tensor(size, device=device, dtype=dtype, noncontiguous=True)
                     src = torch.randn(*size[:dim], num_src, *size[dim + 1:], dtype=dtype, device=device)
                     if not src_contig:
-                        src = noncontiguous_like(src)
+                        # noncontiguous_like fails with RuntimeError: XLA tensors do not have storage
+                        src = torch.testing.make_non_contiguous(src)
                     idx = torch.randint(num_dest, (num_src,), dtype=idx_dtype, device=device)
                     if not index_contig:
-                        idx = noncontiguous_like(idx)
+                        # noncontiguous_like fails with RuntimeError: XLA tensors do not have storage
+                        idx = torch.testing.make_non_contiguous(idx)
                     expected = dest.clone()
-                    dest._index_reduce_(dim, idx, src, reduce, include_self=include_self)
+                    dest.index_reduce_(dim, idx, src, reduce, include_self=include_self)
                     # fill rows in idx with reduction inits if include_self=False
                     if (not include_self):
                         expected.index_fill_(dim, idx.long(), reduction_init[reduce])
@@ -2950,6 +2990,7 @@ else:
 
     # FIXME: move to test indexing
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @skipIfMps
     def test_index_fill(self, device, dtype):
         x = torch.tensor([[1, 2], [4, 5]], dtype=dtype, device=device)
         index = torch.tensor([0], device=device)
@@ -3141,6 +3182,7 @@ else:
             self.assertEqual(out, orig + source.sum(), rtol=rtol, atol=atol)
 
     # FIXME: find a test suite for the take operator
+    @skipIfMps
     def test_take_empty(self, device):
         for input_shape in [(0,), (0, 1, 2, 0), (1, 2, 3)]:
             for indices_shape in [(0,), (0, 1, 2, 0)]:
@@ -3368,6 +3410,7 @@ else:
             self.assertEqual(str(wi.message)[0:55], str(warn))
 
     # FIXME: find a test suite for the masked scatter operator
+    @skipIfMps
     def test_masked_scatter_bool_tensor(self, device):
         src = torch.tensor([True, True, True], device=device)
         dst = torch.tensor([False, False, False], device=device)
@@ -3670,7 +3713,7 @@ else:
         ind_01 = torch.tensor([0, 1], dtype=torch.int64, device=device)
         self.assertEqual(c_clone, c.index_fill_(0, ind_empty, -1))
         self.assertEqual(c_clone, c.index_fill_(2, ind_empty, -1))
-        self.assertEqual(c_clone, c.index_fill_(2, torch.tensor([0, 1], dtype=torch.int64, device=device), -1))
+        self.assertEqual(c_clone, c.index_fill_(2, ind_01, -1))
         self.assertEqual(c_clone, c.index_copy_(0, ind_empty, torch.empty((0, 1, 2, 0), device=device)))
         self.assertEqual(c_clone, c.index_copy_(2, ind_empty, torch.empty((0, 1, 0, 0), device=device)))
         self.assertEqual(c_clone, c.index_copy_(2, ind_01, torch.empty((0, 1, 2, 0), device=device)))
@@ -3705,6 +3748,19 @@ else:
         self.assertEqual(c, c.index_select(0, ind_empty))
         c = torch.randn((0, 1, 2), device=device)
         self.assertEqual(c, c.index_select(0, ind_empty))
+        w = torch.randn((0, 3), device=device)
+        self.assertEqual((0, 2), w.index_select(1, ind_01).shape)
+        w = torch.randn((3, 0), device=device)
+        self.assertEqual((2, 0), w.index_select(0, ind_01).shape)
+        ind_01_int32 = torch.tensor([0, 1], dtype=torch.int32, device=device)
+        self.assertEqual((2, 0), w.index_select(0, ind_01_int32).shape)
+        if device == 'cpu':
+            w = torch.randn((0, 3), device=device)
+            with self.assertRaisesRegex(RuntimeError, "self indexing axis dim should be positive"):
+                torch.index_select(w, 0, ind_01)
+            ind_05 = torch.tensor([0, 5], dtype=torch.int64, device=device)
+            with self.assertRaisesRegex(RuntimeError, "INDICES element is out of DATA bounds"):
+                torch.index_select(w, 1, ind_05)
 
     # FIXME: find a test suite for the pdist operator
     def _brute_pdist(self, inp, p=2):
@@ -4239,6 +4295,7 @@ else:
             result = ambiguous * 5
             self.assertEqual(ambiguous.stride(), result.stride())
 
+    @skipIfMps
     def test_memory_format_empty_like(self, device):
         def test_helper(x, memory_format):
             xc = x.contiguous(memory_format=memory_format)
@@ -4695,6 +4752,7 @@ else:
             self.assertEqual(t.dtype, t.storage().dtype)
 
     # FIXME: move to test distributions
+    @skipIfMps
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
     @dtypes(torch.float, torch.double)
     def test_multinomial(self, device, dtype):
@@ -5042,6 +5100,7 @@ else:
                     self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
 
     # FIXME: convert to ErrorInputs
+    @skipIfMps
     def test_multinomial_invalid(self, device):
         def test(probs):
             with self.assertRaisesRegex(RuntimeError,
@@ -5055,6 +5114,7 @@ else:
         test(torch.tensor([1., 1., nan]))
 
     # FIXME: convert to ErrorInputs
+    @skipIfMps
     def test_multinomial_invalid_distribution(self, device):
         def test(probs, replacement):
             with self.assertRaisesRegex(RuntimeError,
@@ -6241,7 +6301,7 @@ class TestTorch(TestCase):
             torch.storage._LegacyStorage()
 
         for storage_class in torch._storage_classes:
-            if storage_class in [torch._UntypedStorage, torch.cuda._UntypedStorage, torch._TypedStorage]:
+            if storage_class in [torch._UntypedStorage, torch._TypedStorage]:
                 continue
 
             device = 'cuda' if storage_class.__module__ == 'torch.cuda' else 'cpu'
@@ -6326,19 +6386,13 @@ class TestTorch(TestCase):
         storage_classes = [
             torch.cuda.ByteStorage,
             torch.cuda.FloatStorage,
-            torch.cuda._UntypedStorage,
         ]
         for storage_class in storage_classes:
             with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
                 storage_class.from_buffer()
 
-            if storage_class == torch.cuda._UntypedStorage:
-                with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
-                    storage_class._new_with_weak_ptr()
-
-            else:
-                with self.assertRaisesRegex(AttributeError, r'has no attribute'):
-                    storage_class._new_with_weak_ptr()
+            with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
+                storage_class._new_with_weak_ptr()
 
             with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
                 storage_class._new_shared_filename(0, 0, 0)
@@ -7614,7 +7668,11 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_to(self):
         self._test_to_with_layout(torch.strided)
-        self._test_to_with_layout(torch.sparse_csr)
+        is_cuda10_2_or_higher = (
+            (torch.version.cuda is not None)
+            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+        if is_cuda10_2_or_higher:  # in cuda10_1 sparse_csr is beta
+            self._test_to_with_layout(torch.sparse_csr)
 
     # FIXME: describe this test
     def test_as_subclass(self):
