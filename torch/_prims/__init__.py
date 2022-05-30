@@ -790,6 +790,13 @@ round = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+rsqrt = _make_elementwise_unary_prim(
+    "rsqrt",
+    impl_aten=torch.rsqrt,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 sign = _make_elementwise_unary_prim(
     "sign",
     impl_aten=torch.sign,
@@ -1098,13 +1105,6 @@ pow = _make_elementwise_binary_prim(
     "pow",
     impl_aten=torch.pow,
     impl_nvfuser=_pow_nvfuser,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-)
-
-rsqrt = _make_elementwise_binary_prim(
-    "rsqrt",
-    impl_aten=torch.rsqrt,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
