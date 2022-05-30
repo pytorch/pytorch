@@ -20,7 +20,7 @@ class NearlyDiagonalSparsifier(BaseSparsifier):
         Currently - supports only odd number
 
     Args:
-        nearliness: The degree of nearliness
+        nearliness: The degree of nearliness (default = 1)
 
     """
     def __init__(self, nearliness: int = 1):
@@ -44,8 +44,9 @@ class NearlyDiagonalSparsifier(BaseSparsifier):
         if dist_to_diagonal >= min(height, width):
             raise ValueError("nearliness cannot be larger than the "
                             "dimensions of weight matrix.")
-        # create mask
+
         for row in range(0, height):
-            for col in range(0, width):
-                if abs(row - col) <= dist_to_diagonal:
-                    mask[row, col] = 1
+            # Bounds of entries that needs to be set to 1
+            low = max(0, row - dist_to_diagonal)
+            high = min(width, row + dist_to_diagonal + 1)
+            mask[row, low:high] = torch.ones(high - low, device=mask.device)

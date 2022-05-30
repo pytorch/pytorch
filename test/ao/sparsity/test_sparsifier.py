@@ -414,9 +414,9 @@ class TestNearlyDiagonalSparsifier(TestCase):
             assert torch.all(weights == torch.eye(height, width) * weights) # only diagonal to be present
 
     def test_sparsity_levels(self):
-        nearliness_levels = [i for i in range(-1, 30)]        
+        nearliness_levels = [nearliness for nearliness in range(-1, 100)]        
         model = nn.Sequential()
-        nearliness_per_layer_config = []
+
         p = re.compile(r'[-\.\s]')
         for nearliness in nearliness_levels:
             
@@ -424,8 +424,8 @@ class TestNearlyDiagonalSparsifier(TestCase):
             layer_name = f'{nearliness}'
             layer_name = p.sub('_', layer_name)
 
-            layer = nn.Linear(12, 12, bias=False)
-            layer.weight = nn.Parameter(torch.ones(12, 12))
+            layer = nn.Linear(32, 32, bias=False)
+            layer.weight = nn.Parameter(torch.ones(32, 32))
             width, height = layer.weight.shape
             model.add_module(layer_name, layer)
             config = {
@@ -455,9 +455,9 @@ def verify_nearliness(mask: torch.Tensor, nearliness: int):
     else:
         height, width = mask.shape
         dist_to_diagonal = nearliness // 2
-        for i in range(0, height):
-            low = max(0, i - dist_to_diagonal)
-            high = min(width, i + dist_to_diagonal + 1)
-            # the selected slice must be ones
-            assert torch.all(mask[i, low:high] == torch.ones(high - low))
-
+        for row in range(0, height):
+            for col in range(0, width):
+                if abs(row - col) <= dist_to_diagonal:
+                    assert mask[row, col] == 1
+                else:
+                    assert mask[row, col] == 0
