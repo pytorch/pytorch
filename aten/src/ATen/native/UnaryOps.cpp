@@ -161,7 +161,7 @@ TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& result) {  \
 // See gh-70918
 #define CREATE_UNARY_TORCH_IMPL_INTEGER_NO_OP_FUNC(func_out, func_stub)                                \
 TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& result) {  \
-  if (self.dtype() == at::kLong) {                                      \
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/false)) {                                      \
     result.copy_(self);                                                 \
   } else {                                                              \
     func_stub(device_type(), *this);                                    \
