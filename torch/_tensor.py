@@ -2,7 +2,7 @@ from collections import OrderedDict
 import enum
 import functools
 from numbers import Number
-from typing import Any, Dict, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 import warnings
 import copyreg
 from copy import deepcopy
@@ -201,9 +201,6 @@ class Tensor(torch._C._TensorBase):
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage, (self,), self)
-
-        if self.dtype not in torch.storage._dtype_to_storage_type_map():
-            raise RuntimeError(f'unsupported Storage type: {self.dtype}')
 
         return torch._TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
 
@@ -533,6 +530,10 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.norm, (self,), self, p=p, dim=dim, keepdim=keepdim, dtype=dtype)
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
+    def solve(self, other):
+        from ._linalg_utils import solve
+        return solve(self, other)
+
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa
@@ -544,6 +545,40 @@ class Tensor(torch._C._TensorBase):
             return LU, pivots, infos
         else:
             return LU, pivots
+
+    def stft(self, n_fft: int, hop_length: Optional[int] = None,
+             win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
+             center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
+             onesided: Optional[bool] = None, return_complex: Optional[bool] = None):
+        r"""See :func:`torch.stft`
+
+        .. warning::
+          This function changed signature at version 0.4.1. Calling with
+          the previous signature may cause error or return incorrect result.
+        """
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor.stft, (self,), self, n_fft, hop_length=hop_length,
+                win_length=win_length, window=window, center=center, pad_mode=pad_mode, normalized=normalized,
+                onesided=onesided, return_complex=return_complex
+            )
+        return torch.stft(self, n_fft, hop_length, win_length, window, center,
+                          pad_mode, normalized, onesided, return_complex=return_complex)
+
+    def istft(self, n_fft: int, hop_length: Optional[int] = None,
+              win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
+              center: bool = True, normalized: bool = False,
+              onesided: Optional[bool] = None, length: Optional[int] = None,
+              return_complex: bool = False):
+        r"""See :func:`torch.istft`"""
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor.istft, (self,), self, n_fft, hop_length=hop_length, win_length=win_length,
+                window=window, center=center, normalized=normalized, onesided=onesided, length=length,
+                return_complex=return_complex
+            )
+        return torch.istft(self, n_fft, hop_length, win_length, window, center,
+                           normalized, onesided, length, return_complex=return_complex)
 
     def resize(self, *sizes):
         if has_torch_function_unary(self):
@@ -611,6 +646,7 @@ class Tensor(torch._C._TensorBase):
     __itruediv__ = _C._TensorBase.__idiv__
 
     __pow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(_C._TensorBase.pow)
+    __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(_C._TensorBase.pow_)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmod__(self, other):
@@ -622,10 +658,6 @@ class Tensor(torch._C._TensorBase):
         if self.dim() == 0 and not self.is_meta:
             return self.item().__format__(format_spec)
         return object.__format__(self, format_spec)
-
-    @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __ipow__(self, other):  # type: ignore[misc]
-        return NotImplemented
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rpow__(self, other):

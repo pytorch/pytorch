@@ -1,9 +1,10 @@
 import functools
 from torch.distributed._shard.sharded_tensor import (
-    sharded_op_impl,
+    _sharded_op_impl,
     Shard,
     ShardedTensor,
 )
+from torch.distributed._shard.common_op_utils import _basic_validation
 
 def _sharded_op_common(op, early_stop_func, extra_check):
     """
@@ -12,7 +13,7 @@ def _sharded_op_common(op, early_stop_func, extra_check):
 
     Example::
         >>> op = torch.transpose
-        >>> @sharded_op_impl(op)
+        >>> @_sharded_op_impl(op)
         >>> @_sharded_op_common(op, early_stop_func, extra_check)
         >>> def sharded_tensor_op(types, args, kwargs, process_group):
         >>>   ....
@@ -35,15 +36,9 @@ def _sharded_op_common(op, early_stop_func, extra_check):
     def decorator_sharded_func(wrapped_func):
         @functools.wraps(wrapped_func)
         def wrapper(types, args=(), kwargs=None, pg=None):
-            if len(args) == 0:
-                raise ValueError(f" No input for '{op.__name__}'!")
-            # Validate types
+            _basic_validation(op, args, kwargs)
+
             st = args[0]
-            if not isinstance(st, ShardedTensor):
-                raise TypeError(
-                    f"torch function '{op.__name__}', with args: {args} and "
-                    f"kwargs: {kwargs} are called for non ShardedTensor!"
-                )
             if kwargs is None:
                 kwargs = {}
             if extra_check:
@@ -69,6 +64,9 @@ def _register_sharded_op_on_local_shards(
     For more complicated ops, a customized func can be used to generate
     the new shards and sharded tensor size.
 
+    This function expects that the original ShardingSpec for the ShardedTensor
+    is preserved irrespective of whether or not a customized function is used.
+
     Args:
         op: The op to be registered and applied to all shards of the st.
         early_stop_func (Callable, optional): the func for early stop.
@@ -84,7 +82,7 @@ def _register_sharded_op_on_local_shards(
         func (Callable): registered implementation for sharded op for
         ``__torch_function__`` dispatch.
     """
-    @sharded_op_impl(op)
+    @_sharded_op_impl(op)
     @_sharded_op_common(op, early_stop_func, extra_check)
     def sharded_tensor_op_on_local_shards(types, args=(), kwargs=None, pg=None):
         st = args[0]
@@ -104,4 +102,5 @@ def _register_sharded_op_on_local_shards(
             st_metadata,
             process_group=pg,
             init_rrefs=st._init_rrefs,
+            sharding_spec=st.sharding_spec()
         )

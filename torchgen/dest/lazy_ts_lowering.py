@@ -1,15 +1,10 @@
-from typing import Union
-from torchgen.model import NativeFunction, NativeFunctionsGroup
 from torchgen.api.lazy import LazyIrSchema
 from torchgen.api.types import OptionalCType
 
 
-def ts_lowering_body(f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
+def ts_lowering_body(schema: LazyIrSchema) -> str:
     # for now, we just want one IR class decl and soon after also the method defs
     # and we use the functional version not out/inplace.
-    func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
-    schema = LazyIrSchema(func)
-
     emplace_arguments = []
     for arg in schema.positional_args:
         if arg.is_lazy_value:
@@ -47,7 +42,7 @@ def ts_lowering_body(f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
     {emplace_arguments_str}
     {emplace_kwarguments}
     torch::lazy::TSOpVector {schema.aten_name}_out = torch::lazy::LowerTSBuiltin(function, op().op, arguments, kwarguments);
-    CHECK_EQ({schema.aten_name}_out.size(), {len(func.returns)});
+    CHECK_EQ({schema.aten_name}_out.size(), {len(schema.returns)});
 
     return {schema.aten_name}_out;
 """

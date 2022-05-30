@@ -358,14 +358,14 @@ std::string Adapter::stringize() const {
   const VkPhysicalDeviceMemoryProperties& mem_props = memory_properties_;
   ss << "  Memory Info {" << std::endl;
   ss << "    Memory Types [" << std::endl;
-  for (int i = 0; i < mem_props.memoryTypeCount; ++i) {
+  for (const auto i : c10::irange(mem_props.memoryTypeCount)) {
   ss << "      " << " [Heap " << mem_props.memoryTypes[i].heapIndex << "] "
                << get_memory_properties_str(mem_props.memoryTypes[i].propertyFlags)
                << std::endl;
   }
   ss << "    ]" << std::endl;
   ss << "    Memory Heaps [" << std::endl;
-  for (int i = 0; i < mem_props.memoryHeapCount; ++i) {
+  for (const auto i : c10::irange(mem_props.memoryHeapCount)) {
   ss << "      " << mem_props.memoryHeaps[i].size << std::endl;
   }
   ss << "    ]" << std::endl;

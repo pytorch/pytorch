@@ -72,6 +72,10 @@ class Geometric(Distribution):
         return 1. / self.probs - 1.
 
     @property
+    def mode(self):
+        return torch.zeros_like(self.probs)
+
+    @property
     def variance(self):
         return (1. / self.probs - 1.) / self.probs
 

@@ -1,5 +1,5 @@
 import torch
-from torch import Tensor
+from torch import Tensor, _TypedStorage
 
 import torch._prims.utils as utils
 from torch._prims.utils import (
@@ -8,18 +8,25 @@ from torch._prims.utils import (
     TensorMeta,
     ShapeType,
     getnvFuserDtype,
+    DimsType,
     DimsSequenceType,
     StrideType,
     Number,
     NumberType,
 )
 from torch.overrides import has_torch_function, handle_torch_function
+import torch.library
+from torch.utils._pytree import tree_map
 
-from typing import Sequence, Optional, Union, Callable, List, Tuple, Any
+from typing import Sequence, Optional, Union, Callable, List, Tuple, Any, Type
 from functools import reduce, partial
 from enum import Enum
 import operator
 import math
+
+prim = torch.library.Library("prims", "DEF")
+prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
+prim_meta_impl = torch.library.Library("prims", "IMPL", "Meta")
 
 # Experimental module containing prototype "primitive" operations.
 
@@ -38,8 +45,11 @@ __all__ = [
     "atan",
     "cos",
     "cosh",
+    "bessel_i0",
     "bessel_i0e",
+    "bessel_i1",
     "bessel_i1e",
+    "bitwise_not",
     "cbrt",
     "ceil",
     "digamma",
@@ -48,40 +58,49 @@ __all__ = [
     "erfc",
     "exp",
     "expm1",
+    "exp2",
+    "fill",
     "floor",
-    "is_finite",
+    "isfinite",
+    "is_infinite",
     "lgamma",
     "log",
     "log1p",
+    "log2",
+    "log10",
     "neg",
     "reciprocal",
     "round",
     "sign",
+    "signbit",
     "sin",
     "sinh",
     "sqrt",
     "square",
     "tan",
+    "tanh",
     #
     # Elementwise binary prims
     #
     "add",
     "atan2",
     "bitwise_and",
-    "bitwise_not",
     "bitwise_or",
     "bitwise_xor",
     # 'complex',  # needs custom meta
     "div",
     "eq",
+    "fmax",
+    "fmin",
+    "fmod",
     "ge",
     "gt",
     "igamma",
     "igammac",
     "le",
     "lt",
-    "max",
-    "min",
+    "maximum",
+    "minimum",
     "mul",
     "ne",
     "nextafter",
@@ -90,45 +109,64 @@ __all__ = [
     "shift_left",
     "shift_right_arithmetic",
     "shift_right_logical",  # not implemented
+    "sub",
+    "zeta",
     #
     # View prims
     #
+    "as_strided",
     "broadcast_in_dim",
     "collapse_view",
+    "expand_dims",
     "slice",
     "slice_in_dim",  # implemented using slice -- make this a ref?
     "split_dim",
     "squeeze",
     "transpose",
+    "view_of",
     #
     # Shape prims
     #
     "collapse",
-    "concatenate",
+    "cat",
     "reshape",
+    "rev",
     #
     # Conditional prims
     #
-    "select",
+    "where",
     #
     # Data conversion and movement prims
     #
+    "clone",
     "convert_element_type",
     "device_put",
+    "item",
+    "maximum_value",
+    "minimum_value",
+    "to_dtype",
     #
     # Inplace prims
     #
     "copy_to",
     "resize",
+    # "_set",  # Commented out, see note below
     #
     # Reduction prims
     #
-    "all",
     "amax",
     "amin",
-    "any",
     "prod",
     "sum",
+    "var",
+    #
+    # Tensor Creation Prims
+    #
+    "empty_strided",
+    #
+    # Randomness Prims
+    #
+    "uniform",
 ]
 
 #
@@ -148,32 +186,59 @@ class RETURN_TYPE(Enum):
     INPLACE = (2,)
 
 
+def _wrap_tensor_meta(f):
+    def wrap(t):
+        if isinstance(t, torch.Tensor):
+            return TensorMeta(t)
+        else:
+            return t
+
+    def unwrap(t):
+        # TODO: doesn't setup aliasing relation on views correctly
+        if isinstance(t, TensorMeta):
+            return torch.empty_strided(
+                t.shape, t.stride(), dtype=t.dtype, device="meta"
+            )
+        else:
+            return t
+
+    def wrapper(*args, **kwargs):
+        wrapped_args = tree_map(wrap, args)
+        wrapped_kwargs = tree_map(wrap, kwargs)
+        return tree_map(unwrap, f(*wrapped_args, **wrapped_kwargs))
+
+    return wrapper
+
+
 def _make_prim(
     *,
-    name: str,
+    schema: str,
+    return_type: RETURN_TYPE,
     meta: Callable,
     impl_aten: Callable,
     impl_nvfuser: Optional[Callable] = None,
-    return_type: RETURN_TYPE,
-    doc: str
+    doc: str,
 ):
     """
     Creates a primitive operation.
 
     """
 
-    def _prim(*args, **kwargs):
-        # TODO: allow dispatch to be overridden here
-        if has_torch_function(args):
-            return handle_torch_function(_prim, args, *args, **kwargs)
+    prim.define(schema)
 
+    def _prim_impl(*args, **kwargs):
         # always run the meta function because aten implementation will
         # typically accept more inputs (e.g., it will do promotion and
         # broadcasting) which we want to reject
         meta(*args, **kwargs)
         return impl_aten(*args, **kwargs)
 
-    _prim.__name__ = name
+    name = schema.split("(")[0]
+    prim_impl.impl(name, _prim_impl)
+    prim_meta_impl.impl(name, _wrap_tensor_meta(meta))
+
+    _prim = getattr(torch.ops.prims, name).default
+
     _prim.__doc__ = doc
     _prim.meta = meta  # type: ignore[attr-defined]
     _prim.impl_nvfuser = impl_nvfuser  # type: ignore[attr-defined]
@@ -188,8 +253,12 @@ class ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND(Enum):
     COMPLEX_TO_FLOAT = (3,)
 
 
-# TODO: implement and test type promotion and stride behavior
-def _elementwise_meta(*args, type_promotion):
+# TODO: implement dtype validation here, too, or on the corresponding refs
+def _elementwise_meta(
+    *args,
+    type_promotion: ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND,
+    args_with_fixed_dtypes: Tuple[TensorLikeType, ...] = None,
+) -> TensorMeta:
     """
     Meta function for elementwise operations that produce outputs in the same dtype
     as their inputs.
@@ -199,38 +268,63 @@ def _elementwise_meta(*args, type_promotion):
 
     assert len(args) > 0
 
-    utils.check_same_device(*args, allow_cpu_scalar_tensors=True)
-    utils.check_same_shape(*args)
     utils.check_same_dtype(*args)
 
-    strides = None
-    tensor = None
-    number = None
+    args_ = list(args)
+    if args_with_fixed_dtypes is not None:
+        args_.extend(args_with_fixed_dtypes)
+
+    utils.check_same_device(*args_, allow_cpu_scalar_tensors=True)
+    utils.check_same_shape(*args_, allow_cpu_scalar_tensors=True)
+
+    strides = utils.compute_elementwise_output_strides(*args_)
+    shape = utils.extract_shape(*args_, allow_cpu_scalar_tensors=True)
+
+    # Acquires the dtype
+    dtype = None
+    scalar_type = None
     for arg in args:
         if isinstance(arg, TensorLike):
-            if strides is None:
-                strides = arg.stride()
+            if not utils.is_cpu_scalar_tensor(arg):
+                dtype = arg.dtype
+                break
+            else:
+                dtype = arg.dtype
+        elif isinstance(arg, Number):
+            scalar_type = type(arg)
 
-            if tensor is None:
-                tensor = arg
+    # Acquires the device (if it exists) or number
+    device = None
+    number = None
+    for arg in args_:
+        if isinstance(arg, TensorLike):
+            device = arg.device
+            break
 
-            if arg.stride() != strides:
-                return TensorMeta(
-                    arg, strides=utils.make_contiguous_strides_for(arg.shape)
-                )
         elif isinstance(arg, Number):
             if number is None:
                 number = arg
 
-    # TODO: fix strides
-    if tensor is not None:
-        if 0 in tensor.stride() and tensor.numel() > 0:
-            return TensorMeta(
-                tensor, strides=utils.make_contiguous_strides_for(tensor.shape)
-            )
-        else:
-            return TensorMeta(tensor)
+    # NOTE: type promotion behavior here is mostly hidden from tests because
+    # references will typically handle the type promotion properly even if this doesn't
+    # (but getting it wrong will cause too many casts to be inserted in traces!)
+    if device is not None:
+        assert dtype is not None
+        if type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT:
+            dtype = dtype
+        elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
+            dtype = torch.bool
+        elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
+            if utils.is_complex_dtype(dtype):
+                dtype = utils.corresponding_real_dtype(dtype)
+            else:
+                dtype = dtype
 
+        return TensorMeta(device=device, shape=shape, strides=strides, dtype=dtype)
+
+    # Number case
+    # NOTE: this case is not currently exercised
+    # TODO: fix number type promotion (bool, complex->float)
     return TensorMeta(number)
 
 
@@ -242,10 +336,10 @@ def _make_elementwise_unary_prim(
     """
 
     return _make_prim(
-        name=name,
+        schema=f"{name}(Tensor self) -> Tensor",
         meta=partial(_elementwise_meta, type_promotion=type_promotion),
         return_type=RETURN_TYPE.NEW,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -257,10 +351,10 @@ def _make_elementwise_binary_prim(
     """
 
     return _make_prim(
-        name=name,
+        schema=f"{name}(Tensor self, Tensor other) -> Tensor",
         meta=partial(_elementwise_meta, type_promotion=type_promotion),
         return_type=RETURN_TYPE.NEW,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -272,16 +366,28 @@ def _not_impl(*args, **kwargs):
 # Elementwise unary operations
 #
 
+
+def _abs_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.abs(a)  # type: ignore[attr-defined]
+
+
 abs = _make_elementwise_unary_prim(
     "abs",
     impl_aten=torch.abs,
+    impl_nvfuser=_abs_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
 )
 
+
+def _acos_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.acos(a)  # type: ignore[attr-defined]
+
+
 acos = _make_elementwise_unary_prim(
     "acos",
     impl_aten=torch.acos,
+    impl_nvfuser=_acos_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -293,30 +399,61 @@ acosh = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _asin_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.asin(a)  # type: ignore[attr-defined]
+
+
 asin = _make_elementwise_unary_prim(
     "asin",
     impl_aten=torch.asin,
+    impl_nvfuser=_asin_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _atan_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.atan(a)  # type: ignore[attr-defined]
+
 
 atan = _make_elementwise_unary_prim(
     "atan",
     impl_aten=torch.atan,
+    impl_nvfuser=_atan_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _cos_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.cos(a)  # type: ignore[attr-defined]
+
 
 cos = _make_elementwise_unary_prim(
     "cos",
     impl_aten=torch.cos,
+    impl_nvfuser=_cos_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _cosh_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.cosh(a)  # type: ignore[attr-defined]
+
+
 cosh = _make_elementwise_unary_prim(
     "cosh",
     impl_aten=torch.cosh,
+    impl_nvfuser=_cosh_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+bessel_i0 = _make_elementwise_unary_prim(
+    "bessel_i0",
+    impl_aten=torch.i0,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -328,9 +465,29 @@ bessel_i0e = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+bessel_i1 = _make_elementwise_unary_prim(
+    "bessel_i1",
+    impl_aten=torch.special.i1,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 bessel_i1e = _make_elementwise_unary_prim(
     "bessel_i1e",
     impl_aten=torch.special.i1e,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _bitwise_not_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.bitwise_not(a)  # type: ignore[attr-defined]
+
+
+bitwise_not = _make_elementwise_unary_prim(
+    "bitwise_not",
+    impl_aten=torch.bitwise_not,
+    impl_nvfuser=_bitwise_not_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -347,9 +504,15 @@ cbrt = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _ceil_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.ceil(a)  # type: ignore[attr-defined]
+
+
 ceil = _make_elementwise_unary_prim(
     "ceil",
     impl_aten=torch.ceil,
+    impl_nvfuser=_ceil_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -361,9 +524,15 @@ digamma = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _erf_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.erf(a)  # type: ignore[attr-defined]
+
+
 erf = _make_elementwise_unary_prim(
     "erf",
     impl_aten=torch.erf,
+    impl_nvfuser=_erf_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -375,37 +544,105 @@ erf_inv = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _erfc_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.erfc(a)  # type: ignore[attr-defined]
+
+
 erfc = _make_elementwise_unary_prim(
     "erfc",
     impl_aten=torch.special.erfc,
+    impl_nvfuser=_erfc_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _exp_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.exp(a)  # type: ignore[attr-defined]
+
 
 exp = _make_elementwise_unary_prim(
     "exp",
     impl_aten=torch.exp,
+    impl_nvfuser=_exp_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _expm1_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.expm1(a)  # type: ignore[attr-defined]
+
 
 expm1 = _make_elementwise_unary_prim(
     "expm1",
     impl_aten=torch.special.expm1,
+    impl_nvfuser=_expm1_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+exp2 = _make_elementwise_unary_prim(
+    "exp2",
+    impl_aten=torch.special.exp2,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _fill_meta(a: TensorLikeType, value: NumberType) -> TensorLikeType:
+    return _elementwise_meta(
+        a, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
+# See https://github.com/pytorch/pytorch/issues/77932 for out-of-place fill request
+def _fill_aten(a: Tensor, value: NumberType) -> Tensor:
+    t = a * False
+    with torch.no_grad():
+        t.fill_(value)  # type: ignore[arg-type]
+    return t
+
+
+# NOTE: fill uses _make_prim directly because it has a value parameter
+fill = _make_prim(
+    schema="fill(Tensor self, Scalar value) -> Tensor",
+    return_type=RETURN_TYPE.NEW,
+    meta=_fill_meta,
+    impl_aten=_fill_aten,
+    doc="",
+)
+
+
+def _floor_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.floor(a)  # type: ignore[attr-defined]
+
 
 floor = _make_elementwise_unary_prim(
     "floor",
     impl_aten=torch.floor,
+    impl_nvfuser=_floor_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
-is_finite = _make_elementwise_unary_prim(
-    "is_finite",
+
+def _isfinite_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.isfinite(a)  # type: ignore[attr-defined]
+
+
+isfinite = _make_elementwise_unary_prim(
+    "isfinite",
     impl_aten=torch.isfinite,
+    impl_nvfuser=_isfinite_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+)
+
+is_infinite = _make_elementwise_unary_prim(
+    "is_infinite",
+    impl_aten=torch.isinf,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -417,37 +654,93 @@ lgamma = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _log_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.log(a)  # type: ignore[attr-defined]
+
+
 log = _make_elementwise_unary_prim(
     "log",
     impl_aten=torch.log,
+    impl_nvfuser=_log_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _log1p_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.log1p(a)  # type: ignore[attr-defined]
+
 
 log1p = _make_elementwise_unary_prim(
     "log1p",
     impl_aten=torch.log1p,
+    impl_nvfuser=_log1p_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _log2_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.log2(a)  # type: ignore[attr-defined]
+
+
+log2 = _make_elementwise_unary_prim(
+    "log2",
+    impl_aten=torch.log2,
+    impl_nvfuser=_log2_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _log10_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.log10(a)  # type: ignore[attr-defined]
+
+
+log10 = _make_elementwise_unary_prim(
+    "log10",
+    impl_aten=torch.log10,
+    impl_nvfuser=_log10_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _reciprocal_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.reciprocal(a)  # type: ignore[attr-defined]
+
 
 reciprocal = _make_elementwise_unary_prim(
     "reciprocal",
     impl_aten=torch.reciprocal,
+    impl_nvfuser=_reciprocal_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _neg_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.neg(a)  # type: ignore[attr-defined]
+
 
 neg = _make_elementwise_unary_prim(
     "neg",
     impl_aten=torch.neg,
+    impl_nvfuser=_neg_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _round_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.round(a)  # type: ignore[attr-defined]
+
+
 round = _make_elementwise_unary_prim(
     "round",
     impl_aten=torch.round,
+    impl_nvfuser=_round_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -459,23 +752,48 @@ sign = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
-sin = _make_elementwise_unary_prim(
-    "sin",
-    impl_aten=torch.sin,
+signbit = _make_elementwise_unary_prim(
+    "signbit",
+    impl_aten=torch.signbit,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _sin_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.sin(a)  # type: ignore[attr-defined]
+
+
+sin = _make_elementwise_unary_prim(
+    "sin",
+    impl_aten=torch.sin,
+    impl_nvfuser=_sin_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _sinh_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.sinh(a)  # type: ignore[attr-defined]
+
 
 sinh = _make_elementwise_unary_prim(
     "sinh",
     impl_aten=torch.sinh,
+    impl_nvfuser=_sinh_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _sqrt_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.sqrt(a)  # type: ignore[attr-defined]
+
+
 sqrt = _make_elementwise_unary_prim(
     "sqrt",
     impl_aten=torch.sqrt,
+    impl_nvfuser=_sqrt_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -487,9 +805,28 @@ square = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _tan_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.tan(a)  # type: ignore[attr-defined]
+
+
 tan = _make_elementwise_unary_prim(
     "tan",
     impl_aten=torch.tan,
+    impl_nvfuser=_tan_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _tanh_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.tanh(a)  # type: ignore[attr-defined]
+
+
+tanh = _make_elementwise_unary_prim(
+    "tanh",
+    impl_aten=torch.tanh,
+    impl_nvfuser=_tanh_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -520,13 +857,6 @@ atan2 = _make_elementwise_binary_prim(
 bitwise_and = _make_elementwise_binary_prim(
     "bitwise_and",
     impl_aten=torch.bitwise_and,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-)
-
-bitwise_not = _make_elementwise_binary_prim(
-    "bitwise_not",
-    impl_aten=torch.bitwise_not,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -571,11 +901,51 @@ div = _make_elementwise_binary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 eq = _make_elementwise_binary_prim(
     "eq",
     impl_aten=torch.eq,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+)
+
+
+def _fmax_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.fmax(a, b)  # type: ignore[attr-defined]
+
+
+fmax = _make_elementwise_binary_prim(
+    "fmax",
+    impl_aten=torch.fmax,
+    impl_nvfuser=_fmax_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _fmin_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.fmin(a, b)  # type: ignore[attr-defined]
+
+
+fmin = _make_elementwise_binary_prim(
+    "fmin",
+    impl_aten=torch.fmin,
+    impl_nvfuser=_fmin_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _fmod_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.fmod(a, b)  # type: ignore[attr-defined]
+
+
+fmod = _make_elementwise_binary_prim(
+    "fmod",
+    impl_aten=torch.fmod,
+    impl_nvfuser=_fmod_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 
@@ -644,40 +1014,52 @@ lt = _make_elementwise_binary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
+
+def _wrap_scalar(a: NumberType, *, dtype: torch.dtype = None) -> torch.Tensor:
+    """
+    Wraps a Number into a Tensor of corresponding dtype.
+
+    Note: this should not generally be used, but some torch functions don't
+    accept scalars, so it's necessary for their prims to do so.
+    """
+    dtype = dtype if dtype is not None else utils.type_to_dtype(type(a))
+    return torch.tensor(a, dtype=dtype)
+
+
 # Note: the following impls are because torch.maximum and torch.mininum do not support scalar inputs
-def _max_aten(
+def _maximum_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
-        b = utils.wrap_scalar(b, dtype=a.dtype)
+        b = _wrap_scalar(b, dtype=a.dtype)
     elif isinstance(b, TensorLike) and isinstance(a, Number):
-        a = utils.wrap_scalar(a, dtype=b.dtype)
+        a = _wrap_scalar(a, dtype=b.dtype)
 
     return torch.maximum(a, b)  # type: ignore[arg-type]
 
 
-max = _make_elementwise_binary_prim(
-    "max",
-    impl_aten=_max_aten,
+maximum = _make_elementwise_binary_prim(
+    "maximum",
+    impl_aten=_maximum_aten,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 
-def _min_aten(
+def _minimum_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
-        b = utils.wrap_scalar(b, dtype=a.dtype)
+        b = _wrap_scalar(b, dtype=a.dtype)
     elif isinstance(b, TensorLike) and isinstance(a, Number):
-        a = utils.wrap_scalar(a, dtype=b.dtype)
+        a = _wrap_scalar(a, dtype=b.dtype)
 
     return torch.minimum(a, b)  # type: ignore[arg-type]
 
 
-min = _make_elementwise_binary_prim(
-    "min",
-    impl_aten=_min_aten,
+minimum = _make_elementwise_binary_prim(
+    "minimum",
+    impl_aten=_minimum_aten,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -746,9 +1128,54 @@ sub = _make_elementwise_binary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+zeta = _make_elementwise_binary_prim(
+    "zeta",
+    impl_aten=torch.special.zeta,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 #
 # View operations
 #
+# TODO: model view relationships
+# TODO: model storage
+def _as_strided_meta(
+    a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int
+) -> TensorLikeType:
+    assert len(size) == len(stride)
+    assert storage_offset >= 0
+    utils.validate_strides(stride)
+    utils.validate_shape(size)
+
+    if reduce(operator.mul, size) == 0:
+        # NOTE: This special case is to avoid having to acquire the storage below
+        # as_strided to shapes with no elements are trivially valid, so it's OK
+        pass
+    elif isinstance(a, torch.Tensor):
+        utils.check_in_bounds_for_storage(a.storage(), size, stride, storage_offset)
+
+    return TensorMeta(a, shape=size, strides=stride)
+
+
+def _as_strided_aten(
+    a: Tensor, size: ShapeType, stride: StrideType, storage_offset: int
+) -> Tensor:
+    return torch.as_strided(a, size, stride, storage_offset)
+
+
+_as_strided_doc = """
+    Creates a view of the tensor with the given shape (size), strides (stride) and
+    storage offset (storage_offset).
+"""
+
+as_strided = _make_prim(
+    schema="as_strided(Tensor(a!) a, int[] size, int[] stride, int storage_offset) -> Tensor(a!)",
+    meta=_as_strided_meta,
+    impl_aten=_as_strided_aten,
+    return_type=RETURN_TYPE.VIEW,
+    doc=_as_strided_doc,
+)
 
 
 def _broadcast_in_dim_meta(
@@ -785,7 +1212,12 @@ def _broadcast_in_dim_meta(
     original_idx = 0
     for idx in range(len(shape)):
         if idx in broadcast_dimensions:
-            new_strides.append(a.stride()[original_idx])
+            # Assigns a stride of zero to dimensions
+            # which were actually broadcast
+            if a.shape[original_idx] != shape[idx]:
+                new_strides.append(0)
+            else:
+                new_strides.append(a.stride()[original_idx])
             original_idx = original_idx + 1
         else:
             new_strides.append(0)
@@ -816,10 +1248,10 @@ def _broadcast_in_dim_nvfuser(
 
 
 _broadcast_in_dim_doc = """
-  Creates a view of t with the specified shape.
+  Creates a view of a with the specified shape.
 
   Allows adding dimensions of any length and broadcasting
-  dimensions of length one in t to any length.
+  dimensions of length one in a to any length.
 
   The location of the broadcast dimensions must be specified
   using the broadcast_dimensions argument. Changing the
@@ -827,7 +1259,7 @@ _broadcast_in_dim_doc = """
   """
 
 broadcast_in_dim = _make_prim(
-    name="broadcast_in_dim",
+    schema="broadcast_in_dim(Tensor(a) a, int[] shape, int[] broadcast_dimensions) -> Tensor(a)",
     meta=_broadcast_in_dim_meta,
     impl_aten=_broadcast_in_dim_aten,
     impl_nvfuser=_broadcast_in_dim_nvfuser,
@@ -836,43 +1268,86 @@ broadcast_in_dim = _make_prim(
 )
 
 
-def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeType:
+def _collapse_view_helper(
+    a: TensorLikeType, start: int, end: int
+) -> Tuple[Optional[ShapeType], Optional[StrideType]]:
     assert isinstance(a, TensorLike)
 
-    shape = a.shape
-    strides = a.stride()
+    # Special-case for zero dimensional tensors
+    if a.ndim == 0:
+        shape = (1,)
+        strides = (1,)
+    else:
+        shape = a.shape  # type: ignore[assignment]
+        strides = a.stride()
 
-    utils.validate_idx(shape, start)
-    utils.validate_exclusive_idx(shape, end)
+    utils.validate_idx(len(shape), start)
+    utils.validate_exclusive_idx(len(shape), end)
 
     # Verifies end is strictly greater than start
     # (Collapse requires a non-empty interval)
-    assert end > start
+    if end <= start:
+        msg = "Attempting to collapse but end, {0}, is less than or equal to start, {1}!".format(
+            end, start
+        )
+        raise ValueError(msg)
 
-    length = 1
-    stride = 1
-    for idx in range(start, end):
-        if idx != (end - 1):
-            assert strides[idx] == strides[idx + 1] * shape[idx + 1]
+    if a.ndim == 0 or (end - 1 == start):
+        return shape, strides
+
+    length = shape[end - 1]
+    stride = strides[end - 1]
+    for idx in reversed(range(start, end - 1)):
+        if shape[idx] == 0 or shape[idx + 1] == 0:
+            length = 0
+            stride = 0
+            break
+
+        if shape[idx] == 1:
+            continue
+
         length = length * shape[idx]
-        stride = stride * strides[idx]
+        stride = min(stride, strides[idx])
+
+        if (
+            a.numel() > 0
+            and shape[idx + 1] != 1
+            and not (strides[idx] == strides[idx + 1] * shape[idx + 1])
+        ):
+            return None, None
 
     new_shape = shape[:start] + (length,) + shape[end:]
-    new_strides = strides[:start] + (stride,) + shape[end:]
+    new_strides = strides[:start] + (stride,) + strides[end:]
+
+    # NOTE: when the input has no elements it's restrided as if it were contiguous
+    if a.numel() == 0:
+        new_strides = utils.make_contiguous_strides_for(new_shape)
+
+    return new_shape, new_strides
+
+
+def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeType:
+    new_shape, new_strides = _collapse_view_helper(a, start, end)
+
+    if new_shape is None:
+        msg = "Attempting to view a collapsed tensor, but no such view exists!"
+        raise ValueError(msg)
 
     return TensorMeta(a, shape=new_shape, strides=new_strides)
 
 
 def _collapse_view_aten(a: Tensor, start: int, end: int) -> Tensor:
-    # Short-circuits on null op
-    if start == end - 1:
-        return a
+    # Special-cases zero-dim tensors
+    if a.ndim == 0:
+        shape = (1,)
+    else:
+        shape = a.shape  # type: ignore[assignment]
 
     dim_length = 1
     for idx in range(start, end):
-        dim_length = dim_length * a.shape[idx]
+        dim_length = dim_length * shape[idx]
 
-    new_shape = a.shape[0:start] + (dim_length,) + a.shape[end:]
+    new_shape = shape[0:start] + (dim_length,) + shape[end:]
 
     return a.view(new_shape)
 
@@ -895,15 +1370,36 @@ _collapse_view_doc = """
   """
 
 collapse_view = _make_prim(
-    name="collapse_view",
+    schema="collapse_view(Tensor(a) a, int start, int end) -> Tensor(a)",
     meta=_collapse_view_meta,
     impl_aten=_collapse_view_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_collapse_view_doc,
 )
 
+
+def expand_dims(a: TensorLikeType, dimensions: DimsSequenceType) -> TensorLikeType:
+    """
+    Creates a view of a with a.ndim + len(dimensions) dimensions, with new
+    dimensions of length one at the dimensions specified by dimensions.
+    """
+    dims = sorted(utils.canonicalize_dims(a.ndim, dimensions))  # type: ignore[arg-type]
+    if len(set(dims)) != len(dims):
+        msg = "Received duplicate dimensions to expand in {0}".format(str(dimensions))
+        raise ValueError(msg)
+
+    new_shape = list(a.shape)
+    for idx in dims:
+        new_shape.insert(idx, 1)
+
+    broadcast_dimensions = [
+        idx for idx in range(len(new_shape)) if idx not in dimensions
+    ]
+    return broadcast_in_dim(a, new_shape, broadcast_dimensions)
+
+
 # Note: saves the Python slice object because we're about to clobber its name with the slice prim
-pyslice = slice
+pyslice: Type[slice] = slice  # type: ignore[has-type]
 
 
 def _slice_meta(
@@ -951,10 +1447,8 @@ def _slice_meta(
 
     for x, y, z in zip(limit_indices, a.shape, start_indices):
         if x < 0:
-            msg = (
-                "Attempting to slice a tensor with a negative stop index of {0}!".format(
-                    x
-                )
+            msg = "Attempting to slice a tensor with a negative stop index of {0}!".format(
+                x
             )
             raise ValueError(msg)
         if x > y:
@@ -1019,7 +1513,7 @@ _slice_doc = """
     """
 
 slice = _make_prim(
-    name="slice",
+    schema="slice(Tensor(a) a, int[] start_indices, int[] limit_indices, int[]? strides=None) -> Tensor(a)",
     meta=_slice_meta,
     impl_aten=_slice_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1103,7 +1597,7 @@ _slice_in_dim_doc = """
     """
 
 slice_in_dim = _make_prim(
-    name="slice_in_dim",
+    schema="slice_in_dim(Tensor(a) a, int start_index, int limit_index, int stride=1, int axis=0) -> Tensor(a)",
     meta=_slice_in_dim_meta,
     impl_aten=_slice_in_dim_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1113,17 +1607,22 @@ slice_in_dim = _make_prim(
 
 def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLikeType:
     assert isinstance(a, TensorLike)
-    utils.validate_idx(a.shape, dim)
+    utils.validate_idx(a.ndim, dim)
     utils.validate_dim_length(outer_length)
 
     # Verifies the dim can be split with the specified lhs_length
     _inner_length = a.shape[dim] / outer_length
     inner_length: int = int(_inner_length)
-    assert inner_length == _inner_length
+
+    if inner_length != _inner_length:
+        msg = "Attempting to split dimension of length {0}, but outer length of {1} divides it with a remainder!".format(
+            a.shape[dim], outer_length
+        )
+        raise ValueError(msg)
 
     new_shape: List[int] = []
     new_strides: List[int] = []
-    for idx in a.shape:
+    for idx in range(a.ndim):
         if idx == dim:
             new_shape.extend((outer_length, inner_length))
             new_strides.extend((a.stride()[idx] * inner_length, a.stride()[idx]))
@@ -1150,7 +1649,7 @@ _split_dim_doc = """
 
 # TODO: consider renaming split_dim_view
 split_dim = _make_prim(
-    name="split_dim",
+    schema="split_dim(Tensor(a) a, int dim, int outer_length) -> Tensor(a)",
     meta=_split_dim_meta,
     impl_aten=_split_dim_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1162,7 +1661,7 @@ def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
     assert isinstance(a, TensorLike)
 
     for idx in dimensions:
-        utils.validate_idx(a.shape, idx)
+        utils.validate_idx(a.ndim, idx)
         assert a.shape[idx] == 1
 
     new_shape = []
@@ -1178,8 +1677,10 @@ def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
 
 
 def _squeeze_aten(a: Tensor, dimensions: Sequence) -> Tensor:
+    squeezes = 0
     for idx in dimensions:
-        a = torch.squeeze(a, dim=idx)
+        a = torch.squeeze(a, dim=(idx - squeezes))
+        squeezes = squeezes + 1
 
     return a
 
@@ -1191,7 +1692,7 @@ _squeeze_doc = """
   """
 
 squeeze = _make_prim(
-    name="squeeze",
+    schema="squeeze(Tensor(a) a, int[] dimensions) -> Tensor(a)",
     meta=_squeeze_meta,
     impl_aten=_squeeze_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1232,11 +1733,32 @@ _transpose_doc = """
     """
 
 transpose = _make_prim(
-    name="transpose",
+    schema="transpose(Tensor(a) a, int[] permutation) -> Tensor(a)",
     meta=_transpose_meta,
     impl_aten=_transpose_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_transpose_doc,
+)
+
+
+def _view_of_meta(a: TensorLikeType) -> TensorLikeType:
+    return TensorMeta(a)
+
+
+def _view_of_aten(a: Tensor) -> Tensor:
+    return a.view(a.shape)
+
+
+_view_of_doc = """
+    Creates a view of the tensor.
+    """
+
+view_of = _make_prim(
+    schema="view_of(Tensor(a) a) -> Tensor",
+    meta=_view_of_meta,
+    impl_aten=_view_of_aten,
+    return_type=RETURN_TYPE.VIEW,
+    doc=_view_of_doc,
 )
 
 #
@@ -1246,7 +1768,7 @@ def collapse(a: Tensor, start: int, end: int) -> Tensor:
     """
     Wrapper around reshape that collapses a span of dimensions.
 
-    See merge_dims for the corresponding view operation.
+    See collapse_view for the corresponding view operation.
     """
 
     dim_length = 1
@@ -1258,19 +1780,9 @@ def collapse(a: Tensor, start: int, end: int) -> Tensor:
 
 
 # TODO: review stride logic
-def _concatenate_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
-    assert len(tensors) > 0
-
-    for tensor in tensors:
-        assert isinstance(tensor, TensorLike)
-
-    utils.check_same_dtype(*tensors)
-    utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
-
-    shape = tensors[0].shape
-    utils.validate_idx(shape, dim)
-
+def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     # Verifies same shape (except in the concat dimension)
+    shape = tensors[0].shape
     concat_length = 0
     for tensor in tensors:
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
@@ -1288,42 +1800,43 @@ def _concatenate_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLike
     )
 
 
-def _concatenate_aten(
-    tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int
-) -> Tensor:
+def _cat_aten(tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int) -> Tensor:
     return torch.cat(tensors, dim)
 
 
-_concatenate_doc = """
+_cat_doc = """
   Concatenates tensors along the specified dimension.
 
   The tensors' shapes must have the same rank and same length for other dimensions.
   """
 
-concatenate = _make_prim(
-    name="concatenate",
-    meta=_concatenate_meta,
-    impl_aten=_concatenate_aten,
+cat = _make_prim(
+    schema="cat(Tensor[] tensors, int dim) -> Tensor",
+    meta=_cat_meta,
+    impl_aten=_cat_aten,
     return_type=RETURN_TYPE.NEW,
-    doc=_concatenate_doc,
+    doc=_cat_doc,
 )
 
 
-# TODO: needs to return the proper meta tensor
-def _reshape_meta(a: TensorLikeType, shape: Sequence):
+def _reshape_meta(a: TensorLikeType, shape: ShapeType):
     assert isinstance(a, TensorLike)
     utils.validate_shape(shape)
 
     # Validates the tensor and the requested shape have the
     # same number of elements
-    numel = reduce(lambda acc, x: acc * x, shape)
-    assert a.numel() == numel
+    numel = reduce(operator.mul, shape)
+    if numel != a.numel():
+        msg = "Attempting to reshape a tensor with {0} elements to a shape with {1} elements!".format(
+            a.numel(), numel
+        )
+        raise ValueError(msg)
+
+    return TensorMeta(a, shape=shape, strides=utils.make_contiguous_strides_for(shape))
 
 
-def _reshape_aten(
-    a: Tensor, shape: Union[torch.Size, List[int], Tuple[int, ...]]
-) -> Tensor:
-    return a.clone().reshape(shape).contiguous()
+def _reshape_aten(a: Tensor, shape: ShapeType) -> Tensor:
+    return a.reshape(shape).contiguous().clone()
 
 
 _reshape_doc = """
@@ -1331,11 +1844,29 @@ _reshape_doc = """
   containing a copy of the data in a.
   """
 reshape = _make_prim(
-    name="reshape",
+    schema="reshape(Tensor a, int[] shape) -> Tensor",
     meta=_reshape_meta,
     impl_aten=_reshape_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_reshape_doc,
+)
+
+
+def _rev_meta(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
+    utils.validate_dimension_indices(a.ndim, dims)
+    return TensorMeta(a)
+
+
+_rev_doc = """
+    Reverses the order of elements along the given dimensions.
+    """
+
+rev = _make_prim(
+    schema="rev(Tensor a, int[] dims) -> Tensor",
+    meta=_rev_meta,
+    impl_aten=torch.flip,
+    return_type=RETURN_TYPE.NEW,
+    doc=_rev_doc,
 )
 
 #
@@ -1343,40 +1874,60 @@ reshape = _make_prim(
 #
 
 
-def _select_meta(
+def _where_meta(
     pred: TensorLikeType, a: TensorLikeType, b: TensorLikeType
 ) -> TensorLikeType:
-    utils.check_same_device(pred, a, b, allow_cpu_scalar_tensors=True)
-    utils.check_same_shape(pred, a, b)
-    assert pred.dtype is torch.bool
 
     return _elementwise_meta(
-        a, b, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+        a,
+        b,
+        type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+        args_with_fixed_dtypes=(pred,),
     )
 
 
-def _select_aten(pred: Tensor, a: Tensor, b: Tensor) -> Tensor:
-    return torch.where(pred, a, b)
-
-
-_select_doc = """
+_where_doc = """
   Selects elements from a and b according to pred.
 
   Where pred is true the result contains the element from a, and
   where pred is false the result contains the element from b.
   """
 
-select = _make_prim(
-    name="select",
-    meta=_select_meta,
-    impl_aten=_select_aten,
+where = _make_prim(
+    schema="where(Tensor pred, Tensor a, Tensor b) -> Tensor",
+    meta=_where_meta,
+    impl_aten=torch.where,
     return_type=RETURN_TYPE.NEW,
-    doc=_select_doc,
+    doc=_where_doc,
 )
 
 #
 # Type conversions
 #
+# TODO: model memory format on TensorMeta
+# TODO: make clone a reference following its implementation in TensorFactories.cpp
+def _clone_meta(
+    a: TensorLikeType, *, memory_format: torch.memory_format
+) -> TensorLikeType:
+    strides = utils.compute_elementwise_output_strides(a)
+    return TensorMeta(a, strides=strides)
+
+
+def _clone_aten(a: Tensor, *, memory_format: torch.memory_format) -> Tensor:
+    return torch.clone(a, memory_format=memory_format)
+
+
+_clone_doc = """
+    Creates a copy of a tensors.
+"""
+
+clone = _make_prim(
+    schema="clone(Tensor a, *, MemoryFormat memory_format) -> Tensor",
+    meta=_clone_meta,
+    impl_aten=_clone_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_clone_doc,
+)
 
 
 def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
@@ -1384,11 +1935,28 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
     assert isinstance(a, TensorLike)
     assert isinstance(dtype, torch.dtype)
 
-    return TensorMeta(a, dtype=dtype)
+    strides = utils.compute_elementwise_output_strides(a)
+
+    return TensorMeta(a, strides=strides, dtype=dtype)
 
 
 def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
-    return a.to(dtype)
+
+    # Propagates requires grad when possible
+    if not utils.is_grad_dtype(dtype):
+        requires_grad = False
+    else:
+        # TODO: update meta objects so this can be acquired directly
+        try:
+            requires_grad = a.requires_grad
+        except Exception as e:
+            requires_grad = False
+
+    result = torch.empty_like(
+        a, device=a.device, dtype=dtype, requires_grad=requires_grad
+    )
+    with torch.no_grad():
+        return copy_to(result, a)
 
 
 def _convert_element_type_nvfuser(fd: Any, a: Tensor, dtype: torch.dtype) -> Tensor:
@@ -1401,7 +1969,7 @@ _convert_element_type_doc = """
   """
 
 convert_element_type = _make_prim(
-    name="convert_element_type",
+    schema="convert_element_type(Tensor a, ScalarType dtype) -> Tensor",
     meta=_convert_element_type_meta,
     impl_aten=_convert_element_type_aten,
     impl_nvfuser=_convert_element_type_nvfuser,
@@ -1428,11 +1996,118 @@ _device_put_doc = """
   """
 
 device_put = _make_prim(
-    name="device_put",
+    schema="device_put(Tensor a, Device device) -> Tensor",
     meta=_device_put_meta,
     impl_aten=_device_put_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_device_put_doc,
+)
+
+# NOTE: need to model meta scalars
+# See https://github.com/pytorch/pytorch/issues/78070
+def _item_meta(a: TensorLikeType) -> TensorMeta:
+    number_type = utils.dtype_to_type(a.dtype)
+    return TensorMeta(number_type(-1))
+
+
+_item_doc = """
+    Converts a tensor with one element to a Python number.
+"""
+
+# TODO: create a new return type for scalars?
+# FIXME: currently returns integers for boolean tensors
+# https://github.com/pytorch/pytorch/issues/78071
+item = _make_prim(
+    schema="item(Tensor a) -> Scalar",
+    meta=_item_meta,
+    impl_aten=torch.Tensor.item,
+    return_type=RETURN_TYPE.NEW,
+    doc=_item_doc,
+)
+
+# NOTE: need to model meta scalars
+# See https://github.com/pytorch/pytorch/issues/78070
+def _maximum_value_meta(dtype: torch.dtype) -> TensorMeta:
+    number_type = utils.dtype_to_type(dtype)
+    return TensorMeta(number_type(-1))
+
+
+def _maximum_value_aten(dtype: torch.dtype):
+    if dtype == torch.bool:
+        return True
+    elif dtype.is_complex or dtype.is_floating_point:
+        return torch.finfo(dtype).max
+    else:
+        return torch.iinfo(dtype).max
+
+
+_maximum_value_doc = """
+    Return the maximum finite value for a dtype.
+"""
+
+# TODO: create a new return type for scalars?
+# FIXME: currently returns integers for boolean tensors
+# https://github.com/pytorch/pytorch/issues/78071
+maximum_value = _make_prim(
+    schema="maximum_value(ScalarType dtype) -> Scalar",
+    meta=_maximum_value_meta,
+    impl_aten=_maximum_value_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_maximum_value_doc,
+)
+
+
+# NOTE: need to model meta scalars
+# See https://github.com/pytorch/pytorch/issues/78070
+def _minimum_value_meta(dtype: torch.dtype) -> TensorMeta:
+    number_type = utils.dtype_to_type(dtype)
+    return TensorMeta(number_type(-1))
+
+
+def _minimum_value_aten(dtype: torch.dtype):
+    if dtype == torch.bool:
+        return False
+    elif dtype.is_complex or dtype.is_floating_point:
+        return torch.finfo(dtype).min
+    else:
+        return torch.iinfo(dtype).min
+
+
+_minimum_value_doc = """
+    Return the mimimum finite value for a dtype.
+"""
+
+# TODO: create a new return type for scalars?
+# FIXME: currently returns integers for boolean tensors
+# https://github.com/pytorch/pytorch/issues/78071
+minimum_value = _make_prim(
+    schema="minium_value(ScalarType dtype) -> Scalar",
+    meta=_minimum_value_meta,
+    impl_aten=_minimum_value_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_minimum_value_doc,
+)
+
+# TODO: FIXME: strides are incorrect
+def _to_dtype_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
+    strides = utils.make_contiguous_strides_for(a.shape)
+    return TensorMeta(a, strides=strides, dtype=dtype)
+
+
+def _to_dtype_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
+    return a.to(dtype)
+
+
+_to_dtype_doc = """
+    Creates a contiguous copy of a tensor with the given dtype.
+"""
+
+to_dtype = _make_prim(
+    schema=("to_dtype(Tensor a, ScalarType dtype) -> Tensor"),
+    meta=_to_dtype_meta,
+    impl_aten=_to_dtype_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_to_dtype_doc,
 )
 
 #
@@ -1445,10 +2120,11 @@ def _copy_to_meta(a: TensorLikeType, b: TensorLikeType):
     assert isinstance(b, TensorLike)
 
     # Validates the cast is safe
-    a_typ = utils.dtype_to_type(a.dtype)
-    b_typ = utils.dtype_to_type(b.dtype)
-    if a_typ is not utils.get_higher_type(a_typ, b_typ):
-        raise RuntimeError(str(b.dtype), " can't be cast safely to ", str(a.dtype), "!")
+    # TODO: move this as an option on the reference
+    # a_typ = utils.dtype_to_type(a.dtype)
+    # b_typ = utils.dtype_to_type(b.dtype)
+    # if a_typ is not utils.get_higher_type(a_typ, b_typ):
+    #     raise RuntimeError(str(b.dtype), " can't be cast safely to ", str(a.dtype), "!")
 
     # Validates the tensors have the same number of elements
     if a.numel() != b.numel():
@@ -1470,7 +2146,7 @@ _copy_to_doc = """
 
 # TODO: Remove safe casting and implement on reference instead
 copy_to = _make_prim(
-    name="copy_to",
+    schema="copy_to(Tensor(a!) a, Tensor b) -> Tensor(a!)",
     meta=_copy_to_meta,
     impl_aten=_copy_to_aten,
     return_type=RETURN_TYPE.INPLACE,
@@ -1496,7 +2172,7 @@ _resize_doc = """
 
 # TODO: review support arbitrary resizes
 resize = _make_prim(
-    name="resize",
+    schema="resize(Tensor(a!) a, int[] shape) -> Tensor(a!)",
     meta=_resize_meta,
     impl_aten=_resize_aten,
     return_type=RETURN_TYPE.INPLACE,
@@ -1521,12 +2197,20 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
     )
 
 
-def _bool_return_reduction_meta(inp, dims):
-    return _reduction_meta(inp, dims, output_dtype=torch.bool)
+def _var_reduction_meta(inp, dims, *, correction):
+    if utils.is_complex_dtype(inp.dtype):
+        output_dtype = utils.corresponding_real_dtype(inp.dtype)
+    else:
+        output_dtype = inp.dtype
+    return _reduction_meta(inp, dims, output_dtype=output_dtype)
 
 
 _sum_doc = """
     Computes the sum of elements in the input tensor over the list of dimensions
+    specified in the dim argument
+    """
+_prod_doc = """
+    Computes the product of elements in the input tensor over the list of dimensions
     specified in the dim argument
     """
 _amax_doc = """
@@ -1537,52 +2221,240 @@ _amin_doc = """
     Computes the minimum value of elements in the input tensor over the list of dimensions
     specified in the dim argument
     """
+_var_doc = """
+    Computes the biased variance of x over the list of dimensions specified in the dim argument
+    """
 
 
-sum = _make_prim(
+def _make_reduction_prim(name: str, impl_aten, doc):
+    """Creates a reduction prim."""
+    return _make_prim(
+        schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType? output_dtype=None) -> Tensor",
+        meta=_reduction_meta,
+        impl_aten=impl_aten,
+        return_type=RETURN_TYPE.NEW,
+        doc=doc,
+    )
+
+
+def _make_var_reduction_prim(name: str, impl_aten, doc):
+    """Creates a reduction prim."""
+    return _make_prim(
+        schema=f"{name}(Tensor inp, int[]? dims, *, int correction, ScalarType? output_dtype=None) -> Tensor",
+        meta=_var_reduction_meta,
+        impl_aten=impl_aten,
+        return_type=RETURN_TYPE.NEW,
+        doc=doc,
+    )
+
+
+sum = _make_reduction_prim(
     name="sum",
-    meta=_reduction_meta,
     impl_aten=torch.sum,
-    return_type=RETURN_TYPE.NEW,
     doc=_sum_doc,
 )
 
-prod = _make_prim(
+prod = _make_reduction_prim(
     name="prod",
-    meta=_reduction_meta,
     impl_aten=torch.prod,
-    return_type=RETURN_TYPE.NEW,
-    doc=_sum_doc,
+    doc=_prod_doc,
 )
 
-amax = _make_prim(
+var = _make_var_reduction_prim(
+    name="var",
+    impl_aten=torch.var,
+    doc=_var_doc,
+)
+
+amax = _make_reduction_prim(
     name="amax",
-    meta=_reduction_meta,
     impl_aten=torch.amax,
-    return_type=RETURN_TYPE.NEW,
     doc=_amax_doc,
 )
 
-amin = _make_prim(
+amin = _make_reduction_prim(
     name="amin",
-    meta=_reduction_meta,
     impl_aten=torch.amin,
-    return_type=RETURN_TYPE.NEW,
     doc=_amin_doc,
 )
 
-all = _make_prim(
-    name="all",
-    meta=_bool_return_reduction_meta,
-    impl_aten=torch.all,
+# TODO: layout, pin_memory, memory_format
+# TODO: model requires_grad on TensorMeta
+def _empty_meta(
+    shape: ShapeType, *, dtype: torch.dtype, device: torch.device, requires_grad: bool
+) -> TensorLikeType:
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
+
+
+def _empty_aten(
+    shape: ShapeType, *, dtype: torch.dtype, device: torch.device, requires_grad: bool
+) -> Tensor:
+    return torch.empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+
+
+_empty_doc = """
+    Creates a tensor with uninitialized values and the specified shape, dtype, and device.
+"""
+
+empty = _make_prim(
+    schema="empty(int[] shape, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
+    meta=_empty_meta,
+    impl_aten=_empty_aten,
     return_type=RETURN_TYPE.NEW,
-    doc="",
+    doc=_empty_doc,
 )
 
-any = _make_prim(
-    name="any",
-    meta=_bool_return_reduction_meta,
-    impl_aten=torch.any,
+
+def _empty_strided_meta(
+    shape: ShapeType,
+    strides: StrideType,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+) -> TensorLikeType:
+    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
+
+
+_empty_strided_doc = """
+    Creates a tensor with uninitialized values.
+"""
+
+# TODO: add layout, pin_memory
+empty_strided = _make_prim(
+    schema="empty_strided(int[] shape, int[] strides, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
     return_type=RETURN_TYPE.NEW,
-    doc="",
+    meta=_empty_strided_meta,
+    impl_aten=torch.empty_strided,
+    doc=_empty_strided_doc,
+)
+
+
+def _full_meta(
+    shape: ShapeType,
+    fill_value: NumberType,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+) -> TensorLikeType:
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
+
+
+def _full_aten(
+    shape: ShapeType,
+    fill_value: NumberType,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+) -> Tensor:
+    # Note that Mypy thinks torch.full can't accept a complex fill_value
+    return torch.full(
+        shape, fill_value, dtype=dtype, device=device, requires_grad=requires_grad  # type: ignore[arg-type]
+    )
+
+
+_full_doc = """
+    Creates a tensor filled with the given fill value, and with the specified shape, dtype, and device.
+"""
+
+# TODO: add layout
+full = _make_prim(
+    schema="full(int[] shape, Scalar fill_value, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
+    meta=_full_meta,
+    impl_aten=_full_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_full_doc,
+)
+
+
+def _full_like_meta(
+    a: TensorLikeType,
+    fill_value: NumberType,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+) -> TensorLikeType:
+    strides = strides = utils.compute_elementwise_output_strides(a)
+    if a.numel() == 0:
+        strides = a.stride()
+
+    return TensorMeta(a, strides=strides, dtype=dtype, device=device)
+
+
+def _full_like_aten(
+    a: Tensor,
+    fill_value: NumberType,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+) -> Tensor:
+    # Note that Mypy thinks torch.full can't accept a complex fill_value
+    return torch.full_like(
+        a, fill_value, dtype=dtype, device=device, requires_grad=requires_grad  # type: ignore[arg-type]
+    )
+
+
+_full_like_doc = """
+    Creates a tensor filled with the given fill value, and the same shape, dtype, and device as the
+    given tensor by default. The dtype and device settings can be overridden
+    by specifying them explicitly.
+"""
+
+full_like = _make_prim(
+    schema="full_like(Tensor a, Scalar fill_value, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
+    meta=_full_like_meta,
+    impl_aten=_full_like_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_full_like_doc,
+)
+
+#
+# Randomness Prims
+#
+
+
+def _uniform_meta(
+    shape: ShapeType,
+    *,
+    low: float,
+    high: float,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> TensorLikeType:
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
+
+
+def _uniform_aten(
+    shape: ShapeType,
+    *,
+    low: float,
+    high: float,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> Tensor:
+    a = torch.empty(shape, dtype=dtype, device=device)
+    a.uniform_(low, high)
+    return a
+
+
+_uniform_doc = """
+    Constructs a tensor filled with values drawn uniformly from low to high.
+"""
+
+# TODO: we should more seriously review randomness modeling and prims
+uniform = _make_prim(
+    schema=(
+        "uniform(int[] shape, *, Scalar low, Scalar high, ScalarType dtype, Device device) -> Tensor"
+    ),
+    return_type=RETURN_TYPE.NEW,
+    meta=_uniform_meta,
+    impl_aten=_uniform_aten,
+    doc=_uniform_doc,
 )
