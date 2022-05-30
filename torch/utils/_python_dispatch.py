@@ -147,6 +147,10 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError()
 
+    @classmethod
+    def push(cls, *args, **kwargs):
+        return push_torch_dispatch_mode(functools.partial(cls, *args, **kwargs))
+
 
 class BaseTorchDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):

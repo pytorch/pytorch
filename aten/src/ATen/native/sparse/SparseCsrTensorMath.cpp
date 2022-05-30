@@ -115,7 +115,7 @@ TORCH_META_FUNC(_convert_indices_from_coo_to_csr)
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options =
       TensorOptions().device(self.options().device()).dtype(scalar_type);
-  set_output(size + 1, options);
+  set_output_raw_strided(0, size + 1, {}, options);
 }
 
 TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
@@ -128,7 +128,7 @@ TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
   TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
-  set_output(0, {2, col_indices.numel()}, {}, options, {});
+  set_output_raw_strided(0, {2, col_indices.numel()}, {}, options, {});
 }
 
 } // namespace meta
@@ -148,9 +148,9 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
     if (result.numel() == 0) {
       at::native::resize_as_sparse_csr_(result, self);
     }
-    // copy_sparse_csr_ internally checks the sizes of result and self tensors
+    // copy_sparse_compressed_ internally checks the sizes of result and self tensors
     // Hence no external size check required
-    at::native::copy_sparse_csr_(result, self);
+    at::native::copy_sparse_compressed_(result, self);
   }
 
   auto self_values = self.values();
@@ -424,7 +424,7 @@ void addmm_out_sparse_csr_native_cpu(
 
 // Functions for matrix multiplication.
 // result = beta * self + alpha (mat1 @ mat2)
-Tensor& addmm_out_sparse_csr_cpu(
+Tensor& addmm_out_sparse_compressed_cpu(
     const Tensor& self,
     const Tensor& mat1,
     const Tensor& mat2,
@@ -446,6 +446,11 @@ Tensor& addmm_out_sparse_csr_cpu(
   TORCH_CHECK(
       mat1.size(1) == mat2.size(0), "mat1 and mat2 shapes cannot be multiplied (",
       mat1.size(0), "x", mat1.size(1), " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+
+  if (mat1.layout() == kSparseCsc || mat2.layout() == kSparseCsc) {
+    return addmm_out_sparse_compressed_cpu(
+        self, mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
+  }
 
   c10::MaybeOwned<at::Tensor> self_;
   // Don't expand self if this is an in-place operation
@@ -501,7 +506,9 @@ Tensor& addmm_out_sparse_csr_cpu(
       false,
       "Calling addmm on sparse CPU tensors requires Linux platform. ",
       "Please use PyTorch built with MKL on Linux.");
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.layout() == kStrided);
+  TORCH_CHECK(
+      result.layout() == kStrided,
+      "Calling addmm on CPU with sparse output requires MKL.");
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       result.scalar_type(), "addmm_sparse_dense", [&] {
         addmm_out_sparse_csr_native_cpu<scalar_t>(
@@ -513,7 +520,7 @@ Tensor& addmm_out_sparse_csr_cpu(
   return result;
 }
 
-Tensor addmm_sparse_csr_dense(
+Tensor addmm_sparse_compressed_dense(
     const Tensor& self,
     const SparseCsrTensor& sparse,
     const Tensor& dense,
@@ -549,6 +556,19 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
         0.0,
         1.0);
   }
+  if ((mat1.layout() == kSparseCsc || mat1.layout() == kSparseCsr) &&
+      (mat2.layout() == kSparseCsc || mat2.layout() == kSparseCsr)) {
+    // TODO: Expensive conversion to CSR. Should add native support for CSC.
+    // Covers CSC @ CSR
+    // Covers CSR @ CSC
+    // Covers CSC @ CSC
+    return _sparse_csr_mm(mat1.to_sparse_csr(), mat2.to_sparse_csr());
+  }
+  if (mat1.layout() == kSparseCsc && mat2.layout() == c10::kStrided) {
+    // TODO: This is a costly conversion. We should have
+    // native support for CSC.
+    return _sparse_csr_mm(mat1.to_sparse_csr(), mat2);
+  }
   if (mat1.is_sparse_csr() && mat2.layout() == c10::kStrided) {
     // Return dense
     return at::addmm(
@@ -567,7 +587,7 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
         0.0,
         1.0);
   }
-  TORCH_INTERNAL_ASSERT(false, "Shouldn't get here. Please open an issue.");
+  AT_ERROR("_sparse_csr_mm does not support matrix multiplication of ", mat1.layout(), " @ ", mat2.layout());
 }
 
 Tensor _sparse_csr_addmm(
