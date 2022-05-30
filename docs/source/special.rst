@@ -32,7 +32,9 @@ Exponential Functions
 ^^^^^^^^^^^^^^^^^^^^^
 
 .. note::
-    The exponential function, ``exp``, is found in the ``torch`` module.
+    The exponential function is found in the ``torch`` module:
+
+    * ``torch.exp``
 
 .. autofunction:: exp2
 .. autofunction:: expit
@@ -42,8 +44,11 @@ Logarithmic Functions
 ^^^^^^^^^^^^^^^^^^^^^
 
 .. note::
-    The standard logarithmic functions, ``log``, ``log2``, and ``log10``, are
-    found in the ``torch`` module.
+    Many logarithmic functions can be found in the ``torch`` module:
+
+    * ``torch.log``
+    * ``torch.log2``
+    * ``torch.log10``
 
 .. autofunction:: log1p
 .. autofunction:: logit
@@ -55,8 +60,8 @@ Trigonometric Functions
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 .. note::
-    The majority of trigonometric, inverse trigonmetric, hyperbolic, and inverse
-    hyperbolic functions are found in the ``torch`` module.
+    The **majority** of trigonometric, inverse trigonmetric, hyperbolic, and
+    inverse hyperbolic functions are found in the ``torch`` module.
 
 .. autofunction:: sinc
 
@@ -93,8 +98,21 @@ Gamma and Related Functions
 Gamma Functions
 ^^^^^^^^^^^^^^^
 
-.. autofunction:: gammainc
-.. autofunction:: gammaincc
+The `complete` gamma function is an extension of the factorial function to real
+and complex numbers:
+
+.. math::
+    \Gamma(n) = (n - 1)!
+
+.. autofunction:: gamma
+
+The complete gamma function :math:`\Gamma(x)` can be generalized to the `upper`
+incomplete gamma function :math:`\Gamma(a, x)` and `lower` incomplete gamma
+function :math:`\gamma(a,x)`.
+
+.. autofunction:: upper_incomplete_gamma
+.. autofunction:: lower_incomplete_gamma
+
 .. autofunction:: gammaln
 .. autofunction:: multigammaln
 
@@ -105,6 +123,22 @@ Polygamma Functions
 .. autofunction:: polygamma
 .. autofunction:: psi
 
+Combinatorial Functions
+^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autofunction:: factorial
+
+.. autofunction:: falling_factorial
+.. autofunction:: rising_factorial
+
+.. autofunction:: superfactorial_sf
+.. autofunction:: hyperfactorial_h
+
+.. autofunction:: binomial_coefficient
+
+Barnes G-Functions
+^^^^^^^^^^^^^^^^^^
+
 Orthogonal Polynomials
 ----------------------
 
@@ -113,6 +147,9 @@ Chebyshev Polynomials
 
 .. autofunction:: chebyshev_polynomial_t
 .. autofunction:: chebyshev_polynomial_u
+
+Shifted Chebyshev Polynomials
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Hermite Polynomials
 ^^^^^^^^^^^^^^^^^^^
@@ -243,6 +280,9 @@ same amplitude of oscillation as :math:`\operatorname{Ai}(x)` as
 
 .. math::
     \operatorname{Bi}(x)={\frac{1}{\pi}}\int_{0}^{\infty}\left[\exp \left(-{\tfrac{t^{3}}{3}}+xt\right)+\sin\left({\tfrac{t^{3}}{3}}+xt\right)\,\right]dt.
+
+.. autofunction:: airy_ai
+.. autofunction:: airy_bi
 
 Zeta and Related Functions
 --------------------------
