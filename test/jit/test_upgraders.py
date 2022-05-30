@@ -133,10 +133,52 @@ class TestUpgraders(JitTestCase):
         traced_func = torch.jit.trace(test_func, ())
         buffer = io.BytesIO()
         torch.jit.save(traced_func, buffer)
+
+        current_flag_value = torch._C._get_version_calculator_flag()
+        # calculate based on old version
+        torch._C._calculate_package_version_based_on_upgraders(False)
         buffer.seek(0)
         loaded_func = torch.jit.load(buffer)
         version = self._load_model_version(loaded_func)
         self.assertTrue(version == 4)
+
+        # calculate based on new version
+        torch._C._calculate_package_version_based_on_upgraders(True)
+        buffer.seek(0)
+        loaded_func = torch.jit.load(buffer)
+        version = self._load_model_version(loaded_func)
+        self.assertTrue(version == 4)
+
+        # make sure we preserve old behaviou
+        torch._C._calculate_package_version_based_on_upgraders(current_flag_value)
+
+    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
+    def test_aten_full_other_variants(self):
+        def test_func():
+            a = torch.full([4, 5, 6], 4, names=["a", "b", "c"], dtype=torch.int64)
+            return a
+
+        scripted_func = torch.jit.script(test_func)
+        buffer = io.BytesIO()
+        torch.jit.save(scripted_func, buffer)
+
+        current_flag_value = torch._C._get_version_calculator_flag()
+        # calculate based on old version
+        torch._C._calculate_package_version_based_on_upgraders(False)
+        buffer.seek(0)
+        loaded_func = torch.jit.load(buffer)
+        version = self._load_model_version(loaded_func)
+        self.assertTrue(version == 5)
+
+        # calculate based on new version
+        torch._C._calculate_package_version_based_on_upgraders(True)
+        buffer.seek(0)
+        loaded_func = torch.jit.load(buffer)
+        version = self._load_model_version(loaded_func)
+        self.assertTrue(version == 5)
+
+        # make sure we preserve old behaviou
+        torch._C._calculate_package_version_based_on_upgraders(current_flag_value)
 
     @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
     def test_aten_linspace(self):
