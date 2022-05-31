@@ -33,6 +33,22 @@ from torch.onnx import (  # noqa: F401
 )
 from torch.onnx._globals import GLOBALS
 
+__all__ = [
+    "is_in_onnx_export",
+    "select_model_mode_for_export",
+    "disable_apex_o2_state_dict_hook",
+    "setup_onnx_logging",
+    "exporter_context",
+    "export",
+    "warn_on_static_input_change",
+    "unpack_quantized_tensor",
+    "export_to_pretty_string",
+    "unconvertible_ops",
+    "get_ns_op_name_from_custom_op",
+    "register_custom_op_symbolic",
+    "unregister_custom_op_symbolic",
+]
+
 # the flag to tell the user whether it's in the middle of ONNX export or not
 __IN_ONNX_EXPORT = False
 
