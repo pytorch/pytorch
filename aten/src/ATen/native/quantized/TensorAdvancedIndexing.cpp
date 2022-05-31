@@ -5,10 +5,11 @@
 #include <ATen/native/TensorAdvancedIndexingUtils.h>
 #include <ATen/NamedTensorUtils.h>
 #include <c10/core/QScheme.h>
-#include <iostream>
 
 namespace at {
 namespace native {
+DEFINE_DISPATCH(masked_fill_kernel_quantized_stub);
+DEFINE_DISPATCH(index_put_kernel_quantized_stub);
 
 namespace {
 static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
@@ -50,7 +51,7 @@ static Tensor & masked_fill_impl_quantized_cpu(Tensor & self, const Tensor & mas
     .add_input(mask)
     .build();
 
-  at::native::masked_fill_kernel_quantized_cpu(iter, value, self.q_scale(), self.q_zero_point());
+  masked_fill_kernel_quantized_stub(iter.device_type(), iter, value, self.q_scale(), self.q_zero_point());
   return self;
 }
 }
@@ -110,7 +111,7 @@ Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<c10::opt
 
   auto info = make_info(self, indices);
   auto iter = make_index_put_iterator(info, value_);
-  at::native::index_put_kernel_quantized_cpu(iter, info.indexed_sizes, info.indexed_strides, accumulate, self.q_scale(), self.q_zero_point());
+  index_put_kernel_quantized_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides, accumulate, self.q_scale(), self.q_zero_point());
   return self;
 }
 
