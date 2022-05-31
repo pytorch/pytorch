@@ -152,7 +152,7 @@ def register_op_handler(run_handler_check: Union[Callable[[OpOverload], bool], O
 # it insteead of calling device again or we would keep on recurring
 # NB: register this first, since device will be called frequently
 @register_op_handler(torch.ops.prim.device.default)
-def to_copy(cls_or_mode_instance, func, types, args, kwargs, run_function, converter):
+def device_op(cls_or_mode_instance, func, types, args, kwargs, run_function, converter):
     assert len(args) == 1 and isinstance(args[0], FakeTensor)
     return args[0].fake_device
 
