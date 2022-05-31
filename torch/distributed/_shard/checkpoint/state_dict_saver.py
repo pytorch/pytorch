@@ -1,6 +1,7 @@
 import io
 from typing import Any, Dict, List, Tuple, Optional, Union
 
+
 import torch
 import torch.distributed as dist
 
@@ -20,12 +21,18 @@ from .resharding import (
     _prepare_bytes_write
 )
 
-from .storage import StorageWriter
+from .storage import (
+    StorageWriter,
+)
+
+from .api import CheckpointException
 
 # -------------- private functions --------------
 
 def _prepare(
-    state_dict: Dict[str, Any]
+    state_dict: Dict[str, Any],
+    write_replicated_data: bool,
+    process_group: Optional[dist.ProcessGroup] = None,
 ) -> Tuple[Metadata, List[BytesWriteRequest], List[TensorWriteRequest]]:
     """
     Build the serialization plan for a given state_dict
@@ -55,9 +62,6 @@ def _prepare(
     tensor_write_requests: List[TensorWriteRequest] = []
     bytes_write_requests: List[BytesWriteRequest] = []
     storage_key_to_fqn: Dict[str, str] = dict()
-    # The assumption is that all non ShardedTensor items are replicated
-    #   and we can save them from rank 0.
-    write_replicated_data = not (dist.is_initialized() and dist.get_rank() != 0)
 
     for fqn, obj in state_dict.items():
         if isinstance(obj, ShardedTensor):
@@ -82,11 +86,12 @@ def _prepare(
 
     return (metadata, bytes_write_requests, tensor_write_requests)
 
-
 def save_state_dict(
     state_dict: Dict[str, Any],
     storage_writer: StorageWriter,
-    process_group: Optional[dist.ProcessGroup] = None
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False
 ) -> None:
     """
     Save a distributed model in SPMD style.
@@ -105,10 +110,16 @@ def save_state_dict(
     If using the `process_group` argument, make sure that only its ranks
     call `save_state_dict` and that all data in state_dict belong to it.
 
+    This function can be used to save a state_dict with an intialized process
+    group by passing ``no_dist=True``. This can be used to produce a checkpoint
+    that can consumed by load_state_dict is a SPMD fashion.
+
     Args:
         state_dict (Dict[str, Any]) : A state_dict
         storage_writer (StorageWriter): Instance of StorageWrite use to perform writes.
         process_group (ProcessGroup): ProcessGroup to be used for cross-rank synchronization
+        coordinator_rank (int): Rank to use to coordinate the checkpoint, rank0 is used by default
+        no_dist (bool): Don't attempt to save in SPMD style. Default to False
 
     Example:
         >>> my_model = MyModule()
@@ -122,33 +133,84 @@ def save_state_dict(
         >>>     state_dict=model_state_dict,
         >>>     storage_writer=fs_stroage_writer,
         >>> )
-    """
-    (
-        metadata,
-        bytes_write_requests,
-        tensor_write_requests,
-    ) = _prepare(state_dict)
 
-    is_rank0 = not dist.is_initialized() or dist.get_rank(process_group) == 0
-    if is_rank0:
-        storage_writer.prepare()
+    .. note:: save_state_dict uses collectives to coordinate writes across ranks.
+        For NCCL-based process groups, internal tensor representations of objects
+        must be moved to the GPU device before communication takes place. In this
+        case, the device used is given by ``torch.cuda.current_device()`` and it
+        is the user's responsibility to ensure that this is set so that each rank
+        has an individual GPU, via ``torch.cuda.set_device()``
+    """
+    is_coordinator = no_dist or dist.get_rank(process_group) == coordinator_rank
+
+    exceptions: List[Optional[BaseException]] = [None]
+    if is_coordinator:
+        try:
+            storage_writer.prepare()
+        except BaseException as e:
+            exceptions = [e]
 
     # Writing can only start once prepare has finished
-    if dist.is_initialized():
-        dist.barrier(process_group)
+    if not no_dist:
+        dist.broadcast_object_list(exceptions, group=process_group, src=coordinator_rank)
 
-    combined_writes: List[Union[TensorWriteRequest, BytesWriteRequest]] = []
-    combined_writes.extend(tensor_write_requests)
-    combined_writes.extend(bytes_write_requests)
+    if exceptions[0] is not None:
+        raise CheckpointException("failed to prepare storage", {coordinator_rank : exceptions[0]})
 
-    storage_writer.prepare_storage(combined_writes)
-    bytes_futures = storage_writer.write_bytes(bytes_write_requests)
-    tensor_futures = storage_writer.write_tensors(tensor_write_requests)
-    torch.futures.wait_all([bytes_futures, tensor_futures])
+    rank_write_error: Optional[BaseException]
+    try:
+        (
+            metadata,
+            bytes_write_requests,
+            tensor_write_requests,
+        ) = _prepare(state_dict, is_coordinator, process_group)
 
-    if is_rank0:
-        storage_writer.write_metadata(metadata=metadata)
-        storage_writer.finish()
-    # barrier at the end that ensures all ranks can see the checkpoint
-    if dist.is_initialized():
-        dist.barrier(process_group)
+        combined_writes: List[Union[TensorWriteRequest, BytesWriteRequest]] = []
+        combined_writes.extend(tensor_write_requests)
+        combined_writes.extend(bytes_write_requests)
+
+        storage_writer.prepare_storage(combined_writes)
+        bytes_futures = storage_writer.write_bytes(bytes_write_requests)
+        tensor_futures = storage_writer.write_tensors(tensor_write_requests)
+        torch.futures.wait_all([bytes_futures, tensor_futures])
+        rank_write_error = None
+    except BaseException as e:
+        rank_write_error = e
+
+    all_errors: List[Optional[BaseException]]
+    # collect all write errors
+    if not no_dist:
+        all_errors = [None] * dist.get_world_size(process_group)
+        dist.gather_object(
+            obj=rank_write_error,
+            object_gather_list=all_errors if is_coordinator else None,
+            dst=coordinator_rank
+        )
+    else:
+        all_errors = [rank_write_error]
+
+    result: List[Optional[CheckpointException]] = [None]
+    if is_coordinator:
+        message: Optional[str] = None
+        # gather produces an array of arrays, flatten it
+        if any(all_errors):
+            message = "Failed to write data"
+        else:
+            try:
+                storage_writer.finish(metadata=metadata)
+            except BaseException as e:
+                all_errors[coordinator_rank] = e
+                message = "Failed to finish checkpoint"
+
+        if message is not None:
+            node_failures = {i: err for i, err in enumerate(all_errors) if err is not None}
+            result[0] = CheckpointException(message, node_failures)
+
+    if not no_dist:
+        dist.broadcast_object_list(
+            result,
+            group=process_group,
+            src=coordinator_rank)
+
+    if result[0] is not None:
+        raise result[0]
