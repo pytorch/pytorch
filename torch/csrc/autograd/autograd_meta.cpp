@@ -97,20 +97,37 @@ namespace {
     if (!at::_has_same_storage_numel(base, other)) {
       return false;
     }
-    if (base.is_conj() != other.is_conj()) {
+    if (base.is_conj() != other.is_conj() || base.is_neg() != other.is_neg()) {
       return false;
     }
     return true;
   }
 
-  Tensor maybe_flip_conj(const Tensor& other, const Tensor& base) {
-    // If conj-ness is not same, flip the conj of other
-    if (base.is_conj() && !other.is_conj()) {
-      return other.conj_physical().conj();
-    } else if (!base.is_conj() && other.is_conj()) {
-      return other.resolve_conj();
+  Tensor maybe_match_conj_or_neg(const Tensor& other, const Tensor& base) {
+    if (base.is_conj()) {
+      if (other.is_neg()) {
+        return other.resolve_neg().conj_physical().conj();
+      } else if (other.is_conj()) {
+        return other;
+      } else {
+        return other.conj_physical().conj();
+      }
+    } else if (base.is_neg()) {
+      if (other.is_neg()) {
+        return other;
+      } else if (other.is_conj()) {
+        return other.resolve_conj().negative()._neg_view();
+      } else {
+        return other.negative()._neg_view();
+      }
     } else {
-      return other;
+      if (other.is_neg()) {
+        return other.resolve_neg();
+      } else if (other.is_conj()) {
+        return other.resolve_conj();
+      } else {
+        return other;
+      }
     }
   }
 
@@ -177,7 +194,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
             new_base_fw_grad = new_grad;
           } else {
             new_base_fw_grad = at::_new_zeros_with_same_feature_meta(new_grad, base);
-            new_base_fw_grad = maybe_flip_conj(new_base_fw_grad, base);
+            new_base_fw_grad = maybe_match_conj_or_neg(new_base_fw_grad, base);
 
             // Update new_grad to be a view of the base
             Tensor new_fw_grad_value;
@@ -204,7 +221,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
             "Expected the output of forward differentiable view operations to have the tangent have the same layout as primal")
       }
       auto res = at::_new_zeros_with_same_feature_meta(new_grad, self);
-      res = maybe_flip_conj(res, self);
+      res = maybe_match_conj_or_neg(res, self);
       res.copy_(new_grad);
       new_grad = res;
     }
