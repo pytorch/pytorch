@@ -1,6 +1,5 @@
 """ONNX exporter exceptions."""
 
-
 from typing import Optional
 
 __all__ = ["OnnxExporterError", "CheckerError", "UnsupportedOperatorError"]
