@@ -614,7 +614,8 @@ def gen_pyi(
             ],
             "as_subclass": ["def as_subclass(self, cls: Tensor) -> Tensor: ..."],
             "_make_subclass": [
-                "def _make_subclass(cls, data: Tensor, require_grad: _bool = False) -> Tensor: ..."
+                "def _make_subclass(cls, data: Tensor, require_grad: _bool = False, dispatch_strides: _bool=False,"
+                " dispatch_device: _bool=False) -> Tensor: ..."
             ],
             "__getitem__": ["def __getitem__(self, {}) -> Tensor: ...".format(INDICES)],
             "__setitem__": [
