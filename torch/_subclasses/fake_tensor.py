@@ -3,6 +3,7 @@ import torch
 from torch.utils._pytree import tree_map
 from functools import partial
 from torch.fx.operator_schemas import normalize_function
+from torch.utils._mode_utils import no_dispatch
 from typing import Union
 
 aten = torch.ops.aten
@@ -60,6 +61,17 @@ class FakeTensor(torch.Tensor):
             return args[0].fake_device
 
         # Run the original computation
+
+        # _to_copy fails when run with FakeTensors to cuda device
+        # TODO: debug
+        if func == torch.ops.aten._to_copy.default:
+            _, new_kwargs = normalize_function(
+                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+            )
+            out_device = new_kwargs.pop("device", new_kwargs["input"].device)
+            with no_dispatch():
+                input = new_kwargs.pop("input").to("meta")
+                return FakeTensor(torch.ops.aten._to_copy(input, **new_kwargs), out_device)
 
         r = super().__torch_dispatch__(func, types, args, kwargs)
 
