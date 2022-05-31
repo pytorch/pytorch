@@ -9,6 +9,7 @@ from typing import Union
 from torch._ops import OpOverload
 from torch.utils._python_dispatch import TorchDispatchMode
 import functools
+import contextlib
 
 aten = torch.ops.aten
 
@@ -56,6 +57,17 @@ def _is_tensor_constructor(func: OpOverload):
         len(schema.returns) == 1 and schema.returns[0].type is torch._C.TensorType.get()
     )
 
+cpu_fallback_enabled = False
+
+@contextlib.contextmanager
+def enable_cpu_fallback(enable_cpu_fallback: bool):
+    global cpu_fallback_enabled
+    orig = cpu_fallback_enabled
+    cpu_fallback_enabled = enable_cpu_fallback
+    try:
+        yield
+    finally:
+        cpu_fallback_enabled = orig
 
 # Similar to `MetaConverter`, this is a class for converting
 # multiple tensors into fake tensors which share the same view/storage
@@ -78,6 +90,39 @@ class FakeTensorConverter(MetaConverter):
     def __call__(self, t, device=None):
         return self.fake_tensor(t, device)
 
+def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
+    with no_dispatch():
+        def to_cpu(e):
+            if isinstance(e, FakeTensor):
+                return torch.empty_like(e, device="cpu")
+            return e
+        try:
+            args = tree_map(to_cpu, args)
+            kwargs = tree_map(to_cpu, kwargs)
+            r = func(*args , **kwargs)
+        except Exception:
+            # original error more orinformative
+            raise orig_not_implemented_exception
+        tensor_impls = set()
+
+        def collect_impls(e):
+            if isinstance(e, torch.Tensor):
+                tensor_impls.add(e)
+
+        tree_map(collect_impls, (args, kwargs))
+        # proper aliasing/metadata relationship between outputs and inputs will
+        # not be set up, bc of conversion to cpu, error on reused impls
+
+        def throw_on_reused_impls(e):
+            if e in tensor_impls:
+                raise orig_not_implemented_exception
+
+        tree_map(throw_on_reused_impls, r)
+
+    # we're only converting these to MetaTensors now, not Fake Tensors,
+    # and the cpu inputs should be temporary. just convert outputs to meta
+    # and continue
+    return tree_map(MetaConverter(), r)
 
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
@@ -96,9 +141,10 @@ def torch_dispatch_impl(cls_or_mode_instance, func, types, args, kwargs, run_fun
         assert len(args) == 1 and isinstance(args[0], FakeTensor)
         return args[0].fake_device
 
-    def wrap(e, device=None):
+    def wrap(e, device=None, converter_fn=None):
+        converter_fn = converter if converter_fn is None else converter_fn
         if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
-            return converter(e, device)
+            return converter_fn(e, device)
         else:
             return e
 
@@ -147,6 +193,7 @@ def torch_dispatch_impl(cls_or_mode_instance, func, types, args, kwargs, run_fun
             # cpu is default device if none is specified
             default_device = torch.device("cpu")
             args = ()
+
         out_device = new_kwargs.pop("device", default_device)
         new_kwargs["device"] = torch.device("meta")
         r = run_function(func, types, args, new_kwargs)
@@ -160,7 +207,12 @@ def torch_dispatch_impl(cls_or_mode_instance, func, types, args, kwargs, run_fun
         r = run_function(func, types, (), new_kwargs)
         return converter(r, out_device)
 
-    r = run_function(func, types, args, kwargs)
+    try:
+        r = run_function(func, types, args, kwargs)
+    except NotImplementedError as not_implemented_error:
+        if not cpu_fallback_enabled:
+            raise not_implemented_error
+        r = run_cpu_fallback(func, args, kwargs, not_implemented_error)
 
     # TODO: handle non-kwarg devices
     assert func not in _device_not_kwarg_ops, f"NYI: {func}"

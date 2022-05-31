@@ -90,6 +90,26 @@ class FakeTensorTest(TestCase):
         self.assertTrue(isinstance(z, FakeTensor))
         self.assertEqual(z.device.type, "cuda")
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cpu_fallback(self):
+        filters = FakeTensor.from_tensor(torch.randn(8, 4, 3, 3).cuda())
+        inputs = FakeTensor.from_tensor(torch.randn(1, 4, 5, 5).cuda())
+        with self.assertRaises(NotImplementedError):
+            torch.nn.functional.conv2d(inputs, filters, padding=1)
+
+        with torch._subclasses.fake_tensor.enable_cpu_fallback(True):
+            out = torch.nn.functional.conv2d(inputs, filters, padding=1)
+        self.assertEqual(out.device.type, "cuda")
+        self.assertEqual(list(out.size()), [1, 8, 5, 5])
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cpu_fallback_returned_impl(self):
+        x = FakeTensor.from_tensor(torch.randn([4, 4]).cuda())
+        y = FakeTensor.from_tensor(torch.randn([4, 4]).cuda())
+        with self.assertRaises(NotImplementedError):
+            with torch._subclasses.fake_tensor.enable_cpu_fallback(True):
+                out = torch.relu_(x)
+
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
         contains_type(e, maybe_contained_type) for e in type.containedTypes()
