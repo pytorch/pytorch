@@ -66,7 +66,7 @@ __all__ = [
     "log",
     "set_log_stream",
     # Errors
-    "CheckerError",
+    "CheckerError",  # Backwards compatibility
 ]
 
 producer_name = "pytorch"
