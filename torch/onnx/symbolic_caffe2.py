@@ -12,7 +12,9 @@ def register_quantized_ops(domain: str, version: int):
     # Register all quantized ops
     module = importlib.import_module("torch.onnx.symbolic_caffe2")
     symbolic_registry._symbolic_versions["caffe2"] = module
-    quant_version_ops = inspect.getmembers(symbolic_registry._symbolic_versions["caffe2"])
+    quant_version_ops = inspect.getmembers(
+        symbolic_registry._symbolic_versions["caffe2"]
+    )
     for op in quant_version_ops:
         if inspect.isfunction(op[1]) and not symbolic_registry.is_registered_op(
             op[0], domain, version
