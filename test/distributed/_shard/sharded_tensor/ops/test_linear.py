@@ -12,7 +12,6 @@ from torch.distributed._shard.api import (
 )
 from torch.distributed._shard.sharded_optim import (
     ShardedOptimizer,
-    named_params_with_sharded_tensor,
 )
 from torch.distributed._shard.sharded_tensor import (
     empty,
@@ -127,7 +126,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         previous_sharded_weight = sharded_weight.clone()
         previous_sharded_bias = sharded_linear.bias.clone()
         sharded_optim = ShardedOptimizer(
-            dict(named_params_with_sharded_tensor(sharded_linear)),
+            dict(sharded_linear.named_parameters()),
             torch.optim.SGD,
             lr=0.1,
         )

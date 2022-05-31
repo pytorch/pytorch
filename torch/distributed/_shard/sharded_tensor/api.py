@@ -425,6 +425,26 @@ class ShardedTensor(torch.Tensor):
         )
         return st_cpu
 
+    def cuda(
+        self,
+        device=None,
+        non_blocking=False,
+        memory_format=torch.preserve_format,
+        process_group=None
+    ) -> ShardedTensor:
+        """
+        Returns a copy of this object in CUDA memory.
+
+        If this ShardedTensor is already on CPU memory, then no copy is
+        performed and original object is returned.
+
+        .. note:: When moving a ShardedTensor from GPU to CPU, the ShardedTensor might
+            need to be managed by a different type of ProcessGroup(i.e. ProcessGroupGloo),
+            it is the user's responsiblity to explicitly pass in a new process_group that
+            is compatible with CPU.
+        """
+        return self
+
     @classmethod
     def _init_from_local_shards(
         cls,
