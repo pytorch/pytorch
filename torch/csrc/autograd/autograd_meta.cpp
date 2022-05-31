@@ -103,31 +103,13 @@ namespace {
     return true;
   }
 
-  Tensor maybe_match_conj_or_neg(const Tensor& other, const Tensor& base) {
-    if (base.is_conj()) {
-      if (other.is_neg()) {
-        return other.resolve_neg().conj_physical().conj();
-      } else if (other.is_conj()) {
-        return other;
-      } else {
-        return other.conj_physical().conj();
-      }
-    } else if (base.is_neg()) {
-      if (other.is_neg()) {
-        return other;
-      } else if (other.is_conj()) {
-        return other.resolve_conj().negative()._neg_view();
-      } else {
-        return other.negative()._neg_view();
-      }
+  Tensor maybe_match_conj_or_neg(const Tensor& self, const Tensor& target) {
+    if (target.is_conj()) {
+      return self.conj();
+    } else if (target.is_neg()) {
+      return self._neg_view();
     } else {
-      if (other.is_neg()) {
-        return other.resolve_neg();
-      } else if (other.is_conj()) {
-        return other.resolve_conj();
-      } else {
-        return other;
-      }
+      return self;
     }
   }
 
