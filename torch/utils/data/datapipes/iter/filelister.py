@@ -10,7 +10,7 @@ from torch.utils.data.datapipes.utils.common import get_file_pathnames_from_root
 __all__ = ["FileListerIterDataPipe", ]
 
 
-@functional_datapipe("list_files")
+@functional_datapipe("list_file")
 class FileListerIterDataPipe(IterDataPipe[str]):
     r"""
     Given path(s) to the root directory, yields file pathname(s) (path + filename) of files within the root directory.
