@@ -23,7 +23,7 @@ from . import forward_ad
 from . import graph
 from .. import _vmap_internals
 
-__all__ = ['Variable', 'Function', 'backward', 'grad_mode']
+__all__ = ['Variable', 'Function', 'backward', 'grad_mode', 'ProfilerActivity']
 
 _OptionalTensor = Optional[torch.Tensor]
 
