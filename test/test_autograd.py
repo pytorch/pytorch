@@ -6704,6 +6704,26 @@ class TestAutogradForwardMode(TestCase):
             fwAD.make_dual(torch.rand_like(s), s)
             self.assertEqual(counter[0], 1)
 
+    def test_make_dual_forbid_integral_dtype(self):
+        primal_f = torch.ones(2, 2, dtype=torch.float)
+        primal_l = torch.ones(2, 2, dtype=torch.long)
+
+        tangent_f = torch.ones(2, 2, dtype=torch.float)
+        tangent_l = torch.ones(2, 2, dtype=torch.long)
+
+        with fwAD.dual_level():
+            # Float Primal and Long Tangent
+            with self.assertRaisesRegex(ValueError, "Expected tangent to be floating point or complex"):
+                fwAD.make_dual(primal_f, tangent_l)
+
+            # Long Primal and Long Tangent
+            with self.assertRaisesRegex(ValueError, "Expected primal to be floating point or complex"):
+                fwAD.make_dual(primal_l, tangent_l)
+
+            # Long Primal and Float Tangent
+            with self.assertRaisesRegex(ValueError, "Expected primal to be floating point or complex"):
+                fwAD.make_dual(primal_l, tangent_f)
+
     def test_print(self):
         with fwAD.dual_level() as level:
             a = torch.rand(3)
