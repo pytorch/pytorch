@@ -2,6 +2,7 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <thrust/execution_policy.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
@@ -38,6 +39,8 @@
 #include <ATen/cuda/cub.h>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
+
+#include <thrust/binary_search.h>
 
 #include <limits>
 
@@ -1259,21 +1262,6 @@ namespace {
   // Cannot use fastAtomicAdd inside GPU_LAMBDA as nvcc complaints
   // about calling __device__ operator() in the __host__ context
   template <typename index_t>
-  static __host__ __device__ __forceinline__ void applyFastAtomicIndexInc(
-      index_t* const src,
-      index_t idx,
-      index_t numel
-  ) {
-    fastAtomicAdd(
-      src, idx, numel,
-      /*value=*/static_cast<index_t>(1),
-      /*fast_atomics=*/true
-    );
-  }
-
-  // Cannot use fastAtomicAdd inside GPU_LAMBDA as nvcc complaints
-  // about calling __device__ operator() in the __host__ context
-  template <typename index_t>
   static __host__ __device__ __forceinline__ index_t applyAtomicIndexInc(
       index_t* const address,
       index_t val
@@ -1340,47 +1328,52 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
       });
       return nneg_index;
     }();
-    const auto dim_indices = indices[dim].contiguous();
 
+    const auto dim_indices = indices[dim].contiguous();
     const auto idx_nneg_index = at::arange(index_len, nneg_index.options());
     const auto idx_dim_indices = at::arange(nnz, dim_indices.options());
+
+    Tensor sorted_dim_indices, argsort_dim_indices;
+    std::tie(sorted_dim_indices, argsort_dim_indices) = [&]() -> std::tuple<Tensor, Tensor> {
+      if (dim == 0 && self.is_coalesced()) {
+        return std::make_tuple(dim_indices, idx_dim_indices);
+      }
+      else {
+        return dim_indices.sort();
+      }
+    }();
 
     const auto intrsc_counts_nneg_index = [&]() -> Tensor {
       auto intrsc_counts_nneg_index = at::zeros_like(nneg_index);
 
-      const auto rows_over_dim_indices = (nnz <= index_len);
       // Need to have output as TensorIterator does not allow having void lambdas.
-      auto dummy_output = at::empty({1, 1}, dim_indices.options())
-        .expand(
-            rows_over_dim_indices
-            ? IntArrayRef({nnz, index_len})
-            : IntArrayRef({index_len, nnz})
-        );
+      auto dummy_output = at::empty({1}, dim_indices.options()).expand(IntArrayRef({index_len}));
       auto iter = TensorIteratorConfig()
         .add_output(dummy_output)
         // All iterations map to a single element in dummy_output by design,
         // hence removed output memory overlap check.
         .set_check_mem_overlap(false)
-        .add_owned_input(dim_indices.unsqueeze(rows_over_dim_indices ? -1: -2))
-        .add_owned_input(nneg_index.unsqueeze(rows_over_dim_indices ? -2: -1))
-        .add_owned_input(idx_nneg_index.unsqueeze(rows_over_dim_indices ? -2: -1))
+        .add_input(nneg_index)
+        .add_input(idx_nneg_index)
         .build();
 
       AT_DISPATCH_INDEX_TYPES(nneg_index.scalar_type(), "index_select_sparse_cuda", [&]() {
           index_t* ptr_intrsc_counts_nneg_index = intrsc_counts_nneg_index.data_ptr<index_t>();
+          index_t* ptr_sorted_dim_indices = sorted_dim_indices.data_ptr<index_t>();
           gpu_kernel(
               iter,
-              [ptr_intrsc_counts_nneg_index, index_len] GPU_LAMBDA (
-                index_t dim_val, index_t idx_val, // dim_indices[j], j
-                index_t idx_idx // i
+              [ptr_intrsc_counts_nneg_index, index_len, ptr_sorted_dim_indices, nnz] GPU_LAMBDA (
+                index_t idx_val, index_t idx_idx
               ) -> index_t {
-                if (dim_val == idx_val) {
-                  applyFastAtomicIndexInc(
-                    ptr_intrsc_counts_nneg_index,
-                    idx_idx,
-                    static_cast<index_t>(index_len)
-                  );
-                }
+                const auto equal_range_iters = thrust::equal_range(
+                  thrust::seq,
+                  ptr_sorted_dim_indices,
+                  ptr_sorted_dim_indices + nnz,
+                  idx_val
+                );
+                const auto idx_count = equal_range_iters.second - equal_range_iters.first;
+                ptr_intrsc_counts_nneg_index[idx_idx] = idx_count;
+
                 // A dummy return scalar for a dummy output
                 return static_cast<index_t>(1);
               }
