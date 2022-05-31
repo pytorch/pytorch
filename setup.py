@@ -231,6 +231,7 @@ import glob
 import importlib
 import time
 import sysconfig
+import logging
 
 from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
@@ -430,8 +431,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
     # Copy libiomp5.dylib inside the wheel package on OS X
     def _embed_libiomp(self):
+
+        logging.info('In _embed_libiomp')
         if not IS_DARWIN:
             return
+
+        logging.info('Is Darwin _embed_libiomp')
         lib_dir = os.path.join(self.build_lib, 'torch', 'lib')
         libtorch_cpu_path = os.path.join(lib_dir, 'libtorch_cpu.dylib')
         if not os.path.exists(libtorch_cpu_path):
@@ -452,14 +457,17 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
         omp_lib_name = 'libiomp5.dylib'
         if os.path.join('@rpath', omp_lib_name) not in libs:
+            logging.info('libiomp5 not in libs returning')
             return
 
         # Copy libiomp5 from rpath locations
+        logging.info('Copy libiomp5 from rpath locations')
         for rpath in rpaths:
             source_lib = os.path.join(rpath, omp_lib_name)
             if not os.path.exists(source_lib):
                 continue
             target_lib = os.path.join(self.build_lib, 'torch', 'lib', omp_lib_name)
+            logging.info('Copying libomp to: '+target_lib + ' from '+ source_lib)
             self.copy_file(source_lib, target_lib)
             break
 
