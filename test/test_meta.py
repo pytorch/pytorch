@@ -21,7 +21,11 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.logging_tensor import no_dispatch
 from torch.testing._internal.common_methods_invocations import op_db
+from torchgen.utils import YamlLoader
+from torchgen.model import OperatorName
 
+import sys
+import yaml
 import atexit
 import re
 from collections import defaultdict
@@ -1083,4 +1087,19 @@ class TestMeta(TestCase):
 instantiate_device_type_tests(TestMeta, globals())
 
 if __name__ == "__main__":
+    COMPARE_XLA = os.getenv('PYTORCH_COMPARE_XLA', None)
+    if COMPARE_XLA is not None:
+        with open(COMPARE_XLA, "r") as f:
+            d = yaml.load(f, Loader=YamlLoader)
+            ops = d.get("full_codegen", []) + d.get("supported", []) + d.get("autograd", [])
+            for op_str in ops:
+                op = OperatorName.parse(op_str)
+                packet = getattr(torch.ops.aten, str(op.name))
+                overload = getattr(packet, op.overload_name if op.overload_name else "default")
+                if any(overload in d for d in [meta_dispatch_skips, meta_dispatch_device_skips['cuda']]):
+                    print(f"{overload}  # SKIP")
+                if any(overload in d for d in [meta_dispatch_expected_failures, meta_dispatch_device_expected_failures['cuda']]):
+                    print(overload)
+        sys.exit(0)
+
     run_tests()
