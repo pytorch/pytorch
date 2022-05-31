@@ -245,8 +245,8 @@ class TestQuantizedFunctionalOps(QuantizationTestCase):
 
 class TestSignatureEquivalence(TestCase):
     def _test_same_signature(self, fp_func, q_func,
-                             fp_extras = None,
-                             q_extras = None,
+                             fp_extras=None,
+                             q_extras=None,
                              pass_if_no_check=True):
         r"""Checks if two methods, fp_func and q_func have the same signatures.
 
@@ -316,8 +316,7 @@ class TestSignatureEquivalence(TestCase):
 
         if not fp_extras and not q_extras:
             # No extras, assume the signatures must be identical
-            self.assertEqual(fp_sig, q_sig,
-                msg=f'{fp_sig} vs. {q_sig}')
+            self.assertEqual(fp_sig, q_sig)
         else:
             fp_extras = fp_extras or []
             q_extras = q_extras or []
@@ -327,36 +326,38 @@ class TestSignatureEquivalence(TestCase):
             # Check if number of common arguments is the same
             num_common_fp_args = len(fp_args) - len(fp_extras)
             num_common_q_args = len(q_args) - len(q_extras)
-            self.assertEqual(num_common_fp_args, num_common_q_args,
+            self.assertEqual(
+                num_common_fp_args, num_common_q_args,
                 msg=f'Number of arguments in {fp_func.__name__} and {q_func.__name__}'
                 ' don\'t match ({num_common_fp_args} vs. {num_common_q_args})')
             # Check if argument names are same
             # Assume that the extra arguments come AFTER the common ones.
             for fp_arg, q_arg in zip(fp_args[:num_common_fp_args],
                                      q_args[:num_common_fp_args]):
-                self.assertEqual(fp_arg, q_arg,
+                self.assertEqual(
+                    fp_arg, q_arg,
                     msg=f'Argument name mismatch: {fp_arg} vs. {q_arg}')
 
     def test_conv1d(self):
         fp_func = torch.nn.functional.conv1d
         q_func = torch.nn.quantized.functional.conv1d
         self._test_same_signature(fp_func, q_func,
-                                  fp_extras = None,
-                                  q_extras = ['scale', 'zero_point'],
+                                  fp_extras=None,
+                                  q_extras=['scale', 'zero_point'],
                                   pass_if_no_check=True)
 
     def test_conv2d(self):
         fp_func = torch.nn.functional.conv2d
         q_func = torch.nn.quantized.functional.conv2d
         self._test_same_signature(fp_func, q_func,
-                                  fp_extras = None,
-                                  q_extras = ['scale', 'zero_point'],
+                                  fp_extras=None,
+                                  q_extras=['scale', 'zero_point'],
                                   pass_if_no_check=True)
 
     def test_conv3d(self):
         fp_func = torch.nn.functional.conv3d
         q_func = torch.nn.quantized.functional.conv3d
         self._test_same_signature(fp_func, q_func,
-                                  fp_extras = None,
-                                  q_extras = ['scale', 'zero_point'],
+                                  fp_extras=None,
+                                  q_extras=['scale', 'zero_point'],
                                   pass_if_no_check=True)
