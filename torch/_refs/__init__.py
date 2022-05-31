@@ -1253,7 +1253,7 @@ def any(
     return result
 
 
-# TODO: register decomp after stride logic is fixed
+@register_decomposition(torch.ops.aten.sum)
 def sum(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
