@@ -3,8 +3,8 @@
 #include <ATen/ATen.h>
 #include <ATen/core/List.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/native/quantized/cpu/onednn_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <c10/util/irange.h>
 
 #include <tuple>
