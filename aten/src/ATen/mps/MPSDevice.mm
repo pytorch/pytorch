@@ -26,13 +26,13 @@ MPSDevice::MPSDevice(): _mtl_device(nil) {
   // which is used by MPS backend.
   id mpsCD = NSClassFromString(@"MPSGraph");
   if ([mpsCD instancesRespondToSelector:@selector(LSTMWithSourceTensor:
-                                                           recurrentWeight:
-                                                               inputWeight:
-                                                                      bias:
-                                                                 initState:
-                                                                  initCell:
-                                                                descriptor:
-                                                           name:)] == NO)) {
+                                                       recurrentWeight:
+                                                           inputWeight:
+                                                                  bias:
+                                                             initState:
+                                                              initCell:
+                                                            descriptor:
+                                                                  name:)] == NO) {
     return;
   }
   NSArray* devices = [MTLCopyAllDevices() autorelease];
