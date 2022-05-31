@@ -157,7 +157,7 @@ std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::
   torch::lazy::Value running_var_value =
       GetIrValueOrDefault(running_var, 0, features_shape, input->GetDevice());
   torch::lazy::NodePtr node =
-      torch::lazy::MakeNode<TSNativeBatchNormForward>(
+      ReuseOrMakeNode<TSNativeBatchNormForward>(
           input->GetIrValue(), weight_value, bias_value, running_mean_value,
           running_var_value, training, momentum, eps);
   torch::lazy::LazyTensorPtr output = torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 0), input->GetDevice());
@@ -179,14 +179,14 @@ std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::
       GetIrValueOrDefault(weight, 1, features_shape, input->GetDevice());
   torch::lazy::NodePtr node;
   if (!running_mean && !running_var) {
-    node = torch::lazy::MakeNode<TSNativeBatchNormBackward>(
+    node = ReuseOrMakeNode<TSNativeBatchNormBackward>(
         grad_out->GetIrValue(), input->GetIrValue(), weight_value,
         save_mean->GetIrValue(), save_invstd->GetIrValue(), training, eps,
         std::array<bool, 3>{output_mask[0], output_mask[1], output_mask[2]});
   } else {
     CHECK(running_mean);
     CHECK(running_var);
-    node = torch::lazy::MakeNode<TSNativeBatchNormBackward>(
+    node = ReuseOrMakeNode<TSNativeBatchNormBackward>(
         grad_out->GetIrValue(), input->GetIrValue(), weight_value,
         running_mean->GetIrValue(), running_var->GetIrValue(),
         save_mean->GetIrValue(), save_invstd->GetIrValue(), training, eps,
