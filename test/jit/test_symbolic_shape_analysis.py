@@ -275,7 +275,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             nn_inps = (
                 (make_arg((40,), 0, 9), torch.nn.Embedding(20, embedding_dim=64, max_norm=1.0)),
                 (make_arg((2, 4), 0, 9), torch.nn.Embedding(10, 20, sparse=True)),
-                (make_arg(()), torch.nn.Embedding(0, 0, sparse=True)),
+                (make_arg((0,)), torch.nn.Embedding(0, 0, sparse=True)),
                 (make_arg((2, 4), 0, 9), torch.nn.Embedding(10, 0, sparse=True)),
                 (make_arg((4,), 0, 21), torch.nn.Embedding(22, 5, max_norm=1.0)),
                 (make_arg((2,), 0, 1), torch.nn.Embedding.from_pretrained(torch.arange(6.).view(2, 3), max_norm=2.,

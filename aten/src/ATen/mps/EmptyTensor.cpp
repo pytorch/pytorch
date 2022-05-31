@@ -25,7 +25,7 @@ TensorBase empty_mps(
     c10::optional<c10::MemoryFormat> memory_format_opt) {
 #if defined(__APPLE__)
 #if __is_target_os(macOS)
-  if (__builtin_available(macOS 12.3, *) || __builtin_available(macOSApplicationExtension 12.3, *)) {
+  if (at::hasMPS()) {
     auto device = device_or_default(device_opt);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::MPS);
 
@@ -87,7 +87,7 @@ TensorBase empty_strided_mps(
     c10::optional<Device> device_opt) {
 #if defined(__APPLE__)
 #if __is_target_os(macOS)
-  if (__builtin_available(macOS 12.3, *) || __builtin_available(macOSApplicationExtension 12.3, *)) {
+  if (at::hasMPS()) {
     auto device = device_or_default(device_opt);
     TORCH_INTERNAL_ASSERT(device.is_mps());
     TORCH_CHECK_TYPE(dtype != ScalarType::Double, MPS_ERROR_DOUBLE_NOT_SUPPORTED);
