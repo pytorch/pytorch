@@ -6712,16 +6712,16 @@ class TestAutogradForwardMode(TestCase):
         tangent_l = torch.ones(2, 2, dtype=torch.long)
 
         with fwAD.dual_level():
-            # Float Primal and Long Tangent works
-            with self.assertRaisesRegex(AssertionError, "Expected tangent to be floating point or complex"):
+            # Float Primal and Long Tangent
+            with self.assertRaisesRegex(ValueError, "Expected tangent to be floating point or complex"):
                 fwAD.make_dual(primal_f, tangent_l)
 
-            # Long Primal and Long Tangent works
-            with self.assertRaisesRegex(AssertionError, "Expected primal to be floating point or complex"):
+            # Long Primal and Long Tangent
+            with self.assertRaisesRegex(ValueError, "Expected primal to be floating point or complex"):
                 fwAD.make_dual(primal_l, tangent_l)
 
-            # Long Primal and Float Tangent works
-            with self.assertRaisesRegex(AssertionError, "Expected primal to be floating point or complex"):
+            # Long Primal and Float Tangent
+            with self.assertRaisesRegex(ValueError, "Expected primal to be floating point or complex"):
                 fwAD.make_dual(primal_l, tangent_f)
 
     def test_print(self):
