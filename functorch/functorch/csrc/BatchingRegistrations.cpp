@@ -557,6 +557,34 @@ Tensor cat_batching_rule(TensorList tensors, int64_t dim) {
   return physical_views[0].getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor block_diag_batching_rule(TensorList tensors) {
+  if (!participatesInCurrentLevel(tensors)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    return at::block_diag(tensors);
+  }
+  auto physical_views = MultiBatchVmapTransform::logicalToPhysical(tensors);
+  auto physical_tensors = fmap(
+      physical_views, [](const VmapPhysicalView& view) -> Tensor { return view.tensor(); });
+  TORCH_INTERNAL_ASSERT(
+      tensors.size() > 0, "The dispatcher should not have dispatched here otherwise.");
+  // Implementing this as a dummy for loop for now, since I'm not sure how to do it any better.
+  // I'm probably not accounting for potentially multiple batched dimensions?
+  auto bdim = physical_tensors[0].size(0);
+  std::vector<Tensor> batched_outputs;
+  batched_outputs.reserve(bdim);
+  for (const auto& i : c10::irange(bdim)) {
+    std::vector<Tensor> inputs_for_batch;
+    inputs_for_batch.reserve(physical_tensors.size());
+    for (const auto& t : physical_tensors) {
+      inputs_for_batch.push_back(t[i]);
+    }
+    auto out_for_batch = at::block_diag(inputs_for_batch);
+    batched_outputs.push_back(out_for_batch.unsqueeze(0));
+  }
+  auto result = at::cat(batched_outputs);
+  return physical_views[0].getPhysicalToLogicalMap().apply(result);
+}
+
 Tensor stack_batching_rule(TensorList tensors, int64_t dim) {
   if (!participatesInCurrentLevel(tensors)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -666,6 +694,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
   m.impl("unbind.int", unbind_batching_rule);
   m.impl("cat", cat_batching_rule);
+  m.impl("block_diag", block_diag_batching_rule);
   m.impl("stack", stack_batching_rule);
 
   // still legacy b/c needs special inplace rules
