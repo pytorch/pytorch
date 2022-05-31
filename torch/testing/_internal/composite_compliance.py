@@ -47,7 +47,7 @@ def check_metadata_consistency(wrapper_tensor, CCT):
         # stride when a dimension size is `0` or `1` dont matter,
         # and few functions take advantange of this to short-circuit
         if metadata_name == 'stride' and \
-                (0 in wrapper_tensor.shape or 1 in wrapper_tensor.shape):
+                (0 == wrapper_tensor.shape[0] or len(wrapper_tensor.shape) == 1):
             continue
         check_attr_consistency(wrapper_tensor, metadata_name, metadata_accessor)
 
