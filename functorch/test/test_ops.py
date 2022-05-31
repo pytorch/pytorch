@@ -591,7 +591,6 @@ class TestOperators(TestCase):
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
         xfail('__getitem__', ''),
         xfail('_masked.prod'),  # calls aten::item
-        xfail('block_diag'),
         xfail('eig'),  # calls aten::item
         xfail('linalg.det', ''),  # calls .item()
         xfail('linalg.eig'),  # Uses aten::allclose
@@ -664,7 +663,6 @@ class TestOperators(TestCase):
 
         # Try to in-place batched tensor into non-batched tensor
         xfail('matrix_exp'),
-        xfail('block_diag'),  # TODO: We expect this to fail in core, but it doesn't
 
         # Apprently these support forward AD, but we get "Trying to use forward AD..."
         # These are cases where OpInfo has supports_forward_ad=True, but disables
@@ -763,7 +761,6 @@ class TestOperators(TestCase):
         xfail('as_strided'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('std_mean'),
-        xfail('block_diag'),
         xfail('scatter'),
         xfail('matrix_exp'),
         xfail('nanquantile'),
@@ -950,7 +947,6 @@ class TestOperators(TestCase):
         xfail('to_sparse'),
         xfail('unfold'),
         xfail('vdot'),
-        xfail('block_diag'),
         xfail('nn.functional.dropout'),
         xfail('_masked.prod'),
         xfail('fft.ihfft2'),
