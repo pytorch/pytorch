@@ -71,6 +71,10 @@ from torch.ao.quantization import (
     default_embedding_qat_qconfig,
 )
 
+from torch.ao.quantization.backend_config.native import (
+    _get_native_and_fp16_backend_config_dict,
+)
+
 from torch.ao.quantization.qconfig_mapping import (
     GLOBAL_DICT_KEY,
     MODULE_NAME_DICT_KEY,
@@ -3957,14 +3961,17 @@ class TestQuantizeFx(QuantizationTestCase):
             float16_dynamic_qconfig: torch.ops.quantized.linear_relu_dynamic_fp16,
             default_dynamic_qconfig: torch.ops.quantized.linear_relu_dynamic
         }
+        backend_config_dict = _get_native_and_fp16_backend_config_dict()
         for qconfig in [float16_dynamic_qconfig, default_dynamic_qconfig]:
             model = M().eval()
             qconfig_dict = {
                 "": qconfig
             }
             example_inputs = (torch.rand(5, 5),)
-            m = prepare_fx(model, qconfig_dict, example_inputs=example_inputs)
-            m = convert_fx(m)
+            m = prepare_fx(
+                model, qconfig_dict, example_inputs=example_inputs,
+                backend_config_dict=backend_config_dict)
+            m = convert_fx(m, backend_config_dict=backend_config_dict)
             m(*example_inputs)
             node_list = [
                 ns.call_module(nniqd.LinearReLU),
@@ -3998,14 +4005,17 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = self.linear_relu(x)
                 return x
 
+        backend_config_dict = _get_native_and_fp16_backend_config_dict()
         for qconfig in [float16_dynamic_qconfig, default_dynamic_qconfig]:
             model = M().eval()
             qconfig_dict = {
                 "": qconfig
             }
             example_inputs = (torch.randn(5, 5),)
-            m = prepare_fx(model, qconfig_dict, example_inputs=example_inputs)
-            m = convert_fx(m)
+            m = prepare_fx(
+                model, qconfig_dict, example_inputs=example_inputs,
+                backend_config_dict=backend_config_dict)
+            m = convert_fx(m, backend_config_dict=backend_config_dict)
             m(*example_inputs)
             node_list = [
                 ns.call_module(nniqd.LinearReLU),
@@ -4039,14 +4049,17 @@ class TestQuantizeFx(QuantizationTestCase):
                 y2 = self.mod2(x)
                 return y1 + y2
 
+        backend_config_dict = _get_native_and_fp16_backend_config_dict()
         for qconfig in [float16_dynamic_qconfig, default_dynamic_qconfig]:
             model = M().eval()
             qconfig_dict = {
                 "": qconfig
             }
             example_inputs = (torch.rand(5, 5, 5),)
-            m = prepare_fx(model, qconfig_dict, example_inputs=example_inputs)
-            m = convert_fx(m)
+            m = prepare_fx(
+                model, qconfig_dict, example_inputs=example_inputs,
+                backend_config_dict=backend_config_dict)
+            m = convert_fx(m, backend_config_dict=backend_config_dict)
             m(*example_inputs)
             node_list = [
                 ns.call_module(nniqd.LinearReLU),
@@ -4803,6 +4816,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             (True, False),  # functional relu
             (True, False),  # is_reference
         )
+        backend_config_dict = _get_native_and_fp16_backend_config_dict()
         for use_bias, has_relu, f_relu, is_reference in options:
             model = FuncLinear(use_bias, has_relu, f_relu)
             if is_reference:
@@ -4826,9 +4840,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 is_reference=is_reference,
                 custom_qconfig_dict={"": float16_dynamic_qconfig},
                 prepare_expected_node_occurrence=prepare_node_occurrence,
-                expected_node_occurrence=convert_node_occurrence)
+                expected_node_occurrence=convert_node_occurrence,
+                backend_config_dict=backend_config_dict)
 
-    # TODO: maybe remove this support
     def test_linear_static_fp16(self):
         class FuncLinear(torch.nn.Module):
             def __init__(self, use_bias, has_relu, f_relu):
@@ -4859,6 +4873,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             (True, False),  # functional relu
             (True, False),  # is_reference
         )
+        backend_config_dict = _get_native_and_fp16_backend_config_dict()
         for use_bias, has_relu, f_relu, is_reference in options:
             model = FuncLinear(use_bias, has_relu, f_relu)
             linear_fun = ns.call_function(torch.nn.functional.linear)
@@ -4888,7 +4903,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 is_reference=is_reference,
                 custom_qconfig_dict={"": float16_static_qconfig},
                 prepare_expected_node_occurrence=prepare_node_occurrence,
-                expected_node_occurrence=convert_node_occurrence)
+                expected_node_occurrence=convert_node_occurrence,
+                backend_config_dict=backend_config_dict)
 
     @skipIfNoFBGEMM
     def test_conv_module(self):
@@ -5107,6 +5123,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         custom_qconfig_dict = {
             "object_type": [(binary_op, float16_static_qconfig)]
         }
+        backend_config_dict = _get_native_and_fp16_backend_config_dict()
         for is_inplace, is_scalar in options:
             node_occurrence = {
                 # output_conv1, output_add1, output_add2 for scalar
@@ -5116,7 +5133,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
             self.checkGraphModeFxOp(
                 BinaryOp(binary_op, ibinary_op, is_inplace, is_scalar), data, quant_type,
                 expected_node_occurrence=node_occurrence,
-                custom_qconfig_dict=custom_qconfig_dict)
+                custom_qconfig_dict=custom_qconfig_dict,
+                backend_config_dict=backend_config_dict)
 
             node_occurrence = {
                 # input_add, output_add for scalar
@@ -5126,7 +5144,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
             self.checkGraphModeFxOp(
                 BinaryOpNonQuantizedInput(binary_op, ibinary_op, is_inplace, is_scalar), data, quant_type,
                 expected_node_occurrence=node_occurrence,
-                custom_qconfig_dict=custom_qconfig_dict)
+                custom_qconfig_dict=custom_qconfig_dict,
+                backend_config_dict=backend_config_dict)
 
     def _test_binary_op_relu_int8_impl(self, binary_op, ibinary_op, quantized_op):
         data = (torch.rand((1, 1, 1, 1), dtype=torch.float),
@@ -5151,6 +5170,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             "": float16_static_qconfig,
             "object_type": [(torch.nn.Conv2d, None)]
         }
+        backend_config_dict = _get_native_and_fp16_backend_config_dict()
         for is_inplace_op, is_functional_relu, is_scalar in options:
             node_occurrence = {
                 ns.call_method("to"): 3 if is_scalar else 4
@@ -5159,7 +5179,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 binary_op, ibinary_op, is_inplace_op, is_functional_relu, is_scalar)
             self.checkGraphModeFxOp(
                 model, data, quant_type, custom_qconfig_dict=custom_qconfig_dict,
-                expected_node_occurrence=node_occurrence)
+                expected_node_occurrence=node_occurrence,
+                backend_config_dict=backend_config_dict)
 
 
     @skipIfNoFBGEMM
@@ -5960,12 +5981,14 @@ class TestQuantizeFxOps(QuantizationTestCase):
         qconfig_dict = {
             "": float16_static_qconfig
         }
+        backend_config_dict = _get_native_and_fp16_backend_config_dict()
         node_occurrence = {
             ns.call_method("to"): 7
         }
         self.checkGraphModeFxOp(
             M(), data, quant_type, custom_qconfig_dict=qconfig_dict,
-            expected_node_occurrence=node_occurrence)
+            expected_node_occurrence=node_occurrence,
+            backend_config_dict=backend_config_dict)
 
     def test_fixed_qparams_ops_qint8(self):
         class M(torch.nn.Module):
@@ -6675,8 +6698,11 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 (torch.nn.functional.linear, default_qconfig)
             ]
         }
+        backend_config_dict = _get_native_and_fp16_backend_config_dict()
         example_inputs = (torch.randn(1, 4),)
-        m = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
+        m = prepare_fx(
+            m, qconfig_dict, example_inputs=example_inputs,
+            backend_config_dict=backend_config_dict)
         expected_occurrence = {
             # input and weight of first and second linear, output of first and second linear
             ns.call_module(torch.ao.quantization.MinMaxObserver): 6,
@@ -6687,7 +6713,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m,
             expected_node_occurrence=expected_occurrence
         )
-        m = convert_fx(m)
+        m = convert_fx(m, backend_config_dict=backend_config_dict)
         expected_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 2,
             # dequantize after first linear, before reshape and before output
@@ -6726,7 +6752,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
             ]
         }
         example_inputs = (torch.randn(1, 4),)
-        m = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
+        backend_config_dict = _get_native_and_fp16_backend_config_dict()
+        m = prepare_fx(
+            m, qconfig_dict, example_inputs=example_inputs,
+            backend_config_dict=backend_config_dict)
         expected_occurrence = {
             # input and weight of linear, output of linear
             ns.call_module(torch.ao.quantization.MinMaxObserver): 3,
