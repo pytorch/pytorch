@@ -32,7 +32,6 @@ from ._constants import ONNX_ARCHIVE_MODEL_PROTO_NAME
 from ._exporter_states import ExportTypes, SymbolicContext
 from .errors import CheckerError  # Backwards compatibility
 
-# Names may be accessible from torch.onnx but not meant for public use are not listed.
 __all__ = [
     # Modules
     "symbolic_helper",
@@ -61,6 +60,13 @@ __all__ = [
     "select_model_mode_for_export",
     "register_custom_op_symbolic",
     "unregister_custom_op_symbolic",
+    "disable_log",
+    "enable_log",
+    "is_onnx_log_enabled",
+    "log",
+    "set_log_stream",
+    # Errors
+    "CheckerError",
 ]
 
 producer_name = "pytorch"

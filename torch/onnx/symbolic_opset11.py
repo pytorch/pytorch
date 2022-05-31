@@ -257,6 +257,14 @@ upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
 upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 upsample_bicubic2d = _interpolate("upsample_bicubic2d", 4, "cubic")
 
+upsample_nearest1d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_nearest2d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_nearest3d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_linear1d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_bilinear2d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_trilinear3d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_bicubic2d.__module__ = "torch.onnx.symbolic_opset11"
+
 
 def __interpolate(
     g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias
