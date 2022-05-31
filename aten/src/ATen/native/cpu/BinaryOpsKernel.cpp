@@ -1110,13 +1110,45 @@ void zeta_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void beta_kernel(TensorIteratorBase& iterator) {
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "beta_cpu", [&]() {
-        cpu_kernel(iterator, [](scalar_t x, scalar_t y) -> scalar_t {
-            return beta_forward(x, y);
+void chebyshev_polynomial_t_kernel(TensorIteratorBase& iterator) {
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "chebyshev_polynomial_t_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x, scalar_t n) -> scalar_t {
+            return chebyshev_polynomial_t_forward(x, n);
         });
     });
-}
+} // chebyshev_polynomial_t_kernel(TensorIteratorBase& iterator)
+
+void chebyshev_polynomial_u_kernel(TensorIteratorBase& iterator) {
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "chebyshev_polynomial_u_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x, scalar_t n) -> scalar_t {
+            return chebyshev_polynomial_u_forward(x, n);
+        });
+    });
+} // chebyshev_polynomial_u_kernel(TensorIteratorBase& iterator)
+
+void hermite_polynomial_h_kernel(TensorIteratorBase& iterator) {
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "hermite_polynomial_h_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x, scalar_t n) -> scalar_t {
+            return hermite_polynomial_h_forward(x, n);
+        });
+    });
+} // hermite_polynomial_h_kernel(TensorIteratorBase& iterator)
+
+void hermite_polynomial_he_kernel(TensorIteratorBase& iterator) {
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "hermite_polynomial_he_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x, scalar_t n) -> scalar_t {
+            return hermite_polynomial_he_forward(x, n);
+        });
+    });
+} // hermite_polynomial_he_kernel(TensorIteratorBase& iterator)
+
+void laguerre_polynomial_l_kernel(TensorIteratorBase& iterator) {
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "laguerre_polynomial_l_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x, scalar_t n) -> scalar_t {
+            return laguerre_polynomial_l_forward(x, n);
+        });
+    });
+} // laguerre_polynomial_l_kernel(TensorIteratorBase& iterator)
 
 } // namespace
 
@@ -1165,7 +1197,11 @@ REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
 REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel);
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel);
 REGISTER_DISPATCH(zeta_stub, &zeta_kernel);
-REGISTER_DISPATCH(beta_stub, &beta_kernel);
+REGISTER_DISPATCH(chebyshev_polynomial_t_stub, &chebyshev_polynomial_t_kernel);
+REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel);
+REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel);
+REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel);
+REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_kernel);
 
 } // namespace native
 } // namespace at
