@@ -1487,6 +1487,7 @@
   dispatch:
     CPU: count_nonzero_cpu
     CUDA: count_nonzero_cuda
+    MPS: count_nonzero_mps
 
 - func: count_nonzero(Tensor self, int? dim=None) -> Tensor
   variants: function, method
