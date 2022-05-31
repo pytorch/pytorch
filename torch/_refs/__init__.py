@@ -2041,3 +2041,8 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
         return True
 
     return item(all(eq(a, b)))  # type: ignore[return-value]
+
+
+# populate the decomp table
+import torch._refs.nn.functional
+import torch._refs.special
