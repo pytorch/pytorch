@@ -583,7 +583,6 @@ meta_function_expected_failures = {
     torch.roll: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::roll
     torch.searchsorted: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::searchsorted.Tensor, aten::searchsorted.Tensor_out
     torch.symeig: {f32, f64},
-    torch.std_mean: {bf16, f16, f32, f64},  # aten::std_mean.correction
     torch.take: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::take, aten::take.out
     torch.trace: {f32, f64, i16, i32, i64, i8, u8},  # aten::trace
     torch.vdot: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::vdot
@@ -848,7 +847,6 @@ meta_dispatch_expected_failures = {
     aten.rrelu_with_noise.default: {bf16, f64, f32},
     aten.searchsorted.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.searchsorted.Tensor_out: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
-    aten.std_mean.correction: {bf16, f16, f64, f32},
     aten.take.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.take.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.tensordot.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
