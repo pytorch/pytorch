@@ -65,7 +65,7 @@ class SubgraphSlicer {
         // redundant prim::Constants). Run CSE to clean them up.
         EliminateCommonSubexpression(curNode->g(attr::Subgraph));
 
-        if (!inlineIfTooSmall(curNode)) {
+        if (!inlineIfTooSmall(curNode) && !inlineIfNoGradients(curNode)) {
           diff_nodes_.push_back(curNode);
         }
       }
@@ -207,6 +207,33 @@ class SubgraphSlicer {
       i += !it->notExecutedOp();
       if (i >= minSubgraphSize_) {
         return false;
+      }
+    }
+
+    SubgraphUtils::unmergeSubgraph(n);
+    return true;
+  }
+
+  bool inlineIfNoGradients(Node* n) {
+    auto subgraph = SubgraphUtils::getSubgraph(n);
+
+    // if any input requires grad, don't inline
+    for (Value* input : subgraph->inputs()) {
+      if (input->type()->kind() != TypeKind::TensorType) {
+        return false;
+      }
+      auto inputRequiresGrad =
+          input->type()->expectRef<TensorType>().requiresGrad();
+      if (inputRequiresGrad.has_value() && inputRequiresGrad.value()) {
+        return false;
+      }
+      for (auto& use : input->uses()) {
+        if (use.user->kind() == prim::profile) {
+          auto profiled_type = use.user->ty(attr::profiled_type);
+          if (profiled_type->expectRef<TensorType>().requires_grad()) {
+            return false;
+          }
+        }
       }
     }
 

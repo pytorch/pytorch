@@ -484,6 +484,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 .check_not("aten::t") \
                 .run(graph)
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING)
     def test_has_profiled_info_aliasing_outputs(self):
         # The expectation is that CallFunction will prevent the final profile node from
         # getting merged into the DifferentiableGraph, and that create_autodiff_subgraphs
@@ -517,3 +518,31 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             .check("requires_grad=0") \
             .check("aten::relu") \
             .run(graph)
+
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING)
+    def test_diff_graph_inline_no_requires_grad(self):
+        with enable_profiling_mode_for_profiling_tests():
+            NUM_RUNS = 1
+            with num_profiled_runs(NUM_RUNS):
+                @torch.jit.script
+                def foo(x, y):
+                    return torch.sigmoid(torch.sigmoid(x)), torch.relu(y)
+
+                @torch.jit.script
+                def bar(x, y):
+                    return torch.sigmoid(torch.sigmoid(x)), torch.relu(y)
+
+                x_grad = torch.rand([4, 4], requires_grad=True)
+                x_nograd = torch.rand([4, 4], requires_grad=False)
+                y_grad = torch.rand([4, 4], requires_grad=True)
+
+                # the torch.sigmoid() portion is large enough
+                foo(x_grad, y_grad)
+                foo(x_grad, y_grad)
+
+                # even though sigmoid(sigmoid()) is large enough, none of its inputs require_grad.
+                bar(x_nograd, y_grad)
+                bar(x_nograd, y_grad)
+
+                self.assertGraphContainsExactly(foo.graph_for(x_grad, y_grad), 'prim::DifferentiableGraph', 1)
+                self.assertGraphContainsExactly(bar.graph_for(x_nograd, y_grad), 'prim::DifferentiableGraph', 0)
