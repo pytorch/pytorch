@@ -192,11 +192,21 @@ _nvfuser_binary_ops = {
     "sub",
 }
 
+
+def _assert_nvfuser_op_exists(fname: str):
+    try:
+        from torch._C._nvfuser import FusionDefinition as fd
+        assert getattr(fd.Ops, fname)
+    except ImportError:
+        # Not all PyTorch builds have nvfuser
+        pass
+
+
 for fname in _nvfuser_binary_ops:
     exec(
         f"""
 # Ensure that the nvfuser implementation exists
-assert getattr(torch._C._nvfuser.FusionDefinition.Ops, "{fname}")
+_assert_nvfuser_op_exists("{fname}")
 
 def _{fname}_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
     return fd.Ops.{fname}(a, b)  # type: ignore[attr-defined]
@@ -211,7 +221,7 @@ for fname in _nvfuser_ternary_ops:
     exec(
         f"""
 # Ensure that the nvfuser implementation exists
-assert getattr(torch._C._nvfuser.FusionDefinition.Ops, "{fname}")
+_assert_nvfuser_op_exists("{fname}")
 
 def _{fname}_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType, c: TensorLikeType):
     return fd.Ops.{fname}(a, b, c)  # type: ignore[attr-defined]
