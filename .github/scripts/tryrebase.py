@@ -48,6 +48,14 @@ def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, dry_run: bool = False, stab
 
     repo.fetch(orig_ref, orig_ref)
     repo._run_git("rebase", onto_branch, orig_ref)
+
+    os.environ["OAUTH_TOKEN"] = os.environ["GITHUB_TOKEN"]
+    with open('.ghstackrc', 'w+') as f:
+        f.write('[ghstack]\n' +
+                "github_url=github.com\n" +
+                "github_username=pytorchmergebot\n" +
+                "remote_name=origin")
+
     if dry_run:
         print("Don't know how to dry-run ghstack")
     else:
