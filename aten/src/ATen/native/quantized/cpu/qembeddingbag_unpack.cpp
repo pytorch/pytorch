@@ -8,6 +8,7 @@
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_empty_per_channel_affine_quantized.h>
 #include <ATen/ops/empty.h>
