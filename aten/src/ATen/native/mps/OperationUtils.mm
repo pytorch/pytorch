@@ -338,14 +338,13 @@ id<MTLBuffer> gatherViewTensorWithAllocatedMem(const at::Tensor& src, id<MTLBuff
   return __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
 }
 
-Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src,
-                         MPSShape *mpsShape, bool check_view)
+Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSShape *mpsShape)
 {
   Tensor src_ = src;
   TORCH_CHECK(src_.is_mps(), "Placeholder storage has not been allocated on MPS device!");
     // extract the pointer to MTLBuffer from the Tensor's storage
   id<MTLBuffer> srcBuf = __builtin_bit_cast(id<MTLBuffer>, src.storage().data());
-  if (check_view) {
+  if (src.is_view()) {
     MPSCachedGraph* cachedGraph = _getCachedGraph(src);
     if (cachedGraph) {
       allocateViewTensor(src);
@@ -358,24 +357,18 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src,
       srcBuf = __builtin_bit_cast(id<MTLBuffer>, src_.storage().data());
     }
   }
-
-  const size_t buf_size = [srcBuf length];
-
   // tensor.numel() could be zero, but tensor is valid as long as the buffer size is non-zero.
-  // if buf_size is zero in here, it's not a user error. It could be a missing check for
+  // if buffer size is zero in here, it's not a user error. It could be a missing check for
   // tensor.numel() == 0 in our internal implementations of ops.
-  TORCH_INTERNAL_ASSERT(buf_size > 0, "Placeholder tensor is empty!");
-
-  TORCH_CHECK(src_.storage().nbytes() <= buf_size, "Placeholder buffer size (", buf_size,
-      ") is not large enough to contain the Tensor storage of size ", src_.storage().nbytes());
+  TORCH_INTERNAL_ASSERT([srcBuf length] > 0, "Placeholder tensor is empty!");
 
   const MPSDataType mpsDataType = src_.dim() == 0 ? getMPSScalarType(src_.scalar_type()) : getMPSDataType(src_.scalar_type());
   if (!mpsShape)
     mpsShape = getMPSShape(src_);
 
   _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
-                                                   shape:mpsShape
-                                                dataType:mpsDataType] autorelease];
+                                                    shape:mpsShape
+                                                 dataType:mpsDataType] autorelease];
   TORCH_INTERNAL_ASSERT(_value);
   _placeholder = mpsGraphTensor;
 }
