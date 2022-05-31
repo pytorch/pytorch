@@ -804,6 +804,9 @@ void initPythonIRBindings(PyObject* module_) {
             s << t;
             return s.str();
           })
+      .def(
+          "containedTypes",
+          [](Type& self) { return self.containedTypes().vec(); })
       .def("kind", [](const Type& t) { return typeKindToString(t.kind()); })
       .def(
           "dim",
@@ -1008,10 +1011,7 @@ void initPythonIRBindings(PyObject* module_) {
       });
   py::class_<UnionType, Type, UnionTypePtr>(m, "UnionType")
       .def(py::init(
-          [](const std::vector<TypePtr>& a) { return UnionType::create(a); }))
-      .def("containedTypes", [](UnionType& self) {
-        return self.containedTypes().vec();
-      });
+          [](const std::vector<TypePtr>& a) { return UnionType::create(a); }));
   py::class_<ListType, Type, ListTypePtr>(m, "ListType")
       .def(py::init([](TypePtr a) { return ListType::create(a); }))
       .def_static("ofInts", &ListType::ofInts)

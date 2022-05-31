@@ -1,6 +1,8 @@
 import functools
+import torch
 from typing import Iterator
 from dataclasses import dataclass
+from contextlib import contextmanager
 
 # This file has all the logic to dedupe logic between torch dispatch and
 # torch function modes
@@ -130,3 +132,11 @@ def _push_mode(ctor, mode_info: _ModeInfo) -> Iterator[object]:
         yield mode
     finally:
         mode_info.set_mode(old)
+
+@contextmanager
+def no_dispatch():
+    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
+    try:
+        yield
+    finally:
+        del guard

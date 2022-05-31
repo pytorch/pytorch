@@ -7,8 +7,9 @@ from torch.library import Library
 from torch.cuda.jiterator import _create_jit_fn
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
+from torch.utils._mode_utils import no_dispatch
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
-    log_input, capture_logs, no_dispatch, capture_logs_with_logging_tensor_mode
+    log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.utils._pytree import tree_map
 from torch.utils._python_dispatch import enable_torch_dispatch_mode, push_torch_dispatch_mode, TorchDispatchMode
 
