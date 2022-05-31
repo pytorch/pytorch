@@ -10,7 +10,7 @@ class TestNonUniformObserver(unittest.TestCase):
         obs = APoTObserver(t, t, t, 0, 0)
 
         with self.assertRaises(NotImplementedError):
-            obs._calculate_qparams()
+            obs.calculate_qparams()
         # t = torch.Tensor()
         # obs = APoTObserver(t, t, t, 0, 0)
 
