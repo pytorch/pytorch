@@ -69,7 +69,7 @@ def enable_cpu_fallback(enable_cpu_fallback: bool):
     finally:
         cpu_fallback_enabled = orig
 
-# Similar to `MetaConverter`, this is a class for converting
+## Similar to `MetaConverter`, this is a class for converting
 # multiple tensors into fake tensors which share the same view/storage
 # structure. Like `MetaConverter`, it will keep alive all
 # tensors that are converted to FakeTensors.
@@ -77,18 +77,25 @@ class FakeTensorConverter(MetaConverter):
     def __init__(self):
         self.tensor_memo = {}
         self.meta_converter = MetaConverter()
+        # we need to throw on inplace-view operations on FakeTensors
+        # that are created from real tensors, because we have no way
+        # affecting the original tensor without ruining the "simulated"
+        # property of FakeTensorMode
+        self.fake_from_real_set = set()
 
-    def fake_tensor(self, t, device=None):
-        if t not in self.tensor_memo:
-            if device:
-                self.tensor_memo[t] = FakeTensor(t, device)
-            else:
-                existing_device = t.device
-                self.tensor_memo[t] = FakeTensor(self.meta_converter(t), existing_device)
+    def from_real_tensor(self, t):
+        existing_device = t.device
+        FakeTensor(self.meta_converter(t), existing_device)
+        self.tensor_memo[t] = FakeTensor(self.meta_converter(t), existing_device)
+        self.fake_from_real_set.add(tensor_memo[t])
         return self.tensor_memo[t]
 
-    def __call__(self, t, device=None):
-        return self.fake_tensor(t, device)
+    def from_meta_and_device(self, t, device):
+        assert t.device.type == "meta"
+        self.tensor_memo[t] = FakeTensor(t, device)
+        # would a single tensor `t` of device meta ever be reused across different devices?
+        # not sure if possible
+        return self.tensor_memo[t]
 
 
 def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
