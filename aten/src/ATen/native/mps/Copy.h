@@ -1,7 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 
 #pragma once
-
 #include <ATen/core/Tensor.h>
 
 namespace at {
