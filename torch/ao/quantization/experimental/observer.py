@@ -37,8 +37,8 @@ class APoTObserver(NonUniformQuantizationObserverBase):
     def calculate_qparams(self):
         return self._calculate_qparams()
 
-    # def _calculate_qparams(self):
-    #     return NonUniformQuantizationObserverBase._calculate_qparams()
+    def _calculate_qparams(self):
+        raise NotImplementedError
 
     def forward(self, x_orig):
         pass
