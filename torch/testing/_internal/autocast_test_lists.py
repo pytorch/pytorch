@@ -169,6 +169,7 @@ class AutocastTestLists(object):
             ("renorm", mat0_fp16 + (2, 0, 1.0)),
             ("sum", pointwise0_fp16),
             ("sum", mat0_fp16 + (1,)),
+            ("logsumexp", mat0_fp16 + (1,)),
         ]
         self.torch_need_autocast_promote = [
             ("addcdiv", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),)),
