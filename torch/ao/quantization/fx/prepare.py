@@ -1,3 +1,4 @@
+import copy
 import torch
 import operator
 import warnings
@@ -17,9 +18,9 @@ from ..observer import (
     ObserverBase,
 )
 from ..qconfig import QConfigAny, is_reuse_input_qconfig
-from ..qconfig_dict_utils import (
+from ..qconfig_mapping import QConfigMapping
+from ..qconfig_mapping_utils import (
     get_flattened_qconfig_dict,
-    convert_dict_to_ordered_dict,
     update_qconfig_for_qat,
 )
 from .qconfig_utils import (
@@ -95,6 +96,42 @@ from .backend_config_utils import (
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
 from collections import defaultdict
+
+
+# TODO: revisit this list. Many helper methods shouldn't be public
+__all__ = [
+    "DO_NOT_OBS_DTYPE_LIST",
+    "add_matched_node_name_to_set",
+    "get_arg_target_compute_dtype_as_input_to_node",
+    "get_arg_target_dtype_as_input_to_node",
+    "get_arg_target_dtype_as_output",
+    "get_target_activation_dtype_for_node",
+    "insert_observer",
+    "insert_observers_for_model",
+    "is_activation_post_process_node",
+    "is_input_arg_dtype_supported_by_backend",
+    "is_observer_in_same_graph",
+    "is_output_dtype_supported_by_backend",
+    "is_pattern_dtype_config_supported_by_backend",
+    "maybe_insert_input_equalization_observers_for_node",
+    "maybe_insert_input_observer_for_arg_or_kwarg",
+    "maybe_insert_input_observers_for_node",
+    "maybe_insert_observers_before_graph_output",
+    "maybe_insert_output_observer_for_node",
+    "maybe_make_input_output_share_observers",
+    "maybe_propagate_dtype_for_node",
+    "node_arg_is_bias",
+    "node_arg_is_weight",
+    "prepare",
+    "prepare_get_standalone_module_configs",
+    "propagate_dtypes_for_known_nodes",
+    "qat_swap_modules",
+    "remove_output_observer",
+    "run_prepare_fx_on_standalone_modules",
+    "save_state",
+    "swap_custom_module_to_observed",
+]
+
 
 # list of dtypes to not add observers to
 DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
@@ -1335,7 +1372,7 @@ def save_state(
     node_name_to_scope: Dict[str, Tuple[str, type]],
     prepare_custom_config_dict: Dict[str, Any],
     equalization_qconfig_map: Dict[str, Any],
-    qconfig_dict: Dict[str, Dict[Any, Any]],
+    qconfig_mapping: QConfigMapping,
     is_qat: bool,
     observed_node_names: Set[str],
 ) -> None:
@@ -1344,18 +1381,18 @@ def save_state(
         prepare_custom_config_dict  # type: ignore[assignment]
     observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
     observed._equalization_qconfig_map = equalization_qconfig_map  # type: ignore[assignment]
-    observed._qconfig_dict = qconfig_dict  # type: ignore[assignment]
+    observed._qconfig_mapping = qconfig_mapping  # type: ignore[assignment]
     observed._is_qat = is_qat  # type: ignore[assignment]
     observed._observed_node_names = observed_node_names  # type: ignore[assignment]
 
 def prepare(
         model: GraphModule,
-        qconfig_dict: Any,
+        qconfig_mapping: Union[QConfigMapping, Dict[str, Any]],
         is_qat: bool,
         node_name_to_scope: Dict[str, Tuple[str, type]],
         example_inputs: Tuple[Any, ...],
         prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
-        equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
+        equalization_config: Optional[QConfigMapping] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None,
         is_standalone_module: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
@@ -1380,8 +1417,25 @@ def prepare(
     """
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
-    if equalization_qconfig_dict is None:
-        equalization_qconfig_dict = {}
+    if equalization_config is None:
+        equalization_config = QConfigMapping()
+
+    if isinstance(qconfig_mapping, Dict):
+        warnings.warn(
+            "Passing a QConfig dictionary to prepare is deprecated and will not be supported "
+            "in a future version. Please pass in a QConfigMapping instead.")
+        qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping)
+
+    if isinstance(equalization_config, Dict):
+        warnings.warn(
+            "Passing a QConfig dictionary to prepare for equalization is deprecated and will not "
+            "be supported in a future version. Please pass in a QConfigMapping instead.")
+        equalization_config = QConfigMapping.from_dict(equalization_config)
+
+    assert(isinstance(qconfig_mapping, QConfigMapping))
+    assert(isinstance(equalization_config, QConfigMapping))
+    qconfig_mapping = copy.deepcopy(qconfig_mapping)
+    equalization_config = copy.deepcopy(equalization_config)
 
     # mapping from a tuple of nodes in reverse order to uninitialized
     #   QuantizeHandler subclass. For example,
@@ -1421,18 +1475,16 @@ def prepare(
     root_node_getter_mapping = \
         get_fusion_pattern_to_root_node_getter(backend_config_dict)
 
-    convert_dict_to_ordered_dict(qconfig_dict)
-    convert_dict_to_ordered_dict(equalization_qconfig_dict)
-    qconfig_dict = update_qconfig_for_fusion(model, qconfig_dict)
-    equalization_qconfig_dict = update_qconfig_for_fusion(model, equalization_qconfig_dict)
-    flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
+    update_qconfig_for_fusion(model, qconfig_mapping)
+    update_qconfig_for_fusion(model, equalization_config)
+    flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_mapping)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config_dict)
 
     if is_qat:
         module_to_qat_module = get_module_to_qat_module(backend_config_dict)
         qat_swap_modules(model, module_to_qat_module)
-        qconfig_dict = update_qconfig_for_qat(qconfig_dict, {})
+        update_qconfig_for_qat(qconfig_mapping, {})
 
     # mapping from fully qualified module name to module instance
     # for example,
@@ -1444,8 +1496,9 @@ def prepare(
     modules = dict(model.named_modules(remove_duplicate=False))
 
     # fill qconfig_map, a map from node name to qconfig, used in find_matches
-    equalization_qconfig_map = generate_qconfig_map(model, modules, model.graph, equalization_qconfig_dict, node_name_to_scope)
-    qconfig_map = generate_qconfig_map(model, modules, model.graph, qconfig_dict, node_name_to_scope)
+    equalization_qconfig_map = generate_qconfig_map(
+        model, modules, model.graph, equalization_config, node_name_to_scope)
+    qconfig_map = generate_qconfig_map(model, modules, model.graph, qconfig_mapping, node_name_to_scope)
 
     # match the patterns that will get quantized
     standalone_module_name_configs = prepare_custom_config_dict.get(
@@ -1485,7 +1538,7 @@ def prepare(
         is_qat)
 
     save_state(model, qconfig_map, node_name_to_scope,
-               prepare_custom_config_dict, equalization_qconfig_map, qconfig_dict, is_qat, observed_node_names)
+               prepare_custom_config_dict, equalization_qconfig_map, qconfig_mapping, is_qat, observed_node_names)
 
     preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
     model = ObservedGraphModule(model, model.graph, preserved_attributes)
