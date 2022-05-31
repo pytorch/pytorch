@@ -2176,11 +2176,13 @@
   dispatch:
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
+    MPS: eye_out_mps
 
 - func: eye.m_out(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
+    MPS: eye_out_mps
 
 - func: flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)
   variants: function, method
