@@ -42,7 +42,7 @@ import torch
 # Distributions tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
-from torch._six import inf
+from torch._six import inf, nan
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests,
      gradcheck)
@@ -2756,6 +2756,18 @@ class TestDistributions(TestCase):
                                     'Dirichlet(alpha={})'.format(list(alpha)),
                                     multivariate=True)
 
+    def test_dirichlet_mode(self):
+        # Test a few edge cases for the Dirichlet distribution mode. This also covers beta distributions.
+        concentrations_and_modes = [
+            ([2, 2, 1], [.5, .5, 0.]),
+            ([3, 2, 1], [2 / 3, 1 / 3, 0]),
+            ([.5, .2, .2], [1., 0., 0.]),
+            ([1, 1, 1], [nan, nan, nan]),
+        ]
+        for concentration, mode in concentrations_and_modes:
+            dist = Dirichlet(torch.tensor(concentration))
+            self.assertEqual(dist.mode, torch.tensor(mode))
+
     def test_beta_shape(self):
         con1 = torch.randn(2, 3).exp().requires_grad_()
         con0 = torch.randn(2, 3).exp().requires_grad_()
@@ -2951,6 +2963,14 @@ class TestDistributions(TestCase):
                     'icdf(cdf(x)) = {}'.format(actual),
                 ]))
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_gamma_log_prob_at_boundary(self):
+        for concentration, log_prob in [(.5, inf), (1, 0), (2, -inf)]:
+            dist = Gamma(concentration, 1)
+            scipy_dist = scipy.stats.gamma(concentration)
+            self.assertAlmostEqual(dist.log_prob(0), log_prob)
+            self.assertAlmostEqual(dist.log_prob(0), scipy_dist.logpdf(0))
+
     def test_cdf_log_prob(self):
         # Tests if the differentiation of the CDF gives the PDF at a given value
         for Dist, params in EXAMPLES:
@@ -3145,6 +3165,76 @@ class TestDistributions(TestCase):
 
         for dist, kwargs in invalid_examples:
             self.assertRaises(RuntimeError, dist, **kwargs)
+
+    def _test_discrete_distribution_mode(self, dist, sanitized_mode, batch_isfinite):
+        # We cannot easily check the mode for discrete distributions, but we can look left and right
+        # to ensure the log probability is smaller than at the mode.
+        for step in [-1, 1]:
+            log_prob_mode = dist.log_prob(sanitized_mode)
+            if isinstance(dist, OneHotCategorical):
+                idx = (dist._categorical.mode + 1) % dist.probs.shape[-1]
+                other = torch.nn.functional.one_hot(idx, num_classes=dist.probs.shape[-1]).to(dist.mode)
+            else:
+                other = dist.mode + step
+            mask = batch_isfinite & dist.support.check(other)
+            self.assertTrue(mask.any() or dist.mode.unique().numel() == 1)
+            # Add a dimension to the right if the event shape is not a scalar, e.g. OneHotCategorical.
+            other = torch.where(mask[..., None] if mask.ndim < other.ndim else mask, other, dist.sample())
+            log_prob_other = dist.log_prob(other)
+            delta = log_prob_mode - log_prob_other
+            self.assertTrue((-1e-12 < delta[mask].detach()).all())  # Allow up to 1e-12 rounding error.
+
+    def _test_continuous_distribution_mode(self, dist, sanitized_mode, batch_isfinite):
+        if isinstance(dist, Wishart):
+            return
+        # We perturb the mode in the unconstrained space and expect the log probability to decrease.
+        num_points = 10
+        transform = transform_to(dist.support)
+        unconstrained_mode = transform.inv(sanitized_mode)
+        perturbation = 1e-5 * (torch.rand((num_points,) + unconstrained_mode.shape) - 0.5)
+        perturbed_mode = transform(perturbation + unconstrained_mode)
+        log_prob_mode = dist.log_prob(sanitized_mode)
+        log_prob_other = dist.log_prob(perturbed_mode)
+        delta = log_prob_mode - log_prob_other
+
+        # We pass the test with a small tolerance to allow for rounding and manually set the
+        # difference to zero if both log probs are infinite with the same sign.
+        both_infinite_with_same_sign = (log_prob_mode == log_prob_other) & (log_prob_mode.abs() == inf)
+        delta[both_infinite_with_same_sign] = 0.
+        ordering = (delta > -1e-12).all(axis=0)
+        self.assertTrue(ordering[batch_isfinite].all())
+
+    def test_mode(self):
+        discrete_distributions = (
+            Bernoulli, Binomial, Categorical, Geometric, NegativeBinomial, OneHotCategorical, Poisson,
+        )
+        no_mode_available = (
+            ContinuousBernoulli, LKJCholesky, LogisticNormal, MixtureSameFamily, Multinomial,
+            RelaxedBernoulli, RelaxedOneHotCategorical,
+        )
+
+        for dist_cls, params in EXAMPLES:
+            for param in params:
+                dist = dist_cls(**param)
+                if isinstance(dist, no_mode_available) or type(dist) is TransformedDistribution:
+                    with self.assertRaises(NotImplementedError):
+                        dist.mode
+                    continue
+
+                # Check that either all or no elements in the event shape are nan: the mode cannot be
+                # defined for part of an event.
+                isfinite = dist.mode.isfinite().reshape(dist.batch_shape + (dist.event_shape.numel(),))
+                batch_isfinite = isfinite.all(axis=-1)
+                self.assertTrue((batch_isfinite | ~isfinite.any(axis=-1)).all())
+
+                # We sanitize undefined modes by sampling from the distribution.
+                sanitized_mode = torch.where(~dist.mode.isnan(), dist.mode, dist.sample())
+                if isinstance(dist, discrete_distributions):
+                    self._test_discrete_distribution_mode(dist, sanitized_mode, batch_isfinite)
+                else:
+                    self._test_continuous_distribution_mode(dist, sanitized_mode, batch_isfinite)
+
+                self.assertFalse(dist.log_prob(sanitized_mode).isnan().any())
 
 
 # These tests are only needed for a few distributions that implement custom

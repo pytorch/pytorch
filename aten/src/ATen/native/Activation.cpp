@@ -588,14 +588,13 @@ Tensor rrelu_with_noise_backward(
     const Scalar& upper,
     bool training,
     bool is_result) {
-  auto lower_tensor = scalar_to_tensor(lower);
-  auto upper_tensor = scalar_to_tensor(upper);
-  if (training && (upper_tensor - lower_tensor).item().to<float>() > 1E-6) {
-    return grad_output.mul(noise);
+  if (training) {
+    return noise * grad_output;
   } else {
-    auto negative = (lower_tensor + upper_tensor) / 2;
-    Scalar negative_slope = negative.item();
-    return at::leaky_relu_backward(grad_output, self_or_result, negative_slope, is_result);
+    auto l = lower.toDouble();
+    auto u = upper.toDouble();
+    auto mid = (l + u) / 2.;
+    return at::leaky_relu_backward(grad_output, self_or_result, mid, is_result);
   }
 }
 

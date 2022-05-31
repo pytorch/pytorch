@@ -13,7 +13,8 @@ import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, DeterministicGuard, \
-    _TestParametrizer, compose_parametrize_fns, dtype_name, TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES
+    _TestParametrizer, compose_parametrize_fns, dtype_name, \
+    TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_dtype import get_all_dtypes
 
@@ -485,6 +486,13 @@ class CUDATestBase(DeviceTypeTestBase):
         # Acquires the current device as the primary (test) device
         cls.primary_device = 'cuda:{0}'.format(torch.cuda.current_device())
 
+class MPSTestBase(DeviceTypeTestBase):
+    device_type = 'mps'
+
+    def _should_stop_test_suite(self):
+        return False
+
+    # TODO: Maybe override `_get_dtypes`, `_get_precision_override`
 
 # Adds available device-type-specific test base classes
 def get_device_type_test_bases():
@@ -503,9 +511,12 @@ def get_device_type_test_bases():
         test_bases.append(CPUTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
+        # Disable MPS testing in generic device testing temporarily while we're
+        # ramping up support.
+        # elif torch.backends.mps.is_available():
+        #   test_bases.append(MPSTestBase)
 
     return test_bases
-
 
 device_type_test_bases = get_device_type_test_bases()
 
@@ -695,7 +706,7 @@ class OpDTypes(Enum):
 class ops(_TestParametrizer):
     def __init__(self, op_list, *, dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.supported,
                  allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
-        self.op_list = op_list
+        self.op_list = list(op_list)
         self.opinfo_dtypes = dtypes
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
 
@@ -745,6 +756,8 @@ class ops(_TestParametrizer):
                     if dtype in dtype_set:
                         dtypes = {dtype}
                         break
+                else:
+                    dtypes = {}
             elif self.opinfo_dtypes == OpDTypes.none:
                 dtypes = {None}
             else:
@@ -1076,6 +1089,10 @@ class dtypesIfCUDA(dtypes):
     def __init__(self, *args):
         super().__init__(*args, device_type='cuda')
 
+class dtypesIfMPS(dtypes):
+
+    def __init__(self, *args):
+        super().__init__(*args, device_type='mps')
 
 def onlyCPU(fn):
     return onlyOn('cpu')(fn)
