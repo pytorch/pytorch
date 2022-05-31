@@ -230,6 +230,10 @@ LayoutTypePtr LayoutType::get() {
 static LayoutTypePtr value(new LayoutType());
 return value;
 }
+MemoryFormatTypePtr MemoryFormatType::get() {
+static MemoryFormatTypePtr value(new MemoryFormatType());
+return value;
+}
 PyObjectTypePtr PyObjectType::get() {
   static PyObjectTypePtr value(new PyObjectType());
   return value;

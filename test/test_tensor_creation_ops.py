@@ -3530,8 +3530,12 @@ class TestRandomTensorCreation(TestCase):
         for n in (5, 100, 50000, 100000):
             # Ensure both integer and floating-point numbers are tested. Half follows an execution path that is
             # different from others on CUDA.
-            for dtype in (torch.long, torch.half, torch.float):
+            for dtype in (torch.long, torch.half, torch.float, torch.bfloat16):
                 if n > 2049 and dtype == torch.half:  # Large n for torch.half will raise an exception, do not test here.
+                    continue
+                if dtype == torch.bfloat16 and device != 'cpu':
+                    continue
+                if n > 256 and dtype == torch.bfloat16:
                     continue
                 with torch.random.fork_rng(devices=rng_device):
                     res1 = torch.randperm(n, dtype=dtype, device=device)
