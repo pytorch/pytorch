@@ -1256,9 +1256,6 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & val
 }
 
 Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
-  // This just implements a naive brute-force algorithm.
-  // TODO: implement more sophisticated and performant algorithms
-  // similar to how index_select_sparse_cpu is doing that.
   const auto ndim = self.dim();
   TORCH_CHECK_INDEX(ndim, "index_select() cannot be applied to a 0-dim tensor.");
   TORCH_CHECK_INDEX(
