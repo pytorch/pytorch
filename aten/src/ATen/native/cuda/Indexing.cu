@@ -32,7 +32,6 @@
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
-#include <ATen/ops/repeat_interleave.h>
 #endif
 
 #include <ATen/cuda/CUDAContext.h>
@@ -1390,50 +1389,46 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
 
     Tensor selected_dim_indices, res_dim_indices;
     std::tie(selected_dim_indices, res_dim_indices) = [&]() -> std::tuple<Tensor, Tensor> {
-      const auto res_dim_indices = at::repeat_interleave(
-          /*self=*/idx_nneg_index,
-          /*counts=*/intrsc_counts_nneg_index,
-          /*dim=*/-1,
-          /*output_size=*/res_len
-      );
-
-      const auto selected_dim_indices = at::empty_like(res_dim_indices);
+      auto res_dim_indices = at::empty({res_len}, nneg_index.options());
+      auto selected_dim_indices = at::empty_like(res_dim_indices);
       auto selected_dim_indices_offsets = intrsc_counts_nneg_index.cumsum(0)
         .sub_(intrsc_counts_nneg_index);
 
-      const auto rows_over_dim_indices = (nnz <= index_len);
       // Need to have output as TensorIterator does not allow having void lambdas.
-      auto dummy_output = at::empty({1, 1}, dim_indices.options())
-        .expand(
-            rows_over_dim_indices
-            ? IntArrayRef({nnz, index_len})
-            : IntArrayRef({index_len, nnz})
-        );
+      auto dummy_output = at::empty({1}, dim_indices.options()).expand(IntArrayRef({index_len}));
       auto iter = TensorIteratorConfig()
         .add_output(dummy_output)
         // All iterations map to a single element in dummy_output by design,
         // hence removed output memory overlap check.
         .set_check_mem_overlap(false)
-        .add_owned_input(dim_indices.unsqueeze(rows_over_dim_indices ? -1: -2))
-        .add_owned_input(idx_dim_indices.unsqueeze(rows_over_dim_indices ? -1: -2))
-        .add_owned_input(nneg_index.unsqueeze(rows_over_dim_indices ? -2: -1))
-        .add_owned_input(idx_nneg_index.unsqueeze(rows_over_dim_indices ? -2: -1))
+        .add_input(idx_nneg_index)
+        .add_input(intrsc_counts_nneg_index)
+        .add_input(selected_dim_indices_offsets)
+        .add_input(intrsc_first_match_nneg_index)
         .build();
 
       AT_DISPATCH_INDEX_TYPES(nneg_index.scalar_type(), "index_select_sparse_cuda", [&]() {
+          index_t* ptr_res_dim_indices = res_dim_indices.data_ptr<index_t>();
           index_t* ptr_selected_dim_indices = selected_dim_indices.data_ptr<index_t>();
-          index_t* ptr_selected_dim_indices_offsets = selected_dim_indices_offsets.data_ptr<index_t>();
+          index_t* ptr_argsort_dim_indices = argsort_dim_indices.data_ptr<index_t>();
           gpu_kernel(
               iter,
-              [ptr_selected_dim_indices, ptr_selected_dim_indices_offsets] GPU_LAMBDA (
-                index_t dim_val, index_t idx_dim, // dim_indices[j], j
-                index_t idx_val, index_t idx_idx // index[i], i
+              [ptr_res_dim_indices, ptr_selected_dim_indices, ptr_argsort_dim_indices] GPU_LAMBDA (
+                index_t idx_idx, index_t count, index_t offset, index_t first_match
               ) -> index_t {
-                if (dim_val == idx_val) {
-                  index_t* ptr_offset = ptr_selected_dim_indices_offsets + idx_idx;
-                  index_t offset = applyAtomicIndexInc(ptr_offset, static_cast<index_t>(1));
-                  ptr_selected_dim_indices[offset] = idx_dim;
-                }
+                thrust::fill_n(
+                  thrust::seq,
+                  /*output=*/ptr_res_dim_indices + offset,
+                  /*n=*/count,
+                  /*value=*/idx_idx
+                );
+                thrust::copy_n(
+                  thrust::seq,
+                  /*input=*/ptr_argsort_dim_indices + first_match,
+                  /*n=*/count,
+                  /*output=*/ptr_selected_dim_indices + offset
+                );
+
                 // A dummy return scalar for a dummy output
                 return static_cast<index_t>(1);
               }
