@@ -1348,8 +1348,8 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
               [ptr_intrsc_counts_nneg_index, ptr_sorted_dim_indices, nnz] GPU_LAMBDA (
                 index_t idx_val, index_t idx_idx
               ) -> index_t {
+                // TODO: thrust could be slow. Try writing a custom kernel
                 const auto equal_range_iters = thrust::equal_range(
-                  // TODO: thrust::seq could be slow. Try writing a custom kernel
                   thrust::seq,
                   ptr_sorted_dim_indices,
                   ptr_sorted_dim_indices + nnz,
