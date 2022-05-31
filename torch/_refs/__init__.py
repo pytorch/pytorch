@@ -161,6 +161,7 @@ __all__ = [
     "std_mean",
     "std_var",
     "sum",
+    "prod",
     "var",
     #
     # Linear algebra ops
@@ -1253,7 +1254,7 @@ def any(
     return result
 
 
-# TODO: register decomp after stride logic is fixed
+@register_decomposition(torch.ops.aten.sum)
 def sum(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -1273,6 +1274,34 @@ def sum(
     return _reduction(
         a,
         prims.sum,
+        dims=dim,
+        keepdims=keepdim,
+        dtype=dtype,
+        out=out,
+        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    )
+
+
+@register_decomposition(torch.ops.aten.prod)
+def prod(
+    a: TensorLikeType,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
+    keepdim: bool = False,
+    *,
+    dtype=None,
+    out: Optional[Tensor] = None,
+) -> TensorLikeType:
+    if dtype is None:
+        if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
+            dtype = torch.int64
+        else:
+            dtype = a.dtype
+    # reduces over all dimensions if dim=() is passed
+    if dim == () or dim == []:
+        dim = None
+    return _reduction(
+        a,
+        prims.prod,
         dims=dim,
         keepdims=keepdim,
         dtype=dtype,
@@ -1385,18 +1414,22 @@ def std(
     if dim == () or dim == []:
         dim = None
 
+    opmath_dtype, dtype = utils.reduction_dtypes(
+        a, REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
+    )
+
     result = _reduction(
         a,
         partial(prims.var, correction=correction),
         dims=dim,
         keepdims=keepdim,
-        dtype=None,
+        dtype=opmath_dtype,
         out=None,
         has_identity=True,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
     )
     result = sqrt(result)
-    return result
+    return _maybe_convert_to_dtype(result, dtype)  # type: ignore[return-value,arg-type]
 
 
 def mean(
@@ -1440,6 +1473,7 @@ def mean(
     return result
 
 
+@register_decomposition(torch.ops.aten.std_mean.correction)
 def std_mean(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -2041,3 +2075,8 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
         return True
 
     return item(all(eq(a, b)))  # type: ignore[return-value]
+
+
+# populate the decomp table
+import torch._refs.nn.functional
+import torch._refs.special
