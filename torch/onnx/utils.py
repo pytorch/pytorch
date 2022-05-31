@@ -1434,8 +1434,13 @@ def _run_symbolic_function(
                 op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
             )
         else:
-            raise symbolic_registry.UnsupportedOperatorError(
-                domain, op_name, opset_version
+            raise errors.UnsupportedOperatorError(
+                domain,
+                op_name,
+                opset_version,
+                symbolic_registry.get_op_supported_version(
+                    op_name, domain, opset_version
+                ),
             )
     except RuntimeError:
         if operator_export_type == _C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
