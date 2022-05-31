@@ -19746,6 +19746,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.roll",
         torch_opinfo_name="roll",
+        validate_view_consistency=False,
         skips=(
             # TODO: decide on the error message for the reference implementation
             # See https://github.com/pytorch/pytorch/issues/78252
@@ -19755,6 +19756,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.rot90",
         torch_opinfo_name="rot90",
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.stack",
