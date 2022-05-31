@@ -2651,7 +2651,7 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   // NOTE: As frobenius_norm_out is currently implemented, it will always produce a
   //    strided tensor result, even if the input is sparse.
   auto options = self.options().layout(c10::Layout::Strided).dtype(toRealValueType(self.scalar_type()));
-  return frobenius_norm_impl(self, dim, keepdim);
+  return frobenius_norm_impl(self, dim, keepdim).to(options);
 }
 
 Tensor &frobenius_norm_out(const Tensor& self,
