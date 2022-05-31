@@ -1414,7 +1414,9 @@ def std(
     if dim == () or dim == []:
         dim = None
 
-    opmath_dtype, dtype = utils.reduction_dtypes(a, REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT)
+    opmath_dtype, dtype = utils.reduction_dtypes(
+        a, REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
+    )
 
     result = _reduction(
         a,
@@ -1427,7 +1429,7 @@ def std(
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
     )
     result = sqrt(result)
-    return _maybe_convert_to_dtype(result, dtype)  # type: ignore[return-value]
+    return _maybe_convert_to_dtype(result, dtype)  # type: ignore[return-value,arg-type]
 
 
 def mean(
@@ -2073,3 +2075,8 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
         return True
 
     return item(all(eq(a, b)))  # type: ignore[return-value]
+
+
+# populate the decomp table
+import torch._refs.nn.functional
+import torch._refs.special
