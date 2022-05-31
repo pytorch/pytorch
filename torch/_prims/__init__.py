@@ -72,6 +72,7 @@ __all__ = [
     "reciprocal",
     "round",
     "sign",
+    "signbit",
     "sin",
     "sinh",
     "sqrt",
@@ -141,6 +142,8 @@ __all__ = [
     "convert_element_type",
     "device_put",
     "item",
+    "maximum_value",
+    "minimum_value",
     "to_dtype",
     #
     # Inplace prims
@@ -745,6 +748,13 @@ round = _make_elementwise_unary_prim(
 sign = _make_elementwise_unary_prim(
     "sign",
     impl_aten=torch.sign,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+signbit = _make_elementwise_unary_prim(
+    "signbit",
+    impl_aten=torch.signbit,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -2013,6 +2023,69 @@ item = _make_prim(
     impl_aten=torch.Tensor.item,
     return_type=RETURN_TYPE.NEW,
     doc=_item_doc,
+)
+
+# NOTE: need to model meta scalars
+# See https://github.com/pytorch/pytorch/issues/78070
+def _maximum_value_meta(dtype: torch.dtype) -> TensorMeta:
+    number_type = utils.dtype_to_type(dtype)
+    return TensorMeta(number_type(-1))
+
+
+def _maximum_value_aten(dtype: torch.dtype):
+    if dtype == torch.bool:
+        return True
+    elif dtype.is_complex or dtype.is_floating_point:
+        return torch.finfo(dtype).max
+    else:
+        return torch.iinfo(dtype).max
+
+
+_maximum_value_doc = """
+    Return the maximum finite value for a dtype.
+"""
+
+# TODO: create a new return type for scalars?
+# FIXME: currently returns integers for boolean tensors
+# https://github.com/pytorch/pytorch/issues/78071
+maximum_value = _make_prim(
+    schema="maximum_value(ScalarType dtype) -> Scalar",
+    meta=_maximum_value_meta,
+    impl_aten=_maximum_value_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_maximum_value_doc,
+)
+
+
+# NOTE: need to model meta scalars
+# See https://github.com/pytorch/pytorch/issues/78070
+def _minimum_value_meta(dtype: torch.dtype) -> TensorMeta:
+    number_type = utils.dtype_to_type(dtype)
+    return TensorMeta(number_type(-1))
+
+
+def _minimum_value_aten(dtype: torch.dtype):
+    if dtype == torch.bool:
+        return False
+    elif dtype.is_complex or dtype.is_floating_point:
+        return torch.finfo(dtype).min
+    else:
+        return torch.iinfo(dtype).min
+
+
+_minimum_value_doc = """
+    Return the mimimum finite value for a dtype.
+"""
+
+# TODO: create a new return type for scalars?
+# FIXME: currently returns integers for boolean tensors
+# https://github.com/pytorch/pytorch/issues/78071
+minimum_value = _make_prim(
+    schema="minium_value(ScalarType dtype) -> Scalar",
+    meta=_minimum_value_meta,
+    impl_aten=_minimum_value_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_minimum_value_doc,
 )
 
 # TODO: FIXME: strides are incorrect
