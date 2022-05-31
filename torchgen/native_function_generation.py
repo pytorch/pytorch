@@ -253,6 +253,7 @@ def generate_function(
             # Every generated NativeFunction gets a "generated" tag, so it's easy to tell
             # which NativeFunction objects did not come directly from native_functions.yaml.
             tags=set(["generated"]),
+            composite=(set(), set()),
         ),
         backend_metadata,
     )
