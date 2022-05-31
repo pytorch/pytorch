@@ -468,6 +468,9 @@ class build_ext(setuptools.command.build_ext.build_ext):
             target_lib = os.path.join(self.build_lib, 'torch', 'lib', omp_lib_name)
             report('--Copying libomp to: '+target_lib + ' from '+ source_lib)
             self.copy_file(source_lib, target_lib)
+
+            report('--Make sure we call install_name_tool on  libiomp5')
+            report(subprocess.check_output(['install_name_tool', '-id', '@rpath/libiomp5.dylib', target_lib]).decode('utf-8').split('\n'))
             break
 
     def run(self):
