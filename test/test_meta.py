@@ -432,6 +432,10 @@ def run_meta_crossref(
     # (if any of them failed, we're in a mixed device situation and
     # this isn't well supported)
     if do_meta and to_meta.successful():
+        # Special cases
+        if func is torch.tensor_split:
+            # Use original indices_or_sections, this argument is data dependent
+            meta_args = (meta_args[0], args[1]) + meta_args[2:]
         try:
             # Suppress warnings, this doesn't matter for test_meta.py
             # but it does matter if you want to use this decorator
@@ -631,10 +635,7 @@ meta_function_skips = {
     torch.logical_not: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.nn.functional.cross_entropy: {bf16, f32, f64},
     torch.nn.functional.interpolate: {bf16, f32, f64, u8},
-    # BEGIN TODO
-    torch.nn.functional.nll_loss: {bf16, f32, f64},
-    torch.tensor_split: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
-    # END TODO
+    torch.nn.functional.nll_loss: {bf16, f32, f64},  # TODO
     torch.inverse: {f32, f64},
     torch.linalg.matrix_power: {f32, f64},
     torch.linalg.matrix_rank: {f32, f64},
