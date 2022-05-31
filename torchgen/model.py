@@ -635,6 +635,14 @@ class NativeFunction:
             "Since this kernel is already structure, remove the composite listing."
         )
 
+        assert not (
+            len(composite_kernels) > 0
+            and DispatchKey.CompositeExplicitAutograd in dispatch.keys()
+        ), (
+            "dispatch-less composite kernels implies in CompositeExplicitAutograd. "
+            "Remove it from the dispatch."
+        )
+
         raw_ufunc_inner_loop = e.pop("ufunc_inner_loop", {})
         ufunc_inner_loop = {}
         if isinstance(raw_ufunc_inner_loop, str):
