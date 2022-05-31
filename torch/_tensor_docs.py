@@ -522,7 +522,7 @@ In-place version of :meth:`~Tensor.arcsinh`
 """)
 
 add_docstr_all('as_strided', r"""
-as_strided(size, stride, storage_offset=0) -> Tensor
+as_strided(size, stride, storage_offset=None) -> Tensor
 
 See :func:`torch.as_strided`
 """)
