@@ -65,7 +65,7 @@ class FakeTensorTest(TestCase):
             out = x + y
 
         self.assertTrue(isinstance(y, FakeTensor))
-        
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_non_kwarg_device(self):
         x = FakeTensor.from_tensor(torch.rand([16, 1], device="cpu"))
