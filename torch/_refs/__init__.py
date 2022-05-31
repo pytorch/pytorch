@@ -1414,10 +1414,7 @@ def std(
     if dim == () or dim == []:
         dim = None
 
-    opmath_dtype = utils.get_computation_dtype(a.dtype)
-    dtype = a.dtype
-    if utils.is_complex_dtype(dtype):
-        dtype = utils.corresponding_real_dtype(dtype)
+    opmath_dtype, dtype = utils.reduction_dtypes(a, REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT)
 
     result = _reduction(
         a,
