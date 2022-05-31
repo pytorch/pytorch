@@ -314,8 +314,13 @@ class TestSignatureEquivalence(TestCase):
             self.assertIsNotNone(fp_sig, msg=f'Cannot get signature of the {fp_func.__name__}')
             self.assertIsNotNone(q_sig, msg=f'Cannot get signature of the {q_func.__name__}')
 
+        if fp_sig is None or q_sig is None:
+            # Couldn't extract signature and pass_if_no_check is set
+            # There is now
+            return
+
         if not fp_extras and not q_extras:
-            # No extras, assume the signatures must be identical
+            # No extras, assume the signatures are identical
             self.assertEqual(fp_sig, q_sig)
         else:
             fp_extras = fp_extras or []
@@ -336,7 +341,7 @@ class TestSignatureEquivalence(TestCase):
                                      q_args[:num_common_fp_args]):
                 self.assertEqual(
                     fp_arg, q_arg,
-                    msg=f'Argument name mismatch: {fp_arg} vs. {q_arg}')
+                    msg=f'Argument mismatch: {fp_arg} vs. {q_arg}')
 
     def test_conv1d(self):
         fp_func = torch.nn.functional.conv1d
