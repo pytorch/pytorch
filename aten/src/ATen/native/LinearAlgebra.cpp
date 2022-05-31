@@ -2618,18 +2618,9 @@ Tensor frobenius_norm(const Tensor& self) {
   return at::norm(self);
 }
 
-Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  // NOTE: As frobenius_norm_out is currently implemented, it will always produce a
-  //    strided tensor result, even if the input is sparse.
-  auto options = self.options().layout(c10::Layout::Strided).dtype(toRealValueType(self.scalar_type()));
-  Tensor result = at::empty({0}, options);
-  return at::native::frobenius_norm_out(self, dim, keepdim, result);
-}
+namespace {
 
-Tensor &frobenius_norm_out(const Tensor& self,
-    IntArrayRef dim,
-    bool keepdim,
-    Tensor& result) {
+Tensor frobenius_norm_impl(const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(
       dim.size() <= 2,
       "Expected at most 2 dimensions, but got ",
@@ -2642,15 +2633,29 @@ Tensor &frobenius_norm_out(const Tensor& self,
     auto dim_ = dim.vec();
     maybe_wrap_dims(dim_, self.dim());
     TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
-    if (self.is_complex()){
+    if (self.is_complex()) {
       result_ = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
     } else {
       result_ = at::sqrt(at::sum((self * self), dim_, keepdim));
     }
   }
-  // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out above.
-  //    However, norm_out and sqrt_out do not support automatic differentiation.
-  //    More details here: https://github.com/pytorch/pytorch/pull/44095#discussion_r486673947
+  return result_;
+}
+
+} // namespace
+
+Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
+  // NOTE: As frobenius_norm_out is currently implemented, it will always produce a
+  //    strided tensor result, even if the input is sparse.
+  auto options = self.options().layout(c10::Layout::Strided).dtype(toRealValueType(self.scalar_type()));
+  return frobenius_norm_impl(self, dim, keepdim);
+}
+
+Tensor &frobenius_norm_out(const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    Tensor& result) {
+  auto result_ = frobenius_norm_impl(self, dim, keepdim);
   at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
   return result;
