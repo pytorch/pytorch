@@ -23,6 +23,7 @@ __all__ = [
     'i0e',
     'i1',
     'i1e',
+    'laguerre_polynomial_l',
     'log_ndtr',
     'log_softmax',
     'log1p',
@@ -943,6 +944,28 @@ is returned. Otherwise, the recursion:
 
 .. math::
     He_{n + 1}(\text{input}) = 2 \times \text{input} \times He_{n}(\text{input}) - He_{n - 1}(\text{input})
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+laguerre_polynomial_l = _add_docstr(_special.special_laguerre_polynomial_l,
+                                    r"""
+laguerre_polynomial_l(input, n, *, out=None) -> Tensor
+
+Laguerre polynomial :math:`L_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    L_{n + 1}(\text{input}) = 2 \times \text{input} \times L_{n}(\text{input}) - L_{n - 1}(\text{input})
 
 is evaluated.
 
