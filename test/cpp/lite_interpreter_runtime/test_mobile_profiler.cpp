@@ -70,7 +70,7 @@ TEST(MobileProfiler, ModuleHierarchy) {
   ASSERT_TRUE(checkMetaData("aten::add", metadata_name, "top(C)::<unknown>.aten::add", trace_file));
 }
 
-TEST(MobileProfiler, Backend) {
+TEST(MobileProfiler, DISABLED_Backend) {
   std::string filePath(__FILE__);
   auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
   testModelFile.append("test_backend_for_profiling.ptl");
