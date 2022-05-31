@@ -187,7 +187,13 @@ class WeightedRandomSampler(Sampler[int]):
         if not isinstance(replacement, bool):
             raise ValueError("replacement should be a boolean value, but got "
                              "replacement={}".format(replacement))
-        self.weights = torch.as_tensor(weights, dtype=torch.double)
+        
+        weights = torch.as_tensor(weights, dtype=torch.double)
+        if len(weights.shape) != 1:
+            raise ValueError("weights should be a 1d sequence but given "
+                             "weights have shape {}".format(tuple(weights.shape)))
+
+        self.weights = weights
         self.num_samples = num_samples
         self.replacement = replacement
         self.generator = generator
