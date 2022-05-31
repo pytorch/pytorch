@@ -16,7 +16,6 @@
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
-#include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
@@ -838,7 +837,6 @@ TEST(FlatbufferTest, DuplicateSetState) {
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  ASSERT_TRUE(torch::jit::is_upgraders_map_populated());
   const auto methods2 = bc.get_methods();
   ASSERT_EQ(methods2.size(), expected_n);
 }
