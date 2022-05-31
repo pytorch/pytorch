@@ -1,5 +1,5 @@
-# Owner(s): ["oncall: quantization"]
-
+import torch
+from torch import Tensor
 from torch.ao.quantization.experimental.observer import APoTObserver
 import unittest
 
