@@ -497,6 +497,7 @@ class Argument:
     default_value: Optional[Any]
     def has_default_value(self) -> _bool: ...
     kwarg_only : _bool
+    is_out: _bool
     ...
 class FunctionSchema:
     arguments: List[Argument]
