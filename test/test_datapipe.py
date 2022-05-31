@@ -301,7 +301,7 @@ class TestIterableDataPipeBasic(TestCase):
         self.assertEqual(count, 2 * len(self.temp_files))
 
         # test functional API
-        datapipe = datapipe.list_file()
+        datapipe = datapipe.list_files()
         count = 0
         for pathname in datapipe:
             count += 1
