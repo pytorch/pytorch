@@ -581,25 +581,26 @@ class TestSparseCSR(TestCase):
         sparse = self.genSparseBSRTensor(shape, (2, 2), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
 
         # select from batch dimensions
-        sparse_selected12 = sparse.select(0, 2)
-        expected_sparse_selected12 = torch.sparse_bsr_tensor(sparse.crow_indices().select(0, 2).contiguous(),
+        sparse_selected02 = sparse.select(0, 2)
+        expected_sparse_selected02 = torch.sparse_bsr_tensor(sparse.crow_indices().select(0, 2).contiguous(),
                                                              sparse.col_indices().select(0, 2).contiguous(),
                                                              sparse.values().select(0, 2).contiguous(),
-                                                             size=(1, 6, 10),
+                                                             size=(6, 10),
                                                              dtype=dtype,
                                                              device=device)
-        self.assertEqual(expected_sparse_selected12, sparse_selected12)
+        self.assertEqual(expected_sparse_selected02, sparse_selected02)
 
+        msg = "selecting non-batch dimensions is currently only supported for CSR tensors"
         # selecting from rows or columns for batched CSR is not yet implemented
-        with self.assertRaisesRegex(RuntimeError, "selecting rows or columns is not implemented for batched"):
+        with self.assertRaisesRegex(RuntimeError, msg):
             sparse.select(-2, 0)
 
-        with self.assertRaisesRegex(RuntimeError, "selecting rows or columns is not implemented for batched"):
+        with self.assertRaisesRegex(RuntimeError, msg):
             sparse.select(-1, 0)
 
         # assigning to sparse via indexing is disabled
-        with self.assertRaisesRegex(TypeError, "Cannot assign to a sparse tensor"):
-            sparse[0, 0, 0, 0] = 99.0
+        with self.assertRaisesRegex(RuntimeError, msg):
+            sparse[0, 0, 0] = 99.0
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
