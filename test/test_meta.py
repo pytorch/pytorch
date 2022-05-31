@@ -633,7 +633,6 @@ meta_function_skips = {
     torch.nn.functional.interpolate: {bf16, f32, f64, u8},
     # BEGIN TODO
     torch.nn.functional.nll_loss: {bf16, f32, f64},
-    torch.prod: {b8, f32, f64, i16, i32, i64, i8, u8},
     torch.tensor_split: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     # END TODO
     torch.inverse: {f32, f64},
@@ -729,7 +728,6 @@ meta_function_device_skips['cuda'] = {
     torch.nn.functional.cross_entropy: {f16},
     torch.nn.functional.interpolate: {f16},
     torch.nn.functional.nll_loss: {f16},
-    torch.prod: {bf16, c32, f16},
     torch.svd: {f32, f64},
 }
 
@@ -851,7 +849,6 @@ meta_dispatch_expected_failures = {
     aten.nonzero.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.polar.default: {f64, f32},
     aten.prelu.default: {bf16, f64, f32},
-    aten.prod.default: {i64, u8, b8, f32, i8, f64, i16, i32},
     aten.relu.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.repeat_interleave.Tensor: {c64, i64, c128, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.roll.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
@@ -978,7 +975,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
     aten.prelu.default: {f16},  # aten::prelu
-    aten.prod.default: {bf16, c32, f16},  # aten::prod
     aten.relu.default: {f16},  # aten::relu
     aten.rrelu_with_noise.default: {f16},  # aten::rrelu_with_noise
     aten.tensordot.out: {f16},  # aten::tensordot.out
