@@ -46,6 +46,24 @@ _like_tensor_constructors = (
     aten.zeros_like.default,
 )
 
+# TODO: use tags
+_inplace_view_ops = (
+    aten.rename_.default,
+    aten.as_strided_.default,
+    aten.detach_.default,
+    aten.squeeze_.default,
+    aten.squeeze_.dim,
+    aten.squeeze_.dimname,
+    aten.t_.default,
+    aten.transpose_.default,
+    aten.unsqueeze_.default,
+    aten.swapaxes_.default,
+    aten.swapdims_.default,
+    aten.resize_.default,  # needs inplace_view tag
+    aten._resize_output_.default,  # needs inplace_view tag
+    aten.set_.default,  # needs inplace-metadata tag
+)
+
 @functools.lru_cache(None)
 def _is_tensor_constructor(func: OpOverload):
     assert isinstance(func, OpOverload)
@@ -69,7 +87,7 @@ def enable_cpu_fallback(enable_cpu_fallback: bool):
     finally:
         cpu_fallback_enabled = orig
 
-## Similar to `MetaConverter`, this is a class for converting
+# Similar to `MetaConverter`, this is a class for converting
 # multiple tensors into fake tensors which share the same view/storage
 # structure. Like `MetaConverter`, it will keep alive all
 # tensors that are converted to FakeTensors.
@@ -85,18 +103,24 @@ class FakeTensorConverter(MetaConverter):
 
     def from_real_tensor(self, t):
         existing_device = t.device
-        FakeTensor(self.meta_converter(t), existing_device)
         self.tensor_memo[t] = FakeTensor(self.meta_converter(t), existing_device)
-        self.fake_from_real_set.add(tensor_memo[t])
+        self.fake_from_real_set.add(self.tensor_memo[t])
         return self.tensor_memo[t]
 
     def from_meta_and_device(self, t, device):
-        assert t.device.type == "meta"
+        if t in self.tensor_memo:
+            return self.tensor_memo[t]
         self.tensor_memo[t] = FakeTensor(t, device)
-        # would a single tensor `t` of device meta ever be reused across different devices?
-        # not sure if possible
         return self.tensor_memo[t]
 
+    def __call__(self, t, device=None):
+        assert t.device.type != 'meta' or device is not None
+        if t in self.tensor_memo:
+            return self.tensor_memo[t]
+        elif t.device.type != 'meta':
+            return self.from_real_tensor(t)
+        else:
+            return self.from_meta_and_device(t, device)
 
 def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
     with no_dispatch():
@@ -150,7 +174,7 @@ def register_op_handler(run_handler_check: Union[Callable[[OpOverload], bool], O
 # it insteead of calling device again or we would keep on recurring
 # NB: register this first, since device will be called frequently
 @register_op_handler(torch.ops.prim.device.default)
-def to_copy(cls_or_mode_instance, func, types, args, kwargs, run_function, converter):
+def device_op(cls_or_mode_instance, func, types, args, kwargs, run_function, converter):
     assert len(args) == 1 and isinstance(args[0], FakeTensor)
     return args[0].fake_device
 
@@ -201,10 +225,8 @@ def non_kwarg_to(cls_or_mode_instance, func, types, args, kwargs, run_function, 
 # Dont default to default device handling,
 # since the device of `the_template` is ignored
 @register_op_handler(aten.resize_as_.default)
-def resize_as_(cls_or_mode_instance, func, types, args, kwargs, run_function, converter)
-    r = run_function(func, types, args, kwargs)
-    _, new_kwargs = normalize_function(func, args, kwargs, normalize_to_only_use_kwargs=True)
-    return FakeTensor(r, new_kwargs["input"].device)
+def resize_as_(cls_or_mode_instance, func, types, args, kwargs, run_function, converter):
+    return run_function(func, types, args, kwargs)
 
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
@@ -217,24 +239,29 @@ def torch_dispatch_impl(cls_or_mode_instance, func, types, args, kwargs, run_fun
     in_fake_mode = isinstance(cls_or_mode_instance, FakeTensorMode)
     converter = cls_or_mode_instance.fake_tensor_converter if in_fake_mode else FakeTensorConverter()
 
+
+    def wrap_to_fake(e, device=None):
+        if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
+            return converter.from_real_tensor(e)
+        else:
+            return e
+
     # if we are in the dispatch mode, we will enter this function even if the inputs
     # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
     # and just support constructors. TODO: extend more broadly
     if in_fake_mode:
-        conversion_made = False
+        args, kwargs = tree_map(wrap_to_fake, (args, kwargs))
 
-        def check_non_fake_tensor(x):
-            nonlocal conversion_made
-            conversion_made = conversion_made or (isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor))
+    def check_for_input_tensor_inplace_view(e):
+        if e in converter.fake_from_real_set:
+            raise Exception(f"Inplace metadata change on a fake tensor that was created from a real tensor input."
+                            f"Convert all tensor inputs to fake tensors and re-run.{func}")
 
-        tree_map(check_non_fake_tensor, args)
-        tree_map(check_non_fake_tensor, kwargs)
+    if func in _inplace_view_ops:
+        tree_map(check_for_input_tensor_inplace_view, (args, kwargs))
+    if kwargs.get("out", None) and func.overload_name == "out":
+        check_for_input_tensor_inplace_view(kwargs["out"])
 
-        if conversion_made:
-            raise Exception(
-                "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
-                f"Please convert all Tensors to FakeTensors first. Found in {func}"
-            )
 
     for run_op_handler_check, op_handler in op_handlers:
         if run_op_handler_check(func):
@@ -250,12 +277,12 @@ def torch_dispatch_impl(cls_or_mode_instance, func, types, args, kwargs, run_fun
     # TODO: handle non-kwarg devices
     assert func not in _device_not_kwarg_ops, f"NYI: {func}"
 
-    def wrap(e, device=None, converter_fn=None):
-        converter_fn = converter if converter_fn is None else converter_fn
+    def wrap(e, device=None):
         if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
-            return converter_fn(e, device)
+            return converter(e, device)
         else:
             return e
+
 
     # if device is specified, use that
     if kwargs.get("device", None):
