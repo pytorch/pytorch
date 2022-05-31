@@ -1343,16 +1343,14 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
       }
     }();
 
-    const auto intrsc_counts_nneg_index = [&]() -> Tensor {
+    Tensor intrsc_counts_nneg_index;
+    Tensor intrsc_first_match_nneg_index;
+    std::tie(intrsc_counts_nneg_index, intrsc_first_match_nneg_index) = [&]() -> std::tuple<Tensor, Tensor> {
       auto intrsc_counts_nneg_index = at::zeros_like(nneg_index);
+      auto intrsc_first_match_nneg_index = at::zeros_like(nneg_index);
 
-      // Need to have output as TensorIterator does not allow having void lambdas.
-      auto dummy_output = at::empty({1}, dim_indices.options()).expand(IntArrayRef({index_len}));
       auto iter = TensorIteratorConfig()
-        .add_output(dummy_output)
-        // All iterations map to a single element in dummy_output by design,
-        // hence removed output memory overlap check.
-        .set_check_mem_overlap(false)
+        .add_output(intrsc_first_match_nneg_index)
         .add_input(nneg_index)
         .add_input(idx_nneg_index)
         .build();
@@ -1374,13 +1372,12 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
                 const auto idx_count = equal_range_iters.second - equal_range_iters.first;
                 ptr_intrsc_counts_nneg_index[idx_idx] = idx_count;
 
-                // A dummy return scalar for a dummy output
-                return static_cast<index_t>(1);
+                return equal_range_iters.first - ptr_sorted_dim_indices;
               }
           );
       });
 
-      return intrsc_counts_nneg_index;
+      return std::make_tuple(intrsc_counts_nneg_index, intrsc_first_match_nneg_index);
     }();
 
     // Unavoidable sync since the shape of the result is not known in advance
