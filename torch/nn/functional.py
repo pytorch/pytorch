@@ -2049,14 +2049,8 @@ def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
     return torch._C._nn.hardswish(input)
 
 
-def _no_grad_embedding_renorm_(weight: Tensor, input: Tensor, max_norm: float, norm_type: float) -> Tensor:
-    prev_state = get_fwd_grad_enabled()
-    with torch.no_grad():
-        set_fwd_grad_enabled(False)
-        try:
-          torch.embedding_renorm_(weight, input, max_norm, norm_type)
-        finally:
-          set_fwd_grad_enabled(prev_state)
+def _no_grad_embedding_renorm_(weight: Tensor, input: Tensor, max_norm: float, norm_type: float) -> Tuple[Tensor, Tensor]:
+    torch.embedding_renorm_(weight.detach(), input, max_norm, norm_type)
 
 
 def embedding(
