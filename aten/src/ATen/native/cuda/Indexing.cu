@@ -1359,7 +1359,7 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
           index_t* ptr_sorted_dim_indices = sorted_dim_indices.data_ptr<index_t>();
           gpu_kernel(
               iter,
-              [ptr_intrsc_counts_nneg_index, index_len, ptr_sorted_dim_indices, nnz] GPU_LAMBDA (
+              [ptr_intrsc_counts_nneg_index, ptr_sorted_dim_indices, nnz] GPU_LAMBDA (
                 index_t idx_val, index_t idx_idx
               ) -> index_t {
                 const auto equal_range_iters = thrust::equal_range(
