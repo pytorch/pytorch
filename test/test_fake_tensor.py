@@ -22,6 +22,7 @@ class FakeTensorTest(TestCase):
         x = FakeTensor.from_tensor(torch.empty(1, device="cpu"))
         y = FakeTensor.from_tensor(torch.empty(8, 8, device="cuda"))
         out = x.resize_as_(y)
+        self.assertTrue(isinstance(out, FakeTensor))
         self.assertEqual(out.shape, (8, 8))
         self.assertEqual(out.device.type, "cpu")
 
