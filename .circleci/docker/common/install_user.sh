@@ -23,4 +23,4 @@ chown jenkins:jenkins /usr/local
 echo 'jenkins ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/jenkins
 
 # Test that sudo works
-sudo -u jenkins sudo -v
+/bin/sudo -u jenkins sudo -v
