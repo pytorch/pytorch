@@ -5,7 +5,7 @@ namespace torch {
 namespace lazy {
 
 Normal::Normal(const torch::lazy::Value& self, const double& mean, const double& std, std::vector<torch::lazy::Shape>&& shapes)
-    : torch::lazy::TsNode(torch::lazy::OpKind(c10::Symbol::fromQualString("aten::normal_")),
+    : torch::lazy::TsNode(ClassOpKind(),
             {self}, std::move(shapes),
             /* num_outputs */ 1,
             torch::lazy::MHash(mean, std)),

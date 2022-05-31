@@ -960,11 +960,22 @@ TORCH_IMPL_FUNC(softmax_backward_cuda_out)
 Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const c10::optional<int64_t> dim_) {
   Tensor output = at::empty_like(input_, input_.options());
   TORCH_CHECK(mask_.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
-  bool is_transformer_mask = (input_.dim() == 4 && mask_.dim() == 2 && input_.size(0) == mask_.size(0) && input_.size(2) == mask_.size(1) && input_.size(3) == mask_.size(1));
-  TORCH_CHECK(mask_.sizes() == input_.sizes() || is_transformer_mask, "Mask shape should match input");
+
+  // If input is [B, H, T, T] and mask is [B, T]
+  // we have special fast kernel
+  bool is_BxT_mask = (input_.dim() == 4 && mask_.dim() == 2 && input_.size(0) == mask_.size(0) && input_.size(2) == mask_.size(1) && input_.size(3) == mask_.size(1));
+
+  // If input is [B, H, T, T] and mask is [T, T]
+  // expand mask to [B, H, T, T] and treat it like regular mask
+  // TODO We should have special fast kernel for TxT mask as well
+  bool is_TxT_mask = input_.dim() == 4 && mask_.dim() == 2 && input_.size(3) == mask_.size(1) && input_.size(2) == mask_.size(0) && mask_.size(0) == mask_.size(1);
+  TORCH_CHECK(mask_.sizes() == input_.sizes() || is_BxT_mask || is_TxT_mask, "Mask shape should match input. mask: ", mask_.sizes(), " input: ", input_.sizes());
 
   auto input = input_.dim() == 0 ? input_.view(1) : input_;
   auto mask = mask_.dim() == 0 ? mask_.view(1) : mask_;
+  if (is_TxT_mask) {
+    mask = mask.expand(input.sizes());
+  }
   int64_t dim = dim_.has_value() ? dim_.value() : input.dim() - 1;
 
   int softmax_elements = input.size(dim);
@@ -988,7 +999,7 @@ Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const c10:
   }
   int batch_count = input.numel() / softmax_elements;
   int chunk_size = input.numel() / input.size(0);
-  if (is_transformer_mask) {
+  if (is_BxT_mask) {
     // Only support when num_heads is even in transformer
     TORCH_CHECK(input.size(1) % 2 == 0, "Only support when num_heads is even in transformer");
     AT_DISPATCH_FLOATING_TYPES_AND2(
