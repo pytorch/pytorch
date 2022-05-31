@@ -5229,7 +5229,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
-    @skipCUDAIfRocm
     def test_lobpcg_ortho(self, device, dtype):
         self._test_lobpcg_method(device, dtype, 'ortho')
 
