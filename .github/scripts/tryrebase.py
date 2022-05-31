@@ -53,7 +53,7 @@ def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, dry_run: bool = False, stab
     with open('.ghstackrc', 'w+') as f:
         f.write('[ghstack]\n' +
                 "github_url=github.com\n" +
-                "github_username=clee2000\n" +
+                "github_username=pytorchmergebot\n" +
                 "remote_name=origin")
 
     if dry_run:
