@@ -1,7 +1,7 @@
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
 load(
-    "//tools:build_variables.bzl",
+    ":build_variables.bzl",
     "aten_cpu_source_list",
     "aten_native_source_list",
     "core_sources_common",
@@ -10,7 +10,7 @@ load(
     "libtorch_profiler_sources",
 )
 load(
-    "//:pt_defs.oss.bzl",
+    ":pt_defs.oss.bzl",
     "USED_PT_BACKENDS",
     "build_aten_cpu",
     "gen_aten_files",
