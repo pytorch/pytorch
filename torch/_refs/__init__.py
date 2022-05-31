@@ -48,8 +48,6 @@ __all__ = [
     "acosh",
     "asin",
     "atan",
-    # "bessel_i0e",  # special.i0e
-    # "bessel_i1e",  # special.i1e
     "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
@@ -74,10 +72,14 @@ __all__ = [
     "log1p",
     "log2",
     "log10",
+    "nan_to_num",
     "neg",
+    "positive",
     "reciprocal",
     "round",  # TODO: model kwargs
+    "sigmoid",
     "sign",
+    "signbit",
     "sin",
     "sinh",
     "sqrt",
@@ -100,8 +102,9 @@ __all__ = [
     "eq",
     "float_power",
     # 'floor_divide', # requires floor
-    # 'fmax', # requires where
-    # 'fmod',
+    "fmax",
+    "fmin",
+    "fmod",
     # 'gcd',
     "ge",
     "gt",
@@ -115,7 +118,7 @@ __all__ = [
     "le",
     "logical_and",
     "logical_or",
-    # 'logical_xor',
+    "logical_xor",
     "lt",
     # 'max', # implement with reductions
     "maximum",
@@ -439,7 +442,7 @@ frac = _make_elementwise_unary_reference(
 
 def _isfinite(a: TensorLikeType) -> TensorLikeType:
     if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
-        return prims.is_finite(a)
+        return prims.isfinite(a)
 
     return ones_like(a, dtype=torch.bool)
 
@@ -512,6 +515,41 @@ log10 = _make_elementwise_unary_reference(
 )
 
 
+@register_decomposition(torch.ops.aten.nan_to_num)
+@out_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a,"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def nan_to_num(
+    a: TensorLikeType,
+    *,
+    nan: Optional[NumberType] = 0.0,
+    posinf: Optional[NumberType] = None,
+    neginf: Optional[NumberType] = None,
+) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+
+    if a.dtype == torch.bool:
+        return clone(a)
+
+    if posinf is None:
+        posinf = prims.maximum_value(a.dtype)
+
+    if neginf is None:
+        neginf = prims.minimum_value(a.dtype)
+
+    result = where(isnan(a), nan, a)
+
+    is_neg = signbit(a)
+    is_neginf = bitwise_and(isinf(a), is_neg)
+    result = where(is_neginf, neginf, result)
+
+    is_posinf = bitwise_and(isinf(a), bitwise_not(is_neg))
+    result = where(is_posinf, posinf, result)
+    return result
+
+
 def _neg_meta(a: TensorLikeType):
     if a.dtype is torch.bool:
         msg = "neg is not supported on bool tensors."
@@ -523,6 +561,16 @@ neg = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     extra_meta=_neg_meta,
 )
+
+
+# positive does not use _make_elementwise_unary_reference because it does not support out
+def positive(a: TensorLikeType) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+    if a.dtype is torch.bool:
+        msg = "positive does not support bool tensors."
+        raise RuntimeError(msg)
+    return a
+
 
 reciprocal = _make_elementwise_unary_reference(
     prims.reciprocal,
@@ -536,9 +584,26 @@ round = _make_elementwise_unary_reference(
     aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
 )
 
+
+def _sigmoid(a: TensorLikeType) -> TensorLikeType:
+    return true_divide(1, add(1, exp(neg(a))))
+
+
+sigmoid = _make_elementwise_unary_reference(
+    _sigmoid,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=torch.ops.aten.sigmoid,
+)
+
 sign = _make_elementwise_unary_reference(
     prims.sign,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+signbit = _make_elementwise_unary_reference(
+    prims.signbit,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
 sin = _make_elementwise_unary_reference(
@@ -742,6 +807,27 @@ def float_power(
 
 
 # TODO: add docstring
+fmax = _make_elementwise_binary_reference(
+    prims.fmax,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmax,
+)
+
+# TODO: add docstring
+fmin = _make_elementwise_binary_reference(
+    prims.fmin,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmin,
+)
+
+# TODO: add docstring
+fmod = _make_elementwise_binary_reference(
+    prims.fmod,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmod,
+)
+
+# TODO: add docstring
 ge = _make_elementwise_binary_reference(
     prims.ge,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
@@ -857,6 +943,23 @@ logical_or = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.logical_or,
 )
+
+
+def _logical_xor(a: TensorLikeType, b: TensorLikeType):
+    if not utils.is_boolean_dtype(a.dtype):
+        a = ne(a, 0)
+    if not utils.is_boolean_dtype(b.dtype):
+        b = ne(b, 0)
+    return bitwise_xor(a, b)
+
+
+# TODO: skip unnecessary conversion of long to float
+logical_xor = _make_elementwise_binary_reference(
+    _logical_xor,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.logical_xor,
+)
+
 
 # TODO: add docstring
 lt = _make_elementwise_binary_reference(
@@ -1955,3 +2058,8 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
         return True
 
     return item(all(eq(a, b)))  # type: ignore[return-value]
+
+
+# populate the decomp table
+import torch._refs.nn.functional
+import torch._refs.special
