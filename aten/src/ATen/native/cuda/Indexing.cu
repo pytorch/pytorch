@@ -12,10 +12,8 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/cuda/Atomic.cuh>
 #include <ATen/native/Resize.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/cuda/CUDAUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -1255,18 +1253,6 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & val
   TORCH_CHECK(value.dim() == 0, "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
       "with ", value.dim(), " dimension(s).");
   return masked_fill__cuda(self, mask, value.item());
-}
-
-namespace {
-  // Cannot use fastAtomicAdd inside GPU_LAMBDA as nvcc complaints
-  // about calling __device__ operator() in the __host__ context
-  template <typename index_t>
-  static __host__ __device__ __forceinline__ index_t applyAtomicIndexInc(
-      index_t* const address,
-      index_t val
-  ) {
-    return gpuAtomicAddWithReturn(address, val);
-  }
 }
 
 Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
