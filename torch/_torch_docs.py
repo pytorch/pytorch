@@ -1045,15 +1045,13 @@ returned tensor will, by default, infer its datatype from the scalar values, be 
 CPU device, and not share its memory.
 
 .. seealso::
+
     :func:`torch.tensor` creates a tensor that always copies the data from the input object.
-
     :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
-
     :func:`torch.frombuffer` creates a tensor that always shares memory from objects that
-           implement the buffer protocol.
-
+    implement the buffer protocol.
     :func:`torch.from_dlpack` creates a tensor that always shares memory from
-           DLPack capsules.
+    DLPack capsules.
 
 Args:
     obj (object): a tensor, NumPy array, DLPack Capsule, object that implements Python's
