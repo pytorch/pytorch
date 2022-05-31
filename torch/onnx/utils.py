@@ -46,7 +46,7 @@ _params_dict = {}  # type: ignore[var-annotated]
 
 
 @contextlib.contextmanager
-def select_model_mode_for_export(model, mode):
+def select_model_mode_for_export(model, mode: Optional[_C_onnx.TrainingMode]):
     if not isinstance(model, torch.jit.ScriptFunction):
         is_originally_training = model.training
 
@@ -70,7 +70,6 @@ def select_model_mode_for_export(model, mode):
         if mode == _C_onnx.TrainingMode.TRAINING or (
             mode == _C_onnx.TrainingMode.PRESERVE and is_originally_training
         ):
-
             if GLOBALS.export_onnx_opset_version < 12:
                 warnings.warn(
                     "You are exporting the model in training mode with onnx opset "
@@ -80,7 +79,7 @@ def select_model_mode_for_export(model, mode):
                 )
             is_export_training = True
 
-        symbolic_helper._set_training_mode(is_export_training)
+        GLOBALS.training_mode = mode
         model.train(is_export_training)
     try:
         yield
