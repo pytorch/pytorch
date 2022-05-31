@@ -6,11 +6,13 @@ import torch.nn.functional as F
 import torch.nn.quantized.functional as qF
 
 # Standard library
+import inspect
 import numpy as np
 
 # Testing utils
 from hypothesis import assume, given
 from hypothesis import strategies as st
+from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     _make_conv_test_input,
@@ -20,6 +22,7 @@ from torch.testing._internal.common_utils import (
     IS_PPC,
     TEST_WITH_UBSAN,
 )
+
 
 class TestQuantizedFunctionalOps(QuantizationTestCase):
     def test_relu_api(self):
@@ -238,3 +241,122 @@ class TestQuantizedFunctionalOps(QuantizationTestCase):
         out_exp = torch.quantize_per_tensor(F.grid_sample(X, grid), scale=scale, zero_point=zero_point, dtype=torch.quint8)
         np.testing.assert_array_almost_equal(
             out.int_repr().numpy(), out_exp.int_repr().numpy(), decimal=0)
+
+
+class TestSignatureEquivalence(TestCase):
+    def _test_same_signature(self, fp_func, q_func,
+                             fp_extras = None,
+                             q_extras = None,
+                             pass_if_no_check=True):
+        r"""Checks if two methods, fp_func and q_func have the same signatures.
+
+        TODO: Python 3.10 introduces `inspect.get_annotations()`, which could be used
+              https://docs.python.org/3/library/inspect.html#inspect.get_annotations
+
+        The check is done as follows:
+
+        1. Try running `inspect.getfullargspec` on the function to get all the
+           args and kwargs.
+        2. If (1) fails, try extracting the information from the docstring.
+        3. If (2) fails, fail the test if `pass_if_no_checks` is False.
+        4. Compare the arguments, while ignoring the fp_extras and q_extras.
+
+        The assumption in (2) is that the docstring's 1st line is always the
+        function signature.
+
+        The extra arguments are assumed to come AFTER the common argument.
+        The reason for this assumption is that common arguments should be
+        accessible positionally, so should come in the same order in both
+        functions.
+
+        Args:
+            fp_func: Callable FP function
+            q_func: Callable quantized function, that is expected to have the same
+                    signature as FP.
+            fp_extras: Arguments that exist in the FP function, but are not expected
+                       in the quantized version
+            q_extras: Arguments that exist in the quantized function, but are not
+                      needed in the FP version
+            pass_if_no_check: Marks test as passed, if there was no way to check for
+                              arguments. This might happen if a function is compiled
+                              and no information about the signature could be
+                              extracted.
+        """
+        def _get_signature(func):
+            if inspect.isbuiltin(func):
+                # Cannot get signature of built-ins, bound built-in methods,
+                # or any other compiled functions.
+                docstring = getattr(func, '__doc__', None)
+                if not docstring:
+                    return None
+                docstring = docstring.splitlines()
+                # Find the right line, ideally should be the first one
+                sig = None
+                for line in docstring:
+                    if line.startswith(func.__name__):
+                        sig = line
+                        break
+                if not sig:
+                    return None
+                signature = inspect._signature_fromstr(
+                    cls=inspect.Signature,
+                    obj=func, s=sig)
+                # Return annotations
+                if len(sig.split('->')) > 1:
+                    return_annotation = sig.split('->')[1].strip()
+                    signature = signature.replace(return_annotation=return_annotation)
+                return signature
+            return inspect.Signature.from_callable(func)
+
+        fp_sig = _get_signature(fp_func)
+        q_sig = _get_signature(q_func)
+        if not pass_if_no_check:
+            self.assertIsNotNone(fp_sig, msg=f'Cannot get signature of the {fp_func.__name__}')
+            self.assertIsNotNone(q_sig, msg=f'Cannot get signature of the {q_func.__name__}')
+
+        if not fp_extras and not q_extras:
+            # No extras, assume the signatures must be identical
+            self.assertEqual(fp_sig, q_sig,
+                msg=f'{fp_sig} vs. {q_sig}')
+        else:
+            fp_extras = fp_extras or []
+            q_extras = q_extras or []
+            fp_args = list(fp_sig.parameters.keys())
+            q_args = list(q_sig.parameters.keys())
+
+            # Check if number of common arguments is the same
+            num_common_fp_args = len(fp_args) - len(fp_extras)
+            num_common_q_args = len(q_args) - len(q_extras)
+            self.assertEqual(num_common_fp_args, num_common_q_args,
+                msg=f'Number of arguments in {fp_func.__name__} and {q_func.__name__}'
+                ' don\'t match ({num_common_fp_args} vs. {num_common_q_args})')
+            # Check if argument names are same
+            # Assume that the extra arguments come AFTER the common ones.
+            for fp_arg, q_arg in zip(fp_args[:num_common_fp_args],
+                                     q_args[:num_common_fp_args]):
+                self.assertEqual(fp_arg, q_arg,
+                    msg=f'Argument name mismatch: {fp_arg} vs. {q_arg}')
+
+    def test_conv1d(self):
+        fp_func = torch.nn.functional.conv1d
+        q_func = torch.nn.quantized.functional.conv1d
+        self._test_same_signature(fp_func, q_func,
+                                  fp_extras = None,
+                                  q_extras = ['scale', 'zero_point'],
+                                  pass_if_no_check=True)
+
+    def test_conv2d(self):
+        fp_func = torch.nn.functional.conv2d
+        q_func = torch.nn.quantized.functional.conv2d
+        self._test_same_signature(fp_func, q_func,
+                                  fp_extras = None,
+                                  q_extras = ['scale', 'zero_point'],
+                                  pass_if_no_check=True)
+
+    def test_conv3d(self):
+        fp_func = torch.nn.functional.conv3d
+        q_func = torch.nn.quantized.functional.conv3d
+        self._test_same_signature(fp_func, q_func,
+                                  fp_extras = None,
+                                  q_extras = ['scale', 'zero_point'],
+                                  pass_if_no_check=True)
