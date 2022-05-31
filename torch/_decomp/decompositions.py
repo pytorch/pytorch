@@ -1317,4 +1317,4 @@ def norm(self: Tensor, p: float, dim: List[int] = [], keepdim: bool = False):
         result = self_.square().sum(dim, keepdim = keepdim).sqrt()
     else:
         result = self_.pow(p).sum(dim, keepdim = keepdim).pow(1/p)
-    return result.to(dtype=self.dtype)
+    return result.to(dtype=self_.dtype)
