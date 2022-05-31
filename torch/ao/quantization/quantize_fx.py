@@ -353,7 +353,7 @@ def prepare_fx(
 
       * `qconfig_mapping` (required): mapping from model ops to qconfigs::
 
-          from torch.ao.quantization import QConfigMapping
+          from torch.quantization import QConfigMapping
 
           qconfig_mapping = QConfigMapping() \
               .set_global(global_qconfig) \

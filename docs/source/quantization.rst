@@ -326,7 +326,7 @@ There are multiple quantization types in post training quantization (weight only
 
 API Example::
 
-  from torch.ao.quantization import QConfigMapping
+  from torch.quantization import QConfigMapping
   import torch.quantization.quantize_fx as quantize_fx
   import copy
 
@@ -339,7 +339,7 @@ API Example::
   # we need to deepcopy if we still want to keep model_fp unchanged after quantization since quantization apis change the input model
   model_to_quantize = copy.deepcopy(model_fp)
   model_to_quantize.eval()
-  qconfig_mapping = QConfigMapping().set_global(torch.ao.quantization.default_dynamic_qconfig)
+  qconfig_mapping = QConfigMapping().set_global(torch.quantization.default_dynamic_qconfig)
   # prepare
   model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_mapping)
   # no calibration needed when we only have dynamici/weight_only quantization
@@ -351,7 +351,7 @@ API Example::
   #
 
   model_to_quantize = copy.deepcopy(model_fp)
-  qconfig_mapping = QConfigMapping().set_global(torch.ao.quantization.get_default_qconfig('qnnpack'))
+  qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qconfig('qnnpack'))
   model_to_quantize.eval()
   # prepare
   model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_mapping)
@@ -364,7 +364,7 @@ API Example::
   #
 
   model_to_quantize = copy.deepcopy(model_fp)
-  qconfig_mapping = QConfigMapping().set_global(torch.ao.quantization.get_default_qat_qconfig('qnnpack'))
+  qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qat_qconfig('qnnpack'))
   model_to_quantize.train()
   # prepare
   model_prepared = quantize_fx.prepare_qat_fx(model_to_quantize, qconfig_mapping)
@@ -794,7 +794,7 @@ Example::
 
     import torch
     import torch.nn.quantized as nnq
-    from torch.ao.quantization import QConfigMapping
+    from torch.quantization import QConfigMapping
     import torch.quantization.quantize_fx
 
     # original fp32 module to replace
@@ -870,7 +870,7 @@ Example::
 
     m = torch.nn.Sequential(CustomModule()).eval()
 
-    qconfig_mapping = QConfigMapping().set_global(torch.ao.quantization.default_qconfig)
+    qconfig_mapping = QConfigMapping().set_global(torch.quantization.default_qconfig)
     prepare_custom_config_dict = {
         "float_to_observed_custom_module_class": {
             "static": {
