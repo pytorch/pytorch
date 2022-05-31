@@ -89,8 +89,9 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
         code_string (string): CUDA code string to be compiled by jiterator. The entry functor must return by value.
         kwargs (Dict, optional): Keyword arguments for generated function
 
-    Example:
-        code_string = "template <typename T> T my_kernel(T x, T y, T alpha) { return  -x + alpha * y; }"
+    Example::
+
+        code_string = "template <typename T> T my_kernel(T x, T y, T alpha) { return -x + alpha * y; }"
         jitted_fn = create_jit_fn(code_string, alpha=1.0)
         a = torch.rand(3, device='cuda')
         b = torch.rand(3, device='cuda')
@@ -99,7 +100,8 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
 
     code_string also allows mulitple function definitions, and the last function will be treated as the entry function.
 
-    Example:
+    Example::
+
         code_string = "template <typename T> T util_fn(T x, T y) { return ::sin(x) + ::cos(y); }"
         code_string += "template <typename T> T my_kernel(T x, T y, T val) { return ::min(val, util_fn(x, y)); }"
         jitted_fn = create_jit_fn(code_string, val=0.0)
@@ -111,7 +113,8 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
     Jiterator can be used together with python registration to override an operator's cuda kernel.
     Following example is overriding gelu's cuda kernel with relu.
 
-    Example:
+    Example::
+
         code_string = "template <typename T> T my_gelu(T a) { return a > 0 ? a : 0; }"
         my_gelu = create_jit_fn(code_string)
         my_lib = torch.library.Library("aten", "IMPL")
@@ -141,7 +144,8 @@ def _create_multi_output_jit_fn(code_string: str, num_outputs: int, **kwargs) ->
         num_outputs(int): number of outputs return by the kernel
         kwargs (Dict, optional): Keyword arguments for generated function
 
-    Example:
+    Example::
+
         code_string = "template <typename T> void my_kernel(T x, T y, T alpha, T& out) { out = -x + alpha * y; }"
         jitted_fn = create_jit_fn(code_string, alpha=1.0)
         a = torch.rand(3, device='cuda')
