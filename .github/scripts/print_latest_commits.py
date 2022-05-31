@@ -1,13 +1,20 @@
 import sys
-import subprocess
+from typing import Any
 from datetime import datetime, timedelta
+from gitutils import _check_output
 
-def print_latest_commits(mins: int = 60) -> None:
+def parse_args() -> Any:
+    from argparse import ArgumentParser
+    parser = ArgumentParser("Print latest commits")
+    parser.add_argument("--minutes", type=int, help = "duration in minutes of last commits")
+    return parser.parse_args()
+
+def print_latest_commits(minutes: int = 60) -> None:
     current_time = datetime.now()
-    time_since = current_time - timedelta(minutes=mins)
+    time_since = current_time - timedelta(minutes=minutes)
     timestamp_since = datetime.timestamp(time_since)
 
-    commits = subprocess.check_output(
+    commits = _check_output(
         [
             "git",
             "rev-list",
@@ -21,7 +28,8 @@ def print_latest_commits(mins: int = 60) -> None:
         print(commit)
 
 def main() -> None:
-    print_latest_commits() if len(sys.argv) == 1 else print_latest_commits(int(sys.argv[1]))
+    args = parse_args()
+    print_latest_commits(args.minutes)
 
 if __name__ == "__main__":
     main()
