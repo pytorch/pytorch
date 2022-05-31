@@ -48,7 +48,7 @@ args+=("--cov-append")
 args_parallel=()
 if [[ $PARALLEL == 1 ]]; then
   args_parallel+=("-n")
-  args_parallel+=("4")
+  args_parallel+=("auto")
 fi
 
 # onnxruntime only support py3
