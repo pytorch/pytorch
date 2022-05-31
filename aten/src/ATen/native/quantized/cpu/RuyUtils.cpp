@@ -1,7 +1,7 @@
 #ifdef USE_RUY_QMATMUL
 
 #include <ATen/ATen.h>
-#include <ATen/native/quantized/cpu/ruy_utils.h>
+#include <ATen/native/quantized/cpu/RuyUtils.h>
 
 namespace at {
 namespace native {

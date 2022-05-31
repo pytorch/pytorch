@@ -2,7 +2,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/quantized/affine_quantizer.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 

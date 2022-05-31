@@ -9,7 +9,7 @@
 
 #include <ATen/ATen.h>
 #include <torch/library.h>
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/native/quantized/cudnn/utils.h>
 #include <ATen/native/quantized/packed_params.h>
 #include <ATen/quantized/Quantizer.h>
