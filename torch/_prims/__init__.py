@@ -196,6 +196,7 @@ _nvfuser_binary_ops = {
 def _assert_nvfuser_op_exists(fname: str):
     try:
         from torch._C._nvfuser import FusionDefinition as fd
+
         assert getattr(fd.Ops, fname)
     except ImportError:
         # Not all PyTorch builds have nvfuser
