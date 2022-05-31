@@ -1200,3 +1200,11 @@ def check(b, s):
     """
     if not b:
         raise RuntimeError(s())
+
+
+def check_value(b, s):
+    """
+    As `check` but raises a ValueError
+    """
+    if not b:
+        raise ValueError(s())

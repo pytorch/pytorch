@@ -4,6 +4,7 @@ import torch._prims as prims
 import torch._prims.utils as utils
 from torch._prims.utils import (
     check,
+    check_value,
     DimsType,
     ShapeType,
     StrideType,
@@ -797,15 +798,18 @@ def isclose(
     atol: float = 1e-08,
     equal_nan: bool = False,
 ) -> TensorLikeType:
-    if a.dtype != b.dtype:
-        msg = "Attempting to compare tensors of different dtypes {0} and {1}!".format(
-            a.dtype, b.dtype
-        )
-    if rtol < 0:
-        msg = "rtol must be greater than or equal to zero, but got {0}!".format(rtol)
-    if atol < 0:
-        msg = "atol must be greater than or equal to zero, but got {0}!".format(atol)
-    raise ValueError(msg)
+    check_value(
+        a.dtype == b.dtype,
+        lambda: f"Attempting to compare tensors of different dtypes {a.dtype} and {b.dtype}!",
+    )
+    check_value(
+        rtol >= 0,
+        lambda: f"rtol must be greater than or equal to zero, but got {rtol}!",
+    )
+    check_value(
+        atol >= 0,
+        lambda: f"atol must be greater than or equal to zero, but got {atol}!",
+    )
 
     close = eq(a, b)
     if equal_nan and (utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype)):

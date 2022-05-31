@@ -47,7 +47,7 @@ def vector_norm(
     if x.numel() == 0 and (ord < 0.0 or ord == float("inf")):
         check(
             dim is not None and len(dim) != 0,
-            f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
+            lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
             "because the operation does not have an identity",
         )
         shape = x.shape
@@ -55,7 +55,7 @@ def vector_norm(
         for d in dim:
             check(
                 shape[d] != 0,
-                f"linalg.vector_norm cannot compute the {ord} norm on the "
+                lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
                 f"dimension {d} because this dimension is empty and the "
                 "operation does not have an identity",
             )
