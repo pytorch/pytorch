@@ -61,6 +61,7 @@ def parse_backend_yaml(
         "supported",
         "autograd",
         "full_codegen",
+        "non_native",
     ]
 
     backend = yaml_values.pop("backend", None)
@@ -97,6 +98,9 @@ def parse_backend_yaml(
     # full_codegen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
     full_codegen = yaml_values.pop("full_codegen", [])
     supported.extend(full_codegen)
+
+    # non_native is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
+    non_native = yaml_values.pop("non_native", {})
 
     assert (
         len(yaml_values.keys()) == 0

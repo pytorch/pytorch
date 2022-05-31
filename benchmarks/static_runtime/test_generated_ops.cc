@@ -3666,8 +3666,8 @@ TEST(StaticRuntime, autogen_bitwise_left_shift_Tensor) {
         return (%cloned)
   )IR";
 
-  auto self0 = at::rand({6, 6, 6});
-  auto other0 = at::rand({6, 6, 6});
+  auto self0 = at::randint(1, 100, {6, 6, 6}, at::kInt);
+  auto other0 = at::randint(1, 100, {6, 6, 6}, at::kInt);
   std::vector<IValue> args{self0, other0};
   testStaticRuntime(
       script,
@@ -3677,8 +3677,8 @@ TEST(StaticRuntime, autogen_bitwise_left_shift_Tensor) {
       /*use_equalnan=*/false,
       /*check_resize=*/true);
 
-  auto self1 = at::rand({22, 22, 22});
-  auto other1 = at::rand({22, 22, 22});
+  auto self1 = at::randint(1, 100, {22, 22, 22}, at::kInt);
+  auto other1 = at::randint(1, 100, {22, 22, 22}, at::kInt);
   std::vector<IValue> args2{self1, other1};
   testStaticRuntime(
       script,
@@ -3698,8 +3698,8 @@ TEST(StaticRuntime, autogen_bitwise_right_shift_Tensor) {
         return (%cloned)
   )IR";
 
-  auto self0 = at::rand({6, 6, 6});
-  auto other0 = at::rand({6, 6, 6});
+  auto self0 = at::randint(1, 100, {6, 6, 6}, at::kInt);
+  auto other0 = at::randint(1, 100, {6, 6, 6}, at::kInt);
   std::vector<IValue> args{self0, other0};
   testStaticRuntime(
       script,
@@ -3709,8 +3709,8 @@ TEST(StaticRuntime, autogen_bitwise_right_shift_Tensor) {
       /*use_equalnan=*/false,
       /*check_resize=*/true);
 
-  auto self1 = at::rand({22, 22, 22});
-  auto other1 = at::rand({22, 22, 22});
+  auto self1 = at::randint(1, 100, {22, 22, 22}, at::kInt);
+  auto other1 = at::randint(1, 100, {22, 22, 22}, at::kInt);
   std::vector<IValue> args2{self1, other1};
   testStaticRuntime(
       script,
@@ -7861,4 +7861,438 @@ TEST(StaticRuntime, autogen_linalg_matrix_power) {
       /*use_allclose=*/false,
       /*use_equalnan=*/false,
       /*check_resize=*/true);
+}
+
+TEST(StaticRuntime, autogen_view_as_real) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::view_as_real(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::randn({6, 6, 6}, at::kComplexFloat);
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_view_as_complex) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::view_as_complex(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({2, 2});
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_real) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::real(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_imag) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::imag(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::randn({6, 6, 6}, at::kComplexFloat);
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen__conj) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::_conj(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::randn({6, 6, 6}, at::kComplexFloat);
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_conj) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::conj(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_resolve_conj) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::resolve_conj(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_resolve_neg) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::resolve_neg(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen__neg_view) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::_neg_view(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_diagonal) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %offset: int, %dim1: int, %dim2: int):
+        %bias: None = prim::Constant()
+        %ret = aten::diagonal(%self, %offset, %dim1, %dim2)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto offset0 = 0;
+  auto dim10 = 2;
+  auto dim20 = 1;
+  auto dim00 = 1;
+  std::vector<IValue> args{self0, offset0, dim10, dim20};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_linalg_diagonal) {
+  const std::string script = R"IR(
+    graph(%A: Tensor, %offset: int, %dim1: int, %dim2: int):
+        %bias: None = prim::Constant()
+        %ret = aten::linalg_diagonal(%A, %offset, %dim1, %dim2)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto A0 = at::rand({6, 6, 6});
+  auto offset0 = 0;
+  auto dim10 = 2;
+  auto dim20 = 1;
+  auto dim00 = 1;
+  std::vector<IValue> args{A0, offset0, dim10, dim20};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_movedim_int) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %source: int, %destination: int):
+        %bias: None = prim::Constant()
+        %ret = aten::movedim(%self, %source, %destination)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto source0 = 1;
+  auto destination0 = 1;
+  std::vector<IValue> args{self0, source0, destination0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_moveaxis_int) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %source: int, %destination: int):
+        %bias: None = prim::Constant()
+        %ret = aten::moveaxis(%self, %source, %destination)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto source0 = 1;
+  auto destination0 = 1;
+  std::vector<IValue> args{self0, source0, destination0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_numpy_T) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::numpy_T(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_matrix_H) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::matrix_H(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({8, 8});
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_mT) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::mT(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_mH) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::mH(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_adjoint) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::adjoint(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_ravel) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::ravel(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_t) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::t(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({8, 8});
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_unsqueeze) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %dim: int):
+        %bias: None = prim::Constant()
+        %ret = aten::unsqueeze(%self, %dim)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto dim0 = 1;
+  std::vector<IValue> args{self0, dim0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_view_as) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %other: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::view_as(%self, %other)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto other0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{self0, other0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_positive) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::positive(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen__autocast_to_reduced_precision) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %cuda_enabled: bool, %cpu_enabled: bool, %cuda_dtype: int, %cpu_dtype: int):
+        %bias: None = prim::Constant()
+        %ret = aten::_autocast_to_reduced_precision(%self, %cuda_enabled, %cpu_enabled, %cuda_dtype, %cpu_dtype)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto cuda_enabled0 = false;
+  auto cpu_enabled0 = false;
+  auto cuda_dtype0 = at::ScalarType::Float;
+  auto cpu_dtype0 = at::ScalarType::Float;
+  std::vector<IValue> args{
+      self0, cuda_enabled0, cpu_enabled0, cuda_dtype0, cpu_dtype0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen__autocast_to_full_precision) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %cuda_enabled: bool, %cpu_enabled: bool):
+        %bias: None = prim::Constant()
+        %ret = aten::_autocast_to_full_precision(%self, %cuda_enabled, %cpu_enabled)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto cuda_enabled0 = false;
+  auto cpu_enabled0 = false;
+  std::vector<IValue> args{self0, cuda_enabled0, cpu_enabled0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_swapaxes) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %axis0: int, %axis1: int):
+        %bias: None = prim::Constant()
+        %ret = aten::swapaxes(%self, %axis0, %axis1)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto axis00 = 1;
+  auto axis10 = 1;
+  std::vector<IValue> args{self0, axis00, axis10};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_swapdims) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %dim0: int, %dim1: int):
+        %bias: None = prim::Constant()
+        %ret = aten::swapdims(%self, %dim0, %dim1)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto dim00 = 1;
+  auto dim10 = 1;
+  std::vector<IValue> args{self0, dim00, dim10};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_unfold) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %dimension: int, %size: int, %step: int):
+        %bias: None = prim::Constant()
+        %ret = aten::unfold(%self, %dimension, %size, %step)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto dimension0 = 1;
+  auto size0 = 1;
+  auto step0 = 1;
+  std::vector<IValue> args{self0, dimension0, size0, step0};
+  testStaticRuntime(script, args);
+}
+
+TEST(StaticRuntime, autogen_alias) {
+  const std::string script = R"IR(
+    graph(%self: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::alias(%self)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{self0};
+  testStaticRuntime(script, args);
 }
