@@ -913,6 +913,7 @@ tanh = _make_elementwise_unary_prim(
 def _add_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
     return fd.Ops.add(a, b)  # type: ignore[attr-defined]
 
+
 add = _make_elementwise_binary_prim(
     name="add",
     impl_aten=torch.add,
