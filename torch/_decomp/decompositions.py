@@ -182,12 +182,6 @@ def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
     return torch.where(self <= threshold, grad_output.new_zeros(()), grad_output)
 
 
-@register_decomposition(aten.leaky_relu)
-@pw_cast_for_opmath
-def leaky_relu(self: Tensor, negative_slope: float = 0.01) -> Tensor:
-    return torch.where(self > 0, self, self * negative_slope)
-
-
 @register_decomposition(aten.leaky_relu_backward)
 @pw_cast_for_opmath
 def leaky_relu_backward(
@@ -691,8 +685,8 @@ def logit_backward(
 @register_decomposition(aten.native_dropout)
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
     if train:
-        bool_mask = torch.rand_like(input) < p
-        res = bool_mask * input * float(1.0 / p)
+        bool_mask = torch.rand_like(input) > p
+        res = bool_mask * input * float(1.0 / (1.0 - p))
         return (res, bool_mask)
     else:
         return (input, torch.ones_like(input, dtype=torch.bool))
@@ -855,7 +849,7 @@ def normalize(input, norm_dims, eps):
     return out, mean, rstd
 
 
-@register_decomposition(aten.native_layer_norm)
+@register_decomposition(aten.native_layer_norm.default)
 def native_layer_norm(
     input: Tensor,
     normalized_shape: List[int],
@@ -886,12 +880,45 @@ def native_layer_norm(
         rstd = rstd.to(dtype=input.dtype)
     return (out, mean, rstd)
 
+
+@register_decomposition(aten.native_group_norm.default, disable_meta=True)
+def native_group_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    N: int,
+    C: int,
+    HxW: int,
+    group: int,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    orig_shape = input.shape
+    input = input.view(N, group, C // group, HxW)
+    reduction_dims = [2, 3]
+    out, mean, rstd = normalize(input, reduction_dims, eps)
+    mean = _squeeze_multiple(mean, reduction_dims)
+    rstd = _squeeze_multiple(rstd, reduction_dims)
+    out = out.view(orig_shape)
+    if weight is not None:
+        weight = _unsqueeze_to_dim(weight, out.dim() - 1)
+        out = out * weight
+    if bias is not None:
+        bias = _unsqueeze_to_dim(bias, out.dim() - 1)
+        out = out + bias
+
+    out = out.to(dtype=input.dtype)
+    mean = mean.to(dtype=input.dtype)
+    rstd = rstd.to(dtype=input.dtype)
+    return (out, mean, rstd)
+
+
 def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
     if x is not None:
         return x.to(dtype)
     return x
 
-# TODO: Correct the type promotion semantics
+
+# TODO: Take a closer look at the type promotion semantics
 @register_decomposition(aten.native_layer_norm_backward)
 def native_layer_norm_backward(
     grad_out: Tensor,
@@ -1042,12 +1069,6 @@ def _fused_dropout_decomposition(input, p, generator=None):
     mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
     res = mask.type_as(input) * input * (1.0 / p)
     return (res, mask)
-
-
-# TODO: these logical decomps are buggy for complex inputs
-@register_decomposition(aten.logical_xor)
-def logical_xor(self: Tensor, other: Tensor) -> Tensor:
-    return self.to(dtype=torch.bool) ^ other.to(dtype=torch.bool)
 
 
 @register_decomposition(aten.logical_not)
