@@ -4306,7 +4306,7 @@ class TestAutograd(TestCase):
         b = torch.tensor(2.0)
         c = torch.tensor(3, dtype=torch.int64)
         a.data = b
-        with self.assertRaisesRegex(RuntimeError, 'must be floating point and complex dtype'):
+        with self.assertRaisesRegex(RuntimeError, 'must be floating point or complex dtype'):
             a.data = c
 
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
