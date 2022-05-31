@@ -1304,10 +1304,13 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
 
 # torch.ops.aten.norm only supports numeric p, does not support Frobenius norm or nuclear norm
 # aten.norms supports any dimension
-@register_decomposition(aten.norm)
-#Scalar? p, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-def norm(self: Tensor, p: float, dim: List[int] = [], keepdim: bool = False, out:Tensor = None):
+@register_decomposition(aten.norm) #[aten.norm.Scalar, ...]
+@reduction_complex_to_real
+def norm(self: Tensor, p: float, dim: List[int] = [], keepdim: bool = False):
     # import pdb; pdb.set_trace()
+    orig_dtype = self.dtype #check util
+    # if self.dtype in [torch.float16, torch.bfloat16]:
+    #     self = self.to(dtype=torch.float32)
     self_ = self.abs()
     if p==0: 
         result = (self_ != 0).sum(dim, keepdim = keepdim)
@@ -1318,11 +1321,14 @@ def norm(self: Tensor, p: float, dim: List[int] = [], keepdim: bool = False, out
     else:
         result = self_.pow(p).sum(dim, keepdim = keepdim).pow(1/p)
 
-    if not self.is_complex():
-        result = result.type(self.type())
-    else:
-        result = result.type(self_.type()) # faster way to get scalar type?
-    
-    if out:
-        out = result
-    return result
+    # if not self.is_complex():
+    #     result = result.to(self.dtype)
+    # else:
+    #     result = result.to(self_.dtype) # faster way to get scalar type?
+
+    # if orig_dtype.is_complex:
+    #     return result 
+    # else:
+    #     return result.to(dtype=orig_dtype)
+
+    return result.to(dtype=orig_dtype)
