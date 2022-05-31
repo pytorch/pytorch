@@ -302,7 +302,6 @@ class TestIterableDataPipeBasic(TestCase):
 
         # test functional API
         temp_files = self.temp_files
-        datapipe = dp.iter.FileLister([temp_dir, *temp_files])
         datapipe = datapipe.list_files()
         count = 0
         for pathname in datapipe:
