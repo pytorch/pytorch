@@ -1045,15 +1045,13 @@ returned tensor will, by default, infer its datatype from the scalar values, be 
 CPU device, and not share its memory.
 
 .. seealso::
+
     :func:`torch.tensor` creates a tensor that always copies the data from the input object.
-
     :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
-
     :func:`torch.frombuffer` creates a tensor that always shares memory from objects that
-           implement the buffer protocol.
-
+    implement the buffer protocol.
     :func:`torch.from_dlpack` creates a tensor that always shares memory from
-           DLPack capsules.
+    DLPack capsules.
 
 Args:
     obj (object): a tensor, NumPy array, DLPack Capsule, object that implements Python's
@@ -3776,19 +3774,17 @@ Example::
 add_docstr(torch.floor_divide, r"""
 floor_divide(input, other, *, out=None) -> Tensor
 
-.. warning::
+.. note::
 
-    :func:`torch.floor_divide` is deprecated and will be removed in a future PyTorch
-    release. Its name is a misnomer because it actually rounds the quotient
-    towards zero instead of taking its floor. To keep the current behavior use
-    :func:`torch.div` with ``rounding_mode='trunc'``. To actually perform floor
-    division, use :func:`torch.div` with ``rounding_mode='floor'``.
+    Before PyTorch 1.13 :func:`torch.floor_divide` incorrectly performed
+    truncation division. To restore the previous behavior use
+    :func:`torch.div` with ``rounding_mode='trunc'``.
 
-Computes :attr:`input` divided by :attr:`other`, elementwise, and rounds each
-quotient towards zero. Equivalently, it truncates the quotient(s):
+Computes :attr:`input` divided by :attr:`other`, elementwise, and floors
+the result.
 
 .. math::
-    \text{{out}}_i = \text{trunc} \left( \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right)
+    \text{{out}}_i = \text{floor} \left( \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right)
 
 """ + r"""
 
