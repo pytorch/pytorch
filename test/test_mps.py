@@ -4712,6 +4712,9 @@ class TestConsistency(TestCase):
     @ops(op_db)
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
+        if not torch.backends.mps.is_available():
+            self.skipTest("MPS is not available")
+
         if dtype in [torch.bfloat16, torch.double, torch.int8]:
             self.skipTest(f"{dtype} not supported by MPS")
 
