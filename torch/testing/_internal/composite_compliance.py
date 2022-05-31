@@ -45,9 +45,10 @@ def check_metadata_consistency(wrapper_tensor, CCT):
     }
     for metadata_name, metadata_accessor in things_to_check.items():
         # stride when a dimension size is `0` or `1` dont matter,
-        # and few functions take advantange of this to short-circuit
+        # and few functions like `at::for_blob` take advantange of this
+        # to short-circuit
         if metadata_name == 'stride' and \
-                (0 == wrapper_tensor.shape[0] or len(wrapper_tensor.shape) == 1):
+                not (len(wrapper_tensor.shape) != 1 or 0 != wrapper_tensor.shape[0]):
             continue
         check_attr_consistency(wrapper_tensor, metadata_name, metadata_accessor)
 
