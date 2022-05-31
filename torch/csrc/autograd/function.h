@@ -185,7 +185,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// of the new input.
   uint32_t add_input_metadata(
     const at::TensorOptions& options,
-    at::IntArrayRef shape,
+    c10::SymIntArrayRef shape,
     bool is_tensor_subclass) noexcept {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();

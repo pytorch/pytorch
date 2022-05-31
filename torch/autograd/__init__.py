@@ -63,8 +63,8 @@ def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor
             new_grads.append(grad)
         elif grad is None:
             if out.requires_grad:
-                if out.numel() != 1:
-                    raise RuntimeError("grad can be implicitly created only for scalar outputs")
+                # if out.numel() != 1:
+                #     raise RuntimeError("grad can be implicitly created only for scalar outputs")
                 new_grads.append(torch.ones_like(out, memory_format=torch.preserve_format))
             else:
                 new_grads.append(None)

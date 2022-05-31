@@ -1115,6 +1115,8 @@
 - func: broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
   variants: function, method
 
+- func: broadcast_to.SymInt(Tensor(a) self, SymInt[] size) -> Tensor(a)
+
 - func: _sparse_broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
   variants: function
   dispatch:

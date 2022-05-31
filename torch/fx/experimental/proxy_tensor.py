@@ -41,7 +41,7 @@ def enable_strict(val):
 
 def wrap_output(real_out, proxy_out):
     def wrap_with_proxy(e, proxy):
-        if type(e) == torch.Tensor:
+        if isinstance(e, torch.Tensor):
             with no_dispatch():
                 return ProxyTensor(e, proxy)
         else:
@@ -59,6 +59,7 @@ def wrap_output(real_out, proxy_out):
     else:
         return real_out
 
+from torch.overrides import enable_reentrant_dispatch
 
 def proxy_call(func_overload, args, kwargs=None):
     func = func_overload.overloadpacket
@@ -68,6 +69,8 @@ def proxy_call(func_overload, args, kwargs=None):
         raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
                            "It's likely that this is caused by data-dependent control flow or similar."
                            "Try torch.fx.experimental.proxy_tensor.enable_strict(False) to disable this check")
+    def unwrap_elem(e):
+        return e.elem if isinstance(e, ProxyTensor) else e
 
     def unwrap_proxy(e):
         return e.proxy if isinstance(e, ProxyTensor) else e
@@ -82,10 +85,18 @@ def proxy_call(func_overload, args, kwargs=None):
         args[0].proxy = proxy_out
         proxy_out.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
 
-    with no_dispatch():
-        real_out = func_overload(*args, **kwargs)
+    with enable_reentrant_dispatch():
+        real_out = func_overload(*pytree.tree_map(unwrap_elem, args), **pytree.tree_map(unwrap_elem, kwargs))
 
     return wrap_output(real_out, proxy_out)
+
+def create_contiguous(shape):
+    if len(shape) == 0:
+        return []
+    strides = [1]
+    for dim in reversed(shape[:-1]):
+        strides.append(dim * strides[-1])
+    return list(reversed(strides))
 
 class ProxyTensor(torch.Tensor):
     proxy: fx.Proxy
@@ -93,18 +104,21 @@ class ProxyTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, elem, proxy, *, requires_grad=None):
         # Hack to deal with super().__new__ not working for sparse tensors
-        if elem.is_sparse or requires_grad is not None:
-            if requires_grad is None:
-                requires_grad = False
-            r = torch.Tensor._make_subclass(cls, elem, requires_grad)
-        else:
-            r = super().__new__(cls, elem)  # type: ignore[call-arg]
+        def create_proxy_symint(sym_int, new_proxy):
+            return torch._C.SymbolicIntNode.new_symint(ProxySymInt(sym_int, new_proxy))
 
-        if elem.is_sparse:
-            proxy.node.meta['tensor_meta'] = {}
-        else:
-            proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(r)
+        r = torch.Tensor._make_wrapper_subclass(
+            cls, [create_proxy_symint(elem.shape[i], proxy.size(i)) for i in range(len(elem.shape))],
+            create_contiguous(elem.shape), 0,
+            dtype=elem.dtype, layout=elem.layout, requires_grad=requires_grad if requires_grad is not None else False,
+            device=elem.device
+        )
+        # if elem.is_sparse:
+        #     proxy.node.meta['tensor_meta'] = {}
+        # else:
+        #     proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(r)
         r.proxy = proxy  # type: ignore[attr-defined]
+        r.elem = elem
 
         return r
 
@@ -121,6 +135,53 @@ class ProxyTensor(torch.Tensor):
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
         return proxy_call(func_overload, args, kwargs)
 
+import sympy
+
+class ProxySymInt(object):
+    def __init__(self, sym_int, proxy):
+        self.sym_int = sym_int
+        self.proxy = proxy
+
+    def wrap(self, num):
+        return ProxySymInt(num, num)
+
+    def __str__(self):
+        return f"ProxySymInt({self.sym_int})"
+
+    def __int__(self):
+        return int(self.sym_int)
+
+    def __bool__(self):
+        return bool(self.sym_int)
+
+magic_methods = [
+    'add',
+    # 'radd',
+    'sub',
+    'mul',
+    # 'div',
+    'mod',
+    'eq',
+    'gt',
+    'lt',
+]
+
+import operator
+
+for method in magic_methods:
+    method_name = f'{method}'
+    op = getattr(operator, method_name)
+    def create_magic_impl():
+        def magic_impl(self, other):
+            def unwrap_proxy(x): return x.proxy if isinstance(x, ProxyTensor) else x
+            out_proxy = op(unwrap_proxy(self), unwrap_proxy(other))
+            def unwrap_proxyint(x): return x.sym_int if isinstance(x, ProxySymInt) else x
+            out_sym_int = op(unwrap_proxy(self), unwrap_proxyint(other))
+            return ProxySymInt(out_sym_int, out_proxy)
+        return magic_impl
+
+    # this should be wrapped transparently into torch._C.SymbolicIntNode
+    setattr(ProxySymInt, method_name, create_magic_impl())
 
 class PythonKeyTracer(Tracer):
     def __init__(self):
@@ -151,6 +212,10 @@ class PythonKeyTracer(Tracer):
                 setattr(self.root, qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})
+        elif isinstance(a, torch._C.SymbolicIntNode):
+            py_symint = a.get_pyobj()
+            assert isinstance(py_symint, ProxySymInt)
+            return py_symint.proxy.node
         return super().create_arg(a)
 
 

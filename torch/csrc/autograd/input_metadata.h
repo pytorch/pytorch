@@ -5,6 +5,7 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -26,20 +27,20 @@ namespace torch { namespace autograd {
 struct InputMetadata {
   InputMetadata() = default;
 
-  InputMetadata(const at::TensorOptions options, at::IntArrayRef shape, bool is_tensor_subclass)
+  InputMetadata(const at::TensorOptions options, c10::SymIntArrayRef shape, bool is_tensor_subclass)
   : options_{options}, shape_{shape}, is_tensor_subclass_{is_tensor_subclass} {
     auto device_ = options.device();
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
   }
 
   InputMetadata(const at::Tensor& t)
-  : InputMetadata(t.options(), t.sizes(), t.unsafeGetTensorImpl()->is_python_dispatch()) { }
+  : InputMetadata(t.options(), t.sym_sizes(), t.unsafeGetTensorImpl()->is_python_dispatch()) { std::cout<<"36"<<std::endl; }
 
   const at::TensorOptions options() const {
     return options_;
   }
 
-  at::IntArrayRef shape() const {
+  c10::SymIntArrayRef shape() const {
     return shape_;
   }
 
@@ -64,12 +65,12 @@ struct InputMetadata {
   }
 
   at::Tensor zeros_like() const {
-    return at::zeros(shape_, options_);
+    return at::zeros(asIntArrayRefSlow(shape_), options_);
   }
 
 private:
   const at::TensorOptions options_;
-  at::DimVector shape_;
+  c10::SymIntArrayRef shape_;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device());
   bool is_tensor_subclass_ = false;
 };
