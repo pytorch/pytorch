@@ -133,7 +133,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!module) throw python_error();
 
-  THPByteStorage_postInit(module);
+  THPStorage_postInit(module);
   THPAutograd_initFunctions();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -508,12 +508,6 @@ PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_benchmark_cudnn expects a bool, "
           "but got %s", THPUtils_typename(arg));
-#if defined(USE_ROCM)
-  if (arg == Py_False) {
-    TORCH_WARN_ONCE("Disabling benchmark mode for MIOpen is NOT supported. Overriding value to True");
-    arg = Py_True;
-  }
-#endif
   at::globalContext().setBenchmarkCuDNN(arg == Py_True);
   Py_RETURN_NONE;
 }
@@ -735,7 +729,6 @@ static PyMethodDef TorchMethods[] = {
   {nullptr, nullptr, 0, nullptr}
 };
 
-bool THCPByteStorage_init(PyObject *module);
 void THCPStream_init(PyObject *module);
 void THCPEvent_init(PyObject *module);
 void THCPGraph_init(PyObject *module);
@@ -748,8 +741,6 @@ void initModule(PyObject *module);
 
 }} // namespace torch::cuda
 #endif
-
-bool THDPByteStorage_init(PyObject *module);
 
 static std::vector<PyMethodDef> methods;
 
@@ -853,14 +844,13 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
-  ASSERT_TRUE(THPByteStorage_init(module));
+  ASSERT_TRUE(THPStorage_init(module));
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
   // They won't be ready for real usage until importing cuda module, that will
   // complete the process (but it defines Python classes before calling back into
   // C, so these lines have to execute first)..
-  ASSERT_TRUE(THCPByteStorage_init(module));
   THCPStream_init(module);
   THCPEvent_init(module);
   THCPGraph_init(module);
@@ -1026,6 +1016,10 @@ Call this whenever a new thread is created in order to propagate values from
 
   ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
   ASSERT_TRUE(set_module_attr("has_mps", has_mps));
+  py_module.def("_is_mps_available", []() {
+      return at::hasMPS();
+  });
+
 
   ASSERT_TRUE(set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 

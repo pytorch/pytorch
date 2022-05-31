@@ -30,25 +30,25 @@ runner_types:
   linux.2xlarge:
     instance_type: c5.2xlarge
     os: linux
-    max_available: 750
+    max_available: 1000
     disk_size: 150
     is_ephemeral: false
   linux.4xlarge: # for binary-builds
     instance_type: c5.4xlarge
     os: linux
-    max_available: 250
+    max_available: 500
     disk_size: 150
     is_ephemeral: false
   linux.8xlarge.nvidia.gpu:
     instance_type: g3.8xlarge
     os: linux
-    max_available: 125
+    max_available: 200
     disk_size: 150
     is_ephemeral: false
   linux.4xlarge.nvidia.gpu:
     instance_type: g3.4xlarge
     os: linux
-    max_available: 125
+    max_available: 250
     disk_size: 150
     is_ephemeral: false
   linux.16xlarge.nvidia.gpu:

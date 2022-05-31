@@ -918,6 +918,34 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         output = m_loaded()
         self.assertEqual(output, None)
 
+    def test_module_info_flatbuffer(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.foo = torch.nn.Linear(2, 2)
+                self.bar = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                x = self.foo(x)
+                x = self.bar(x)
+                return x
+
+        first_script_module = torch.jit.script(Foo())
+        first_saved_module = io.BytesIO()
+        torch.jit.save_jit_module_to_flatbuffer(
+            first_script_module, first_saved_module)
+        first_saved_module.seek(0)
+        expected = {
+            'bytecode_version': 4,
+            'operator_version': 4,
+            'function_names': {'__torch__.___torch_mangle_0.Foo.forward'},
+            'type_names': set(),
+            'opname_to_num_args': {'aten::linear': 3}}
+        self.assertEqual(
+            torch.jit._serialization.get_flatbuffer_module_info(first_saved_module),
+            expected)
+
+
     def test_save_load_params_buffers_submodules(self):
         """
         Check that parameters, buffers, and submodules are the same after loading.

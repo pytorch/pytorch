@@ -43,9 +43,9 @@ def execute(ctx: PrimContext, *args, executor: str = "aten", **kwargs):
             nv_args = [fd]
             for arg in args:
                 if isinstance(arg, torch.Tensor):
-                    x = fd.define_tensor(arg.size(),
-                                         arg.stride(),
-                                         getnvFuserDtype(arg.dtype))
+                    x = fd.define_tensor(
+                        arg.size(), arg.stride(), getnvFuserDtype(arg.dtype)
+                    )
                     fd.add_input(x)
                     nv_args.append(x)
                 else:
