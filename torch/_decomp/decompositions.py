@@ -1306,15 +1306,18 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
 @register_decomposition([aten.norm.Scalar, aten.norm.ScalarOpt_dim])
 @reduction_complex_to_real
 def norm(self: Tensor, p: float, dim: List[int] = None, keepdim: bool = False):
-    self_ = self.abs()
     if dim is None:
         dim = []
+
+    self_ = self.abs()
     if p == 0:
         result = (self_ != 0).sum(dim, keepdim=keepdim)
     elif p == float('inf'):
         result = self_.amax(dim, keepdim=keepdim)
     elif p == -float('inf'):
         result = self_.amin(dim, keepdim=keepdim)
+    elif p == 1:
+        result = self_.sum(dim, keepdim=keepdim)
     elif p == 2:
         result = self_.square().sum(dim, keepdim=keepdim).sqrt()
     else:
