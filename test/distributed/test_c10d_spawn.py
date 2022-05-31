@@ -84,7 +84,7 @@ class AbstractProcessGroupShareTensorTest(object):
             cls, rank, filename, shared_tensors, world_size, init_pg, c2p, p2c):
         pg = init_pg(rank, filename, world_size)
         xs = [shared_tensors[rank]]
-        pg.allreduce(xs, op=c10d.ReduceOp.SUM).wait()
+        pg.allreduce(xs, op=c10d.ReduceOp(c10d.ReduceOp.SUM)).wait()
         c2p.put((rank, torch.ones(2, 2) * 2, xs[0].to("cpu")))
         p2c.get()
 
@@ -151,7 +151,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         device = torch.device(f"cuda:{self.rank}")
         x = torch.ones(5, 5, device=device) + self.rank
         x.requires_grad = True
-        y = torch.distributed.nn.reduce(x, 1, op=c10d.ReduceOp.SUM)
+        y = torch.distributed.nn.reduce(x, 1, op=c10d.ReduceOp(c10d.ReduceOp.SUM))
 
         if self.rank == 1:
             self.assertEqual(y, 3 * torch.ones(5, 5, device=device))
@@ -172,7 +172,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         device = torch.device(f"cuda:{self.rank}")
         x = torch.ones(5, 5, device=device) + self.rank
         x.requires_grad = True
-        y = torch.distributed.nn.all_reduce(x, op=c10d.ReduceOp.SUM)
+        y = torch.distributed.nn.all_reduce(x, op=c10d.ReduceOp(c10d.ReduceOp.SUM))
 
         self.assertEqual(y, 3 * torch.ones(5, 5, device=device))
 

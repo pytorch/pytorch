@@ -56,7 +56,7 @@ if sys.version_info < (3, 9):
         ):
             pg = init_pg(rank, filename, world_size)
             x = shared_tensors[rank]
-            pg.reduce(x, root=0, op=c10d.ReduceOp.SUM).wait()
+            pg.reduce(x, root=0, op=c10d.ReduceOp(c10d.ReduceOp.SUM)).wait()
             if rank == 0:
                 c2p.put((rank, torch.ones(2, 2) * 2, x.to("cpu")))
             else:

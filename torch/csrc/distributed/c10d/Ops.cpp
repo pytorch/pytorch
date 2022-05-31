@@ -27,7 +27,7 @@ c10::intrusive_ptr<ProcessGroup::Work> allreduce_(
   return process_group->allreduce(
       tensor_vec,
       AllreduceOptions{
-          static_cast<ReduceOp>(reduce_op),
+          ReduceOp(static_cast<ReduceOp::Kind>(reduce_op)),
           std::chrono::milliseconds(timeout)});
 }
 
@@ -52,7 +52,7 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter_(
       const_cast<std::vector<at::Tensor>&>(output_tensors),
       const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
       ReduceScatterOptions{
-          static_cast<ReduceOp>(reduce_op),
+          ReduceOp(static_cast<ReduceOp::Kind>(reduce_op)),
           std::chrono::milliseconds(timeout)});
 }
 
@@ -67,7 +67,7 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce_(
   return process_group->reduce(
       tensor_vec,
       ReduceOptions{
-          static_cast<ReduceOp>(reduce_op),
+          ReduceOp{static_cast<ReduceOp::Kind>(reduce_op)},
           root_rank,
           root_tensor,
           std::chrono::milliseconds(timeout)});
