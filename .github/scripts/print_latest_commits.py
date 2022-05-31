@@ -1,4 +1,3 @@
-import sys
 from typing import Any
 from datetime import datetime, timedelta
 from gitutils import _check_output
@@ -6,7 +5,7 @@ from gitutils import _check_output
 def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Print latest commits")
-    parser.add_argument("--minutes", type=int, help = "duration in minutes of last commits")
+    parser.add_argument("--minutes", type=int, help="duration in minutes of last commits")
     return parser.parse_args()
 
 def print_latest_commits(minutes: int = 60) -> None:
