@@ -250,10 +250,9 @@ def torch_dispatch_impl(cls_or_mode_instance, func, types, args, kwargs, run_fun
     # TODO: handle non-kwarg devices
     assert func not in _device_not_kwarg_ops, f"NYI: {func}"
 
-    def wrap(e, device=None, converter_fn=None):
-        converter_fn = converter if converter_fn is None else converter_fn
+    def wrap(e, device=None):
         if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
-            return converter_fn(e, device)
+            return converter(e, device)
         else:
             return e
 
