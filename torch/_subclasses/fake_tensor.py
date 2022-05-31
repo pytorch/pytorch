@@ -73,7 +73,7 @@ def torch_dispatch_impl(cls_or_mode_instance, func, types, args, kwargs, run_fun
     # if we are in the dispatch mode, we will enter this function even if the inputs
     # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
     # and just support constructors. TODO: extend more broadly
-    if isinstance(cls, FakeTensorMode):
+    if isinstance(cls_or_mode_instance, FakeTensorMode):
         conversion_made = False
 
         def check_non_fake_tensor(x):
