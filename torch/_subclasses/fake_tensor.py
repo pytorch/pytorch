@@ -5,7 +5,7 @@ from functools import partial
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._mode_utils import no_dispatch
 from torch._subclasses.meta_utils import MetaConverter
-from typing import Union
+from typing import Union, Callable
 from torch._ops import OpOverload
 from torch.utils._python_dispatch import TorchDispatchMode
 import functools
@@ -90,6 +90,7 @@ class FakeTensorConverter(MetaConverter):
     def __call__(self, t, device=None):
         return self.fake_tensor(t, device)
 
+
 def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
     with no_dispatch():
         def to_cpu(e):
@@ -124,6 +125,80 @@ def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
     # and continue
     return tree_map(MetaConverter(), r)
 
+op_handlers = []
+
+def register_op_handler(run_handler_check: Union[Callable[[OpOverload], bool], OpOverload]):
+    def handler_decorater(op_handler):
+        global op_handlers
+        if isinstance(run_handler_check, OpOverload):
+            op_handlers.append((lambda func: func == run_handler_check, op_handler))
+        else:
+            op_handlers.append((run_handler_check, op_handler))
+
+        return op_handler
+
+    return handler_decorater
+
+# This classes virtualizes .device() calls, need to short-circuit
+# it insteead of calling device again or we would keep on recurring
+# NB: register this first, since device will be called frequently
+@register_op_handler(torch.ops.prim.device.default)
+def to_copy(cls_or_mode_instance, func, types, args, kwargs, run_function, converter):
+    assert len(args) == 1 and isinstance(args[0], FakeTensor)
+    return args[0].fake_device
+
+
+# _to_copy fails when run with FakeTensors to cuda device
+# TODO: debug
+@register_op_handler(torch.ops.aten._to_copy.default)
+def to_copy(cls_or_mode_instance, func, types, args, kwargs, run_function, converter):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    out_device = new_kwargs.pop("device", new_kwargs["input"].device)
+    with no_dispatch():
+        input = new_kwargs.pop("input").to("meta")
+        return FakeTensor(
+            torch.ops.aten._to_copy(input, **new_kwargs), out_device
+        )
+
+@register_op_handler(lambda func: _is_tensor_constructor(func) or func in _like_tensor_constructors)
+def contructors(cls_or_mode_instance, func, types, args, kwargs, run_function, converter):
+    assert func not in _non_kwarg_device_constructors
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    if func in _like_tensor_constructors:
+        default_device = new_kwargs["input"].device
+        # TODO: file issue
+        args = (new_kwargs.pop("input"),)
+    else:
+        # cpu is default device if none is specified
+        default_device = torch.device("cpu")
+        args = ()
+
+    out_device = new_kwargs.pop("device", default_device)
+    new_kwargs["device"] = torch.device("meta")
+    r = run_function(func, types, args, new_kwargs)
+    return FakeTensor(r, out_device)
+
+@register_op_handler(lambda func: func in (aten.to.prim_Device, aten.to.device))
+def non_kwarg_to(cls_or_mode_instance, func, types, args, kwargs, run_function, converter):
+    _, new_kwargs = normalize_function(func, args, kwargs, normalize_to_only_use_kwargs=True)
+    input_device = new_kwargs["device"]
+    out_device = input_device if input_device else new_kwargs["input"].device
+    new_kwargs["device"] = torch.device("meta")
+    r = run_function(func, types, (), new_kwargs)
+    return converter(r, out_device)
+
+# Dont default to default device handling,
+# since the device of `the_template` is ignored
+@register_op_handler(aten.resize_as_.default)
+def resize_as_(cls_or_mode_instance, func, types, args, kwargs, run_function, converter)
+    r = run_function(func, types, args, kwargs)
+    _, new_kwargs = normalize_function(func, args, kwargs, normalize_to_only_use_kwargs=True)
+    return FakeTensor(r, new_kwargs["input"].device)
+
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
 # Because the device is `meta`, meta tensors do not model device propagation.
@@ -135,23 +210,10 @@ def torch_dispatch_impl(cls_or_mode_instance, func, types, args, kwargs, run_fun
     in_fake_mode = isinstance(cls_or_mode_instance, FakeTensorMode)
     converter = cls_or_mode_instance.fake_tensor_converter if in_fake_mode else FakeTensorConverter()
 
-    # This classes virtualizes .device() calls, need to short-circuit
-    # it insteead of calling device again or we would keep on recurring
-    if func == torch.ops.prim.device.default:
-        assert len(args) == 1 and isinstance(args[0], FakeTensor)
-        return args[0].fake_device
-
-    def wrap(e, device=None, converter_fn=None):
-        converter_fn = converter if converter_fn is None else converter_fn
-        if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
-            return converter_fn(e, device)
-        else:
-            return e
-
     # if we are in the dispatch mode, we will enter this function even if the inputs
     # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
     # and just support constructors. TODO: extend more broadly
-    if isinstance(cls_or_mode_instance, FakeTensorMode):
+    if in_fake_mode:
         conversion_made = False
 
         def check_non_fake_tensor(x):
@@ -167,45 +229,9 @@ def torch_dispatch_impl(cls_or_mode_instance, func, types, args, kwargs, run_fun
                 f"Please convert all Tensors to FakeTensors first. Found in {func}"
             )
 
-    # _to_copy fails when run with FakeTensors to cuda device
-    # TODO: debug
-    if func == torch.ops.aten._to_copy.default:
-        _, new_kwargs = normalize_function(
-            func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-        )
-        out_device = new_kwargs.pop("device", new_kwargs["input"].device)
-        with no_dispatch():
-            input = new_kwargs.pop("input").to("meta")
-            return FakeTensor(
-                torch.ops.aten._to_copy(input, **new_kwargs), out_device
-            )
-
-    if _is_tensor_constructor(func) or func in _like_tensor_constructors:
-        assert func not in _non_kwarg_device_constructors
-        _, new_kwargs = normalize_function(
-            func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-        )
-        if func in _like_tensor_constructors:
-            default_device = new_kwargs["input"].device
-            # TODO: file issue
-            args = (new_kwargs.pop("input"),)
-        else:
-            # cpu is default device if none is specified
-            default_device = torch.device("cpu")
-            args = ()
-
-        out_device = new_kwargs.pop("device", default_device)
-        new_kwargs["device"] = torch.device("meta")
-        r = run_function(func, types, args, new_kwargs)
-        return FakeTensor(r, out_device)
-
-    if func in (aten.to.prim_Device, aten.to.device):
-        _, new_kwargs = normalize_function(func, args, kwargs, normalize_to_only_use_kwargs=True)
-        input_device = new_kwargs["device"]
-        out_device = input_device if input_device else new_kwargs["input"].device
-        new_kwargs["device"] = torch.device("meta")
-        r = run_function(func, types, (), new_kwargs)
-        return converter(r, out_device)
+    for run_op_handler_check, op_handler in op_handlers:
+        if run_op_handler_check(func):
+            return op_handler(cls_or_mode_instance, func, types, args, kwargs, run_function, converter)
 
     try:
         r = run_function(func, types, args, kwargs)
@@ -217,19 +243,16 @@ def torch_dispatch_impl(cls_or_mode_instance, func, types, args, kwargs, run_fun
     # TODO: handle non-kwarg devices
     assert func not in _device_not_kwarg_ops, f"NYI: {func}"
 
+    def wrap(e, device=None, converter_fn=None):
+        converter_fn = converter if converter_fn is None else converter_fn
+        if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
+            return converter_fn(e, device)
+        else:
+            return e
+
     # if device is specified, use that
     if kwargs.get("device", None):
         return tree_map(partial(wrap, device=kwargs["device"]), r)
-
-    # operators which copy size from another tensor do not
-    # also take device from the size tensor
-    # other size_as operators are not builtin operators
-    if func == aten.resize_as_.default:
-        _, new_kwargs = normalize_function(
-            func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-        )
-        # device of the input is returned
-        return tree_map(partial(wrap, device=new_kwargs["input"].device), r)
 
     common_device = FakeTensor._find_common_device(func, args, kwargs)
 
