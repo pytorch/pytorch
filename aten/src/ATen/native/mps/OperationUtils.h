@@ -47,7 +47,7 @@ MPSDataType getMPSDataType(ScalarType scalar_type);
 MPSDataType getMPSScalarType(ScalarType scalar_type);
 std::string getMPSTypeString(ScalarType scalar_type);
 std::string getMPSShapeString(MPSShape* shape);
-std::string getTensorsStringKey(const TensorList& tensors);
+std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value = true);
 double getMPSScalarValue(const Tensor& t);
 std::string getArrayRefString(const IntArrayRef s);
 std::string getStridedKey(const Tensor& self, const IntArrayRef sz,
@@ -73,16 +73,28 @@ class Placeholder {
     return _value == nullptr;
   }
 
+  void allocateViewTensor(const at::Tensor& src)
+  {
+    assert (!_viewOutput.numel());
+    _viewOutput = at::native::empty_mps(
+                  src.sizes(),
+                  src.scalar_type(),
+                  c10::nullopt,
+                  kMPS,
+                  c10::nullopt,
+                  c10::nullopt);
+  }
+
  private:
   MPSGraphTensor* _placeholder;
   MPSGraphTensorData* _value;
+  Tensor _viewOutput;
 };
 
 void resize_tensor(Tensor* output);
 MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
-MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph,
-                                          MPSStream* mpsStream,
-                                          const Tensor& tensor);
+MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStream, const Tensor& tensor);
+MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, const Scalar& scalar, MPSDataType dataType);
 
 MPSGraph* make_mps_graph();
 void printTensorNDArray(const Tensor& t);
@@ -90,7 +102,7 @@ void printTensorNDArray(const Tensor& t);
 MPSGraphTensor* mpsGraphUnrankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType);
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType, MPSShape* mpsShape);
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const Tensor& tensor);
-MPSGraphTensor* mpsGraphConstantFloatPlaceHolder(MPSGraph *mpsGraph, const double value, MPSShape* mpsShape);
+MPSGraphTensor* mpsGraphConstantPlaceHolder(MPSGraph *mpsGraph, const double value, MPSShape* mpsShape, MPSDataType dataType);
 
 string get_mem_format_string(c10::MemoryFormat memory_format);
 

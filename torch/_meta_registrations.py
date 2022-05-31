@@ -1,4 +1,6 @@
 import torch
+from torch._prims import utils
+from torch._prims.utils import check
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
@@ -66,3 +68,70 @@ def meta_linalg_eigh(self, uplo="L"):
     values.transpose_(-2, -1)
     vectors = self.new_empty(self.shape[:-1])
     return (values, vectors)
+
+@torch.library.impl(meta_lib, "reflection_pad2d")
+def meta_pad2d(self, padding):
+    valid_dims = self.size(1) != 0 and self.size(2) != 0
+    check(
+        (self.ndim == 3 and valid_dims)
+        or (self.ndim == 4 and valid_dims and self.size(3) != 0),
+        f"3D or 4D (batch mode) tensor expected for input, but got: {self}"
+    )
+    if self.ndim == 4:
+        nbatch, nplane, input_h, input_w = self.shape
+    else:
+        nbatch = 1
+        nplane, input_h, input_w = self.shape
+
+    pad_l, pad_r, pad_t, pad_b = padding
+
+    output_h = input_h + pad_t + pad_b
+    output_w = input_w + pad_l + pad_r
+
+    if self.ndim == 3:
+        return self.new_empty((nplane, output_h, output_w))
+    else:
+        return self.new_empty((nbatch, nplane, output_h, output_w))
+
+@torch.library.impl(meta_lib, "dot")
+def meta_dot(self, tensor):
+    check(
+        self.dim() == 1 and tensor.dim() == 1,
+        f"1D tensors expected, but got {self.dim()}D and {tensor.dim()}D tensors"
+    )
+    return self.new_empty(())
+
+@torch.library.impl(meta_lib, "var_mean.correction")
+def meta_var_mean_correction(self, dim, *, correction, keepdim=False):
+    dim = utils.reduction_dims(self.shape, dim)
+    if keepdim:
+        output_shape = tuple(self.shape[i] if i not in dim else 1 for i in range(self.ndim))
+    else:
+        output_shape = utils.compute_reduction_output_shape(self.shape, dim)
+    result1 = self.new_empty(output_shape, dtype=toRealValueType(self.dtype))
+    result2 = self.new_empty(output_shape)
+    return result1, result2
+
+@torch.library.impl(meta_lib, "inverse")
+def meta_inverse(self):
+    # Bug: https://github.com/pytorch/pytorch/issues/77498
+    if self.numel() == 0:
+        return torch.empty_like(self)
+    r = self.new_empty(self.shape)
+    r.transpose_(-2, -1)
+    return r
+
+@torch.library.impl(meta_lib, "bernoulli.out")
+def meta_bernoulli(self, *, generator=None, out):
+    torch._resize_output_(out, self.size(), self.device)
+    return out
+
+@torch.library.impl(meta_lib, "_adaptive_avg_pool2d")
+def meta_adaptive_avg_pool2d(self, output_size):
+    check(self.ndim == 3 or self.ndim == 4, f"Expected 3D or 4D tensor, but got {self.shape}")
+    return self.new_empty(self.shape[:-2] + tuple(output_size))
+
+@torch.library.impl(meta_lib, "_adaptive_avg_pool3d")
+def meta_adaptive_avg_pool3d(self, output_size):
+    check(self.ndim == 4 or self.ndim == 5, f"Expected 4D or 5D tensor, but got {self.shape}")
+    return self.new_empty(self.shape[:-3] + tuple(output_size))
