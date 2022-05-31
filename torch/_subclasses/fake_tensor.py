@@ -78,17 +78,26 @@ class FakeTensorConverter(MetaConverter):
         self.tensor_memo = {}
         self.meta_converter = MetaConverter()
 
-    def fake_tensor(self, t, device=None):
-        if t not in self.tensor_memo:
-            if device:
-                self.tensor_memo[t] = FakeTensor(t, device)
-            else:
-                existing_device = t.device
-                self.tensor_memo[t] = FakeTensor(self.meta_converter(t), existing_device)
+    def from_real_tensor(self, t):
+        existing_device = t.device
+        self.tensor_memo[t] = FakeTensor(self.meta_converter(t), existing_device)
+        return self.tensor_memo[t]
+
+    def from_meta_and_device(self, t, device):
+        if t in self.tensor_memo:
+            return self.tensor_memo[t]
+        self.tensor_memo[t] = FakeTensor(t, device)
         return self.tensor_memo[t]
 
     def __call__(self, t, device=None):
-        return self.fake_tensor(t, device)
+        assert t.device.type != 'meta' or device is not None
+        if t in self.tensor_memo:
+            return self.tensor_memo[t]
+        elif t.device.type != 'meta':
+            return self.from_real_tensor(t)
+        else:
+            return self.from_meta_and_device(t, device)
+
 
 def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
     with no_dispatch():
