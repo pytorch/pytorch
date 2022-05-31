@@ -25,7 +25,7 @@ class HalfCauchy(TransformedDistribution):
         scale (float or Tensor): scale of the full Cauchy distribution
     """
     arg_constraints = {'scale': constraints.positive}
-    support = constraints.positive
+    support = constraints.nonnegative
     has_rsample = True
 
     def __init__(self, scale, validate_args=None):
@@ -44,6 +44,10 @@ class HalfCauchy(TransformedDistribution):
     @property
     def mean(self):
         return torch.full(self._extended_shape(), math.inf, dtype=self.scale.dtype, device=self.scale.device)
+
+    @property
+    def mode(self):
+        return torch.zeros_like(self.scale)
 
     @property
     def variance(self):
