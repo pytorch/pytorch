@@ -4858,8 +4858,8 @@ REGISTER_OPERATOR_FUNCTOR(
     aten::linalg_svdvals,
     aten_linalg_svdvals,
     [](Node* n) -> SROperator {
-      if (n->matches(
-              torch::schema("aten::linalg_svdvals(Tensor A) -> Tensor"))) {
+      if (n->matches(torch::schema(
+              "aten::linalg_svdvals(Tensor A, *, str? driver=None) -> Tensor"))) {
         return [](ProcessedNode* p_node) {
           const auto& A = p_node->Input(0).toTensor();
           if (p_node->Output(0).isNone()) {
@@ -4868,7 +4868,7 @@ REGISTER_OPERATOR_FUNCTOR(
           }
           auto& out = p_node->Output(0).toTensor();
           fastResizeToZero(out);
-          at::native::linalg_svdvals_out(A, out);
+          at::native::linalg_svdvals_out(A, c10::nullopt, out);
         };
       }
       LogAndDumpSchema(n);

@@ -1518,7 +1518,7 @@
   self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
 
 # We never call _linalg_svd with compute_uv=False in an autograd context, so we don't even consider it here
-- name: _linalg_svd(Tensor A, bool full_matrices=False, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor Vh)
+- name: _linalg_svd(Tensor A, bool full_matrices=False, bool compute_uv=True, *, str? driver=None) -> (Tensor U, Tensor S, Tensor Vh)
   A: "svd_backward(full_matrices && grad_U.defined() ? grad_U.narrow(-1, 0, S.size(-1)) : grad_U,
                    grad_S,
                    full_matrices && grad_Vh.defined() ? grad_Vh.narrow(-2, 0, S.size(-1)) : grad_Vh,

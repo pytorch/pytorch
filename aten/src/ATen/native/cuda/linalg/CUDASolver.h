@@ -176,6 +176,44 @@ void gesvdjBatched<c10::complex<float>>(CUDASOLVER_GESVDJ_BATCHED_ARGTYPES(c10::
 template<>
 void gesvdjBatched<c10::complex<double>>(CUDASOLVER_GESVDJ_BATCHED_ARGTYPES(c10::complex<double>, double));
 
+#define CUDASOLVER_GESVDA_STRIDED_BATCHED_BUFFERSIZE_ARGTYPES(Dtype, Vtype)  \
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int rank, int m, int n, Dtype *A, int lda, long long int strideA, \
+    Vtype *S, long long int strideS, Dtype *U, int ldu, long long int strideU, Dtype *V, int ldv, long long int strideV, \
+    int *lwork, int batchSize
+
+template<class Dtype, class Vtype>
+void gesvdaStridedBatched_buffersize(CUDASOLVER_GESVDA_STRIDED_BATCHED_BUFFERSIZE_ARGTYPES(Dtype, Vtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::gesvdaStridedBatched_buffersize: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void gesvdaStridedBatched_buffersize<float>(CUDASOLVER_GESVDA_STRIDED_BATCHED_BUFFERSIZE_ARGTYPES(float, float));
+template<>
+void gesvdaStridedBatched_buffersize<double>(CUDASOLVER_GESVDA_STRIDED_BATCHED_BUFFERSIZE_ARGTYPES(double, double));
+template<>
+void gesvdaStridedBatched_buffersize<c10::complex<float>>(CUDASOLVER_GESVDA_STRIDED_BATCHED_BUFFERSIZE_ARGTYPES(c10::complex<float>, float));
+template<>
+void gesvdaStridedBatched_buffersize<c10::complex<double>>(CUDASOLVER_GESVDA_STRIDED_BATCHED_BUFFERSIZE_ARGTYPES(c10::complex<double>, double));
+
+
+#define CUDASOLVER_GESVDA_STRIDED_BATCHED_ARGTYPES(Dtype, Vtype)  \
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int rank, int m, int n, Dtype *A, int lda, long long int strideA, \
+    Vtype *S, long long int strideS, Dtype *U, int ldu, long long int strideU, Dtype *V, int ldv, long long int strideV, \
+    Dtype *work, int lwork, int *info, double *h_R_nrmF, int batchSize
+// h_R_nrmF is always double, regardless of input Dtype.
+
+template<class Dtype, class Vtype>
+void gesvdaStridedBatched(CUDASOLVER_GESVDA_STRIDED_BATCHED_ARGTYPES(Dtype, Vtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::gesvdaStridedBatched: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void gesvdaStridedBatched<float>(CUDASOLVER_GESVDA_STRIDED_BATCHED_ARGTYPES(float, float));
+template<>
+void gesvdaStridedBatched<double>(CUDASOLVER_GESVDA_STRIDED_BATCHED_ARGTYPES(double, double));
+template<>
+void gesvdaStridedBatched<c10::complex<float>>(CUDASOLVER_GESVDA_STRIDED_BATCHED_ARGTYPES(c10::complex<float>, float));
+template<>
+void gesvdaStridedBatched<c10::complex<double>>(CUDASOLVER_GESVDA_STRIDED_BATCHED_ARGTYPES(c10::complex<double>, double));
+
 
 #define CUDASOLVER_POTRF_ARGTYPES(Dtype)  \
     cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, Dtype* A, int lda, Dtype* work, int lwork, int* info
