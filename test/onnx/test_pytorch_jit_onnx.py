@@ -2,10 +2,10 @@
 import unittest
 
 import onnxruntime
-from test_pytorch_onnx_onnxruntime import ort_compare_with_pytorch, run_ort
 
 import torch
 from torch._C import parse_ir
+from torch.onnx import verification
 
 
 def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
@@ -17,10 +17,7 @@ def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
     It also does not interact with actual PyTorch modules nor
     PyTorch tensor inputs.
     """
-    from torch.onnx.symbolic_helper import (
-        _set_onnx_shape_inference,
-        _set_opset_version,
-    )
+    from torch.onnx.symbolic_helper import _set_onnx_shape_inference, _set_opset_version
     from torch.onnx.utils import _optimize_graph
 
     # Shape inference is required because some ops' symbolic functions
@@ -65,9 +62,11 @@ class _TestJITIRToONNX:
         ort_sess = onnxruntime.InferenceSession(
             onnx_proto, providers=self.ort_providers
         )
-        ort_outs = run_ort(ort_sess, example_inputs)
+        ort_outs = verification._run_ort(ort_sess, example_inputs)
 
-        ort_compare_with_pytorch(ort_outs, jit_outs, rtol=1e-3, atol=1e-7)
+        verification._compare_ort_pytorch_outputs(
+            ort_outs, jit_outs, rtol=1e-3, atol=1e-7
+        )
 
     def test_example_ir(self):
         graph_ir = """
