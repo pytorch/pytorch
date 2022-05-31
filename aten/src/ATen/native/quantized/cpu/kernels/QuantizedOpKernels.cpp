@@ -10,11 +10,14 @@
 #include <ATen/native/quantized/fake_quant_affine.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/cpu/utils.h>
+#include "c10/core/Scalar.h"
 #include <c10/util/irange.h>
 
 #include <cmath>
 #ifdef USE_FBGEMM
+#include <cpuinfo.h>
 #include <fbgemm/QuantUtils.h>
+#include <fbgemm/Utils.h>
 #endif
 #ifdef _OPENMP
 #include <omp.h>
@@ -27,6 +30,12 @@
 namespace at {
 namespace native {
 namespace {
+
+void check_tensor_memory_format(const Tensor& qtensor) {
+  TORCH_CHECK(
+      qtensor.is_contiguous(qtensor.suggest_memory_format()),
+      "Quantized tensor should be contiguous");
+}
 
 void check_tensor_memory_format(const Tensor& ref, const Tensor& other) {
   TORCH_CHECK(
@@ -2717,6 +2726,72 @@ void quantized_normalize_kernel(
 }
 
 #ifdef USE_FBGEMM
+
+namespace fbgemm_overload_utils {
+namespace {
+
+// this function is analogous to fbgemm::Quantize, except src is a
+// float point value instead of a pointer. this function is created for
+// the purpose of quantizing a single value and broadcast assigning it
+// to the destination tensor
+template <typename T, bool LEGACY>
+void Quantize(const float src, T* dst, int64_t len, const fbgemm::TensorQuantizationParams& qparams,
+                 int thread_id, int num_threads) {
+  bool avx2_support = cpuinfo_initialize() && fbgemm::fbgemmHasAvx2Support();
+  bool fma_support = cpuinfo_has_x86_fma3();
+  int64_t i_begin, i_end;
+  fbgemm::fbgemmPartition1D(thread_id, num_threads, len, i_begin, i_end);
+  if (avx2_support && fma_support && qparams.precision == 8) {
+    /* fast path  */
+    fbgemm::QuantizeAvx2<T, LEGACY>(
+        &src, &dst[i_begin], i_end - i_begin, qparams);
+  } else {
+    for (int64_t i = i_begin; i < i_end; ++i) {
+      dst[i] = fbgemm::Quantize<T, LEGACY>(src, qparams);
+    }
+  }
+}
+
+template void Quantize<uint8_t, false>(const float src, uint8_t* dst, int64_t len, const fbgemm::TensorQuantizationParams& qparams,
+                 int thread_id, int num_threads);
+template void Quantize<int8_t, false>(const float src, int8_t* dst, int64_t len, const fbgemm::TensorQuantizationParams& qparams,
+                 int thread_id, int num_threads);
+
+} // anonymous namespace
+} // fbgemm_overload_utils
+
+void quantize_scalar_per_tensor_affine_cpu(
+    const float val,
+    Tensor& qtensor,
+    double scale,
+    int64_t zero_point) {
+  AT_DISPATCH_QINT_TYPES(
+      qtensor.scalar_type(), "quantize_scalar_per_tensor_affine_cpu", [&]() {
+        check_tensor_memory_format(qtensor);
+        auto qd = qtensor.data_ptr<underlying_t>();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+        fbgemm::TensorQuantizationParams qparams;
+        qparams.scale = scale;
+        qparams.zero_point = zero_point;
+        qparams.precision = CHAR_BIT * sizeof(underlying_t);
+        int num_tasks = at::get_num_threads();
+        at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+          for (const auto task_id : c10::irange(begin, end)) {
+            fbgemm_overload_utils::Quantize<underlying_t, false /*LEGACY*/>(
+                // NOLINTNEXTLINE(bugprone-argument-comment)
+                val, /*src=*/
+                // NOLINTNEXTLINE(bugprone-argument-comment)
+                qd, /*dst=*/
+                qtensor.numel(), /*len*/
+                // NOLINTNEXTLINE(bugprone-argument-comment)
+                qparams, /*qparams=*/
+                task_id, /*thread_id*/
+                num_tasks /*num_threads*/);
+          }
+        });
+      });
+}
+
 void quantize_tensor_per_tensor_affine_cpu(
     const Tensor& rtensor,
     Tensor& qtensor,
@@ -2792,6 +2867,18 @@ const static int PARALLEL_THRESHOLD = 1 << 20;
 
 // Generic template defaults to naive quantize implementation
 template <typename T>
+void quantize_scalar_arm(
+    const float in,
+    T* __restrict__ out,
+    const int64_t N,
+    const float scale,
+    const int32_t zero_point) {
+  for (const auto i : c10::irange(N)) {
+    out[i] = at::native::quantize_val<T>(scale, zero_point, in);
+  }
+}
+
+template <typename T>
 void quantize_tensor_arm(
     const float* __restrict__ in,
     T* __restrict__ out,
@@ -2804,6 +2891,19 @@ void quantize_tensor_arm(
 }
 
 namespace quantize_tensor_arm_intrinsics {
+template <typename Tx8>
+C10_ALWAYS_INLINE Tx8 vld1q(int16x16_t* ptr);
+
+template <>
+C10_ALWAYS_INLINE Tx8 vld1q<int8x16_t>(int8x16_t* ptr) {
+  return vld1q_s8(ptr);
+}
+
+template <>
+C10_ALWAYS_INLINE Tx8 vld1q<uint8x16_t>(uint8x16_t* ptr) {
+  return vld1q_u8(ptr);
+}
+
 template <typename Tx8>
 C10_ALWAYS_INLINE Tx8 vqmov(int16x8_t vraw);
 
@@ -2830,6 +2930,57 @@ C10_ALWAYS_INLINE void vst1<int8_t, int8x8_t>(int8_t* out, int8x8_t vout) {
   vst1_s8(out, vout);
 }
 } // namespace quantize_tensor_arm_intrinsics
+
+// Specialized implementation from caffe2::Int8Quantize.
+// There may be slight accuracy difference between this and implementation of
+// quantize_val
+// TODO Update quantize_tensor_arm implementation to follow quantize_val,
+// i.e. f = Round(value/scale + zero_point)
+// TODO Make quantize_tensor_arm work for int32 datatype too.
+template <typename scalar_t, typename underlying_t>
+void quantize_scalar_arm_q8(
+    const float in,
+    scalar_t* __restrict__ out,
+    const int64_t N,
+    const float scale,
+    const int32_t zero_point) {
+  uint32_t i = 0;
+  auto quantized_val = at::native::quantize_val_arm<underlying_t>(scale, zero_point, in);
+
+  for (i = 0; i + 8 <= N; i += 8) {
+    const auto loaded_val = vld1q(&quantized_val);
+    quantize_tensor_arm_intrinsics::vst1<underlying_t, int8x16_t>(
+        out, loaded_val);
+    out += 8;
+  }
+  // process the remainder
+  for (; i < N; ++i) {
+    (*out++) = quantized_val;
+  }
+}
+
+template <>
+void quantize_scalar_arm<c10::quint8>(
+    const float in,
+    c10::quint8* __restrict__ out,
+    const int64_t N,
+    const float scale,
+    const int32_t zero_point) {
+  quantize_scalar_arm_q8<c10::quint8, uint8_t>(
+      in, out, N, scale, zero_point);
+}
+
+template <>
+void quantize_scalar_arm<c10::qint8>(
+    const float in,
+    c10::qint8* __restrict__ out,
+    const int64_t N,
+    const float scale,
+    const int32_t zero_point) {
+  quantize_scalar_arm_q8<c10::qint8, int8_t>(
+      in, out, N, scale, zero_point);
+      asdfsadfds
+}
 
 // Specialized implementation from caffe2::Int8Quantize.
 // There may be slight accuracy difference between this and implementation of
@@ -3123,6 +3274,58 @@ void dequantize_tensor_per_tensor_affine_cpu(
 // TODO: add fbgemm for per channel
 // Generic template defaults to naive quantize implementation
 template <typename T>
+void quantize_scalar_per_channel_impl(
+    const float val,
+    Tensor& qtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
+    int64_t axis) {
+  // TODO: channels last kernel can be made faster.
+  // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
+  // For channels_last/3d however axis == 0 or 1.
+  // Since current implemntation on channels_last format does not
+  // cover per channel quant with arbitrary axis value, it is better
+  // to check and fail.
+  int64_t batches = size_to_dim_(axis, qtensor.sizes());
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  int64_t elements_per_channel = size_from_dim_(axis + 1, qtensor.sizes());
+  int64_t channels = qtensor.size(axis);
+  auto scales_data = scales.data_ptr<double>();
+  auto zero_points_data = zero_points.data_ptr<int64_t>();
+  auto out = qtensor.data_ptr<T>();
+  if (axis == 1 &&
+      (qtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
+       qtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
+    // This code handles per channel quant when axis = 1 and
+    // channels_last contig.
+    // If axis = 0 and channels_last contig, implementation for channels
+    // first (NCHW) works.
+    for (const auto b : c10::irange(batches)) {
+      for (const auto e : c10::irange(elements_per_channel)) {
+        for (const auto c : c10::irange(channels)) {
+          auto i = b * channels * elements_per_channel + e * channels + c;
+          out[i] = at::native::quantize_val<T>(
+              scales_data[c], zero_points_data[c], val);
+        }
+      }
+    }
+  } else {
+    for (const auto b : c10::irange(batches)) {
+      for (const auto c : c10::irange(channels)) {
+        for (const auto e : c10::irange(elements_per_channel)) {
+          auto i = b * channels * elements_per_channel +
+              c * elements_per_channel + e;
+          out[i] = at::native::quantize_val<T>(
+              scales_data[c], zero_points_data[c], val);
+        }
+      }
+    }
+  }
+}
+
+// TODO: add fbgemm for per channel
+// Generic template defaults to naive quantize implementation
+template <typename T>
 void quantize_tensor_per_channel_impl(
     const Tensor& rtensor,
     Tensor& qtensor,
@@ -3368,6 +3571,24 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
 }
 #endif // defined(__ARM_NEON__) || defined(__aarch64__)
 
+void quantize_scalar_per_channel_affine_cpu(
+    const float val,
+    Tensor& qtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
+    int64_t axis) {
+  TORCH_CHECK(
+      qtensor.is_contiguous() || (axis <= 1),
+      "If tensor is channels_last contig then per channel quantization "
+      "is supported only for axis = 0 or 1.");
+  AT_DISPATCH_QINT_TYPES(
+      qtensor.scalar_type(), "quantize_tensor_per_channel_affine_cpu", [&]() {
+        check_tensor_memory_format(qtensor);
+        quantize_scalar_per_channel_impl<scalar_t>(
+            val, qtensor, scales, zero_points, axis);
+      });
+}
+
 void quantize_tensor_per_channel_affine_cpu(
     const Tensor& rtensor,
     Tensor& qtensor,
@@ -3465,6 +3686,71 @@ void dequantize_tensor_per_channel_affine_cpu(
 }
 
 // quantize stubs for floating point scale and zero_point.
+void quantize_scalar_per_channel_float_qparams_cpu(
+    const float val,
+    Tensor& qtensor,
+    const Tensor& scales,
+    const Tensor& zero_points,
+    int64_t axis) {
+  // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
+  // For channels_last/3d however axis == 0 or 1.
+  // Since current implemntation on channels_last format does not
+  // cover per channel quant with arbitrary axis value, it is better
+  // to check and fail.
+  TORCH_CHECK(qtensor.is_contiguous() || (axis <=1),
+      "If tensor is channels_last contig then per channel quantization "
+      "is supported only for axis = 0 or 1.");
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
+      qtensor.scalar_type(), "quantize_tensor_per_channel_float_qparams_cpu", [&]() {
+        int64_t batches = size_to_dim_(axis, qtensor.sizes());
+        int64_t elements_per_channel =
+            size_from_dim_(axis + 1, qtensor.sizes());
+        int64_t channel = qtensor.size(axis);
+        auto scales_data = scales.data_ptr<float>();
+        auto zero_points_data = zero_points.data_ptr<float>();
+        check_tensor_memory_format(qtensor, qtensor);
+        auto qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
+        const auto elem_per_byte = CHAR_BIT / bit_width;
+        int qvalue = 0;
+        if (axis == 1 && (qtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
+            qtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
+          for (const auto b : c10::irange(batches)) {
+            for (const auto e : c10::irange(elements_per_channel)) {
+              for (const auto c : c10::irange(channel)) {
+                auto i = b * channel * elements_per_channel + e * channel + c;
+                qvalue = quantize_val_float_qparams(
+                    scales_data[c], zero_points_data[c], val, quant_min, quant_max);
+                // NOLINTNEXTLINE(clang-analyzer-core.DivideZero)
+                if (i % elem_per_byte == 0) {
+                  qdata[i / elem_per_byte] = static_cast<underlying_t>(qvalue);
+                } else {
+                  qdata[i / elem_per_byte] |= static_cast<underlying_t>(qvalue << ((i % elem_per_byte) * bit_width));
+                }
+              }
+            }
+          }
+        } else {
+          for (const auto b : c10::irange(batches)) {
+            for (const auto c : c10::irange(channel)) {
+              for (const auto e : c10::irange(elements_per_channel)) {
+                auto i = b * channel * elements_per_channel +
+                    c * elements_per_channel + e;
+                qvalue = quantize_val_float_qparams(
+                    scales_data[c], zero_points_data[c], val, quant_min, quant_max);
+                // NOLINTNEXTLINE(clang-analyzer-core.DivideZero)
+                if (i % elem_per_byte == 0) {
+                  qdata[i / elem_per_byte] = static_cast<underlying_t>(qvalue);
+                } else {
+                  qdata[i / elem_per_byte] |= static_cast<underlying_t>(qvalue << ((i % elem_per_byte) * bit_width));
+                }
+              }
+            }
+          }
+        }
+      });
+}
+
+// quantize stubs for floating point scale and zero_point.
 void quantize_tensor_per_channel_float_qparams_cpu(
     const Tensor& rtensor,
     Tensor& qtensor,
@@ -3541,6 +3827,36 @@ void dequantize_tensor_per_channel_float_qparams_cpu(
       qtensor.scalar_type(), "dequantize_tensor_per_channel_float_qparams_cpu", [&]() {
         dequantize_per_channel_affine_kernel<float, float, scalar_t>(qtensor, rtensor, scales, zero_points, axis, bit_width);
       });
+}
+
+void quantize_scalar_per_tensor_affine_sub_byte_cpu(
+    const float val,
+    Tensor& qtensor,
+    float scale,
+    float zero_point) {
+  // TODO Use fbgemm kernel to pack values
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
+    qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_sub_byte_cpu", [&]() {
+      check_tensor_memory_format(qtensor, qtensor);
+      auto qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
+      auto numel = qtensor.numel();
+      const auto elem_per_byte = CHAR_BIT / bit_width;
+      for (const auto i : c10::irange(numel)) {
+        float inv_scale = scale == 0 ? 1.0f : 1.0f / scale;
+        int64_t qvalue = lrintf(std::nearbyint(val * inv_scale) + zero_point);
+        qvalue = std::max(quant_min, std::min(qvalue, quant_max));
+
+        // We pack sub_byte values and align them to a byte.
+        // Eg. for 4-bits Index 0 is packed in the lower 4-bits
+        // and index 1 is packed in the upper 4-bits.
+        // NOLINTNEXTLINE(clang-analyzer-core.DivideZero)
+        if (i % elem_per_byte == 0) {
+          qdata[i / elem_per_byte] = static_cast<underlying_t>(qvalue);
+        } else {
+          qdata[i / elem_per_byte] |= static_cast<underlying_t>(qvalue << ((i % elem_per_byte) * bit_width));
+        }
+      } // for numel
+    });
 }
 
 void quantize_tensor_per_tensor_affine_sub_byte_cpu(
