@@ -17,9 +17,9 @@
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/_to_copy.h>
 #include <ATen/ops/_to_copy_native.h>
 #include <ATen/ops/_to_cpu_native.h>
@@ -34,10 +34,13 @@
 #include <ATen/ops/to_dense_native.h>
 #include <ATen/ops/to_mkldnn_backward_native.h>
 #include <ATen/ops/to_native.h>
+#include <ATen/ops/to_sparse_bsc_native.h>
+#include <ATen/ops/to_sparse_bsr_native.h>
+#include <ATen/ops/to_sparse_csc_native.h>
 #include <ATen/ops/to_sparse_csr_native.h>
+#include <ATen/ops/to_sparse_native.h>
 #include <ATen/ops/view_native.h>
 #include <ATen/ops/zeros.h>
-#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>

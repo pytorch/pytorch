@@ -3,7 +3,6 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/native/layer_norm.h>
 
@@ -14,6 +13,7 @@
 #include <ATen/ops/_nested_from_padded.h>
 #include <ATen/ops/_nested_from_padded_and_nested_example_native.h>
 #include <ATen/ops/_nested_from_padded_native.h>
+#include <ATen/ops/_nested_tensor_from_mask_native.h>
 #include <ATen/ops/_nested_tensor_layer_norm_native.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/add_native.h>
