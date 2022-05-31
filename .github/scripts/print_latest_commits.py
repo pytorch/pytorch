@@ -1,7 +1,6 @@
 import sys
 import subprocess
-from datetime import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 def print_latest_commits(mins: int = 60) -> None:
     current_time = datetime.now()
