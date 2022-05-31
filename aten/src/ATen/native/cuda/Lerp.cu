@@ -11,14 +11,14 @@ namespace at {
 namespace native {
 namespace {
 
-const char lerp_tensor_name[] = "lerp_tensor_kernel";
+const char lerp_tensor_name[] = "lerp_tensor";
 void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
   auto dtype = iter.common_dtype();
   if(at::isComplexType(dtype)) {
 #if AT_USE_JITERATOR()
   static const auto lerp_tensor_string = jiterator_stringify(
       template <typename T>
-      T lerp_tensor_kernel(T self_val, T end_val, T weight_val) {
+      T lerp_tensor(T self_val, T end_val, T weight_val) {
         return (std::abs(weight_val) < 0.5)
             ? self_val + weight_val * (end_val - self_val)
             : end_val -
@@ -78,14 +78,14 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
   }
 }
 
-const char lerp_scalar_name[] = "lerp_scalar_kernel";
+const char lerp_scalar_name[] = "lerp_scalar";
 void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
-#if false // AT_USE_JITERATOR()
+#if AT_USE_JITERATOR()
   static const auto lerp_scalar_string = jiterator_stringify(
       template <typename T>
-      T lerp_scalar_kernel(T self_val, T end_val, int weight) {
+      T lerp_scalar(T self_val, T end_val, float weight) {
         auto weight_val = weight.to<T>();
         return (std::abs(weight_val) < 0.5)
             ? self_val + weight_val * (end_val - self_val)
@@ -103,7 +103,7 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight)
         lerp_scalar_string,
         /*scalar_pos=*/ at::cuda::jit::BinaryFuncVariant::NoScalar,
         /*scalar_val=*/ 0,
-        /*extra_args=*/ std::make_tuple(weight));
+        /*extra_args=*/ std::make_tuple(weight.to<scalar_t>()));
   });
 #else
   AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "lerp_cuda", [&] {
