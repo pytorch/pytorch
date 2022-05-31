@@ -1575,11 +1575,11 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
 @out_wrapper
 def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
-    aligned_tensors = [
-        x if x.ndim > 1 else torch._prims.expand_dims(x, list(range(x.ndim, 2)))
+    aligned_tensors = (
+        x if x.ndim > 1 else prims.expand_dims(x, list(range(x.ndim, 2)))
         for x in tensors
-    ]
-    return prims.cat(aligned_tensors, 1)
+    )
+    return cat(aligned_tensors, 1)
 
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
