@@ -29,6 +29,20 @@ class ToCopy : public torch::lazy::TsNode {
         non_blocking(non_blocking),
         memory_format(memory_format) {}
 
+  bool CanBeReused(const torch::lazy::Value& self,
+             const c10::optional<at::ScalarType>& dtype,
+             const c10::optional<at::Layout>& layout,
+             const c10::optional<at::Device>& device,
+             const c10::optional<bool>& pin_memory, const bool& non_blocking,
+             const c10::optional<at::MemoryFormat>& memory_format) const {
+    size_t i = 0;
+    return (operand(i++) == self && this->dtype == dtype &&
+            this->layout == layout && this->device == device &&
+            this->pin_memory == pin_memory &&
+            this->non_blocking == non_blocking &&
+            this->memory_format == memory_format);
+  }
+
   std::string ToString() const override {
     std::stringstream ss;
     ss << torch::lazy::TsNode::ToString();

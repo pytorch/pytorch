@@ -15,26 +15,21 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
                              const bool is_div,
                              const string op_name)
 {
-  using scalar_t = double;
-  scalar_t value_scalar = value_opt.to<scalar_t>();
   if (&output != &self) {
     output.resize_(output.sizes());
   }
-  TORCH_CHECK(output.is_mps());
+  MPSStream* mpsStream = getCurrentMPSStream();
 
-  // Derive from MPSCachedGraph
   struct CachedGraph : public MPSCachedGraph
   {
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor *inputTensor = nil, *outputTensor = nil;
-    MPSGraphTensor *firstTensor = nil, *secondTensor = nil;
+    MPSGraphTensor *firstTensor = nil, *secondTensor = nil, *valueTensor = nil;
   };
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
-    string key = op_name + to_string(value_scalar)
-                         + getTensorsStringKey({self, tensor1, tensor2})+ ":"
-                         + getMPSTypeString(value_opt.type());
+    string key = op_name + getTensorsStringKey({self, tensor1, tensor2}, false);
 
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
@@ -49,6 +44,7 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
             newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
             newCachedGraph->firstTensor = mpsGraphRankedPlaceHolder(mpsGraph, tensor1);
             newCachedGraph->secondTensor = mpsGraphRankedPlaceHolder(mpsGraph, tensor2);
+            newCachedGraph->valueTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSScalarType(self.scalar_type()));
 
             // the tensor to be optionally multiplied by value_scalar
             MPSGraphTensor *multiplicandTensor = nil;
@@ -62,15 +58,9 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
                                                                         name:nil];
             }
             // the tensor to be added to input_tensor
-            MPSGraphTensor *addendTensor = multiplicandTensor;
-            // if value_scalar is 1.0, then we don't bother adding another multiply to graph
-            if (value_scalar != 1.0) {
-              MPSGraphTensor* valueTensor = [mpsGraph constantWithScalar:value_scalar
-                                                                dataType:getMPSScalarType(value_opt.type())];
-              addendTensor = [mpsGraph multiplicationWithPrimaryTensor:multiplicandTensor
-                                                       secondaryTensor:valueTensor
-                                                                  name:nil];
-            }
+            MPSGraphTensor *addendTensor = [mpsGraph multiplicationWithPrimaryTensor:multiplicandTensor
+                                                      secondaryTensor:newCachedGraph->valueTensor
+                                                                name:nil];
             newCachedGraph->outputTensor = [mpsGraph additionWithPrimaryTensor:newCachedGraph->inputTensor
                                                                secondaryTensor:addendTensor
                                                                           name:nil];
@@ -87,18 +77,18 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
 
     // Create dictionary of inputs and outputs
-    // Utility to dump out graph : [mpsGraph dump];
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
       tensor1Placeholder.getMPSGraphTensor() : tensor1Placeholder.getMPSGraphTensorData(),
-      tensor2Placeholder.getMPSGraphTensor() : tensor2Placeholder.getMPSGraphTensorData()
+      tensor2Placeholder.getMPSGraphTensor() : tensor2Placeholder.getMPSGraphTensorData(),
+      cachedGraph->valueTensor : getMPSGraphTensorFromScalar(mpsStream, value_opt, getMPSScalarType(self.scalar_type())),
     };
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
     };
 
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
   }
 
   return output;
