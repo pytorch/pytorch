@@ -11,6 +11,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/index_cuda_dispatch.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/masked_scatter_native.h>
 #include <ATen/ops/masked_select_native.h>
@@ -39,7 +40,7 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
   // owning and expand_outplace returns a borrow, the returned borrow
   // would dangle.
   auto mask_self_expanded = expand_outplace(*mask_temp, *self_temp);
-  at::native::index_out(
+  at::cuda::index_out(
       result, *std::get<1>(mask_self_expanded),
       c10::List<c10::optional<at::Tensor>>({*std::move(std::get<0>(mask_self_expanded))}));
 

@@ -808,7 +808,6 @@ meta_dispatch_expected_failures = {
     aten.histogram.bin_ct: {f64, f32},
     aten.histogram.bins_tensor: {f64, f32},
     aten.im2col.default: {bf16, f16, f64, f32},
-    aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32},
     aten.kthvalue.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.linalg_matrix_exp.default: {bf16, f64, f32},
     aten.log_sigmoid_forward.output: {bf16, f64, f32},
@@ -889,6 +888,7 @@ meta_dispatch_expected_failures = {
 
 # these sometimes pass and sometimes fail
 meta_dispatch_skips = {
+    aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32},  # at::nonzero doesn't have a Meta function
     aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.aminmax.default: {i64, u8, b8, f32, i8, f64, i16, i32},
     aten.cummax.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
@@ -924,7 +924,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.grid_sampler_3d.default: {f16},  # aten::grid_sampler_3d
     aten.histc.default: {i16, i32, i64, i8},  # aten::histc
     aten.histc.out: {i16, i32, i64, i8},  # aten::histc.out
-    aten.index.Tensor: {c32},  # aten::index.Tensor
     aten.kthvalue.default: {f16},  # aten::kthvalue.values
     aten.linalg_cholesky_ex.L: {f32, f64},  # aten::linalg_cholesky_ex.L
     aten.linalg_cholesky_ex.default: {f32, f64},  # aten::linalg_cholesky_ex
