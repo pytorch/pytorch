@@ -564,7 +564,6 @@ def _check_flatten_did_not_remove(original, jit_flattened):
 
 
 def _create_jit_graph(model, args):
-    model = _pre_trace_quant_model(model, args)
     torch_out = None
     params: Union[List, Tuple]
     if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
@@ -721,6 +720,7 @@ def _model_to_graph(
     if isinstance(args, (torch.Tensor, int, float, bool)):
         args = (args,)
 
+    model = _pre_trace_quant_model(model, args)
     graph, params, torch_out, module = _create_jit_graph(model, args)
     params_dict = _get_named_param_dict(graph, params)
 

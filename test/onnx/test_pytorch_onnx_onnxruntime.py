@@ -1993,6 +1993,7 @@ class _TestONNXRuntime:
         x = torch.randn(2, 3)
         self.run_test(ArithmeticModule(), x)
 
+    @unittest.skip("Floor division on ONNX is inconsistent with eager (see #78411)")
     def test_floor_div(self):
         class FloorDivModule(torch.nn.Module):
             def forward(self, x, y):
@@ -2015,6 +2016,7 @@ class _TestONNXRuntime:
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4)
         self.run_test(FloorDivModule(), (x, y))
 
+    @unittest.skip("Floor division on ONNX is inconsistent with eager (see #78411)")
     def test_floor_div_script(self):
         class FloorDivModule(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -2025,6 +2027,7 @@ class _TestONNXRuntime:
         y = torch.randn(2, 3, 4)
         self.run_test(FloorDivModule(), (x, y))
 
+    @unittest.skip("Floor division on ONNX is inconsistent with eager (see #78411)")
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_floordiv(self):
         class FloordivModule(torch.nn.Module):

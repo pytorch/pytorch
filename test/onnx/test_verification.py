@@ -3,7 +3,7 @@
 import unittest
 
 import torch
-from torch.onnx import verification
+from torch.onnx import _experimental, verification
 
 
 class TestVerification(unittest.TestCase):
@@ -42,7 +42,7 @@ class TestVerification(unittest.TestCase):
         ]
 
         results = verification._check_onnx_model_diff(
-            UnexportableModel(), test_inputs, verification.ExportOptions()
+            UnexportableModel(), test_inputs, _experimental.ExportOptions()
         )
         self.assertRegex(
             results,
@@ -58,10 +58,10 @@ class TestVerification(unittest.TestCase):
             def forward(self, x, y):
                 return x + y
 
-        test_inputs = [
+        test_input_sets = [
             ((torch.randn(2, 3), torch.randn(2, 3)), {}),
             ((torch.randn(2, 3), torch.randn(2, 3)), {}),
         ]
 
-        results = verification.check_export_model_diff(SupportedModel(), test_inputs)
+        results = verification.check_export_model_diff(SupportedModel(), test_input_sets)
         self.assertEqual(results, "")

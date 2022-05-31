@@ -493,7 +493,7 @@ class FullyShardedDataParallel(nn.Module):
             params and grads to be on same device to work with optimizer. This
             API is subject to change. Default is ``None`` in which case there
             will be no offloading.
-        auto_wrap_policy (Optional[Callable]):
+        auto_wrap_policy (Optional[Callable[[nn.Module, bool, int], bool]]):
             A callable specifying a policy to recursively wrap layers with FSDP.
             Note that this policy currently will only apply to child modules of
             the passed in module. The remainder modules are always wrapped in
@@ -502,12 +502,14 @@ class FullyShardedDataParallel(nn.Module):
             an example of ``auto_wrap_policy`` callable, this policy wraps layers
             with the number of parameters larger than 100M. ``transformer_auto_wrap_policy``
             written in ``torch.distributed.fsdp.wrap`` is an example of ``auto_wrap_policy``
-            callable for tranformer-like model architectures. Users can supply the customized
+            callable for transformer-like model architectures. Users can supply the customized
             ``auto_wrap_policy`` callable that should accept following arguments:
-            ``module: nn.Module``, ``recurse: bool``, ``unwrapped_params: int``,
-            extra customized arguments could be added to the customized
-            ``auto_wrap_policy`` callable as well. It is a good practice to print out
-            the sharded model and check whether the sharded model is what
+            ``module: nn.Module``, ``recurse: bool``, ``unwrapped_params: int``, and return
+            a ``bool`` specifying whether the passed in ``module``` should be wrapped
+            (if ``recurse=False``) or whether we should recurse down the subgraph of ``module``
+            children (if ``recurse=True``). Extra customized arguments could be added to
+            the customized ``auto_wrap_policy`` callable as well. It is a good practice to
+            print out the sharded model and check whether the sharded model is what
             the application wants and then adjust accordingly.
 
             Example::
@@ -520,6 +522,8 @@ class FullyShardedDataParallel(nn.Module):
                 >>>     min_num_params: int = int(1e8),
                 >>> ) -> bool:
                 >>>     return unwrapped_params >= min_num_params
+                >>> # Configure a custom min_num_params
+                >>> my_auto_wrap_policy = functools.partial(custom_auto_wrap_policy, min_num_params=1e5)
 
         backward_prefetch (Optional[BackwardPrefetch]):
             This is an experimental feature that is subject to change in the
