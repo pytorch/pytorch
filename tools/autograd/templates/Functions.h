@@ -35,7 +35,8 @@ inline c10::List<c10::optional<Tensor>> unpack_opt_list(at::ArrayRef<SavedVariab
   torch::List<c10::optional<Tensor>> result;
   result.reserve(xs.size());
   for (const SavedVariable& v : xs) {
-    result.push_back(v.unpack());
+    auto var = v.unpack();
+    result.push_back(var.defined() ? c10::optional<Tensor>(var) : c10::nullopt);
   }
   return result;
 }
