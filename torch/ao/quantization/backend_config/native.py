@@ -679,7 +679,7 @@ def _get_embedding_op_configs():
         })
     return embedding_op_configs
 
-def _get_native_and_fp16_backend_config_dict():
+def get_native_and_fp16_backend_config_dict():
     """
     This is a backend configuration for the union of fbgemm/qnnpack
     and various additional fp16 ops.
@@ -754,6 +754,6 @@ def get_native_backend_config_dict():
     }
 
 __all__ = [
-    "_get_native_and_fp16_backend_config_dict",
+    "get_native_and_fp16_backend_config_dict",
     "get_native_backend_config_dict",
 ]
