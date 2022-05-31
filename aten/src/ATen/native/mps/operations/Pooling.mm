@@ -651,7 +651,7 @@ TORCH_IMPL_FUNC(avg_pool2d_out_mps) (
   TensorArg input_arg{ input_, "input_", 2 };
 
   checkAllSameGPU("avg_pool2d_out_cuda", {output_arg, input_arg});
-  TORCH_CHECK(isFloatingType(input_.dtype().toScalarType()), "Only floating point dtypes are supported for avg_pool on MPS.");
+  TORCH_CHECK(isFloatingType(input_.scalar_type()), "Only floating point dtypes are supported for avg_pool on MPS.");
 
   const int kH = safe_downcast<int, int64_t>(kH_);
   const int kW = safe_downcast<int, int64_t>(kW_);

@@ -101,7 +101,7 @@ Tensor& mm_out_mps_impl(
   using namespace mps;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
   TORCH_CHECK(self.dtype() == other.dtype(), "tensors must have the same dtype");
-  TORCH_CHECK(isFloatingType(self.dtype().toScalarType()), "Only floating point dtypes are supported for mm on MPS.");
+  TORCH_CHECK(isFloatingType(self.scalar_type()), "Only floating point dtypes are supported for mm on MPS.");
 
   TensorArg args[]{{output, "out", 0}, {self, "mat1", 1}, {other, "mat2", 2}};
   checkAllSameGPU("mm", args);
@@ -212,7 +212,7 @@ Tensor& addmm_out_mps_impl(
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
   TORCH_CHECK(self.dtype() == other.dtype(), "tensors must have the same dtype");
   TORCH_CHECK(self.dtype() == bias.dtype(), "tensors must have the same dtype");
-  TORCH_CHECK(isFloatingType(self.dtype().toScalarType()), "Only floating point dtypes are supported for mm on MPS.");
+  TORCH_CHECK(isFloatingType(self.scalar_type()), "Only floating point dtypes are supported for mm on MPS.");
 
   TensorArg args[]{{output, "out", 0}, {bias, "self", 1}, {self, "mat1", 2}, {other, "mat2", 3}};
   checkAllSameGPU(__func__, args);
@@ -376,7 +376,7 @@ Tensor& bmm_out_mps_impl(
   }
 
   TORCH_CHECK(batch1.dtype() == batch2.dtype(), "tensors must have the same dtype");
-  TORCH_CHECK(isFloatingType(batch1.dtype().toScalarType()), "Only floating point dtypes are supported for mm on MPS.");
+  TORCH_CHECK(isFloatingType(batch1.scalar_type()), "Only floating point dtypes are supported for mm on MPS.");
 
   MPSStream* stream = getCurrentMPSStream();
 
@@ -464,7 +464,7 @@ Tensor& addbmm_or_baddbmm_out_mps_impl(
 
   TORCH_CHECK(input.dtype() == batch1.dtype(), "tensors must have the same dtype");
   TORCH_CHECK(batch1.dtype() == batch2.dtype(), "tensors must have the same dtype");
-  TORCH_CHECK(isFloatingType(batch1.dtype().toScalarType()), "Only floating point dtypes are supported for mm on MPS.");
+  TORCH_CHECK(isFloatingType(batch1.scalar_type()), "Only floating point dtypes are supported for mm on MPS.");
 
   if (opType == ADDBMM_OP_TYPE)
   {

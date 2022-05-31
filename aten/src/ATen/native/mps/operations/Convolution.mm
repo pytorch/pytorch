@@ -52,7 +52,7 @@ Tensor _mps_convolution(
             weight { weight_t, "weight", 2 };
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
-  TORCH_CHECK(isFloatingType(input_t.dtype().toScalarType()), "Only floating point dtypes are supported for convolution on MPS.");
+  TORCH_CHECK(isFloatingType(input_t.scalar_type()), "Only floating point dtypes are supported for convolution on MPS.");
 
 
   bool bias_defined;
@@ -202,7 +202,7 @@ Tensor mps_convolution_backward_input(
             weight{ weight_t, "weight", 2 };
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
-  TORCH_CHECK(isFloatingType(weight_t.dtype().toScalarType()), "Only floating point dtypes are supported for conv_transpose on MPS.");
+  TORCH_CHECK(isFloatingType(weight_t.scalar_type()), "Only floating point dtypes are supported for conv_transpose on MPS.");
 
   TORCH_CHECK(weight_t.dim() <= 4, "conv_transpose on MPS supports only 1d and 2d");
 
@@ -325,7 +325,7 @@ Tensor mps_convolution_backward_weights(
 
   checkAllSameType(c, {grad_output, input});
   checkAllSameGPU(c, {grad_output, input});
-  TORCH_CHECK(isFloatingType(input_t.dtype().toScalarType()), "Only floating point dtypes are supported for convolution backward on MPS.");
+  TORCH_CHECK(isFloatingType(input_t.scalar_type()), "Only floating point dtypes are supported for convolution backward on MPS.");
 
   auto grad_weight_t = at::empty(weight_size, grad_output_t.options(), memory_format);
   TensorArg grad_weight{ grad_weight_t, "result", 0 };
