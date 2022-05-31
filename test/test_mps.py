@@ -3714,7 +3714,6 @@ class TestNLLLoss(TestCase):
     # Test linspace
     def test_linspace(self):
         def helper(start, end, steps, dtype=torch.float32):
-            
             cpu_result = torch.tensor(np.linspace(start, end, steps), dtype=dtype)
             result = torch.linspace(start, end, steps, dtype=dtype, device='mps')
             self.assertEqual(cpu_result, result)
