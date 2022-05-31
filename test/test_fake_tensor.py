@@ -82,6 +82,7 @@ class FakeTensorTest(TestCase):
             with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
                 y = x[0]
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_like_constructor(self):
         x = FakeTensor.from_tensor(torch.rand([4, 4]))
         y = torch.ones_like(x)
