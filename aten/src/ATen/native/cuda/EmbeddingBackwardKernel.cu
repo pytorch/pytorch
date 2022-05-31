@@ -290,7 +290,7 @@ Tensor embedding_backward_cuda_kernel(
     // Unit: index in `sorted_indices` and `orig_indices`
     auto partial_segment_offset = at::empty({max_partial_segment}, orig_indices.options());
     {
-      krn_partial_segment_offset<<<ceil_div(max_partial_segment, 32), 32, 0, stream>>> (
+      krn_partial_segment_offset<<<ceil_div(max_segments, 32), 32, 0, stream>>> (
               partial_segment_offset.data_ptr<index_t>(),
               partials_per_segment.data_ptr<index_t>(),
               partials_per_segment_offset.data_ptr<index_t>(),
