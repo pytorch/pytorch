@@ -44,6 +44,11 @@ def check_metadata_consistency(wrapper_tensor, CCT):
         'storage_offset': Tensor.storage_offset,
     }
     for metadata_name, metadata_accessor in things_to_check.items():
+        # stride when a dimension size is `0` or `1` dont matter,
+        # and few functions take advantange of this to short-circuit
+        if metadata_name == 'stride' and \
+                (0 in wrapper_tensor.shape or 1 in wrapper_tensor.shape):
+            continue
         check_attr_consistency(wrapper_tensor, metadata_name, metadata_accessor)
 
 def is_view_fn(func):
