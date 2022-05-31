@@ -153,6 +153,15 @@ def aten_core_hdrs(rules):
         "aten/src/ATen/detail/HIPHooksInterface.h",
     ]
 
+def aten_core_srcs(rules):
+    return rules.glob([
+        "aten/src/ATen/core/*.cpp",
+        "aten/src/ATen/core/boxing/*.cpp",
+        "aten/src/ATen/core/boxing/impl/*.cpp",
+        "aten/src/ATen/core/dispatch/*.cpp",
+        "aten/src/ATen/core/op_registration/*.cpp",
+    ], exclude = ["**/*_test.cpp"])
+
 #
 # ATen generated code
 # You need to keep this is sync with the files written out

@@ -19,6 +19,7 @@ load(
     "GENERATED_H_CORE",
     "GENERATED_H_CUDA",
     "aten_core_hdrs",
+    "aten_core_srcs",
     "define_targets",
 )
 load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
@@ -61,18 +62,6 @@ filegroup(
         "aten/src/ATen/detail/*.cpp",
         "aten/src/ATen/cpu/*.cpp",
     ]),
-)
-
-filegroup(
-    name = "ATen_CORE_SRCS",
-    srcs = glob(
-        [
-            "aten/src/ATen/core/**/*.cpp",
-        ],
-        exclude = [
-            "aten/src/ATen/core/**/*_test.cpp",
-        ],
-    ),
 )
 
 filegroup(
@@ -269,8 +258,7 @@ intern_build_aten_ops(
 
 cc_library(
     name = "aten",
-    srcs = [
-        ":ATen_CORE_SRCS",
+    srcs = aten_core_srcs(rules = rules) + [
         ":ATen_QUANTIZED_SRCS",
         ":aten_base_cpp",
         ":aten_base_metal",
