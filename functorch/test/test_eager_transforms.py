@@ -1999,6 +1999,18 @@ class TestJvp(TestCase):
         gx, = torch.autograd.grad(y, x)
         self.assertEqual(gx, x.cos())
 
+    def test_zerotensor_vmapjvp_interaction(self, device):
+        dummy = torch.ones(4, 1)
+        x = torch.randn(4, 2)
+        x_tangent = torch.randn(2)
+
+        def push_jvp(dummy, x):
+            result = jvp(torch.cov, (x,), (x_tangent,))
+            return result
+
+        # Should not error
+        vmap(vmap(push_jvp, (0, None)))(dummy, x)
+
 
 class TestCustomFunction(TestCase):
     @unittest.skipIf(IS_WINDOWS, "Prototype of custom_vjp doesn't link on windows")

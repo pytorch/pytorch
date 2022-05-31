@@ -7,16 +7,30 @@
 
 namespace at { namespace functorch {
 
-constexpr DispatchKeySet all_dynlayer_keyset = DispatchKeySet({
-  kDynamicLayerFrontModeKey,
-  kDynamicLayerBackModeKey,
-  kGradWrapperKey,
-  DispatchKey::Functionalize,
-  // DispatchKey::Batched,
-  kBatchedKey,
-  DispatchKey::PythonTLSSnapshot,
-  DispatchKey::ADInplaceOrView
-}) | autograd_dispatch_keyset;
+static DispatchKeySet get_all_dynlayer_keyset() {
+  // NB: FULL_AFTER does not include the dispatch key
+
+  // "all dispatch keys between DynamicLayer{Front, Back}Mode, inclusive"
+  auto result =
+    DispatchKeySet(DispatchKeySet::FULL_AFTER, kDynamicLayerFrontModeKey) -
+    DispatchKeySet(DispatchKeySet::FULL_AFTER, kDynamicLayerBackModeKey);
+  result = result | DispatchKeySet({kDynamicLayerFrontModeKey});
+
+  // Hack: don't handle the autocast dispatch keys. Their interaction with functorch
+  // is weird.
+  result = result - autocast_dispatch_keyset;
+
+  // Hack: don't handle kVmapModeKey. We need a better way of modeling this.
+  // In e.g. grad(vmap(f)), kVmapModeKey makes it so that all random operations,
+  // even after we are done handling the vmap layer, error out.
+  result = result.remove(kVmapModeKey);
+
+  return result;
+}
+
+// TODO: This should be constexpr, but there are some methods
+// of DispatchKeySet that haven't been marked constexpr yet.
+static DispatchKeySet all_dynlayer_keyset = get_all_dynlayer_keyset();
 
 static DispatchKeySet keysForEnteringDynamicLayer(TransformType key) {
   if (key == TransformType::Vmap) {
