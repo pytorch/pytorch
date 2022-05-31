@@ -3,6 +3,8 @@ from torch._prims import utils
 from torch._prims.utils import check
 import torch._refs as refs
 
+from typing import List
+
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
 def toRealValueType(dtype):
@@ -154,9 +156,9 @@ def meta_index_Tensor(self, indices):
     # in the array being indexed."
     #
     # But Nones at the beginning of the list get treated specially
-    before_shape = []
-    after_shape = []
-    replacement_shape = []
+    before_shape: List[int] = []
+    after_shape: List[int] = []
+    replacement_shape: List[int] = []
     for dim, index in enumerate(indices):
         if index is None:
             if replacement_shape:
