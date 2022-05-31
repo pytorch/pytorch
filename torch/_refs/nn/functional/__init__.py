@@ -2,6 +2,7 @@ import torch
 
 import torch._prims.utils as utils
 from torch._prims.utils import (
+    TensorLike,
     TensorLikeType,
     NumberType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -10,7 +11,12 @@ import torch._refs as refs
 from torch._decomp import register_decomposition
 from torch._prims.wrappers import (
     elementwise_type_promotion_wrapper,
+    elementwise_unary_scalar_wrapper,
     out_wrapper,
+)
+from torch._refs import (
+    _make_elementwise_unary_reference,
+    _make_elementwise_binary_reference,
 )
 
 from typing import Optional
@@ -19,9 +25,12 @@ __all__ = [
     "celu",
     "dropout",
     "elu",
+    "hinge_embedding_loss",
+    "margin_ranking_loss",
     "mish",
     "selu",
     "softplus",
+    "tanhshrink",
 ]
 
 # celu is implemented specially because it has an alpha argument
@@ -209,3 +218,79 @@ def softplus(
         rhs = refs.log1p(refs.exp(scaled_input))
 
     return refs.where(refs.gt(scaled_input, threshold), a, rhs)
+
+
+# Losses
+def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeType:
+    if reduction == "sum":
+        return refs.sum(loss)
+    elif reduction == "mean":
+        return refs.mean(loss)
+    else:  # reduction == "none"
+        return loss
+
+
+def _check_reduction_value(reduction: str):
+    if reduction not in ("mean", "sum", "none"):
+        raise ValueError("{} is not a valid value for reduction".format(reduction))
+
+
+def margin_ranking_loss(
+    input1: TensorLikeType,
+    input2: TensorLikeType,
+    target: TensorLikeType,
+    margin: float = 0.0,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    # Formula of loss (implementation gets confusing with all the refs.foo)
+    # loss_without_reduction = max(0, −target * (input1 − input2) + margin)
+    if input1.ndim != input2.ndim or input1.ndim != target.ndim:
+        raise RuntimeError(
+            (
+                "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
+                "input1: {}, input2: {}, target: {} ".format(
+                    input1.shape, input2.shape, target.shape
+                )
+            )
+        )
+    _check_reduction_value(reduction)
+    neg_target = refs.neg(target)
+    input_diff = refs.sub(input1, input2)
+    mul_target_input = refs.mul(neg_target, input_diff)
+    add_margin = refs.add(mul_target_input, margin)
+    loss = refs.maximum(add_margin, 0)
+    return _apply_loss_reduction(loss, reduction)
+
+
+def hinge_embedding_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    margin: float = 1.0,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    # Formula of loss (implementation gets confusing with all the refs.foo)
+    # loss_without_reduction = input if y == 1
+    #                        = max(0, margin - input) if y == -1
+    _check_reduction_value(reduction)
+    margin_clamp = refs.maximum(refs.sub(margin, input), 0)
+    output_margin = refs.where(refs.ne(target, 1), margin_clamp, 0)
+    output_self = refs.where(refs.ne(target, -1), input, 0)
+    loss = refs.add(output_margin, output_self)
+    return _apply_loss_reduction(loss, reduction)
+
+
+# tanhshrink does not use _make_elementwise_unary_reference because it does not support out
+@elementwise_unary_scalar_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def tanhshrink(a: TensorLikeType) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.tanhshrink
+    """
+    if not isinstance(a, TensorLike):
+        raise RuntimeError(
+            "Expected a tensor input for an elementwise unary operation!"
+        )
+    return refs.sub(a, refs.tanh(a))
