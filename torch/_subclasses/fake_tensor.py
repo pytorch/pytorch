@@ -33,6 +33,17 @@ def contains_tensor_types(type):
         contains_tensor_types(e) for e in type.containedTypes()
     )
 
+_like_tensor_constructors = (
+    aten.empty_like.default,
+    aten.full_like.default,
+    aten.ones_like.default,
+    aten.rand_like.default,
+    aten.randn_like.default,
+    aten.randint_like.default,
+    aten.randint_like.low_dtype,
+    aten.randn_like.default,
+    aten.zeros_like.default,
+)
 
 @functools.lru_cache(None)
 def _is_tensor_constructor(func: OpOverload):
@@ -123,15 +134,22 @@ def torch_dispatch_impl(cls_or_mode_instance, func, types, args, kwargs, run_fun
                 torch.ops.aten._to_copy(input, **new_kwargs), out_device
             )
 
-    if _is_tensor_constructor(func):
+    if _is_tensor_constructor(func) or func in _like_tensor_constructors:
         assert func not in _non_kwarg_device_constructors
         _, new_kwargs = normalize_function(
             func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
         )
-        # cpu is default device if none is specified
-        out_device = new_kwargs.pop("device", torch.device("cpu"))
+        if func in _like_tensor_constructors:
+            default_device = new_kwargs["input"].device
+            # TODO: file issue
+            args = (new_kwargs.pop("input"),)
+        else:
+            # cpu is default device if none is specified
+            default_device = torch.device("cpu")
+            args = ()
+        out_device = new_kwargs.pop("device", default_device)
         new_kwargs["device"] = torch.device("meta")
-        r = run_function(func, types, (), new_kwargs)
+        r = run_function(func, types, args, new_kwargs)
         return FakeTensor(r, out_device)
 
     if func in (aten.to.prim_Device, aten.to.device):
