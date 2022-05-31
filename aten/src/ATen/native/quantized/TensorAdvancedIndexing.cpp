@@ -8,6 +8,7 @@
 
 namespace at {
 namespace native {
+DEFINE_DISPATCH(masked_fill_kernel_quantized_stub);
 
 namespace {
 static Tensor & masked_fill_impl_quantized_cpu(Tensor & self, const Tensor & mask, const Scalar& value) {
@@ -33,7 +34,7 @@ static Tensor & masked_fill_impl_quantized_cpu(Tensor & self, const Tensor & mas
     .add_input(mask)
     .build();
 
-  at::native::masked_fill_kernel_quantized_cpu(iter, value, self.q_scale(), self.q_zero_point());
+  masked_fill_kernel_quantized_stub(iter.device_type(), iter, value, self.q_scale(), self.q_zero_point());
   return self;
 }
 }
