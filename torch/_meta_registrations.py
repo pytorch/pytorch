@@ -1,6 +1,7 @@
 import torch
 from torch._prims import utils
 from torch._prims.utils import check
+import torch._refs as refs
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
@@ -24,19 +25,6 @@ def meta_index_select(self, dim, index):
 def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.index_select(self, dim, index))
-
-@torch.library.impl(meta_lib, "abs")
-def meta_abs(self):
-    if self.is_complex():
-        float_type = toRealValueType(self.dtype)
-        return self.new_empty(self.size(), dtype=float_type)
-    else:
-        return self.new_empty(self.size())
-
-@torch.library.impl(meta_lib, "abs.out")
-def meta_abs_out(self, out):
-    torch._resize_output_(out, self.size(), self.device)
-    return out.copy_(torch.abs(self))
 
 @torch.library.impl(meta_lib, "max")
 def meta_max(self):
@@ -135,3 +123,46 @@ def meta_adaptive_avg_pool2d(self, output_size):
 def meta_adaptive_avg_pool3d(self, output_size):
     check(self.ndim == 4 or self.ndim == 5, f"Expected 4D or 5D tensor, but got {self.shape}")
     return self.new_empty(self.shape[:-3] + tuple(output_size))
+
+@torch.library.impl(meta_lib, "index.Tensor")
+def meta_index_Tensor(self, indices):
+    # aten::index is the internal advanced indexing implementation
+    check(len(indices) <= self.ndim, f"too many indices for tensor of dimension {self.ndim} (got {len(indices)})")
+    # checkIndexTensorTypes
+    result = []
+    for i, index in enumerate(indices):
+        if index is not None:
+            check(index.dtype in [torch.long, torch.int8, torch.bool], "tensors used as indices must be long, byte or bool tensors")
+            if index.dtype in [torch.int8, torch.bool]:
+                nonzero = index.nonzero()
+                for j in range(index.ndim):
+                    result.append(nonzero.select(1, j))
+            else:
+                result.append(index)
+        else:
+            result.append(index)
+    indices = result
+    # expand_outplace
+    indices = list(refs._maybe_broadcast(*indices))
+    # add missing null tensors
+    while len(indices) < self.ndim:
+        indices.append(None)
+    # AdvancedIndex::AdvancedIndex
+    # "In general, the shape of the resultant array will be the concatenation of
+    # the shape of the index array (or the shape that all the index arrays were
+    # broadcast to) with the shape of any unused dimensions (those not indexed)
+    # in the array being indexed."
+    #
+    # But Nones at the beginning of the list get treated specially
+    before_shape = []
+    after_shape = []
+    replacement_shape = []
+    for dim, index in enumerate(indices):
+        if index is None:
+            if replacement_shape:
+                after_shape.append(self.shape[dim])
+            else:
+                before_shape.append(self.shape[dim])
+        else:
+            replacement_shape = list(index.shape)
+    return self.new_empty(before_shape + replacement_shape + after_shape)
