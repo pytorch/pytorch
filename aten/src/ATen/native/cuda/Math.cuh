@@ -1265,6 +1265,52 @@ const auto erfcx_string = jiterator_stringify(
   }
 ); // erfcx_string
 
+const auto chebyshev_polynomial_t_string = jiterator_stringify(
+    template<typename T>
+    T chebyshev_polynomial_t_forward(T x, int64_t n) {
+        if (n < 0) {
+            return T(0.0);
+        }
+
+        if (abs(x) == T(1.0)) {
+            if (x > T(0.0) || n % 2 == 0) {
+                return T(1.0);
+            }
+
+            return T(-1.0);
+        }
+
+        if ((n > 6) && (abs(x) < T(1.0))) {
+            return cos(n * acos(x));
+        }
+
+        if (n == 0) {
+            return T(1.0);
+        }
+
+        if (n == 1) {
+            return x;
+        }
+
+        T p = T(1.0);
+        T q = x;
+        T r;
+
+        for (int64_t k = 2; k <= n; k++) {
+            r = (x + x) * q - p;
+            p = q;
+            q = r;
+        }
+
+        return r;
+    }
+
+    template<typename T>
+    T chebyshev_polynomial_t_forward(T x, T n) {
+        return chebyshev_polynomial_t_forward(x, static_cast<int64_t>(n));
+    }
+);
+
 #else // !AT_USE_JITERATOR() -- kernels must be precompiled
 
 template <typename scalar_t>
