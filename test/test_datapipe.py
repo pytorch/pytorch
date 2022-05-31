@@ -300,25 +300,7 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertTrue(pathname in self.temp_files)
         self.assertEqual(count, 2 * len(self.temp_files))
 
-    def test_functionalapi_iterable_datapipe(self):
-        temp_dir = self.temp_dir.name
-        datapipe = dp.iter.FileLister(temp_dir, '')
-        datapipe = datapipe.list_files()
-
-        count = 0
-        for pathname in datapipe:
-            count = count + 1
-            self.assertTrue(pathname in self.temp_files)
-        self.assertEqual(count, len(self.temp_files))
-
-        count = 0
-        datapipe = dp.iter.FileLister(temp_dir, '', recursive=True)
-        datapipe = datapipe.list_files()
-        for pathname in datapipe:
-            count = count + 1
-            self.assertTrue((pathname in self.temp_files) or (pathname in self.temp_sub_files))
-        self.assertEqual(count, len(self.temp_files) + len(self.temp_sub_files))
-
+        # test functional API
         temp_files = self.temp_files
         datapipe = dp.iter.FileLister([temp_dir, *temp_files])
         datapipe = datapipe.list_files()
