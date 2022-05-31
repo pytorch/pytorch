@@ -460,21 +460,21 @@ bessel_i0 = _make_elementwise_unary_prim(
 
 bessel_i0e = _make_elementwise_unary_prim(
     "bessel_i0e",
-    impl_aten=torch.special.i0e,
+    impl_aten=torch.special.i0e,  # type: ignore[has-type]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 bessel_i1 = _make_elementwise_unary_prim(
     "bessel_i1",
-    impl_aten=torch.special.i1,
+    impl_aten=torch.special.i1,  # type: ignore[has-type]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 bessel_i1e = _make_elementwise_unary_prim(
     "bessel_i1e",
-    impl_aten=torch.special.i1e,
+    impl_aten=torch.special.i1e,  # type: ignore[has-type]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -539,7 +539,7 @@ erf = _make_elementwise_unary_prim(
 
 erf_inv = _make_elementwise_unary_prim(
     "erf_inv",
-    impl_aten=torch.special.erfinv,
+    impl_aten=torch.special.erfinv,  # type: ignore[has-type]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -551,7 +551,7 @@ def _erfc_nvfuser(fd: Any, a: TensorLikeType):
 
 erfc = _make_elementwise_unary_prim(
     "erfc",
-    impl_aten=torch.special.erfc,
+    impl_aten=torch.special.erfc,  # type: ignore[has-type]
     impl_nvfuser=_erfc_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
@@ -577,7 +577,7 @@ def _expm1_nvfuser(fd: Any, a: TensorLikeType):
 
 expm1 = _make_elementwise_unary_prim(
     "expm1",
-    impl_aten=torch.special.expm1,
+    impl_aten=torch.special.expm1,  # type: ignore[has-type]
     impl_nvfuser=_expm1_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
@@ -585,7 +585,7 @@ expm1 = _make_elementwise_unary_prim(
 
 exp2 = _make_elementwise_unary_prim(
     "exp2",
-    impl_aten=torch.special.exp2,
+    impl_aten=torch.special.exp2,  # type: ignore[has-type]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -976,14 +976,14 @@ gt = _make_elementwise_binary_prim(
 
 igamma = _make_elementwise_binary_prim(
     "igamma",
-    impl_aten=torch.special.gammainc,
+    impl_aten=torch.special.gammainc,  # type: ignore[has-type]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 igammac = _make_elementwise_binary_prim(
     "igammac",
-    impl_aten=torch.special.gammaincc,
+    impl_aten=torch.special.gammaincc,  # type: ignore[has-type]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1130,7 +1130,7 @@ sub = _make_elementwise_binary_prim(
 
 zeta = _make_elementwise_binary_prim(
     "zeta",
-    impl_aten=torch.special.zeta,
+    impl_aten=torch.special.zeta,  # type: ignore[has-type]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
