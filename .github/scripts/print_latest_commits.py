@@ -3,20 +3,20 @@ import subprocess
 from datetime import datetime
 from datetime import timedelta
 
-def print_latest_commits(mins = 60):
+def print_latest_commits(mins: int = 60) -> None:
     current_time = datetime.now()
     time_since = current_time - timedelta(minutes=mins)
     timestamp_since = datetime.timestamp(time_since)
 
     commits = subprocess.check_output(
-            [
-                "git",
-                "rev-list",
-                f"--max-age={timestamp_since}",
-                "--all",
-            ],
-            encoding="ascii",
-        ).splitlines()
+        [
+            "git",
+            "rev-list",
+            f"--max-age={timestamp_since}",
+            "--all",
+        ],
+        encoding="ascii",
+    ).splitlines()
 
     for commit in commits:
         print(commit)
