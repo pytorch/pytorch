@@ -136,6 +136,7 @@ __all__ = [
     # # special.zeta
     "sub",
     "true_divide",
+    "trunc_divide",
     # 'xlogy', # where?, log, mul
     #
     # Elementwise Ternary References
@@ -771,17 +772,6 @@ bitwise_xor = _make_elementwise_binary_reference(
 # TODO: add docstring
 # complex =  _make_elementwise_binary_reference(prims.complex, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 
-
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("a", "b"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
-def _floor_divide(
-    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
-):
-    return floor(true_divide(a, b))
-
-
 @register_decomposition(torch.ops.aten.div)
 @out_wrapper
 def div(
@@ -796,10 +786,9 @@ def div(
     if rounding_mode is None:
         return true_divide(a, b)
     elif rounding_mode == "trunc":
-        return floor_divide(a, b)
+        return trunc_divide(a, b)
     elif rounding_mode == "floor":
-        a, b = _maybe_broadcast(a, b)
-        return _floor_divide(a, b)
+        return floor_divide(a, b)
     else:
         msg = (
             "div expected rounding_mode to be one of None, 'trunc', or 'floor' "
@@ -847,18 +836,18 @@ def float_power(
     a, b = _maybe_broadcast(a, b)
     return prims.pow(a, b)
 
-
-def _trunc_divide(
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a", "b"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def _floor_divide(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ):
-    return trunc(true_divide(a, b))
-
+    return floor(true_divide(a, b))
 
 # TODO: add docstring
-# Currently torch.floor_divide rounds its quotient to zero.
-# output = trunc(input / other)
 floor_divide = _make_elementwise_binary_reference(
-    _trunc_divide,
+    _floor_divide,
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
     aten_op=None,  # CompositeImplicitAutograd
 )
@@ -1110,6 +1099,18 @@ def sub(
 true_divide = _make_elementwise_binary_reference(
     prims.div,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=None,  # CompositeImplicitAutograd
+)
+
+def _trunc_divide(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+):
+    return trunc(true_divide(a, b))
+
+# TODO: add docstring
+trunc_divide = _make_elementwise_binary_reference(
+    _trunc_divide,
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
     aten_op=None,  # CompositeImplicitAutograd
 )
 
