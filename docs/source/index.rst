@@ -36,8 +36,9 @@ Features described in this documentation are classified by release status:
    community/*
 
 .. toctree::
+   :glob:
    :maxdepth: 1
-   :caption: Guides
+   :caption: Developer Notes
 
    notes/*
 
