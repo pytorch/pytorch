@@ -265,6 +265,107 @@ class TestTorchDeviceType(TestCase):
                 error_storage = a.to(error_dtype).storage()
                 b = torch.tensor([], device=device, dtype=dtype).set_(error_storage)
 
+    def _check_storage_meta(self, s, s_check):
+        self.assertTrue(
+            isinstance(s, (torch._UntypedStorage, torch._TypedStorage)) and
+            isinstance(s_check, type(s)),
+            (
+                's and s_check must both be one of _UntypedStorage or '
+                '_TypedStorage, but got'
+                f' {type(s).__name__} and {type(s_check).__name__}'))
+
+        self.assertEqual(s.device.type, 'meta')
+        self.assertEqual(s.nbytes(), s_check.nbytes())
+        self.assertEqual(s.size(), s_check.size())
+        self.assertEqual(s.data_ptr(), 0)
+
+        with self.assertRaisesRegex(NotImplementedError, r'Not available'):
+            s[0]
+
+        if isinstance(s, torch._TypedStorage):
+            self.assertEqual(s.dtype, s_check.dtype)
+            self._check_storage_meta(s._untyped(), s_check._untyped())
+
+    @onlyNativeDeviceTypes
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_typed_storage_meta(self, device, dtype):
+        args_list = [
+            [],
+            [0],
+            [100],
+            [[1, 2, 3, 4, 5, 6]],
+        ]
+        for args in args_list:
+            s_check = torch._TypedStorage(*args, dtype=dtype, device=device)
+            s = torch._TypedStorage(*args, dtype=dtype, device='meta')
+            self._check_storage_meta(s, s_check)
+
+    @onlyNativeDeviceTypes
+    def test_untyped_storage_meta(self, device):
+        args_list = [
+            [],
+            [0],
+            [100],
+            [[1, 2, 3, 4, 5, 6]],
+        ]
+        for args in args_list:
+            s_check = torch._UntypedStorage(*args, device=device)
+            s = torch._UntypedStorage(*args, device='meta')
+            self._check_storage_meta(s, s_check)
+
+    @onlyNativeDeviceTypes
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_storage_meta_from_tensor(self, device, dtype):
+        t_check = make_tensor((4, 5, 3), dtype=dtype, device=device, low=-9, high=9)
+        t = t_check.to('meta')
+
+        s_check = t_check.storage()
+        s = t.storage()
+        self._check_storage_meta(s, s_check)
+
+    @onlyCPU
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_storage_meta_errors(self, device, dtype):
+        s0 = torch._TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
+
+        with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+            s0.cpu()
+
+        with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
+            s0._share_fd_cpu_()
+
+        with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
+            s0._share_filename_cpu_()
+
+        if torch.cuda.is_available():
+            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+                s0.cuda()
+
+            with self.assertRaisesRegex(RuntimeError, r'only available on CUDA'):
+                s0._share_cuda_()
+
+            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+                s0.pin_memory()
+
+        with self.assertRaisesRegex(RuntimeError, r'got unexpected device type'):
+            s0.resize_(10)
+
+        with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
+            s0.share_memory_()
+
+        with self.assertRaisesRegex(NotImplementedError, r'Not available'):
+            s0.tolist()
+
+        with tempfile.NamedTemporaryFile() as f:
+            with self.assertRaisesRegex(RuntimeError, r'Device not recognized'):
+                s0._write_file(f, True, True, s0.element_size())
+
+        for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
+            s1 = torch._TypedStorage([1, 2, 3, 4], device=device, dtype=dtype)
+
+            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+                s1.copy_(s0)
+
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy(self, device, dtype):
         from copy import deepcopy
@@ -6382,6 +6483,12 @@ class TestTorch(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"Too many positional arguments"):
                 torch._TypedStorage(0, 0, dtype=dtype, device=device)
 
+            if isinstance(s, torch._TypedStorage):
+                s_other = torch._TypedStorage([1, 2, 3, 4], device=device, dtype=dtype)
+
+                with self.assertRaisesRegex(RuntimeError, r'cannot set item'):
+                    s.fill_(s_other)
+
     def test_storage_error_no_attribute(self):
         storage_classes = [
             torch.cuda.ByteStorage,
@@ -7288,11 +7395,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
             """Expected out tensor to have device meta, but got cpu instead"""
         )
-
-    def test_detach_meta(self):
-        x = torch.empty(2, device='meta')
-        # This used to segfault
-        self.assertRaises(RuntimeError, lambda: x.detach().storage())
 
     def test_add_meta_scalar(self):
         # From https://github.com/pytorch/pytorch/issues/53815
