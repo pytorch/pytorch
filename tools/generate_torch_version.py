@@ -10,6 +10,7 @@ from typing import Optional, Union
 UNKNOWN = "Unknown"
 RELEASE_PATTERN = re.compile(r"/v[0-9]+(\.[0-9]+)*(-rc[0-9]+)?/")
 
+
 def get_sha(pytorch_root: Union[str, Path]) -> str:
     try:
         return (
