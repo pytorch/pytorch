@@ -2676,14 +2676,16 @@
 
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
 
-- func: layer_norm.out(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True, *, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-
 - func: native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)
+  structured_delegate: native_layer_norm.out
+
+- func: native_layer_norm.out(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, *, Tensor(a!) out, Tensor(b!) mean, Tensor(c!) rstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   dispatch:
     CPU: layer_norm_cpu
     CUDA: layer_norm_cuda
-    CompositeImplicitAutograd: math_native_layer_norm
+  structured: true
+  precomputed:
+    - int M, int N
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:

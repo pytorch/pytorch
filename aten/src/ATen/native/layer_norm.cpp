@@ -22,6 +22,20 @@
 namespace at {
 namespace native {
 
+TORCH_PRECOMPUTE_META_FUNC(layer_norm) (const Tensor& input,
+    IntArrayRef normalized_shape, at::OptionalTensorRef weight_opt, at::OptionalTensorRef bias_opt,
+    double eps) {
+  auto M_N = _check_layer_norm_inputs(input, normalized_shape, *weight_opt, *bias_opt);
+  auto M = M_N.first;
+  auto N = M_N.second;
+
+  set_output_contiguous(0, input.size(), input.options());
+  set_output_contiguous(1, {M}, input.options());
+  set_output_contiguous(2, {M}, input.options());
+
+  return TORCH_PRECOMPUTE_STRUCT(layer_norm)().set_M(M).set_N(N);
+}
+
 void layer_norm_with_mean_rstd_out(
     at::Tensor& out,
     at::Tensor& mean,
@@ -54,52 +68,16 @@ void layer_norm_with_mean_rstd_out(
   rstd = rstd.view(stat_shape);
 }
 
-void layer_norm_cpu_out(
-    at::Tensor& out,
-    const at::Tensor& input,
-    const Tensor& gamma,
-    const Tensor& beta,
-    double eps,
-    int64_t M,
-    int64_t N) {
-  if (M <= 0) {
-    return;
-  }
-  LayerNormKernel(kCPU, input, gamma, beta, M, N, eps, &out, /*mean=*/nullptr, /*rstd=*/nullptr);
-}
-
-std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
+TORCH_IMPL_FUNC(layer_norm_cpu)(
     const Tensor& input,
-    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
-    double eps) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
+    IntArrayRef normalized_shape, at::OptionalTensorRef weight_opt, at::OptionalTensorRef bias_opt,
+    double eps, int64_t M, int64_t N, const Tensor& Y, const Tensor& mean, const Tensor& rstd) {
 
-  bool mixed_type = is_mixed_type(input, weight, bias);
-
-  auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
-  auto M = M_N.first;
-  auto N = M_N.second;
   auto X = input.expect_contiguous();
-  auto gamma = weight.expect_contiguous();
-  auto beta = bias.expect_contiguous();
-
-  Tensor Y = at::native::empty_like(
-      *X,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
-      at::MemoryFormat::Contiguous);
-  const auto dtype = param_scalar_type(input, mixed_type);
-  Tensor mean = at::empty({M}, X->options().dtype(dtype));
-  Tensor rstd = at::empty({M}, X->options().dtype(dtype));
+  auto gamma = *weight_opt.expect_contiguous();
+  auto beta = *bias_opt.expect_contiguous();
 
   layer_norm_with_mean_rstd_out(Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
-  return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
