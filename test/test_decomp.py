@@ -237,19 +237,10 @@ def normalize_op_input_output2(
 
 
 def upcast_tensor(func, x, dtype=torch.float32):
-    # Some functions take a dtype as argument, so we need to
-    # manually change that dtype in order to run it with a
-    # higher precision
-    dtype_arg_table = {
-        torch.ops.aten._softmax_backward_data.default,
-        torch.ops.aten._log_softmax_backward_data.default,
-    }
-
     if isinstance(x, Tensor) and x.dtype.is_floating_point:
         return x.to(dtype=dtype)
     elif (
         isinstance(x, torch.dtype)
-        and func in dtype_arg_table
         and x in [torch.float16, torch.bfloat16]
     ):
         return torch.float64
