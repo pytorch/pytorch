@@ -316,7 +316,7 @@ class DispatchKeySet final {
   // Any backend bits set on self will remain unchanged.
   // See Note [Removing keys from DispatchKeySet Only Affects Functionality
   // Keys]
-  DispatchKeySet operator-(DispatchKeySet other) const {
+  constexpr DispatchKeySet operator-(DispatchKeySet other) const {
     return DispatchKeySet(repr_ & (full_backend_mask | ~other.repr_));
   }
 
@@ -332,10 +332,10 @@ class DispatchKeySet final {
   }
   // Add a DispatchKey to the DispatchKey set.  Does NOT mutate,
   // returns the extended DispatchKeySet!
-  C10_NODISCARD DispatchKeySet add(DispatchKey t) const {
+  C10_NODISCARD constexpr DispatchKeySet add(DispatchKey t) const {
     return *this | DispatchKeySet(t);
   }
-  C10_NODISCARD DispatchKeySet add(DispatchKeySet ks) const {
+  C10_NODISCARD constexpr DispatchKeySet add(DispatchKeySet ks) const {
     return *this | ks;
   }
 
@@ -363,7 +363,7 @@ class DispatchKeySet final {
   //
   // Instead, remove(DispatchKey.AutogradCPU) will only remove the "Autograd"
   // bit from the bitset.
-  constexpr DispatchKeySet remove(DispatchKey t) const {
+  C10_NODISCARD constexpr DispatchKeySet remove(DispatchKey t) const {
     return DispatchKeySet(
         repr_ & ~(DispatchKeySet(t).repr_ & ~full_backend_mask));
   }
