@@ -18999,6 +18999,7 @@ op_db: List[OpInfo] = [
                 },
             ),
         ),
+        domain=(-10, 10), # operation is equivalent to SciPy in this domain
         dtypes=all_types_and(torch.bool),
         ref=lambda x: scipy.special.airy(x)[0] if TEST_SCIPY else _NOTHING,
         supports_autograd=False,

@@ -2256,6 +2256,10 @@ static inline C10_HOST_DEVICE T airy_ai_forward(T x) {
 
     T ai;
 
+    if (std::isinf(x)) {
+        return std::numeric_limits<T>::quiet_NaN();
+    }
+
     if (x > T(103.892)) {
         return T(0.0);
     }
