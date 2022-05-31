@@ -593,9 +593,11 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   // dispatch and then go again, triggering segfault.  TBH I'm thinking I want
   // to delete this function entirely
   py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
-  TORCH_CHECK_TYPE(attr.ptr() != nullptr && attr.ptr() != torch::disabled_torch_dispatch_impl()
-,
-    ((PyTypeObject*)cls)->tp_name, " must define __torch_dispatch__");
+  TORCH_CHECK_TYPE(
+      attr.ptr() != nullptr &&
+          attr.ptr() != torch::disabled_torch_dispatch_impl(),
+      ((PyTypeObject*)cls)->tp_name,
+      " must define __torch_dispatch__");
 
   const auto options = TensorOptions()
     .dtype(r.scalartype(5))
