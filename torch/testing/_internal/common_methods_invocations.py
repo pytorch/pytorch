@@ -15790,12 +15790,6 @@ op_db: List[OpInfo] = [
                skipCUDAIfNoMagma,
                skipCPUIfNoLapack,
            ],
-           skips=(
-               # following 2 tests failed intermittenly
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cuda',
-                            dtypes=[torch.complex128], active_if=TEST_WITH_ROCM),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad', device_type='cuda',
-                            dtypes=[torch.complex128], active_if=TEST_WITH_ROCM)),
            ),
     OpInfo('einsum',
            # we need this lambda because SampleInput expects tensor input as the first argument
