@@ -19808,6 +19808,11 @@ python_ref_db = [
         supports_out=True,
     ),
     ReductionPythonRefInfo(
+        "_refs.prod",
+        torch_opinfo_name="prod",
+        supports_out=True,
+    ),
+    ReductionPythonRefInfo(
         "_refs.var",
         torch_opinfo_name="var",
         supports_out=True
