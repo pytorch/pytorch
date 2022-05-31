@@ -195,7 +195,7 @@ _nvfuser_binary_ops = {
 
 def _assert_nvfuser_op_exists(fname: str):
     try:
-        from torch._C._nvfuser import FusionDefinition as fd
+        from torch._C._nvfuser import FusionDefinition as fd  # type: ignore[import]
 
         assert getattr(fd.Ops, fname)
     except ImportError:
