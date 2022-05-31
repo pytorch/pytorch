@@ -78,7 +78,6 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
   if (result.numel() != steps) {
     result.resize_({steps});
   }
-  
   auto ns_steps = [NSNumber numberWithInt:steps];
 
   if (steps == 0) {
@@ -87,7 +86,7 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     result.fill_(start);
   } else {
     Tensor r = result.is_contiguous() ? result : result.contiguous();
-    
+
     // Do the MPSGraph computation
     MPSGraphCache* cache_ = MPSGraphCache::getInstance();
     MPSStream* stream = getCurrentMPSStream();
