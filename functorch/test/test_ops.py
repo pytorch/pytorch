@@ -1136,7 +1136,6 @@ class TestOperators(TestCase):
         xfail('_masked.softmin', ''),
         xfail('amax', ''),
         xfail('amin', ''),
-        xfail('block_diag', ''),
         xfail('cdist', ''),
         xfail('cholesky', ''),
         xfail('eig', ''),

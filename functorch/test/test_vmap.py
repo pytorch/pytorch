@@ -3262,7 +3262,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu_factor_ex', ''),
         xfail('diagflat', ''),
         xfail('special.log_ndtr'),
-        xfail('block_diag'),  # aten::slice_copy.Tensor hit the vmap fallback which is currently disabled
         xfail('nn.functional.triplet_margin_loss', ''),
         xfail('nn.functional.pdist', ''),
         xfail('scatter_reduce', 'sum'),
