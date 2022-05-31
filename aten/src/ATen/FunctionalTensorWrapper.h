@@ -91,6 +91,9 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // replace_() swaps out the wrapped tensor, value_, with tmp.
   void replace_(const Tensor& other);
 
+  // See Note[resize_() in functionalization pass]
+  void maybe_replace_storage(const Tensor& other);
+
   ~FunctionalTensorWrapper() override = default;
 
  private:

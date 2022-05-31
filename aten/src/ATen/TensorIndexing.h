@@ -353,8 +353,8 @@ static inline void copy_to(const Tensor& dst, const Tensor& src) {
     // appear. Users can workaround that case by dst[index..] = src.reshape(..)
     dst.copy_(src);
     return;
-  } else if (src.sizes().size() == 0 && src.device().type() == at::kCPU) {
-    dst.fill_(src.item());
+  } else if (src.dim() == 0 && src.device().type() == at::kCPU) {
+    dst.fill_(src);
     return;
   }
   auto src_view = src.view(slicePrefix1sSize(src.sizes()));
