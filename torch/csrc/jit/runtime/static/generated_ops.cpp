@@ -3167,25 +3167,6 @@ REGISTER_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
-REGISTER_OPERATOR_FUNCTOR(aten::max, aten_max, [](Node* n) -> SROperator {
-  if (n->matches(torch::schema(
-          "aten::max.other(Tensor self, Tensor other) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
-      const auto& self = p_node->Input(0).toTensor();
-      const auto& other = p_node->Input(1).toTensor();
-      if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::max(self, other);
-        return;
-      }
-      auto& out = p_node->Output(0).toTensor();
-      fastResizeToZero(out);
-      at::native::max_out(self, other, out);
-    };
-  }
-  LogAndDumpSchema(n);
-  return nullptr;
-});
-
 REGISTER_OPERATOR_FUNCTOR(
     aten::minimum,
     aten_minimum,
@@ -4877,8 +4858,8 @@ REGISTER_OPERATOR_FUNCTOR(
     aten::linalg_svdvals,
     aten_linalg_svdvals,
     [](Node* n) -> SROperator {
-      if (n->matches(
-              torch::schema("aten::linalg_svdvals(Tensor A) -> Tensor"))) {
+      if (n->matches(torch::schema(
+              "aten::linalg_svdvals(Tensor A, *, str? driver=None) -> Tensor"))) {
         return [](ProcessedNode* p_node) {
           const auto& A = p_node->Input(0).toTensor();
           if (p_node->Output(0).isNone()) {
@@ -4887,7 +4868,7 @@ REGISTER_OPERATOR_FUNCTOR(
           }
           auto& out = p_node->Output(0).toTensor();
           fastResizeToZero(out);
-          at::native::linalg_svdvals_out(A, out);
+          at::native::linalg_svdvals_out(A, c10::nullopt, out);
         };
       }
       LogAndDumpSchema(n);

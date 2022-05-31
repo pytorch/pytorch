@@ -613,7 +613,4 @@ else
   test_custom_backend
   test_torch_function_benchmark
   test_benchmarks
-  if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-test* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-test* ]]; then
-    test_python_gloo_with_tls
-  fi
 fi
