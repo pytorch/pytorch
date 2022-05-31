@@ -21,22 +21,19 @@ struct BinaryOpCachedGraph : public MPSCachedGraph
 typedef MPSGraphTensor* (^BinaryOpBlock)(MPSGraph*, MPSGraphTensor*, MPSGraphTensor*);
 #define BinaryOpFn() MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* primary, MPSGraphTensor* secondary)
 
-void binaryOpTensor(const Tensor& self_t, const Tensor& other_t, const Tensor& output, std::string op_name, BinaryOpBlock binaryBlock)
+void binaryOpTensor(const Tensor& self, const Tensor& other, const Tensor& output, std::string op_name, BinaryOpBlock binaryBlock)
 {
   // it's possible to receive empty tensors here
-  if (self_t.numel() == 0 || other_t.numel() == 0) {
+  if (self.numel() == 0 || other.numel() == 0) {
     return;
   }
   MPSStream* mpsStream = getCurrentMPSStream();
 
-  const bool is_self_scalar = self_t.dim() == 0;
-  const bool is_other_scalar = other_t.dim() == 0;
+  const bool is_self_scalar = self.dim() == 0;
+  const bool is_other_scalar = other.dim() == 0;
 
-  Tensor self = is_self_scalar ? self_t : self_t.contiguous(at::MemoryFormat::Contiguous);
-  Tensor other = is_other_scalar ? other_t : other_t.contiguous(at::MemoryFormat::Contiguous);
-
-  const MPSDataType self_dtype = getMPSScalarType((is_self_scalar && !is_other_scalar ? other_t : self_t).scalar_type());
-  const MPSDataType other_dtype = getMPSScalarType((!is_other_scalar ? other_t : self_t).scalar_type());
+  const MPSDataType self_dtype = getMPSScalarType((is_self_scalar && !is_other_scalar ? other : self).scalar_type());
+  const MPSDataType other_dtype = getMPSScalarType((!is_other_scalar ? other : self).scalar_type());
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
@@ -58,17 +55,20 @@ void binaryOpTensor(const Tensor& self_t, const Tensor& other_t, const Tensor& o
       cachedGraph = static_cast<BinaryOpCachedGraph *>(tmpCachedGraph);
     }
 
-    NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
+    NSMutableDictionary *feeds   = [[NSMutableDictionary new] autorelease];
+    Placeholder selfPlaceholder;
+    Placeholder otherPlaceholder;
+
     if (is_self_scalar) {
       feeds[cachedGraph->primaryTensor] = getMPSGraphTensorFromScalar(mpsStream, self.item(), self_dtype);
     } else {
-      Placeholder selfPlaceholder = Placeholder(cachedGraph->primaryTensor, self);
+      selfPlaceholder = Placeholder(cachedGraph->primaryTensor, self);
       feeds[selfPlaceholder.getMPSGraphTensor()] = selfPlaceholder.getMPSGraphTensorData();
     }
     if (is_other_scalar) {
       feeds[cachedGraph->secondaryTensor] = getMPSGraphTensorFromScalar(mpsStream, other.item(), other_dtype);
     } else {
-      Placeholder otherPlaceholder = Placeholder(cachedGraph->secondaryTensor, other);
+      otherPlaceholder = Placeholder(cachedGraph->secondaryTensor, other);
       feeds[otherPlaceholder.getMPSGraphTensor()] = otherPlaceholder.getMPSGraphTensorData();
     }
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
