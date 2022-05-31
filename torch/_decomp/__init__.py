@@ -1,7 +1,7 @@
 import torch
 import torch._ops
 import torch.library
-from typing import Callable, Union, Dict, Sequence, List
+from typing import Callable, Union, Dict, Sequence
 from torch.utils._pytree import tree_map
 from collections import defaultdict
 
