@@ -2394,7 +2394,7 @@ def sample_inputs_broadcast_sizes(op, device, dtype, requires_grad, **kwargs):
 
     for shape in shapes:
         #broadcasts_input = (shape_lhs != torch.broadcast_shapes(shape_lhs, shape_rhs))
-        print("testing : " shape)
+        print("testing : ", shape)
         yield SampleInput(shape,)
 
 # The base reference input generation for elementwise binary operations
