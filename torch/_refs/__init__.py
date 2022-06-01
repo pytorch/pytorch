@@ -1529,7 +1529,7 @@ def as_strided(
 
 
 def broadcast_shapes(*shapes) -> ShapeType:
-    return torch.Size(_broadcast_shapes(*_shapes)):
+    return torch.Size(_broadcast_shapes(*_shapes))
 
 
 def broadcast_tensors(*tensors) -> List[TensorLikeType]:
