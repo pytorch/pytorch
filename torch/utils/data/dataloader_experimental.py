@@ -1,5 +1,3 @@
-
-import functools
 import time
 
 from typing import Any, List
