@@ -1037,9 +1037,9 @@ def _maximum_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
-        b = scalar_tensor(b, dtype=a.dtype)
+        b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(b, TensorLike) and isinstance(a, Number):
-        a = scalar_tensor(a, dtype=b.dtype)
+        a = scalar_tensor(a, dtype=b.dtype, device=b.device)
 
     return torch.maximum(a, b)  # type: ignore[arg-type]
 
@@ -1056,9 +1056,9 @@ def _minimum_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
-        b = scalar_tensor(b, dtype=a.dtype)
+        b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(b, TensorLike) and isinstance(a, Number):
-        a = scalar_tensor(a, dtype=b.dtype)
+        a = scalar_tensor(a, dtype=b.dtype, device=b.device)
 
     return torch.minimum(a, b)  # type: ignore[arg-type]
 
