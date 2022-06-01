@@ -450,6 +450,9 @@ def run_meta_crossref(
                 else:
                     indices.append(meta_index)
             meta_args = (meta_args[0], indices)
+        elif func is torch.ops.aten.repeat_interleave.Tensor:
+            if kwargs.get("output_size", None) is None:
+                meta_args = args
         try:
             # Suppress warnings, this doesn't matter for test_meta.py
             # but it does matter if you want to use this decorator
@@ -845,7 +848,6 @@ meta_dispatch_expected_failures = {
     aten.nonzero.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.polar.default: {f64, f32},
     aten.prelu.default: {bf16, f64, f32},
-    aten.repeat_interleave.Tensor: {c64, i64, c128, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.roll.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.rrelu_with_noise.default: {bf16, f64, f32},
     aten.searchsorted.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},

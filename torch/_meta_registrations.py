@@ -204,3 +204,11 @@ def meta_index_Tensor(self, indices):
         else:
             replacement_shape = list(index.shape)
     return self.new_empty(before_shape + replacement_shape + after_shape)
+
+@torch.library.impl(meta_lib, "repeat_interleave.Tensor")
+def meta_repeat_interleave_Tensor(repeats, output_size=None):
+    if output_size is None:
+        raise RuntimeError(
+            "cannot repeat_interleave a meta tensor without output_size"
+        )
+    return repeats.new_empty(output_size)
