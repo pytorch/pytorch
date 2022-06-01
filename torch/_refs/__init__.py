@@ -1860,7 +1860,7 @@ def tensor_split(
 
     # If indices_or_sections is a tensor, it must be a CPU Long tensor
     if isinstance(indices_or_sections, TensorLike):
-        if indices_or_sections.device != torch.device("cpu"):
+        if not utils.is_cpu(indices_or_sections.device):
             msg = "tensor_split: if indices_or_sections is a tensor it must be on the CPU, but received one on {0}".format(
                 indices_or_sections.device
             )

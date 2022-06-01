@@ -75,7 +75,7 @@ class TensorMeta(torch.Tensor):
         shape: Optional[ShapeType] = None,
         strides: Optional[StrideType] = None,
         dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[torch.device, str]] = None,
+        device: Optional[DeviceLikeType] = None,
     ):
 
         if isinstance(tensorlike, Number):
@@ -106,9 +106,7 @@ class TensorMeta(torch.Tensor):
         strides = inferred_strides if strides is None else tuple(strides)
         dtype = inferred_dtype if dtype is None else dtype
         device = inferred_device if device is None else device
-
-        if isinstance(device, str):
-            device = torch.device(device)
+        device = canonicalize_device(device)
 
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
@@ -190,16 +188,9 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
         msg = "Dtypes {0} and {1} are not equal!".format(a.dtype, b.dtype)
         raise AssertionError(msg)
 
-    if a.device != b.device:
-        # Handles special cuda:0 vs cuda case
-        # TODO: we should review why this happens and see about fixing it
-        if (str(a.device) == "cuda:0" or str(a.device) == "cuda") and (
-            str(b.device) == "cuda:0" or str(b.device) == "cuda"
-        ):
-            pass
-        else:
-            msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
-            raise AssertionError(msg)
+    if a.device.type != b.device.type:
+        msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
+        raise AssertionError(msg)
 
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
     # same_strides, idx = check_significant_strides(a, b)
@@ -217,7 +208,7 @@ def check_significant_strides(
     # See https://github.com/pytorch/pytorch/issues/77553
     # Only compares strides that are "meaningful" -- strides for dimensions with length > 1
     # and for tensors with more than one element
-    if (a.device.type == "cuda" or b.device.type == "cuda") and a.numel() > 0:
+    if (is_cuda(a.device) or is_cuda(b.device)) and a.numel() > 0:
         for idx in range(a.ndim):
             if a.stride()[idx] != b.stride()[idx] and a.shape[idx] > 1:
                 return False, idx
@@ -446,7 +437,7 @@ def is_same_shape(a: Sequence, b: Sequence) -> bool:
 
 
 def is_cpu_scalar_tensor(a: Any) -> bool:
-    return isinstance(a, TensorLike) and a.ndim == 0 and a.device.type == "cpu"
+    return isinstance(a, TensorLike) and a.ndim == 0 and is_cpu(a.device)
 
 
 def check_same_device(*args, allow_cpu_scalar_tensors):
@@ -489,12 +480,20 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
             raise RuntimeError(msg)
 
 
-def canonicalize_device(device: Union[str, torch.device]) -> torch.device:
+def canonicalize_device(device: DeviceLikeType) -> torch.device:
     if isinstance(device, torch.device):
         return device
 
     assert isinstance(device, str)
     return torch.device(device)
+
+
+def is_cpu(device: torch.device):
+    return device.type == "cpu"
+
+
+def is_cuda(device: torch.device):
+    return device.type == "cuda"
 
 
 # Asserts if any of the following are true:
@@ -1101,20 +1100,6 @@ def reduction_dtypes(
     else:  # ALWAYS_BOOL
         result_dtype = torch.bool
     return computation_dtype, result_dtype
-
-
-def wrap_device(d: Union[str, torch.device]) -> torch.device:
-    """
-    Wraps strings into torch.device objects.
-
-    Given torch.device objects are returned unmodified.
-    """
-
-    assert isinstance(d, (str, torch.device))
-    if isinstance(d, str):
-        return torch.device(d)
-
-    return d
 
 
 def make_contiguous_strides_for(shape: ShapeType) -> Tuple[int, ...]:
