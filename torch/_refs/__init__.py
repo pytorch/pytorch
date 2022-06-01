@@ -892,7 +892,6 @@ def _floor_divide(
     div = true_divide(sub(a, mod), b)
 
     # Ensure that the remainder has the same sign as denominator
-    # TODO: Should we use signbit reference here?
     different_signed_inputs = bitwise_xor(lt(a, 0), lt(b, 0))
     non_zero_remainder = ne(mod, 0)
     mask = bitwise_and(non_zero_remainder, different_signed_inputs)
