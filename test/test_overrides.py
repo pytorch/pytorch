@@ -1245,21 +1245,23 @@ class TestTorchFunctionMode(TestCase):
                 torch.empty([])
 
     def test_with_nested_modes(self):
-        class ErrorA(RuntimeError):
-            def __init__(self, msg):
-                return super().__init__(msg)
+        out = []
 
         class A(TorchFunctionMode):
             def __init__(self, msg):
                 self.msg = msg
 
-            def __torch_function__(self, *args, **kwargs):
-                raise ErrorA(self.msg)
+            def __torch_function__(self, func, _, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                out.append(self.msg)
+                return func(*args, **kwargs)
 
-        with self.assertRaisesRegex(ErrorA, "layer2"):
-            with A("layer1"):
-                with A("layer2"):
-                    torch.empty([])
+        with A("layer1"):
+            with A("layer2"):
+                torch.empty([])
+
+        self.assertEquals(out, ["layer2", "layer1"])
 
     def test_error_using_same_mode(self):
         class A(TorchFunctionMode):

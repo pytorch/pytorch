@@ -1739,10 +1739,7 @@ def is_tensor_like(inp):
 def _wrap_torch_function(f):
     @functools.wraps(f)
     def wrapped(self, *args, **kwargs):
-        if hasattr(self, "inner"):
-            inner = self.inner
-        else:
-            inner = None
+        inner = getattr(self, "inner", None)
 
         with enable_torch_function_mode(inner):
             return f(self, *args, **kwargs)
