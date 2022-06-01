@@ -2379,6 +2379,24 @@ def sample_inputs_jiterator(op, device, dtype, requires_grad, **kwargs):
 
         yield SampleInput(lhs, args=tuple(args), kwargs=sample_kwargs, broadcasts_input=broadcasts_input)
 
+def sample_inputs_broadcast_sizes(op, device, dtype, requires_grad, **kwargs):
+    shapes = (
+        ((), ()),
+        ((S,), ()),
+        ((S, 1), (S,)),
+        ((M, S), ()),
+        ((S, M, S), (M, S)),
+        ((S, M, S), (S, M, S)),
+        ((M, 1, S), (M, S)),
+        ((M, 1, S), (1, M, S)),
+        ((0, 1, 3), (0, 10, 3))
+    )
+
+    for shape in shapes:
+        #broadcasts_input = (shape_lhs != torch.broadcast_shapes(shape_lhs, shape_rhs))
+        print("testing : " shape)
+        yield SampleInput(shape,)
+
 # The base reference input generation for elementwise binary operations
 def _reference_inputs_elementwise_binary(op, device, dtype, requires_grad, exclude_zero, **kwargs):
     yield from op.sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
@@ -19691,6 +19709,14 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_conj_view'),
         ),
+    ),
+    PythonRefInfo(
+        "_refs.broadcast_shapes",
+        ref=np.broadcast_shapes,
+        torch_opinfo_name="broadcast_shapes",
+        # dtype doesn't matter since we don't use it
+        dtypes=(torch.bool),
+        sample_inputs_func=sample_inputs_broadcast_sizes,
     ),
     PythonRefInfo(
         "_refs.broadcast_tensors",
