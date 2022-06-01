@@ -12,7 +12,9 @@ from torch._prims.utils import (
     NumberType,
     corresponding_real_dtype,
     is_float_dtype,
+    is_complex_dtype,
     get_computation_dtype,
+    get_higher_dtype,
     reduction_dtypes,
     REDUCTION_OUTPUT_TYPE_KIND,
 )
@@ -28,6 +30,30 @@ __all__ = [
 ]
 
 
+def check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_name: str):
+    """
+    Checks related to the dtype kwarg in `linalg.*norm` functions
+    """
+    if dtype is not None:
+        check(
+            is_float_dtype(dtype) or is_complex_dtype(dtype),
+            lambda: f"{fn_name}: dtype should be floating point or complex. Got {dtype}",
+        )
+        check(
+            is_complex_dtype(dtype) == is_complex_dtype(x_dtype),
+            lambda: "{fn_name}: dtype should be {d} for {d} inputs. Got {dtype}".format(
+                fn_name=fn_name,
+                d="complex" if is_complex_dtype(x_dtype) else "real",
+                dtype=dtype,
+            ),
+        )
+        check(
+            get_higher_dtype(dtype, x_dtype) == dtype,
+            lambda: f"{fn_name}: the dtype of the input ({x_dtype}) should be convertible "
+            "without narrowing to the specified dtype ({dtype})",
+        )
+
+
 @out_wrapper
 def vector_norm(
     x: TensorLikeType,
@@ -38,7 +64,9 @@ def vector_norm(
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
     # Checks
-    linalg.utils.check_fp_or_complex(x.dtype, "linalg.vector_norm", half=True)
+    linalg.utils.check_fp_or_complex(
+        x.dtype, "linalg.vector_norm", allow_half_dtypes=True
+    )
 
     if isinstance(dim, int):
         dim = [dim]  # type: ignore[assignment]
@@ -61,7 +89,7 @@ def vector_norm(
                 f"dimension {d} because this dimension is empty and the "
                 "operation does not have an identity",
             )
-    linalg.utils.check_norm_dtype(dtype, x.dtype, "linalg.vector_norm")
+    check_norm_dtype(dtype, x.dtype, "linalg.vector_norm")
 
     computation_dtype, result_dtype = reduction_dtypes(
         x, REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT, dtype
@@ -81,11 +109,12 @@ def vector_norm(
         x = prims.convert_element_type(x, computation_dtype)
         reduce_sum = partial(refs.sum, dim=dim, keepdim=keepdim)
 
+        # This choice should be made in ref
         def fast_pow(x, p):
             if p == 1.0:
                 return x
             elif p == 2.0:
-                return prims.mul(x, x)
+                return prims.square(x)
             elif p == 0.5:
                 return prims.sqrt(x)
             else:
@@ -96,13 +125,9 @@ def vector_norm(
         # x = prims.real(prims.mul(prims.conj(x), x))
         # and it should be more stable, but it's not clear whether it'll be faster on, say
         # CPU (abs is 1 vectorised operation), so leaving it just for real dtypes for now
-        ord_pow = ord
-        if ord % 2.0 == 0.0 and is_float_dtype(x.dtype):
-            x = prims.mul(x, x)
-            ord_pow /= 2.0
-        else:
+        if not (ord % 2.0 == 0.0 and is_float_dtype(x.dtype)):
             x = prims.abs(x)
-        return to_result_dtype(fast_pow(reduce_sum(fast_pow(x, ord_pow)), 1.0 / ord))
+        return to_result_dtype(fast_pow(reduce_sum(fast_pow(x, ord)), 1.0 / ord))
 
 
 # out_wrapper_multi is buggy (see the note in its definition), and so is the `linalg.svd` out behaviour
