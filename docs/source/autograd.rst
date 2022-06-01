@@ -75,6 +75,7 @@ between no-grad and inference mode as well as other related mechanisms that
 may be confused with the two.
 
 .. autosummary::
+    :toctree: generated
     :nosignatures:
 
     no_grad

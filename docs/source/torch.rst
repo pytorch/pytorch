@@ -260,11 +260,7 @@ Examples::
     :toctree: generated
     :nosignatures:
 
-    no_grad
-    enable_grad
-    set_grad_enabled
     is_grad_enabled
-    inference_mode
     is_inference_mode_enabled
 
 Math operations
