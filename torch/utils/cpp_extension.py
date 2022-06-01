@@ -1058,11 +1058,17 @@ def CUDAExtension(name, sources, *args, **kwargs):
     dlink = kwargs.get('dlink', False) or dlink_libraries
     if dlink:
         extra_compile_args = kwargs.get('extra_compile_args', {})
+
         extra_compile_args_dlink = extra_compile_args.get('nvcc_dlink', [])
         extra_compile_args_dlink += ['-dlink']
         extra_compile_args_dlink += [f'-L{x}' for x in library_dirs]
         extra_compile_args_dlink += [f'-l{x}' for x in dlink_libraries]
         extra_compile_args['nvcc_dlink'] = extra_compile_args_dlink
+
+        extra_compile_args_nvcc = extra_compile_args.get('nvcc', [])
+        extra_compile_args_nvcc += ['-rdc=true']
+        extra_compile_args['nvcc'] = extra_compile_args_nvcc
+
         kwargs['extra_compile_args'] = extra_compile_args
 
     return setuptools.Extension(name, sources, *args, **kwargs)
