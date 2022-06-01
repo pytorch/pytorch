@@ -236,8 +236,6 @@ class TestShardParameter(ShardedTensorTestBase):
         local_shards = fc.weight.local_shards()
         self.assertEqual(1, len(local_shards))
         self.assertEqual(torch.Size([3, 12]), local_shards[0].tensor.size())
-        self.assertEqual(3, local_shards[0].tensor.size(0))
-        self.assertEqual(12, local_shards[0].tensor.size(1))
 
 
 class TestShardTensor(ShardedTensorTestBase):

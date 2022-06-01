@@ -255,7 +255,8 @@ def shard_module(
     If the parameter is a MetaTensor, then an empty ShardedTensor is
     materialized as per the provided ``sharding_spec`` and ``src_rank`` is ignored.
     In this case, it is the user's responsibility to appropriately initialize
-    the ShardedTensor as desired.
+    the ShardedTensor as desired (ex: by using initializers
+    :meth:`torch.nn.init.uniform_` etc.).
 
     Args:
         module (:class:`torch.nn.Module`): The module to apply sharding to
