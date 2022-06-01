@@ -5,10 +5,10 @@ from gitutils import _check_output
 def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Print latest commits")
-    parser.add_argument("--minutes", type=int, default=60, help="duration in minutes of last commits")
+    parser.add_argument("--minutes", type=int, default=30, help="duration in minutes of last commits")
     return parser.parse_args()
 
-def print_latest_commits(minutes: int = 60) -> None:
+def print_latest_commits(minutes: int = 30) -> None:
     current_time = datetime.now()
     time_since = current_time - timedelta(minutes=minutes)
     timestamp_since = datetime.timestamp(time_since)
@@ -25,6 +25,10 @@ def print_latest_commits(minutes: int = 60) -> None:
 
     for commit in commits:
         print(commit)
+        print_commit_status(commit)
+
+def print_commit_status(sha: str) -> None:
+    print("sha is", sha)
 
 def main() -> None:
     args = parse_args()
