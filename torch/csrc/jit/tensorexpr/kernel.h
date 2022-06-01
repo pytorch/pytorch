@@ -194,11 +194,6 @@ class TORCH_API TensorExprKernel {
     kBlockCodeGen,
   };
 
-  enum MemoryLayoutPolicy {
-    kContiguous,
-    kChannelsLastNdContiguous,
-  };
-
   void compile();
   void genInputDebugNames();
   void runKernel(Stack& stack) const;
@@ -235,19 +230,6 @@ class TORCH_API TensorExprKernel {
 
   Tensor bindInput(const torch::jit::Value* input);
   BlockPtr bindAllInputs();
-
-  // Deduce the memory layout policy to be propagated within
-  // NNC fusion group. The memory layout policy could be `kContiguous`
-  // or `kChannelsLastNdContiguous`.
-  //    `kContiguous`: Always convert the non-contiguous input tensors and
-  //        internal buffers to contiguous.
-  //    `kChannelsLastNdContiguous`: Always convert the input tensors and
-  //        internal buffers to channels-last contiguous.
-  // Currently, the rule is simple.
-  //    If all the input and out tensors of NNC fusion group are channels-last
-  //    contiguous, the policy is `kChannelsLastNdContiguous`. Otherwise, it
-  //    is always `kContiguous`.
-  void deduceMemoryLayoutPolicy();
 
   Tensor convertSymbolicOutputToCorrectStrides(torch::jit::Value* v);
   Tensor convertStaticShapeOutputToCorrectStrides(torch::jit::Value* v);
@@ -292,13 +274,8 @@ class TORCH_API TensorExprKernel {
   std::vector<ExprHandle> getInputStrides(
       const torch::jit::Value* input,
       const std::vector<ExprHandle>& inputTensorDims);
-  std::vector<torch::jit::StrideInput>& getSymbolicStrideDesc(
+  std::vector<torch::jit::StrideInput>& getSymbolicInputStrideDesc(
       const torch::jit::Value* value);
-
-  // Apply the optimizations to the graph owned by the current fusion group,
-  // like concatenation optimization, post-op fusion, and some other graph-level
-  // optimizations.
-  void optimizeOwningGraph();
 
   int64_t nInputs_ = 0;
   int64_t nOutputs_ = 0;
@@ -347,13 +324,9 @@ class TORCH_API TensorExprKernel {
   // map from <input index, tensor dimension> to stride as arg VarHandle
   std::unordered_map<std::pair<size_t, size_t>, VarHandle, SmallSizeTPairHash>
       strideArgToVar_;
-  std::unordered_map<
-      const torch::jit::Value*,
-      std::vector<torch::jit::StrideInput>>
-      symbolic_strides_;
-
-  // Memory layout to be propagated with fusion group
-  MemoryLayoutPolicy memory_layout_policy_ = MemoryLayoutPolicy::kContiguous;
+  std::unordered_map<size_t, std::vector<torch::jit::StrideInput>>
+      sym_stride_inputs_;
+  std::unordered_map<size_t, torch::jit::StrideInput> sym_stride_outputs_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();

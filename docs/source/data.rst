@@ -111,8 +111,7 @@ Loading Batched and Non-Batched Data
 
 :class:`~torch.utils.data.DataLoader` supports automatically collating
 individual fetched data samples into batches via arguments
-:attr:`batch_size`, :attr:`drop_last`, :attr:`batch_sampler`, and
-:attr:`collate_fn` (which has a default function).
+:attr:`batch_size`, :attr:`drop_last`, and :attr:`batch_sampler`.
 
 
 Automatic batching (default)
@@ -210,8 +209,7 @@ arrays in PyTorch tensors.
 **When automatic batching is enabled**, :attr:`collate_fn` is called with a list
 of data samples at each time. It is expected to collate the input samples into
 a batch for yielding from the data loader iterator. The rest of this section
-describes the behavior of the default :attr:`collate_fn`
-(:func:`~torch.utils.data.default_collate`).
+describes behavior of the default :attr:`collate_fn` in this case.
 
 For instance, if each data sample consists of a 3-channel image and an integral
 class label, i.e., each element of the dataset returns a tuple
@@ -233,10 +231,6 @@ properties:
 Users may use customized :attr:`collate_fn` to achieve custom batching, e.g.,
 collating along a dimension other than the first, padding sequences of
 various lengths, or adding support for custom data types.
-
-If you run into a situation where the outputs of :class:`~torch.utils.data.DataLoader`
-have dimensions or type that is different from your expectation, you may
-want to check your :attr:`collate_fn`.
 
 Single- and Multi-process Data Loading
 --------------------------------------

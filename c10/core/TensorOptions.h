@@ -390,7 +390,7 @@ struct C10_API TensorOptions {
 
   // Resolves the ATen backend specified by the current construction axes.
   // TODO: Deprecate this
-  Backend backend() const {
+  Backend backend() const noexcept {
     return at::dispatchKeyToBackend(computeDispatchKey());
   }
 

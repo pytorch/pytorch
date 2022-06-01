@@ -378,9 +378,9 @@ class TransformerEncoderLayer(Module):
 
         # We can't test self.activation in forward() in TorchScript,
         # so stash some information about it instead.
-        if activation is F.relu or isinstance(activation, torch.nn.ReLU):
+        if activation is F.relu:
             self.activation_relu_or_gelu = 1
-        elif activation is F.gelu or isinstance(activation, torch.nn.GELU):
+        elif activation is F.gelu:
             self.activation_relu_or_gelu = 2
         else:
             self.activation_relu_or_gelu = 0

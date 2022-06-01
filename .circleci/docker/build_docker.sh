@@ -46,10 +46,7 @@ fi
 # Build new image
 ./build.sh ${IMAGE_NAME} -t "${image}:${tag}"
 
-# Only push if `DOCKER_SKIP_PUSH` = false
-if [ "${DOCKER_SKIP_PUSH:-true}" = "false" ]; then
-  docker push "${image}:${tag}"
-fi
+docker push "${image}:${tag}"
 
 if [ -z "${DOCKER_SKIP_S3_UPLOAD:-}" ]; then
   trap "rm -rf ${IMAGE_NAME}:${tag}.tar" EXIT

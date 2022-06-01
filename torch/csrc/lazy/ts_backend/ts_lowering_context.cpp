@@ -10,8 +10,9 @@ TSLoweringContext::TSLoweringContext(
     const std::string& name,
     BackendDevice device)
     : torch::lazy::LoweringContext(name, device),
-      graph_(std::make_shared<torch::jit::Graph>()),
-      function_(std::make_shared<torch::jit::GraphFunction>(name, graph_, nullptr)) {}
+      graph_(std::make_shared<torch::jit::Graph>()) {
+  lowering_ = TSNodeLoweringInterface::Create(this);
+}
 
 TSLoweringContext::TSLoweringContext(
     const std::string& name,
@@ -19,28 +20,11 @@ TSLoweringContext::TSLoweringContext(
     c10::ArrayRef<Node*> post_order,
     Util::EmissionMap emit_status)
     : torch::lazy::LoweringContext(name, device, post_order, emit_status),
-      graph_(std::make_shared<torch::jit::Graph>()),
-      function_(std::make_shared<torch::jit::GraphFunction>(name, graph_, nullptr)) {
+      graph_(std::make_shared<torch::jit::Graph>()) {
+  lowering_ = TSNodeLoweringInterface::Create(this);
   for (auto node : post_order) {
-    Lower(node);
-  }
-}
-
-
-void TSLoweringContext::Lower(const Node* node) {
-  if (auto* tsnode = dynamic_cast<const torch::lazy::TsNode*>(node)) {
-    // First, we call the node lowering function, which exists for newly
-    // codegenned or refactored nodes
-    TSOpVector ops = tsnode->Lower(function_, this);
-    CHECK(!ops.empty()) << "Failed to lower: " << *node;
-    CHECK_EQ(node->num_outputs(), ops.size());
-    for (size_t i = 0; i < ops.size(); ++i) {
-      AssignOutputOp(torch::lazy::Output(node, i), ops[i]);
-    }
-  }
-  else {
-    throw std::runtime_error(
-        "Expected torch::lazy::TsNode but could not dynamic cast");
+    bool ok = lowering_->Lower(node);
+    CHECK(ok) << "Failed to lower: " << *node;
   }
 }
 

@@ -62,16 +62,16 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Tensor& outpu
     if (is_self_scalar) {
       feeds[cachedGraph->primaryTensor] = getMPSGraphTensorFromScalar(mpsStream, self.item(), self_dtype);
     } else {
-      selfPlaceholder = Placeholder(cachedGraph->primaryTensor, self);
+      selfPlaceholder = Placeholder(cachedGraph->primaryTensor, self, nullptr, true);
       feeds[selfPlaceholder.getMPSGraphTensor()] = selfPlaceholder.getMPSGraphTensorData();
     }
     if (is_other_scalar) {
       feeds[cachedGraph->secondaryTensor] = getMPSGraphTensorFromScalar(mpsStream, other.item(), other_dtype);
     } else {
-      otherPlaceholder = Placeholder(cachedGraph->secondaryTensor, other);
+      otherPlaceholder = Placeholder(cachedGraph->secondaryTensor, other, nullptr, true);
       feeds[otherPlaceholder.getMPSGraphTensor()] = otherPlaceholder.getMPSGraphTensorData();
     }
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output, nullptr);
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
     };

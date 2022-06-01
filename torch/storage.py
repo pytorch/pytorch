@@ -63,8 +63,6 @@ class _StorageBase(object):
     @classmethod
     def _new_shared_cuda(cls, *args, **kwargs) -> T: ...  # noqa: E704
     def _shared_incref(self, *args, **kwargs): ...  # noqa: E704
-    @classmethod
-    def _free_weak_ref(cls, *args, **kwargs): ...  # noqa: E704
 
     def __str__(self):
         info_str = (
@@ -651,7 +649,7 @@ class _TypedStorage:
 
     @classmethod
     def _free_weak_ref(cls, *args, **kwargs):
-        return _UntypedStorage._free_weak_ref(*args, **kwargs)
+        return eval(cls.__module__)._UntypedStorage._free_weak_ref(*args, **kwargs)
 
     def _weak_ref(self, *args, **kwargs):
         return self._storage._weak_ref(*args, **kwargs)

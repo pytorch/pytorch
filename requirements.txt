@@ -10,3 +10,4 @@ setuptools
 six
 types-dataclasses
 typing_extensions
+dataclasses; python_version<"3.7"
