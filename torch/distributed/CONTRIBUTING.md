@@ -97,7 +97,7 @@ python test/distributed/rpc/cuda/test_tensorpipe_agent.py
 # Run the RPC test suite for the FaultyAgent
 python test/distributed/rpc/test_faulty_agent.py
 
-# Run a specific test method. Uses pytest (pip install pytest)
+# Run a specific test method. Uses pytest (pip install pytest).
 # ProcessGroup gloo/nccl test
 pytest -vs test/distributed/test_c10d_common.py -k test_multi_limit_single_dtype
 
