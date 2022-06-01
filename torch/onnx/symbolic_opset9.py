@@ -91,6 +91,7 @@ __all__ = [
     "mean",
     "prod",
     "cumsum",
+    "t",
     "expand",
     "expand_as",
     "embedding",
