@@ -36,6 +36,9 @@ void Context::flush() {
   resource().pool.purge();
   descriptor().pool.purge();
   command().pool.purge();
+
+  buffers_to_clear_.clear();
+  images_to_clear_.clear();
 }
 
 void Context::wait(const at::Tensor& src) {

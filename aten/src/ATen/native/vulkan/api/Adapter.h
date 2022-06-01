@@ -112,6 +112,9 @@ class Adapter final {
   ShaderCache shader_cache_;
   PipelineLayoutCache pipeline_layout_cache_;
   ComputePipelineCache compute_pipeline_cache_;
+  // Memory Management
+  SamplerCache sampler_cache_;
+  MemoryAllocator vma_;
 
  public:
 
@@ -162,6 +165,16 @@ class Adapter final {
 
   inline ComputePipelineCache& compute_pipeline_cache() {
     return compute_pipeline_cache_;
+  }
+
+  // Memory Allocation
+
+  inline SamplerCache& sampler_cache() {
+    return sampler_cache_;
+  }
+
+  inline MemoryAllocator& vma() {
+    return vma_;
   }
 
   // Miscellaneous
