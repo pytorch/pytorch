@@ -351,7 +351,7 @@ class TestWeightNormSparsifier(TestCase):
 class TestNearlyDiagonalSparsifier(TestCase):
     def test_constructor(self):
         model = Model()
-        sparsifier = NearlyDiagonalSparsifier()
+        sparsifier = NearlyDiagonalSparsifier(nearliness=1)
         sparsifier.prepare(model, config=None)
         for g in sparsifier.module_groups:
             assert isinstance(g['module'], nn.Linear)
@@ -360,7 +360,7 @@ class TestNearlyDiagonalSparsifier(TestCase):
 
     def test_step(self):
         model = Model()
-        sparsifier = NearlyDiagonalSparsifier(nearliness = 1)
+        sparsifier = NearlyDiagonalSparsifier(nearliness=1)
         sparsifier.prepare(model, config=[model.linear])
 
         for g in sparsifier.module_groups:
@@ -370,7 +370,9 @@ class TestNearlyDiagonalSparsifier(TestCase):
 
         sparsifier.enable_mask_update = True
         sparsifier.step()
-        assert torch.all(module.parametrizations['weight'][0].mask == torch.eye(module.parametrizations['weight'][0].mask.shape[0], module.parametrizations['weight'][0].mask.shape[1]))
+        mask = module.parametrizations['weight'][0].mask
+        height, width = mask.shape
+        assert torch.all(mask == torch.eye(height, width))
 
         for g in sparsifier.module_groups:
             # After step
@@ -389,7 +391,7 @@ class TestNearlyDiagonalSparsifier(TestCase):
 
     def test_prepare(self):
         model = Model()
-        sparsifier = NearlyDiagonalSparsifier()
+        sparsifier = NearlyDiagonalSparsifier(nearliness=1)
         sparsifier.prepare(model, config=None)
         for g in sparsifier.module_groups:
             module = g['module']
@@ -411,16 +413,15 @@ class TestNearlyDiagonalSparsifier(TestCase):
             assert not hasattr(module, 'mask')
             weights = module.weight
             height, width = weights.shape
-            assert torch.all(weights == torch.eye(height, width) * weights) # only diagonal to be present
+            assert torch.all(weights == torch.eye(height, width) * weights)  # only diagonal to be present
 
     def test_sparsity_levels(self):
-        nearliness_levels = [nearliness for nearliness in range(-1, 100)]        
+        nearliness_levels = list(nearliness for nearliness in range(-1, 100))
         model = nn.Sequential()
 
         p = re.compile(r'[-\.\s]')
         for nearliness in nearliness_levels:
-            
-            sparsifier = NearlyDiagonalSparsifier()
+            sparsifier = NearlyDiagonalSparsifier(nearliness=1)
             layer_name = f'{nearliness}'
             layer_name = p.sub('_', layer_name)
 
@@ -443,13 +444,13 @@ class TestNearlyDiagonalSparsifier(TestCase):
                 sparsifier.squash_mask()
                 model.eval()
 
-                layer = getattr(model, layer_name)               
+                layer = getattr(model, layer_name)
                 # verify that mask created corresponds to the nearliness
-                verify_nearliness(layer.weight, nearliness)
+                _verify_nearliness(layer.weight, nearliness)
 
 
 # helper function to verify nearliness of a mask
-def verify_nearliness(mask: torch.Tensor, nearliness: int):
+def _verify_nearliness(mask: torch.Tensor, nearliness: int):
     if nearliness <= 0:
         assert torch.all(mask == torch.zeros(mask.shape[0], mask.shape[1]))
     else:

@@ -6,17 +6,17 @@ from .base_sparsifier import BaseSparsifier
 class NearlyDiagonalSparsifier(BaseSparsifier):
     r"""Nearly Diagonal Sparsifier
 
-    This sparsifier creates a nearly diagonal mask to be applied to the weight matrix. 
-    Nearly Diagonal Matrix is a matrix that contains non-zero elements near the diagonal and the rest are zero. 
+    This sparsifier creates a nearly diagonal mask to be applied to the weight matrix.
+    Nearly Diagonal Matrix is a matrix that contains non-zero elements near the diagonal and the rest are zero.
     An example of a nearly diagonal matrix with degree (or nearliness) 3 and 5 are follows respectively.
     1 1 0 0       1 1 1 0
-    0 1 1 0       1 1 1 1
+    1 1 1 0       1 1 1 1
     0 1 1 1       1 1 1 1
     0 0 1 1       0 1 1 1
     Note that a nearly diagonal matrix with degree 1 is just a matrix with main diagonal populated
 
-    This sparsifier is controlled by one variables:
-    1. `nearliness` defines the number of non-zero diagonal lines that are closest to the main diagonal. 
+    This sparsifier is controlled by one variable:
+    1. `nearliness` defines the number of non-zero diagonal lines that are closest to the main diagonal.
         Currently - supports only odd number
 
     Args:
@@ -27,7 +27,7 @@ class NearlyDiagonalSparsifier(BaseSparsifier):
         defaults = {'nearliness': nearliness}
         super().__init__(defaults=defaults)
 
-    def update_mask(self, layer, nearliness: int,
+    def update_mask(self, layer, nearliness,
                     **kwargs):
         mask = layer.parametrizations.weight[0].mask
         mask.data = torch.zeros_like(mask)
@@ -42,11 +42,10 @@ class NearlyDiagonalSparsifier(BaseSparsifier):
         dist_to_diagonal = nearliness // 2
         # check
         if dist_to_diagonal >= min(height, width):
-            raise ValueError("nearliness cannot be larger than the "
-                            "dimensions of weight matrix.")
+            raise ValueError("nearliness cannot be larger than the dimensions of weight matrix.")
 
         for row in range(0, height):
             # Bounds of entries that needs to be set to 1
             low = max(0, row - dist_to_diagonal)
             high = min(width, row + dist_to_diagonal + 1)
-            mask[row, low:high] = torch.ones(high - low, device=mask.device)
+            mask[row, low:high].fill_(1)
