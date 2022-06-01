@@ -1,7 +1,5 @@
 #include <onnx/onnx_pb.h>
-#include <torch/csrc/onnx/init.h>
-#include <torch/csrc/onnx/onnx.h>
-#include <torch/version.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
@@ -23,6 +21,9 @@
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/onnx/init.h>
+#include <torch/csrc/onnx/onnx.h>
+#include <torch/version.h>
 
 namespace torch {
 namespace onnx {
@@ -43,8 +44,10 @@ void initONNXBindings(PyObject* module) {
              const python::IODescriptor& desc,
              bool onnx_shape_inference,
              bool is_script) {
+            HANDLE_TH_ERRORS
             ONNXAssignOutputShape(
                 graph, tensors, desc, onnx_shape_inference, is_script);
+            END_HANDLE_TH_ERRORS_PYBIND
           })
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def(
@@ -52,15 +55,19 @@ void initONNXBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& graph,
              int opset_version,
              bool fixed_batch_size) {
+            HANDLE_TH_ERRORS
             return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
+            END_HANDLE_TH_ERRORS_PYBIND
           })
       .def("_jit_pass_onnx_preprocess", PreprocessForONNX)
       .def(
           "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, IValue>& paramsDict) {
+            HANDLE_TH_ERRORS
             EvalPeepholeONNX(graph, paramsDict);
             return paramsDict;
+            END_HANDLE_TH_ERRORS_PYBIND
           },
           pybind11::return_value_policy::move)
       .def(
@@ -71,21 +78,25 @@ void initONNXBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, IValue>& paramsDict,
              int opset_version) {
+            HANDLE_TH_ERRORS
             ConstantFoldONNX(
                 graph,
                 paramsDict,
                 opset_version); // overload resolution
             return paramsDict;
+            END_HANDLE_TH_ERRORS_PYBIND
           },
           pybind11::return_value_policy::move)
       .def(
           "_jit_pass_onnx_eliminate_unused_items",
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, IValue>& paramsDict) {
+            HANDLE_TH_ERRORS
             EliminateUnusedItemsONNX(
                 graph->block(),
                 paramsDict); // overload resolution
             return paramsDict;
+            END_HANDLE_TH_ERRORS_PYBIND
           },
           pybind11::return_value_policy::move)
       .def(
@@ -93,8 +104,10 @@ void initONNXBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& graph,
              bool lowprecision_cast,
              int opset_version) {
+            HANDLE_TH_ERRORS
             return ScalarTypeAnalysisForONNX(
                 graph, lowprecision_cast, opset_version);
+            END_HANDLE_TH_ERRORS_PYBIND
           },
           py::arg("graph"),
           py::arg("lowprecision_cast") = true,
@@ -106,7 +119,9 @@ void initONNXBindings(PyObject* module) {
           [](Node* n,
              std::map<std::string, IValue>& params_dict,
              int opset_version) {
+            HANDLE_TH_ERRORS
             ONNXShapeTypeInference(n, params_dict, opset_version);
+            END_HANDLE_TH_ERRORS_PYBIND
           })
       .def(
           "_jit_pass_onnx_graph_shape_type_inference",
@@ -117,7 +132,9 @@ void initONNXBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
       .def("_jit_pass_onnx_lint", ONNXLintGraph)
-      .def("_jit_pass_onnx_function_extraction", torch::jit::onnx::ONNXFunctionExtraction)
+      .def(
+          "_jit_pass_onnx_function_extraction",
+          torch::jit::onnx::ONNXFunctionExtraction)
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
@@ -171,9 +188,11 @@ void initONNXBindings(PyObject* module) {
           [](std::string stream_name = "stdout") -> void {
             std::shared_ptr<std::ostream> out;
             if (stream_name == "stdout") {
-              out = std::shared_ptr<std::ostream>(&std::cout, [](std::ostream*){});
+              out = std::shared_ptr<std::ostream>(
+                  &std::cout, [](std::ostream*) {});
             } else if (stream_name == "stderr") {
-              out = std::shared_ptr<std::ostream>(&std::cerr, [](std::ostream*){});
+              out = std::shared_ptr<std::ostream>(
+                  &std::cerr, [](std::ostream*) {});
             } else {
               std::cerr << "ERROR: only `stdout` and `stderr`"
                         << "are supported as `stream_name`" << std::endl;

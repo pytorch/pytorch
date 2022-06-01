@@ -1,3 +1,4 @@
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
 
 #include <torch/csrc/jit/jit_log.h>
@@ -81,9 +82,11 @@ void functionCallSubstitution(Block* block) {
 // maintain the behavior for ONNX conversion, we replace these function calls
 // with the aten symbolic which can still be used by the ONNX converter.
 void ONNXFunctionCallSubstitution(Graph& graph) {
+  HANDLE_TH_ERRORS
   GRAPH_DUMP("Before function call substitution calls: ", &graph);
   functionCallSubstitution(graph.block());
   GRAPH_DUMP("After function call substitution calls: ", &graph);
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 } // namespace jit

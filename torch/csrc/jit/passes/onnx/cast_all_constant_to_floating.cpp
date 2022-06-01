@@ -1,3 +1,4 @@
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
@@ -69,7 +70,9 @@ void CastAllConstantToFloating(Block* block) {
 }
 
 void CastAllConstantToFloating(const std::shared_ptr<Graph>& graph) {
+  HANDLE_TH_ERRORS
   CastAllConstantToFloating(graph->block());
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 } // namespace jit
 } // namespace torch

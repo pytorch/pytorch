@@ -42,8 +42,10 @@ void removePrintOps(Block* block) {
 }
 
 void RemovePrintOps(std::shared_ptr<Graph>& graph) {
+  HANDLE_TH_ERRORS
   removePrintOps(graph->block());
   GRAPH_DUMP("After RemovePrintOps: ", graph);
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 void checkONNXCompatibility(const c10::FunctionSchema& schema) {
@@ -156,14 +158,17 @@ void preprocessCaffe2Ops(Block* block) {
 }
 
 void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
+  HANDLE_TH_ERRORS
   preprocessCaffe2Ops(graph->block());
   GRAPH_DUMP("After PreprocessCaffe2Ops: ", graph);
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 // Transform PythonOps into Nodes that match ONNX semantics.
 std::shared_ptr<Graph> ToONNX(
     std::shared_ptr<Graph>& graph,
     ::torch::onnx::OperatorExportTypes operator_export_type) {
+  HANDLE_TH_ERRORS
   auto constant_value_map = ConstantValueMap::getInstance();
   ConstantValueMap::ClearMaps();
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
@@ -179,6 +184,7 @@ std::shared_ptr<Graph> ToONNX(
   GRAPH_DUMP("after ToONNX: ", new_graph);
   ConstantValueMap::ClearMaps();
   return new_graph;
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 // BlockToONNX.
