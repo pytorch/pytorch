@@ -688,7 +688,7 @@ imag = _make_prim(
     schema="imag(Tensor self) -> Tensor",
     meta=partial(
         _elementwise_meta,
-        type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
+        type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
     ),
     return_type=RETURN_TYPE.VIEW,
     impl_aten=torch.imag,
@@ -802,7 +802,7 @@ real = _make_prim(
     schema="real(Tensor self) -> Tensor",
     meta=partial(
         _elementwise_meta,
-        type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
+        type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
     ),
     return_type=RETURN_TYPE.VIEW,
     impl_aten=torch.real,
