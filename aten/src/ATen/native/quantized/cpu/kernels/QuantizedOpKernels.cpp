@@ -3240,6 +3240,40 @@ void dequantize_tensor_arm<c10::quint8>(
 
 #endif // defined(__ARM_NEON__) || defined(__aarch64__)
 
+void quantize_scalar_per_tensor_affine_cpu(
+    const float val,
+    Tensor& qtensor,
+    double scale,
+    int64_t zero_point) {
+  check_tensor_memory_format(rtensor, qtensor);
+  const float* rdata = rtensor.data_ptr<float>();
+  int numel = rtensor.numel();
+#if defined(__ARM_NEON__) || defined(__aarch64__)
+  AT_DISPATCH_QINT_TYPES(
+      qtensor.scalar_type(), "quantize_scalar_per_tensor_affine_cpu", [&]() {
+        scalar_t* qdata = qtensor.data_ptr<scalar_t>();
+        auto quantize_range = [&, val](int64_t begin, int64_t end) {
+          quantize_scalar_arm<scalar_t>(
+            val, qdata + begin, end - begin, scale, zero_point);
+        };
+        if (numel >= PARALLEL_THRESHOLD) {
+          at::parallel_for(0, numel, 1, quantize_range);
+        } else {
+          quantize_range(0, numel);
+        }
+      });
+#else
+  // Fallback path
+  AT_DISPATCH_QINT_TYPES(
+      qtensor.scalar_type(), "quantize_scalar_per_tensor_affine_cpu", [&, val]() {
+        scalar_t* qdata = qtensor.data_ptr<scalar_t>();
+        for (const auto i : c10::irange(numel)) {
+          qdata[i] = quantize_val<scalar_t>(scale, zero_point, val);
+        }
+      });
+#endif // defined(__ARM_NEON__) || defined(__aarch64__)
+}
+
 void quantize_tensor_per_tensor_affine_cpu(
     const Tensor& rtensor,
     Tensor& qtensor,
