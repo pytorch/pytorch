@@ -62,8 +62,7 @@ static C10_UNUSED void gather_shape_check(const Tensor& self, int64_t dim,
 // Used for `scatter` and `scatter_add`
 // Tests:
 //  1. index.size(d) <= self.size(d) for all d != dim
-//  2. index.size(d) <= src.size(d) for all d if src is a Tensor
-//  3. index.dim() == self.dim() == src.dim()
+//  2. index.dim() == self.dim() == src.dim()
 static C10_UNUSED void scatter_shape_check(
   const Tensor& self, int64_t dim, const Tensor& index,
   const c10::optional<Tensor>& src_opt = c10::nullopt
@@ -110,8 +109,7 @@ static C10_UNUSED void scatter_shape_check(
     TORCH_CHECK(!is_wrong_shape,
       "Expected index ", index.sizes(),
       " to be smaller than self ", self.sizes(),
-      " apart from dimension ", dim,
-      " and to be smaller size than src ", src.sizes()
+      " apart from dimension ", dim
     );
   }
   else {
