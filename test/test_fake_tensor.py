@@ -42,6 +42,12 @@ class FakeTensorTest(TestCase):
         x = FakeTensor.from_tensor(torch.rand([4, 4]))
         self.assertEqual(x.device.type, "cpu")
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_type_as(self):
+        x = FakeTensor.from_tensor(torch.rand([16, 1], device='cpu'))
+        y = FakeTensor.from_tensor(torch.rand([4, 4], device='cuda'))
+        out = x.type_as(y)
+        self.assertEqual(out.device.type, "cuda")
 
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
