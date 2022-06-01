@@ -64,7 +64,7 @@ def vector_norm(
 ) -> Tensor:
     # Checks
     linalg.utils.check_fp_or_complex(
-        x.dtype, "linalg.vector_norm", allow_half_dtypes=True
+        x.dtype, "linalg.vector_norm", allow_low_precision_dtypes=True
     )
 
     if isinstance(dim, int):
