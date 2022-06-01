@@ -2897,8 +2897,6 @@ void quantized_groupnorm_nhwc_kernel(
 
     constexpr int kFloatVLen = fVec::size();
     int64_t kIntVLen = kFloatVLen * qVec::float_num_vecs();
-    int64_t kNumIntVecInLayer = N / kIntVLen; // Num of int vec in each group
-    int64_t kNonVecRemInLayer = N % kIntVLen; // Num of int scalar
     int64_t channels_per_group = C / G;
     int64_t HxW = N / channels_per_group;
     int64_t kNumIntVecInHxW = channels_per_group / kIntVLen;
@@ -2971,7 +2969,7 @@ void quantized_groupnorm_nhwc_kernel(
               auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
               auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                     x_fake_scale_zp_neg_premul_vec);
-              for (int fvecIdx = 0; fvecIdx < dqXVec.size(); ++fvecIdx) {
+              for (size_t fvecIdx = 0; fvecIdx < dqXVec.size(); ++fvecIdx) {
                 auto scaleVec = fVec::loadu(scale_ptr + vecStartIdx + fvecIdx * kFloatVLen);
                 auto biasVec = fVec::loadu(bias_ptr + vecStartIdx + fvecIdx * kFloatVLen);
                 dqXVec[fvecIdx] = dqXVec[fvecIdx] * scaleVec + biasVec;
@@ -3095,7 +3093,7 @@ void quantized_groupnorm_nhwc_kernel(
             auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
             auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                   x_fake_scale_zp_neg_premul_vec);
-            for (int fvecIdx = 0; fvecIdx < dqXVec.size(); ++fvecIdx) {
+            for (size_t fvecIdx = 0; fvecIdx < dqXVec.size(); ++fvecIdx) {
               auto scaleVec = fVec::loadu(scale_ptr + vecStartIdx + fvecIdx * kFloatVLen);
               auto biasVec = fVec::loadu(bias_ptr + vecStartIdx + fvecIdx * kFloatVLen);
               dqXVec[fvecIdx] = dqXVec[fvecIdx] * scaleVec + biasVec;
@@ -4099,7 +4097,7 @@ REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_stub);
 REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_affine_stub);
 REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_float_qparams_stub);
 REGISTER_NO_AVX512_DISPATCH(quantized_normalize_stub);
-REGISTER_NO_AVX512_DISPATCH(quantized_normalize_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(quantized_groupnorm_nhwc_stub);
 REGISTER_NO_AVX512_DISPATCH(qupsample_bilinear2d_nhwc_stub);
 REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
 REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
