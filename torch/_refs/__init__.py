@@ -1564,8 +1564,8 @@ def addr(
 
 
 def atleast_1d(
-    *args: TensorLikeType,
-) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
+    *args: Union[TensorLikeType, TensorSequenceType],
+) -> Union[TensorLikeType, TensorSequenceType]:
     """Reference implementation of :func:`torch.atleast_1d`."""
     args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
     res = tuple(a if a.ndim >= 1 else unsqueeze(a, 0) for a in args_)
@@ -1583,8 +1583,8 @@ def _unsqueeze_atleast(
 
 
 def atleast_2d(
-    *args: TensorLikeType,
-) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
+    *args: Union[TensorLikeType, TensorSequenceType],
+) -> Union[TensorLikeType, TensorSequenceType]:
     """Reference implementation of :func:`torch.atleast_2d`."""
     args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
     unsqueeze_atleast_1d = partial(_unsqueeze_atleast, atleast_1d, 0)
@@ -1593,8 +1593,8 @@ def atleast_2d(
 
 
 def atleast_3d(
-    *args: TensorLikeType,
-) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
+    *args: Union[TensorLikeType, TensorSequenceType],
+) -> Union[TensorLikeType, TensorSequenceType]:
     """Reference implementation of :func:`torch.atleast_3d`."""
     args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
     unsqueeze_atleast_2d = partial(_unsqueeze_atleast, atleast_2d, -1)
