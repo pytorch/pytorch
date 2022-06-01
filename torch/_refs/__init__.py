@@ -846,6 +846,8 @@ def float_power(
     return prims.pow(a, b)
 
 
+# For reference, see CPython's implementation:
+# https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
 def _floor_divide(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ):
