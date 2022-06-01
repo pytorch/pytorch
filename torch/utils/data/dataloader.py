@@ -37,8 +37,6 @@ from torch.utils.data.datapipes.datapipe import _IterDataPipeSerializationWrappe
 
 from . import _utils
 
-import torch.utils.data.graph_settings
-
 __all__ = [
     "DataLoader",
     "get_worker_info",
