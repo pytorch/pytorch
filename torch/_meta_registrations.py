@@ -149,13 +149,49 @@ def meta_index_Tensor(self, indices):
     # add missing null tensors
     while len(indices) < self.ndim:
         indices.append(None)
+
+    # hasContiguousSubspace
+    #   true if all non-null tensors are adjacent
+    # See:
+    # https://stackoverflow.com/questions/53841497/why-does-numpy-mixed-basic-advanced-indexing-depend-on-slice-adjacency
+    state = 0
+    has_contiguous_subspace = False
+    for index in indices:
+        if state == 0:
+            if index is not None:
+                state = 1
+        elif state == 1:
+            if index is None:
+                state = 2
+        else:
+            if index is not None:
+                break
+    else:
+        has_contiguous_subspace = True
+
+    # transposeToFront
+    # This is the logic that causes the newly inserted dimensions to show up
+    # at the beginning of the tensor, if they're not contiguous
+    if not has_contiguous_subspace:
+        dims = []
+        transposed_indices = []
+        for i, index in enumerate(indices):
+            if index is not None:
+                dims.append(i)
+                transposed_indices.append(index)
+        for i, index in enumerate(indices):
+            if index is None:
+                dims.append(i)
+                transposed_indices.append(index)
+        self = self.permute(dims)
+        indices = transposed_indices
+
     # AdvancedIndex::AdvancedIndex
-    # "In general, the shape of the resultant array will be the concatenation of
-    # the shape of the index array (or the shape that all the index arrays were
-    # broadcast to) with the shape of any unused dimensions (those not indexed)
-    # in the array being indexed."
-    #
-    # But Nones at the beginning of the list get treated specially
+    # Now we can assume the indices have contiguous subspace
+    # This is simplified from AdvancedIndex which goes to more effort
+    # to put the input and indices in a form so that TensorIterator can
+    # take them.  If we write a ref for this, probably that logic should
+    # get implemented
     before_shape: List[int] = []
     after_shape: List[int] = []
     replacement_shape: List[int] = []
