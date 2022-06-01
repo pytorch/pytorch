@@ -484,7 +484,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 .check_not("aten::t") \
                 .run(graph)
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING)
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Needs profiling executor")
     def test_has_profiled_info_aliasing_outputs(self):
         # The expectation is that CallFunction will prevent the final profile node from
         # getting merged into the DifferentiableGraph, and that create_autodiff_subgraphs
@@ -519,7 +519,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             .check("aten::relu") \
             .run(graph)
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING)
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Needs profiling executor")
     def test_diff_graph_inline_no_requires_grad(self):
         with enable_profiling_mode_for_profiling_tests():
             NUM_RUNS = 1
