@@ -8,8 +8,9 @@ from torch.ao.quantization.observer import ObserverBase
 from typing import Tuple
 
 class NonUniformQuantizationObserverBase(ObserverBase):
-    quant_min = None
-    quant_max = None
+    alpha = 0
+    gamma = 0
+    level_indices = torch.Tensor()
 
     def __init__(
         self,
@@ -24,10 +25,6 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         pass
 
 class APoTObserver(NonUniformQuantizationObserverBase):
-    alpha = 0
-    gamma = 0
-    level_indices = torch.Tensor()
-
     def __init__(
         self,
         min_val: torch.Tensor,
@@ -40,8 +37,8 @@ class APoTObserver(NonUniformQuantizationObserverBase):
     def calculate_qparams(self):
         return self._calculate_qparams()
 
-    def _calculate_qparams(self):
-        raise NotImplementedError
+    # def _calculate_qparams(self):
+    #     return NonUniformQuantizationObserverBase._calculate_qparams()
 
     def forward(self, x_orig):
         pass
