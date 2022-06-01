@@ -1838,6 +1838,14 @@ class TestNN(NNTestCase):
         parameters += param_list[-2:]
         check()
 
+    def test_ParameterList_meta(self):
+        p = torch.nn.Parameter(torch.empty(1, device='meta'))
+        self.assertExpectedInline(str(p), """\
+Parameter containing:
+tensor(..., device='meta', size=(1,), requires_grad=True)""")
+        pl = torch.nn.ParameterList([p])
+        self.assertExpectedInline(str(pl), """ParameterList(  (0): Parameter containing: [torch.float64 of size 1])""")
+
     def test_ParameterList_replication(self):
         # The actual replication code from DP cannot be used on CPU so doing it manually here
         def make_param():
