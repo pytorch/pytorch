@@ -864,7 +864,7 @@ class ThroughputBenchmark(object):
     def run_once(self, *args: Any, **kwargs: Any) -> Any: ...
     def benchmark(self, config: BenchmarkConfig) -> BenchmarkExecutionStats: ...
 
-# Defined in torch/csrc/generic/Storage.cpp
+# Defined in torch/csrc/Storage.cpp
 ${legacy_storage_base_hints}
 
 # TODO: where
