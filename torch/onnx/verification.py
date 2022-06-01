@@ -10,7 +10,7 @@ import io
 import os
 import tempfile
 import warnings
-from typing import Any, Mapping, Optional, Sequence, Set, Tuple, Type, Union
+from typing import Any, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -299,12 +299,12 @@ class _GraphDiff:
                 ref_stack = n_ref.sourceRange()
                 if ref_stack:
                     source_printout += (
-                        f"Reference source location:\n{self._indent(ref_stack)}\n"
+                        f"Reference source location:\n{self._indent(str(ref_stack))}\n"
                     )
                 check_stack = n_check.sourceRange()
                 if check_stack:
                     source_printout += (
-                        f"Check source location:\n{self._indent(check_stack)}\n"
+                        f"Check source location:\n{self._indent(str(check_stack))}\n"
                     )
 
                 graph_diff_report += source_printout
@@ -440,7 +440,9 @@ def check_export_model_diff(
     Returns:
         str: A string containing the diff of the exported models.
     """
-    export_options = _experimental.ExportOptions() if export_options is None else export_options
+    export_options = (
+        _experimental.ExportOptions() if export_options is None else export_options
+    )
 
     # TODO: refactor utils.py to remove duplicated code of context setup.
     opset_version = export_options.opset_version

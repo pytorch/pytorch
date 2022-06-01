@@ -63,5 +63,7 @@ class TestVerification(unittest.TestCase):
             ((torch.randn(2, 3), torch.randn(2, 3)), {}),
         ]
 
-        results = verification.check_export_model_diff(SupportedModel(), test_input_sets)
+        results = verification.check_export_model_diff(
+            SupportedModel(), test_input_sets
+        )
         self.assertEqual(results, "")
