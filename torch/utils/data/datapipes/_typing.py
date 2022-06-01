@@ -464,13 +464,26 @@ def _set_datapipe_valid_iterator_id(datapipe):
     return datapipe._valid_iterator_id
 
 
+# Enable/disable profiler for `IterDataPipe`
+_USE_ITERDP_PROFILER = False
+
+
+def set_profiler_for_iterdatapipe(enable: bool) -> None:
+    global _USE_ITERDP_PROFILER
+    _USE_ITERDP_PROFILER = enable
+
+
 def hook_iterator(namespace, profile_name):
     r"""
     Hook that is applied to all `__iter__` of metaclass `_DataPipeMeta`. This is done for the purpose of
     profiling and checking if an iterator is still valid.
     """
     def context():
-        return torch.autograd.profiler.record_function(profile_name)
+        global _USE_ITERDP_PROFILER
+        if _USE_ITERDP_PROFILER:
+            return torch.autograd.profiler.record_function(profile_name)
+        else:
+            return contextlib.nullcontext()
 
     class IteratorDecorator:
         """Wrap the iterator and modifying its `__next__` method"""

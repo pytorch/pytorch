@@ -22,6 +22,7 @@ from torch.utils.data.datapipes.datapipe import (
     DataChunk,
     IterDataPipe,
     MapDataPipe,
+    set_profiler_for_iterdatapipe,
 )
 from torch.utils.data.dataloader import (
     DataLoader,

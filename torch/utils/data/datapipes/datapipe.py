@@ -2,7 +2,7 @@ import functools
 import pickle
 from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
 
-from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta
+from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta, set_profiler_for_iterdatapipe
 from torch.utils.data.dataset import Dataset, IterableDataset
 
 try:
@@ -21,6 +21,7 @@ __all__ = [
     "DFIterDataPipe",
     "IterDataPipe",
     "MapDataPipe",
+    "set_profiler_for_iterdatapipe",
 ]
 
 T = TypeVar('T')
