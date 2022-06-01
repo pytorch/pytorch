@@ -252,14 +252,6 @@ typename std::enable_if<std::is_integral<T>::value, double>::type log2(T x) {
   return ::log(x) / ::log(2.0);
 }
 
-inline float signbit(float x) {
-  throw std::runtime_error("std::signbit is not implemented on older Android");
-}
-
-inline double signbit(double x) {
-  throw std::runtime_error("std::signbit is not implemented on older Android");
-}
-
 } // namespace std
 
 #endif
