@@ -695,6 +695,7 @@ imag = _make_prim(
     doc="",
 )
 
+
 def _isfinite_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.isfinite(a)  # type: ignore[attr-defined]
 
