@@ -13582,7 +13582,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            supports_gradgrad=True,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,  # Need: hardswish_backward
+           supports_fwgrad_bwgrad=True,
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::hardswish"]),
     OpInfo('nn.functional.unfold',

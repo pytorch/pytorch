@@ -733,6 +733,8 @@
 - name: hardswish_backward(Tensor grad_output, Tensor self) -> Tensor
   grad_output: hardswish_backward(grad, self)
   self: at::where(at::logical_and(-3.0 < self, self < 3.0), grad * grad_output / 3.0, at::zeros({}, self.options()))
+  result: "hardswish_backward(grad_output_t, self_p)
+         + at::where(at::logical_and(-3.0 < self_p, self_p < 3.0), self_t * grad_output_p / 3.0, at::zeros({}, self_p.options()))"
 
 - name: hypot(Tensor self, Tensor other) -> Tensor
   self: grad * self / result
