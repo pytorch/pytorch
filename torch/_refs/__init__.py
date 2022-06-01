@@ -1995,7 +1995,7 @@ def tensor_split(
 
     # If indices_or_sections is a tensor, it must be a CPU Long tensor
     if isinstance(indices_or_sections, TensorLike):
-        if not utils.is_cpu(indices_or_sections.device):
+        if not indices_or_sections.device.type == "cpu":
             msg = "tensor_split: if indices_or_sections is a tensor it must be on the CPU, but received one on {0}".format(
                 indices_or_sections.device
             )

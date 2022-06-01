@@ -188,9 +188,16 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
         msg = "Dtypes {0} and {1} are not equal!".format(a.dtype, b.dtype)
         raise AssertionError(msg)
 
-    if a.device.type != b.device.type:
-        msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
-        raise AssertionError(msg)
+    if a.device != b.device:
+        # Handles special cuda:0 vs cuda case
+        # TODO: we should review why this happens and see about fixing it
+        if (str(a.device) == "cuda:0" or str(a.device) == "cuda") and (
+            str(b.device) == "cuda:0" or str(b.device) == "cuda"
+        ):
+            pass
+        else:
+            msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
+            raise AssertionError(msg)
 
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
     # same_strides, idx = check_significant_strides(a, b)
@@ -208,7 +215,7 @@ def check_significant_strides(
     # See https://github.com/pytorch/pytorch/issues/77553
     # Only compares strides that are "meaningful" -- strides for dimensions with length > 1
     # and for tensors with more than one element
-    if (is_cuda(a.device) or is_cuda(b.device)) and a.numel() > 0:
+    if (a.device.type == "cuda" or b.device.type == "cuda") and a.numel() > 0:
         for idx in range(a.ndim):
             if a.stride()[idx] != b.stride()[idx] and a.shape[idx] > 1:
                 return False, idx
@@ -437,7 +444,7 @@ def is_same_shape(a: Sequence, b: Sequence) -> bool:
 
 
 def is_cpu_scalar_tensor(a: Any) -> bool:
-    return isinstance(a, TensorLike) and a.ndim == 0 and is_cpu(a.device)
+    return isinstance(a, TensorLike) and a.ndim == 0 and a.device.type == "cpu"
 
 
 def check_same_device(*args, allow_cpu_scalar_tensors):
@@ -486,14 +493,6 @@ def canonicalize_device(device: DeviceLikeType) -> torch.device:
 
     assert isinstance(device, str)
     return torch.device(device)
-
-
-def is_cpu(device: torch.device):
-    return device.type == "cpu"
-
-
-def is_cuda(device: torch.device):
-    return device.type == "cuda"
 
 
 # Asserts if any of the following are true:
@@ -584,7 +583,7 @@ def extract_shape_from_varargs(
 
 
 _integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-_half_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
+_low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
 _float_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 _complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
 
@@ -599,9 +598,9 @@ def is_integer_dtype(dtype: torch.dtype) -> bool:
     return dtype in _integer_dtypes
 
 
-def is_half_dtype(dtype: torch.dtype) -> bool:
+def is_low_precision_dtype(dtype: torch.dtype) -> bool:
     assert isinstance(dtype, torch.dtype)
-    return dtype in _half_dtypes
+    return dtype in _low_precision_dtypes
 
 
 def is_float_dtype(dtype: torch.dtype) -> bool:
