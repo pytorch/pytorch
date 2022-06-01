@@ -446,19 +446,18 @@ class TestNearlyDiagonalSparsifier(TestCase):
 
                 layer = getattr(model, layer_name)
                 # verify that mask created corresponds to the nearliness
-                _verify_nearliness(layer.weight, nearliness)
+                self._verify_nearliness(layer.weight, nearliness)
 
-
-# helper function to verify nearliness of a mask
-def _verify_nearliness(mask: torch.Tensor, nearliness: int):
-    if nearliness <= 0:
-        assert torch.all(mask == torch.zeros(mask.shape[0], mask.shape[1]))
-    else:
-        height, width = mask.shape
-        dist_to_diagonal = nearliness // 2
-        for row in range(0, height):
-            for col in range(0, width):
-                if abs(row - col) <= dist_to_diagonal:
-                    assert mask[row, col] == 1
-                else:
-                    assert mask[row, col] == 0
+    # helper function to verify nearliness of a mask
+    def _verify_nearliness(self, mask: torch.Tensor, nearliness: int):
+        if nearliness <= 0:
+            assert torch.all(mask == torch.zeros(mask.shape[0], mask.shape[1]))
+        else:
+            height, width = mask.shape
+            dist_to_diagonal = nearliness // 2
+            for row in range(0, height):
+                for col in range(0, width):
+                    if abs(row - col) <= dist_to_diagonal:
+                        assert mask[row, col] == 1
+                    else:
+                        assert mask[row, col] == 0
