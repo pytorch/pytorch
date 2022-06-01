@@ -2392,10 +2392,9 @@ def sample_inputs_broadcast_shapes(op, device, dtype, requires_grad, **kwargs):
         ((0, 1, 3), (0, 10, 3))
     )
 
+    # restricting test runs on cpu/bool to prevent repetitive runs
     if dtype is torch.bool and device == 'cpu':
         for shape in shapes:
-            #broadcasts_input = (shape_lhs != torch.broadcast_shapes(shape_lhs, shape_rhs))
-            print("testing : ", shape)
             inp, *arg0 = shape
             yield SampleInput(inp, args=arg0)
 
@@ -10688,7 +10687,7 @@ op_db: List[OpInfo] = [
            op=torch.broadcast_shapes,
            ref=np.broadcast_shapes,
            dtypes=_dispatch_dtypes((torch.bool,)),
-           dtypesIfCUDA=_dispatch_dtypes(),  # broadcast_shapes runs only on cpu
+           dtypesIfCUDA=_dispatch_dtypes(),  # broadcast_shapes is device independent
            supports_out=False,
            supports_gradgrad=False,
            assert_autodiffed=False,
