@@ -3,9 +3,9 @@ from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
 __all__ = [
+    'complete_elliptic_integral_k_e',
+    'complete_elliptic_integral_k_k',
     'digamma',
-    'elliptic_integral_e',
-    'elliptic_integral_k',
     'entr',
     'erf',
     'erfc',
@@ -853,9 +853,9 @@ Example::
 
 """.format(**common_args))
 
-elliptic_integral_e = _add_docstr(_special.special_elliptic_integral_e,
-                                  r"""
-elliptic_integral_e(input, *, out=None) -> Tensor
+complete_elliptic_integral_k_e = _add_docstr(_special.special_complete_elliptic_integral_k_e,
+                                             r"""
+complete_elliptic_integral_k_e(input, *, out=None) -> Tensor
 
 Complete elliptic integral :math:`E(m)`.
 
@@ -866,9 +866,9 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-elliptic_integral_k = _add_docstr(_special.special_elliptic_integral_k,
-                                  r"""
-elliptic_integral_k(input, *, out=None) -> Tensor
+complete_elliptic_integral_k_k = _add_docstr(_special.special_complete_elliptic_integral_k_k,
+                                             r"""
+complete_elliptic_integral_k_k(input, *, out=None) -> Tensor
 
 Complete elliptic integral of the first kind :math:`K(m)`.
 

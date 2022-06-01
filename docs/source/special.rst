@@ -51,5 +51,5 @@ Elliptic Functions and Integrals
 Elliptic Integrals
 """"""""""""""""""
 
-.. autofunction:: elliptic_integral_e
-.. autofunction:: elliptic_integral_k
+.. autofunction:: complete_elliptic_integral_k_e
+.. autofunction:: complete_elliptic_integral_k_k

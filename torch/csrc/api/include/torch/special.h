@@ -566,35 +566,37 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
 }
 
 /// Complete elliptic integral E(m).
-/// See https://pytorch.org/docs/master/special.html#torch.special.special_elliptic_integral_e.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.special_complete_elliptic_integral_k_e.
 ///
 /// Example:
 /// ```
 /// auto t = torch::randn(128, dtype=kDouble);
-/// torch::special::special_elliptic_integral_e(t);
+/// torch::special::special_complete_elliptic_integral_k_e(t);
 /// ```
-inline Tensor special_elliptic_integral_e(const Tensor& self) {
-  return torch::special_elliptic_integral_e(self);
+inline Tensor special_complete_elliptic_integral_k_e(const Tensor& self) {
+  return torch::special_complete_elliptic_integral_k_e(self);
 }
 
-inline Tensor& special_elliptic_integral_e_out(Tensor& result, const Tensor& self) {
-  return torch::special_elliptic_integral_k_out(result, self);
+inline Tensor& special_complete_elliptic_integral_k_e_out(Tensor& result, const Tensor& self) {
+  return torch::special_complete_elliptic_integral_k_e_out(result, self);
 }
 
 /// Complete elliptic integral of the first kind K(m).
+///
 /// See https://pytorch.org/docs/master/special.html#torch.special.special_elliptic_integral_k.
 ///
 /// Example:
 /// ```
 /// auto t = torch::randn(128, dtype=kDouble);
-/// torch::special::special_elliptic_integral_k(t);
+/// torch::special::special_complete_elliptic_integral_k_k(t);
 /// ```
-inline Tensor special_elliptic_integral_k(const Tensor& self) {
-  return torch::special_elliptic_integral_k(self);
+inline Tensor special_complete_elliptic_integral_k_k(const Tensor& self) {
+  return torch::special_complete_elliptic_integral_k_k(self);
 }
 
-inline Tensor& special_elliptic_integral_k_out(Tensor& result, const Tensor& self) {
-  return torch::special_elliptic_integral_k_out(result, self);
+inline Tensor& special_complete_elliptic_integral_k_k_out(Tensor& result, const Tensor& self) {
+  return torch::special_complete_elliptic_integral_k_k_out(result, self);
 }
 
 }} // torch::special

@@ -559,21 +559,21 @@ void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
       });
 }
 
-static void elliptic_integral_e_kernel(TensorIteratorBase& iterator){
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_integral_e_cpu", [&]() {
+static void complete_elliptic_integral_k_e_kernel(TensorIteratorBase& iterator) {
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "complete_elliptic_integral_k_e_cpu", [&]() {
         cpu_kernel(iterator, [](scalar_t x) -> scalar_t {
-            return elliptic_integral_e(x);
+            return complete_elliptic_integral_k_e(x);
         });
     });
-} // elliptic_integral_e_kernel
+} // complete_elliptic_integral_k_e_kernel(TensorIteratorBase& iterator)
 
-static void elliptic_integral_k_kernel(TensorIteratorBase& iterator){
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_integral_k_cpu", [&]() {
+static void complete_elliptic_integral_k_k_kernel(TensorIteratorBase& iterator) {
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "complete_elliptic_integral_k_k_cpu", [&]() {
         cpu_kernel(iterator, [](scalar_t x) -> scalar_t {
-            return elliptic_integral_k(x);
+            return complete_elliptic_integral_k_k(x);
         });
     });
-} // elliptic_integral_e_kernel
+} // complete_elliptic_integral_k_k_kernel(TensorIteratorBase& iterator)
 
 // TODO: Disable cont. branch to test more risky code
 
@@ -665,8 +665,8 @@ REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
 REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
 REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
-REGISTER_DISPATCH(special_elliptic_integral_e_stub, &CPU_CAPABILITY::elliptic_integral_e_kernel);
-REGISTER_DISPATCH(special_elliptic_integral_k_stub, &CPU_CAPABILITY::elliptic_integral_k_kernel);
+REGISTER_DISPATCH(complete_elliptic_integral_k_e_stub, &CPU_CAPABILITY::complete_elliptic_integral_k_e_kernel);
+REGISTER_DISPATCH(complete_elliptic_integral_k_k_stub, &CPU_CAPABILITY::complete_elliptic_integral_k_k_kernel);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(acos)

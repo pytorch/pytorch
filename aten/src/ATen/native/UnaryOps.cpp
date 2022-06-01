@@ -87,8 +87,8 @@ CREATE_UNARY_META_FUNC(bitwise_not)
 CREATE_UNARY_META_FUNC(frac)
 CREATE_UNARY_META_FUNC(round)
 CREATE_UNARY_META_FUNC(sgn)
-CREATE_UNARY_META_FUNC(special_elliptic_integral_e)
-CREATE_UNARY_META_FUNC(special_elliptic_integral_k)
+CREATE_UNARY_META_FUNC(special_complete_elliptic_integral_k_e)
+CREATE_UNARY_META_FUNC(special_complete_elliptic_integral_k_k)
 
 TORCH_META_FUNC2(round, decimals)(const Tensor& self, int64_t decimals){
   build_unary_op(maybe_get_output(), self);
@@ -193,8 +193,8 @@ CREATE_UNARY_TORCH_IMPL_FUNC(sqrt_out, sqrt_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan_out, tan_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh_out, tanh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(trunc_out, trunc_stub)
-CREATE_UNARY_TORCH_IMPL_FUNC(special_elliptic_integral_e_out, special_elliptic_integral_e_stub)
-CREATE_UNARY_TORCH_IMPL_FUNC(special_elliptic_integral_k_out, special_elliptic_integral_k_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_complete_elliptic_integral_k_e_out, special_complete_elliptic_integral_k_e_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_complete_elliptic_integral_k_k_out, special_complete_elliptic_integral_k_k_stub)
 
 TORCH_IMPL_FUNC(round_decimals_out)
 (const Tensor& self, int64_t decimals, const Tensor& result) {
@@ -868,8 +868,8 @@ DEFINE_DISPATCH(tanh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-v
 DEFINE_DISPATCH(trigamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(trunc_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lgamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(special_elliptic_integral_e_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(special_elliptic_integral_k_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_complete_elliptic_integral_k_e_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_complete_elliptic_integral_k_k_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 } // namespace native
 } // namespace at

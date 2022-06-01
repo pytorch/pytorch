@@ -374,37 +374,37 @@ void entr_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
-const char elliptic_integral_e_name[] = "elliptic_integral_e";
+const char complete_elliptic_integral_k_e_name[] = "complete_elliptic_integral_k_e";
 
-void elliptic_integral_e_kernel_cuda(TensorIteratorBase& iterator) {
+void complete_elliptic_integral_k_e_kernel_cuda(TensorIteratorBase& iterator) {
 #ifdef USE_JITERATOR
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_integral_e_cuda", [&]() {
-        jitted_gpu_kernel<elliptic_integral_e_name, scalar_t, scalar_t, 1>(iterator, elliptic_integral_e_string);
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "complete_elliptic_integral_k_e_cuda", [&]() {
+        jitted_gpu_kernel<complete_elliptic_integral_k_e_name, scalar_t, scalar_t, 1>(iterator, complete_elliptic_integral_k_e_string);
     });
 #else
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_integral_e_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "complete_elliptic_integral_k_e_cuda", [&]() {
         gpu_kernel(iterator, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
-            return elliptic_integral_e<scalar_t>(x);
+            return complete_elliptic_integral_k_e<scalar_t>(x);
         });
     });
 #endif
-} // elliptic_integral_e_kernel_cuda
+} // complete_elliptic_integral_k_e_kernel_cuda(TensorIteratorBase& iterator)
 
-const char elliptic_integral_k_name[] = "elliptic_integral_k";
+const char complete_elliptic_integral_k_k_name[] = "complete_elliptic_integral_k_k";
 
-void elliptic_integral_k_kernel_cuda(TensorIteratorBase& iterator) {
+void complete_elliptic_integral_k_k_kernel_cuda(TensorIteratorBase& iterator) {
 #ifdef USE_JITERATOR
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_integral_k_cuda", [&]() {
-        jitted_gpu_kernel<elliptic_integral_k_name, scalar_t, scalar_t, 1>(iterator, elliptic_integral_k_string);
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "complete_elliptic_integral_k_k_cuda", [&]() {
+        jitted_gpu_kernel<complete_elliptic_integral_k_k_name, scalar_t, scalar_t, 1>(iterator, complete_elliptic_integral_k_k_string);
     });
 #else
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_integral_k_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "complete_elliptic_integral_k_k_cuda", [&]() {
         gpu_kernel(iterator, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
-            return elliptic_integral_k<scalar_t>(x);
+            return complete_elliptic_integral_k_k<scalar_t>(x);
         });
     });
 #endif
-} // elliptic_integral_k_kernel_cuda
+} // complete_elliptic_integral_k_k_kernel_cuda(TensorIteratorBase& iterator)
 
 REGISTER_DISPATCH(exp2_stub, &exp2_kernel_cuda);
 REGISTER_DISPATCH(i0_stub, &i0_kernel_cuda);
@@ -422,8 +422,8 @@ REGISTER_DISPATCH(special_entr_stub, &entr_kernel_cuda);
 REGISTER_DISPATCH(special_ndtri_stub, &ndtri_kernel_cuda);
 REGISTER_DISPATCH(special_log_ndtr_stub, &log_ndtr_kernel_cuda);
 REGISTER_DISPATCH(special_erfcx_stub, &erfcx_kernel_cuda);
-REGISTER_DISPATCH(special_elliptic_integral_e_stub, &elliptic_integral_e_kernel_cuda);
-REGISTER_DISPATCH(special_elliptic_integral_k_stub, &elliptic_integral_k_kernel_cuda);
+REGISTER_DISPATCH(special_complete_elliptic_integral_k_e_stub, &complete_elliptic_integral_k_e_kernel_cuda);
+REGISTER_DISPATCH(special_complete_elliptic_integral_k_k_stub, &complete_elliptic_integral_k_k_kernel_cuda);
 
 } // namespace native
 } // namespace at
