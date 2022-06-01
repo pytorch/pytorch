@@ -36,6 +36,8 @@ from torchgen.model import (
 from torchgen.native_function_generation import (
     pre_group_native_functions,
     add_generated_native_functions,
+    gen_composite_functional_kernel,
+    gen_composite_out_kernel,
 )
 from torchgen.api.types import (
     Binding,
@@ -76,7 +78,6 @@ from torchgen.gen_functionalization_type import (
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
     gen_composite_view_copy_kernel,
-    gen_composite_functional_kernel,
 )
 
 T = TypeVar("T")
@@ -2274,6 +2275,12 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
             "GeneratedCompositeFunctional_Definitions": list(
                 mapMaybe(
                     gen_composite_functional_kernel,
+                    structured_native_functions,
+                )
+            ),
+            "GeneratedCompositeOut_Definitions": list(
+                mapMaybe(
+                    gen_composite_out_kernel,
                     structured_native_functions,
                 )
             ),
