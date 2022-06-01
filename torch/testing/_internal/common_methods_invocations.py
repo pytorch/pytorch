@@ -19535,6 +19535,10 @@ python_ref_db = [
         torch_opinfo_name="bitwise_xor",
     ),
     ElementwiseBinaryPythonRefInfo(
+        "_refs.copysign",
+        torch_opinfo_name="copysign",
+    ),
+    ElementwiseBinaryPythonRefInfo(
         "_refs.div",
         torch_opinfo_name="div",
         torch_opinfo_variant_name="no_rounding_mode",
@@ -19587,6 +19591,13 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
+        # bfloat16 floor_divide compared with a float32 reference works inconsistently
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.bfloat16,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.bfloat16,)),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.fmax",
