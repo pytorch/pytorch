@@ -10,13 +10,14 @@
 #include <ATen/native/quantized/fake_quant_affine.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/cpu/utils.h>
-#include "c10/core/Scalar.h"
+#include <c10/core/Scalar.h>
 #include <c10/util/irange.h>
 
 #include <cmath>
 #ifdef USE_FBGEMM
 #include <cpuinfo.h>
 #include <fbgemm/QuantUtils.h>
+#include <fbgemm/QuantUtilsAvx2.h>
 #include <fbgemm/Utils.h>
 #endif
 #ifdef _OPENMP
@@ -2729,33 +2730,70 @@ void quantized_normalize_kernel(
 
 namespace fbgemm_overload_utils {
 namespace {
-
-// this function is analogous to fbgemm::Quantize, except src is a
-// float point value instead of a pointer. this function is created for
+// The functions in this namespace are analogous to fbgemm::Quantize, except src is a
+// float point value instead of a pointer. these templated functions are created for
 // the purpose of quantizing a single value and broadcast assigning it
-// to the destination tensor
-template <typename T, bool LEGACY>
-void Quantize(const float src, T* dst, int64_t len, const fbgemm::TensorQuantizationParams& qparams,
-                 int thread_id, int num_threads) {
-  bool avx2_support = cpuinfo_initialize() && fbgemm::fbgemmHasAvx2Support();
-  bool fma_support = cpuinfo_has_x86_fma3();
-  int64_t i_begin, i_end;
-  fbgemm::fbgemmPartition1D(thread_id, num_threads, len, i_begin, i_end);
-  if (avx2_support && fma_support && qparams.precision == 8) {
-    /* fast path  */
-    fbgemm::QuantizeAvx2<T, LEGACY>(
-        &src, &dst[i_begin], i_end - i_begin, qparams);
-  } else {
-    for (int64_t i = i_begin; i < i_end; ++i) {
-      dst[i] = fbgemm::Quantize<T, LEGACY>(src, qparams);
-    }
-  }
-}
+// to the destination quantized tensor. Example use case: fill_quantized
 
-template void Quantize<uint8_t, false>(const float src, uint8_t* dst, int64_t len, const fbgemm::TensorQuantizationParams& qparams,
-                 int thread_id, int num_threads);
-template void Quantize<int8_t, false>(const float src, int8_t* dst, int64_t len, const fbgemm::TensorQuantizationParams& qparams,
-                 int thread_id, int num_threads);
+template <typename T, bool LEGACY = true>
+FBGEMM_API void Quantize(
+    const float src,
+    T* dst,
+    std::int64_t len,
+    const fbgemm::TensorQuantizationParams& qparams,
+    int thread_id = 0,
+    int num_threads = 1);
+
+#define FBGEMM_SPECIALIZED_QUANTIZE(T, LEGACY)                              \
+  template <>                                                               \
+  void Quantize<T, LEGACY>(                                                 \
+    const float src,                                                        \
+    T* dst,                                                                 \
+    int64_t len,                                                            \
+    const fbgemm::TensorQuantizationParams& qparams,                        \
+    int thread_id,                                                          \
+    int num_threads) {                                                      \
+    int64_t i_begin, i_end;                                                 \
+    fbgemm::fbgemmPartition1D(thread_id, num_threads, len, i_begin, i_end); \
+    for (int64_t i = i_begin; i < i_end; ++i) {                             \
+      dst[i] = fbgemm::Quantize<T, LEGACY>(src, qparams);                   \
+    }                                                                       \
+  }
+FBGEMM_SPECIALIZED_QUANTIZE(uint16_t, true)
+FBGEMM_SPECIALIZED_QUANTIZE(int16_t, true)
+FBGEMM_SPECIALIZED_QUANTIZE(int32_t, true)
+FBGEMM_SPECIALIZED_QUANTIZE(uint16_t, false)
+FBGEMM_SPECIALIZED_QUANTIZE(int16_t, false)
+FBGEMM_SPECIALIZED_QUANTIZE(int32_t, false)
+#undef FBGEMM_SPECIALIZED_QUANTIZE
+
+#define FBGEMM_SPECIALIZED_QUANTIZE_AVX2(T, LEGACY)                             \
+  template <>                                                                   \
+  void Quantize<T, LEGACY>(                                                     \
+      const float src,                                                          \
+      T* dst, int64_t len,                                                      \
+      const fbgemm::TensorQuantizationParams& qparams,                          \
+      int thread_id,                                                            \
+      int num_threads) {                                                        \
+    bool avx2_support = cpuinfo_initialize() && fbgemm::fbgemmHasAvx2Support(); \
+    bool fma_support = cpuinfo_has_x86_fma3();                                  \
+    int64_t i_begin, i_end;                                                     \
+    fbgemm::fbgemmPartition1D(thread_id, num_threads, len, i_begin, i_end);     \
+    if (avx2_support && fma_support && qparams.precision == 8) {                \
+      /* fast path  */                                                          \
+      fbgemm::QuantizeAvx2<T, LEGACY>(                                          \
+          &src, &dst[i_begin], i_end - i_begin, qparams);                       \
+    } else {                                                                    \
+      for (int64_t i = i_begin; i < i_end; ++i) {                               \
+        dst[i] = fbgemm::Quantize<T, LEGACY>(src, qparams);                     \
+      }                                                                         \
+    }                                                                           \
+  }
+FBGEMM_SPECIALIZED_QUANTIZE_AVX2(int8_t, true)
+FBGEMM_SPECIALIZED_QUANTIZE_AVX2(uint8_t, true)
+FBGEMM_SPECIALIZED_QUANTIZE_AVX2(int8_t, false)
+FBGEMM_SPECIALIZED_QUANTIZE_AVX2(uint8_t, false)
+#undef FBGEMM_SPECIALIZED_QUANTIZE_AVX2
 
 } // anonymous namespace
 } // fbgemm_overload_utils
@@ -3961,6 +3999,7 @@ REGISTER_NO_AVX512_DISPATCH(qthreshold_stub);
 REGISTER_NO_AVX512_DISPATCH(qtopk_stub);
 REGISTER_NO_AVX512_DISPATCH(fake_quant_grad_learnable_channel_stub);
 REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_stub);
+REGISTER_NO_AVX512_DISPATCH(quantize_scalar_per_tensor_affine_stub);
 REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_affine_stub);
 REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_float_qparams_stub);
 REGISTER_NO_AVX512_DISPATCH(quantized_normalize_stub);
@@ -4014,17 +4053,29 @@ REGISTER_DISPATCH(qtopk_stub, &qtopk_kernel);
 REGISTER_DISPATCH(fake_quant_grad_learnable_channel_stub,
                   &fake_quantize_learnable_channel_grad_kernel_cpu);
 REGISTER_DISPATCH(
+    quantize_scalar_per_tensor_affine_stub,
+    &quantize_scalar_per_tensor_affine_cpu);
+REGISTER_DISPATCH(
     quantize_tensor_per_tensor_affine_stub,
     &quantize_tensor_per_tensor_affine_cpu);
 REGISTER_DISPATCH(
+    quantize_scalar_per_channel_affine_stub,
+    &quantize_scalar_per_channel_affine_cpu);
+REGISTER_DISPATCH(
     quantize_tensor_per_channel_affine_stub,
     &quantize_tensor_per_channel_affine_cpu);
+REGISTER_DISPATCH(
+    quantize_scalar_per_channel_float_qparams_stub,
+    &quantize_scalar_per_channel_float_qparams_cpu);
 REGISTER_DISPATCH(
     quantize_tensor_per_channel_float_qparams_stub,
     &quantize_tensor_per_channel_float_qparams_cpu);
 REGISTER_DISPATCH(quantized_normalize_stub, &quantized_normalize_kernel);
 REGISTER_DISPATCH(qupsample_bilinear2d_nhwc_stub,
                   &qupsample_bilinear2d_nhwc_kernel);
+REGISTER_DISPATCH(
+    quantize_scalar_per_tensor_affine_sub_byte_stub,
+    &quantize_scalar_per_tensor_affine_sub_byte_cpu);
 REGISTER_DISPATCH(
     quantize_tensor_per_tensor_affine_sub_byte_stub,
     &quantize_tensor_per_tensor_affine_sub_byte_cpu);

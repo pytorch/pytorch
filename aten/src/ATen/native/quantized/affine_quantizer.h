@@ -7,13 +7,34 @@
 namespace at {
 namespace native {
 
+Tensor& quantize_scalar_per_tensor_affine(
+    const float val,
+    Tensor& qtensor,
+    double scale,
+    int64_t zero_point);
+
 Tensor& quantize_tensor_per_tensor_affine(
     const Tensor& rtensor,
     Tensor& qtensor,
     double scale,
     int64_t zero_point);
+
+Tensor& quantize_scalar_per_channel_affine(
+    const float val,
+    Tensor& qtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis);
+
 Tensor& quantize_tensor_per_channel_affine(
     const Tensor& rtensor,
+    Tensor& qtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis);
+
+Tensor& quantize_scalar_per_channel_float_qparams(
+    const float val,
     Tensor& qtensor,
     Tensor scales,
     Tensor zero_points,
@@ -31,12 +52,14 @@ Tensor& dequantize_tensor_per_tensor_affine(
     Tensor& rtensor,
     double scale,
     int64_t zero_point);
+
 Tensor& dequantize_tensor_per_channel_affine(
     const Tensor& qtensor,
     Tensor& rtensor,
     Tensor scales,
     Tensor zero_points,
     int64_t axis);
+
 Tensor& dequantize_tensor_per_channel_float_qparams(
     const Tensor& qtensor,
     Tensor& rtensor,
@@ -84,12 +107,26 @@ using quantize_tensor_per_tensor_affine_sub_byte_fn =
 using dequantize_tensor_per_tensor_affine_sub_byte_fn =
     void (*)(const Tensor& qtensor, Tensor& rtensor, float scale, float zero_point);
 
+using quantize_scalar_per_tensor_affine_fn = void (*)(const float val, Tensor& qtensor, double scale, int64_t zero_point);
+using quantize_scalar_per_channel_affine_fn = void (*)(const float val, Tensor& qtensor, const Tensor& scales, const Tensor& zero_points, int64_t axis);
+using quantize_scalar_per_channel_float_qparams_fn = void (*)(const float val, Tensor& qtensor, const Tensor& scales, const Tensor& zero_points, int64_t axis);
+using quantize_scalar_per_tensor_affine_sub_byte_fn = void (*)(const float val, Tensor& qtensor, float scale, float zero_point);
+
+DECLARE_DISPATCH(
+    quantize_scalar_per_tensor_affine_fn,
+    quantize_scalar_per_tensor_affine_stub);
 DECLARE_DISPATCH(
     quantize_tensor_per_tensor_affine_fn,
     quantize_tensor_per_tensor_affine_stub);
 DECLARE_DISPATCH(
+    quantize_scalar_per_channel_affine_fn,
+    quantize_scalar_per_channel_affine_stub);
+DECLARE_DISPATCH(
     quantize_tensor_per_channel_affine_fn,
     quantize_tensor_per_channel_affine_stub);
+DECLARE_DISPATCH(
+    quantize_scalar_per_channel_float_qparams_fn,
+    quantize_scalar_per_channel_float_qparams_stub);
 DECLARE_DISPATCH(
     quantize_tensor_per_channel_float_qparams_fn,
     quantize_tensor_per_channel_float_qparams_stub);
@@ -103,11 +140,12 @@ DECLARE_DISPATCH(
 DECLARE_DISPATCH(
     dequantize_tensor_per_channel_float_qparams_fn,
     dequantize_tensor_per_channel_float_qparams_stub);
-
 DECLARE_DISPATCH(
     quantize_tensor_per_tensor_affine_sub_byte_fn,
     quantize_tensor_per_tensor_affine_sub_byte_stub);
-
+DECLARE_DISPATCH(
+    quantize_scalar_per_tensor_affine_sub_byte_fn,
+    quantize_scalar_per_tensor_affine_sub_byte_stub);
 DECLARE_DISPATCH(
     dequantize_tensor_per_tensor_affine_sub_byte_fn,
     dequantize_tensor_per_tensor_affine_sub_byte_stub);

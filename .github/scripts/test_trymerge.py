@@ -77,7 +77,7 @@ class TestGitHubPR(TestCase):
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_match_rules(self, mocked_gql: Any) -> None:
         "Tests that PR passes merge rules"
-        pr = GitHubPR("pytorch", "pytorch", 71759)
+        pr = GitHubPR("pytorch", "pytorch", 77700)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
 

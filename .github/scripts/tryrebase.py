@@ -13,13 +13,14 @@ def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Rebase PR into branch")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--stable", action="store_true")
     parser.add_argument("pr_num", type=int)
     return parser.parse_args()
 
 
-def rebase_onto(pr: GitHubPR, repo: GitRepo, dry_run: bool = False) -> None:
+def rebase_onto(pr: GitHubPR, repo: GitRepo, dry_run: bool = False, stable: bool = False) -> None:
     branch = f"pull/{pr.pr_num}/head"
-    onto_branch = pr.default_branch()
+    onto_branch = "refs/remotes/origin/viable/strict" if stable else pr.default_branch()
     remote_url = f"https://github.com/{pr.info['headRepository']['nameWithOwner']}.git"
     refspec = f"{branch}:{pr.head_ref()}"
 
@@ -39,14 +40,22 @@ def rebase_onto(pr: GitHubPR, repo: GitRepo, dry_run: bool = False) -> None:
                         "git pull --rebase`)", dry_run=dry_run)
 
 
-def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, dry_run: bool = False) -> None:
+def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, dry_run: bool = False, stable: bool = False) -> None:
     if subprocess.run([sys.executable, "-m", "ghstack", "--help"], capture_output=True).returncode != 0:
         subprocess.run([sys.executable, "-m", "pip", "install", "ghstack"])
     orig_ref = f"{re.sub(r'/head$', '/orig', pr.head_ref())}"
-    onto_branch = pr.default_branch()
+    onto_branch = "refs/remotes/origin/viable/strict" if stable else pr.default_branch()
 
     repo.fetch(orig_ref, orig_ref)
     repo._run_git("rebase", onto_branch, orig_ref)
+
+    os.environ["OAUTH_TOKEN"] = os.environ["GITHUB_TOKEN"]
+    with open('.ghstackrc', 'w+') as f:
+        f.write('[ghstack]\n' +
+                "github_url=github.com\n" +
+                "github_username=pytorchmergebot\n" +
+                "remote_name=origin")
+
     if dry_run:
         print("Don't know how to dry-run ghstack")
     else:
@@ -102,9 +111,9 @@ def main() -> None:
 
     try:
         if pr.is_ghstack_pr():
-            rebase_ghstack_onto(pr, repo, dry_run=args.dry_run)
+            rebase_ghstack_onto(pr, repo, dry_run=args.dry_run, stable=args.stable)
             return
-        rebase_onto(pr, repo, dry_run=args.dry_run)
+        rebase_onto(pr, repo, dry_run=args.dry_run, stable=args.stable)
     except Exception as e:
         msg = f"Rebase failed due to {e}"
         run_url = os.getenv("GH_RUN_URL")

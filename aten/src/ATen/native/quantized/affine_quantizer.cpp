@@ -12,11 +12,15 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(quantize_tensor_per_tensor_affine_stub);
+DEFINE_DISPATCH(quantize_scalar_per_tensor_affine_stub);
+DEFINE_DISPATCH(quantize_scalar_per_channel_affine_stub);
 DEFINE_DISPATCH(quantize_tensor_per_channel_affine_stub);
+DEFINE_DISPATCH(quantize_scalar_per_channel_float_qparams_stub);
 DEFINE_DISPATCH(quantize_tensor_per_channel_float_qparams_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_channel_affine_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub);
+DEFINE_DISPATCH(quantize_scalar_per_tensor_affine_sub_byte_stub);
 DEFINE_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
 
@@ -104,6 +108,31 @@ void checkSameSize(
 
 } // anonymous namespace
 
+Tensor& quantize_scalar_per_tensor_affine(
+    const float val,
+    Tensor& qtensor,
+    double scale,
+    int64_t zero_point) {
+  static constexpr auto fn_name = "quantize_scalar_per_tensor_affine";
+
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+    checkQuantizedTensor<scalar_t>(fn_name, qtensor);
+    checkZeroPoint<underlying_t>(fn_name, zero_point);
+  });
+
+  // Temporary solution to pack the tensor if dtype is torch.quint4x2
+  // Can move this into the fbgemm::Quantize op.
+  if (qtensor.scalar_type() == at::ScalarType::QUInt4x2 || qtensor.scalar_type() == at::ScalarType::QUInt2x4) {
+    quantize_scalar_per_tensor_affine_sub_byte_stub(
+        qtensor.device().type(), val, qtensor, scale, zero_point);
+  } else {
+    quantize_scalar_per_tensor_affine_stub(
+        qtensor.device().type(), val, qtensor, scale, zero_point);
+  }
+  return qtensor;
+}
+
 Tensor& quantize_tensor_per_tensor_affine(
     const Tensor& rtensor,
     Tensor& qtensor,
@@ -131,6 +160,41 @@ Tensor& quantize_tensor_per_tensor_affine(
     quantize_tensor_per_tensor_affine_stub(
         rtensor.device().type(), rtensor, qtensor, scale, zero_point);
   }
+  return qtensor;
+}
+
+Tensor& quantize_scalar_per_channel_affine(
+    const float val,
+    Tensor& qtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis) {
+  static constexpr auto fn_name = "quantize_scalar_per_channel_affine";
+
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+    checkQuantizedTensor<scalar_t>(fn_name, qtensor);
+    if(qtensor.device().type() != c10::DeviceType::CUDA){
+      checkZeroPoints<underlying_t>(fn_name, zero_points);
+    }  // for cuda, this check will occur in the actual cuda function
+  });
+
+  TORCH_CHECK(
+      0 <= axis && axis < qtensor.dim(),
+      "Channel axis out of range in per channel affine quantization. Got: ",
+      axis,
+      "Expected: [0, ",
+      qtensor.dim(),
+      ")");
+  int64_t channel = qtensor.size(axis);
+  TORCH_CHECK(
+      channel == int64_t(scales.numel()),
+      "length of scales must equal to channel");
+  TORCH_CHECK(
+      channel == int64_t(zero_points.numel()),
+      "length of zero_points must equal to channel");
+
+  quantize_scalar_per_channel_affine_stub(
+      qtensor.device().type(), val, qtensor, scales, zero_points, axis);
   return qtensor;
 }
 
@@ -171,6 +235,40 @@ Tensor& quantize_tensor_per_channel_affine(
 
   quantize_tensor_per_channel_affine_stub(
       rtensor.device().type(), rtensor, qtensor, scales, zero_points, axis);
+  return qtensor;
+}
+
+Tensor& quantize_scalar_per_channel_float_qparams(
+    const float val,
+    Tensor& qtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis) {
+  static constexpr auto fn_name =
+      "quantize_scalar_per_channel_float_qparams";
+
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+    checkQuantizedTensor<scalar_t>(fn_name, qtensor);
+  });
+
+  TORCH_CHECK(
+      0 <= axis && axis < qtensor.dim(),
+      "Channel axis out of range in per channel float qparams quantization. Got: ",
+      axis,
+      "Expected: [0, ",
+      qtensor.dim(),
+      ")");
+  int64_t channel = qtensor.size(axis);
+  TORCH_CHECK(
+      channel == int64_t(scales.numel()),
+      "length of scales must equal to channel");
+  TORCH_CHECK(
+      channel == int64_t(zero_points.numel()),
+      "length of zero_points must equal to channel");
+
+  quantize_scalar_per_channel_float_qparams_stub(
+      qtensor.device().type(), val, qtensor, scales, zero_points, axis);
   return qtensor;
 }
 
