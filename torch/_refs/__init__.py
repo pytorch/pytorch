@@ -1960,6 +1960,22 @@ def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return cat(tensors, dim)
 
 
+@out_wrapper
+def hstack(tensors: TensorSequenceType) -> TensorLikeType:
+    check(len(tensors) > 0, "hstack expects a non-empty TensorList")
+    rep = atleast_1d(tensors)
+    if rep[0].ndim == 1:
+        return cat(rep, 0)
+    return cat(rep, 1)
+
+
+@out_wrapper
+def vstack(tensors: TensorSequenceType) -> TensorLikeType:
+    check(len(tensors) > 0, "vstack expects a non-empty TensorList")
+    rep = atleast_2d(tensors)
+    return cat(rep, 0)
+
+
 # Note: although squeeze is documented as having the out= kwarg it doesn't
 def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
     if dim is not None:

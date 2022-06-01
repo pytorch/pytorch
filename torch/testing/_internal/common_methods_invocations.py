@@ -4009,13 +4009,29 @@ def _floor_divide_np(a, b):
     return np.floor_divide(a, b)
 
 def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad, **kwargs):
-    tensors = [
-        make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-        make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-        make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-    ]
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    tensor_shapes = (
+        # First Tensor being 1-D is special
+        # case for hstack
+        ((S,), (S,), (S,)),
+        ((S, S), (S, S), (S, S)),
+    )
+    for s1, s2, s3 in tensor_shapes:
+        tensors = (make_arg(s1,), make_arg(s2,), make_arg(s3))
+        yield SampleInput(tensors)
 
-    return (SampleInput(tensors),)
+def error_inputs_hstack_dstack_vstack(op, device):
+    make_arg = partial(make_tensor, dtype=torch.int32, device=device, requires_grad=False)
+    tensor_shapes = (
+        ((S,), (S, S, S, S), (S,)),
+    )
+    for s1, s2, s3 in tensor_shapes:
+        tensors = (make_arg(s1,), make_arg(s2,), make_arg(s3))
+        # Different dimension tensor
+        yield ErrorInput(SampleInput(tensors), error_regex="Tensors must have same number of dimensions")
+    
+    # empty tensor list
+    yield ErrorInput(SampleInput(()), error_regex="expects a non-empty TensorList")
 
 def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
     return (
@@ -16828,6 +16844,7 @@ op_db: List[OpInfo] = [
     OpInfo('hstack',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
+           error_inputs_func=error_inputs_hstack_dstack_vstack,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            ),
@@ -16929,6 +16946,7 @@ op_db: List[OpInfo] = [
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
+           error_inputs_func=error_inputs_hstack_dstack_vstack,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
@@ -16938,6 +16956,7 @@ op_db: List[OpInfo] = [
     OpInfo('dstack',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
+           error_inputs_func=error_inputs_hstack_dstack_vstack,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            ),
@@ -19800,6 +19819,22 @@ python_ref_db = [
             # https://github.com/pytorch/pytorch/issues/77046
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.hstack",
+        torch_opinfo_name="hstack",
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/78613
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.vstack",
+        torch_opinfo_name="vstack",
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/78613
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
     ),
     PythonRefInfo(
