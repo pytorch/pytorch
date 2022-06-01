@@ -245,6 +245,9 @@ struct cpu_scatter_gather_base_kernel {
 
     auto src_dim_stride = ensure_nonempty_stride(src, dim);
     auto src_dim_size = ensure_nonempty_size(src, dim);
+    int64_t src_non_dim_size = 1;
+    for (const auto d : c10::irange(ensure_nonempty_dim(src.dim())))
+      if (d != dim) src_non_dim_size *= ensure_nonempty_size(src, d);
 
     auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
 
@@ -264,8 +267,7 @@ struct cpu_scatter_gather_base_kernel {
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
           if (dim== self.dim() - 1) {
-            for (const auto nelem : c10::irange(n)) {
-              (void)nelem; //Suppress unused variable warning
+            for (const auto j : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
@@ -278,7 +280,12 @@ struct cpu_scatter_gather_base_kernel {
 
               self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
               index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
-              src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
+              if ((j + 1) % src_non_dim_size == 0) {
+                src_data_bytes -= (src_non_dim_size - 1) * strides[SRC_ITER_STRIDE_IDX];
+              }
+              else {
+                src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
+              }
             }
           }
           else {
@@ -334,6 +341,9 @@ struct cpu_scatter_gather_base_kernel {
 
     auto src_dim_stride = ensure_nonempty_stride(src, dim);
     auto src_dim_size = ensure_nonempty_size(src, dim);
+    int64_t src_non_dim_size = 1;
+    for (const auto d : c10::irange(ensure_nonempty_dim(src.dim())))
+      if (d != dim) src_non_dim_size *= ensure_nonempty_size(src, d);
 
     auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
 
@@ -353,8 +363,7 @@ struct cpu_scatter_gather_base_kernel {
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
           if (dim== self.dim() - 1) {
-            for (const auto nelem : c10::irange(n)) {
-              (void)nelem; //Suppress unused variable warning
+            for (const auto j : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
@@ -367,7 +376,12 @@ struct cpu_scatter_gather_base_kernel {
 
               self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
               index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
-              src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
+              if ((j + 1) % src_non_dim_size == 0) {
+                src_data_bytes -= (src_non_dim_size - 1) * strides[SRC_ITER_STRIDE_IDX];
+              }
+              else {
+                src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
+              }
             }
           }
           else {
@@ -423,6 +437,9 @@ struct cpu_scatter_gather_base_kernel {
 
     auto src_dim_stride = ensure_nonempty_stride(src, dim);
     auto src_dim_size = ensure_nonempty_size(src, dim);
+    int64_t src_non_dim_size = 1;
+    for (const auto d : c10::irange(ensure_nonempty_dim(src.dim())))
+      if (d != dim) src_non_dim_size *= ensure_nonempty_size(src, d);
 
     auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
 
@@ -442,8 +459,7 @@ struct cpu_scatter_gather_base_kernel {
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
           if (dim== self.dim() - 1) {
-            for (const auto nelem : c10::irange(n)) {
-              (void)nelem; //Suppress unused variable warning
+            for (const auto j : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
@@ -456,7 +472,12 @@ struct cpu_scatter_gather_base_kernel {
 
               self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
               index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
-              src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
+              if ((j + 1) % src_non_dim_size == 0) {
+                src_data_bytes -= (src_non_dim_size - 1) * strides[SRC_ITER_STRIDE_IDX];
+              }
+              else {
+                src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
+              }
             }
           }
           else {
@@ -512,6 +533,9 @@ struct cpu_scatter_gather_base_kernel {
 
     auto src_dim_stride = ensure_nonempty_stride(src, dim);
     auto src_dim_size = ensure_nonempty_size(src, dim);
+    int64_t src_non_dim_size = 1;
+    for (const auto d : c10::irange(ensure_nonempty_dim(src.dim())))
+      if (d != dim) src_non_dim_size *= ensure_nonempty_size(src, d);
 
     auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
 
@@ -531,8 +555,7 @@ struct cpu_scatter_gather_base_kernel {
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
           if (dim== self.dim() - 1) {
-            for (const auto nelem : c10::irange(n)) {
-              (void)nelem; //Suppress unused variable warning
+            for (const auto j : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
@@ -545,7 +568,12 @@ struct cpu_scatter_gather_base_kernel {
 
               self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
               index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
-              src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
+              if ((j + 1) % src_non_dim_size == 0) {
+                src_data_bytes -= (src_non_dim_size - 1) * strides[SRC_ITER_STRIDE_IDX];
+              }
+              else {
+                src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
+              }
             }
           }
           else {
