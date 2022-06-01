@@ -1307,35 +1307,28 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
 # For 2-norm and -2 matrix norm, it doesn't compute the singular values, it just compute the norm the same as when p > 2.
 @register_decomposition([aten.norm.Scalar, aten.norm.ScalarOpt_dim])
 @reduction_complex_to_real
-def norm(self: Tensor, p: float, dim: List[int] = None, keepdim: bool = False):
+def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = False):
     if dim is None:
         dim = []
 
     if p == 0:
         return (self != 0).sum(dim, keepdim=keepdim)
-
-    self_ = self.abs()
-    if p == float('inf'):
-        result = self_.amax(dim, keepdim=keepdim)
+    elif p == float('inf'):
+        return self.abs().amax(dim, keepdim=keepdim)
     elif p == -float('inf'):
-        result = self_.amin(dim, keepdim=keepdim)
-    elif p == 1:
-        result = self_.sum(dim, keepdim=keepdim)
-    elif p == 2:
-        result = self_.square().sum(dim, keepdim=keepdim).sqrt()
-    else:
-        result = self_.pow(p).sum(dim, keepdim=keepdim).pow(1 / p)
-    return result
-    # def fast_pow(x, p):
-    #     if p == 1.0:
-    #         return x
-    #     elif p == 2.0:
-    #         return prims.square(x)
-    #     elif p == 0.5:
-    #         return prims.sqrt(x)
-            
-    #     else:
-    #         return prims.pow(x, p)
-    # if not (ord % 2.0 == 0.0 and is_float_dtype(x.dtype)):
-    #         x = prims.abs(x)
-    #     return to_result_dtype(fast_pow(reduce_sum(fast_pow(x, ord)), 1.0 / ord))
+        return self.abs().amin(dim, keepdim=keepdim)
+
+    def fast_pow(x, ord):
+        if ord == 1.0:
+            return x
+        elif ord == 2.0:
+            return x.square()
+        elif ord == 0.5:
+            return x.sqrt()
+        else:
+            return x.pow(ord)
+
+    if not (p % 2.0 == 0.0 and utils.is_float_dtype(self.dtype)):
+        self = self.abs()
+    
+    return fast_pow(fast_pow(self, p).sum(dim, keepdim=keepdim), 1.0 / p)
