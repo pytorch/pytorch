@@ -1305,7 +1305,7 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
 # torch.ops.aten.norm only supports numeric p, does not support Frobenius norm or nuclear norm
 @register_decomposition([aten.norm.Scalar, aten.norm.ScalarOpt_dim])
 @reduction_complex_to_real
-def norm(self: Tensor, p: float, dim: List[int] = None, keepdim: bool = False):
+def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = False):
     if dim is None:
         dim = []
 
