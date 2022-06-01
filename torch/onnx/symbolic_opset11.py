@@ -2,6 +2,7 @@ import sys
 import warnings
 
 import torch
+from torch._C import _onnx as _C_onnx
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
 from torch.onnx import symbolic_opset10 as opset10
@@ -1079,7 +1080,7 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and GLOBALS.training_mode:
+    if scale_grad_by_freq and GLOBALS.training_mode == _C_onnx.TrainingMode.TRAINING:
         return symbolic_helper._onnx_unsupported(
             "embedding_bag with scale_grad_by_freq for training mode"
         )
