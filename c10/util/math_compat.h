@@ -251,7 +251,6 @@ template <typename T>
 typename std::enable_if<std::is_integral<T>::value, double>::type log2(T x) {
   return ::log(x) / ::log(2.0);
 }
-
 } // namespace std
 
 #endif
