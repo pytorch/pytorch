@@ -44,9 +44,16 @@ at::Backend get_backend(bool is_cuda, bool is_sparse) {
   }
 }
 
-at::DeprecatedTypeProperties* get_type(at::Backend backend, at::ScalarType scalarType) {
-  if (isSparse(backend) && scalarType == at::kHalf) {
-    return nullptr;
+at::DeprecatedTypeProperties* get_type_properties(at::DeviceType device_type, at::ScalarType scalarType) {
+  at::Backend backend;
+  if (device_type == at::kCPU) {
+    backend = at::Backend::CPU;
+  } else if (device_type == at::kCUDA) {
+    backend = at::Backend::CUDA;
+  } else if (device_type == at::DeviceType::Meta) {
+    backend = at::Backend::Undefined;
+  } else {
+    TORCH_CHECK(false, "Invalid device for storage: ", device_type);
   }
   return &at::getDeprecatedTypeProperties(backend, scalarType);
 }
@@ -77,11 +84,7 @@ THPLayout* getTHPLayout(at::Layout layout) {
 }
 
 PyObject* createPyObject(const at::Storage& storage) {
-  // TODO: https://github.com/pytorch/pytorch/issues/47442
-  if (storage.device_type() == at::DeviceType::Meta) {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "python bindings for meta storage objects not supported");
-  }
-  if (storage.data() == nullptr && storage.nbytes() != 0) {
+  if (storage.device_type() != at::DeviceType::Meta && storage.data() == nullptr && storage.nbytes() != 0) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "python bindings to nullptr storage (e.g., from torch.Tensor._make_wrapper_subclass) are currently unsafe and thus disabled.  See https://github.com/pytorch/pytorch/issues/61669 for more details");
   }
   PyTypeObject* type = reinterpret_cast<PyTypeObject*>(THPStorageClass);
@@ -149,16 +152,7 @@ at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type, boo
   c10::StorageImpl* impl = static_cast<c10::StorageImpl*>(((THPVoidStorage*)untyped_storage_obj)->cdata);
   c10::DeviceType device_type = impl->device().type();
 
-  at::Backend backend;
-  if (device_type == at::kCPU) {
-    backend = at::Backend::CPU;
-  } else if (device_type == at::kCUDA) {
-    backend = at::Backend::CUDA;
-  } else {
-    TORCH_CHECK(false, "Invalid device for storage: ", device_type);
-  }
-
-  auto type_properties = get_type(backend, at::kByte);
+  auto type_properties = get_type_properties(device_type, at::kByte);
 
   return type_properties->unsafeStorageFromTH(((THPVoidStorage*)untyped_storage_obj)->cdata, true);
 }

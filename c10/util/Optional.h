@@ -177,7 +177,7 @@ union storage_t {
 #if __cplusplus >= 202002L
   constexpr
 #endif
-  storage_t(trivial_init_t) noexcept {
+      storage_t(trivial_init_t) noexcept {
     new (&dummy_) unsigned char;
   }
 
