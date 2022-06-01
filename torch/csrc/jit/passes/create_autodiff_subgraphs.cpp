@@ -214,26 +214,48 @@ class SubgraphSlicer {
     return true;
   }
 
+  bool checkValueForGradients(Value* val) {
+    if (val->type()->kind() != TypeKind::TensorType) {
+      return true;
+    }
+    auto valRequiresGrad = val->type()->expectRef<TensorType>().requiresGrad();
+    if (valRequiresGrad.has_value() && valRequiresGrad.value()) {
+      return true;
+    }
+
+    if (val->node()->kind() == prim::profile &&
+        val->node()->hasAttribute(attr::profiled_type)) {
+      auto profiled_type = val->node()->ty(attr::profiled_type);
+      if (profiled_type->expectRef<TensorType>().requires_grad()) {
+        return true;
+      }
+    }
+
+    for (auto& use : val->uses()) {
+      if (use.user->kind() == prim::profile) {
+        auto profiled_type = use.user->ty(attr::profiled_type);
+        if (profiled_type->expectRef<TensorType>().requires_grad()) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   bool inlineIfNoGradients(Node* n) {
     auto subgraph = SubgraphUtils::getSubgraph(n);
 
     // if any input requires grad, don't inline
     for (Value* input : subgraph->inputs()) {
-      if (input->type()->kind() != TypeKind::TensorType) {
+      if (checkValueForGradients(input)) {
         return false;
       }
-      auto inputRequiresGrad =
-          input->type()->expectRef<TensorType>().requiresGrad();
-      if (inputRequiresGrad.has_value() && inputRequiresGrad.value()) {
+    }
+
+    // ... or if any output requires grad, don't inline
+    for (Value* output : subgraph->outputs()) {
+      if (checkValueForGradients(output)) {
         return false;
-      }
-      for (auto& use : input->uses()) {
-        if (use.user->kind() == prim::profile) {
-          auto profiled_type = use.user->ty(attr::profiled_type);
-          if (profiled_type->expectRef<TensorType>().requires_grad()) {
-            return false;
-          }
-        }
       }
     }
 
