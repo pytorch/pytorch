@@ -440,6 +440,9 @@ def run_meta_crossref(
         if func is torch.tensor_split:
             # Use original indices_or_sections, this argument is data dependent
             meta_args = (meta_args[0], args[1]) + meta_args[2:]
+        elif func is torch.ops.aten.repeat_interleave.Tensor:
+            if kwargs.get("output_size", None) is None:
+                meta_args = args
         elif func is torch.ops.aten.index.Tensor:
             # Don't convert boolean tensors to meta as they will have nonzero
             # called on them
@@ -450,9 +453,6 @@ def run_meta_crossref(
                 else:
                     indices.append(meta_index)
             meta_args = (meta_args[0], indices)
-        elif func is torch.ops.aten.repeat_interleave.Tensor:
-            if kwargs.get("output_size", None) is None:
-                meta_args = args
         try:
             # Suppress warnings, this doesn't matter for test_meta.py
             # but it does matter if you want to use this decorator
