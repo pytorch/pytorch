@@ -3513,7 +3513,7 @@ class FullyShardedDataParallel(nn.Module):
                     "Multiple process groups were found in the module "
                     "hierarchy. An arbitrary one will be used for collectives "
                     "in `full_optim_state_dict()`."
-                )  # TODO: Add note about multiple process groups not being supported
+                )
             group = next(iter(process_groups))
         rank = dist.get_rank(group)
         to_save = not rank0_only or rank == 0
@@ -3585,9 +3585,6 @@ class FullyShardedDataParallel(nn.Module):
 
         if not to_save:
             return {}
-
-        # TODO: for now, construct parameter groups according to local rank
-        # without considering rank 0 (only really matters for rank0_only=False)
 
         # Handle the "param_groups" part of the optimizer state dict
         full_osd_param_groups = full_osd["param_groups"]  # alias
