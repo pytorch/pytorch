@@ -10693,8 +10693,9 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            sample_inputs_func=sample_inputs_broadcast_shapes,
            skips=(
-               # non tensor input doesn't need to noncontiguous variant
+               # skip these tests since we have non tensor input
                DecorateInfo(unittest.skip('Skipped!'), "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
            )),
     OpInfo('broadcast_tensors',
            ref=np.broadcast_arrays,
