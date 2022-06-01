@@ -193,9 +193,11 @@ bool isListOfInts(const TypePtr& type) {
 
 bool isListOfListOfInts(const TypePtr& type) {
   // Allows List[Optional[List[Int]]]
-  if (!type->cast<ListType>() ){return false;}
+  if (!type->cast<ListType>()) {
+    return false;
+  }
   TypePtr element_type = type->cast<ListType>()->getElementType();
-  if(element_type->cast<OptionalType>()) {
+  if (element_type->cast<OptionalType>()) {
     element_type = element_type->cast<OptionalType>()->getElementType();
   }
   return isListOfInts(element_type);
@@ -314,7 +316,7 @@ struct SymbolicShapeOpAnalyzer {
 
   // We handle non-constant values in the shape propagation step
   void substituteConstantInputs() {
-    if (shape_compute_graph_->inputs().size() == 0){
+    if (shape_compute_graph_->inputs().size() == 0) {
       return;
     }
 
@@ -338,7 +340,8 @@ struct SymbolicShapeOpAnalyzer {
       uint64_t li_length = inputs_.size() - (schema_->arguments().size() - 1);
       std::vector<Value*> li_inputs;
 
-      TypePtr element_type = first_input->type()->cast<ListType>()->getElementType();
+      TypePtr element_type =
+          first_input->type()->cast<ListType>()->getElementType();
       for (size_t j = 0; j < li_length; ++j) {
         auto new_inp = shape_compute_graph_->insertInput(j);
         new_inp->setType(element_type);
