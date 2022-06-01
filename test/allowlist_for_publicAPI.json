@@ -514,9 +514,6 @@
     "Tuple",
     "reduce"
   ],
-  "torch.ao.sparsity.sparsifier.nearly_diagonal_sparsifier": [
-    "BaseSparsifier"
-  ],
   "torch.autograd": [
     "NestedIOFunction",
     "detect_anomaly",

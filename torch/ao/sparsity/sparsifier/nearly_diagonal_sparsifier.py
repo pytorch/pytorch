@@ -1,9 +1,9 @@
 import torch
 
-from .base_sparsifier import BaseSparsifier
+from . import base_sparsifier
 
 
-class NearlyDiagonalSparsifier(BaseSparsifier):
+class NearlyDiagonalSparsifier(base_sparsifier.BaseSparsifier):
     r"""Nearly Diagonal Sparsifier
 
     This sparsifier creates a nearly diagonal mask to be applied to the weight matrix.
