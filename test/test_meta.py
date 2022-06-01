@@ -800,8 +800,6 @@ meta_dispatch_expected_failures = {
     aten.count_nonzero.dim_IntList: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.diag.default: {i64, u8, b8, f32, i8, f64, i16, i32, bf16},
     aten.diag.out: {bf16, i64, u8, b8, f32, i8, f64, i16, i32},
-    aten.floor_divide.default: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
-    aten.floor_divide.out: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.frexp.Tensor: {bf16, f16, f64, f32},
     aten.grid_sampler_2d.default: {f64, f32},
     aten.grid_sampler_3d.default: {f64, f32},
