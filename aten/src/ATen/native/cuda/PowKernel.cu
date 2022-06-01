@@ -113,12 +113,14 @@ void pow_scalar_tensor_impl(TensorIteratorBase& iter, c10::complex<at::Half> bas
 
 namespace {
 
+#if AT_USE_JITERATOR()
 /* complex<Half> support impl */
 const char pow_name[] = "pow_kernel";
 static const auto pow_kernel_string =
     jiterator_stringify(template <typename T> T pow_kernel(T base, T exp) {
       return std::pow(base, exp);
     });
+#endif
 
 /* complex<Half> support impl */
 void pow_chalf_tensor_scalar_impl(TensorIteratorBase& iter, const Scalar& exp_scalar) {
