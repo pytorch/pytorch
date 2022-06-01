@@ -1330,5 +1330,5 @@ def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = Fals
 
     if not (p % 2.0 == 0.0 and utils.is_float_dtype(self.dtype)):
         self = self.abs()
-    
+
     return fast_pow(fast_pow(self, p).sum(dim, keepdim=keepdim), 1.0 / p)
