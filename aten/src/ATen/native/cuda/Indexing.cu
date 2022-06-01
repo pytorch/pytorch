@@ -1400,18 +1400,13 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
               [ptr_res_dim_indices, ptr_selected_dim_indices, ptr_argsort_dim_indices] GPU_LAMBDA (
                 index_t idx_idx, index_t count, index_t offset, index_t first_match
               ) -> index_t {
-                thrust::fill_n(
-                  thrust::seq,
-                  /*output=*/ptr_res_dim_indices + offset,
-                  /*n=*/count,
-                  /*value=*/idx_idx
-                );
-                thrust::copy_n(
-                  thrust::seq,
-                  /*input=*/ptr_argsort_dim_indices + first_match,
-                  /*n=*/count,
-                  /*output=*/ptr_selected_dim_indices + offset
-                );
+                index_t* __restrict__ ptr_res_dim_indices_out = ptr_res_dim_indices + offset;
+                index_t* __restrict__ ptr_argsort_dim_indices_in = ptr_argsort_dim_indices + first_match;
+                index_t* __restrict__ ptr_selected_dim_indices_out = ptr_selected_dim_indices + offset;
+                for (index_t i = 0; i < count; ++i) {
+                  *ptr_res_dim_indices_out++ = idx_idx;
+                  *ptr_selected_dim_indices_out++ = *ptr_argsort_dim_indices_in++;
+                }
 
                 // A dummy return scalar for a dummy output
                 return static_cast<index_t>(1);
