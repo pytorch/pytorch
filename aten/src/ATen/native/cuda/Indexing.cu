@@ -1255,6 +1255,33 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & val
   return masked_fill__cuda(self, mask, value.item());
 }
 
+namespace {
+
+template<class ForwardIt, class T>
+static __host__ __device__ __forceinline__
+ForwardIt find_bound(ForwardIt first, ForwardIt last, const T& value)
+{
+    ForwardIt it;
+    std::ptrdiff_t count, step;
+    count = last - first;
+
+    while (count > 0) {
+      it = first;
+      step = count / 2;
+      std::advance(it, step);
+      if (*it < value) {
+        first = ++it;
+        count -= step + 1;
+      }
+      else {
+        count = step;
+      }
+    }
+    return first;
+}
+
+}
+
 Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
   const auto ndim = self.dim();
   TORCH_CHECK_INDEX(ndim, "index_select() cannot be applied to a 0-dim tensor.");
@@ -1346,12 +1373,20 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
                 index_t idx_val, index_t idx_idx
               ) -> index_t {
                 // TODO: thrust could be slow. Try writing a custom kernel
-                const auto equal_range_iters = thrust::equal_range(
+                auto* lb = find_bound(
+                  ptr_sorted_dim_indices,
+                  ptr_sorted_dim_indices + nnz,
+                  idx_val
+                );
+                auto equal_range_iters = thrust::equal_range(
                   thrust::seq,
                   ptr_sorted_dim_indices,
                   ptr_sorted_dim_indices + nnz,
                   idx_val
                 );
+                if (*lb == idx_val) {
+                  equal_range_iters = thrust::make_pair(lb, equal_range_iters.second);
+                }
                 const auto idx_count = equal_range_iters.second - equal_range_iters.first;
                 ptr_intrsc_counts_nneg_index[idx_idx] = idx_count;
 
