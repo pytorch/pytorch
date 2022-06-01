@@ -401,6 +401,10 @@ void VariableHooks::set_data(const at::TensorBase & self_base, const at::TensorB
     _has_compatible_shallow_copy_type(self, new_data),
     "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have incompatible tensor type.");
 
+  TORCH_CHECK(
+    !self.requires_grad() || isDifferentiableType(at::typeMetaToScalarType(new_data.dtype())),
+    "data set to a tensor that requires gradients must be floating point or complex dtype");
+
   // Resets gradient accumulator if metadata is out of date
   AutogradMeta* autograd_meta = impl::get_autograd_meta(self);
   if (autograd_meta) {
