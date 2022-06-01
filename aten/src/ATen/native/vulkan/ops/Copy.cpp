@@ -59,59 +59,45 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
         //      * buffer-to-image NHWC -> NC4HW packing
         //      * image-to-buffer NC4HW -> NHWC unpacking
 
-        using Future = vTensor::Future<void, vTensor::Access::Write>;
-        Future v_self_future = v_self.host<void, vTensor::Access::Write>(command_buffer);
+        {
+          api::MemoryMap mapping(
+              v_self.host_buffer(command_buffer, vTensor::Access::Write),
+              api::MemoryAccessType::WRITE);
 
-        // Ideally we would have been able to put as much distance between
-        // requesting the data - a call to host() - and accessing the data
-        // - a call to wait() - but a local view of the computation graph
-        // in eager mode makes that optimization non-trivial.
+          float* data_ptr = mapping.template data<float>();
 
-        // This wait() will be a no-op if no hazards are detected, including the
-        // obvious, yet important, special case of 'self' being an empty tensor.
-
-        Future::Payload v_self_payload = v_self_future.wait();
-
-        memcpy(
-            v_self_payload.get(),
-            cpu_src.contiguous().data_ptr<float>(),
-            std::min(src.nbytes(), self.nbytes()));
+          memcpy(
+              data_ptr,
+              cpu_src.contiguous().data_ptr<float>(),
+              std::min(src.nbytes(), self.nbytes()));
+        }
       }
     }
     // Vulkan -> X
     else if (at::kVulkan == src.device().type()) {
       api::Command::Buffer& command_buffer = command_pool.stream(); // Don't collect the timestamp since the command buffer doesn't record anything
-      const vTensor& v_src = convert(src);
+      vTensor& v_src = convert(src);
 
       // Vulkan -> CPU
       if (self.device().is_cpu()) {
-        // Similar notes as above applies, with the additional consideration of
-        // potential syncs on read accesses.  Namely,
-        // - on discrete systems, if the (staging, buffer, image) trio, or
-        // - on UMA, if the (buffer, image) duo
-        // have gone out of sync as a result of one processor writing to one
-        // resource which is then either accessed as an another resource type on
-        // the same or another processor.  Same considerations regarding hazard
-        // avoidance as above applies.
+        {
+          api::MemoryMap mapping(
+              v_src.host_buffer(command_buffer, vTensor::Access::Read),
+              api::MemoryAccessType::READ);
 
-        using Future = vTensor::Future<const void, vTensor::Access::Read>;
-        const Future v_src_future = v_src.host<const void>(command_buffer);
+          v_src.wait_for_fence();
 
-        // Ideally we would have been able to put as much distance between
-        // requesting the data - a call to host() - and accessing the data
-        // - a call to wait() - but a local view of the computation graph
-        // in eager mode makes that optimization non-trivial.
+          // Invalidate mapped memory to prepare for reading
+          mapping.invalidate();
 
-        // This wait() is a no-op if data is not out of sync.  More often than
-        // not though, waits here are expected as the GPU catches up with
-        // compute submitted from CPU.
+          float* data_ptr = mapping.template data<float>();
 
-        const Future::Payload v_src_payload = v_src_future.wait();
+          memcpy(
+              self.data_ptr<float>(),
+              data_ptr,
+              std::min(src.nbytes(), self.nbytes()));
+        }
 
-        memcpy(
-            self.data_ptr<float>(),
-            v_src_payload.get(),
-            std::min(src.nbytes(), self.nbytes()));
       }
       else {
         TORCH_CHECK(false, "Unsupported!");

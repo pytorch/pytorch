@@ -14,6 +14,24 @@ namespace native {
 namespace vulkan {
 namespace api {
 
+class CommandStream final {
+ public:
+  explicit CommandStream(const VkDevice);
+
+  CommandStream(const CommandStream&) = delete;
+  CommandStream& operator=(const CommandStream&) = delete;
+
+  CommandStream(CommandStream&&) noexcept;
+  CommandStream& operator=(CommandStream&&) = delete;
+
+  ~CommandStream();
+
+ private:
+  VkDevice device_;
+  VkCommandPool pool_;
+};
+
+
 struct Command final {
   class Pool;
 
@@ -42,7 +60,9 @@ struct Command final {
         VkPipelineLayout pipeline_layout,
         utils::uvec3 local_work_group);
     void bind(const Descriptor::Set& set);
-    void copy(Resource::Buffer::Object source, Resource::Buffer::Object destination);
+    void copy(
+        const api::VulkanBuffer::Package source,
+        const api::VulkanBuffer::Package destination);
     void dispatch(const utils::uvec3& global_work_group);
 
    private:
@@ -98,7 +118,7 @@ struct Command final {
     void submit(
         VkQueue queue,
         c10::ArrayRef<const Buffer> buffers,
-        Resource::Fence fence = {});
+        const VkFence fence = VK_NULL_HANDLE);
 
    private:
     void invalidate();

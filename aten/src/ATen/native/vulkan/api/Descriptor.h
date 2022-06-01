@@ -71,6 +71,9 @@ struct Descriptor final {
     Set& bind(uint32_t binding, const Resource::Buffer::Object& buffer);
     Set& bind(uint32_t binding, const Resource::Image::Object& image);
 
+    Set& bind(uint32_t binding, const VulkanBuffer::Package&);
+    Set& bind(uint32_t binding, const VulkanImage::Package&);
+
     VkDescriptorSet handle() const;
 
    private:

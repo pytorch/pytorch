@@ -18,6 +18,7 @@ Context::Context(const VkInstance instance, size_t adapter_i)
       command_(gpu()),
       descriptor_(gpu()),
       resource_(gpu()),
+      fences_(device_),
       querypool_(
         device_,
         adapter_p_->timestamp_compute_and_graphics(),
@@ -36,6 +37,9 @@ void Context::flush() {
   resource().pool.purge();
   descriptor().pool.purge();
   command().pool.purge();
+
+  buffers_to_clear_.clear();
+  images_to_clear_.clear();
 }
 
 void Context::wait(const at::Tensor& src) {

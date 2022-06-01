@@ -8,6 +8,28 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
+
+//
+// CommandStream
+//
+
+CommandStream::CommandStream(const VkDevice device)
+  : device_(device),
+    pool_(VK_NULL_HANDLE) {
+}
+
+CommandStream::CommandStream(CommandStream&& other) noexcept
+  : device_(other.device_),
+    pool_(other.pool_) {
+  other.pool_ = VK_NULL_HANDLE;
+}
+
+CommandStream::~CommandStream() {
+  if C10_LIKELY(VK_NULL_HANDLE == pool_) {
+    return;
+  }
+}
+
 namespace {
 
 std::mutex queue_mutex;
@@ -196,27 +218,19 @@ void Command::Buffer::bind(const Descriptor::Set& set) {
 }
 
 void Command::Buffer::copy(
-    const Resource::Buffer::Object source,
-    const Resource::Buffer::Object destination) {
+  const api::VulkanBuffer::Package source,
+  const api::VulkanBuffer::Package destination) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
       "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      source,
-      "Invalid Vulkan source buffer!");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      destination,
-      "Invalid Vulkan destination buffer!");
 
   barrier();
 
   const VkBufferCopy buffer_copy{
     0u,
     0u,
-    std::min(source.range, destination.range),
+    std::min(source.buffer_range, destination.buffer_range),
   };
 
   vkCmdCopyBuffer(
@@ -438,7 +452,7 @@ void Command::Pool::purge() {
 void Command::Pool::submit(
     const VkQueue queue,
     const c10::ArrayRef<const Buffer> buffers,
-    const Resource::Fence fence) {
+    const VkFence fence) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && command_pool_,
       "This command pool is in an invalid state! "
@@ -467,7 +481,7 @@ void Command::Pool::submit(
       // - The user has implictly signaled interest in the results via a fence.
       // - We are over the submission cutoff.  We don't want to starve the GPU.
 
-      if (fence || (stream_.counter++ > Configuration::kSubmit)) {
+      if (fence != VK_NULL_HANDLE || (stream_.counter++ > Configuration::kSubmit)) {
         stream_.buffer.end();
         stream_.buffer.invalidate();
       }
@@ -503,7 +517,7 @@ void Command::Pool::submit(
       // When running Vulkan backend in different threads without any locking mechanism,
       // vkQueueSubmit will get the VK_ERROR_INITIALIZATION_FAILED(-3) error.
       std::lock_guard<std::mutex> guard(queue_mutex);
-      VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence.handle()));
+      VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence));
     }
   }
 }

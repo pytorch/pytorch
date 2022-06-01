@@ -272,7 +272,9 @@ Adapter::Adapter(
     shader_layout_cache_(device_.handle_),
     shader_cache_(device_.handle_),
     pipeline_layout_cache_(device_.handle_),
-    compute_pipeline_cache_(device_.handle_) {
+    compute_pipeline_cache_(device_.handle_),
+    sampler_cache_(device_.handle_),
+    vma_(instance_, physical_device_.handle, device_.handle_) {
 }
 
 Adapter::Adapter(Adapter&& other) noexcept
@@ -283,7 +285,9 @@ Adapter::Adapter(Adapter&& other) noexcept
     shader_layout_cache_(std::move(other.shader_layout_cache_)),
     shader_cache_(std::move(other.shader_cache_)),
     pipeline_layout_cache_(std::move(other.pipeline_layout_cache_)),
-    compute_pipeline_cache_(std::move(other.compute_pipeline_cache_)) {
+    compute_pipeline_cache_(std::move(other.compute_pipeline_cache_)),
+    sampler_cache_(std::move(other.sampler_cache_)),
+    vma_(std::move(other.vma_)) {
   std::lock_guard<std::mutex> lock(other.queue_mutex_);
 
   queues_ = std::move(other.queues_);
