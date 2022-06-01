@@ -37,7 +37,7 @@ class TestLazyReuseIr(TestCase):
             torch._lazy.mark_step()
 
         torch.testing.assert_close(z.cpu(), z_lazy.cpu())
-        assert metrics.counter_value("IrNodeReused_torch::lazy::AddTensor") >= 16
+        assert metrics.counter_value("IrNodeReused_torch::lazy::AddTensor") >= 14
         metrics.reset()
         torch._lazy.ir_cache.reset()
 
@@ -66,8 +66,7 @@ class TestLazyReuseIr(TestCase):
             torch._lazy.mark_step()
 
         torch.testing.assert_close(z.cpu(), z_lazy.cpu())
-        assert metrics.counter_value("IrNodeReused_torch::lazy::AddTensor") >= 10
-        assert metrics.counter_value("IrNodeReused_torch::lazy::AddTensor") >= 4
+        assert metrics.counter_value("IrNodeReused_torch::lazy::AddTensor") >= 8
         metrics.reset()
         torch._lazy.ir_cache.reset()
 
@@ -97,10 +96,29 @@ class TestLazyReuseIr(TestCase):
             torch._lazy.mark_step()
 
         torch.testing.assert_close(z.cpu(), z_lazy.cpu())
-        assert metrics.counter_value("IrNodeReused_torch::lazy::AddTensor") >= 11
+        assert metrics.counter_value("IrNodeReused_torch::lazy::AddTensor") >= 8
         metrics.reset()
         torch._lazy.ir_cache.reset()
         torch._lazy.config.set_force_fallback("")
+
+    def testBatchNorm(self):
+        device = get_test_device()
+        x = torch.randn(16, 3, 224, 224, device=device)
+        bn = torch.nn.BatchNorm2d(3).to(device=device)
+        for i in range(10):
+            z = bn(x)
+
+        device = "lazy"
+        x_lazy = x.detach().clone().to(device=device)
+        bn = bn.to(device=device)
+        for i in range(10):
+            z_lazy = bn(x_lazy)
+            torch._lazy.mark_step()
+
+        torch.testing.assert_close(z.cpu(), z_lazy.cpu())
+        assert metrics.counter_value("IrNodeReused_torch::lazy::TSNativeBatchNormForward") >= 7
+        metrics.reset()
+        torch._lazy.ir_cache.reset()
 
 if __name__ == '__main__':
     run_tests()
