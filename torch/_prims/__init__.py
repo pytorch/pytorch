@@ -173,62 +173,6 @@ __all__ = [
 # Common datastructures and helpers
 #
 
-_nvfuser_binary_ops = {
-    "add",
-    "atan2",
-    "bitwise_and",
-    "bitwise_or",
-    "bitwise_xor",
-    "div",
-    "eq",
-    "fmod",
-    "ge",
-    "gt",
-    "le",
-    "lt",
-    "mul",
-    "ne",
-    "pow",
-    "sub",
-}
-
-
-def _assert_nvfuser_op_exists(fname: str):
-    try:
-        from torch._C._nvfuser import FusionDefinition as fd  # type: ignore[import]
-
-        assert getattr(fd.Ops, fname)
-    except ImportError:
-        # Not all PyTorch builds have nvfuser
-        pass
-
-
-for fname in _nvfuser_binary_ops:
-    exec(
-        f"""
-# Ensure that the nvfuser implementation exists
-_assert_nvfuser_op_exists("{fname}")
-
-def _{fname}_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
-    return fd.Ops.{fname}(a, b)  # type: ignore[attr-defined]
-"""
-    )
-
-_nvfuser_ternary_ops = {
-    "where",
-}
-
-for fname in _nvfuser_ternary_ops:
-    exec(
-        f"""
-# Ensure that the nvfuser implementation exists
-_assert_nvfuser_op_exists("{fname}")
-
-def _{fname}_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType, c: TensorLikeType):
-    return fd.Ops.{fname}(a, b, c)  # type: ignore[attr-defined]
-"""
-    )
-
 # Describes the return type of the primitive:
 #
 #   - NEW, a new tensor is created
@@ -703,15 +647,9 @@ is_infinite = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
-
-def _lgamma_nvfuser(fd: Any, a: TensorLikeType):
-    return fd.Ops.lgamma(a)  # type: ignore[attr-defined]
-
-
 lgamma = _make_elementwise_unary_prim(
     "lgamma",
     impl_aten=torch.lgamma,
-    impl_nvfuser=_lgamma_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -803,19 +741,6 @@ round = _make_elementwise_unary_prim(
     "round",
     impl_aten=torch.round,
     impl_nvfuser=_round_nvfuser,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-)
-
-
-def _rsqrt_nvfuser(fd: Any, a: TensorLikeType):
-    return fd.Ops.rsqrt(a)  # type: ignore[attr-defined]
-
-
-rsqrt = _make_elementwise_unary_prim(
-    "rsqrt",
-    impl_aten=torch.rsqrt,
-    impl_nvfuser=_rsqrt_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -925,7 +850,6 @@ add = _make_elementwise_binary_prim(
 atan2 = _make_elementwise_binary_prim(
     name="atan2",
     impl_aten=torch.atan2,
-    impl_nvfuser=_atan2_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -933,7 +857,6 @@ atan2 = _make_elementwise_binary_prim(
 bitwise_and = _make_elementwise_binary_prim(
     "bitwise_and",
     impl_aten=torch.bitwise_and,
-    impl_nvfuser=_bitwise_and_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -941,7 +864,6 @@ bitwise_and = _make_elementwise_binary_prim(
 bitwise_or = _make_elementwise_binary_prim(
     "bitwise_or",
     impl_aten=torch.bitwise_or,
-    impl_nvfuser=_bitwise_or_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -949,7 +871,6 @@ bitwise_or = _make_elementwise_binary_prim(
 bitwise_xor = _make_elementwise_binary_prim(
     "bitwise_xor",
     impl_aten=torch.bitwise_xor,
-    impl_nvfuser=_bitwise_xor_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -968,56 +889,87 @@ def _div_aten(a, b):
     return torch.true_divide(a, b)
 
 
+def _div_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.div(a, b)  # type: ignore[attr-defined]
+
+
 div = _make_elementwise_binary_prim(
     "div",
     impl_aten=_div_aten,
-    impl_nvfuser=_div_nvfuser,  # type: ignore[name-defined]
+    impl_nvfuser=_div_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
 
 eq = _make_elementwise_binary_prim(
     "eq",
     impl_aten=torch.eq,
-    impl_nvfuser=_eq_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
+
+
+def _fmax_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.fmax(a, b)  # type: ignore[attr-defined]
+
 
 fmax = _make_elementwise_binary_prim(
     "fmax",
     impl_aten=torch.fmax,
+    impl_nvfuser=_fmax_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _fmin_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.fmin(a, b)  # type: ignore[attr-defined]
+
 
 fmin = _make_elementwise_binary_prim(
     "fmin",
     impl_aten=torch.fmin,
+    impl_nvfuser=_fmin_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _fmod_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.fmod(a, b)  # type: ignore[attr-defined]
+
 
 fmod = _make_elementwise_binary_prim(
     "fmod",
     impl_aten=torch.fmod,
-    impl_nvfuser=_fmod_nvfuser,  # type: ignore[name-defined]
+    impl_nvfuser=_fmod_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _ge_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.ge(a, b)  # type: ignore[attr-defined]
+
+
 ge = _make_elementwise_binary_prim(
     "ge",
     impl_aten=torch.ge,
-    impl_nvfuser=_ge_nvfuser,  # type: ignore[name-defined]
+    impl_nvfuser=_ge_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
+
+def _gt_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.gt(a, b)  # type: ignore[attr-defined]
+
+
 gt = _make_elementwise_binary_prim(
     "gt",
     impl_aten=torch.gt,
-    impl_nvfuser=_gt_nvfuser,  # type: ignore[name-defined]
+    impl_nvfuser=_gt_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -1036,18 +988,28 @@ igammac = _make_elementwise_binary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _le_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.le(a, b)  # type: ignore[attr-defined]
+
+
 le = _make_elementwise_binary_prim(
     "le",
     impl_aten=torch.le,
-    impl_nvfuser=_le_nvfuser,  # type: ignore[name-defined]
+    impl_nvfuser=_le_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
+
+def _lt_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.lt(a, b)  # type: ignore[attr-defined]
+
+
 lt = _make_elementwise_binary_prim(
     "lt",
     impl_aten=torch.lt,
-    impl_nvfuser=_lt_nvfuser,  # type: ignore[name-defined]
+    impl_nvfuser=_lt_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -1102,10 +1064,15 @@ minimum = _make_elementwise_binary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _mul_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.mul(a, b)  # type: ignore[attr-defined]
+
+
 mul = _make_elementwise_binary_prim(
     "mul",
     impl_aten=torch.mul,
-    impl_nvfuser=_mul_nvfuser,  # type: ignore[name-defined]
+    impl_nvfuser=_mul_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1113,7 +1080,6 @@ mul = _make_elementwise_binary_prim(
 ne = _make_elementwise_binary_prim(
     "ne",
     impl_aten=torch.ne,
-    impl_nvfuser=_ne_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -1128,7 +1094,13 @@ nextafter = _make_elementwise_binary_prim(
 pow = _make_elementwise_binary_prim(
     "pow",
     impl_aten=torch.pow,
-    impl_nvfuser=_pow_nvfuser,  # type: ignore[name-defined]
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+rsqrt = _make_elementwise_binary_prim(
+    "rsqrt",
+    impl_aten=torch.rsqrt,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1152,7 +1124,6 @@ shift_right_logical = _not_impl
 sub = _make_elementwise_binary_prim(
     "sub",
     impl_aten=torch.sub,
-    impl_nvfuser=_sub_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1926,7 +1897,6 @@ where = _make_prim(
     schema="where(Tensor pred, Tensor a, Tensor b) -> Tensor",
     meta=_where_meta,
     impl_aten=torch.where,
-    impl_nvfuser=_where_nvfuser,  # type: ignore[name-defined]
     return_type=RETURN_TYPE.NEW,
     doc=_where_doc,
 )
@@ -2256,13 +2226,12 @@ _var_doc = """
     """
 
 
-def _make_reduction_prim(name: str, impl_aten, doc, impl_nvfuser=None):
+def _make_reduction_prim(name: str, impl_aten, doc):
     """Creates a reduction prim."""
     return _make_prim(
         schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType? output_dtype=None) -> Tensor",
         meta=_reduction_meta,
         impl_aten=impl_aten,
-        impl_nvfuser=impl_nvfuser,
         return_type=RETURN_TYPE.NEW,
         doc=doc,
     )
@@ -2279,43 +2248,15 @@ def _make_var_reduction_prim(name: str, impl_aten, doc):
     )
 
 
-def _sum_nvfuser(
-    fd: Any,
-    a: TensorLikeType,
-    dims: DimsSequenceType,
-    *,
-    output_dtype: Optional[torch.dtype] = None,
-):
-    keep_dims = False
-    return fd.Ops.sum(a, dims, keep_dims, output_dtype)
-
-
 sum = _make_reduction_prim(
     name="sum",
     impl_aten=torch.sum,
-    impl_nvfuser=_sum_nvfuser,
     doc=_sum_doc,
 )
 
-
-def _prod_aten(
-    inp: TensorLikeType,
-    dims: Optional[DimsSequenceType],
-    *,
-    dtype: Optional[torch.dtype] = None,
-) -> Tensor:
-    if dims is not None:
-        for d in sorted(dims, reverse=True):
-            assert d >= 0
-            inp = torch.prod(inp, d, dtype=dtype)
-        return inp
-    else:
-        return torch.prod(inp, dims, dtype=dtype)
-
-
 prod = _make_reduction_prim(
     name="prod",
-    impl_aten=_prod_aten,
+    impl_aten=torch.prod,
     doc=_prod_doc,
 )
 

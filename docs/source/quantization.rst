@@ -296,7 +296,7 @@ by module basis. Specifically, for all quantization techniques, the user needs t
    additional parameters) from functionals to module form (for example,
    using ``torch.nn.ReLU`` instead of ``torch.nn.functional.relu``).
 2. Specify which parts of the model need to be quantized either by assigning
-   ``.qconfig`` attributes on submodules or by specifying ``qconfig_mapping``.
+   ``.qconfig`` attributes on submodules or by specifying ``qconfig_dict``.
    For example, setting ``model.conv1.qconfig = None`` means that the
    ``model.conv`` layer will not be quantized, and setting
    ``model.linear1.qconfig = custom_qconfig`` means that the quantization
@@ -322,11 +322,10 @@ to do the following in addition:
 (Prototype) FX Graph Mode Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-There are multiple quantization types in post training quantization (weight only, dynamic and static) and the configuration is done through `qconfig_mapping` (an argument of the `prepare_fx` function).
+There are multiple quantization types in post training quantization (weight only, dynamic and static) and the configuration is done through `qconfig_dict` (an argument of the `prepare_fx` function).
 
 API Example::
 
-  from torch.quantization import QConfigMapping
   import torch.quantization.quantize_fx as quantize_fx
   import copy
 
@@ -339,9 +338,9 @@ API Example::
   # we need to deepcopy if we still want to keep model_fp unchanged after quantization since quantization apis change the input model
   model_to_quantize = copy.deepcopy(model_fp)
   model_to_quantize.eval()
-  qconfig_mapping = QConfigMapping().set_global(torch.quantization.default_dynamic_qconfig)
+  qconfig_dict = {"": torch.quantization.default_dynamic_qconfig}
   # prepare
-  model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_mapping)
+  model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_dict)
   # no calibration needed when we only have dynamici/weight_only quantization
   # quantize
   model_quantized = quantize_fx.convert_fx(model_prepared)
@@ -351,10 +350,10 @@ API Example::
   #
 
   model_to_quantize = copy.deepcopy(model_fp)
-  qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qconfig('qnnpack'))
+  qconfig_dict = {"": torch.quantization.get_default_qconfig('qnnpack')}
   model_to_quantize.eval()
   # prepare
-  model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_mapping)
+  model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_dict)
   # calibrate (not shown)
   # quantize
   model_quantized = quantize_fx.convert_fx(model_prepared)
@@ -364,10 +363,10 @@ API Example::
   #
 
   model_to_quantize = copy.deepcopy(model_fp)
-  qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qat_qconfig('qnnpack'))
+  qconfig_dict = {"": torch.quantization.get_default_qat_qconfig('qnnpack')}
   model_to_quantize.train()
   # prepare
-  model_prepared = quantize_fx.prepare_qat_fx(model_to_quantize, qconfig_mapping)
+  model_prepared = quantize_fx.prepare_qat_fx(model_to_quantize, qconfig_dict)
   # training loop (not shown)
   # quantize
   model_quantized = quantize_fx.convert_fx(model_prepared)
@@ -794,7 +793,6 @@ Example::
 
     import torch
     import torch.nn.quantized as nnq
-    from torch.quantization import QConfigMapping
     import torch.quantization.quantize_fx
 
     # original fp32 module to replace
@@ -870,7 +868,7 @@ Example::
 
     m = torch.nn.Sequential(CustomModule()).eval()
 
-    qconfig_mapping = QConfigMapping().set_global(torch.quantization.default_qconfig)
+    qconfig_dict = {'': torch.quantization.default_qconfig}
     prepare_custom_config_dict = {
         "float_to_observed_custom_module_class": {
             "static": {
@@ -886,7 +884,7 @@ Example::
         }
     }
     mp = torch.quantization.quantize_fx.prepare_fx(
-        m, qconfig_mapping, prepare_custom_config_dict=prepare_custom_config_dict)
+        m, qconfig_dict, prepare_custom_config_dict=prepare_custom_config_dict)
     # calibration (not shown)
     mq = torch.quantization.quantize_fx.convert_fx(
         mp, convert_custom_config_dict=convert_custom_config_dict)

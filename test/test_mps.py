@@ -1186,16 +1186,6 @@ class TestMPS(TestCase):
         helper((2, 8, 4, 5), 0.2)
         helper((2, 3, 4, 5), 1.0)  # value of 1 should be ignored internally
 
-    def test_buffer_size_match(self):
-        # this test shouldn't cause any crash
-        size = 16
-        cpu_A = torch.rand(size, device='cpu')
-        cpu_F = torch.rand(size, size, size, device='cpu')
-
-        mps_A = cpu_A.to('mps')
-        mps_F = cpu_F.to('mps')
-        self.assertEqual(cpu_A @ cpu_F, mps_A @ mps_F)
-
     def test_transpose_inplace(self):
         values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
         cpu_x = torch.tensor(values, device='cpu')
@@ -1327,37 +1317,6 @@ class TestMPS(TestCase):
         helper((2, 3, 4), (4, 3, 2, 5, 7, 2))
         helper((3, 4, 5), (2, 3, 4, 5))
         helper((3, 4, 5), (2, 2, 2))
-
-    def test_count_nonzero(self):
-        def helper(dtype):
-            n = [
-                [[1, 0, 2], [3, 0, 2], [7, 9, -4]],
-                [[0, 2, 3], [3, 2, 1], [2, 0, 0]],
-            ]
-            cpu_x = torch.tensor(n, dtype=dtype)
-            mps_x = torch.tensor(n, dtype=dtype).to('mps')
-
-            # All non-zeros
-            self.assertEqual(
-                torch.count_nonzero(cpu_x),
-                torch.count_nonzero(mps_x)
-            )
-
-            # dim=1
-            self.assertEqual(
-                torch.count_nonzero(cpu_x, dim=1),
-                torch.count_nonzero(mps_x, dim=1)
-            )
-
-            # dim=(0, 1)
-            self.assertEqual(
-                torch.count_nonzero(cpu_x, dim=(0, 1)),
-                torch.count_nonzero(mps_x, dim=(0, 1))
-            )
-        helper(torch.int32)
-        helper(torch.int64)
-        helper(torch.float16)
-        helper(torch.float32)
 
     def _test_module_empty_input(self, module, inp, check_size=True):
         inp.requires_grad_(True)
@@ -3711,19 +3670,6 @@ class TestNLLLoss(TestCase):
             for diag in [0, 1, 2, 3, 4, -1, -2, -3, -4]:
                 helper(shape, diag=diag)
 
-    # Test linspace
-    def test_linspace(self):
-        def helper(start, end, steps, dtype=torch.float32):
-            cpu_result = torch.tensor(np.linspace(start, end, steps), dtype=dtype)
-            result = torch.linspace(start, end, steps, dtype=dtype, device='mps')
-            self.assertEqual(cpu_result, result)
-
-        for dtype in [torch.float32, torch.int32, torch.uint8, torch.int64]:
-            helper(2, 5, 10, dtype)
-            helper(2, 2, 10, dtype)
-            helper(5, 2, 10, dtype)
-            helper(2, 2, 0, dtype)
-
     # Test softmax
     def test_softmax(self):
         def helper(shape, dim, channels_last=False):
@@ -4016,25 +3962,6 @@ class TestNNMPS(NNTestCase):
             m = torch.load(path, encoding='utf-8')
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
-
-    def test_conv_expand(self):
-        device = 'mps'
-        input_ = torch.rand(2, 3, 16, 16, device=device)
-        kernel = torch.rand(1, 1, 3, 11, device=device)
-        tmp_kernel = kernel.expand(-1, 3, -1, -1)
-        output = F.conv2d(input_, tmp_kernel, groups=1, padding=0, stride=1)
-
-    # The test should not crash
-    def test_permute(self):
-        X = torch.randn(5, 5).to('mps')
-        torch.log(X)
-        X = X.permute(1, 0)
-        torch.log(X)
-
-    # Printing of non_contiguous should not crash
-    def test_print_non_contiguous(self):
-        print(torch.ones(100, 100, device='mps').nonzero())
-        print(torch.ones(100, 100, device='mps').nonzero().contiguous())
 
     def test_zero_grad(self):
         i = torch.randn(2, 5, requires_grad=True)

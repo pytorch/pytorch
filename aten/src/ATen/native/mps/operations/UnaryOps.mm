@@ -13,8 +13,9 @@ namespace mps {
 
 typedef MPSGraphTensor* (^UnaryOpBlock)(MPSGraph*, MPSGraphTensor*);
 
-void unary_op(const Tensor& self, const Tensor& output, std::string op_name, UnaryOpBlock unaryBlock)
+void unary_op(const Tensor& self_t, const Tensor& output, std::string op_name, UnaryOpBlock unaryBlock)
 {
+  Tensor self = self_t.contiguous(at::MemoryFormat::Contiguous);
   if (!output.is_same_size(self)) {
     output.resize_(self.sizes());
   }
@@ -25,7 +26,7 @@ void unary_op(const Tensor& self, const Tensor& output, std::string op_name, Una
   };
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self}, /*use_scalar_value*/ false);
+    string key = op_name + getTensorsStringKey({self});
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
