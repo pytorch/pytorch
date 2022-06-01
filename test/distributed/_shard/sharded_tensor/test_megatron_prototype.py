@@ -145,7 +145,7 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         )
 
         # Test backward gradient calculation.
-        self.assertEqual(sharded_weight_fc1.grad, local_grad_narrowed_fc1, atol=1e-4, rtol=1e-6)
+        self.assertEqual(sharded_weight_fc1.grad, local_grad_narrowed_fc1, atol=1e-3, rtol=1e-6)
         self.assertEqual(sharded_weight_fc2.grad, local_grad_narrowed_fc2, atol=1e-4, rtol=1e-6)
         self.assertEqual(bias_grad_fc1, local_bias_grad_fc1, atol=1e-4, rtol=1e-6)
         self.assertEqual(bias_grad_fc2, local_bias_grad_fc2, atol=1e-4, rtol=1e-6)
