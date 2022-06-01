@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 from torchgen.api import dispatchless, cpp
 from torchgen.api.types import (
     CppSignatureGroup,
