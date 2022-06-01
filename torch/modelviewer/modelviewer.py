@@ -65,7 +65,7 @@ class ModelViewer:
         plt.show()
         return fig
 
-    @staticmethod     
+    @staticmethod
     def save_model(fig, img):
         # path to save the architecture diagram
         img = img.rsplit('.', 1)[0]
