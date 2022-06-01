@@ -1,6 +1,7 @@
 import torch
 from torch._prims import utils
 from torch._prims.utils import check
+from torch._prims.wrappers import out_wrapper_multi
 import torch._refs as refs
 
 from typing import List
@@ -243,3 +244,21 @@ def meta_linalg_qr_helper(input, mode):
     R = input.new_empty(Rt_shape)
     R.transpose_(-2, -1)
     return (Q, R)
+
+@out_wrapper_multi("L", "info")
+def meta_linalg_cholesky_ex(input, upper=False, check_errors=False):
+    info_output_dtype = torch.int
+    # TODO: check linalg compatible dtype
+    # linalg_cholesky_out_info
+    assert input.dim() >= 2
+    assert input.size(-1) == input.size(-2)
+    L_sizes = list(input.size())
+    L_sizes[-1], L_sizes[-2] = L_sizes[-2], L_sizes[-1]
+    L = input.new_empty(L_sizes)
+    L.transpose_(-2, -1)
+    info_sizes = input.size()[:-2]
+    info = input.new_empty(info_sizes, dtype=torch.int)
+    return L, info
+
+torch.library.impl(meta_lib, "linalg_cholesky_ex")(meta_linalg_cholesky_ex)
+torch.library.impl(meta_lib, "linalg_cholesky_ex.L")(meta_linalg_cholesky_ex)
