@@ -596,7 +596,6 @@ meta_function_expected_failures = {
     torch.take: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::take, aten::take.out
     torch.trace: {f32, f64, i16, i32, i64, i8, u8},  # aten::trace
     torch.vdot: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::vdot
-    torch.qr: {f32, f64},
     torch.ormqr: {f32, f64},
     torch.lu_solve: {f32, f64},
     torch.cholesky: {f32, f64},  # aten::cholesky, aten::cholesky.out
