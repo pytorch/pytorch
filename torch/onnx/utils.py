@@ -15,6 +15,7 @@ import textwrap
 import typing
 import warnings
 import zipfile
+from http.client import REQUEST_URI_TOO_LONG
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -47,15 +48,21 @@ _params_dict = {}  # type: ignore[var-annotated]
 
 @contextlib.contextmanager
 def select_model_mode_for_export(model, mode: Optional[_C_onnx.TrainingMode]):
+    """Adjusts the model training mode to the specified mode for export."""
+    if mode is None:
+        export_mode = _C_onnx.TrainingMode.EVAL
+    else:
+        export_mode = mode
+
+    originally_training: bool = False
     if not isinstance(model, torch.jit.ScriptFunction):
-        is_originally_training = model.training
+        originally_training = model.training
 
         if mode is None:
-            mode = _C_onnx.TrainingMode.EVAL
             # if the model is in training mode but the user did not specify
             # to export the model in training mode, export the model in inference
             # mode (default) and warn them
-            if is_originally_training:
+            if originally_training:
                 warnings.warn(
                     "You are exporting the model to ONNX while in training mode with "
                     "'train' parameter not specified. The model will default to inference mode export. "
@@ -63,12 +70,10 @@ def select_model_mode_for_export(model, mode: Optional[_C_onnx.TrainingMode]):
                     "training=TrainingMode.PRESERVE (to preserve the original model state) in torch.onnx.export()."
                 )
 
-        # if mode == TrainingMode.EVAL or (mode == TrainingMode.PRESERVE and not is_originally_training) => is_training = False
-        is_export_training = False
         # ONNX opset 12 has better support for training amenable models, with updated
         # versions of the dropout and batch_norm operators
-        if mode == _C_onnx.TrainingMode.TRAINING or (
-            mode == _C_onnx.TrainingMode.PRESERVE and is_originally_training
+        if export_mode == _C_onnx.TrainingMode.TRAINING or (
+            export_mode == _C_onnx.TrainingMode.PRESERVE and originally_training
         ):
             if GLOBALS.export_onnx_opset_version < 12:
                 warnings.warn(
@@ -77,16 +82,23 @@ def select_model_mode_for_export(model, mode: Optional[_C_onnx.TrainingMode]):
                     "Opset versions lower than opset 12 will not be able to export "
                     "nodes such as Dropout and BatchNorm correctly."
                 )
-            is_export_training = True
 
-        GLOBALS.training_mode = mode
-        model.train(is_export_training)
+        GLOBALS.training_mode = export_mode
+        if export_mode == _C_onnx.TrainingMode.TRAINING:
+            model.train(True)
+        elif export_mode == _C_onnx.TrainingMode.EVAL:
+            model.train(False)
+        # else mode == _C_onnx.TrainingMode.PRESERVE, do nothing
+
     try:
         yield
     finally:
-        if not isinstance(model, torch.jit.ScriptFunction):
-            # FIXME(justinchuby): is_originally_training is possibly unbound
-            model.train(is_originally_training)
+        if not (
+            isinstance(model, torch.jit.ScriptFunction)
+            or export_mode == _C_onnx.TrainingMode.PRESERVE
+        ):
+            # Alter the model training state only if export_mode is not PRESERVE
+            model.train(originally_training)
 
 
 @contextlib.contextmanager
