@@ -1,23 +1,22 @@
 # Owner(s): ["oncall: quantization"]
 
-from torch.ao.quantization.experimental.observer import APoTObserver
-import unittest
 import torch
+from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
+import unittest
 
-class TestNonUniformObserver(unittest.TestCase):
-    def test_calculate_qparams(self):
+class TestQuantizedTensor(unittest.TestCase):
+    def test_quantize_APoT(self):
         t = torch.Tensor()
-        obs = APoTObserver(t, t, t, 0, 0)
-
         with self.assertRaises(NotImplementedError):
-            obs.calculate_qparams()
+            TensorAPoT.quantize_APoT(t)
 
-    def test_override_calculate_qparams(self):
-        t = torch.Tensor()
-        obs = APoTObserver(t, t, t, 0, 0)
-
+    def test_dequantize(self):
         with self.assertRaises(NotImplementedError):
-            obs._calculate_qparams()
+            TensorAPoT.dequantize(self)
+
+    def test_q_apot_alpha(self):
+        with self.assertRaises(NotImplementedError):
+            TensorAPoT.q_apot_alpha(self)
 
 if __name__ == '__main__':
     unittest.main()
