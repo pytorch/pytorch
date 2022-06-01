@@ -2384,6 +2384,7 @@ def sample_inputs_broadcast_shapes(op, device, dtype, requires_grad, **kwargs):
         ((), ()),
         ((S,), ()),
         ((S, 1), (S,)),
+        ((S, 1), S),
         ((M, S), ()),
         ((S, M, S), (M, S)),
         ((S, M, S), (S, M, S)),
