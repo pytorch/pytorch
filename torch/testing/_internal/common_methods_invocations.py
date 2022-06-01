@@ -10685,7 +10685,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_broadcast_to),
     OpInfo('broadcast_shapes',
            op=torch.broadcast_shapes,
-           ref=np.broadcast_shapes,
+           ref=np.broadcast_shapes if np.lib.NumpyVersion(np.__version__) >= '1.20.0' else None,
            dtypes=_dispatch_dtypes((torch.bool,)),
            dtypesIfCUDA=_dispatch_dtypes(),  # broadcast_shapes is device independent
            supports_out=False,
