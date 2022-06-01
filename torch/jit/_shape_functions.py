@@ -922,14 +922,13 @@ def native_batch_norm(input: List[int], weight: Optional[List[int]], bias: Optio
         _size = [0]
     return _copy(input), _size, _size
 
-# TODO: Add support for List[Optional[List[int]]] arguments (i.e. `Tensor?[]`).
-# def index_Tensor(self: List[int], indices: List[Optional[List[int]]]) -> List[int]:
-#     assert len(indices) <= len(self), "More indices than dimensions to index"
-#     broadcasted_shape: List[int] = []
-#     for index_tensor_shape in indices:
-#         if index_tensor_shape is not None:
-#             broadcasted_shape = broadcast(broadcasted_shape, index_tensor_shape)
-#     return broadcasted_shape
+def index_Tensor(self: List[int], indices: List[Optional[List[int]]]) -> List[int]:
+    assert len(indices) <= len(self), "More indices than dimensions to index"
+    broadcasted_shape: List[int] = []
+    for index_tensor_shape in indices:
+        if index_tensor_shape is not None:
+            broadcasted_shape = broadcast(broadcasted_shape, index_tensor_shape)
+    return broadcasted_shape
 
 ScriptFn = torch._C.ScriptFunction
 shape_compute_graph_mapping : Dict[str, ScriptFn ] = {}
@@ -1021,8 +1020,7 @@ add_shape_compute_mapping("aten::topk(Tensor self, int k, int dim=-1, bool large
 add_shape_compute_mapping("aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", nll_loss_forward)
 add_shape_compute_mapping("aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", native_layer_norm)
 add_shape_compute_mapping("aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
-# TODO: Add support for List[Optional[List[int]]] arguments (i.e. `Tensor?[]`).
-#add_shape_compute_mapping("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", index_Tensor)
+add_shape_compute_mapping("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", index_Tensor)
 
 # TODO: migrate over all of symbolic_shape_registry_util.cpp
 # These are duplicated here so that the functions will be serialiazed
