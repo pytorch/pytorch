@@ -1110,14 +1110,19 @@ def make_contiguous_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     multiplier = 1
     strides = []
     for l in reversed(shape):
+        strides.append(multiplier)
         if l != 0:
-            strides.append(multiplier)
-            multiplier = l * multiplier
-        else:
-            strides.append(multiplier)
+            multiplier *= l
 
     result = tuple(reversed(strides))
     return result
+
+
+def make_batched_column_major_strides_for(shape: ShapeType) -> Tuple[int, ...]:
+    contiguous_strides = make_contiguous_strides_for(shape)
+    if len(shape) < 2:
+        return contiguous_strides
+    return contiguous_strides[:-2] + (1, max(shape[-2], 1))
 
 
 def compute_reduction_output_shape(

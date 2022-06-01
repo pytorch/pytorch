@@ -1,8 +1,9 @@
 import torch
+from torch import Tensor
 
 import torch._prims as prims
 import torch._refs as refs
-from torch._prims.wrappers import out_wrapper
+from torch._prims.wrappers import out_wrapper, out_wrapper_multi
 
 from torch._prims.utils import (
     check,
@@ -18,10 +19,11 @@ from torch._prims.utils import (
 import torch._refs.linalg as linalg
 import torch._refs.linalg.utils
 
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from functools import partial
 
 __all__ = [
+    "svd",
     "vector_norm",
 ]
 
@@ -34,7 +36,7 @@ def vector_norm(
     keepdim: bool = False,
     *,
     dtype: Optional[torch.dtype] = None,
-):
+) -> Tensor:
     # Checks
     linalg.utils.check_fp_or_complex(x.dtype, "linalg.vector_norm", half=True)
 
@@ -101,3 +103,14 @@ def vector_norm(
         else:
             x = prims.abs(x)
         return to_result_dtype(fast_pow(reduce_sum(fast_pow(x, ord_pow)), 1.0 / ord))
+
+
+# out_wrapper_multi is buggy (see the note in its definition), and so is the `linalg.svd` out behaviour
+@out_wrapper_multi("U", "S", "Vh")
+def svd(A: TensorLikeType, full_matrices: bool = True) -> Tuple[Tensor, Tensor, Tensor]:
+    return prims.svd(A, full_matrices=full_matrices)
+
+
+@out_wrapper
+def svdvals(A: TensorLikeType) -> Tensor:
+    return svd(A, full_matrices=False)[1]

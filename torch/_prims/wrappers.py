@@ -194,6 +194,10 @@ def out_wrapper(fn: Callable) -> Callable:
     return _fn
 
 
+# FIXME This currently assumes that the API for multiple returns specifies each return separately
+# The actual API is that of having an in-out argument which is a tuple of tensors. This argument
+# is *always* called `out`. Even more, these functions return a `torch.return_types.{fn_name}` type,
+# not a tuple
 def out_wrapper_multi(*out_names):
     def go(fn: Callable) -> Callable:
         @wraps(fn)

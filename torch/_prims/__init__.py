@@ -3,6 +3,7 @@ from torch import Tensor, _TypedStorage
 
 import torch._prims.utils as utils
 from torch._prims.utils import (
+    check,
     TensorLike,
     TensorLikeType,
     TensorMeta,
@@ -164,6 +165,10 @@ __all__ = [
     #
     "empty_strided",
     #
+    # Linear algebra (linalg) Prims
+    #
+    "svd",
+    #
     # Randomness Prims
     #
     "uniform",
@@ -213,7 +218,7 @@ def _wrap_tensor_meta(f):
 def _make_prim(
     *,
     schema: str,
-    return_type: RETURN_TYPE,
+    return_type: Union[RETURN_TYPE, Tuple[RETURN_TYPE, ...]],
     meta: Callable,
     impl_aten: Callable,
     impl_nvfuser: Optional[Callable] = None,
@@ -2288,6 +2293,7 @@ amin = _make_reduction_prim(
     doc=_amin_doc,
 )
 
+
 # TODO: layout, pin_memory, memory_format
 # TODO: model requires_grad on TensorMeta
 def _empty_meta(
@@ -2423,6 +2429,72 @@ full_like = _make_prim(
     return_type=RETURN_TYPE.NEW,
     doc=_full_like_doc,
 )
+
+
+#
+# Linear algebra (linalg) prims
+#
+
+
+def _svd_meta(
+    A: TensorLikeType, *, full_matrices: bool
+) -> Tuple[TensorLikeType, TensorLikeType, TensorLikeType]:
+    A_shape = A.shape
+    check(
+        len(A_shape) >= 2,
+        lambda: f"linalg.svd: input should have at least 2 dimensions, but has {A.ndim} dimensions instead",
+    )
+    batch = A_shape[:-2]
+    m, n = A_shape[-2:]
+    k = min(m, n)
+
+    def contig_strides(shape, *, row_major):
+        if row_major:
+            return utils.make_contiguous_strides_for(shape)
+        else:  # row major
+            return utils.make_batched_column_major_strides_for(shape)
+
+    shape_U = batch + (m, m if full_matrices else k)
+    strides_U = contig_strides(shape_U, row_major=False)
+    U = TensorMeta(shape=shape_U, strides=strides_U, dtype=A.dtype, device=A.device)
+
+    shape_S = batch + (k,)
+    strides_S = contig_strides(shape_S, row_major=True)
+    S = TensorMeta(
+        shape=shape_S,
+        strides=strides_S,
+        dtype=utils.corresponding_real_dtype(A.dtype),
+        device=A.device,
+    )
+
+    shape_Vh = batch + (n if full_matrices else k, n)
+    # The CPU backend returns V, but the cuSolver backend returns V^H
+    # TODO The MAGMA backend returns V, so this is wrong if used with the MAGMA backend
+    strides_Vh = contig_strides(shape_Vh, row_major=utils.is_cuda(A.device))
+    Vh = TensorMeta(shape=shape_Vh, strides=strides_Vh, dtype=A.dtype, device=A.device)
+    return U, S, Vh
+
+
+def _svd_aten(
+    A: TensorLikeType, *, full_matrices: bool
+) -> Tuple[Tensor, Tensor, Tensor]:
+    return torch.linalg.svd(A, full_matrices=full_matrices)
+
+
+_svd_doc = """
+    Returns the SVD of a matrix or batch of matrices.
+
+    The `full_matrices` flag controls whether the full or reduced SVD decomposition is returned.
+"""
+
+svd = _make_prim(
+    schema="svd(Tensor A, *, bool full_matrices) -> (Tensor U, Tensor S, Tensor Vh)",
+    meta=_svd_meta,
+    impl_aten=_svd_aten,
+    return_type=(RETURN_TYPE.NEW, RETURN_TYPE.NEW, RETURN_TYPE.NEW),
+    doc=_svd_doc,
+)
+
 
 #
 # Randomness Prims
