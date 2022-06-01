@@ -497,6 +497,7 @@ class Argument:
     default_value: Optional[Any]
     def has_default_value(self) -> _bool: ...
     kwarg_only : _bool
+    is_out: _bool
     ...
 class FunctionSchema:
     arguments: List[Argument]
@@ -863,7 +864,7 @@ class ThroughputBenchmark(object):
     def run_once(self, *args: Any, **kwargs: Any) -> Any: ...
     def benchmark(self, config: BenchmarkConfig) -> BenchmarkExecutionStats: ...
 
-# Defined in torch/csrc/generic/Storage.cpp
+# Defined in torch/csrc/Storage.cpp
 ${legacy_storage_base_hints}
 
 # TODO: where

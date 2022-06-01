@@ -57,6 +57,12 @@ enum class BackendComponent : uint8_t {
   HPUBit,
   VEBit,
   LazyBit,
+  // A meta tensor is a tensor without any data associated with it.  (They
+  // have also colloquially been referred to as tensors on the "null" device).
+  // A meta tensor can be used to dry run operators without actually doing any
+  // computation, e.g., add on two meta tensors would give you another meta
+  // tensor with the output shape and dtype, but wouldn't actually add anything.
+  MetaBit,
   PrivateUse1Bit,
   PrivateUse2Bit,
   PrivateUse3Bit,
@@ -155,13 +161,6 @@ enum class DispatchKey : uint16_t {
 
   Vulkan,
   Metal,
-
-  // A meta tensor is a tensor without any data associated with it.  (They
-  // have also colloquially been referred to as tensors on the "null" device).
-  // A meta tensor can be used to dry run operators without actually doing any
-  // computation, e.g., add on two meta tensors would give you another meta
-  // tensor with the output shape and dtype, but wouldn't actually add anything.
-  Meta,
 
   // See [Note: Per-Backend Functionality Dispatch Keys]
   Quantized,
@@ -409,6 +408,7 @@ enum class DispatchKey : uint16_t {
   HPU, // For out of tree & closed source integration of HPU / Habana
   VE, // For out of tree & closed source integration of SX-Aurora / NEC
   Lazy, // For lazy tensor backends
+  Meta,
   // Here are reserved backends for user-defined backends, see Note [Private use
   // DispatchKey]
   // To see some example about how to use this, check out ORT
@@ -433,6 +433,7 @@ enum class DispatchKey : uint16_t {
   _QuantizedHPU,
   _QuantizedVE,
   _QuantizedLazy,
+  _QuantizedMeta,
   _QuantizedPrivateUse1,
   _QuantizedPrivateUse2,
   _QuantizedPrivateUse3,
@@ -455,6 +456,7 @@ enum class DispatchKey : uint16_t {
   _SparseHPU,
   SparseVE, // For out of tree & closed source integration of SX-Aurora / NEC
   _SparseLazy,
+  _SparseMeta,
   _SparsePrivateUse1,
   _SparsePrivateUse2,
   _SparsePrivateUse3,
@@ -479,6 +481,7 @@ enum class DispatchKey : uint16_t {
   _NestedTensorHPU,
   _NestedTensorVE,
   _NestedTensorLazy,
+  _NestedTensorMeta,
   _NestedTensorPrivateUse1,
   _NestedTensorPrivateUse2,
   _NestedTensorPrivateUse3,
@@ -500,6 +503,7 @@ enum class DispatchKey : uint16_t {
   AutogradHPU,
   _AutogradVE,
   AutogradLazy,
+  AutogradMeta,
   // Here are some reserved pre-autograd keys for user-defined backends, see
   // Note [Private use DispatchKey]
   AutogradPrivateUse1,
