@@ -103,6 +103,7 @@ jobs:
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             -e IS_GHA \
+            -e DEBUG \
             -e PR_NUMBER \
             -e SHA1 \
             -e BRANCH \
