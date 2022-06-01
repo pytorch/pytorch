@@ -72,6 +72,7 @@ __all__ = [
     "reciprocal",
     "round",
     "sign",
+    "signbit",
     "sin",
     "sinh",
     "sqrt",
@@ -89,6 +90,9 @@ __all__ = [
     # 'complex',  # needs custom meta
     "div",
     "eq",
+    "fmax",
+    "fmin",
+    "fmod",
     "ge",
     "gt",
     "igamma",
@@ -138,6 +142,8 @@ __all__ = [
     "convert_element_type",
     "device_put",
     "item",
+    "maximum_value",
+    "minimum_value",
     "to_dtype",
     #
     # Inplace prims
@@ -746,6 +752,13 @@ sign = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+signbit = _make_elementwise_unary_prim(
+    "signbit",
+    impl_aten=torch.signbit,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 
 def _sin_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.sin(a)  # type: ignore[attr-defined]
@@ -888,11 +901,51 @@ div = _make_elementwise_binary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 eq = _make_elementwise_binary_prim(
     "eq",
     impl_aten=torch.eq,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+)
+
+
+def _fmax_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.fmax(a, b)  # type: ignore[attr-defined]
+
+
+fmax = _make_elementwise_binary_prim(
+    "fmax",
+    impl_aten=torch.fmax,
+    impl_nvfuser=_fmax_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _fmin_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.fmin(a, b)  # type: ignore[attr-defined]
+
+
+fmin = _make_elementwise_binary_prim(
+    "fmin",
+    impl_aten=torch.fmin,
+    impl_nvfuser=_fmin_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _fmod_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.fmod(a, b)  # type: ignore[attr-defined]
+
+
+fmod = _make_elementwise_binary_prim(
+    "fmod",
+    impl_aten=torch.fmod,
+    impl_nvfuser=_fmod_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 
@@ -1972,6 +2025,69 @@ item = _make_prim(
     doc=_item_doc,
 )
 
+# NOTE: need to model meta scalars
+# See https://github.com/pytorch/pytorch/issues/78070
+def _maximum_value_meta(dtype: torch.dtype) -> TensorMeta:
+    number_type = utils.dtype_to_type(dtype)
+    return TensorMeta(number_type(-1))
+
+
+def _maximum_value_aten(dtype: torch.dtype):
+    if dtype == torch.bool:
+        return True
+    elif dtype.is_complex or dtype.is_floating_point:
+        return torch.finfo(dtype).max
+    else:
+        return torch.iinfo(dtype).max
+
+
+_maximum_value_doc = """
+    Return the maximum finite value for a dtype.
+"""
+
+# TODO: create a new return type for scalars?
+# FIXME: currently returns integers for boolean tensors
+# https://github.com/pytorch/pytorch/issues/78071
+maximum_value = _make_prim(
+    schema="maximum_value(ScalarType dtype) -> Scalar",
+    meta=_maximum_value_meta,
+    impl_aten=_maximum_value_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_maximum_value_doc,
+)
+
+
+# NOTE: need to model meta scalars
+# See https://github.com/pytorch/pytorch/issues/78070
+def _minimum_value_meta(dtype: torch.dtype) -> TensorMeta:
+    number_type = utils.dtype_to_type(dtype)
+    return TensorMeta(number_type(-1))
+
+
+def _minimum_value_aten(dtype: torch.dtype):
+    if dtype == torch.bool:
+        return False
+    elif dtype.is_complex or dtype.is_floating_point:
+        return torch.finfo(dtype).min
+    else:
+        return torch.iinfo(dtype).min
+
+
+_minimum_value_doc = """
+    Return the mimimum finite value for a dtype.
+"""
+
+# TODO: create a new return type for scalars?
+# FIXME: currently returns integers for boolean tensors
+# https://github.com/pytorch/pytorch/issues/78071
+minimum_value = _make_prim(
+    schema="minium_value(ScalarType dtype) -> Scalar",
+    meta=_minimum_value_meta,
+    impl_aten=_minimum_value_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_minimum_value_doc,
+)
+
 # TODO: FIXME: strides are incorrect
 def _to_dtype_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
     strides = utils.make_contiguous_strides_for(a.shape)
@@ -2138,10 +2254,26 @@ sum = _make_reduction_prim(
     doc=_sum_doc,
 )
 
+
+def _prod_aten(
+    inp: TensorLikeType,
+    dims: Optional[DimsSequenceType],
+    *,
+    dtype: Optional[torch.dtype] = None,
+) -> Tensor:
+    if dims is not None:
+        for d in sorted(dims, reverse=True):
+            assert d >= 0
+            inp = torch.prod(inp, d, dtype=dtype)
+        return inp
+    else:
+        return torch.prod(inp, dims, dtype=dtype)
+
+
 prod = _make_reduction_prim(
     name="prod",
-    impl_aten=torch.prod,
-    doc=_sum_doc,
+    impl_aten=_prod_aten,
+    doc=_prod_doc,
 )
 
 var = _make_var_reduction_prim(
