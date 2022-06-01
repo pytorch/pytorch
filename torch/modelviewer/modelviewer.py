@@ -14,7 +14,7 @@ class ModelViewer:
         # load the pytorch model
         model = torch.load(path)
         return model
-    
+
     @staticmethod
     def get_layers(model):
         # get the list of layers from model
@@ -39,7 +39,7 @@ class ModelViewer:
         # check to remove duplicate entries
         layer_list = [i for n, i in enumerate(layer_list) if i not in layer_list[n + 1:]]
         return layer_list, d
-    
+
     @staticmethod
     def display_model(layers, ref):
         # generate rough sketch of architecture
@@ -64,7 +64,7 @@ class ModelViewer:
             y = y - step_size
         plt.show()
         return fig
-    
+
     @staticmethod     
     def save_model(fig, img):
         # path to save the architecture diagram
