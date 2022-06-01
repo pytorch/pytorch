@@ -48,6 +48,29 @@ Tensor ffn(
   res = linear_for_ffn(b2, res, w2, c10::nullopt);
   return res;
 }
+
+void add_in_place(Tensor& input, const Tensor& arg, bool use_nested_tensor) {
+  if (use_nested_tensor) {
+    NestedTensor_add_NestedTensor_in_place(input, arg);
+  } else {
+    input.add_(arg);
+  }
+}
+
+Tensor norm(
+    const Tensor& input,
+    const int64_t embed_dim,
+    const double eps,
+    const Tensor& weight,
+    const Tensor& bias,
+    const bool use_nested_tensor) {
+  if (use_nested_tensor) {
+    return NestedTensor_layer_norm(input, weight, bias, eps);
+  } else {
+    return at::layer_norm(input, {embed_dim}, weight, bias, eps, true);
+  }
+}
+
 } // namespace
 
 Tensor transformer_encoder_layer_forward(
@@ -92,20 +115,8 @@ Tensor transformer_encoder_layer_forward(
       proj_bias,
       mask,
       false /* need_weights */));
-  if (use_nested_tensor) {
-    NestedTensor_add_NestedTensor_in_place(x, src);
-    x = NestedTensor_layer_norm(
-        x, layer_norm_weight_1, layer_norm_bias_1, layer_norm_eps);
-  } else {
-    x.add_(src);
-    x = at::layer_norm(
-        x,
-        {embed_dim},
-        layer_norm_weight_1,
-        layer_norm_bias_1,
-        layer_norm_eps,
-        true);
-  }
+  add_in_place(x, src, use_nested_tensor);
+  x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
 
   auto pre_ffn_res = x;
   x = ffn(
@@ -116,20 +127,8 @@ Tensor transformer_encoder_layer_forward(
       ffn_bias_2,
       use_gelu,
       /* add_norm* */ false);
-  if (use_nested_tensor) {
-    NestedTensor_add_NestedTensor_in_place(x, pre_ffn_res);
-    x = NestedTensor_layer_norm(
-        x, layer_norm_weight_2, layer_norm_bias_2, layer_norm_eps);
-  } else {
-    x.add_(pre_ffn_res);
-    x = at::layer_norm(
-        x,
-        {embed_dim},
-        layer_norm_weight_2,
-        layer_norm_bias_2,
-        layer_norm_eps,
-        true);
-  }
+  add_in_place(x, pre_ffn_res, use_nested_tensor);
+  x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_2, layer_norm_bias_2, use_nested_tensor);
   return x;
 }
 

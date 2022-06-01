@@ -103,7 +103,7 @@ class ShaderLayoutCache final {
   ShaderLayoutCache(const ShaderLayoutCache&) = delete;
   ShaderLayoutCache& operator=(const ShaderLayoutCache&) = delete;
 
-  ShaderLayoutCache(ShaderLayoutCache&&) = default;
+  ShaderLayoutCache(ShaderLayoutCache&&) noexcept;
   ShaderLayoutCache& operator=(ShaderLayoutCache&&) = delete;
 
   ~ShaderLayoutCache();
@@ -113,12 +113,17 @@ class ShaderLayoutCache final {
   typedef ShaderLayout::Hasher Hasher;
 
  private:
+  // Multiple threads could potentially be adding entries into the cache, so use
+  // a mutex to manage access
+  std::mutex cache_mutex_;
+
   VkDevice device_;
   ska::flat_hash_map<Key, Value, Hasher> cache_;
 
  public:
   VkDescriptorSetLayout retrieve(const Key&);
   void purge();
+
 };
 
 class ShaderCache final {
@@ -128,7 +133,7 @@ class ShaderCache final {
   ShaderCache(const ShaderCache&) = delete;
   ShaderCache& operator=(const ShaderCache&) = delete;
 
-  ShaderCache(ShaderCache&&) = default;
+  ShaderCache(ShaderCache&&) noexcept;
   ShaderCache& operator=(ShaderCache&&) = delete;
 
   ~ShaderCache();
@@ -138,6 +143,10 @@ class ShaderCache final {
   typedef ShaderModule::Hasher Hasher;
 
  private:
+  // Multiple threads could potentially be adding entries into the cache, so use
+  // a mutex to manage access
+  std::mutex cache_mutex_;
+
   VkDevice device_;
   ska::flat_hash_map<Key, Value, Hasher> cache_;
 

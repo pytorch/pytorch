@@ -75,24 +75,6 @@ public:
 #endif
 };
 
-TEST_F(VulkanAPITest, adaptive_avg_pool2d) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-  c10::InferenceMode mode;
-
-  const auto in_cpu = at::rand({5, 7, 47, 31}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  const auto out_cpu = at::adaptive_avg_pool2d(in_cpu, {3, 3});
-  const auto out_vulkan = at::adaptive_avg_pool2d(in_cpu.vulkan(), {3, 3});
-
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    showRtol(out_cpu, out_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
-}
-
 TEST_F(VulkanAPITest, add) {
   if (!at::is_vulkan_available()) {
     return;
@@ -107,9 +89,12 @@ TEST_F(VulkanAPITest, add) {
   const auto c_cpu = at::add(a_cpu, b_cpu, 2.1f);
   const auto c_vulkan = at::add(a_vulkan, b_vulkan, 2.1f);
 
-  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  const auto d_cpu = at::sub(c_cpu, a_cpu, 0.1f);
+  const auto d_vulkan = at::sub(c_vulkan, a_vulkan, 0.1f);
+
+  const auto check = almostEqual(d_cpu, d_vulkan.cpu());
   if (!check) {
-    showRtol(c_cpu, c_vulkan.cpu());
+    showRtol(d_cpu, d_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
