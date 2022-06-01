@@ -2,57 +2,56 @@
 
 <!-- toc -->
 
-- [Table of Contents](#table-of-contents)
-  - [Contributing to PyTorch](#contributing-to-pytorch)
-  - [Developing PyTorch](#developing-pytorch)
-    - [Prerequisites](#prerequisites)
-    - [Instructions](#instructions)
-    - [Tips and Debugging](#tips-and-debugging)
-  - [Nightly Checkout & Pull](#nightly-checkout--pull)
-  - [Codebase structure](#codebase-structure)
-  - [Unit testing](#unit-testing)
-    - [Python Unit Testing](#python-unit-testing)
-    - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
-    - [Local linting](#local-linting)
-      - [Running `mypy`](#running-mypy)
-    - [C++ Unit Testing](#c-unit-testing)
-    - [Run Specific CI Jobs](#run-specific-ci-jobs)
-  - [Writing documentation](#writing-documentation)
-    - [Building documentation](#building-documentation)
-      - [Tips](#tips)
-      - [Building C++ Documentation](#building-c-documentation)
-    - [Previewing changes locally](#previewing-changes-locally)
-    - [Previewing documentation on PRs](#previewing-documentation-on-prs)
-    - [Adding documentation tests](#adding-documentation-tests)
-  - [Profiling with `py-spy`](#profiling-with-py-spy)
-  - [Managing multiple build trees](#managing-multiple-build-trees)
-  - [C++ development tips](#c-development-tips)
-    - [Build only what you need](#build-only-what-you-need)
-    - [Code completion and IDE support](#code-completion-and-ide-support)
-    - [Make no-op build fast](#make-no-op-build-fast)
-      - [Use Ninja](#use-ninja)
-      - [Use CCache](#use-ccache)
-      - [Use a faster linker](#use-a-faster-linker)
-      - [Use pre-compiled headers](#use-pre-compiled-headers)
-      - [Workaround for header dependency bug in nvcc](#workaround-for-header-dependency-bug-in-nvcc)
-    - [C++ frontend development tips](#c-frontend-development-tips)
-    - [GDB integration](#gdb-integration)
-    - [C++ stacktraces](#c-stacktraces)
-  - [CUDA development tips](#cuda-development-tips)
-  - [Windows development tips](#windows-development-tips)
-    - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
-    - [Building on legacy code and CUDA](#building-on-legacy-code-and-cuda)
-  - [Running clang-tidy](#running-clang-tidy)
-  - [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
-  - [Building PyTorch with ASAN](#building-pytorch-with-asan)
-    - [Getting `ccache` to work](#getting-ccache-to-work)
-    - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
-    - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
-    - [Why no leak detection?](#why-no-leak-detection)
-  - [Caffe2 notes](#caffe2-notes)
-  - [CI failure tips](#ci-failure-tips)
-    - [Which commit is used in CI?](#which-commit-is-used-in-ci)
-  - [Dev Infra Office Hours](#dev-infra-office-hours)
+- [Contributing to PyTorch](#contributing-to-pytorch)
+- [Developing PyTorch](#developing-pytorch)
+  - [Prerequisites](#prerequisites)
+  - [Instructions](#instructions)
+  - [Tips and Debugging](#tips-and-debugging)
+- [Nightly Checkout & Pull](#nightly-checkout--pull)
+- [Codebase structure](#codebase-structure)
+- [Unit testing](#unit-testing)
+  - [Python Unit Testing](#python-unit-testing)
+  - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
+  - [Local linting](#local-linting)
+    - [Running `mypy`](#running-mypy)
+  - [C++ Unit Testing](#c-unit-testing)
+  - [Run Specific CI Jobs](#run-specific-ci-jobs)
+- [Writing documentation](#writing-documentation)
+  - [Building documentation](#building-documentation)
+    - [Tips](#tips)
+    - [Building C++ Documentation](#building-c-documentation)
+  - [Previewing changes locally](#previewing-changes-locally)
+  - [Previewing documentation on PRs](#previewing-documentation-on-prs)
+  - [Adding documentation tests](#adding-documentation-tests)
+- [Profiling with `py-spy`](#profiling-with-py-spy)
+- [Managing multiple build trees](#managing-multiple-build-trees)
+- [C++ development tips](#c-development-tips)
+  - [Build only what you need](#build-only-what-you-need)
+  - [Code completion and IDE support](#code-completion-and-ide-support)
+  - [Make no-op build fast](#make-no-op-build-fast)
+    - [Use Ninja](#use-ninja)
+    - [Use CCache](#use-ccache)
+    - [Use a faster linker](#use-a-faster-linker)
+    - [Use pre-compiled headers](#use-pre-compiled-headers)
+    - [Workaround for header dependency bug in nvcc](#workaround-for-header-dependency-bug-in-nvcc)
+  - [C++ frontend development tips](#c-frontend-development-tips)
+  - [GDB integration](#gdb-integration)
+  - [C++ stacktraces](#c-stacktraces)
+- [CUDA development tips](#cuda-development-tips)
+- [Windows development tips](#windows-development-tips)
+  - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
+  - [Building on legacy code and CUDA](#building-on-legacy-code-and-cuda)
+- [Running clang-tidy](#running-clang-tidy)
+- [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
+- [Building PyTorch with ASAN](#building-pytorch-with-asan)
+  - [Getting `ccache` to work](#getting-ccache-to-work)
+  - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
+  - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
+  - [Why no leak detection?](#why-no-leak-detection)
+- [Caffe2 notes](#caffe2-notes)
+- [CI failure tips](#ci-failure-tips)
+  - [Which commit is used in CI?](#which-commit-is-used-in-ci)
+- [Dev Infra Office Hours](#dev-infra-office-hours)
 
 <!-- tocstop -->
 
@@ -390,7 +389,7 @@ Learn more about the linter on the [lintrunner wiki page](https://github.com/pyt
 #### Running `mypy`
 
 `mypy` is an optional static type checker for Python. We have multiple `mypy`
-configs for the PyTorch codebase that are automatically validated whenever the linter is run.
+configs for the PyTorch codebase that are automatically validated against whenever the linter is run.
 
 See [Guide for adding type annotations to
 PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
@@ -440,7 +439,7 @@ of very low signal to reviewers.
 
 So you want to write some documentation and don't know where to start?
 PyTorch has two main types of documentation:
-- **User-facing documentation**:
+- **User facing documentation**:
 These are the docs that you see over at [our docs website](https://pytorch.org/docs).
 - **Developer facing documentation**:
 Developer facing documentation is spread around our READMEs in our codebase and in
@@ -450,7 +449,7 @@ If you're interested in adding new developer docs, please read this [page on the
 The rest of this section is about user-facing documentation.
 
 PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
-for formatting docstrings. Each line inside docstrings block must be limited to 80 characters so that it fits into Jupyter documentation popups.
+for formatting docstrings. Each line inside a docstrings block must be limited to 80 characters so that it fits into Jupyter documentation popups.
 
 ### Building documentation
 

@@ -154,20 +154,18 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 ### From Source
 
 #### Prerequisites
-If you are installing from source, you will need Python 3.7 or later and a C++14 compiler. Also, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
-You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
+If you are installing from source, you will need:
+- Python 3.7 or later (for Linux, Python 3.7.6+ or 3.8.1+ is needed)
+- A C++14 compiler, such as cmake
 
-(For Linux installations, the recommended Python versions are 3.7.6+ or 3.8.1+)
+We highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
-Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
-
-If you want to compile with CUDA support, install
+If you want to compile with CUDA support, install the following (note that CUDA is not supported on macOS)
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 10.2 or above
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
-Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardwares
 
-Note that CUDA is not supported on macOS
+Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardware
 
 If you want to disable CUDA support, export the environment variable `USE_CUDA=0`.
 Other potentially useful environment variables may be found in `setup.py`.
