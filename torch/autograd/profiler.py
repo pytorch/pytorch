@@ -150,6 +150,7 @@ class profile(object):
             with_modules=False,
             use_kineto=False,
             use_cpu=True,
+            use_hpu=False,
             experimental_config=None):
         self.enabled: bool = enabled
         if not self.enabled:
@@ -180,6 +181,11 @@ class profile(object):
         self.kineto_activities = set()
         if self.use_cpu:
             self.kineto_activities.add(ProfilerActivity.CPU)
+        
+        if use_hpu:
+            assert use_kineto, \
+                "HPU events supported only with Kineto (use_kineto=True)"
+            self.kineto_activities.add(ProfilerActivity.HPU)
 
         self.profiler_kind = ProfilerState.KINETO
         if self.use_cuda:

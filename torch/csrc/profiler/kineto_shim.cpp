@@ -33,6 +33,10 @@ const std::set<libkineto::ActivityType> cudaTypes = {
     // CUDA_RUNTIME appears in both cpuTypes and cudaTypes.
     libkineto::ActivityType::CUDA_RUNTIME,
 };
+
+const std::set<libkineto::ActivityType> hpuTypes = {
+    libkineto::ActivityType::HPU_OP,
+  };
 } // namespace
 #endif // USE_KINETO
 
@@ -217,6 +221,9 @@ void prepareTrace(
   if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
     k_activities.insert(cudaTypes.begin(), cudaTypes.end());
   }
+  if (activities.count(torch::autograd::profiler::ActivityType::HPU)) {
+    k_activities.insert(hpuTypes.begin(), hpuTypes.end());
+  }
 
   ExperimentalConfigWrapper configWrap(config);
 
@@ -299,6 +306,8 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::GLOW_RUNTIME:
     case libkineto::ActivityType::PYTHON_FUNCTION:
       return c10::DeviceType::CPU;
+    case libkineto::ActivityType::HPU_OP:
+        return c10::DeviceType::HPU;
     default: {
       TORCH_WARN(
           "Unknown activity type (",
