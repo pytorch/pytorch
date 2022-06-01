@@ -211,7 +211,12 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
 
     if output.dim() == 1:
         output = output.view(dist.get_world_size(pg), -1)
-    result = output.matmul(local_shard_t) + local_bias
+
+    if output.dim() <= 2:
+        # Use fused version if possible.
+        result = torch.addmm(local_bias, output, local_shard_t)
+    else:
+        result = output.matmul(local_shard_t) + local_bias
 
     # Build ShardedTensor as result.
     st_size = list(result.size())
@@ -325,14 +330,18 @@ def _handle_row_wise_sharding_sharded_tensor(
     Returns:
         A :class:`_PartialTensor` object which stores the partial local result.
     """
-    local_shard = input.local_shards()[0].tensor
+    local_input = input.local_shards()[0].tensor
     if input.sharding_spec().dim not in (-1, len(input.size()) - 1):
         raise NotImplementedError(
             "The case when the input does not come from col-wise sharded "
             "linear is not supported for row-wise sharded linear."
         )
 
-    result = local_shard.matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias)
+    # Use fused version if possible.
+    if local_input.dim() <= 2:
+        result = torch.addmm(_BiasTensorPartial.apply(world_size, bias), local_input, local_shard_t)
+    else:
+        result = local_input.matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias)
 
     # Return the partial local result.
     return _PartialTensor(result, pg)
@@ -354,10 +363,7 @@ class _BiasTensorNarrow(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        results = []
-        grad_output_cloned = grad_output.clone()
-        for idx in range(ctx.world_size):
-            results.append(grad_output_cloned)
+        results = [grad_output.clone()] * ctx.world_size
         return (None, None, None, None, None) + (
             _result_distribute_with_col_rearrange(
                 results, grad_output, ctx.world_size, ctx.weight, ctx.pg

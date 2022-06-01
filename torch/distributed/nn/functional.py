@@ -351,12 +351,18 @@ class _AllGatherBase(Function):
     def backward(ctx, grad_output):
         if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
             rank = dist.get_rank(group=ctx.group)
+            world_size = dist.get_world_size(group=ctx.group)
             out_size = list(grad_output.size())
-            out_size[0] = grad_output[0].size() // dist.get_world_size(group=ctx.group)
+            if out_size[0] % world_size != 0:
+                raise RuntimeError(
+                    f'Tensor with dimensions: {out_size} does '
+                    f'not have first dimension divisible by world_size: {world_size}'
+                )
+            out_size[0] = out_size[0] // dist.get_world_size(group=ctx.group)
             gx = torch.empty(out_size, device=grad_output.device)
             dist._reduce_scatter_base(gx, grad_output, ReduceOp.SUM, ctx.group)
         else:
-            raise RuntimeError("Backed not supported!")
+            raise RuntimeError("Backend not supported!")
         return (None, gx, None)
 
 class _AlltoAll(Function):
