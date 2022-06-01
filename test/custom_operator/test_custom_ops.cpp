@@ -164,10 +164,10 @@ void test_move_to_dtype(const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
       torch::jit::load(path_to_exported_script_module);
 
-  module.to(torch::kInt);
+  module.to(torch::kFloat16);
 
   helpers::check_all_parameters(module, [](const torch::Tensor& tensor) {
-    return tensor.dtype() == torch::kInt;
+    return tensor.dtype() == torch::kFloat16;
   });
 
   module.to(torch::kDouble);
