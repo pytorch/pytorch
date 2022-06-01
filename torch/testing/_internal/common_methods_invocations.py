@@ -6860,57 +6860,19 @@ def sample_inputs_roll(op_info, device, dtype, requires_grad=False, **kwargs):
     args = ((0, 0), (1, 2), (0, 2), (2, 0), (-1, 0), (10000, 1), (2,), ((1, 2, -1), (0, 1, 2)))
 
     for arg in args:
-        yield SampleInput(make_arg((0, 0, 0)), args=arg)
         yield SampleInput(make_arg((S, S, S)), args=arg)
 
-
-def error_inputs_roll(op_info, device, **kwargs):
-    err_msg1 = "`shifts` required"
-    s1 = SampleInput(
-        make_tensor((S,), dtype=torch.float32, device=device), args=(tuple(),)
-    )
-    yield ErrorInput(s1, error_regex=err_msg1)
-
-    err_msg2 = ("shifts and dimensions must align")
-    s2 = SampleInput(
-        make_tensor((S, S), dtype=torch.float32, device=device), args=((2, 1), 0)
-    )
-    yield ErrorInput(s2, error_regex=err_msg2)
-
-    err_msg3 = ("out of range")
-    s3 = SampleInput(
-        make_tensor((S, ), dtype=torch.float32, device=device), args=(0, 2)
-    )
-    yield ErrorInput(s3, error_regex=err_msg3, error_type=IndexError)
 
 def sample_inputs_rot90(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    args = itertools.product(range(-5, 6), [(0, 1), (1, 2), (1, -1)])
+    args = ((1, (0, 1),),
+            (1, (1, 2),),
+            (1, (1, -1),),
+            ())
 
-    yield SampleInput(make_arg((S, S, S)))
     for arg in args:
         yield SampleInput(make_arg((S, S, S)), args=arg)
-
-
-def error_inputs_rot90(op_info, device, **kwargs):
-    err_msg1 = "expected total rotation dims"
-    s1 = SampleInput(
-        make_tensor((S, S), dtype=torch.float32, device=device), kwargs={"dims": (0,)}
-    )
-    yield ErrorInput(s1, error_regex=err_msg1)
-
-    err_msg2 = "expected total dims >= 2"
-    s2 = SampleInput(
-        make_tensor((S,), dtype=torch.float32, device=device),
-    )
-    yield ErrorInput(s2, error_regex=err_msg2)
-
-    err_msg3 = "expected rotation dims to be different"
-    s3 = SampleInput(
-        make_tensor((S, S), dtype=torch.float32, device=device), kwargs={"dims": (1, 1)}
-    )
-    yield ErrorInput(s3, error_regex=err_msg3)
 
 
 def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
@@ -14888,25 +14850,19 @@ op_db: List[OpInfo] = [
                        # Skip since real and imag don't have out variants.
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
                    )),
-    OpInfo(
-        "roll",
-        ref=np.roll,
-        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
-        error_inputs_func=error_inputs_roll,
-        supports_out=False,
-        supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
-        sample_inputs_func=sample_inputs_roll,
-    ),
-    OpInfo(
-        "rot90",
-        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
-        error_inputs_func=error_inputs_rot90,
-        supports_out=False,
-        supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
-        sample_inputs_func=sample_inputs_rot90,
-    ),
+    OpInfo('roll',
+           ref=np.roll,
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=sample_inputs_roll),
+    OpInfo('rot90',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=sample_inputs_rot90),
     # To test reference numerics against multiple values of argument `decimals`,
     # we make multiple OpInfo entries with each entry corresponding to different value of decimals.
     UnaryUfuncInfo('round',
@@ -19704,18 +19660,6 @@ python_ref_db = [
     # View & Shape OpInfos
     #
     PythonRefInfo(
-        "_refs.atleast_1d",
-        torch_opinfo_name="atleast_1d",
-    ),
-    PythonRefInfo(
-        "_refs.atleast_2d",
-        torch_opinfo_name="atleast_2d",
-    ),
-    PythonRefInfo(
-        "_refs.atleast_3d",
-        torch_opinfo_name="atleast_3d",
-    ),
-    PythonRefInfo(
         "_refs.as_strided",
         torch_opinfo_name="as_strided",
         # FIXME: doesn't support chalf
@@ -19777,21 +19721,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.reshape",
         torch_opinfo_name="reshape",
-    ),
-    PythonRefInfo(
-        "_refs.roll",
-        torch_opinfo_name="roll",
-        validate_view_consistency=False,
-        skips=(
-            # TODO: decide on the error message for the reference implementation
-            # See https://github.com/pytorch/pytorch/issues/78252
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
-    ),
-    PythonRefInfo(
-        "_refs.rot90",
-        torch_opinfo_name="rot90",
-        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.stack",
