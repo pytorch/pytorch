@@ -462,37 +462,7 @@ static int THPVariable_clear(THPVariable* self) {
     //        because Tensor asked us to (it's already destructing).
 
     if (!self->cdata.unsafeIsBorrowed()) {
-      // TODO: empirically, on OS X this assert appears to be untrue
-      // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
-      // distributed/rpc/test_process_group_agent.py
-      //
-      //  libc++abi.dylib: terminating with uncaught exception of type
-      //  c10::Error: !tensor.unsafeGetTensorImpl()->owns_pyobj()INTERNAL ASSERT
-      //  FAILED at "../torch/csrc/autograd/python_variable.cpp":171, please
-      //  report a bug to PyTorch. Exception raised from THPVariable_clear at
-      //  ../torch/csrc/autograd/python_variable.cpp:171 (most recent call
-      //  first): frame #0: c10::Error::Error(c10::SourceLocation,
-      //  std::__1::basic_string<char, std::__1::char_traits<char>,
-      //  std::__1::allocator<char> >) + 98 (0x1158a0442 in libc10.dylib) frame
-      //  #1: c10::detail::torchCheckFail(char const*, char const*, unsigned
-      //  int, char const*) + 205 (0x11589ed3d in libc10.dylib) frame #2:
-      //  c10::detail::torchInternalAssertFail(char const*, char const*,
-      //  unsigned int, char const*, c10::detail::CompileTimeEmptyString) + 9
-      //  (0x1141e3f89 in libtorch_python.dylib) frame #3:
-      //  THPVariable_clear(THPVariable*) + 412 (0x1148a547c in
-      //  libtorch_python.dylib) frame #4:
-      //  THPVariable_subclass_dealloc(_object*) + 453 (0x1148a5035 in
-      //  libtorch_python.dylib) frame #5: (anonymous
-      //  namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
-      //  _object*) + 53 (0x1148a5ea5 in libtorch_python.dylib) frame #6:
-      //  c10::TensorImpl::release_resources() + 182 (0x11588c4a6 in
-      //  libc10.dylib) frame #7:
-      //  c10::MaybeOwned<at::Tensor>::operator=(c10::MaybeOwned<at::Tensor>&&)
-      //  + 91 (0x11488c11b in libtorch_python.dylib) frame #8:
-      //  THPVariable_subclass_dealloc(_object*) + 607 (0x1148a50cf in
-      //  libtorch_python.dylib) <omitting python frames> frame #47: start + 1
-      //  (0x7fff6ffc7cc9 in libdyld.dylib) frame #48: 0x0 + 4 (0x4 in ???)
-      // TORCH_INTERNAL_ASSERT(!tensor.unsafeGetTensorImpl()->owns_pyobj());
+      TORCH_INTERNAL_ASSERT(!tensor.unsafeGetTensorImpl()->owns_pyobj());
       if (auto grad_acc =
               torch::autograd::impl::try_get_grad_accumulator(tensor)) {
         grad_acc->pre_hooks().clear();
