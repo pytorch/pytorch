@@ -170,6 +170,7 @@ __all__ = [
     # View & Shape Ops
     #
     "as_strided",
+    "broadcast_shapes",
     "broadcast_tensors",
     "cat",
     "chunk",
