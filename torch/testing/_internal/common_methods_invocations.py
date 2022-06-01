@@ -2393,7 +2393,7 @@ def sample_inputs_broadcast_shapes(op, device, dtype, requires_grad, **kwargs):
     )
 
     # restricting test runs on cpu/bool to prevent repetitive runs
-    if dtype is torch.bool and device == 'cpu':
+    if dtype is torch.float32
         for shape in shapes:
             inp, *arg0 = shape
             yield SampleInput(inp, args=arg0)
@@ -10686,13 +10686,16 @@ op_db: List[OpInfo] = [
     OpInfo('broadcast_shapes',
            op=torch.broadcast_shapes,
            ref=np.broadcast_shapes if np.lib.NumpyVersion(np.__version__) >= '1.20.0' else None,
-           dtypes=_dispatch_dtypes((torch.bool,)),
-           dtypesIfCUDA=_dispatch_dtypes(),  # broadcast_shapes is device independent
+           dtypes=_dispatch_dtypes((torch.float32,)),
            supports_out=False,
            supports_gradgrad=False,
            assert_autodiffed=False,
            supports_autograd=False,
-           sample_inputs_func=sample_inputs_broadcast_shapes),
+           sample_inputs_func=sample_inputs_broadcast_shapes,
+           skips=(
+               # non tensor input doesn't need to noncontiguous variant
+               DecorateInfo(unittest.skip('Skipped!'), "TestCommon", "test_noncontiguous_samples"),
+           )),
     OpInfo('broadcast_tensors',
            ref=np.broadcast_arrays,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
