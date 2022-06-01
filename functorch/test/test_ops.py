@@ -1248,7 +1248,6 @@ class TestOperators(TestCase):
                 'softmax',
                 'log_softmax',
                 'nn.functional.cross_entropy',
-                'nn.functional.binary_cross_entropy',
                 'nn.functional.layer_norm'
             }
             if op.name in FUNCTORCH_HAS_FORMULA_BUT_NOT_PYTORCH:
