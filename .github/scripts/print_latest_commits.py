@@ -20,7 +20,7 @@ def print_latest_commits(minutes: int = 30) -> None:
             "git",
             "rev-list",
             f"--max-age={timestamp_since}",
-            "--remotes=*master",
+            "--remotes=*origin/master",
         ],
         encoding="ascii",
     ).splitlines()
