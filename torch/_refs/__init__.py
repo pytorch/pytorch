@@ -441,6 +441,15 @@ frac = _make_elementwise_unary_reference(
 )
 
 
+# imag does not use _make_elementwise_unary_reference because it does not support out
+def imag(a: TensorLikeType) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+    if not utils.is_complex_dtype(a.dtype):
+        msg = "imag only supports complex tensors."
+        raise RuntimeError(msg)
+    return prims.imag(a)
+
+
 def _isfinite(a: TensorLikeType) -> TensorLikeType:
     if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
         return prims.isfinite(a)
@@ -456,21 +465,37 @@ isfinite = _make_elementwise_unary_reference(
 
 
 def _isinf(a: TensorLikeType) -> TensorLikeType:
-    # TODO Add complex tensor support to remove is_infinite prim
-    # if utils.is_complex_dtype(a):
-    #     return bitwise_or(_isinf(real(a), _isinf(imag(a))
-    # else:
-    #     return bitwise_not(bitwise_or(isnan(a), isfinite(a)))
-    if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
-        return prims.is_infinite(a)
-
-    return zeros_like(a, dtype=torch.bool)
+    if utils.is_complex_dtype(a.dtype):
+        return bitwise_or(_isinf(real(a)), _isinf(imag(a)))
+    return bitwise_and(bitwise_not(isfinite(a)), bitwise_not(_isnan(a)))
 
 
 isinf = _make_elementwise_unary_reference(
     _isinf,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
-    aten_op=torch.ops.aten.isinf,  # prim/aten name mismatch
+    aten_op=torch.ops.aten.isinf,
+)
+
+
+def _isposinf(a: TensorLikeType) -> TensorLikeType:
+    return bitwise_and(_isinf(a), gt(a, zeros_like(a)))
+
+
+isposinf = _make_elementwise_unary_reference(
+    _isposinf,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.isposinf,
+)
+
+
+def _isneginf(a: TensorLikeType) -> TensorLikeType:
+    return bitwise_and(_isinf(a), lt(a, zeros_like(a)))
+
+
+isneginf = _make_elementwise_unary_reference(
+    _isneginf,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.isneginf,
 )
 
 
@@ -571,6 +596,12 @@ def positive(a: TensorLikeType) -> TensorLikeType:
         msg = "positive does not support bool tensors."
         raise RuntimeError(msg)
     return a
+
+
+# real does not use _make_elementwise_unary_reference because it does not support out
+def real(a: TensorLikeType) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+    return prims.real(a)
 
 
 reciprocal = _make_elementwise_unary_reference(

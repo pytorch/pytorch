@@ -19287,6 +19287,10 @@ python_ref_db = [
         torch_opinfo_name="frac",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.imag",
+        torch_opinfo_name="imag",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.isfinite",
         torch_opinfo_name="isfinite",
         supports_out=True,
@@ -19294,6 +19298,16 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.isinf",
         torch_opinfo_name="isinf",
+        supports_out=True,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.isposinf",
+        torch_opinfo_name="isposinf",
+        supports_out=True,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.isneginf",
+        torch_opinfo_name="isneginf",
         supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -19336,6 +19350,10 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.positive",
         torch_opinfo_name="positive",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.real",
+        torch_opinfo_name="real",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.reciprocal",

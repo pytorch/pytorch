@@ -61,14 +61,15 @@ __all__ = [
     "exp2",
     "fill",
     "floor",
+    "imag",
     "isfinite",
-    "is_infinite",
     "lgamma",
     "log",
     "log1p",
     "log2",
     "log10",
     "neg",
+    "real",
     "reciprocal",
     "round",
     "sign",
@@ -683,6 +684,13 @@ floor = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+imag = _make_elementwise_unary_prim(
+    "imag",
+    impl_aten=torch.imag,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+)
+
 
 def _isfinite_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.isfinite(a)  # type: ignore[attr-defined]
@@ -692,13 +700,6 @@ isfinite = _make_elementwise_unary_prim(
     "isfinite",
     impl_aten=torch.isfinite,
     impl_nvfuser=_isfinite_nvfuser,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
-)
-
-is_infinite = _make_elementwise_unary_prim(
-    "is_infinite",
-    impl_aten=torch.isinf,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -794,6 +795,12 @@ neg = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+real = _make_elementwise_unary_prim(
+    "real",
+    impl_aten=torch.real,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+)
 
 def _round_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.round(a)  # type: ignore[attr-defined]
