@@ -606,6 +606,46 @@ static void bessel_y1_kernel(TensorIteratorBase& iterator) {
     });
 } // bessel_y1_kernel(TensorIteratorBase& iterator)
 
+static void modified_bessel_i0_kernel(TensorIteratorBase& iterator) {
+    TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_i0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return modified_bessel_i0_forward(x);
+        });
+    });
+} // modified_bessel_i0_kernel(TensorIteratorBase& iterator)
+
+static void modified_bessel_i1_kernel(TensorIteratorBase& iterator) {
+    TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_i1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return modified_bessel_i1_forward(x);
+        });
+    });
+} // modified_bessel_i1_kernel(TensorIteratorBase& iterator)
+
+static void modified_bessel_k0_kernel(TensorIteratorBase& iterator) {
+    TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_k0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return modified_bessel_k0_forward(x);
+        });
+    });
+} // modified_bessel_k0_kernel(TensorIteratorBase& iterator)
+
+static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
+    TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_k1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return modified_bessel_k1_forward(x);
+        });
+    });
+} // modified_bessel_k1_kernel(TensorIteratorBase& iterator)
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -700,6 +740,10 @@ REGISTER_DISPATCH(special_bessel_j0_stub, &CPU_CAPABILITY::bessel_j0_kernel);
 REGISTER_DISPATCH(special_bessel_j1_stub, &CPU_CAPABILITY::bessel_j1_kernel);
 REGISTER_DISPATCH(special_bessel_y0_stub, &CPU_CAPABILITY::bessel_y0_kernel);
 REGISTER_DISPATCH(special_bessel_y1_stub, &CPU_CAPABILITY::bessel_y1_kernel);
+REGISTER_DISPATCH(special_modified_bessel_i0_stub, &CPU_CAPABILITY::modified_bessel_i0_kernel);
+REGISTER_DISPATCH(special_modified_bessel_i1_stub, &CPU_CAPABILITY::modified_bessel_i1_kernel);
+REGISTER_DISPATCH(special_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
+REGISTER_DISPATCH(special_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(acos)

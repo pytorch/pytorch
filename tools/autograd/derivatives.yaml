@@ -2818,3 +2818,15 @@
 
 - name: special_laguerre_polynomial_l.n_scalar(Tensor x, Scalar n) -> Tensor
   x: non_differentiable
+
+- name: special_modified_bessel_i0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_modified_bessel_i1(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_modified_bessel_k0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_modified_bessel_k1(Tensor self) -> Tensor
+  self: non_differentiable

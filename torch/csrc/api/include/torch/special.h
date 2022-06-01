@@ -821,4 +821,80 @@ inline Tensor& laguerre_polynomial_l_out(Tensor& output, const Tensor& x, const 
   return torch::special_laguerre_polynomial_l_out(output, x, n);
 }
 
+/// Modified Bessel function of the first kind of order 0.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_i0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::modified_bessel_i0(x);
+/// ```
+inline Tensor modified_bessel_i0(const Tensor& self) {
+  return torch::special_modified_bessel_i0(self);
+}
+
+inline Tensor& modified_bessel_i0_out(Tensor& result, const Tensor& self) {
+  return torch::special_modified_bessel_i0_out(result, self);
+}
+
+/// Modified Bessel function of the first kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_i1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::modified_bessel_i1(x);
+/// ```
+inline Tensor modified_bessel_i1(const Tensor& self) {
+  return torch::special_modified_bessel_i1(self);
+}
+
+inline Tensor& modified_bessel_i1_out(Tensor& result, const Tensor& self) {
+  return torch::special_modified_bessel_i1_out(result, self);
+}
+
+/// Modified Bessel function of the second kind of order 0.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_k0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::modified_bessel_k0(x);
+/// ```
+inline Tensor modified_bessel_k0(const Tensor& self) {
+  return torch::special_modified_bessel_k0(self);
+}
+
+inline Tensor& modified_bessel_k0_out(Tensor& result, const Tensor& self) {
+  return torch::special_modified_bessel_k0_out(result, self);
+}
+
+/// Modified Bessel function of the second kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_k1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::modified_bessel_k1(x);
+/// ```
+inline Tensor modified_bessel_k1(const Tensor& self) {
+  return torch::special_modified_bessel_k1(self);
+}
+
+inline Tensor& modified_bessel_k1_out(Tensor& result, const Tensor& self) {
+  return torch::special_modified_bessel_k1_out(result, self);
+}
+
 }} // torch::special
