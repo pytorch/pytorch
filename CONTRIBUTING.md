@@ -315,9 +315,10 @@ into the repo directory.
 ### Python Unit Testing
 
 **Prerequisites**:
-- The `expecttest` and `hypothesis` libraries must be installed to run the tests.
-- `mypy` is required for linting
-- `pytest` may help run tests more selectively. All these packages can be installed with `conda` or `pip`.
+The following packages should be installed with either `conda` or `pip`:
+- `expecttest` and `hypothesis` - required to run tests
+- `mypy` - recommended for linting
+- `pytest` - recommended to run tests more selectively
 
 All PyTorch test suites are located in the `test` folder and start with
 `test_`. Run the entire test
