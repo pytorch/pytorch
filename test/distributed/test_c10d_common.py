@@ -31,12 +31,13 @@ from torch.testing._internal.common_distributed import (
 )
 
 from torch.testing._internal.common_utils import (
-    TestCase,
-    load_tests,
-    run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_ROCM,
+    TestCase,
     instantiate_parametrized_tests,
+    load_tests,
     parametrize
+    run_tests,
 )
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -902,6 +903,9 @@ class CommonDistributedDataParallelTest(object):
 
         self._test_not_nan(model, x)
 
+
+    @unittest.skipIf(TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     @skip_if_lt_x_gpu(2)
     def test_sync_batch_norm_cuda_graph_capture(self):
         pg = self._get_process_group()
