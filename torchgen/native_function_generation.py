@@ -502,7 +502,11 @@ def gen_composite_out_kernel(g: NativeFunctionsGroup) -> Optional[str]:
             if len(g.functional.func.returns) == 1
             else f"std::get<{i}>({out_name})"
         )
-        copy_outs.append(f"copy_arg({out_arg.name}, {functional_return_name});")
+        copy_outs.append(
+            f"""\
+  resize_out_helper({out_arg.name}, {functional_return_name});
+  copy_arg({out_arg.name}, {functional_return_name});"""
+        )
 
     rets = []
     # For each return arg in the calling (out=) operator,

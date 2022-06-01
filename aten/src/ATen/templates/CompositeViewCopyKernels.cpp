@@ -2,6 +2,7 @@
 // ${generated_comment}
 
 #include <ATen/Tensor.h>
+#include <ATen/native/Resize.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Operators.h>
@@ -36,6 +37,17 @@ void copy_arg(const at::TensorList& dst, const at::TensorList& src) {
     TORCH_INTERNAL_ASSERT(dst.size() == src.size());
     for (const auto& i : c10::irange(dst.size())) {
         dst[i].copy_(src[i]);
+    }
+}
+
+void resize_out_helper(const at::Tensor& dst, const at::Tensor& src) {
+    at::native::resize_output(dst, src.sizes());
+}
+
+void resize_out_helper(const at::TensorList& dst, const at::TensorList& src) {
+    TORCH_INTERNAL_ASSERT(dst.size() == src.size());
+    for (const auto& i : c10::irange(dst.size())) {
+        at::native::resize_output(dst[i], src[i].sizes());
     }
 }
 
