@@ -1527,6 +1527,10 @@ def as_strided(
     return prims.as_strided(a, size, stride, storage_offset)
 
 
+def broadcast_shapes(*shapes) -> ShapeType:
+    return torch.Size(_broadcast_shapes(*_shapes)):
+
+
 def broadcast_tensors(*tensors) -> List[TensorLikeType]:
     return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
 
