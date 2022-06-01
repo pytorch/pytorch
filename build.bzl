@@ -64,6 +64,81 @@ def define_targets(rules):
         tools = ["//tools/setup_helpers:gen_version_header"],
     )
 
+#
+# ATen generated code
+# You need to keep this is sync with the files written out
+# by gen.py (in the cmake build system, we track generated files
+# via generated_cpp.txt and generated_cpp.txt-cuda
+#
+# Sure would be nice to use gen.py to create this list dynamically
+# instead of hardcoding, no? Well, we can't, as discussed in this
+# thread:
+# https://fb.facebook.com/groups/askbuck/permalink/1924258337622772/
+
+GENERATED_H = [
+    "Functions.h",
+    "NativeFunctions.h",
+    "NativeMetaFunctions.h",
+    "FunctionalInverses.h",
+    "RedispatchFunctions.h",
+    "RegistrationDeclarations.h",
+]
+
+GENERATED_H_CORE = [
+    "Operators.h",
+    # CPUFunctions.h (and likely similar headers) need to be part of core because
+    # of the static dispatch build: TensorBody.h directly includes CPUFunctions.h.
+    # The disinction looks pretty arbitrary though; maybe will can kill core
+    # and merge the two?
+    "CPUFunctions.h",
+    "CPUFunctions_inl.h",
+    "CompositeExplicitAutogradFunctions.h",
+    "CompositeExplicitAutogradFunctions_inl.h",
+    "CompositeImplicitAutogradFunctions.h",
+    "CompositeImplicitAutogradFunctions_inl.h",
+    "MetaFunctions.h",
+    "MetaFunctions_inl.h",
+    "core/TensorBody.h",
+    "MethodOperators.h",
+    "core/aten_interned_strings.h",
+]
+
+GENERATED_H_CUDA = [
+    "CUDAFunctions.h",
+    "CUDAFunctions_inl.h",
+]
+
+GENERATED_CPP = [
+    "Functions.cpp",
+    "RegisterBackendSelect.cpp",
+    "RegisterCPU.cpp",
+    "RegisterQuantizedCPU.cpp",
+    "RegisterNestedTensorCPU.cpp",
+    "RegisterSparseCPU.cpp",
+    "RegisterSparseCsrCPU.cpp",
+    "RegisterMkldnnCPU.cpp",
+    "RegisterCompositeImplicitAutograd.cpp",
+    "RegisterZeroTensor.cpp",
+    "RegisterMeta.cpp",
+    "RegisterCompositeExplicitAutograd.cpp",
+    "CompositeViewCopyKernels.cpp",
+    "RegisterSchema.cpp",
+    "RegisterFunctionalization_0.cpp",
+    "RegisterFunctionalization_1.cpp",
+    "RegisterFunctionalization_2.cpp",
+    "RegisterFunctionalization_3.cpp",
+]
+
+GENERATED_CPP_CORE = [
+    "Operators_0.cpp",
+    "Operators_1.cpp",
+    "Operators_2.cpp",
+    "Operators_3.cpp",
+    "Operators_4.cpp",
+    "core/ATenOpList.cpp",
+    "core/TensorMethods.cpp",
+]
+
 # These lists are temporarily living in and exported from the shared
 # structure so that an internal build that lives under a different
 # root can access them. These could technically live in a separate
