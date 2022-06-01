@@ -6,7 +6,7 @@ from rockset import Client, ParamDict  # type: ignore[import]
 import os
 
 rs = Client(api_key=os.getenv("ROCKSET_API_KEY", None))
-qlambda = rs.QueryLambda.retrieve(  
+qlambda = rs.QueryLambda.retrieve(
     'commit_jobs_query',
     version='c2a4dbce081d0144',
     workspace='commons')
