@@ -2,6 +2,9 @@ from typing import Any
 from datetime import datetime, timedelta
 from gitutils import _check_output
 
+from rockset import Client, ParamDict  # type: ignore[import]
+import os
+
 def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Print latest commits")
@@ -28,7 +31,17 @@ def print_latest_commits(minutes: int = 30) -> None:
         print_commit_status(commit)
 
 def print_commit_status(sha: str) -> None:
-    print("sha is", sha)
+    rs = Client(api_key=os.getenv("ROCKSET_API_KEY", None))
+    qlambda = rs.QueryLambda.retrieve(
+        'commit_jobs_query',
+        version='c2a4dbce081d0144',
+        workspace='commons')
+
+    params = ParamDict()
+    params['sha'] = sha
+    results = qlambda.execute(parameters=params)
+    for check in results['results']:
+        print(f"\t{check['jobName']}: {check['conclusion']}")
 
 def main() -> None:
     args = parse_args()
