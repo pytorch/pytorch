@@ -7,9 +7,6 @@ def _genrule(**kwds):
     if _enabled(**kwds):
         native.genrule(**kwds)
 
-def _is_cpu_static_dispatch_build():
-    return False
-
 def _py_library(name, **kwds):
     deps = [dep for dep in kwds.pop("deps", []) if dep != None]
     native.py_library(name = name, deps = deps, **kwds)
@@ -29,7 +26,6 @@ rules = struct(
     genrule = _genrule,
     glob = native.glob,
     if_cuda = if_cuda,
-    is_cpu_static_dispatch_build = _is_cpu_static_dispatch_build,
     py_binary = native.py_binary,
     py_library = _py_library,
     requirement = _requirement,
