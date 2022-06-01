@@ -264,7 +264,10 @@ class TestFSDPOptimState(FSDPTest):
         use_diff_optim_inputs: bool = False,
     ):
         if use_multiple_param_groups or use_diff_optim_inputs:
-            # Keep these as arguments for parity with `_init_nested_model()`
+            # Keep these as arguments for parity with `_init_nested_model()`;
+            # these settings are not implemented since the transformer is
+            # wrapped with FSDP at the top-level, which means that there is
+            # only a single flattened parameter, making these booleans vacuous
             raise NotImplementedError()
         if group is None:
             group = dist.distributed_c10d._get_default_group()

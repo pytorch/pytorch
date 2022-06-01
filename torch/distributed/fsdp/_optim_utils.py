@@ -62,7 +62,7 @@ class _OptimStateKey(NamedTuple):
     """
     This represents an optimizer state key that may be used commonly across
     ranks. It is based on the unflattened parameter names rather than parameter
-    IDs to make it inedpenendent of each rank's own optimizer construction.
+    IDs to make it indepenendent of each rank's own optimizer construction.
     """
     unflat_param_names: Tuple[str, ...]
     is_flat_param: bool

@@ -3544,25 +3544,35 @@ class FullyShardedDataParallel(nn.Module):
 
         # Ensure that all ranks have at least the optimizer states needed by
         # rank 0's optimizer
-        num_missing = torch.zeros(1, dtype=torch.int32)
+        missing_keys: List[_OptimStateKey] = []
         for r0_optim_state_key in r0_flat_param_id_to_optim_state_key.values():
             if r0_optim_state_key not in optim_state_key_to_flat_param_id:
                 # A parameter from rank 0's optimizer does not exist for this
                 # rank's optimizer
-                num_missing += 1
+                missing_keys.append(r0_optim_state_key)
                 continue
             flat_param_id = optim_state_key_to_flat_param_id[r0_optim_state_key]
             assert flat_param_id >= 0 and flat_param_id < len(flat_param_id_to_param), \
                 "Check the `flat_param_id_to_param` construction"
         device = torch.device("cuda", torch.cuda.current_device())
-        num_missing = num_missing.to(device)
+        num_missing = torch.tensor([len(missing_keys)], dtype=torch.int32, device=device)
         dist.all_reduce(num_missing, group=group)
         if num_missing.item() > 0:
-            raise RuntimeError(
+            obj_list = [None for _ in range(group.size())]
+            dist.all_gather_object(obj_list, missing_keys, group=group)
+            error_msg = (
                 "FSDP currently requires each rank to have at least the "
                 "optimizer states needed by rank 0's optimizer but some ranks "
                 "are missing some of those states"
             )
+            for rank, keys in enumerate(obj_list):
+                if len(keys) > 0:
+                    error_msg += (
+                        f"\nRank {rank} is missing states for the parameters: "
+                        f"{[key.unflat_param_names for key in keys]}"
+                    )
+            raise RuntimeError(error_msg)
+
 
         # Iterate in rank 0's flattened parameter ID order to ensure aligned
         # all-gathers across ranks
