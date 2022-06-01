@@ -2075,6 +2075,7 @@ def generate_elementwise_binary_small_value_tensors(
     _int_vals = (0, -1, 1, -55, 55, -127, 127, -128)
     _float_vals = (
         0.0,
+        -0.0,
         -0.001,
         0.001,
         -0.25,
@@ -2090,9 +2091,6 @@ def generate_elementwise_binary_small_value_tensors(
         -math.pi - 0.00001,
         math.pi + 0.00001,
     )
-
-    # Ref: https://github.com/pytorch/pytorch/issues/78413
-    _float_vals = (-0.,) if op.name != 'angle' else () + _float_vals
 
     l_vals = []
     r_vals = []
@@ -15663,6 +15661,9 @@ op_db: List[OpInfo] = [
                        # RuntimeError: "nonzero_count_cpu" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_consistency',
                                     dtypes=(torch.chalf,),),
+                       # Ref: https://github.com/pytorch/pytorch/issues/78413
+                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_small',
+                                    dtypes=( torch.bfloat16, torch.float16, torch.float32, torch.float64),),
                    )),
     UnaryUfuncInfo('isfinite',
                    ref=np.isfinite,
