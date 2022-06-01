@@ -1000,7 +1000,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
                     dlink=True,
                     dlink_libraries=["dlink_lib"],
                     extra_compile_args={'cxx': ['-g'],
-                                        'nvcc': ['-O2', '-rdc=true']})
+                                        'nvcc': ['-O2']})
     '''
     library_dirs = kwargs.get('library_dirs', [])
     library_dirs += library_paths(cuda=True)
@@ -1066,10 +1066,14 @@ def CUDAExtension(name, sources, *args, **kwargs):
         extra_compile_args['nvcc_dlink'] = extra_compile_args_dlink
 
         extra_compile_args_nvcc = extra_compile_args.get('nvcc', [])
-        extra_compile_args_nvcc += ['-rdc=true']
+        extra_compile_args_nvcc += ['-dc']  # can also use '-rdc=true'
         extra_compile_args['nvcc'] = extra_compile_args_nvcc
 
         kwargs['extra_compile_args'] = extra_compile_args
+
+        libraries = kwargs.get('libraries', [])
+        libraries.append('cudadevrt')   # CUDA Device Runtime library is needed for dlink
+        kwargs['libraries'] = libraries
 
     return setuptools.Extension(name, sources, *args, **kwargs)
 
