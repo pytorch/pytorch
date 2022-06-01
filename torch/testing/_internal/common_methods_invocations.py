@@ -2392,10 +2392,12 @@ def sample_inputs_broadcast_shapes(op, device, dtype, requires_grad, **kwargs):
         ((0, 1, 3), (0, 10, 3))
     )
 
-    for shape in shapes:
-        #broadcasts_input = (shape_lhs != torch.broadcast_shapes(shape_lhs, shape_rhs))
-        print("testing : ", shape)
-        yield SampleInput(shape,)
+    if dtype is torch.bool and device == 'cpu':
+        for shape in shapes:
+            #broadcasts_input = (shape_lhs != torch.broadcast_shapes(shape_lhs, shape_rhs))
+            print("testing : ", shape)
+            inp, *arg0 = shape
+            yield SampleInput(inp, args=arg0)
 
 # The base reference input generation for elementwise binary operations
 def _reference_inputs_elementwise_binary(op, device, dtype, requires_grad, exclude_zero, **kwargs):
@@ -10685,8 +10687,12 @@ op_db: List[OpInfo] = [
     OpInfo('broadcast_shapes',
            op=torch.broadcast_shapes,
            ref=np.broadcast_shapes,
-           dtypes=(torch.bool),
+           dtypes=_dispatch_dtypes((torch.bool,)),
+           dtypesIfCUDA=_dispatch_dtypes(),  # broadcast_shapes runs only on cpu
            supports_out=False,
+           supports_gradgrad=False,
+           assert_autodiffed=False,
+           supports_autograd=False,
            sample_inputs_func=sample_inputs_broadcast_shapes),
     OpInfo('broadcast_tensors',
            ref=np.broadcast_arrays,
@@ -19718,11 +19724,7 @@ python_ref_db = [
     ),
     PythonRefInfo(
         "_refs.broadcast_shapes",
-        ref=np.broadcast_shapes,
         torch_opinfo_name="broadcast_shapes",
-        # dtype doesn't matter since we don't use it
-        dtypes=(torch.bool),
-        sample_inputs_func=sample_inputs_broadcast_shapes,
     ),
     PythonRefInfo(
         "_refs.broadcast_tensors",
