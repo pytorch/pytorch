@@ -802,6 +802,7 @@ real = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
 )
 
+
 def _round_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.round(a)  # type: ignore[attr-defined]
 
