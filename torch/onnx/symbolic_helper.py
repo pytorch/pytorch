@@ -106,14 +106,13 @@ def _parse_arg(value, desc, arg_name=None, node_name=None):
 
     if arg_name is None or node_name is None:
         raise RuntimeError(
-            "Expected node type 'onnx::Constant', got '{}'.".format(value.node().kind())
+            f"Expected node type 'onnx::Constant', got '{value.node().kind()}'."
         )
     else:
         raise RuntimeError(
             "Expected node type 'onnx::Constant' "
-            "for argument '{}' of node '{}', got '{}'.".format(
-                arg_name, node_name, value.node().kind()
-            )
+            f"for argument '{arg_name}' of node '{node_name}', "
+            f"got '{value.node().kind()}'."
         )
 
 
@@ -133,9 +132,8 @@ def _maybe_get_scalar(value):
 def _get_const(value, desc, arg_name):
     if not _is_constant(value):
         raise RuntimeError(
-            "ONNX symbolic expected a constant value of the {} argument, got `{}`".format(
-                arg_name, value
-            )
+            f"ONNX symbolic expected a constant value of the {arg_name} argument, "
+            f"got `{value}`"
         )
     return _parse_arg(value, desc)
 
@@ -150,9 +148,8 @@ def _unpack_tuple(tuple_value):
     tuple_node = tuple_value.node()
     if tuple_node.kind() != "prim::TupleConstruct":
         raise RuntimeError(
-            "ONNX symbolic expected node type `prim::TupleConstruct`, got `{}`".format(
-                tuple_node
-            )
+            f"ONNX symbolic expected node type `prim::TupleConstruct`, "
+            f"got `{tuple_node}`"
         )
     return list(tuple_node.inputs())
 
@@ -220,13 +217,15 @@ def parse_args(*arg_descriptors):
             ]
             # only support _outputs in kwargs
             assert len(kwargs) <= 1, (
-                f"Symbolic function {fn.__name__}'s '**kwargs' can contain a single key/value entry. "
+                f"Symbolic function {fn.__name__}'s '**kwargs' can contain a single "
+                f"key/value entry. "
                 f"{FILE_BUG_MSG}"
             )
 
             if len(kwargs) == 1:
                 assert "_outputs" in kwargs, (
-                    f"Symbolic function {fn.__name__}'s '**kwargs' can only contain '_outputs' key at '**kwargs'. "
+                    f"Symbolic function {fn.__name__}'s '**kwargs' can only contain "
+                    f"'_outputs' key at '**kwargs'. "
                     f"{FILE_BUG_MSG}"
                 )
             return fn(g, *args, **kwargs)
@@ -442,38 +441,31 @@ def _unimplemented(op, msg):
 
 def _onnx_unsupported(op_name):
     raise RuntimeError(
-        "Unsupported: ONNX export of operator {}. "
-        "Please feel free to request support or submit a pull request on PyTorch GitHub.".format(
-            op_name
-        )
+        f"Unsupported: ONNX export of operator {op_name}. "
+        "Please feel free to request support or submit a pull request on PyTorch GitHub."
     )
 
 
 def _onnx_opset_unsupported(op_name, current_opset, supported_opset):
     raise RuntimeError(
-        "Unsupported: ONNX export of {} in "
-        "opset {}. Please try opset version {}.".format(
-            op_name, current_opset, supported_opset
-        )
+        f"Unsupported: ONNX export of {op_name} in opset {current_opset}. "
+        f"Please try opset version {supported_opset}."
     )
 
 
 def _onnx_opset_unsupported_detailed(op_name, current_opset, supported_opset, reason):
     raise RuntimeError(
-        "Unsupported: ONNX export of {} in "
-        "opset {}. {}. Please try opset version {}.".format(
-            op_name, current_opset, reason, supported_opset
-        )
+        f"Unsupported: ONNX export of {op_name} in "
+        f"opset {current_opset}. {reason}. Please try opset version {supported_opset}."
     )
 
 
 def _block_list_in_opset(name):
     def symbolic_fn(*args, **kwargs):
         raise RuntimeError(
-            "ONNX export failed on {}, which is not implemented for opset {}. "
-            "Try exporting with other opset versions.".format(
-                name, GLOBALS.export_onnx_opset_version
-            )
+            f"ONNX export failed on {name}, which is not implemented for opset "
+            f"{GLOBALS.export_onnx_opset_version}. "
+            "Try exporting with other opset versions."
         )
 
     return symbolic_fn
@@ -876,7 +868,7 @@ def __interpolate_helper(
         # and if not assume that it is not a scalar.
         try:
             is_scalar = not _is_packed_list(size) and (
-                (_maybe_get_const(size, "t").dim() == 0)
+                _maybe_get_const(size, "t").dim() == 0
             )
         except AttributeError:
             is_scalar = not _is_packed_list(size)
@@ -1122,27 +1114,29 @@ def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, na
     return padding
 
 
-def check_training_mode(op_train_mode, op_name):
-    op_train_mode = True if op_train_mode == 1 else False
-    if GLOBALS.training_mode is not None and op_train_mode != GLOBALS.training_mode:
-        op_mode = "training " if op_train_mode else "inference"
-        training_mode = "training " if GLOBALS.training_mode else "inference"
-        # setting the model mode could result in op_mode != _flags.training_mode
-        # if the model is a FuncModule. In this case we warn the user of
-        # the state and export depending on op_mode
-        # This is to support use-cases of fixing certain layer weights
-        # in training.
-        warnings.warn(
-            "ONNX export mode is set to "
-            + training_mode
-            + " mode, but operator "
-            + op_name
-            + " is set to "
-            + op_mode
-            + " mode. The operators will be exported in "
-            + op_mode
-            + ", as specified by the functional operator."
-        )
+def check_training_mode(op_train_mode: int, op_name: str) -> None:
+    """Warns the user if the model's training mode and the export mode do not agree."""
+    if GLOBALS.training_mode == _C_onnx.TrainingMode.PRESERVE:
+        return
+
+    if op_train_mode:
+        op_mode_enum = _C_onnx.TrainingMode.TRAINING
+    else:
+        op_mode_enum = _C_onnx.TrainingMode.EVAL
+    if op_mode_enum == GLOBALS.training_mode:
+        # The modes agree. Do nothing
+        return
+
+    op_mode_text = f"train={bool(op_train_mode)}"
+    # Setting the model mode could result in op_mode != GLOBALS.training_mode
+    # if the model is a FuncModule. In this case we warn the user of
+    # the state and export depending on op_mode
+    # This is to support use-cases of fixing certain layer weights
+    # in training.
+    warnings.warn(
+        f"ONNX export mode is set to {GLOBALS.training_mode}, but operator '{op_name}' "
+        f"is set to {op_mode_text}. Exporting with {op_mode_text}."
+    )
 
 
 def _flatten_helper(g, input, start_dim, end_dim, dim):
