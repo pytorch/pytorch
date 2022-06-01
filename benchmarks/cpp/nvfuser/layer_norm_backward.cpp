@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
@@ -10,7 +11,7 @@
 
 #include <cuda_runtime.h>
 
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 using namespace torch::jit::fuser::cuda;
 
@@ -22,7 +23,7 @@ static void setupLayerNorm_BWD(Fusion* fusion, DataType dtype) {
   TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
 
   const int kReductionAxis = 1;
-  Double* eps_ptr = new Double(1e-5);
+  Double* eps_ptr = IrBuilder::create<Double>(1e-5);
 
   // setup fusion
   auto grad_out = makeContigTensor(2, dtype);
@@ -33,12 +34,12 @@ static void setupLayerNorm_BWD(Fusion* fusion, DataType dtype) {
   auto mean = TensorViewBuilder()
                   .contiguity({false, false})
                   .shape({-1, 1})
-                  .dtype(dtype)
+                  .dtype(DataType::Float)
                   .build();
   auto rstd = TensorViewBuilder()
                   .contiguity({false, false})
                   .shape({-1, 1})
-                  .dtype(dtype)
+                  .dtype(DataType::Float)
                   .build();
 
   fusion->addInput(grad_out);
@@ -53,20 +54,17 @@ static void setupLayerNorm_BWD(Fusion* fusion, DataType dtype) {
     input = castOp(DataType::Float, input);
     weight = castOp(DataType::Float, weight);
     bias = castOp(DataType::Float, bias);
-    mean = castOp(DataType::Float, mean);
-    rstd = castOp(DataType::Float, rstd);
   }
 
   auto layer_norm_results = layer_norm_backward(
       grad_out, input, {1}, mean, rstd, weight, bias, {true, true, true});
 
-  if (dtype == DataType::Half) {
+  if (dtype != DataType::Float) {
     layer_norm_results.grad_input =
-        castOp(DataType::Half, layer_norm_results.grad_input);
-    layer_norm_results.grad_bias =
-        castOp(DataType::Half, layer_norm_results.grad_bias);
+        castOp(dtype, layer_norm_results.grad_input);
+    layer_norm_results.grad_bias = castOp(dtype, layer_norm_results.grad_bias);
     layer_norm_results.grad_weight =
-        castOp(DataType::Half, layer_norm_results.grad_weight);
+        castOp(dtype, layer_norm_results.grad_weight);
   }
 
   fusion->addOutput(layer_norm_results.grad_input);
@@ -85,14 +83,16 @@ static void NvFuserScheduler_LayerNorm_BWD(
 
   // inputs
   at::manual_seed(0);
-  auto options =
+  auto maybe_fp16_options =
       at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
-  at::Tensor grad_out = at::randn(input_shape, options);
-  at::Tensor input = at::randn(input_shape, options);
-  at::Tensor weight = at::randn({input_shape[1]}, options);
-  at::Tensor bias = at::randn({input_shape[1]}, options);
-  at::Tensor mean = at::randn({input_shape[0], 1}, options);
-  at::Tensor rstd = at::randn({input_shape[0], 1}, options);
+  auto fp32_options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor grad_out = at::randn(input_shape, maybe_fp16_options);
+  at::Tensor input = at::randn(input_shape, maybe_fp16_options);
+  at::Tensor weight = at::randn({input_shape[1]}, maybe_fp16_options);
+  at::Tensor bias = at::randn({input_shape[1]}, maybe_fp16_options);
+  at::Tensor mean = at::randn({input_shape[0], 1}, fp32_options);
+  at::Tensor rstd = at::randn({input_shape[0], 1}, fp32_options);
 
   std::vector<c10::IValue> aten_inputs(
       {grad_out, input, weight, bias, mean, rstd});
@@ -115,22 +115,24 @@ static void Baseline_LayerNorm_BWD(
 
   std::vector<int64_t> input_shape{
       benchmark_state.range(0), benchmark_state.range(1)};
-  const int kReductionAxis = 1;
+  const size_t kReductionAxis = 1;
   std::vector<int64_t> norm_shape;
-  for (int idx = kReductionAxis; idx < input_shape.size(); ++idx) {
+  for (auto idx = kReductionAxis; idx < input_shape.size(); ++idx) {
     norm_shape.push_back(input_shape[idx]);
   }
 
   // inputs
   at::manual_seed(0);
-  auto options =
+  auto maybe_fp16_options =
       at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
-  at::Tensor grad_out = at::randn(input_shape, options);
-  at::Tensor input = at::randn(input_shape, options);
-  at::Tensor weight = at::randn({input_shape[1]}, options);
-  at::Tensor bias = at::randn({input_shape[1]}, options);
-  at::Tensor mean = at::randn({input_shape[0], 1}, options);
-  at::Tensor rstd = at::randn({input_shape[0], 1}, options);
+  auto fp32_options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor grad_out = at::randn(input_shape, maybe_fp16_options);
+  at::Tensor input = at::randn(input_shape, maybe_fp16_options);
+  at::Tensor weight = at::randn({input_shape[1]}, maybe_fp16_options);
+  at::Tensor bias = at::randn({input_shape[1]}, maybe_fp16_options);
+  at::Tensor mean = at::randn({input_shape[0], 1}, fp32_options);
+  at::Tensor rstd = at::randn({input_shape[0], 1}, fp32_options);
   std::array<bool, 3> output_mask = {true, true, true};
 
   clearL2Cache();

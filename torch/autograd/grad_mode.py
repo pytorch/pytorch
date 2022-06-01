@@ -104,9 +104,14 @@ class no_grad(_DecoratorContextManager):
         disable gradients locally see :ref:`locally-disable-grad-doc` for
         more information on how they compare.
 
+    .. note::
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
+        If you want to disable forward AD for a computation, you can unpack
+        your dual tensors.
+
     Example::
 
-        >>> x = torch.tensor([1], requires_grad=True)
+        >>> x = torch.tensor([1.], requires_grad=True)
         >>> with torch.no_grad():
         ...   y = x * 2
         >>> y.requires_grad
@@ -118,12 +123,12 @@ class no_grad(_DecoratorContextManager):
         >>> z.requires_grad
         False
     """
-    def __init__(self):
+    def __init__(self) -> None:
         if not torch._jit_internal.is_scripting():
             super().__init__()
         self.prev = False
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         self.prev = torch.is_grad_enabled()
         torch.set_grad_enabled(False)
 
@@ -146,6 +151,9 @@ class enable_grad(_DecoratorContextManager):
         enable_grad is one of several mechanisms that can enable or
         disable gradients locally see :ref:`locally-disable-grad-doc` for
         more information on how they compare.
+
+    .. note::
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
 
     Example::
 
@@ -193,9 +201,12 @@ class set_grad_enabled(_DecoratorContextManager):
         disable gradients locally see :ref:`locally-disable-grad-doc` for
         more information on how they compare.
 
+    .. note::
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
+
     Example::
 
-        >>> x = torch.tensor([1], requires_grad=True)
+        >>> x = torch.tensor([1.], requires_grad=True)
         >>> is_train = False
         >>> with torch.set_grad_enabled(is_train):
         ...   y = x * 2
@@ -233,7 +244,9 @@ class inference_mode(_DecoratorContextManager):
     InferenceMode is a new context manager analogous to :class:`~no_grad`
     to be used when you are certain your operations will have no interactions
     with autograd (e.g., model training). Code run under this mode gets better
-    performance by disabling view tracking and version counter bumps.
+    performance by disabling view tracking and version counter bumps. Note that
+    unlike some other mechanisms that locally enable or disable grad,
+    entering inference_mode also disables to :ref:`forward-mode AD <forward-mode-ad>`.
 
     This context manager is thread local; it will not affect computation
     in other threads.

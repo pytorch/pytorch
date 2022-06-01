@@ -1,5 +1,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+#include <ATen/cuda/EmptyTensor.h>
 #include <ATen/native/ConvUtils.h>
 
 #if AT_CUDNN_ENABLED()
@@ -10,8 +11,8 @@
 //
 // ConvPlaceholders.cpp contains placeholder implementation of cudnn
 // convolution when cudnn is not enabled. These operators only raises
-// errors, and do no real computation. This file also contains deprecated
-// operators. These operators are implemented using currnet operators.
+// errors, and do no real computation. These operators are implemented
+// using currnet operators.
 //
 // cuDNN v7 and v8 have different API. ConvShared.{cpp, h} contains
 // code shared by v7 and v8. Conv_v7.cpp contains implementation of
@@ -153,69 +154,6 @@ std::string repro_from_args(const ConvolutionParams& params) {
 
 // ---------------------------------------------------------------------
 //
-// Checking
-//
-// ---------------------------------------------------------------------
-
-// Used on pad, stride and dilation
-static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, const char* arg_name)
-{
-  TORCH_CHECK(args.size() <= expected_size,
-           "Too many ", arg_name, " values (", args.size(), ") supplied, expecting ",
-           expected_size, " (while checking arguments for ", c, ")");
-  TORCH_CHECK(args.size() >= expected_size,
-           "Not enough ", arg_name, " values (", args.size(), ") supplied, expecting ",
-           expected_size, " (while checking arguments for ", c, ")");
-
-  auto num_negative_values = std::count_if(args.begin(), args.end(), [](int x){return x < 0;});
-  if (num_negative_values > 0){
-    std::stringstream ss;
-    ss << arg_name << " should be greater than zero but got (";
-    std::copy(args.begin(), args.end() - 1, std::ostream_iterator<int>(ss,", "));
-    ss << args.back() <<  ")" << " (while checking arguments for " << c << ")";
-    AT_ERROR(ss.str());
-  }
-}
-
-
-// NOTE [ Convolution checks ]
-//
-// NB: For many call sites, it is not strictly necessary to check all of
-// these relationships (for example, for forward convolution, we compute
-// the size of output ourselves, so we don't actually need to check
-// output.  However, writing a single function that does everything
-// means we get to reuse it for both forwards and all backwards
-// variants, even when the set of "real" inputs varies.  The magic of
-// relational computing!
-//
-// (There is one downside, which is that it is slightly harder to write
-// error messages which are able to distinguish between real inputs
-// (which the user can change) and computed inputs (which the user can
-// only indirectly affect).  It would be an interesting exercise to
-// come up with a general framework to handle such situations.)
-static void convolution_shape_check(
-    CheckedFrom c,
-    const TensorGeometryArg& input, const TensorGeometryArg& weight, const TensorGeometryArg& output,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
-{
-  check_args(c, padding, input->dim() - 2, "padding");
-  check_args(c, stride, padding.size(), "stride");
-  check_args(c, dilation, padding.size(), "dilation");
-
-  // Input
-  checkDimRange(c, input, 3, 6 /* exclusive */);
-  checkSize(c, input, input_channels_dim, weight->size(1) * groups);
-
-  // Weight
-  checkSameDim(c, input, weight);
-
-  // TODO: check that output->size() matches output_sizes
-  // TODO: check that weight matches output->sizes()
-  checkSameDim(c, input, output);
-}
-
-// ---------------------------------------------------------------------
-//
 // Convolution forward / Transposed convolution backward
 //
 // ---------------------------------------------------------------------
@@ -230,14 +168,10 @@ Tensor cudnn_convolution_forward(
   checkAllSameGPU(c, {input, weight});
 
   auto memory_format = cudnn_conv_suggest_memory_format(*input, *weight);
-  auto output_t = at::native::empty_cuda(
-                    conv_output_size(input->sizes(), weight->sizes(),
-                                     padding, stride, dilation),
-                    /*dtype=*/input->scalar_type(),
-                    /*layout=*/c10::nullopt,
-                    /*device=*/kCUDA,
-                    /*pin_memory=*/c10::nullopt,
-                    /*memory_format=*/memory_format);
+  Tensor output_t = at::detail::empty_cuda(
+      conv_output_size(input->sizes(), weight->sizes(),
+                       padding, stride, dilation),
+      input->options().memory_format(memory_format));
 
   if (output_t.numel() == 0) {
     return output_t;
@@ -312,13 +246,8 @@ Tensor cudnn_convolution_backward_input(
   checkAllSameGPU(c, {grad_output, weight});
 
   auto memory_format = cudnn_conv_suggest_memory_format(*grad_output, *weight);
-  auto grad_input_t = at::native::empty_cuda(
-                    input_size,
-                    /*dtype=*/grad_output->scalar_type(),
-                    /*layout=*/c10::nullopt,
-                    /*device=*/kCUDA,
-                    /*pin_memory=*/c10::nullopt,
-                    /*memory_format=*/memory_format);
+  Tensor grad_input_t = at::detail::empty_cuda(
+      input_size, grad_output->options().memory_format(memory_format));
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
@@ -493,19 +422,16 @@ Tensor cudnn_convolution_relu(
   const Tensor weight = weight_t.contiguous(memory_format);
 
   // FuseFrozenConvAddRelu performs some tensor shape checking
-  auto output_t = at::native::empty_cuda(
+  Tensor output_t = at::detail::empty_cuda(
       conv_output_size(
           input.sizes(), weight.sizes(), padding, stride, dilation),
-      /*dtype=*/input.scalar_type(),
-      /*layout=*/c10::nullopt,
-      /*device=*/kCUDA,
-      /*pin_memory=*/c10::nullopt,
-      /*memory_format=*/memory_format);
+      input.options().memory_format(memory_format));
   if (output_t.numel() == 0) {
     return output_t;
   }
 
   auto& ctx = at::globalContext();
+  bool benchmark = ctx.benchmarkCuDNN();
   bool allow_tf32 = ctx.allowTF32CuDNN();
   auto _bias = bias_t.has_value()
           ? bias_t.value()
@@ -528,7 +454,7 @@ Tensor cudnn_convolution_relu(
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark, // benchmark
       false, // deterministic
       allow_tf32  // allow_tf32
   );
@@ -544,7 +470,7 @@ Tensor cudnn_convolution_relu(
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark, // benchmark
       false, // deterministic
       allow_tf32  // allow_tf32
   );
@@ -566,22 +492,24 @@ Tensor cudnn_convolution_add_relu(
   auto memory_format = cudnn_conv_suggest_memory_format(input_t, weight_t);
   const Tensor input = input_t.contiguous(memory_format);
   const Tensor weight = weight_t.contiguous(memory_format);
+  Tensor z = z_t;
+  if (z.suggest_memory_format() != memory_format) {
+    z = z.to(memory_format);
+  }
+  z = z.contiguous(memory_format);
 
   // FuseFrozenConvAddRelu performs some tensor shape checking
-  auto output_t = at::native::empty_cuda(
+  Tensor output_t = at::detail::empty_cuda(
       conv_output_size(
           input.sizes(), weight.sizes(), padding, stride, dilation),
-      /*dtype=*/input.scalar_type(),
-      /*layout=*/c10::nullopt,
-      /*device=*/kCUDA,
-      /*pin_memory=*/c10::nullopt,
-      /*memory_format=*/memory_format);
+      input.options().memory_format(memory_format));
   if (output_t.numel() == 0) {
     return output_t;
   }
 
   auto& ctx = at::globalContext();
   bool allow_tf32 = ctx.allowTF32CuDNN();
+  bool benchmark = ctx.benchmarkCuDNN();
   auto _alpha = alpha.has_value() ? alpha.value().to<float>() : 1.0;
   auto _bias = bias_t.has_value()
           ? bias_t.value()
@@ -597,14 +525,14 @@ Tensor cudnn_convolution_add_relu(
       output_t,
       input,
       weight,
-      z_t,
+      z,
       _alpha,
       _bias,
       stride,
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark,
       false, // deterministic
       allow_tf32  // allow_tf32
   );
@@ -613,14 +541,14 @@ Tensor cudnn_convolution_add_relu(
       output_t,
       input,
       weight,
-      z_t,
+      z,
       _alpha,
       _bias,
       stride,
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark,
       false, // deterministic
       allow_tf32  // allow_tf32
   );

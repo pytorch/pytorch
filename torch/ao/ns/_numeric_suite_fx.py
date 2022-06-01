@@ -131,6 +131,9 @@ class OutputLogger(nn.Module):
     stats: List[torch.Tensor]
     stats_rnn: List[RNNReturnType]
 
+    # Mark as impure so that calls to it will not be removed during DCE.
+    _is_impure = True
+
     def __init__(
         self,
         ref_node_name: str,

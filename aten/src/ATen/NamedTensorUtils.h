@@ -10,7 +10,7 @@ namespace at {
 
 using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
 
-inline bool has_names(TensorList tensors) {
+inline bool has_names(ITensorListRef tensors) {
   return std::any_of(
       tensors.begin(), tensors.end(), [](const Tensor& t) { return t.has_names(); });
 }
@@ -71,6 +71,9 @@ unify_from_right(DimnameList names, DimnameList other, const char* action = "bro
 
 namespace namedinference {
 
+const Tensor& propagate_names_if_present_and_nonempty(const Tensor& result,
+    c10::optional<DimnameList> maybe_names,
+    bool validate_names = false);
 // Propagates `names` to `result` if `names` is not empty.
 // `names` can be empty; see [NOTE] Writing name inference rules
 // If `names` is not empty, `names.size()` should equal `result.dim()`.
@@ -98,7 +101,7 @@ TORCH_API void propagate_names_for_reduction(const Tensor& result, const Tensor&
 
 TORCH_API void propagate_names_for_expand(const Tensor& result, const Tensor& self);
 
-TORCH_API std::vector<Dimname> compute_cat_outnames(TensorList tensors);
+TORCH_API std::vector<Dimname> compute_cat_outnames(ITensorListRef tensors);
 
 TORCH_API std::vector<Dimname> compute_broadcast_outnames(
     const Tensor& self,

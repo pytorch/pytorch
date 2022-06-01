@@ -2,6 +2,24 @@
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #include <string>
 
+// This is a utility macro that can be used to throw an exception when a Metal
+// API function produces a NSError. The exception will contain a message with
+// useful info extracted from the NSError.
+#define METAL_THROW_IF_ERROR(error, preamble)                                    \
+  do {                                                                           \
+    if C10_LIKELY(error) {                                                       \
+      throw c10::Error(                                                          \
+          {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},                 \
+          c10::str(                                                              \
+              preamble,                                                          \
+              " Error details: ",                                                \
+              " Localized_description: ", error.localizedDescription.UTF8String, \
+              " Domain: ", error.domain.UTF8String,                              \
+              " Code: ", error.code,                                             \
+              " User Info: ", error.userInfo.description.UTF8String));           \
+    }                                                                            \
+  } while (false)
+
 namespace at {
 namespace native {
 namespace metal {
@@ -13,12 +31,12 @@ struct LaunchParams {
   MTLSize threadsPerGrid; // iOS 11.0
 };
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 LaunchParams spatialPointwiseKernelLaunchParams(
     id<MTLComputePipelineState> pipeline,
     MPSImage* im);
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 LaunchParams spatialPointwiseKernelLaunchParams(
     id<MTLComputePipelineState> pipeline,
     NSUInteger numberOfImages,
@@ -26,7 +44,7 @@ LaunchParams spatialPointwiseKernelLaunchParams(
     NSUInteger height,
     NSUInteger width);
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 static inline std::string kernelFor(
     MPSImage* image,
     const std::string& arrayKernel,

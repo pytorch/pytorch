@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
@@ -83,18 +83,21 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
   void traverseHelper(Fusion* fusion, bool traverse_all_paths = false);
 
  public:
-  // Starts at nodes provided in from, traverses from these nodes to inputs.
-  // Calls handle on all Statement*s in topological sorted order.
-  // traverseAllPaths = false only call handle on each Statement* once
-  // traverseAllPaths = true traverses all paths from nodes in from to inputs.
-  // Handle on a Statement* for every path from "from" nodes, to inputs.
-  // to argument allows specification of nodes to stop at if we want to stop
-  // beffore we hit all leaf nodes. This can be helpful when we want to traverse
-  // from TensorView::domain(), to the rfactor domain, instead of root domain.
+  //! Starts at nodes provided in from, traverses from these nodes to inputs.
+  //! Calls handle on all Statement*s in topological sorted order.
+  //! \param traverseAllPaths = false only call handle on each Statement* once
+  //!    traverseAllPaths = true traverses all paths from nodes in from to
+  //!    inputs. Calls handle on a Statement* for every path from "from" nodes,
+  //!    to inputs.
+  //! \param traverseIntoMembers = When hitting nodes like TensorView,
+  //! TensorDomain, or IterDomain where there are members of the nodes that are
+  //! Val's a value of "true" will also traverse into those member Val's, a
+  //! value of "false" will not traverse into the members.
   void traverseFrom(
       Fusion* fusion,
       const std::vector<Val*>& from,
-      bool traverseAllPaths = false);
+      bool traverseAllPaths = false,
+      bool traverseIntoMembers = false);
 
   // Iterates from terminating outputs registered with the fusion. Terminating
   // means value is not used to generate any other value used in producing
@@ -246,18 +249,40 @@ class TORCH_CUDA_CU_API DependencyCheck {
 
 // Expr sort will take a fusion and return a topologically sorted list of
 // expressions.
-class ExprSort : public IterVisitor {
+class StmtSort : public IterVisitor {
  protected:
-  std::vector<Expr*> exprs;
+  std::vector<Statement*> stmts;
 
-  void handle(Expr* expr) override;
+  void handle(Statement* stmt) override;
 
  public:
-  static std::vector<Expr*> getExprs(Fusion* fusion);
-
+  // If traverse_members it will also extract all member nodes in the sorted
+  // expr list in the fusion. i.e. all expressions on IterDomains, extents, etc
   static std::vector<Expr*> getExprs(
       Fusion* fusion,
-      const std::vector<Val*>& from);
+      bool traverse_members = false);
+
+  // If traverse_members it will also extract all member nodes in the sorted
+  // expr list in the fusion. i.e. all expressions on IterDomains, extents, etc
+  static std::vector<Expr*> getExprs(
+      Fusion* fusion,
+      const std::vector<Val*>& from,
+      bool traverse_members = false);
+
+  // If traverse_members it will also extract all member nodes in the sorted
+  // statement list in the fusion. i.e. all IterDomains, extents, and associated
+  // expressions of them
+  static std::vector<Statement*> getStmts(
+      Fusion* fusion,
+      bool traverse_members = false);
+
+  // If traverse_members it will also extract all member nodes in the sorted
+  // expr list in the fusion. i.e. all IterDomains, extents, and associated
+  // expressions of them
+  static std::vector<Statement*> getStmts(
+      Fusion* fusion,
+      const std::vector<Val*>& from,
+      bool traverse_members = false);
 };
 
 class InputsOf : public IterVisitor {

@@ -26,6 +26,8 @@ retry pip install --pre torch torchvision \
 # binary, and running forward pass with a real model.
 if [[ "$BUILD_ENVIRONMENT" == *-mobile-custom-build-static* ]]; then
   TEST_CUSTOM_BUILD_STATIC=1 test/mobile/custom_build/build.sh
+elif [[ "$BUILD_ENVIRONMENT" == *-mobile-lightweight-dispatch* ]]; then
+  test/mobile/lightweight_dispatch/build.sh
 else
   TEST_DEFAULT_BUILD=1 test/mobile/custom_build/build.sh
 fi

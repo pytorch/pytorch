@@ -348,20 +348,14 @@ graph(%x : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
         """
         graph = torch._C.parse_ir(graph_str)
 
-        def my_custom_lowering(inputs, out_shape, out_type, device):
-            def get_dim_args(dims):
-                dim_args = []
-                for dim in dims:
-                    dim_args.append(te.DimArg(dim, "i" + str(len(dim_args))))
-                return dim_args
-
+        def my_custom_lowering(inputs, out_shape, out_stride, out_type, device):
             def compute(idxs):
                 load = inputs[0].as_buf().load(idxs)
                 return te.ifThenElse(
                     te.ExprHandle.isnan(load), te.ExprHandle.float(0.0), load
                 )
 
-            return te.Compute2("custom_nan_to_num", get_dim_args(out_shape), compute)
+            return te.Compute2("custom_nan_to_num", out_shape, compute)
 
         kernel = te.TensorExprKernel(graph, {"aten::nan_to_num": my_custom_lowering})
         res1 = kernel.run((x,))

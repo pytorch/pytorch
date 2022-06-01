@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
@@ -10,7 +11,7 @@
 
 #include <cuda_runtime.h>
 
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 using namespace torch::jit::fuser::cuda;
 
@@ -24,7 +25,7 @@ static void setupLayerNorm(Fusion* fusion, DataType dtype) {
   const int kReductionAxis = 1;
   const float kEps = 1e-5;
 
-  Double* eps_ptr = new Double(kEps);
+  Double* eps_ptr = IrBuilder::create<Double>(kEps);
 
   // setup fusion
   auto input = makeContigTensor(2, dtype);
@@ -45,8 +46,8 @@ static void setupLayerNorm(Fusion* fusion, DataType dtype) {
 
   auto output = layer_norm_results.output;
 
-  if (dtype == DataType::Half) {
-    output = castOp(DataType::Half, output);
+  if (dtype != DataType::Float) {
+    output = castOp(dtype, output);
   }
 
   fusion->addOutput(output);
@@ -89,9 +90,9 @@ static void Baseline_LayerNorm(
 
   std::vector<int64_t> input_shape{
       benchmark_state.range(0), benchmark_state.range(1)};
-  const int kReductionAxis = 1;
+  const size_t kReductionAxis = 1;
   std::vector<int64_t> norm_shape;
-  for (int idx = kReductionAxis; idx < input_shape.size(); ++idx) {
+  for (auto idx = kReductionAxis; idx < input_shape.size(); ++idx) {
     norm_shape.push_back(input_shape[idx]);
   }
 

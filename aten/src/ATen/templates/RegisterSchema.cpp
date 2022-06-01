@@ -1,19 +1,5 @@
-#include <ATen/TypeDefault.h>
-
 // ${generated_comment}
-
-#include <ATen/DeviceGuard.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/Functions.h>
-#include <ATen/NamedTensorUtils.h>
-#include <ATen/NativeFunctions.h>
-#include <c10/core/Scalar.h>
-#include <c10/core/Storage.h>
-#include <ATen/Operators.h>
-#include <ATen/Tensor.h>
-#include <c10/core/TensorOptions.h>
-#include <ATen/DeviceGuard.h>
-#include <ATen/SparseTensorUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/library.h>
 
 namespace at {

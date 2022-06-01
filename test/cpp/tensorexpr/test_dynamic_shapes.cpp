@@ -1,15 +1,18 @@
 #include <gtest/gtest.h>
 
+#include <ATen/code_template.h>
+#include <c10/core/DeviceType.h>
 #include <test/cpp/tensorexpr/test_base.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/torch.h>
 #include <cmath>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 namespace torch {
 namespace jit {
@@ -48,11 +51,20 @@ TEST(DynamicShapes, SimpleGraph) {
   //   %4 : Float(SS(-2), SS(-3)) = aten::erf(%3)
   //   return (%4)
 
+  std::vector<torch::jit::StrideInput> input_desc = {
+      torch::jit::StrideInput::TENSOR_CONT};
+  std::unordered_map<
+      const torch::jit::Value*,
+      std::vector<torch::jit::StrideInput>>
+      symbolic_strides;
+  symbolic_strides[x_inp] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = input_desc;
   std::vector<int64_t> symbolic_shape_inputs = c10::fmap(
       x_sym_dims,
       [](const c10::ShapeSymbol& shapeSym) { return shapeSym.value(); });
 
-  TensorExprKernel kernel(graph, {}, symbolic_shape_inputs);
+  TensorExprKernel kernel(
+      graph, {}, symbolic_shape_inputs, false, symbolic_strides);
   // Run with the same static dims as the one we initialized the graph with.
   {
     auto a = at::rand({10, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -125,7 +137,18 @@ TEST(DynamicShapes, GraphWith2InputsSameDims) {
       x_sym_dims,
       [](const c10::ShapeSymbol& shapeSym) { return shapeSym.value(); });
 
-  TensorExprKernel kernel(graph, {}, symbolic_shape_inputs);
+  std::vector<torch::jit::StrideInput> input_desc = {
+      torch::jit::StrideInput::TENSOR_CONT};
+  std::unordered_map<
+      const torch::jit::Value*,
+      std::vector<torch::jit::StrideInput>>
+      symbolic_strides;
+  symbolic_strides[x_inp] = input_desc;
+  symbolic_strides[y_inp] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = input_desc;
+
+  TensorExprKernel kernel(
+      graph, {}, symbolic_shape_inputs, false, symbolic_strides);
 
   // Run with the same static dims as the one we initialized the graph with.
   {
@@ -205,7 +228,18 @@ TEST(DynamicShapes, GraphWith2InputsAndBroadcast) {
   std::vector<int64_t> symbolic_shape_inputs(
       {x_dim0_sym.value(), x_dim1_sym.value()});
 
-  TensorExprKernel kernel(graph, {}, symbolic_shape_inputs);
+  std::vector<torch::jit::StrideInput> input_desc = {
+      torch::jit::StrideInput::TENSOR_CONT};
+  std::unordered_map<
+      const torch::jit::Value*,
+      std::vector<torch::jit::StrideInput>>
+      symbolic_strides;
+  symbolic_strides[x_inp] = input_desc;
+  symbolic_strides[y_inp] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = input_desc;
+
+  TensorExprKernel kernel(
+      graph, {}, symbolic_shape_inputs, false, symbolic_strides);
 
   // Run with the same static dims as the one we initialized the graph with.
   {
@@ -276,7 +310,18 @@ TEST(DynamicShapes, GraphWithPartiallySymbolicOutput) {
 
   std::vector<int64_t> symbolic_shape_inputs({x_dim1_sym.value()});
 
-  TensorExprKernel kernel(graph, {}, symbolic_shape_inputs);
+  std::vector<torch::jit::StrideInput> input_desc = {
+      torch::jit::StrideInput::TENSOR_CONT};
+  std::unordered_map<
+      const torch::jit::Value*,
+      std::vector<torch::jit::StrideInput>>
+      symbolic_strides;
+  symbolic_strides[x_inp] = input_desc;
+  symbolic_strides[y_inp] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = input_desc;
+
+  TensorExprKernel kernel(
+      graph, {}, symbolic_shape_inputs, false, symbolic_strides);
 
   // Run with the same static dims as the one we initialized the graph with.
   {
@@ -304,6 +349,67 @@ TEST(DynamicShapes, GraphWithPartiallySymbolicOutput) {
 
     auto o = stack[0].toTensor();
     ASSERT_TRUE(at::allclose(o, ref));
+  }
+#endif
+}
+
+TEST(DynamicShapes, GraphWithSymbolicStrides) {
+#ifdef TORCH_ENABLE_LLVM
+  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  const auto graph_string = R"IR(
+    graph(%0 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu),
+          %1 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu),
+          %SS_3 : int,
+          %SS_2 : int):
+      %15 : int = prim::Constant[value=1]()
+      %21 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu) = aten::add(%0, %1, %15)
+      %22 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu) = aten::mul(%21, %0)
+      return (%22))IR";
+  parseIR(graph_string, &*graph);
+
+  std::vector<torch::jit::StrideInput> input_desc = {
+      torch::jit::StrideInput::S_AS_ARG, torch::jit::StrideInput::S_ONE};
+  std::vector<torch::jit::StrideInput> output_desc = {
+      torch::jit::StrideInput::TENSOR_CONT};
+  std::unordered_map<
+      const torch::jit::Value*,
+      std::vector<torch::jit::StrideInput>>
+      symbolic_strides;
+  symbolic_strides[graph->inputs().at(0)] = input_desc;
+  symbolic_strides[graph->inputs().at(1)] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = output_desc;
+  std::vector<int64_t> symbolic_shape_inputs = {-3, -2};
+  TensorExprKernel k(graph, {}, symbolic_shape_inputs, false, symbolic_strides);
+
+  {
+    auto x0 = at::rand({10, 32}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto x1 = at::rand({10, 32}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto ref = at::mul(at::add(x0, x1, 1), x0);
+
+    std::vector<at::Tensor> inputs = {x0, x1};
+    std::vector<IValue> stack = at::fmap<at::IValue>(inputs);
+    stack.push_back(32);
+    stack.push_back(10);
+    k.run(stack);
+
+    auto o = stack[0].toTensor();
+    ASSERT_TRUE(at::allclose(o, ref));
+  }
+
+  {
+    auto x0 = at::rand({10, 32}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto x1 = at::rand({10, 32}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto out =
+        at::rand({10, 32}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto ref = at::mul(at::add(x0, x1, 1), x0);
+
+    std::vector<at::Tensor> inputs = {out, x0, x1};
+    std::vector<IValue> stack = at::fmap<at::IValue>(inputs);
+    stack.push_back(32);
+    stack.push_back(10);
+    k.runWithAllocatedOutputs(stack);
+
+    ASSERT_TRUE(at::allclose(out, ref));
   }
 #endif
 }
@@ -388,7 +494,19 @@ TEST(DynamicShapes, GraphWithCatAndBroadcast) {
        y_dim0_sym.value(),
        cat_dim0_sym.value()});
 
-  TensorExprKernel kernel(graph, {}, symbolic_shape_inputs);
+  std::vector<torch::jit::StrideInput> input_desc = {
+      torch::jit::StrideInput::TENSOR_CONT};
+  std::unordered_map<
+      const torch::jit::Value*,
+      std::vector<torch::jit::StrideInput>>
+      symbolic_strides;
+  symbolic_strides[x_inp] = input_desc;
+  symbolic_strides[y_inp] = input_desc;
+  symbolic_strides[z_inp] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = input_desc;
+
+  TensorExprKernel kernel(
+      graph, {}, symbolic_shape_inputs, false, symbolic_strides);
 
   auto a = at::rand({10, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   auto b = at::rand({4, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -405,6 +523,177 @@ TEST(DynamicShapes, GraphWithCatAndBroadcast) {
 
   auto o = stack[0].toTensor();
   ASSERT_TRUE(at::allclose(o, ref));
+#endif
+}
+
+TEST(DynamicShapes, GraphFromModel) {
+#ifdef TORCH_ENABLE_LLVM
+  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  const auto graph_string = R"IR(
+    graph(%0 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu),
+          %1 : Float(SS(-2), SS(-4), requires_grad=0, device=cpu),
+          %2 : Float(SS(-2), SS(-5), requires_grad=0, device=cpu),
+          %input.4 : Long(SS(-2), SS(-6), requires_grad=0, device=cpu),
+          %4 : Float(SS(-7), requires_grad=0, device=cpu),
+          %5 : Float(SS(-7), requires_grad=0, device=cpu),
+          %SS_10 : int,
+          %SS_9 : int,
+          %SS_8 : int,
+          %SS_7 : int,
+          %SS_6 : int,
+          %SS_5 : int,
+          %SS_4 : int,
+          %SS_3 : int,
+          %SS_2 : int):
+      %15 : int = prim::Constant[value=1]()
+      %16 : bool = prim::Constant[value=0]()
+      %17 : int = prim::Constant[value=6]()
+      %18 : Float(SS(-2), SS(-6), strides=[139, 1], requires_grad=0, device=cpu) = aten::to(%input.4, %17, %16, %16)
+      %19 : Tensor[] = prim::ListConstruct(%0, %1, %18, %2)
+      %20 : Float(SS(-2), SS(-8), strides=[261, 1], requires_grad=0, device=cpu) = aten::cat(%19, %15)
+      %21 : Float(SS(-2), SS(-9), strides=[261, 1], requires_grad=0, device=cpu) = aten::add(%20, %5, %15)
+      %22 : Float(SS(-2), SS(-10), requires_grad=0, device=cpu) = aten::mul(%21, %4)
+      return (%22))IR";
+  parseIR(graph_string, &*graph);
+
+  std::vector<torch::jit::StrideInput> input_desc = {
+      torch::jit::StrideInput::TENSOR_CONT};
+  std::unordered_map<
+      const torch::jit::Value*,
+      std::vector<torch::jit::StrideInput>>
+      symbolic_strides;
+  symbolic_strides[graph->inputs().at(0)] = input_desc;
+  symbolic_strides[graph->inputs().at(1)] = input_desc;
+  symbolic_strides[graph->inputs().at(2)] = input_desc;
+  symbolic_strides[graph->inputs().at(3)] = input_desc;
+  symbolic_strides[graph->inputs().at(4)] = input_desc;
+  symbolic_strides[graph->inputs().at(5)] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = input_desc;
+  std::vector<int64_t> symbolic_shape_inputs = {
+      -10, -9, -8, -7, -6, -5, -4, -3, -2};
+  TensorExprKernel k(graph, {}, symbolic_shape_inputs, false, symbolic_strides);
+
+  int64_t i2 = 10;
+  int64_t i3 = 32;
+  int64_t i4 = 19;
+  int64_t i5 = 71;
+  int64_t i6 = 139;
+  int64_t i7 = 261;
+  int64_t i8 = 261;
+  int64_t i9 = 261;
+  int64_t i10 = 261;
+  auto x0 = at::rand({i2, i3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto x1 = at::rand({i2, i4}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto x2 = at::rand({i2, i5}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto x3 = at::ones({i2, i6}, at::TensorOptions(at::kCPU).dtype(at::kLong));
+  auto x4 = at::rand({i7}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto x5 = at::rand({i8}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto ref = at::mul(at::add(at::cat({x0, x1, x3, x2}, 1), x5), x4);
+
+  {
+    std::vector<at::Tensor> inputs = {x0, x1, x2, x3, x4, x5};
+    std::vector<IValue> stack = at::fmap<at::IValue>(inputs);
+    stack.emplace_back(i10);
+    stack.emplace_back(i9);
+    stack.emplace_back(i8);
+    stack.emplace_back(i7);
+    stack.emplace_back(i6);
+    stack.emplace_back(i5);
+    stack.emplace_back(i4);
+    stack.emplace_back(i3);
+    stack.emplace_back(i2);
+    k.run(stack);
+
+    auto o = stack[0].toTensor();
+    ASSERT_TRUE(at::allclose(o, ref));
+  }
+
+  {
+    auto out =
+        at::rand({i2, i10}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    std::vector<at::Tensor> inputs = {out, x0, x1, x2, x3, x4, x5};
+    std::vector<IValue> stack = at::fmap<at::IValue>(inputs);
+    stack.emplace_back(i10);
+    stack.emplace_back(i9);
+    stack.emplace_back(i8);
+    stack.emplace_back(i7);
+    stack.emplace_back(i6);
+    stack.emplace_back(i5);
+    stack.emplace_back(i4);
+    stack.emplace_back(i3);
+    stack.emplace_back(i2);
+    k.runWithAllocatedOutputs(stack);
+
+    ASSERT_TRUE(at::allclose(out, ref));
+  }
+#endif
+}
+
+TEST(DynamicShapes, MultiThreadedExecution) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_template = R"IR(
+      graph(%x : Float(SS(-2), SS(-3), requires_grad=0, device=${device}),
+            %y : Float(SS(-2), SS(-3), requires_grad=0, device=${device}),
+            %SS_2 : int,
+            %SS_3 : int):
+        %3 : Float(SS(-2), SS(-3), requires_grad=0, device=${device}) = aten::tanh(%x)
+        %4 : Float(SS(-2), SS(-3), requires_grad=0, device=${device}) = aten::erf(%3)
+        %5 : Float(SS(-2), SS(-3), requires_grad=0, device=${device}) = aten::mul(%4, %y)
+        return (%5))IR";
+  for (bool use_cuda : {false, true}) {
+    if (!torch::cuda::is_available() && use_cuda) {
+      continue;
+    }
+    auto device = use_cuda ? at::kCUDA : at::kCPU;
+    at::jit::TemplateEnv env;
+    env.s("device", use_cuda ? "cuda:0" : "cpu");
+    const auto graph_string = format(graph_template, env);
+    std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+    torch::jit::parseIR(graph_string, graph.get());
+
+    std::vector<int64_t> symbolic_shape_inputs = {-2, -3};
+
+    std::vector<torch::jit::StrideInput> input_desc = {
+        torch::jit::StrideInput::TENSOR_CONT};
+    std::unordered_map<
+        const torch::jit::Value*,
+        std::vector<torch::jit::StrideInput>>
+        symbolic_strides;
+    symbolic_strides[graph->inputs().at(0)] = input_desc;
+    symbolic_strides[graph->inputs().at(1)] = input_desc;
+    symbolic_strides[graph->outputs().at(0)] = input_desc;
+
+    TensorExprKernel kernel(
+        graph, {}, symbolic_shape_inputs, false, symbolic_strides);
+
+    auto run_kernel = [&](int dim1, int dim2) {
+      auto a =
+          at::rand({dim1, dim2}, at::TensorOptions(device).dtype(at::kFloat));
+      auto b =
+          at::rand({dim1, dim2}, at::TensorOptions(device).dtype(at::kFloat));
+
+      auto ref = at::mul(at::erf(at::tanh(a)), b);
+
+      std::vector<IValue> stack = fmap<IValue>(std::vector<at::Tensor>({a, b}));
+      stack.emplace_back(dim1);
+      stack.emplace_back(dim2);
+      kernel.run(stack);
+
+      auto o = stack[0].toTensor();
+      ASSERT_TRUE(at::allclose(o, ref));
+    };
+
+    // Run the kernel in parallel to ensure that the run() method calls in
+    // TensorExprKernel are not changing any state.
+    constexpr size_t kNumThreads = 4;
+    std::vector<std::thread> threads;
+    for (size_t id = 0; id < kNumThreads; ++id) {
+      threads.emplace_back(run_kernel, id + 5, id + 20);
+    }
+    for (auto& t : threads) {
+      t.join();
+    }
+  }
 #endif
 }
 

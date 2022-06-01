@@ -1,16 +1,13 @@
 #pragma once
 
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <utility>
+
+#include <ATen/native/GridSamplerUtils.h>
 
 namespace at { namespace native {
-
-namespace detail {
-
-  enum class GridSamplerInterpolation {Bilinear, Nearest, Bicubic};
-  enum class GridSamplerPadding {Zeros, Border, Reflection};
-
-}  // namespace detail
 
 using detail::GridSamplerInterpolation;
 using detail::GridSamplerPadding;

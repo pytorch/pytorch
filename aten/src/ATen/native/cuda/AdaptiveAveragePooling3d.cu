@@ -1,11 +1,22 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/util/Exception.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/adaptive_avg_pool3d_backward_native.h>
+#include <ATen/ops/adaptive_avg_pool3d_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 #include <algorithm>
 #include <cfloat>

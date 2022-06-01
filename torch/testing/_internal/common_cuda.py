@@ -160,6 +160,12 @@ def with_tf32_off(f):
 
     return wrapped
 
+def _get_magma_version():
+    if 'Magma' not in torch.__config__.show():
+        return (0, 0)
+    position = torch.__config__.show().find('Magma ')
+    version_str = torch.__config__.show()[position + len('Magma '):].split('\n')[0]
+    return tuple(int(x) for x in version_str.split("."))
 
 def _get_torch_cuda_version():
     if torch.version.cuda is None:

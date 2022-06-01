@@ -26,26 +26,31 @@ static Tensor compute_columns2d(
   const int64_t pad_width = padding[1];
   const int64_t stride_height = stride[0];
   const int64_t stride_width = stride[1];
-  const int64_t dim_planes = 1;
-  const int64_t dim_height = 2;
-  const int64_t dim_width = 3;
-  const int64_t n_input_plane = input.size(dim_planes);
-  const int64_t input_height = input.size(dim_height);
-  const int64_t input_width = input.size(dim_width);
-  const int64_t output_height =
-      (input_height + 2 * pad_height - kernel_height) / stride_height + 1;
-  const int64_t output_width =
-      (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
   const int64_t batch_size = input.size(0);
+  const int64_t n_input_plane = input.size(1);
+  const int64_t input_height = input.size(2);
+  const int64_t input_width = input.size(3);
+  const int64_t output_height = (input_height + 2 * pad_height - kernel_height) / stride_height + 1;
+  const int64_t output_width =  (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
+
+  bool is_channels_last = input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
 
   Tensor columns;
   if ((kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
       (kernel_width == 1) && (stride_width == 1) && (pad_width == 0)) {
     // Columns are just a view on the input for the 1x1 kernel special case.
-    columns = input.view({batch_size, n_input_plane, output_height * output_width}).detach();
+    if (is_channels_last) {
+      columns = input.as_strided({batch_size, output_height * output_width, n_input_plane},
+          {output_height * output_width * n_input_plane, n_input_plane, 1}).detach();
+    } else {
+      columns = input.view({batch_size, n_input_plane, output_height * output_width}).detach();
+    }
   } else {
-    columns = at::empty({batch_size, n_input_plane * kernel_height * kernel_width,
-        output_height * output_width}, input.options());
+    int64_t row = is_channels_last ?
+        output_height * output_width : n_input_plane * kernel_height * kernel_width;
+    int64_t col = is_channels_last ?
+        kernel_height * kernel_width * n_input_plane : output_height * output_width;
+    columns = at::empty({batch_size, row, col}, input.options());
     AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv2d_cpu", [&]{
       auto input_a = input.accessor<scalar_t, 4>();
       auto columns_a = columns.accessor<scalar_t, 3>();
@@ -69,7 +74,8 @@ static Tensor compute_columns2d(
               input_height,
               input_width,
               output_height,
-              output_width);
+              output_width,
+              is_channels_last);
         }
       });
     });
@@ -122,7 +128,7 @@ static inline void slow_conv2d_shape_check(
 
   // Allow for empty batch size and channel size but not other dimensions
   TORCH_CHECK(ndim == 4, "Expected 4D input tensor, but got: ", input.sizes());
-  for (int64_t dim = 2; dim < ndim; ++dim) {
+  for (const auto dim : c10::irange(2, ndim)) {
     TORCH_CHECK(input.size(dim) != 0,
                 "Expected non-zero size for input dimension ", dim,
                 ", but got input shape: ", input.sizes(), ". Only the batch and channel dimensions support size 0.");
@@ -189,12 +195,15 @@ static inline void slow_conv2d_shape_check(
   }
 }
 
-static Tensor view_weight_2d(const Tensor& weight_) {
-  Tensor weight = weight_.contiguous();
+static inline Tensor view_weight_2d(const Tensor& weight_,
+    at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) {
+  Tensor weight = weight_.contiguous(memory_format);
   if (weight.dim() == 4) {
     const int64_t s1 = weight.size(0);
     const int64_t s2 = weight.size(1) * weight.size(2) * weight.size(3);
-    return weight.view({s1, s2});
+    return memory_format == at::MemoryFormat::ChannelsLast
+        ? weight.as_strided({s1, s2}, {s2, 1}) // CL: view as {oc, kh*kw*ic}
+        : weight.view({s1, s2}); // CF: view as {oc, ic*kh*kw}
   } else {
     return weight;
   }
@@ -218,29 +227,50 @@ static void slow_conv2d_update_output_frame(
     int64_t input_width,
     int64_t n_output_plane,
     int64_t output_height,
-    int64_t output_width) {
+    int64_t output_width,
+    bool is_channels_last) {
   const int beta = has_bias ? 1 : 0;
 
   // Compute out = weight * input
   // Note gemm expects fortran order, so all 3 matrices are transposed.
   // Swapping argument order cancels this, since C == AB <=> T(C) == T(B)T(A)
-  const int64_t m = output_height * output_width;
-  const int64_t n = n_output_plane;
-  const int64_t k = n_input_plane * kernel_height * kernel_width;
+  if (is_channels_last) {
+    const int64_t m = n_output_plane;
+    const int64_t n = output_height * output_width;
+    const int64_t k = n_input_plane * kernel_height * kernel_width;
 
-  const int64_t lda = m;
-  const int64_t ldb = k;
-  const int64_t ldc = m;
+    const int64_t lda = k;
+    const int64_t ldb = k;
+    const int64_t ldc = m;
 
-  at::native::cpublas::gemm(
-      TransposeType::NoTranspose,
-      TransposeType::NoTranspose,
-      m, n, k,
-      static_cast<scalar_t>(1),
-      finput.data(), lda,
-      weight.data(), ldb,
-      static_cast<scalar_t>(beta),
-      output.data(), ldc);
+    at::native::cpublas::gemm(
+        TransposeType::Transpose,
+        TransposeType::NoTranspose,
+        m, n, k,
+        static_cast<scalar_t>(1),
+        weight.data(), lda,
+        finput.data(), ldb,
+        static_cast<scalar_t>(beta),
+        output.data(), ldc);
+  } else {
+    const int64_t m = output_height * output_width;
+    const int64_t n = n_output_plane;
+    const int64_t k = n_input_plane * kernel_height * kernel_width;
+
+    const int64_t lda = m;
+    const int64_t ldb = k;
+    const int64_t ldc = m;
+
+    at::native::cpublas::gemm(
+        TransposeType::NoTranspose,
+        TransposeType::NoTranspose,
+        m, n, k,
+        static_cast<scalar_t>(1),
+        finput.data(), lda,
+        weight.data(), ldb,
+        static_cast<scalar_t>(beta),
+        output.data(), ldc);
+  }
 }
 
 template <typename scalar_t>
@@ -254,27 +284,48 @@ void slow_conv2d_backward_update_grad_input_frame(
     int64_t stride_height,
     int64_t stride_width,
     int64_t pad_height,
-    int64_t pad_width) {
+    int64_t pad_width,
+    bool is_channels_last) {
   // Compute fgrad_input = weight.T * grad_output.reshape({grad_output.shape(0), -1})
   // Note gemm expects fortran order, so all 3 matrices are transposed.
   // Swapping argument order cancels this, since C == AB <=> T(C) == T(B)T(A)
-  const int64_t m = grad_output.size(1) * grad_output.size(2);
-  const int64_t n = weight.size(1);
-  const int64_t k = weight.size(0);
+  if (is_channels_last) {
+    const int64_t m = weight.size(1);
+    const int64_t n = grad_output.size(1) * grad_output.size(2);
+    const int64_t k = weight.size(0);
 
-  const int64_t lda = m;
-  const int64_t ldb = n;
-  const int64_t ldc = m;
+    const int64_t lda = m;
+    const int64_t ldb = k;
+    const int64_t ldc = m;
 
-  at::native::cpublas::gemm(
-      TransposeType::NoTranspose,
-      TransposeType::Transpose,
-      m, n, k,
-      static_cast<scalar_t>(1),
-      grad_output.data(), lda,
-      weight.data(), ldb,
-      static_cast<scalar_t>(0),
-      fgrad_input, ldc);
+    at::native::cpublas::gemm(
+        TransposeType::NoTranspose,
+        TransposeType::NoTranspose,
+        m, n, k,
+        static_cast<scalar_t>(1),
+        weight.data(), lda,
+        grad_output.data(), ldb,
+        static_cast<scalar_t>(0),
+        fgrad_input, ldc);
+  } else {
+    const int64_t m = grad_output.size(1) * grad_output.size(2);
+    const int64_t n = weight.size(1);
+    const int64_t k = weight.size(0);
+
+    const int64_t lda = m;
+    const int64_t ldb = n;
+    const int64_t ldc = m;
+
+    at::native::cpublas::gemm(
+        TransposeType::NoTranspose,
+        TransposeType::Transpose,
+        m, n, k,
+        static_cast<scalar_t>(1),
+        grad_output.data(), lda,
+        weight.data(), ldb,
+        static_cast<scalar_t>(0),
+        fgrad_input, ldc);
+  }
 
   unfolded2d_acc_stub(
       kCPU,
@@ -291,7 +342,8 @@ void slow_conv2d_backward_update_grad_input_frame(
       grad_input.size(1),
       grad_input.size(2),
       grad_output.size(1),
-      grad_output.size(2));
+      grad_output.size(2),
+      is_channels_last);
 }
 
 void slow_conv2d_backward_out_cpu_template(
@@ -309,7 +361,10 @@ void slow_conv2d_backward_out_cpu_template(
   const int64_t stride_height = stride[0];
   const int64_t stride_width = stride[1];
 
-  const Tensor weight = view_weight_2d(weight_);
+  bool use_channels_last = thnn_conv_use_channels_last(input_, weight_);
+  auto memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+
+  const Tensor weight = view_weight_2d(weight_, memory_format);
   slow_conv2d_shape_check(
       input_,
       grad_output_,
@@ -323,27 +378,21 @@ void slow_conv2d_backward_out_cpu_template(
       pad_width,
       false);
 
-  const Tensor input = input_.contiguous();
+  const Tensor input = input_.contiguous(memory_format);
 
   // Compute shape of columnized data excluding batch dim.
-  const int64_t dim_planes = 1;
-  const int64_t dim_height = 2;
-  const int64_t dim_width = 3;
-  const int64_t n_input_plane = input.size(dim_planes);
-  const int64_t input_height = input.size(dim_height);
-  const int64_t input_width = input.size(dim_width);
-  const int64_t output_height =
-      (input_height + 2 * pad_height - kernel_height) / stride_height + 1;
-  const int64_t output_width =
-      (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
-  const int64_t fgrad_input_size =
-      n_input_plane * kernel_height * kernel_width * output_height * output_width;
-
-  const Tensor grad_output = grad_output_.contiguous();
-  grad_input.resize_as_(input);
-  grad_input.zero_();
-  TORCH_CHECK(grad_input.is_contiguous(), "slow_conv2d: grad_input must be contiguous");
   const int64_t batch_size = input.size(0);
+  const int64_t n_input_plane = input.size(1);
+  const int64_t input_height = input.size(2);
+  const int64_t input_width = input.size(3);
+  const int64_t output_height = (input_height + 2 * pad_height - kernel_height) / stride_height + 1;
+  const int64_t output_width = (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
+  const int64_t fgrad_input_size = n_input_plane * kernel_height * kernel_width * output_height * output_width;
+
+  const Tensor grad_output = grad_output_.contiguous(memory_format);
+  grad_input.resize_as_(input, memory_format);
+  grad_input.zero_();
+  TORCH_CHECK(grad_input.is_contiguous(memory_format), "slow_conv2d: grad_input must be contiguous");
 
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, input.scalar_type(), "slow_conv2d_cpu_grad_input", [&] {
@@ -366,7 +415,8 @@ void slow_conv2d_backward_out_cpu_template(
             stride_height,
             stride_width,
             pad_height,
-            pad_width);
+            pad_width,
+            use_channels_last);
       }
     });
   });
@@ -376,27 +426,48 @@ template <typename scalar_t>
 void slow_conv2d_backward_weight_frame(
     TensorAccessor<scalar_t, 2> grad_weight,
     TensorAccessor<scalar_t, 3> grad_output,
-    TensorAccessor<scalar_t, 2> finput) {
+    TensorAccessor<scalar_t, 2> finput,
+    bool is_channels_last) {
   // Compute grad_weight += grad_output.reshape({grad_output.shape(0), -1}) * finput.T
   // Note gemm expects fortran order, so all 3 matrices are transposed.
   // Swapping argument order cancels this, since C == AB <=> T(C) == T(B)T(A)
-  const int64_t m = finput.size(0);
-  const int64_t n = grad_output.size(0);
-  const int64_t k = grad_output.size(1) * grad_output.size(2);
+  if (is_channels_last) {
+    const int64_t m = finput.size(1);
+    const int64_t n = grad_output.size(0);
+    const int64_t k = grad_output.size(1) * grad_output.size(2);
 
-  const int64_t lda = k;
-  const int64_t ldb = k;
-  const int64_t ldc = m;
+    const int64_t lda = m;
+    const int64_t ldb = n;
+    const int64_t ldc = m;
 
-  at::native::cpublas::gemm(
-      TransposeType::Transpose,
-      TransposeType::NoTranspose,
-      m, n, k,
-      static_cast<scalar_t>(1),
-      finput.data(), lda,
-      grad_output.data(), ldb,
-      static_cast<scalar_t>(1),
-      grad_weight.data(), ldc);
+    at::native::cpublas::gemm(
+        TransposeType::NoTranspose,
+        TransposeType::Transpose,
+        m, n, k,
+        static_cast<scalar_t>(1),
+        finput.data(), lda,
+        grad_output.data(), ldb,
+        static_cast<scalar_t>(1),
+        grad_weight.data(), ldc);
+  } else {
+    const int64_t m = finput.size(0);
+    const int64_t n = grad_output.size(0);
+    const int64_t k = grad_output.size(1) * grad_output.size(2);
+
+    const int64_t lda = k;
+    const int64_t ldb = k;
+    const int64_t ldc = m;
+
+    at::native::cpublas::gemm(
+        TransposeType::Transpose,
+        TransposeType::NoTranspose,
+        m, n, k,
+        static_cast<scalar_t>(1),
+        finput.data(), lda,
+        grad_output.data(), ldb,
+        static_cast<scalar_t>(1),
+        grad_weight.data(), ldc);
+  }
 }
 
 static void slow_conv2d_backward_weight_out_cpu_template(
@@ -406,9 +477,6 @@ static void slow_conv2d_backward_weight_out_cpu_template(
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding) {
-  CheckedFrom c = "slow_conv2d_backward_parameters_cpu";
-  auto grad_weight_arg = TensorArg(grad_weight, "grad_weight_arg", 0);
-
   const int64_t kernel_height = kernel_size[0];
   const int64_t kernel_width = kernel_size[1];
   const int64_t pad_height = padding[0];
@@ -416,9 +484,11 @@ static void slow_conv2d_backward_weight_out_cpu_template(
   const int64_t stride_height = stride[0];
   const int64_t stride_width = stride[1];
 
-  Tensor grad_weight_2d;
-  checkContiguous(c, grad_weight_arg);
-  grad_weight_2d = view_weight_2d(grad_weight);
+  bool use_channels_last = thnn_conv_use_channels_last(input, grad_weight);
+  auto memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+
+  TORCH_CHECK(grad_weight.is_contiguous(memory_format), "slow_conv2d: grad_weight must be contiguous");
+  Tensor grad_weight_2d = view_weight_2d(grad_weight, memory_format);
 
   slow_conv2d_shape_check(
       input,
@@ -433,7 +503,7 @@ static void slow_conv2d_backward_weight_out_cpu_template(
       pad_width,
       true);
 
-  auto grad_output = grad_output_.contiguous();
+  auto grad_output = grad_output_.contiguous(memory_format);
   Tensor finput = compute_columns2d(input, padding, stride, kernel_size);
 
   const int64_t batch_size = input.size(0);
@@ -444,12 +514,12 @@ static void slow_conv2d_backward_weight_out_cpu_template(
     auto grad_weight_2d_a = grad_weight_2d.accessor<scalar_t, 2>();
     auto finput_a = finput.accessor<scalar_t, 3>();
 
-    for (int64_t t = 0; t < batch_size; t++) {
+    for (const auto t : c10::irange(batch_size)) {
       auto grad_output_t = grad_output_a[t];
       auto finput_t = finput_a[t];
 
       slow_conv2d_backward_weight_frame(
-          grad_weight_2d_a, grad_output_t, finput_t);
+          grad_weight_2d_a, grad_output_t, finput_t, use_channels_last);
     }
   });
 }
@@ -474,7 +544,10 @@ Tensor& slow_conv2d_forward_out_cpu(
   const int64_t stride_height = stride[0];
   const int64_t stride_width = stride[1];
 
-  const Tensor weight_2d = view_weight_2d(weight_);
+  bool use_channels_last = thnn_conv_use_channels_last(self, weight_);
+  auto memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+
+  const Tensor weight_2d = view_weight_2d(weight_, memory_format);
 
   slow_conv2d_shape_check(
       self,
@@ -489,28 +562,21 @@ Tensor& slow_conv2d_forward_out_cpu(
       pad_width,
       false);
 
-  const Tensor input = self.contiguous();
-  const int64_t dim_planes = 1;
-  const int64_t dim_height = 2;
-  const int64_t dim_width = 3;
-
-  const int64_t n_input_plane = input.size(dim_planes);
-  const int64_t input_height = input.size(dim_height);
-  const int64_t input_width = input.size(dim_width);
-  const int64_t n_output_plane = weight_2d.size(0);
-  const int64_t output_height =
-      (input_height + 2 * pad_height - kernel_height) / stride_height + 1;
-  const int64_t output_width =
-      (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
-
+  const Tensor input = self.contiguous(memory_format);
   const int64_t batch_size = input.size(0);
+  const int64_t n_input_plane = input.size(1);
+  const int64_t input_height = input.size(2);
+  const int64_t input_width = input.size(3);
+  const int64_t n_output_plane = weight_2d.size(0);
+  const int64_t output_height = (input_height + 2 * pad_height - kernel_height) / stride_height + 1;
+  const int64_t output_width = (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
 
   Tensor finput = compute_columns2d(input, padding, stride, kernel_size);
-  output.resize_({batch_size, n_output_plane, output_height, output_width});
+  output.resize_({batch_size, n_output_plane, output_height, output_width}, memory_format);
   if (bias.defined()) {
     output.copy_(bias.reshape({-1, 1, 1}));
   }
-  TORCH_CHECK(output.is_contiguous(), "slow_conv2d output tensor must be contiguous");
+  TORCH_CHECK(output.is_contiguous(memory_format), "slow_conv2d output tensor must be contiguous");
 
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv2d_cpu", [&]{
     auto input_a = input.accessor<scalar_t, 4>();
@@ -540,7 +606,8 @@ Tensor& slow_conv2d_forward_out_cpu(
             input_width,
             n_output_plane,
             output_height,
-            output_width);
+            output_width,
+            use_channels_last);
       }
     });
   });
@@ -596,9 +663,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(
     at::sum_out(grad_bias, grad_output, IntArrayRef{0, 2, 3});
   }
 
-
   if (grad_weight.defined()) {
-    grad_weight.resize_(weight.sizes());
+    grad_weight.resize_(weight.sizes(), weight.suggest_memory_format());
     grad_weight.zero_();
     slow_conv2d_backward_weight_out_cpu_template(
         grad_weight,

@@ -17,8 +17,8 @@ def _save_storages(importer, obj):
         importers = sys_importer
 
     def persistent_id(obj):
-        if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
-            if isinstance(obj, torch.storage.TypedStorage):
+        if torch.is_storage(obj) or isinstance(obj, torch.storage._TypedStorage):
+            if isinstance(obj, torch.storage._TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can
                 # remove this case
                 storage = obj._storage
@@ -59,10 +59,10 @@ def _load_storages(id, zip_reader, obj_bytes, serialized_storages, serialized_dt
 
         if typename == 'storage':
             # TODO: Once we decide to break serialization FC, we can
-            # stop wrapping with TypedStorage
+            # stop wrapping with _TypedStorage
             storage = serialized_storages[data[0]]
             dtype = serialized_dtypes[data[0]]
-            return torch.storage.TypedStorage(
+            return torch.storage._TypedStorage(
                 wrap_storage=storage._untyped(),
                 dtype=dtype)
 
@@ -82,7 +82,7 @@ def _load_storages(id, zip_reader, obj_bytes, serialized_storages, serialized_dt
         importer = sys_importer
 
     unpickler = PackageUnpickler(importer, io.BytesIO(obj_bytes))
-    unpickler.persistent_load = persistent_load
+    unpickler.persistent_load = persistent_load  # type: ignore[assignment]
     result = _deploy_objects[id] = unpickler.load()
     return result
 

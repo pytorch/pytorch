@@ -21,7 +21,7 @@ from torch.ao.quantization.fx.utils import (
     create_qparam_nodes,
     all_node_args_have_no_tensors,
     node_return_type_is_int,
-    node_bool_tensor_arg_indexes,
+    get_non_observable_arg_indexes_and_types,
     is_get_tensor_info_node,
     maybe_get_next_module
 )

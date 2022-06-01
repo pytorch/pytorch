@@ -46,16 +46,42 @@ inline Tensor dropout(Tensor input,
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 
-inline Tensor dropout2d(Tensor input, double p, bool training, bool inplace) {
+template<int64_t unbatched_dim, int64_t batched_dim>
+inline Tensor _dropoutNd_helper(Tensor input, double p, bool training, bool inplace, const char* fn_name) {
   TORCH_CHECK(
     p >= 0. && p <= 1.,
     "dropout probability has to be between 0 and 1, but got ",
     p);
-  if (inplace) {
-    return torch::feature_dropout_(input, p, training);
-  } else {
-    return torch::feature_dropout(input, p, training);
+
+  auto inp_dim = input.dim();
+  auto is_batched = inp_dim == batched_dim;
+  if (!is_batched) {
+    if (inplace) {
+      input = input.unsqueeze_(0);
+    } else {
+      input = input.unsqueeze(0);
+    }
   }
+
+  Tensor result;
+  if (inplace) {
+    result = torch::feature_dropout_(input, p, training);
+  } else {
+    result = torch::feature_dropout(input, p, training);
+  }
+
+  if (!is_batched) {
+    if (inplace) {
+      result = result.squeeze_(0);
+    } else {
+      result = result.squeeze(0);
+    }
+  }
+  return result;
+}
+
+inline Tensor dropout2d(Tensor input, double p, bool training, bool inplace) {
+  return _dropoutNd_helper<3, 4>(input, p, training, inplace, "dropout2d");
 }
 
 } // namespace detail
@@ -84,15 +110,7 @@ inline Tensor dropout2d(Tensor input,
 namespace detail {
 
 inline Tensor dropout3d(Tensor input, double p, bool training, bool inplace) {
-  TORCH_CHECK(
-    p >= 0. && p <= 1.,
-    "dropout probability has to be between 0 and 1, but got ",
-    p);
-  if (inplace) {
-    return torch::feature_dropout_(input, p, training);
-  } else {
-    return torch::feature_dropout(input, p, training);
-  }
+  return _dropoutNd_helper<4, 5>(input, p, training, inplace, "dropout3d");
 }
 
 } // namespace detail

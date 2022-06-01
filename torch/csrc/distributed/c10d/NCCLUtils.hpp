@@ -25,7 +25,8 @@ const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::
     case ncclUnhandledCudaError:
       return "ncclUnhandledCudaError: Call to CUDA function failed.";
     case ncclSystemError:
-      return "ncclSystemError: System call (socket, malloc, munmap, etc) failed.";
+      return "ncclSystemError: System call (e.g. socket, malloc) or external library call failed or device error. "
+        "It can be also caused by unexpected exit of a remote peer, you can check NCCL warnings for failure reason and see if there is connection closure by a peer.";
     case ncclInternalError:
       return "ncclInternalError: Internal check failed. This is either a bug in NCCL or due to memory corruption";
     case ncclInvalidArgument:

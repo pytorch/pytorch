@@ -8,3 +8,13 @@
 + (MPSCNNNeuronTanH*)tanh;
 
 @end
+
+API_AVAILABLE(ios(11.3), macos(10.13), macCatalyst(13.0))
+@interface MPSCNNNeuronOpDescriptor : NSObject
+
++ (MPSNNNeuronDescriptor*)hardSigmoidDescriptor;
++ (MPSNNNeuronDescriptor*)reluDescriptor;
++ (MPSNNNeuronDescriptor*)sigmoidDescriptor;
++ (MPSNNNeuronDescriptor*)tanhDescriptor;
+
+@end

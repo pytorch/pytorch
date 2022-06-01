@@ -16,6 +16,13 @@ with the following additional functionalities:
 
 3. Number of nodes is allowed to change between minimum and maximum sizes (elasticity).
 
+.. note:: ``torchrun`` is a python
+          `console script <https://packaging.python.org/en/latest/specifications/entry-points/#use-for-scripts>`_
+          to the main module
+          `torch.distributed.run <https://github.com/pytorch/pytorch/blob/master/torch/distributed/run.py>`_
+          declared in the ``entry_points`` configuration in
+          `setup.py <https://github.com/pytorch/pytorch/blob/master/setup.py>`_.
+          It is equivalent to invoking ``python -m torch.distributed.run``.
 
 
 Transitioning from torch.distributed.launch to torchrun
@@ -67,11 +74,11 @@ please refer to:
 * the rest of this page for more information on the features of ``torchrun``.
 
 
-
 Usage
-~~~~~~
+--------
 
-1. Single-node multi-worker
+Single-node multi-worker
+++++++++++++++++++++++++++++++
 
 ::
 
@@ -81,7 +88,29 @@ Usage
         --nproc_per_node=$NUM_TRAINERS
         YOUR_TRAINING_SCRIPT.py (--arg1 ... train script args...)
 
-2. Fault tolerant (fixed sized number of workers, no elasticity, tolerates 3 failures):
+Stacked single-node multi-worker
++++++++++++++++++++++++++++++++++++
+
+To run multiple instances (separate jobs) of single-node, multi-worker on the
+same host, we need to make sure that each instance (job) is
+setup on different ports to avoid port conflicts (or worse, two jobs being merged
+as a single job). To do this you have to run with ``--rdzv_backend=c10d``
+and specify a different port by setting ``--rdzv_endpoint=localhost:$PORT_k``.
+For ``--nodes=1``, its often convenient to let ``torchrun`` pick a free random
+port automatically instead of manually assgining different ports for each run.
+
+::
+
+    >>> torchrun
+        --rdzv_backend=c10d
+        --rdzv_endpoint=localhost:0
+        --nnodes=1
+        --nproc_per_node=$NUM_TRAINERS
+        YOUR_TRAINING_SCRIPT.py (--arg1 ... train script args...)
+
+
+Fault tolerant (fixed sized number of workers, no elasticity, tolerates 3 failures)
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 ::
 
@@ -101,7 +130,8 @@ node in your training cluster, but ideally you should pick a node that has a hig
 .. note::
    If no port number is specified ``HOST_NODE_ADDR`` defaults to 29400.
 
-3. Elastic (``min=1``, ``max=4``, tolerates up to 3 membership changes or failures):
+Elastic (``min=1``, ``max=4``, tolerates up to 3 membership changes or failures)
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 ::
 
@@ -121,7 +151,8 @@ node in your training cluster, but ideally you should pick a node that has a hig
 .. note::
    If no port number is specified ``HOST_NODE_ADDR`` defaults to 29400.
 
-**Note on rendezvous backend**:
+Note on rendezvous backend
+------------------------------
 
 For multi-node training you need to specify:
 
@@ -144,7 +175,8 @@ enabled (e.g. ``--enable-v2``).
    equivalent, but uses a revised implementation. ``etcd`` is in maintenance mode and will be
    removed in a future version.
 
-**Definitions:**
+Definitions
+--------------
 
 1. ``Node`` - A physical instance or a container; maps to the unit that the job manager works with.
 
@@ -173,7 +205,8 @@ enabled (e.g. ``--enable-v2``).
 A ``Node`` runs ``LOCAL_WORLD_SIZE`` workers which comprise a ``LocalWorkerGroup``. The union of
 all ``LocalWorkerGroups`` in the nodes in the job comprise the ``WorkerGroup``.
 
-**Environment Variables:**
+Environment Variables
+----------------------
 
 The following environment variables are made available to you in your script:
 
@@ -209,7 +242,8 @@ The following environment variables are made available to you in your script:
 13. ``PYTHON_EXEC`` - System executable override. If provided, the python user script will
     use the value of ``PYTHON_EXEC`` as executable. The `sys.executable` is used by default.
 
-**Deployment:**
+Deployment
+------------
 
 1. (Not needed for the C10d backend) Start the rendezvous backend server and get the endpoint (to be
    passed as ``--rdzv_endpoint`` to the launcher script)
@@ -223,7 +257,8 @@ The following environment variables are made available to you in your script:
 When using a job/cluster manager the entry point command to the multi-node job should be this
 launcher.
 
-**Failure Modes:**
+Failure Modes
+---------------
 
 1. Worker failure: For a training job with ``n`` workers, if ``k<=n`` workers fail all workers
    are stopped and restarted up to ``max_restarts``.
@@ -234,7 +269,8 @@ launcher.
 
 3. Node failure: Same as agent failure.
 
-**Membership Changes:**
+Membership Changes
+--------------------
 
 1. Node departure (scale-down): The agent is notified of the departure, all existing workers are
    stopped, a new ``WorkerGroup`` is formed, and all workers are started with a new ``RANK`` and
@@ -244,7 +280,8 @@ launcher.
    a new ``WorkerGroup`` is formed, and all workers are started with a new ``RANK`` and
    ``WORLD_SIZE``.
 
-**Important Notices:**
+Important Notices
+--------------------
 
 1. This utility and multi-process distributed (single-node or
    multi-node) GPU training currently only achieves the best performance using

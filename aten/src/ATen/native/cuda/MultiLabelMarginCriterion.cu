@@ -1,11 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/CUDAFunctions.h>
-#include <ATen/NativeFunctions.h>
 #include <c10/macros/Macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/block_reduce.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/CUDAFunctions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros_like.h>
+#include <ATen/ops/sum_cuda_dispatch.h>
+#include <ATen/ops/multilabel_margin_loss.h>
+#endif
 
 
 namespace at {
@@ -25,7 +35,6 @@ void check_shape(const Tensor& input, const Tensor& target) {
 
   if (ndims <= 1) {
     int dim = input.dim() == 0 ? 1 : input.size(0);
-    int target_size = target.dim() == 0 ? 1 : target.size(0);
     TORCH_CHECK(
         valid_inputs && target.dim() <= 1 && target.numel() == dim,
         "inconsistent target size: ",
@@ -210,7 +219,6 @@ void multilabel_margin_loss_forward_out_cuda_template(
 
   if (input.dim() <= 1) {
     int dim = input.dim() == 0 ? 1 : input.size(0);
-    int target_size = target.dim() == 0 ? 1 : target.size(0);
     output.resize_({});
 
     dim3 blocks(1);

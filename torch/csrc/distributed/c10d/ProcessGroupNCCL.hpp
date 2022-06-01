@@ -12,7 +12,9 @@
 #include <c10d/NCCLUtils.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
+#include <c10d/UCCForNCCL.hpp>
 
+#include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/Stream.h>
@@ -368,11 +370,14 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
 
+  // Tests if the UCC fallback path is available
+  bool isUCCAvailable() const;
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
       ncclUniqueId* ncclID,
-      OpType opType,
+      bool isSingleP2POp,
       const std::string& devicesKey,
       int p2pRank);
 
@@ -439,6 +444,10 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
       PreProcess pre,
       PostProcess post,
       const char* profilingTitle);
+
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce_impl(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions());
 
   // Checks for NCCL errors on each of the communicators and returns an
   // appropriate exception_ptr (nullptr if no errors).
@@ -619,6 +628,12 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
   // Counting for the sequential number of NCCL collective call.
   uint64_t seq_{0};
+
+#ifdef USE_NCCL_WITH_UCC
+  // ProcessGroupUCC shared library handle and ProcessGroup pointer
+  static std::shared_ptr<at::DynamicLibrary> uccLib_;
+  c10::intrusive_ptr<ProcessGroup> uccPG_;
+#endif
 };
 
 } // namespace c10d

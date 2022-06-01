@@ -75,16 +75,18 @@ const Tensor apply_update(const Alias::Update& update, const Tensor& base) {
   return t;
 }
 
-void Alias::apply_updates() {
+bool Alias::apply_updates() {
   // N.B:none of the tensors used in this function should be FunctionalTensorWrappers at this point.
   // The only reason we currently need the TLS exclude guard here is because of functorch's DynamicLayer stack.
   // It adds the Functionalize key into TLS before redispatching to the functionalization kernels,
   // which means that we need to explicitly exclude it here before doing any other work underneath the pass.
   at::AutoDispatchSkipFunctionalize guard;
+  bool any_updates = updates_.size() > 0;
   for (auto& update_data: updates_) {
     base_ = apply_update(update_data, base_);
   }
   updates_.clear();
+  return any_updates;
 }
 
 FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& value)
@@ -103,8 +105,8 @@ void FunctionalStorageImpl::add_update(const Tensor& updated_val, const std::vec
   alias_.add_update(updated_val, view_metas);
 }
 
-void FunctionalStorageImpl::apply_updates() {
-  alias_.apply_updates();
+bool FunctionalStorageImpl::apply_updates() {
+  return alias_.apply_updates();
 }
 
 const Tensor& FunctionalStorageImpl::base() {

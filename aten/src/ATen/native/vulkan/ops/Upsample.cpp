@@ -1,5 +1,6 @@
-#include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/UpSample.h>
+#include <ATen/native/vulkan/api/OpProfiler.h>
+#include <ATen/native/vulkan/ops/Common.h>
 #include <torch/library.h>
 
 namespace at {
@@ -39,6 +40,8 @@ Tensor upsample_nearest2d(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), "aten::upsample_nearest2d");
+
     if C10_LIKELY(v_input.has_image()) {
       const struct Block final {
         uvec3 extents;

@@ -78,7 +78,7 @@ static void assertAllEqual(const std::vector<T>& vec, const T& val) {
 template <typename T>
 static void assertAllEqual(const std::vector<T>& v1, const std::vector<T>& v2) {
   ASSERT_EQ(v1.size(), v2.size());
-  for (int i = 0; i < v1.size(); i++) {
+  for (size_t i = 0; i < v1.size(); ++i) {
     ASSERT_EQ(v1[i], v2[i]);
   }
 }

@@ -158,7 +158,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
   //       static void reorderAxis(ForPtr a, ForPtr b);
   //       static std::vector<ForPtr> reorder(const std::vector<ForPtr>& loops, const std::vector<size_t>& permutation);
   //       ForPtr tile(ForPtr x, ForPtr y, int x_factor, int y_factor);
-  //       static void unroll(ForPtr f);
+  //       static void fullUnroll(ForPtr f);
   //       static bool normalize(ForPtr f);
   //       static bool flatten(const std::vector<ForPtr>& f, ForPtr* flattened);
   //       static void compressBuffer(BufPtr buf, StmtPtr stmt);
@@ -191,7 +191,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
     REORDER_AXIS,
     REORDER,
     TILE,
-    UNROLL,
+    FULL_UNROLL,
     NORMALIZE,
     FLATTEN,
     COMPRESS_BUFFER,
@@ -512,7 +512,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
           break;
         }
 
-        case UNROLL: {
+        case FULL_UNROLL: {
           auto loops = NodeFinder<For>::find(l.root_stmt());
           if (loops.size() == 0) {
             break;
@@ -520,9 +520,9 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
           int loop_n = std::rand() % (int)loops.size();
           auto loop = loops[loop_n];
 
-          message = "unroll(loops[" + std::to_string(loop_n) + "]);\n";
+          message = "fullUnroll(loops[" + std::to_string(loop_n) + "]);\n";
           randomization_helper::printHistory(n_transform, message);
-          l.unroll(loop);
+          LoopNest::fullUnroll(loop);
           break;
         }
 

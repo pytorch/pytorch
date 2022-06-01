@@ -619,8 +619,6 @@ if (args.params.dataType == CUDNN_DATA_FLOAT) {                                 
 //
 // ---------------------------------------------------------------------
 
-#if !HAS_CUDNN_V8()
-
 void raw_cudnn_convolution_forward_out_32bit(
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
@@ -666,14 +664,17 @@ void raw_cudnn_convolution_forward_out_32bit(
   );
 }
 
+
+#if !HAS_CUDNN_V8()
 void raw_cudnn_convolution_forward_out(
+#else
+void raw_cudnn_convolution_forward_out_v7(
+#endif
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
   split_batch_dim_to_32bit_out(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, 1024 * 1024 * 256, raw_cudnn_convolution_forward_out_32bit);
 }
-
-#endif // !HAS_CUDNN_V8()
 
 // ---------------------------------------------------------------------
 //
@@ -726,7 +727,11 @@ void raw_cudnn_convolution_backward_input_out_32bit(
   );
 }
 
+#if !HAS_CUDNN_V8()
 void raw_cudnn_convolution_backward_input_out(
+#else
+void raw_cudnn_convolution_backward_input_out_v7(
+#endif
     const at::Tensor& grad_input,
     const at::Tensor& grad_output,
     const at::Tensor& weight,
@@ -785,7 +790,11 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
   );
 }
 
+#if !HAS_CUDNN_V8()
 void raw_cudnn_convolution_backward_weight_out(
+#else
+void raw_cudnn_convolution_backward_weight_out_v7(
+#endif
     const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
@@ -808,6 +817,9 @@ void raw_cudnn_convolution_backward_weight_out(
   int64_t split_size = std::max<int64_t>(1024 * 1024 * 512 / max_inner_size, 1L);
   int64_t num_splits = (n + split_size - 1) / split_size;
   if (split_size * max_inner_size < int_max) {
+    const auto kAccType = (grad_weight.scalar_type() == kHalf || grad_weight.scalar_type() == kBFloat16)
+                             ? kFloat : grad_weight.scalar_type();
+    Tensor grad_weight_accumulator = at::zeros(grad_weight.sizes(), grad_weight.options().dtype(kAccType));
     for (const auto i : c10::irange(num_splits)) {
       int64_t start = split_size * i;
       int64_t split_size_ = std::min<int64_t>(split_size, n - start);
@@ -815,8 +827,9 @@ void raw_cudnn_convolution_backward_weight_out(
       Tensor grad_output_ = grad_output.narrow(0, start, split_size_);
       Tensor grad_weight_ = at::empty_like(grad_weight);
       raw_cudnn_convolution_backward_weight_out_32bit(grad_weight_, grad_output_, input_, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
-      grad_weight.add_(grad_weight_);
+      grad_weight_accumulator.add_(grad_weight_);
     }
+    grad_weight.copy_(grad_weight_accumulator);
     return;
   }
   // If control flow reaches here, this means even splitting N is not enough, then things starts to become complicated:
@@ -833,7 +846,12 @@ void raw_cudnn_convolution_backward_weight_out(
   TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
 }
 
+#if !HAS_CUDNN_V8()
 void raw_cudnn_convolution_add_relu_out(
+#else
+void raw_cudnn_convolution_add_relu_out_v7(
+#endif
+
     const Tensor& output,
     const Tensor& input,
     const Tensor& weight,

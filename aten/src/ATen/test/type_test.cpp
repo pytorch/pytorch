@@ -184,25 +184,27 @@ TEST(TypeEquality, TupleEquality) {
 
 TEST(TypeEquality, NamedTupleEquality) {
   // Named tuples should compare equal if they share a name and field names
+  std::vector<std::string> fields = {"a", "b", "c", "d"};
+  std::vector<std::string> otherFields = {"wow", "so", "very", "different"};
   auto type = TupleType::createNamed(
       "MyNamedTuple",
-      {"a", "b", "c", "d"},
+      fields,
       {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   auto type2 = TupleType::createNamed(
       "MyNamedTuple",
-      {"a", "b", "c", "d"},
+      fields,
       {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   EXPECT_EQ(*type, *type2);
 
   auto differentName = TupleType::createNamed(
       "WowSoDifferent",
-      {"a", "b", "c", "d"},
+      fields,
       {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   EXPECT_NE(*type, *differentName);
 
   auto differentField = TupleType::createNamed(
       "MyNamedTuple",
-      {"wow", "so", "very", "different"},
+      otherFields,
       {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   EXPECT_NE(*type, *differentField);
 }

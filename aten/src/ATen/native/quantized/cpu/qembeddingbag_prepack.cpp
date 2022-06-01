@@ -284,7 +284,7 @@ Tensor& qembeddingbag_byte_prepack_out(Tensor& output, const Tensor& weight) {
 Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   const auto weight_contig =
       weight.expect_contiguous(weight.suggest_memory_format());
-  auto output = at::detail::empty_cpu(
+  Tensor output = at::detail::empty_cpu(
       {0},
       at::kByte,
       weight_contig->layout(),

@@ -20,12 +20,14 @@ __all__ = [
     'CatTransform',
     'ComposeTransform',
     'CorrCholeskyTransform',
+    'CumulativeDistributionTransform',
     'ExpTransform',
     'IndependentTransform',
     'LowerCholeskyTransform',
     'PowerTransform',
     'ReshapeTransform',
     'SigmoidTransform',
+    'SoftplusTransform',
     'TanhTransform',
     'SoftmaxTransform',
     'StackTransform',
@@ -600,6 +602,29 @@ class SigmoidTransform(Transform):
         return -F.softplus(-x) - F.softplus(x)
 
 
+class SoftplusTransform(Transform):
+    r"""
+    Transform via the mapping :math:`\text{Softplus}(x) = \log(1 + \exp(x))`.
+    The implementation reverts to the linear function when :math:`x > 20`.
+    """
+    domain = constraints.real
+    codomain = constraints.positive
+    bijective = True
+    sign = +1
+
+    def __eq__(self, other):
+        return isinstance(other, SoftplusTransform)
+
+    def _call(self, x):
+        return softplus(x)
+
+    def _inverse(self, y):
+        return (-y).expm1().neg().log() + y
+
+    def log_abs_det_jacobian(self, x, y):
+        return -softplus(-x)
+
+
 class TanhTransform(Transform):
     r"""
     Transform via the mapping :math:`y = \tanh(x)`.
@@ -943,7 +968,6 @@ class LowerCholeskyTransform(Transform):
 
 
 class CatTransform(Transform):
-    tseq: List[numbers.Number]
     """
     Transform functor that applies a sequence of transforms `tseq`
     component-wise to each submatrix at `dim`, of length `lengths[dim]`,
@@ -956,6 +980,8 @@ class CatTransform(Transform):
        t = CatTransform([t0, t0], dim=0, lengths=[20, 20])
        y = t(x)
     """
+    transforms: List[Transform]
+
     def __init__(self, tseq, dim=0, lengths=None, cache_size=0):
         assert all(isinstance(t, Transform) for t in tseq)
         if cache_size:
@@ -979,7 +1005,7 @@ class CatTransform(Transform):
     def with_cache(self, cache_size=1):
         if self._cache_size == cache_size:
             return self
-        return CatTransform(self.tseq, self.dim, self.lengths, cache_size)
+        return CatTransform(self.transforms, self.dim, self.lengths, cache_size)
 
     def _call(self, x):
         assert -x.dim() <= self.dim < x.dim()
@@ -1054,6 +1080,8 @@ class StackTransform(Transform):
        t = StackTransform([ExpTransform(), identity_transform], dim=1)
        y = t(x)
     """
+    transforms: List[Transform]
+
     def __init__(self, tseq, dim=0, cache_size=0):
         assert all(isinstance(t, Transform) for t in tseq)
         if cache_size:
@@ -1109,3 +1137,48 @@ class StackTransform(Transform):
     @constraints.dependent_property
     def codomain(self):
         return constraints.stack([t.codomain for t in self.transforms], self.dim)
+
+
+class CumulativeDistributionTransform(Transform):
+    """
+    Transform via the cumulative distribution function of a probability distribution.
+
+    Args:
+        distribution (Distribution): Distribution whose cumulative distribution function to use for
+            the transformation.
+
+    Example::
+
+        # Construct a Gaussian copula from a multivariate normal.
+        base_dist = MultivariateNormal(
+            loc=torch.zeros(2),
+            scale_tril=LKJCholesky(2).sample(),
+        )
+        transform = CumulativeDistributionTransform(Normal(0, 1))
+        copula = TransformedDistribution(base_dist, [transform])
+    """
+    bijective = True
+    codomain = constraints.unit_interval
+    sign = +1
+
+    def __init__(self, distribution, cache_size=0):
+        super(CumulativeDistributionTransform, self).__init__(cache_size=cache_size)
+        self.distribution = distribution
+
+    @property
+    def domain(self):
+        return self.distribution.support
+
+    def _call(self, x):
+        return self.distribution.cdf(x)
+
+    def _inverse(self, y):
+        return self.distribution.icdf(y)
+
+    def log_abs_det_jacobian(self, x, y):
+        return self.distribution.log_prob(x)
+
+    def with_cache(self, cache_size=1):
+        if self._cache_size == cache_size:
+            return self
+        return CumulativeDistributionTransform(self.distribution, cache_size=cache_size)

@@ -82,7 +82,7 @@ void _fft_fill_with_conjugate_symmetry_slice(
     // Explicitly loop over a Hermitian mirrored dimension
     if (iter_index[0] > 0) {
       auto end = std::min(signal_half_sizes[0], iter_index[0] + numel_remaining);
-      for (int64_t i = iter_index[0]; i < end; ++i) {
+      for (const auto i : c10::irange(iter_index[0], end)) {
         out_ptr[(signal_half_sizes[0] - i) * out_strides[0]] = std::conj(in_ptr[i * in_strides[0]]);
       }
       numel_remaining -= (end - iter_index[0]);
@@ -250,7 +250,7 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   auto in_sizes = self.sizes();
   DimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = last_dim_size;
-  auto out = at::empty(out_sizes, self.options().dtype(c10::toValueType(self.scalar_type())));
+  auto out = at::empty(out_sizes, self.options().dtype(c10::toRealValueType(self.scalar_type())));
   pocketfft::shape_t axes(dim.begin(), dim.end());
   if (self.scalar_type() == kComplexFloat) {
     pocketfft::c2r(shape_from_tensor(out), stride_from_tensor(self), stride_from_tensor(out), axes, false,
@@ -347,7 +347,7 @@ static DftiDescriptor _plan_mkl_fft(
 
   // precision
   const DFTI_CONFIG_VALUE prec = [&]{
-    switch (c10::toValueType(dtype)) {
+    switch (c10::toRealValueType(dtype)) {
       case ScalarType::Float: return DFTI_SINGLE;
       case ScalarType::Double: return DFTI_DOUBLE;
       default: TORCH_CHECK(false, "MKL FFT doesn't support tensors of type: ", dtype);
@@ -466,7 +466,7 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
     batched_out_sizes[i + 1] = out_sizes[dim[i]];
   }
 
-  const auto value_type = c10::toValueType(input.scalar_type());
+  const auto value_type = c10::toRealValueType(input.scalar_type());
   out.resize_(batched_out_sizes, MemoryFormat::Contiguous);
 
   auto descriptor = _plan_mkl_fft(
@@ -523,7 +523,7 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   auto in_sizes = input.sizes();
   DimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = last_dim_size;
-  auto out = at::empty(out_sizes, self.options().dtype(c10::toValueType(self.scalar_type())));
+  auto out = at::empty(out_sizes, self.options().dtype(c10::toRealValueType(self.scalar_type())));
   return _exec_fft(out, input, out_sizes, dim, normalization, /*forward=*/false);
 }
 
