@@ -9,117 +9,25 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
-namespace {
-
-VkDevice create_device(
-    const VkPhysicalDevice physical_device,
-    const uint32_t compute_queue_family_index) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      physical_device,
-      "Invalid Vulkan physical device!");
-
-  const float queue_priorities = 1.0f;
-  const VkDeviceQueueCreateInfo device_queue_create_info{
-    VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-    nullptr,
-    0u,
-    compute_queue_family_index,
-    1u,
-    &queue_priorities,
-  };
-
-  uint32_t device_extension_properties_count = 0;
-  VK_CHECK(vkEnumerateDeviceExtensionProperties(
-      physical_device,
-      nullptr,
-      &device_extension_properties_count,
-      nullptr));
-
-  std::vector<VkExtensionProperties> device_extension_properties(
-      device_extension_properties_count);
-
-  VK_CHECK(vkEnumerateDeviceExtensionProperties(
-      physical_device,
-      nullptr,
-      &device_extension_properties_count,
-      device_extension_properties.data()));
-
-  constexpr const char* const requested_device_extensions[]{
-  #ifdef VK_KHR_portability_subset
-    // https://vulkan.lunarg.com/doc/view/1.2.162.0/mac/1.2-extensions/vkspec.html#VUID-VkDeviceCreateInfo-pProperties-04451
-    VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
-  #endif
-  };
-
-  std::vector<const char*> enabled_device_extensions;
-
-  for (const auto& requested_device_extension : requested_device_extensions) {
-    for (const auto& extension : device_extension_properties) {
-      if (strcmp(requested_device_extension, extension.extensionName) == 0) {
-        enabled_device_extensions.push_back(requested_device_extension);
-        break;
-      }
-    }
-  }
-
-  const VkDeviceCreateInfo device_create_info{
-    VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-    nullptr,
-    0u,
-    1u,
-    &device_queue_create_info,
-    0u,
-    nullptr,
-    static_cast<uint32_t>(enabled_device_extensions.size()),
-    enabled_device_extensions.data(),
-    nullptr,
-  };
-
-  VkDevice device{};
-  VK_CHECK(vkCreateDevice(physical_device, &device_create_info, nullptr, &device));
-  TORCH_CHECK(device, "Invalid Vulkan device!");
-
-#ifdef USE_VULKAN_WRAPPER
-#ifdef USE_VULKAN_VOLK
-  volkLoadDevice(device);
-#endif
-#endif
-
-  return device;
-}
-
-VkQueue acquire_queue(
-    const VkDevice device,
-    const uint32_t compute_queue_family_index) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device,
-      "Invalid Vulkan device!");
-
-  VkQueue queue{};
-  vkGetDeviceQueue(device, compute_queue_family_index, 0, &queue);
-  TORCH_CHECK(queue, "Invalid Vulkan queue!");
-
-  return queue;
-}
-
-} // namespace
 
 Context::Context(const VkInstance instance, size_t adapter_i)
     : instance_(instance),
-      adapter_i_(adapter_i),
-      device_(runtime()->get_adapter(adapter_i).device_handle()),
-      queue_(runtime()->get_adapter(adapter_i).request_queue()),
-      shader_layout_cache_(device_),
-      shader_cache_(device_),
-      pipeline_layout_cache_(device_),
-      pipeline_cache_(device_),
-      threadcontext_(gpu()) {
+      adapter_p_(runtime()->get_adapter_p(adapter_i)),
+      device_(adapter_p_->device_handle()),
+      queue_(adapter_p_->request_queue()),
+      command_(gpu()),
+      descriptor_(gpu()),
+      resource_(gpu()),
+      querypool_(
+        device_,
+        adapter_p_->timestamp_compute_and_graphics(),
+        adapter_p_->timestamp_period()) {
 }
 
 Context::~Context() {
+  flush();
   // Let the device know the context is done with the queue
-  runtime()->get_adapter(adapter_i_).return_queue(queue_);
-  // Do not call flush() since all per-thread objects will be destroyed as each thread exits
+  adapter_p_->return_queue(queue_);
 }
 
 void Context::flush() {

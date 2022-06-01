@@ -187,8 +187,16 @@ bool operator==(
 //
 
 PipelineLayoutCache::PipelineLayoutCache(const VkDevice device)
-  : device_(device),
+  : cache_mutex_{},
+    device_(device),
     cache_{} {
+}
+
+PipelineLayoutCache::PipelineLayoutCache(PipelineLayoutCache&& other) noexcept
+  : cache_mutex_{},
+    device_(other.device_) {
+  std::lock_guard<std::mutex> lock(other.cache_mutex_);
+  cache_ = std::move(other.cache_);
 }
 
 PipelineLayoutCache::~PipelineLayoutCache() {
@@ -197,6 +205,8 @@ PipelineLayoutCache::~PipelineLayoutCache() {
 
 VkPipelineLayout PipelineLayoutCache::retrieve(
     const PipelineLayoutCache::Key& key) {
+  std::lock_guard<std::mutex> lock(cache_mutex_);
+
   auto it = cache_.find(key);
   if C10_UNLIKELY(cache_.cend() == it) {
     it = cache_.insert({key, PipelineLayoutCache::Value(device_, key)}).first;
@@ -214,7 +224,8 @@ void PipelineLayoutCache::purge() {
 //
 
 ComputePipelineCache::ComputePipelineCache(const VkDevice device)
-  : device_(device),
+  : cache_mutex_{},
+    device_(device),
     cache_{} {
   const VkPipelineCacheCreateInfo pipeline_cache_create_info{
     VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,  // sType
@@ -231,12 +242,32 @@ ComputePipelineCache::ComputePipelineCache(const VkDevice device)
       &pipeline_cache_));
 }
 
+ComputePipelineCache::ComputePipelineCache(
+    ComputePipelineCache&& other) noexcept
+  : cache_mutex_{},
+    device_(other.device_),
+    pipeline_cache_(other.pipeline_cache_) {
+  std::lock_guard<std::mutex> lock(other.cache_mutex_);
+  cache_ = std::move(other.cache_);
+
+  other.pipeline_cache_ = VK_NULL_HANDLE;
+}
+
+
 ComputePipelineCache::~ComputePipelineCache() {
   purge();
+
+  if C10_LIKELY(VK_NULL_HANDLE == pipeline_cache_) {
+    return;
+  }
+  vkDestroyPipelineCache(device_, pipeline_cache_, nullptr);
+  pipeline_cache_ = VK_NULL_HANDLE;
 }
 
 VkPipeline ComputePipelineCache::retrieve(
     const ComputePipelineCache::Key& key) {
+  std::lock_guard<std::mutex> lock(cache_mutex_);
+
   auto it = cache_.find(key);
   if C10_UNLIKELY(cache_.cend() == it) {
     it = cache_.insert(

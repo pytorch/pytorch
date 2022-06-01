@@ -1472,6 +1472,8 @@ void initJITBindings(PyObject* module) {
           [](Argument& self) -> py::bool_ {
             return self.default_value().has_value();
           })
+      .def_property_readonly(
+          "is_out", [](Argument& self) { return self.is_out(); })
       .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
         return self.kwarg_only();
       });

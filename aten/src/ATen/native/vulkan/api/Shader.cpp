@@ -189,8 +189,16 @@ size_t ShaderModule::Hasher::operator()(
 //
 
 ShaderLayoutCache::ShaderLayoutCache(const VkDevice device)
-  : device_(device),
+  : cache_mutex_{},
+    device_(device),
     cache_{} {
+}
+
+ShaderLayoutCache::ShaderLayoutCache(ShaderLayoutCache&& other) noexcept
+  : cache_mutex_{},
+    device_(other.device_) {
+  std::lock_guard<std::mutex> lock(other.cache_mutex_);
+  cache_ = std::move(other.cache_);
 }
 
 ShaderLayoutCache::~ShaderLayoutCache() {
@@ -199,6 +207,8 @@ ShaderLayoutCache::~ShaderLayoutCache() {
 
 VkDescriptorSetLayout ShaderLayoutCache::retrieve(
     const ShaderLayoutCache::Key& key) {
+  std::lock_guard<std::mutex> lock(cache_mutex_);
+
   auto it = cache_.find(key);
   if C10_UNLIKELY(cache_.cend() == it) {
     it = cache_.insert({key, ShaderLayoutCache::Value(device_, key)}).first;
@@ -216,8 +226,16 @@ void ShaderLayoutCache::purge() {
 //
 
 ShaderCache::ShaderCache(const VkDevice device)
-  : device_(device),
+  : cache_mutex_{},
+    device_(device),
     cache_{} {
+}
+
+ShaderCache::ShaderCache(ShaderCache&& other) noexcept 
+  : cache_mutex_{},
+    device_(other.device_) {
+  std::lock_guard<std::mutex> lock(other.cache_mutex_);
+  cache_ = std::move(other.cache_);
 }
 
 ShaderCache::~ShaderCache() {
@@ -225,6 +243,8 @@ ShaderCache::~ShaderCache() {
 }
 
 VkShaderModule ShaderCache::retrieve(const ShaderCache::Key& key) {
+  std::lock_guard<std::mutex> lock(cache_mutex_);
+
   auto it = cache_.find(key);
   if C10_UNLIKELY(cache_.cend() == it) {
     it = cache_.insert({key, ShaderCache::Value(device_, key)}).first;

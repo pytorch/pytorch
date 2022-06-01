@@ -113,7 +113,7 @@ class PipelineLayoutCache final {
   PipelineLayoutCache(const PipelineLayoutCache&) = delete;
   PipelineLayoutCache& operator=(const PipelineLayoutCache&) = delete;
 
-  PipelineLayoutCache(PipelineLayoutCache&&) = default;
+  PipelineLayoutCache(PipelineLayoutCache&&) noexcept;
   PipelineLayoutCache& operator=(PipelineLayoutCache&&) = delete;
 
   ~PipelineLayoutCache();
@@ -123,6 +123,10 @@ class PipelineLayoutCache final {
   typedef PipelineLayout::Hasher Hasher;
 
  private:
+  // Multiple threads could potentially be adding entries into the cache, so use
+  // a mutex to manage access
+  std::mutex cache_mutex_;
+
   VkDevice device_;
   ska::flat_hash_map<Key, Value, Hasher> cache_;
 
@@ -138,7 +142,7 @@ class ComputePipelineCache final {
   ComputePipelineCache(const ComputePipelineCache&) = delete;
   ComputePipelineCache& operator=(const ComputePipelineCache&) = delete;
 
-  ComputePipelineCache(ComputePipelineCache&&) = default;
+  ComputePipelineCache(ComputePipelineCache&&) noexcept;
   ComputePipelineCache& operator=(ComputePipelineCache&&) = delete;
 
   ~ComputePipelineCache();
@@ -148,6 +152,10 @@ class ComputePipelineCache final {
   typedef ComputePipeline::Hasher Hasher;
 
  private:
+  // Multiple threads could potentially be adding entries into the cache, so use
+  // a mutex to manage access
+  std::mutex cache_mutex_;
+
   VkDevice device_;
   VkPipelineCache pipeline_cache_;
   ska::flat_hash_map<Key, Value, Hasher> cache_;

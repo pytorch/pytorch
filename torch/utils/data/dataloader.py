@@ -525,6 +525,8 @@ class DataLoader(Generic[T_co]):
 class _BaseDataLoaderIter(object):
     def __init__(self, loader: DataLoader) -> None:
         self._dataset = loader.dataset
+        if isinstance(self._dataset, IterDataPipe):
+            self._dataset = torch.utils.data.graph_settings.apply_shuffle_seed(self._dataset, loader.generator)
         self._dataset_kind = loader._dataset_kind
         self._IterableDataset_len_called = loader._IterableDataset_len_called
         self._auto_collation = loader._auto_collation
@@ -587,8 +589,6 @@ class _BaseDataLoaderIter(object):
                                  "https://pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset for examples.")
                 warnings.warn(warn_msg)
             return data
-
-    next = __next__  # Python 2 compatibility
 
     def __len__(self) -> int:
         return len(self._index_sampler)
