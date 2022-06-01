@@ -2414,6 +2414,8 @@
 - name: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold) -> Tensor
   grad_output: softplus_backward(grad, self, beta, threshold)
   self: softplus_double_backward(grad * grad_output, self, beta, threshold)
+  result: "softplus_backward(grad_output_t, self_p, beta, threshold)
+         + softplus_double_backward(self_t * grad_output_p, self_p, beta, threshold)"
 
 - name: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor
   grad_output: _softmax_backward_data(grad.to(output.dtype()), output, dim, input_dtype)
