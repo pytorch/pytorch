@@ -937,10 +937,9 @@ class TestQuantizedTensor(TestCase):
         types = [torch.qint8, torch.quint8, torch.qint32]
         fills = [-1, 1, 2**32]  # positive, negative, overflow
 
-        # `fill_` uses `copy_(float)`, which doesn't support CUDA
-        device = 'cpu'
-        ones = ones.to(device)
-        for qtype, fill_with in itertools.product(types, fills):
+        devices = ['cpu', 'cuda']
+        for qtype, fill_with, device in itertools.product(types, fills, devices):
+            ones = ones.to(device)
             q_filled = torch._empty_affine_quantized(
                 [numel], scale=scale, zero_point=zero_point, device=device,
                 dtype=qtype)
