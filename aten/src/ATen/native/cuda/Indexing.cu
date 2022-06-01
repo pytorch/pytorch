@@ -1257,8 +1257,8 @@ namespace {
 // ForwardIt: only legacy random access iterator is supported.
 template<class ForwardIt, class T, bool is_lower = true>
 static __host__ __device__ __forceinline__
-ForwardIt find_bound(ForwardIt __restrict__ first, ForwardIt __restrict__ last, const T& value) {
-    ForwardIt __restrict__ it;
+ForwardIt find_bound(ForwardIt first, ForwardIt last, const T& value) {
+    ForwardIt it;
     typename std::iterator_traits<ForwardIt>::difference_type count, step;
     // NOTE: std::distance(first, last) compiles but produces wrong results here,
     // so only legacy random access iterators are safe in this code.
