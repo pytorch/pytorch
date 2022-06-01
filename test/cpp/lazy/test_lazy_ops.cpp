@@ -4720,7 +4720,7 @@ TEST_F(LazyOpsTest, TestOneIndexTransfer) {
     torch::Tensor result = torch::index(params, {indices});
     ForEachDevice([&](const torch::Device& device) {
       torch::Tensor lazy_params = CopyToDevice(params, device);
-      torch::Tensor lazy_result = torch::index(lazy_params, {indices.cpu()});
+      torch::Tensor lazy_result = torch::index(lazy_params, {indices});
       AllEqual(result, lazy_result);
     });
   }
