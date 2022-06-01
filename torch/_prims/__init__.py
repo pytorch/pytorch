@@ -684,13 +684,13 @@ floor = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
-imag = _make_elementwise_unary_prim(
-    "imag",
+imag = _make_prim(
+    schema=f"imag(Tensor self) -> Tensor",
+    meta=partial(_elementwise_meta, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT),
+    return_type=RETURN_TYPE.VIEW,
     impl_aten=torch.imag,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+    doc=""
 )
-
 
 def _isfinite_nvfuser(fd: Any, a: TensorLikeType):
     return fd.Ops.isfinite(a)  # type: ignore[attr-defined]
@@ -795,11 +795,12 @@ neg = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
-real = _make_elementwise_unary_prim(
-    "real",
+real = _make_prim(
+    schema=f"real(Tensor self) -> Tensor",
+    meta=partial(_elementwise_meta, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT),
+    return_type=RETURN_TYPE.VIEW,
     impl_aten=torch.real,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+    doc=""
 )
 
 
