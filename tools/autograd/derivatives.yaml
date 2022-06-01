@@ -2334,12 +2334,12 @@
   result: auto_linear
 
 - name: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
-  grad_output: mse_loss_double_backward_grad_output(grad.conj(), grad_output, self, target, reduction)
-  self: mse_loss_double_backward(grad.conj() * grad_output, self, reduction)
-  target: -mse_loss_double_backward(grad.conj() * grad_output, target, reduction)
-  result: "  mse_loss_double_backward(self_t.conj() * grad_output_p, self_p, reduction).conj()
-           - mse_loss_double_backward(target_t.conj() * grad_output_p, target_p, reduction).conj()
-           + mse_loss_double_backward_grad_output(grad_output_t.conj(), grad_output_p, self_p, target_p, reduction).conj()
+  grad_output: mse_loss_backward(grad, self, target, reduction)
+  self: mse_loss_double_backward(grad * grad_output, self, reduction)
+  target: -mse_loss_double_backward(grad * grad_output, target, reduction)
+  result: "  mse_loss_double_backward(self_t * grad_output_p, self_p, reduction)
+           - mse_loss_double_backward(target_t * grad_output_p, target_p, reduction)
+           + mse_loss_backward(grad_output_t, self_p, target_p, reduction)
           "
 
 - name: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
