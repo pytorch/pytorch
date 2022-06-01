@@ -704,7 +704,7 @@ Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
   return bmm_out_sparse_cuda(self, mat2, result);
 }
 
-#if !(defined(USE_ROCM) || (defined(_MSC_VER) && CUSPARSE_VERSION < 11000))
+#if defined(USE_ROCM) || !(defined(_MSC_VER) && CUSPARSE_VERSION < 11000)
 __global__ void search_end_matrix_indices_cuda_kernel(
   int64_t* mat_el_end_indices,
   int64_t num_matrices,
@@ -785,11 +785,9 @@ cudaDataType getTensorCudaDataType(Tensor self) {
 #endif
 
 Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor& result) {
-#if defined(USE_ROCM)
-  TORCH_CHECK(false, "bmm sparse-dense is not supported on HIP");
-#elif defined(_MSC_VER) && (CUSPARSE_VERSION < 11000)
+#if defined(_MSC_VER) && (CUSPARSE_VERSION < 11000)
   TORCH_CHECK(false, "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0");
-#elif defined(CUDART_VERSION) && (CUDART_VERSION >= 10010)  // linux cuda >= 10.1 or windows cuda >= 11.0
+#elif defined(USE_ROCM) || (defined(CUDART_VERSION) && (CUDART_VERSION >= 10010))  // linux cuda >= 10.1 or windows cuda >= 11.0
 
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());

@@ -1197,7 +1197,7 @@ class TestSparse(TestCase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        _get_torch_cuda_version() < (10, 1),
+        _get_torch_cuda_version() < (10, 1) and not TEST_WITH_ROCM,
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm_deterministic(self, device, dtype, coalesced):
