@@ -19507,6 +19507,14 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
         ),
     ),
+    PythonRefInfo(
+        "_refs.nn.functional.relu",
+        torch_opinfo_name="nn.functional.relu",
+        decorators=(
+            # Need FakeTensor support for meta coverage
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
+        ),
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.mish",
         torch_opinfo_name="nn.functional.mish",
