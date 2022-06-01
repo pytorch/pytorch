@@ -2605,10 +2605,11 @@ class FullyShardedDataParallel(nn.Module):
         self._pre_backward_hook_has_run = False
 
         def _pre_backward_hook(*unused: Any) -> None:
-            with torch.autograd.profiler.record_function("FullyShardedDataParallel._pre_backward_hooks"):
-                # Run ``_pre_backward_hook`` only once per backward pass
-                if self._pre_backward_hook_has_run:
-                    return
+            # Run ``_pre_backward_hook`` only once per backward pass
+            if self._pre_backward_hook_has_run:
+                return
+
+            with torch.autograd.profiler.record_function("FullyShardedDataParallel._pre_backward_hook"):
                 # try to queue final backward callback only once for root, so
                 # that final backward callback is attached to the outer most
                 # backward graph task and called after all the backward
@@ -2721,7 +2722,7 @@ class FullyShardedDataParallel(nn.Module):
         alignment is created by :func:`_shard_parameters`, which ensures that
         the local optimizer only sees the relevant parameter shard.
         """
-        with torch.autograd.profiler.record_function("FullyShardedDataParallel._post_backward_hooks"):
+        with torch.autograd.profiler.record_function("FullyShardedDataParallel._post_backward_hook"):
             # First hook callback will see PRE state. If we have multiple params,
             # then subsequent hook callbacks will see POST state.
             self._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.BACKWARD_POST])
