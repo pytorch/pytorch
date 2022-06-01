@@ -3709,7 +3709,7 @@ REGISTER_NO_AVX512_DISPATCH(qupsample_bilinear2d_nhwc_stub);
 REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
 REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
 REGISTER_NO_AVX512_DISPATCH(masked_fill_kernel_quantized_stub);
-REGISTER_DISPATCH(index_put_kernel_quantized_stub);
+REGISTER_NO_AVX512_DISPATCH(index_put_kernel_quantized_stub);
 #else
 REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
                   &dequantize_tensor_per_channel_affine_cpu);
