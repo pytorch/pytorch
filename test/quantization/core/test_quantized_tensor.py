@@ -927,7 +927,7 @@ class TestQuantizedTensor(TestCase):
                 # Check to make sure the scale and zero_point has been copied.
                 self.assertEqual(q, q2)
 
-    def test_qtensor_fill(self):
+    def test_qtensor_fill_per_tensor(self):
         numel = 10
         scale = 0.5
         zero_point = 10
@@ -955,6 +955,38 @@ class TestQuantizedTensor(TestCase):
             # Make sure the scale and zero_point don't change
             self.assertEqual(q_filled.q_scale(), scale)
             self.assertEqual(q_filled.q_zero_point(), zero_point)
+
+    def test_qtensor_fill_per_channel(self):
+        dims = [4, 5]
+        axis = 0
+        # adding a constant to avoid too small of a scale
+        scales = torch.rand(dims[axis], dtype=torch.float64) + 0.1
+        zero_points = torch.randint(low=0, high=10, size=(dims[axis], ))
+
+        ones = torch.ones(dims).to(torch.float)
+
+        types = [torch.qint8, torch.quint8, torch.qint32]
+        fills = [-1, 1, 2**32]  # positive, negative, overflow
+
+        devices = ['cpu', 'cuda']
+        for qtype, fill_with, device in itertools.product(types, fills, devices):
+            scales = scales.to(device)
+            zero_points = zero_points.to(device)
+            ones = ones.to(device)
+            q_filled = torch._empty_per_channel_affine_quantized(
+                dims, scales=scales, zero_points=zero_points, device=device,
+                axis=axis, dtype=qtype)
+            q_filled.fill_(fill_with)
+            int_repr = torch.quantize_per_channel(ones * fill_with, scales=scales,
+                                                 zero_points=zero_points, axis=axis, dtype=qtype)
+            fill_with = int_repr.dequantize()
+            int_repr = int_repr.int_repr()
+
+            self.assertEqual(q_filled.int_repr(), int_repr)
+            self.assertEqual(q_filled.dequantize(), fill_with)
+            # Make sure the scale and zero_point don't change
+            self.assertEqual(q_filled.q_per_channel_scales(), scales)
+            self.assertEqual(q_filled.q_per_channel_zero_points(), zero_points)
 
     @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
     def test_qtensor_index_select_cuda(self):
