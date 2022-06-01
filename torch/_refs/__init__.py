@@ -636,7 +636,7 @@ def _square(a: TensorLikeType) -> TensorLikeType:
 square = _make_elementwise_unary_reference(
     _square,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
-    aten_op=torch.ops.aten.square,
+    aten_op=None,  # CompositeImplicitAutograd,
 )
 
 tan = _make_elementwise_unary_reference(
