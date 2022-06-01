@@ -68,7 +68,6 @@ class _OptimStateKey(NamedTuple):
     is_flat_param: bool
 
 
-
 def _unflatten_optim_state(
     flat_param: FlatParameter,
     flat_param_state: Dict[str, Any],

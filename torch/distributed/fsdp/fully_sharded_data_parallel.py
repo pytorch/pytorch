@@ -1,3 +1,4 @@
+import collections
 import contextlib
 import copy
 import functools
@@ -5,7 +6,6 @@ import itertools
 import math
 import traceback
 import warnings
-from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -3525,7 +3525,7 @@ class FullyShardedDataParallel(nn.Module):
         flat_param_id_to_param: List[torch.nn.Parameter] = \
             _get_param_id_to_param(model, optim_input)
         optim_state_key_to_flat_param_id: Dict[_OptimStateKey, int] = {}  # local
-        r0_flat_param_id_to_optim_state_key: Dict[int, _OptimStateKey] = OrderedDict()  # rank 0
+        r0_flat_param_id_to_optim_state_key: Dict[int, _OptimStateKey] = collections.OrderedDict()  # rank 0
         for flat_param_id, param in enumerate(flat_param_id_to_param):
             # Do not include parameters without state to avoid empty mappings
             # just like in normal `torch.optim.Optimizer.state_dict()`

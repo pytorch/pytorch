@@ -257,11 +257,11 @@ class TestFSDPOptimState(FSDPTest):
     def _init_transformer_model(
         self,
         wrap: bool,
-        device: torch.device = torch.device("cuda"),  # unused
+        device: torch.device = torch.device("cuda"),
         group=None,
         optim_class: Type[torch.optim.Optimizer] = torch.optim.Adam,
-        use_multiple_param_groups: bool = False,  # unused
-        use_diff_optim_inputs: bool = False,  # unused
+        use_multiple_param_groups: bool = False,
+        use_diff_optim_inputs: bool = False,
     ):
         if use_multiple_param_groups or use_diff_optim_inputs:
             # Keep these as arguments for parity with `_init_nested_model()`
