@@ -103,8 +103,8 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
             MPSGraph* mpsGraph = make_mps_graph();
             newCachedGraph = new CachedGraph(mpsGraph);
 
-            int shapeVal[1] = {(uint32_t)steps};
-            MPSGraphTensor *shapeTensor = [mpsGraph constantWithData:[NSData dataWithBytes:shapeVal length:sizeof(uint32_t)]
+            int shapeVal[1] = {(int32_t)steps};
+            MPSGraphTensor *shapeTensor = [mpsGraph constantWithData:[NSData dataWithBytes:shapeVal length:sizeof(int32_t)]
                                                                shape: @[@1]
                                                               dataType:MPSDataTypeInt32];
             MPSGraphTensor* coordsTensor = [mpsGraph coordinateAlongAxis:0
@@ -159,10 +159,7 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
       NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
         outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
       };
-      [cachedGraph->graph() dump];
-
       runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-
     }
 
     if (!result.is_contiguous()) {
