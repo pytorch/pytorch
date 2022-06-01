@@ -89,7 +89,7 @@ def torch_dispatch_impl(cls_or_mode_instance, func, types, args, kwargs, run_fun
     converter = cls_or_mode_instance.fake_tensor_converter if in_fake_mode else FakeTensorConverter()
 
     # This classes virtualizes .device() calls, need to short-circuit
-    # it insteead of calling device again or we would keep on recurring
+    # it instead of calling device again or we would keep on recurring
     if func == torch.ops.prim.device.default:
         assert len(args) == 1 and isinstance(args[0], FakeTensor)
         return args[0].fake_device
