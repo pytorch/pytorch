@@ -1414,22 +1414,18 @@ def std(
     if dim == () or dim == []:
         dim = None
 
-    opmath_dtype, dtype = utils.reduction_dtypes(
-        a, REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
-    )
-
     result = _reduction(
         a,
         partial(prims.var, correction=correction),
         dims=dim,
         keepdims=keepdim,
-        dtype=opmath_dtype,
+        dtype=None,
         out=None,
         has_identity=True,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
     )
     result = sqrt(result)
-    return _maybe_convert_to_dtype(result, dtype)  # type: ignore[return-value,arg-type]
+    return result
 
 
 def mean(
@@ -1473,7 +1469,6 @@ def mean(
     return result
 
 
-@register_decomposition(torch.ops.aten.std_mean.correction)
 def std_mean(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
