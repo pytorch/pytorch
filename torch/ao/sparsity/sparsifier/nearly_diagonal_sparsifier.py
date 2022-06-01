@@ -19,6 +19,10 @@ class NearlyDiagonalSparsifier(base_sparsifier.BaseSparsifier):
     1. `nearliness` defines the number of non-zero diagonal lines that are closest to the main diagonal.
         Currently - supports only odd number
 
+    Note:
+        This can be accelerated (vectorized) once the Spdiagonal feature (PR: #78439) is landed or the banded matrix
+        feature is landed: https://stackoverflow.com/questions/52463972/generating-banded-matrices-using-numpy
+
     Args:
         nearliness: The degree of nearliness (default = 1)
 
