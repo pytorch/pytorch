@@ -18,6 +18,7 @@ __all__ = [
     'gammaincc',
     'gammaln',
     'hermite_polynomial_h',
+    'hermite_polynomial_he',
     'i0',
     'i0e',
     'i1',
@@ -920,6 +921,28 @@ is returned. Otherwise, the recursion:
 
 .. math::
     H_{n + 1}(\text{input}) = 2 \times \text{input} \times H_{n}(\text{input}) - H_{n - 1}(\text{input})
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+hermite_polynomial_he = _add_docstr(_special.special_hermite_polynomial_he,
+                                    r"""
+hermite_polynomial_he(input, n, *, out=None) -> Tensor
+
+Probabilist’s Hermite polynomial :math:`He_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    He_{n + 1}(\text{input}) = 2 \times \text{input} \times He_{n}(\text{input}) - He_{n - 1}(\text{input})
 
 is evaluated.
 
