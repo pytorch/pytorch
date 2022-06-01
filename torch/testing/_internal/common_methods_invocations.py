@@ -19129,7 +19129,7 @@ op_db: List[OpInfo] = [
         decorators=(
             precisionOverride(
                 {
-                    torch.float32: 1e-04,
+                    torch.float32: 1e-03,
                     torch.float64: 1e-05,
                 },
             ),
@@ -19143,7 +19143,7 @@ op_db: List[OpInfo] = [
         decorators=(
             precisionOverride(
                 {
-                    torch.float32: 1e-04,
+                    torch.float32: 1e-03,
                     torch.float64: 1e-05,
                 },
             ),
@@ -19157,7 +19157,7 @@ op_db: List[OpInfo] = [
         decorators=(
             precisionOverride(
                 {
-                    torch.float32: 1e-04,
+                    torch.float32: 1e-03,
                     torch.float64: 1e-05,
                 },
             ),
@@ -19171,7 +19171,7 @@ op_db: List[OpInfo] = [
         decorators=(
             precisionOverride(
                 {
-                    torch.float32: 1e-04,
+                    torch.float32: 1e-03,
                     torch.float64: 1e-05,
                 },
             ),
