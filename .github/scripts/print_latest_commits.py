@@ -40,7 +40,7 @@ def print_commit_status(sha: str) -> None:
     params['sha'] = sha
     results = qlambda.execute(parameters=params)
     for check in results['results']:
-        print(f"\t{check['name']}: {check['conclusion']}")
+        print(f"\t{check['conclusion']:>10}: {check['name']}")
 
 def main() -> None:
     args = parse_args()
