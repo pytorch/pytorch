@@ -2289,6 +2289,11 @@
   grad_output: l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
   self: l1_loss_double_backward(grad, grad_output, self, target, reduction)
   target: l1_loss_double_backward(grad, grad_output, target, target, reduction)
+  result: "self_p.is_complex()
+          ?  l1_loss_double_backward_grad_output(grad_output_t, grad_output_p, self_p, target_p, reduction)
+           + l1_loss_double_backward(self_t, grad_output_p, self_p, target_p, reduction)
+           + l1_loss_double_backward(target_t, grad_output_p, target_p, target_p, reduction)
+          : l1_loss_double_backward_grad_output(grad_output_t, grad_output_p, self_p, target_p, reduction)"
 
 - name: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   grad_output: log_sigmoid_backward(grad, self, buffer)

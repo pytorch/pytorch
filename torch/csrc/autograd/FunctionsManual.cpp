@@ -1788,9 +1788,7 @@ Tensor l1_loss_double_backward(const Tensor & grad, const Tensor & grad_output, 
 Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
   auto output = at::l1_loss_backward(grad.conj(), input, target, at::Reduction::None);
   if (reduction == at::Reduction::Mean) {
-    return output.mean();
-  } else if (reduction == at::Reduction::Sum) {
-    return output.sum();
+    output /= input.numel();
   }
   return handle_r_to_c(grad_output, output);
 }

@@ -17494,6 +17494,7 @@ op_db: List[OpInfo] = [
         backward_dtypes=all_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         skips=(
             # RuntimeError: input->type()->kind() == TypeKind::OptionalTypeINTERNAL ASSERT FAILED
             # at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270, please report a bug to PyTorch.
