@@ -154,17 +154,13 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
       iter.remove_operand(2);
       pow_chalf_tensor_scalar_impl(iter, exp);
     } else {
-      using scalar_t = c10::complex<at::Half>;
       using opmath_t = at::opmath_type<scalar_t>;
-      TORCH_INTERNAL_ASSERT(
-          iter.is_cpu_scalar(2) ||
-          (!iter.is_cpu_scalar(1) && !iter.is_cpu_scalar(2)));
+      TORCH_INTERNAL_ASSERT(!iter.is_cpu_scalar(1) && !iter.is_cpu_scalar(2));
 #if AT_USE_JITERATOR()
       jitted_gpu_kernel<pow_name, scalar_t, scalar_t, 2>(
           iter, pow_kernel_string);
 #else
-      opmath_gpu_kernel_with_scalars<scalar_t>(
-          iter, [=] GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
+      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
             using opmath_t = at::opmath_type<scalar_t>;
             return pow_(opmath_t{base}, opmath_t{exp});
           });
