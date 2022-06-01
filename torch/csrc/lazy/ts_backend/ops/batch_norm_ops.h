@@ -58,6 +58,9 @@ class TSNativeBatchNormBackward : public torch::lazy::TsNode {
 
   const std::array<bool, 3>& output_mask() const { return output_mask_; }
 
+  TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+                   TSLoweringContext* loctx) const override;
+
  private:
   bool training_;
   double eps_;
@@ -94,6 +97,9 @@ class TSNativeBatchNormForward : public torch::lazy::TsNode {
   double momentum() const { return momentum_; }
 
   double eps() const { return eps_; }
+
+  TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+                   TSLoweringContext* loctx) const override;
 
  private:
   bool training_;
