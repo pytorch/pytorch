@@ -845,7 +845,7 @@ def float_power(
     a, b = _maybe_broadcast(a, b)
     return prims.pow(a, b)
 
-
+# Definition: a // b = (a - remainder(a, b)) / b 
 # For reference, see CPython's implementation:
 # https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
 def _floor_divide(
@@ -860,7 +860,6 @@ def _floor_divide(
     elif isinstance(a, Number) and isinstance(b, Tensor):
         a = scalar_tensor(a, dtype=b.dtype, device=b.device)
 
-    # a // b = (a - remainder(a, b)) / b
     mod = fmod(a, b)
     div = true_divide(sub(a, mod), b)
 

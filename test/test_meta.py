@@ -532,7 +532,6 @@ meta_function_expected_failures = {
     torch.fft.rfft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
     torch.fft.rfft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
     torch.fft.rfftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.floor_divide: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::floor_divide, aten::floor_divide.out
     torch.frexp: {bf16, f16, f32, f64},  # aten::frexp.Tensor_out
     torch.functional.istft: {f32, f64},  # aten::view_as_complex
     torch.functional.stft: {f32, f64},  # aten::_fft_r2c
