@@ -89,7 +89,6 @@ __all__ = [
     "bitwise_or",
     "bitwise_xor",
     # 'complex',  # needs custom meta
-    "copysign",
     "div",
     "eq",
     "fmax",
@@ -881,13 +880,6 @@ bitwise_or = _make_elementwise_binary_prim(
 bitwise_xor = _make_elementwise_binary_prim(
     "bitwise_xor",
     impl_aten=torch.bitwise_xor,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-)
-
-copysign = _make_elementwise_binary_prim(
-    "copysign",
-    impl_aten=torch.copysign,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )

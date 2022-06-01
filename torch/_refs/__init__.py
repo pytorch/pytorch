@@ -770,11 +770,30 @@ bitwise_xor = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _copysign(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+):
+    if isinstance(b, Number) and isinstance(a, Tensor):
+        b = scalar_tensor(b, dtype=a.dtype, device=a.device)
+    elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
+        if a.device == torch.device("cpu"):
+            msg = "Expected divisor (b) to be on the same device ({0}) as dividend (a), but it is found on {1}!".format(
+                a.device, b.device
+            )
+            raise RuntimeError(msg)
+        else:
+            b = prims.device_put(b, device=a.device)
+
+    return where(signbit(b), neg(abs(a)), abs(a))
+
+
 # TODO: add docstring
 copysign = _make_elementwise_binary_reference(
-    prims.copysign,
+    _copysign,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
+    aten_op=torch.ops.aten.copysign,
 )
 
 # TODO: add docstring
