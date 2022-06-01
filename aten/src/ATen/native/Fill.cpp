@@ -4,6 +4,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/Fill.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/quantized/Copy.h>
 #include <ATen/Utils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
@@ -27,10 +28,8 @@ Tensor& fill_out(Tensor& self, const Scalar& value) {
 }
 
 Tensor& fill_out_quantized(Tensor& self, const Scalar& value) {
-  at::Tensor out = at::ones(self.sizes()).to(kFloat) * value;
-  out = out.to(self.device());
-  // Trust the `copy_` to handle the quantization and the boundary chacks.
-  self.copy_(out);
+  auto val = value.to<float>();
+  quantized_copy_from_float_scalar_(self, val);
   return self;
 }
 

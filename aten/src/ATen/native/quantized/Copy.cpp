@@ -7,7 +7,7 @@
 namespace at {
 namespace native {
 
-// Copying from float to QInt, used for assigning float value to QTensor
+// Copying from float tensor to QInt, used for assigning float tensor to QTensor
 // The second exception condition `self.is_contiguous() && src.is_contiguous()`
 // forces both the self & src tensors to be contiguous.
 // This means that assignment of a non-contiguous quantized subtensor is currently not supported in pytorch
@@ -18,7 +18,8 @@ Tensor& quantized_copy_from_float_(Tensor& self, const Tensor& src) {
       src.scalar_type() == at::kFloat,
       "Quantized copy only works with kFloat as source Tensor");
   TORCH_CHECK(
-      self.is_contiguous() && src.is_contiguous(),
+      (self.is_contiguous() && src.is_contiguous()) ||
+      (self.is_contiguous(at::MemoryFormat::ChannelsLast) && src.is_contiguous(at::MemoryFormat::ChannelsLast)),
       "Quantized copy only works with contiguous Tensors");
   TORCH_CHECK(
       self.sizes().equals(src.sizes()),
@@ -35,5 +36,25 @@ Tensor& quantized_copy_from_float_(Tensor& self, const Tensor& src) {
   });
   return self;
 }
+
+// Does the same as quantized_copy_from_float_, except src is a float variable rather than a tensor.
+// This function is used for situations in which we want to quantize the given value (src) and assign it
+// to self. One use case is fill_quantized.
+Tensor& quantized_copy_from_float_scalar_(Tensor& self, const float src) {
+  TORCH_CHECK(self.is_contiguous() || self.is_contiguous(at::MemoryFormat::ChannelsLast),
+      "Quantized copy only works with contiguous Tensors");
+  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "Copy", [&]() {
+    if (self.qscheme() == kPerChannelAffine || self.qscheme() == kPerChannelAffineFloatQParams
+        || self.qscheme() == kPerChannelSymmetric) {
+      quantize_scalar_per_channel_affine(src, self, self.q_per_channel_scales(),
+                                         self.q_per_channel_zero_points(),
+                                         self.q_per_channel_axis());
+    } else {
+      quantize_scalar_per_tensor_affine(src, self, self.q_scale(), self.q_zero_point());
+    }
+  });
+  return self;
+}
+
 } // namespace native
 } // namespace at
