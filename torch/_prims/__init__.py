@@ -468,7 +468,7 @@ def _not_impl(*args, **kwargs):
 abs = _make_elementwise_unary_prim(
     "abs",
     impl_aten=torch.abs,
-    impl_nvfuser=_abs_nvfuser,
+    impl_nvfuser=_abs_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
 )
@@ -476,7 +476,7 @@ abs = _make_elementwise_unary_prim(
 acos = _make_elementwise_unary_prim(
     "acos",
     impl_aten=torch.acos,
-    impl_nvfuser=_acos_nvfuser,
+    impl_nvfuser=_acos_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -491,7 +491,7 @@ acosh = _make_elementwise_unary_prim(
 asin = _make_elementwise_unary_prim(
     "asin",
     impl_aten=torch.asin,
-    impl_nvfuser=_asin_nvfuser,
+    impl_nvfuser=_asin_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -499,7 +499,7 @@ asin = _make_elementwise_unary_prim(
 atan = _make_elementwise_unary_prim(
     "atan",
     impl_aten=torch.atan,
-    impl_nvfuser=_atan_nvfuser,
+    impl_nvfuser=_atan_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -507,7 +507,7 @@ atan = _make_elementwise_unary_prim(
 cos = _make_elementwise_unary_prim(
     "cos",
     impl_aten=torch.cos,
-    impl_nvfuser=_cos_nvfuser,
+    impl_nvfuser=_cos_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -515,7 +515,7 @@ cos = _make_elementwise_unary_prim(
 cosh = _make_elementwise_unary_prim(
     "cosh",
     impl_aten=torch.cosh,
-    impl_nvfuser=_cosh_nvfuser,
+    impl_nvfuser=_cosh_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -551,7 +551,7 @@ bessel_i1e = _make_elementwise_unary_prim(
 bitwise_not = _make_elementwise_unary_prim(
     "bitwise_not",
     impl_aten=torch.bitwise_not,
-    impl_nvfuser=_bitwise_not_nvfuser,
+    impl_nvfuser=_bitwise_not_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -571,7 +571,7 @@ cbrt = _make_elementwise_unary_prim(
 ceil = _make_elementwise_unary_prim(
     "ceil",
     impl_aten=torch.ceil,
-    impl_nvfuser=_ceil_nvfuser,
+    impl_nvfuser=_ceil_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -586,7 +586,7 @@ digamma = _make_elementwise_unary_prim(
 erf = _make_elementwise_unary_prim(
     "erf",
     impl_aten=torch.erf,
-    impl_nvfuser=_erf_nvfuser,
+    impl_nvfuser=_erf_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -601,7 +601,7 @@ erf_inv = _make_elementwise_unary_prim(
 erfc = _make_elementwise_unary_prim(
     "erfc",
     impl_aten=torch.special.erfc,
-    impl_nvfuser=_erfc_nvfuser,
+    impl_nvfuser=_erfc_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -609,7 +609,7 @@ erfc = _make_elementwise_unary_prim(
 exp = _make_elementwise_unary_prim(
     "exp",
     impl_aten=torch.exp,
-    impl_nvfuser=_exp_nvfuser,
+    impl_nvfuser=_exp_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -617,7 +617,7 @@ exp = _make_elementwise_unary_prim(
 expm1 = _make_elementwise_unary_prim(
     "expm1",
     impl_aten=torch.special.expm1,
-    impl_nvfuser=_expm1_nvfuser,
+    impl_nvfuser=_expm1_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
