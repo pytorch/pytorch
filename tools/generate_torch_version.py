@@ -1,6 +1,7 @@
 import argparse
 import os
 import subprocess
+import traceback
 from pathlib import Path
 from setuptools import distutils  # type: ignore[import]
 from typing import Optional, Union
@@ -14,6 +15,7 @@ def get_sha(pytorch_root: Union[str, Path]) -> str:
             .strip()
         )
     except Exception:
+        traceback.print_exc()
         return "Unknown"
 
 
