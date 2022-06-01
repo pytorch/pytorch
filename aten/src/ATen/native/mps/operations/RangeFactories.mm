@@ -13,6 +13,42 @@
 namespace at {
 namespace native {
 
+static const char* ARANGE_KERNEL = R"METAL(
+#include <metal_stdlib>
+
+using namespace metal;
+struct ARangeFloatParam {
+  float start;
+  float step;
+  uint length;
+};
+
+kernel void arange_float(constant ARangeFloatParam *params [[buffer(0)]],
+                         device float  *out [[buffer(1)]],
+                         uint offset[[thread_position_in_grid]]) {
+  if (offset >= params->length) {
+    return;
+  }
+  out[offset] = params->start + offset * params->step;
+}
+)METAL";
+
+static id<MTLComputePipelineState> compileMetalShader(id<MTLDevice> device) {
+ static id<MTLComputePipelineState> rc = nil;
+ if (rc != nil) {
+    return rc;
+ }
+ NSError *error = nil;
+ id<MTLLibrary> library = [device newLibraryWithSource:[NSString stringWithUTF8String:ARANGE_KERNEL]
+                                               options:nil
+                                                 error:&error];
+ TORCH_CHECK(library != nil && error == nil, "Failed to load kernels: ", [[error localizedDescription] UTF8String]);
+ id<MTLFunction> func = [library newFunctionWithName:@"arange_float"];
+ TORCH_CHECK(func != nil, "Can't get function");
+ rc = [device newComputePipelineStateWithFunction:func error:&error];
+ TORCH_CHECK(rc != nil && error == nil, "Failed to construct pipeline state: ", [[error localizedDescription] UTF8String]);
+ return rc;
+}
 
 Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_MPS_TYPES(result.scalar_type(), "arange_mps", [&]() {
@@ -43,7 +79,7 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
     int64_t numel = result.numel();
 
     if (numel != size) {
-      if(numel > 0){
+      if(numel > 0) {
         TORCH_WARN("The number of elements in the out tensor of shape ", result.sizes(),
                     " is ", numel, " which does not match the computed number of elements ", size,
                     ". Note that this may occur as a result of rounding error. "
@@ -54,7 +90,30 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
     bool is_contiguous = result.is_contiguous();
     Tensor r = !is_contiguous ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
 
-    //TODO: Add arange Metal kernel.
+    // TODO: Extend shader to other data types
+    using namespace mps;
+    struct ARangeFloatParam {
+      float start;
+      float step;
+      uint32_t length;
+    } params = {xstart, xstep, size};
+    MPSStream* stream = getCurrentMPSStream();
+    id<MTLComputePipelineState> cplState = compileMetalShader(MPSDevice::getInstance()->device());
+    dispatch_sync(stream->queue(), ^(){
+      @autoreleasepool {
+        id<MTLCommandBuffer> buffer = stream->commandBuffer();
+        id<MTLBuffer> rBuf = __builtin_bit_cast(id<MTLBuffer>, r.storage().data());
+        id<MTLComputeCommandEncoder> commandEncoder = [buffer computeCommandEncoder];
+        [commandEncoder pushDebugGroup:@"Dispatch arange kernel"];
+        [commandEncoder setComputePipelineState:cplState];
+        [commandEncoder setBytes:&params length:sizeof(params) atIndex:0];
+        [commandEncoder setBuffer:rBuf offset:0 atIndex:1];
+        [commandEncoder dispatchThreadgroups:MTLSizeMake((params.length + 511) / 512, 1, 1)
+                       threadsPerThreadgroup:MTLSizeMake(512, 1, 1)];
+        [commandEncoder endEncoding];
+        stream->commitAndWait();
+      }
+    });
 
     if(!is_contiguous) {
       result.copy_(r);
