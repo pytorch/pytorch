@@ -143,37 +143,29 @@ class DispatchlessComposite:
         # bail if we have found no registered kernel.
         return None
 
-    def _header_set(
-        self,
-        header_from_fn: Callable[[NativeFunction, Optional[NativeFunctionsGroup]], str],
-    ) -> List[str]:
-        return list(
-            {
-                header_from_fn(dep_f, dep_g)
-                for _, info in self.graph.items()
-                for dep_f, dep_g in info.dependencies
-            }
-        )
-
     def aggregated_headers(self) -> List[str]:
-        def header_from(
-            dep_f: NativeFunction, dep_g: Optional[NativeFunctionsGroup]
-        ) -> str:
-            ns = self._dispatch_namespace(dep_f, dep_g)
-            prefix = f"{ns}" if ns is not None else ""
-            return f"#include <ATen/{prefix}Functions.h>"
+        includes = set()
+        includes.add("#include <ATen/NativeFunctions.h>")
 
-        return self._header_set(header_from)
+        for _, info in self.graph.items():
+            for dep_f, dep_g in info.dependencies:
+                ns = self._dispatch_namespace(dep_f, dep_g)
+                prefix = f"{ns}" if ns is not None else ""
+                includes.add(f"#include <ATen/{prefix}Functions.h>")
+
+        return sorted(includes)
 
     def operator_headers(self) -> List[str]:
-        def header_from(
-            dep_f: NativeFunction, dep_g: Optional[NativeFunctionsGroup]
-        ) -> str:
-            ns = self._dispatch_namespace(dep_f, dep_g)
-            suffix = f"_{ns.lower()}_dispatch" if ns is not None else ""
-            return f"#include <ATen/ops/{dep_f.root_name}{suffix}.h>"
+        includes = set()
 
-        return self._header_set(header_from)
+        for _, info in self.graph.items():
+            includes.add(f"#include <ATen/ops/{info.f.root_name}_native.h>")
+            for dep_f, dep_g in info.dependencies:
+                ns = self._dispatch_namespace(dep_f, dep_g)
+                suffix = f"_{ns.lower()}_dispatch" if ns is not None else ""
+                includes.add(f"#include <ATen/ops/{dep_f.root_name}{suffix}.h>")
+
+        return sorted(includes)
 
     def headers(self) -> List[str]:
         native_functions = [info.f for _, info in self.graph.items()]
