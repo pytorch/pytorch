@@ -3,6 +3,7 @@ import torch
 import torch._prims as prims
 import torch._prims.utils as utils
 from torch._prims.utils import (
+    check,
     DimsType,
     ShapeType,
     StrideType,
@@ -16,6 +17,8 @@ from torch._prims.utils import (
     NumberType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     REDUCTION_OUTPUT_TYPE_KIND,
+    is_weakly_lesser_type,
+    dtype_to_type,
 )
 from torch._prims.wrappers import (
     elementwise_type_promotion_wrapper,
@@ -45,8 +48,6 @@ __all__ = [
     "acosh",
     "asin",
     "atan",
-    # "bessel_i0e",  # special.i0e
-    # "bessel_i1e",  # special.i1e
     "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
@@ -71,10 +72,14 @@ __all__ = [
     "log1p",
     "log2",
     "log10",
+    "nan_to_num",
     "neg",
+    "positive",
     "reciprocal",
     "round",  # TODO: model kwargs
+    "sigmoid",
     "sign",
+    "signbit",
     "sin",
     "sinh",
     "sqrt",
@@ -97,8 +102,9 @@ __all__ = [
     "eq",
     "float_power",
     # 'floor_divide', # requires floor
-    # 'fmax', # requires where
-    # 'fmod',
+    "fmax",
+    "fmin",
+    "fmod",
     # 'gcd',
     "ge",
     "gt",
@@ -112,7 +118,7 @@ __all__ = [
     "le",
     "logical_and",
     "logical_or",
-    # 'logical_xor',
+    "logical_xor",
     "lt",
     # 'max', # implement with reductions
     "maximum",
@@ -156,14 +162,21 @@ __all__ = [
     "std_mean",
     "std_var",
     "sum",
+    "prod",
     "var",
+    #
+    # Linear algebra ops
+    #
+    "addr",
     #
     # View & Shape Ops
     #
     "as_strided",
     "broadcast_tensors",
+    "broadcast_to",
     "cat",
     "chunk",
+    "column_stack",
     "flatten",
     "flip",
     "fliplr",
@@ -431,7 +444,7 @@ frac = _make_elementwise_unary_reference(
 
 def _isfinite(a: TensorLikeType) -> TensorLikeType:
     if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
-        return prims.is_finite(a)
+        return prims.isfinite(a)
 
     return ones_like(a, dtype=torch.bool)
 
@@ -504,6 +517,41 @@ log10 = _make_elementwise_unary_reference(
 )
 
 
+@register_decomposition(torch.ops.aten.nan_to_num)
+@out_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a,"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def nan_to_num(
+    a: TensorLikeType,
+    *,
+    nan: Optional[NumberType] = 0.0,
+    posinf: Optional[NumberType] = None,
+    neginf: Optional[NumberType] = None,
+) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+
+    if a.dtype == torch.bool:
+        return clone(a)
+
+    if posinf is None:
+        posinf = prims.maximum_value(a.dtype)
+
+    if neginf is None:
+        neginf = prims.minimum_value(a.dtype)
+
+    result = where(isnan(a), nan, a)
+
+    is_neg = signbit(a)
+    is_neginf = bitwise_and(isinf(a), is_neg)
+    result = where(is_neginf, neginf, result)
+
+    is_posinf = bitwise_and(isinf(a), bitwise_not(is_neg))
+    result = where(is_posinf, posinf, result)
+    return result
+
+
 def _neg_meta(a: TensorLikeType):
     if a.dtype is torch.bool:
         msg = "neg is not supported on bool tensors."
@@ -515,6 +563,16 @@ neg = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     extra_meta=_neg_meta,
 )
+
+
+# positive does not use _make_elementwise_unary_reference because it does not support out
+def positive(a: TensorLikeType) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+    if a.dtype is torch.bool:
+        msg = "positive does not support bool tensors."
+        raise RuntimeError(msg)
+    return a
+
 
 reciprocal = _make_elementwise_unary_reference(
     prims.reciprocal,
@@ -528,9 +586,26 @@ round = _make_elementwise_unary_reference(
     aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
 )
 
+
+def _sigmoid(a: TensorLikeType) -> TensorLikeType:
+    return true_divide(1, add(1, exp(neg(a))))
+
+
+sigmoid = _make_elementwise_unary_reference(
+    _sigmoid,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=torch.ops.aten.sigmoid,
+)
+
 sign = _make_elementwise_unary_reference(
     prims.sign,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+signbit = _make_elementwise_unary_reference(
+    prims.signbit,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
 sin = _make_elementwise_unary_reference(
@@ -734,6 +809,27 @@ def float_power(
 
 
 # TODO: add docstring
+fmax = _make_elementwise_binary_reference(
+    prims.fmax,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmax,
+)
+
+# TODO: add docstring
+fmin = _make_elementwise_binary_reference(
+    prims.fmin,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmin,
+)
+
+# TODO: add docstring
+fmod = _make_elementwise_binary_reference(
+    prims.fmod,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmod,
+)
+
+# TODO: add docstring
 ge = _make_elementwise_binary_reference(
     prims.ge,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
@@ -849,6 +945,23 @@ logical_or = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.logical_or,
 )
+
+
+def _logical_xor(a: TensorLikeType, b: TensorLikeType):
+    if not utils.is_boolean_dtype(a.dtype):
+        a = ne(a, 0)
+    if not utils.is_boolean_dtype(b.dtype):
+        b = ne(b, 0)
+    return bitwise_xor(a, b)
+
+
+# TODO: skip unnecessary conversion of long to float
+logical_xor = _make_elementwise_binary_reference(
+    _logical_xor,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.logical_xor,
+)
+
 
 # TODO: add docstring
 lt = _make_elementwise_binary_reference(
@@ -1144,7 +1257,7 @@ def any(
     return result
 
 
-# TODO: register decomp after stride logic is fixed
+@register_decomposition(torch.ops.aten.sum)
 def sum(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -1164,6 +1277,34 @@ def sum(
     return _reduction(
         a,
         prims.sum,
+        dims=dim,
+        keepdims=keepdim,
+        dtype=dtype,
+        out=out,
+        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    )
+
+
+@register_decomposition(torch.ops.aten.prod)
+def prod(
+    a: TensorLikeType,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
+    keepdim: bool = False,
+    *,
+    dtype=None,
+    out: Optional[Tensor] = None,
+) -> TensorLikeType:
+    if dtype is None:
+        if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
+            dtype = torch.int64
+        else:
+            dtype = a.dtype
+    # reduces over all dimensions if dim=() is passed
+    if dim == () or dim == []:
+        dim = None
+    return _reduction(
+        a,
+        prims.prod,
         dims=dim,
         keepdims=keepdim,
         dtype=dtype,
@@ -1276,18 +1417,22 @@ def std(
     if dim == () or dim == []:
         dim = None
 
+    opmath_dtype, dtype = utils.reduction_dtypes(
+        a, REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
+    )
+
     result = _reduction(
         a,
         partial(prims.var, correction=correction),
         dims=dim,
         keepdims=keepdim,
-        dtype=None,
+        dtype=opmath_dtype,
         out=None,
         has_identity=True,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
     )
     result = sqrt(result)
-    return result
+    return _maybe_convert_to_dtype(result, dtype)  # type: ignore[return-value,arg-type]
 
 
 def mean(
@@ -1331,6 +1476,7 @@ def mean(
     return result
 
 
+@register_decomposition(torch.ops.aten.std_mean.correction)
 def std_mean(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -1357,6 +1503,61 @@ def var_mean(
     return v, m
 
 
+@register_decomposition(torch.ops.aten.addr)
+@out_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "vec1", "vec2"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def addr(
+    self: TensorLikeType,
+    vec1: TensorLikeType,
+    vec2: TensorLikeType,
+    beta: NumberType = 1,
+    alpha: NumberType = 1,
+) -> TensorLikeType:
+    check(
+        vec1.ndim == 1,
+        lambda: f"addr: Expected 1-D argument vec1, but got {vec1.ndim}-D",
+    )
+    check(
+        vec2.ndim == 1,
+        lambda: f"addr: Expected 1-D argument vec2, but got {vec2.ndim}-D",
+    )
+    self = self.expand(vec1.shape[0], vec2.shape[0])
+    if utils.is_boolean_dtype(self.dtype):
+        # Integers are accepted for booleans
+        check(
+            is_weakly_lesser_type(type(beta), int),
+            f"expected bool/int beta but got {type(beta)}",
+        )
+        check(
+            is_weakly_lesser_type(type(alpha), int),
+            f"expected bool/int alpha but got {type(beta)}",
+        )
+        if not beta:
+            return torch.outer(vec1, vec2) if alpha else torch.full_like(self, False)
+        else:
+            return torch.logical_or(
+                self,
+                torch.outer(vec1, vec2) if alpha else torch.full_like(self, False),
+            )
+    else:
+        check(
+            is_weakly_lesser_type(type(beta), dtype_to_type(self.dtype)),
+            f"cannot safely convert {type(beta)} to {self.dtype}",
+        )
+        check(
+            is_weakly_lesser_type(type(alpha), dtype_to_type(self.dtype)),
+            f"cannot safely convert {type(alpha)} to {self.dtype}",
+        )
+        if beta == 0:
+            # This means NaNs from self are dropped if beta is zero
+            return alpha * torch.outer(vec1, vec2)
+        else:
+            return beta * self + alpha * torch.outer(vec1, vec2)
+
+
 def as_strided(
     a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int = 0
 ) -> TensorLikeType:
@@ -1365,6 +1566,12 @@ def as_strided(
 
 def broadcast_tensors(*tensors) -> List[TensorLikeType]:
     return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
+
+
+def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
+    start = len(size) - len(a.shape)
+    dims = tuple(range(start, len(a.shape) + start))
+    return prims.broadcast_in_dim(a, size, dims)
 
 
 @out_wrapper
@@ -1399,6 +1606,15 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
         return empty((0,), dtype=t.dtype, device=t.device, requires_grad=requires_grad)
 
     return prims.cat(filtered, dim)
+
+
+@out_wrapper
+def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
+    aligned_tensors = tuple(
+        x if x.ndim > 1 else prims.expand_dims(x, list(range(x.ndim, 2)))
+        for x in tensors
+    )
+    return cat(aligned_tensors, 1)
 
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
@@ -1884,3 +2100,8 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
         return True
 
     return item(all(eq(a, b)))  # type: ignore[return-value]
+
+
+# populate the decomp table
+import torch._refs.nn.functional
+import torch._refs.special

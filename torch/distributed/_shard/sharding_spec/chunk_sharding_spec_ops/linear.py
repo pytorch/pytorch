@@ -1,10 +1,10 @@
-from typing import List, cast
+from typing import List
 
 import torch
 import torch.distributed as dist
 from torch.autograd import Function
 from torch.distributed.nn.functional import (
-    all_gather,
+    _all_gather_base,
     all_to_all_single,
 )
 from torch.distributed._shard.partial_tensor import _PartialTensor
@@ -100,18 +100,18 @@ def sharded_linear(types, args, kwargs, pg):
     bias = args[2]
 
     local_shard = weight.local_tensor()
-    local_shard_t = local_shard.t().contiguous()
+    local_shard_t = local_shard.t()
     sharding_dim = weight._sharding_spec.dim
     world_size = dist.get_world_size(pg)
     rank = dist.get_rank(pg)
 
-    if sharding_dim == 1 and isinstance(input, torch.Tensor):
-        return _handle_row_wise_sharding_tensor(
-            input, world_size, weight, rank, local_shard_t, bias, pg
-        )
-    elif sharding_dim == 1 and isinstance(input, ShardedTensor):
+    if sharding_dim == 1 and isinstance(input, ShardedTensor):
         return _handle_row_wise_sharding_sharded_tensor(
             input, world_size, weight, local_shard_t, bias, pg
+        )
+    elif sharding_dim == 1 and isinstance(input, torch.Tensor):
+        return _handle_row_wise_sharding_tensor(
+            input, world_size, weight, rank, local_shard_t, bias, pg
         )
     elif sharding_dim == 0:
         return _handle_col_wise_sharding(
@@ -125,7 +125,7 @@ def sharded_linear(types, args, kwargs, pg):
 
 def _validate_linear_op_param(args, kwargs):
     """
-    Validate input params of sharded embedding op.
+    Validate input params of sharded linear op.
 
     Args:
         input: input of the linear layer.
@@ -141,13 +141,13 @@ def _validate_linear_op_param(args, kwargs):
     # Validate types
     if not isinstance(input, torch.Tensor) and not isinstance(input, ShardedTensor):
         raise TypeError("input needs to be either torch.Tensor or ShardedTensor")
-    if not isinstance(bias, torch.Tensor):
+    if type(bias) != torch.Tensor and type(bias) != torch.nn.Parameter:
         raise TypeError("bias needs to be torch.Tensor")
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")
     if len(input.size()) < 1:  # type: ignore[arg-type]
         raise ValueError("Input needs to have at least 1 dim")
-    weight_size = cast(torch.Size, weight.size())
+    weight_size = weight.size()
     if len(weight_size) != 2:
         raise ValueError("Weight needs to have exactly 2 dims")
     if len(bias.size()) != 1:
@@ -196,22 +196,29 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
         A :class:`ShardedTensor` object which filled with local intermediate results.
     """
     # allgather the inputs first.
-    gathered_inputs = all_gather(input, group=pg)
+    out_size = list(input.size())
+    out_size[0] = input.size(0) * dist.get_world_size(pg)
+    output = torch.empty(out_size, device=input.device)
+    output = _all_gather_base(output, input, group=pg)
+
+    # Adjust bias and perform local matmul.
     (start_pos, chunk_size) = get_chunk_sharding_params(
         bias.size(0), world_size, weight._sharding_spec, rank
     )
     local_bias = _BiasTensorNarrow.apply(
         world_size, start_pos, chunk_size, weight, pg, bias
     )
-    results = []
-    for i, inp in enumerate(gathered_inputs):
-        results.append(inp.matmul(local_shard_t) + local_bias)
-    # When the local result only has one dimension, we need to make sure
-    # it does not shard by dim 0. So reshard can work properly.
-    if results[0].dim() == 1:  # type: ignore[attr-defined]
-        result = torch.stack(results)  # type: ignore[arg-type]
+
+    if output.dim() == 1:
+        output = output.view(dist.get_world_size(pg), -1)
+
+    if output.dim() <= 2:
+        # Use fused version if possible.
+        result = torch.addmm(local_bias, output, local_shard_t)
     else:
-        result = torch.cat(results)  # type: ignore[arg-type]
+        result = output.matmul(local_shard_t) + local_bias
+
+    # Build ShardedTensor as result.
     st_size = list(result.size())
     st_size[-1] = weight.size(0)
     new_sharding_spec = ChunkShardingSpec(
@@ -323,21 +330,21 @@ def _handle_row_wise_sharding_sharded_tensor(
     Returns:
         A :class:`_PartialTensor` object which stores the partial local result.
     """
-    results = []
-    local_shard = input.local_shards()[0].tensor
+    local_input = input.local_tensor()
     if input.sharding_spec().dim not in (-1, len(input.size()) - 1):
         raise NotImplementedError(
             "The case when the input does not come from col-wise sharded "
             "linear is not supported for row-wise sharded linear."
         )
 
-    for tensor in torch.tensor_split(local_shard, world_size):
-        results.append(
-            tensor.matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias)
-        )
+    # Use fused version if possible.
+    if local_input.dim() <= 2:
+        result = torch.addmm(_BiasTensorPartial.apply(world_size, bias), local_input, local_shard_t)
+    else:
+        result = local_input.matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias)
 
     # Return the partial local result.
-    return _PartialTensor(torch.cat(results), pg)
+    return _PartialTensor(result, pg)
 
 
 class _BiasTensorNarrow(Function):
@@ -356,9 +363,7 @@ class _BiasTensorNarrow(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        results = []
-        for idx in range(ctx.world_size):
-            results.append(grad_output.clone())
+        results = [grad_output.clone()] * ctx.world_size
         return (None, None, None, None, None) + (
             _result_distribute_with_col_rearrange(
                 results, grad_output, ctx.world_size, ctx.weight, ctx.pg
