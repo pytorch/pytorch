@@ -1345,6 +1345,55 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             self.assertEqual(e.device.type, 'meta')
             self.assertEqual(ten.type_as(e).device.type, 'meta')
 
+    def test_strides_slow_path(self):
+        for use_wrapper_subclass in [True]:
+            data = torch.randn(4, 3)
+            class ExampleTensor1(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_strides=True)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    return NotImplemented
+
+            class ExampleTensor2(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_strides=True)
+
+                __torch_function__ = torch._C._disabled_torch_function_impl
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func == torch.ops.aten.stride:
+                        return (4,2)
+                    return NotImplemented
+
+            class ExampleTensor3(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_strides=True)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.aten.stride:
+                        return (2, 2)
+                    return NotImplemented
+
+            err_msg = "no implementation found for 'torch.ops.aten.stride'"
+            e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.stride()
+
+            e = ExampleTensor2(torch.randn(3, 3), use_wrapper_subclass)
+            d = e.stride()
+            print ("stride", d)
+            self.assertEqual(d, (4, 1))
+
+            err_msg = "no implementation found for"
+            e = ExampleTensor3(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(e.stride(), (2, 2))
 
 if __name__ == '__main__':
     run_tests()

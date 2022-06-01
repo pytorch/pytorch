@@ -42,6 +42,12 @@ static c10::Device noop_device_fn(const PyInterpreter*, const TensorImpl*) {
       "attempted to device Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
+static c10::IntArrayRef noop_strides_fn(const PyInterpreter*, const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to strides Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
 void PyInterpreter::disarm() noexcept {
   name_fn_ = &noop_name_fn;
   decref_fn_ = &noop_decref_fn;
@@ -49,6 +55,7 @@ void PyInterpreter::disarm() noexcept {
   dispatch_fn_ = &noop_dispatch_fn;
   is_contiguous_fn_ = &noop_is_contiguous_fn;
   device_fn_ = &noop_device_fn;
+  strides_fn_ = &noop_strides_fn;
 }
 
 } // namespace impl

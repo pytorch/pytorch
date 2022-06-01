@@ -216,6 +216,7 @@ void concrete_dispatch_fn(
     const std::shared_ptr<SafePyObject>& type);
 bool concrete_is_contiguous_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
 c10::Device concrete_device_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
+c10::IntArrayRef concrete_strides_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
 
 class PyInterpreterHolder {
  public:
@@ -226,7 +227,8 @@ class PyInterpreterHolder {
             &concrete_detach_fn,
             &concrete_dispatch_fn,
             &concrete_is_contiguous_fn,
-            &concrete_device_fn)) {}
+            &concrete_device_fn,
+            &concrete_strides_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -2034,6 +2036,23 @@ c10::Device concrete_device_fn(const c10::impl::PyInterpreter*, const c10::Tenso
       "torch.ops.prim");
 
   return toDevice(out.ptr());
+}
+
+c10::IntArrayRef concrete_strides_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "stride",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("stride")
+          .ptr(),
+      "torch.ops.aten");
+
+  return c10::IntArrayRef(THPUtils_unpackLongs(out.ptr()));
 }
 
 } // anonymous namespace
