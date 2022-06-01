@@ -19747,12 +19747,20 @@ python_ref_db = [
         torch_opinfo_name="broadcast_tensors",
     ),
     PythonRefInfo(
+        "_refs.broadcast_to",
+        torch_opinfo_name="broadcast_to",
+    ),
+    PythonRefInfo(
         "_refs.cat",
         torch_opinfo_name="cat",
     ),
     PythonRefInfo(
         "_refs.chunk",
         torch_opinfo_name="chunk",
+    ),
+    PythonRefInfo(
+        "_refs.column_stack",
+        torch_opinfo_name="column_stack",
     ),
     PythonRefInfo(
         "_refs.flatten",
