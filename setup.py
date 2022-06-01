@@ -310,7 +310,7 @@ cmake_python_include_dir = sysconfig.get_path("include")
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-package_type = os.getenv('PACKAGE_TYPE', 'libtorch')
+package_type = os.getenv('PACKAGE_TYPE', 'wheel')
 version = get_torch_version()
 report("Building wheel {}-{}".format(package_name, version))
 
