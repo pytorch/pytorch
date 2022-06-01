@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 
-from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init, MetaInitErrorInfo
+from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init
 
 __all__ = [
     "get_ignored_functions",
@@ -1739,7 +1739,9 @@ def is_tensor_like(inp):
 def _wrap_torch_function(f):
     @functools.wraps(f)
     def wrapped(self, *args, **kwargs):
-        with enable_torch_function_mode(self.inner):
+        inner = getattr(self, "inner", None)
+
+        with enable_torch_function_mode(inner):
             return f(self, *args, **kwargs)
     return wrapped
 
@@ -1755,13 +1757,6 @@ def _wrap_torch_function(f):
 # simplify the C++ API surface.  It would also have been valid to build in the
 # notion of mode stack directly into C++ but in this design it's substantially
 # more difficult to interact with TorchFunctionModeMeta.
-
-
-class _TorchFunctionMetaInitErrorInfo(MetaInitErrorInfo):
-    def __init__(self):
-        super().__init__(mode_class_name="TorchDispatchMode", mode_name="torch_dispatch")
-
-
 class TorchFunctionModeMeta(type):
     """
     Metaclass for :class:`TorchFunctionMode`; it does two things:
@@ -1779,7 +1774,7 @@ class TorchFunctionModeMeta(type):
     """
     def __new__(metacls, name, bases, dct):
         if '__init__' in dct:
-            dct['__init__'] = _wrap_init(dct['__init__'], _TorchFunctionMetaInitErrorInfo())
+            dct['__init__'] = _wrap_init(dct['__init__'])
         if '__torch_function__' in dct:
             dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
         return super().__new__(metacls, name, bases, dct)
@@ -1823,6 +1818,16 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError()
+
+    def __enter__(self):
+        if hasattr(self, "inner"):
+            raise RuntimeError(f"{self} has already been used as a mode, please create and use a fresh version")
+        old = _get_torch_function_mode()
+        self.inner = old
+        _set_torch_function_mode(self)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        _set_torch_function_mode(self.inner)
 
     @classmethod
     def push(cls, *args, **kwargs):
