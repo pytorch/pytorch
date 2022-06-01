@@ -6,11 +6,11 @@ from functools import partial
 
 import torch
 import torch.nn as nn
-from torch.distributed._fsdp.fully_sharded_data_parallel import (
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
     CPUOffload,
 )
-from torch.distributed.algorithms._checkpoint._checkpoint_wrapper import (
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
 )
 from torch.testing._internal.common_distributed import (
@@ -115,7 +115,7 @@ class TestFSDPCheckpoint(FSDPTest):
 
         models = [ckpt_sequential_wrapped_fsdp, inner_ckpt, baseline]
 
-        offload_to_cpu_event = "Memcpy DtoH"
+        offload_to_cpu_event = "Memcpy DtoH" if torch.version.cuda else "CopyDeviceToHost"
 
         for i in range(2):
             losses = []
@@ -177,7 +177,7 @@ class TestFSDPCheckpoint(FSDPTest):
             fsdp_call_checkpoint,
         ]
 
-        offload_to_cpu_event = "Memcpy DtoH"
+        offload_to_cpu_event = "Memcpy DtoH" if torch.version.cuda else "CopyDeviceToHost"
 
         for i in range(6):
             losses = []

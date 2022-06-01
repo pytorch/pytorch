@@ -1,10 +1,23 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Dispatch.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_foreach_norm_native.h>
+
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/empty.h>
+#endif
+
 
 namespace at {
 namespace native {
@@ -12,13 +25,13 @@ namespace native {
 template<typename T, int NormType, int depth=1, int r_args_depth=1, int res_arg_index=0>
 struct LpNormFunctor {
   static_assert(NormType == 1 || NormType == 2, "foreach_norm supports only L1 and L2 norm");
+  using opmath_t = typename at::opmath_type<T>;
   __device__ __forceinline__ void operator() (
       int chunk_size,
       TensorListMetadata<depth>& tl,
-      T* output_per_tensor,
+      opmath_t* output_per_tensor,
       const int max_chunks_per_tensor
   ) {
-    using opmath_t = typename at::opmath_type<T>;
     int tensor_loc = tl.block_to_tensor[blockIdx.x];
     int chunk_idx = tl.block_to_chunk[blockIdx.x];
     int n = tl.numel_for_tensor[tensor_loc];
@@ -70,16 +83,15 @@ struct LpNormFunctor {
   }
 };
 
-template<typename T, int NormType>
+template<typename T, int NormType, typename opmath_t = at::opmath_type<T>>
 __global__ void lpnorm_cleanup(
-    T* output_per_tensor,
+    opmath_t* output_per_tensor,
     T* ret_per_tensor,
     int max_chunks_per_tensor) {
-  using opmath_t = typename at::opmath_type<T>;
   __shared__ opmath_t vals[512];
 
-  T* output_this_tensor = output_per_tensor + blockIdx.x*max_chunks_per_tensor;
-  T val = 0;
+  opmath_t* output_this_tensor = output_per_tensor + blockIdx.x*max_chunks_per_tensor;
+  opmath_t val = 0;
   for (int i = threadIdx.x; i < max_chunks_per_tensor; i += blockDim.x) {
     val += output_this_tensor[i];
   }
@@ -122,7 +134,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(TensorList tensors, const Scalar& o
     }
   }
   const auto options = tensors[0].options();
-  auto output_per_tensor = at::zeros({ntensors*max_chunks_per_tensor}, options);
+  auto output_per_tensor = at::zeros({ntensors*max_chunks_per_tensor}, options.dtype(toOpMathType(tensors[0].scalar_type())));
   auto ret_per_tensor = at::empty({ntensors}, options);
 
   auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
@@ -133,13 +145,13 @@ std::vector<Tensor> foreach_tensor_norm_cuda(TensorList tensors, const Scalar& o
         multi_tensor_apply<1>(
           tensor_lists,
           LpNormFunctor<scalar_t, 1>(),
-          output_per_tensor.data_ptr<scalar_t>(),
+          output_per_tensor.data_ptr<opmath_t>(),
           max_chunks_per_tensor);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
         const at::cuda::OptionalCUDAGuard device_guard(device_of(output_per_tensor));
         auto stream = at::cuda::getCurrentCUDAStream();
         lpnorm_cleanup<scalar_t, 1><<<ntensors, 512, 0, stream>>>(
-          output_per_tensor.data_ptr<scalar_t>(),
+          output_per_tensor.data_ptr<opmath_t>(),
           ret_per_tensor.data_ptr<scalar_t>(),
           max_chunks_per_tensor);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -151,13 +163,13 @@ std::vector<Tensor> foreach_tensor_norm_cuda(TensorList tensors, const Scalar& o
         multi_tensor_apply<1>(
           tensor_lists,
           LpNormFunctor<scalar_t, 2>(),
-          output_per_tensor.data_ptr<scalar_t>(),
+          output_per_tensor.data_ptr<opmath_t>(),
           max_chunks_per_tensor);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
         const at::cuda::OptionalCUDAGuard device_guard(device_of(output_per_tensor));
         auto stream = at::cuda::getCurrentCUDAStream();
         lpnorm_cleanup<scalar_t, 2><<<ntensors, 512, 0, stream>>>(
-          output_per_tensor.data_ptr<scalar_t>(),
+          output_per_tensor.data_ptr<opmath_t>(),
           ret_per_tensor.data_ptr<scalar_t>(),
           max_chunks_per_tensor);
         C10_CUDA_KERNEL_LAUNCH_CHECK();

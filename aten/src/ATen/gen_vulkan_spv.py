@@ -6,7 +6,7 @@ import glob
 import os
 import sys
 import subprocess
-from tools.codegen.code_template import CodeTemplate
+from torchgen.code_template import CodeTemplate
 
 H_NAME = "spv.h"
 CPP_NAME = "spv.cpp"

@@ -5,36 +5,41 @@ graph {
   node {
     input: "emb.weight"
     input: "input_1"
-    output: "3"
-    name: "ATenOp_0"
-    op_type: "ATenOp"
+    output: "onnx::Add_3"
+    name: "ATen_0"
+    op_type: "ATen"
     attribute {
       name: "custom_attributes_json"
       s: "{\"padding_idx\":-1,\"scale_grad_by_freq\":false,\"sparse\":false}"
       type: STRING
     }
     attribute {
-      name: "name"
-      s: "aten::embedding"
+      name: "operator"
+      s: "embedding"
       type: STRING
     }
-    domain: "com.microsoft"
+    attribute {
+      name: "overload_name"
+      s: ""
+      type: STRING
+    }
+    domain: "org.pytorch.aten"
   }
   node {
-    input: "3"
+    input: "onnx::Add_3"
     input: "input_2"
-    output: "4"
+    output: "onnx::Shape_4"
     name: "Add_1"
     op_type: "Add"
   }
   node {
-    input: "4"
-    output: "5"
+    input: "onnx::Shape_4"
+    output: "onnx::Gather_5"
     name: "Shape_2"
     op_type: "Shape"
   }
   node {
-    output: "6"
+    output: "onnx::Gather_6"
     name: "Constant_3"
     op_type: "Constant"
     attribute {
@@ -47,9 +52,9 @@ graph {
     }
   }
   node {
-    input: "5"
-    input: "6"
-    output: "7"
+    input: "onnx::Gather_5"
+    input: "onnx::Gather_6"
+    output: "onnx::Unsqueeze_7"
     name: "Gather_4"
     op_type: "Gather"
     attribute {
@@ -59,8 +64,8 @@ graph {
     }
   }
   node {
-    input: "7"
-    output: "8"
+    input: "onnx::Unsqueeze_7"
+    output: "onnx::Concat_8"
     name: "Unsqueeze_5"
     op_type: "Unsqueeze"
     attribute {
@@ -70,8 +75,8 @@ graph {
     }
   }
   node {
-    input: "8"
-    output: "9"
+    input: "onnx::Concat_8"
+    output: "onnx::ConstantOfShape_9"
     name: "Concat_6"
     op_type: "Concat"
     attribute {
@@ -81,7 +86,7 @@ graph {
     }
   }
   node {
-    input: "9"
+    input: "onnx::ConstantOfShape_9"
     output: "10"
     name: "ConstantOfShape_7"
     op_type: "ConstantOfShape"
@@ -95,7 +100,7 @@ graph {
       type: TENSOR
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 4
     dims: 8
@@ -145,27 +150,11 @@ graph {
       }
     }
   }
-  value_info {
-    name: "3"
-    type {
-      tensor_type {
-        elem_type: 1
-        shape {
-          dim {
-            dim_param: "ATenOp3_dim_0"
-          }
-          dim {
-            dim_param: "ATenOp3_dim_1"
-          }
-        }
-      }
-    }
-  }
 }
 opset_import {
   version: 12
 }
 opset_import {
-  domain: "com.microsoft"
+  domain: "org.pytorch.aten"
   version: 1
 }

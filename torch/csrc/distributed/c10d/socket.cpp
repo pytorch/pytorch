@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // All rights reserved.
 //
 // This source code is licensed under the BSD-style license found in the
@@ -167,6 +167,73 @@ class SocketImpl {
 
   Handle hnd_;
 };
+} // namespace detail
+} // namespace c10d
+
+//
+// libfmt formatters for `addrinfo` and `Socket`
+//
+namespace fmt {
+
+template <>
+struct formatter<::addrinfo> {
+  constexpr decltype(auto) parse(format_parse_context& ctx) {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  decltype(auto) format(const ::addrinfo& addr, FormatContext& ctx) {
+    char host[NI_MAXHOST], port[NI_MAXSERV]; // NOLINT
+
+    int r = ::getnameinfo(addr.ai_addr,
+                          addr.ai_addrlen,
+                          host,
+                          NI_MAXHOST,
+                          port,
+                          NI_MAXSERV,
+                          NI_NUMERICSERV);
+    if (r != 0) {
+      return format_to(ctx.out(), "?UNKNOWN?");
+    }
+
+    if (addr.ai_addr->sa_family == AF_INET) {
+      return format_to(ctx.out(), "{}:{}",   host, port);
+    } else {
+      return format_to(ctx.out(), "[{}]:{}", host, port);
+    }
+  }
+};
+
+template <>
+struct formatter<c10d::detail::SocketImpl> {
+  constexpr decltype(auto) parse(format_parse_context& ctx) {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  decltype(auto) format(const c10d::detail::SocketImpl& socket, FormatContext& ctx) {
+    ::sockaddr_storage addr_s{};
+
+    auto addr_ptr = reinterpret_cast<::sockaddr*>(&addr_s);
+
+    ::socklen_t addr_len = sizeof(addr_s);
+
+    if (::getsockname(socket.handle(), addr_ptr, &addr_len) != 0) {
+      return format_to(ctx.out(), "?UNKNOWN?");
+    }
+
+    ::addrinfo addr{};
+    addr.ai_addr = addr_ptr;
+    addr.ai_addrlen = addr_len;
+
+    return format_to(ctx.out(), "{}", addr);
+  }
+};
+
+} // namespace fmt
+
+namespace c10d {
+namespace detail {
 
 SocketImpl::~SocketImpl() {
 #ifdef _WIN32
@@ -206,7 +273,7 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
   addr.ai_addr = addr_ptr;
   addr.ai_addrlen = addr_len;
 
-  C10D_INFO("The server socket on {} has accepted a connection from {}.", *this, addr);
+  C10D_DEBUG("The server socket on {} has accepted a connection from {}.", *this, addr);
 
   auto impl = std::make_unique<SocketImpl>(hnd);
 
@@ -329,7 +396,7 @@ class SocketListenOp {
 
   template <typename... Args>
   void recordError(fmt::string_view format, Args&&... args) {
-    auto msg = fmt::format(format, std::forward<Args>(args)...);
+    auto msg = fmt::vformat(format, fmt::make_format_args(args...));
 
     C10D_WARNING(msg);
 
@@ -347,17 +414,17 @@ SocketListenOp::SocketListenOp(std::uint16_t port, const SocketOptions& opts)
 
 std::unique_ptr<SocketImpl> SocketListenOp::run() {
   if (opts_->prefer_ipv6()) {
-    C10D_INFO("The server socket will attempt to listen on an IPv6 address.");
+    C10D_DEBUG("The server socket will attempt to listen on an IPv6 address.");
     if (tryListen(AF_INET6)) {
       return std::move(socket_);
     }
 
-    C10D_INFO("The server socket will attempt to listen on an IPv4 address.");
+    C10D_DEBUG("The server socket will attempt to listen on an IPv4 address.");
     if (tryListen(AF_INET)) {
       return std::move(socket_);
     }
   } else {
-    C10D_INFO("The server socket will attempt to listen on an IPv4 or IPv6 address.");
+    C10D_DEBUG("The server socket will attempt to listen on an IPv4 or IPv6 address.");
     if (tryListen(AF_UNSPEC)) {
       return std::move(socket_);
     }
@@ -392,7 +459,7 @@ bool SocketListenOp::tryListen(int family) {
   addrinfo_ptr result{naked_result};
 
   for (::addrinfo* addr = naked_result; addr != nullptr; addr = addr->ai_next) {
-    C10D_INFO("The server socket is attempting to listen on {}.", *addr);
+    C10D_DEBUG("The server socket is attempting to listen on {}.", *addr);
     if (tryListen(*addr)) {
       return true;
     }
@@ -467,8 +534,7 @@ class SocketConnectOp {
   enum class ConnectResult {
     Success,
     Error,
-    Retry,
-    TimeOut
+    Retry
   };
 
  public:
@@ -483,9 +549,11 @@ class SocketConnectOp {
 
   ConnectResult tryConnectCore(const ::addrinfo& addr);
 
+  [[noreturn]] void throwTimeoutError() const;
+
   template <typename... Args>
   void recordError(fmt::string_view format, Args&&... args) {
-    auto msg = fmt::format(format, std::forward<Args>(args)...);
+    auto msg = fmt::vformat(format, fmt::make_format_args(args...));
 
     C10D_WARNING(msg);
 
@@ -509,25 +577,25 @@ SocketConnectOp::SocketConnectOp(const std::string& host,
 
 std::unique_ptr<SocketImpl> SocketConnectOp::run() {
   if (opts_->prefer_ipv6()) {
-    C10D_INFO("The client socket will attempt to connect to an IPv6 address of ({}, {}).",
-              host_,
-              port_);
+    C10D_DEBUG("The client socket will attempt to connect to an IPv6 address of ({}, {}).",
+               host_,
+               port_);
 
     if (tryConnect(AF_INET6)) {
       return std::move(socket_);
     }
 
-    C10D_INFO("The client socket will attempt to connect to an IPv4 address of ({}, {}).",
-              host_,
-              port_);
+    C10D_DEBUG("The client socket will attempt to connect to an IPv4 address of ({}, {}).",
+               host_,
+               port_);
 
     if (tryConnect(AF_INET)) {
       return std::move(socket_);
     }
   } else {
-    C10D_INFO("The client socket will attempt to connect to an IPv4 or IPv6 address of ({}, {}).",
-              host_,
-              port_);
+    C10D_DEBUG("The client socket will attempt to connect to an IPv4 or IPv6 address of ({}, {}).",
+               host_,
+               port_);
 
     if (tryConnect(AF_UNSPEC)) {
       return std::move(socket_);
@@ -545,29 +613,14 @@ std::unique_ptr<SocketImpl> SocketConnectOp::run() {
 }
 
 bool SocketConnectOp::tryConnect(int family) {
-  ::addrinfo hints{}, *naked_result = nullptr;
-
+  ::addrinfo hints{};
   hints.ai_flags = AI_V4MAPPED | AI_ALL | AI_NUMERICSERV;
   hints.ai_family = family;
   hints.ai_socktype = SOCK_STREAM;
 
-  int r = ::getaddrinfo(host_, port_.c_str(), &hints, &naked_result);
-  if (r != 0) {
-    const char* gai_err = ::gai_strerror(r);
-
-    recordError("The {}network addresses of ({}, {}) cannot be retrieved (gai error: {} - {}).",
-                family == AF_INET ? "IPv4 " : family == AF_INET6 ? "IPv6 " : "",
-                host_,
-                port_,
-                r,
-                gai_err);
-
-    return false;
-  }
-
-  addrinfo_ptr result{naked_result};
-
   deadline_ = Clock::now() + opts_->connect_timeout();
+
+  std::size_t retry_attempt = 1;
 
   bool retry; // NOLINT(cppcoreguidelines-init-variables)
   do {
@@ -575,28 +628,51 @@ bool SocketConnectOp::tryConnect(int family) {
 
     errors_.clear();
 
-    for (::addrinfo* addr = naked_result; addr != nullptr; addr = addr->ai_next) {
-      C10D_INFO("The client socket is attempting to connect to {}.", *addr);
+    ::addrinfo *naked_result = nullptr;
+    // patternlint-disable cpp-dns-deps
+    int r = ::getaddrinfo(host_, port_.c_str(), &hints, &naked_result);
+    if (r != 0) {
+      const char* gai_err = ::gai_strerror(r);
 
-      ConnectResult cr = tryConnect(*addr);
-      if (cr == ConnectResult::Success) {
-        return true;
+      recordError("The {}network addresses of ({}, {}) cannot be retrieved (gai error: {} - {}).",
+                  family == AF_INET ? "IPv4 " : family == AF_INET6 ? "IPv6 " : "",
+                  host_,
+                  port_,
+                  r,
+                  gai_err);
+      retry = true;
+    } else {
+      addrinfo_ptr result{naked_result};
+
+      for (::addrinfo* addr = naked_result; addr != nullptr; addr = addr->ai_next) {
+        C10D_TRACE("The client socket is attempting to connect to {}.", *addr);
+
+        ConnectResult cr = tryConnect(*addr);
+        if (cr == ConnectResult::Success) {
+          return true;
+        }
+
+        if (cr == ConnectResult::Retry) {
+          retry = true;
+        }
       }
+    }
 
-      if (cr == ConnectResult::TimeOut) {
-        auto msg = fmt::format(
-            "The client socket has timed out after {} while trying to connect to ({}, {}).",
-            opts_->connect_timeout(),
-            host_,
-            port_);
+    if (retry) {
+      if (Clock::now() < deadline_ - delay_duration_) {
+        // Prevent our log output to be too noisy, warn only every 30 seconds.
+        if (retry_attempt == 30) {
+          C10D_INFO("No socket on ({}, {}) is listening yet, will retry.", host_, port_);
 
-        C10D_ERROR(msg);
+          retry_attempt = 0;
+        }
 
-        throw TimeoutError{msg};
-      }
+        // Wait one second to avoid choking the server.
+        delay(delay_duration_);
 
-      if (cr == ConnectResult::Retry) {
-        retry = true;
+        retry_attempt++;
+      } else {
+        throwTimeoutError();
       }
     }
   } while (retry);
@@ -606,7 +682,7 @@ bool SocketConnectOp::tryConnect(int family) {
 
 SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(const ::addrinfo& addr) {
   if (Clock::now() >= deadline_) {
-    return ConnectResult::TimeOut;
+    throwTimeoutError();
   }
 
   SocketImpl::Handle hnd = ::socket(addr.ai_family, addr.ai_socktype, addr.ai_protocol);
@@ -631,25 +707,14 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(const ::addrinfo& add
 
     // Retry if the server is not yet listening or if its backlog is exhausted.
     if (err == std::errc::connection_refused || err == std::errc::connection_reset) {
-      C10D_WARNING("The server socket on {} is not yet listening {}.", addr, err);
+      C10D_TRACE("The server socket on {} is not yet listening {}, will retry.", addr, err);
 
-      if (Clock::now() < deadline_ - delay_duration_) {
-        // Wait a little to avoid choking the server.
-        delay(delay_duration_);
-
-        return ConnectResult::Retry;
-      } else {
-        return ConnectResult::TimeOut;
-      }
+      return ConnectResult::Retry;
     } else {
       recordError("The client socket has failed to connect to {} {}.", addr, err);
 
       return ConnectResult::Error;
     }
-  }
-
-  if (cr == ConnectResult::TimeOut) {
-    return cr;
   }
 
   socket_->closeOnExec();
@@ -683,7 +748,7 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnectCore(const ::addrinfo&
 
   Duration remaining = deadline_ - Clock::now();
   if (remaining <= Duration::zero()) {
-    return ConnectResult::TimeOut;
+    throwTimeoutError();
   }
 
   ::pollfd pfd{};
@@ -694,7 +759,7 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnectCore(const ::addrinfo&
 
   r = pollFd(&pfd, 1, static_cast<int>(ms.count()));
   if (r == 0) {
-    return ConnectResult::TimeOut;
+    throwTimeoutError();
   }
   if (r == -1) {
     return ConnectResult::Error;
@@ -716,6 +781,18 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnectCore(const ::addrinfo&
   } else {
     return ConnectResult::Success;
   }
+}
+
+void SocketConnectOp::throwTimeoutError() const {
+  auto msg = fmt::format(
+      "The client socket has timed out after {} while trying to connect to ({}, {}).",
+      opts_->connect_timeout(),
+      host_,
+      port_);
+
+  C10D_ERROR(msg);
+
+  throw TimeoutError{msg};
 }
 
 } // namespace
@@ -783,65 +860,3 @@ Socket::Socket(std::unique_ptr<SocketImpl>&& impl) noexcept
 SocketError::~SocketError() = default;
 
 } // namespace c10d
-
-//
-// libfmt formatters for `addrinfo` and `Socket`
-//
-namespace fmt {
-
-template <>
-struct formatter<::addrinfo> {
-  constexpr decltype(auto) parse(format_parse_context& ctx) {
-    return ctx.begin();
-  }
-
-  template <typename FormatContext>
-  decltype(auto) format(const ::addrinfo& addr, FormatContext& ctx) {
-    char host[NI_MAXHOST], port[NI_MAXSERV]; // NOLINT
-
-    int r = ::getnameinfo(addr.ai_addr,
-                          addr.ai_addrlen,
-                          host,
-                          NI_MAXHOST,
-                          port,
-                          NI_MAXSERV,
-                          NI_NUMERICSERV);
-    if (r != 0) {
-      return format_to(ctx.out(), "?UNKNOWN?");
-    }
-
-    if (addr.ai_addr->sa_family == AF_INET) {
-      return format_to(ctx.out(), "{}:{}",   host, port);
-    } else {
-      return format_to(ctx.out(), "[{}]:{}", host, port);
-    }
-  }
-};
-
-template <>
-struct formatter<c10d::detail::SocketImpl> {
-  constexpr decltype(auto) parse(format_parse_context& ctx) {
-    return ctx.begin();
-  }
-
-  template <typename FormatContext>
-  decltype(auto) format(const c10d::detail::SocketImpl& socket, FormatContext& ctx) {
-    ::sockaddr_storage addr_s{};
-
-    auto addr_ptr = reinterpret_cast<::sockaddr*>(&addr_s);
-
-    ::socklen_t addr_len = sizeof(addr_s);
-
-    if (::getsockname(socket.handle(), addr_ptr, &addr_len) != 0) {
-      return format_to(ctx.out(), "?UNKNOWN?");
-    }
-
-    ::addrinfo addr{};
-    addr.ai_addr = addr_ptr;
-    addr.ai_addrlen = addr_len;
-
-    return format_to(ctx.out(), "{}", addr);
-  }
-};
-
-} // namespace fmt

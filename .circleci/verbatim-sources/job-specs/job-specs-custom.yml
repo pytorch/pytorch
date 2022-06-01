@@ -5,7 +5,7 @@
     parameters:
       branch:
         type: string
-        default: "master"
+        default: "main"
     steps:
     - attach_workspace:
         at: /tmp/workspace
@@ -43,9 +43,9 @@
           set -ex
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          # turn v1.12.0rc3 into 1.12.0
-          tag=$(echo $CIRCLE_TAG | sed -e 's/v*\([0-9.]*\).*/\1/')
-          target=${tag:-master}
+          # turn v1.12.0rc3 into 1.12
+          tag=$(echo $CIRCLE_TAG | sed -e 's/v*\([0-9]*\.[0-9]*\).*/\1/')
+          target=${tag:-main}
           echo "building for ${target}"
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -55,7 +55,7 @@
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
           mkdir -p ~/workspace/build_artifacts
-          docker cp $id:/var/lib/jenkins/workspace/pytorch.github.io/docs/master ~/workspace/build_artifacts
+          docker cp $id:/var/lib/jenkins/workspace/pytorch.github.io/docs/main ~/workspace/build_artifacts
           docker cp $id:/var/lib/jenkins/workspace/pytorch.github.io /tmp/workspace
 
           # Save the docs build so we can debug any problems
@@ -67,7 +67,7 @@
         paths:
           - .
     - store_artifacts:
-        path: ~/workspace/build_artifacts/master
+        path: ~/workspace/build_artifacts/main
         destination: docs
 
   pytorch_cpp_doc_build:
@@ -89,15 +89,14 @@
           set -ex
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          # turn v1.12.0rc3 into 1.12.0
-          tag=$(echo $CIRCLE_TAG | sed -e 's/v*\([0-9.]*\).*/\1/')
-          tag=${CIRCLE_TAG:1:5}
-          target=${tag:-master}
+          # turn v1.12.0rc3 into 1.12
+          tag=$(echo $CIRCLE_TAG | sed -e 's/v*\([0-9]*\.[0-9]*\).*/\1/')
+          target=${tag:-main}
           echo "building for ${target}"
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && '"export CIRCLE_SHA1='$CIRCLE_SHA1'"' && . ./.circleci/scripts/cpp_doc_push_script.sh docs/"$target" master") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && '"export CIRCLE_SHA1='$CIRCLE_SHA1'"' && . ./.circleci/scripts/cpp_doc_push_script.sh docs/"$target" main") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -581,7 +580,7 @@
           time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
           export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
-          echo "Do NOT merge master branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
+          echo "Do NOT merge main branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
 
           git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
 

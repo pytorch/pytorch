@@ -167,6 +167,8 @@ class _InternalRPCPickler:
             callee modules."""
             )
             ret = AttributeError(except_str)
+            # Ensure the stack trace gets preserved
+            ret.__cause__ = e
 
         # restore _thread_local_tensor_tables.recv_tables if return
         # from nested call, otherwise clean up the table

@@ -1,8 +1,10 @@
 from datetime import timedelta
 import logging
+import os
 import threading
 import warnings
 from typing import Generator, Tuple
+from urllib.parse import urlparse
 
 import torch
 import torch.distributed as dist
@@ -158,16 +160,20 @@ if is_available():
                 backend
             )
 
-        # Rendezvous.
-        # This rendezvous state sometimes is destroyed before all processes
-        # finishing handshaking. To avoid that issue, we make it global to
-        # keep it alive.
-        global rendezvous_iterator
-        rendezvous_iterator = dist.rendezvous(
-            rpc_backend_options.init_method, rank=rank, world_size=world_size
-        )
-        store, _, _ = next(rendezvous_iterator)
-
+        # Create store, performs rendezvous for static RPC group.
+        if not world_size:
+            # If world_size is not set in construction and also not set in environment variables
+            # The store will be created for the dynamic group setting
+            store = dist._create_store_from_options(rpc_backend_options, rank)
+        else:
+            # This rendezvous state sometimes is destroyed before all processes
+            # finishing handshaking. To avoid that issue, we make it global to
+            # keep it alive.
+            global rendezvous_iterator
+            rendezvous_iterator = dist.rendezvous(
+                rpc_backend_options.init_method, rank=rank, world_size=world_size
+            )
+            store, _, _ = next(rendezvous_iterator)
         # Use same timeout as RPC.
         store.set_timeout(timedelta(seconds=rpc_backend_options.rpc_timeout))
 
@@ -195,11 +201,12 @@ if is_available():
             store: dist.Store,
             name: str,
             rank: numbers.Integral,
-            world_size: numbers.Integral,
+            # world_size can be None for a dynamic group
+            world_size: (numbers.Integral, type(None)),
             rpc_backend_options: RpcBackendOptions,
         }
         for arg, arg_type in type_mapping.items():
-            if not isinstance(arg, arg_type):
+            if not isinstance(arg, arg_type):  # type: ignore[arg-type]
                 raise RuntimeError(
                     "Argument {} must be of type {} but got type {}".format(
                         arg, arg_type, type(arg)
@@ -211,7 +218,7 @@ if is_available():
         store=None,
         name=None,
         rank=-1,
-        world_size=-1,
+        world_size=None,
         rpc_backend_options=None,
     ):
 

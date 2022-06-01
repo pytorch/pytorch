@@ -220,7 +220,7 @@ enum DeviceTypeProto {
   PROTO_FPGA = 7; // FPGA
   PROTO_ORT = 8; // ONNX Runtime
   PROTO_XLA = 9; // XLA / TPU
-  PROTO_MLC = 10; // ML Compute
+  PROTO_MPS = 10; // MPS
   // Change the following number if you add more devices in the code.
   PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 11;
 }

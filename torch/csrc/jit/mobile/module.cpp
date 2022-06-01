@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/backends/backend_exception.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <exception>
 
@@ -19,13 +20,20 @@ void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
   methods_.emplace_back(std::move(fn));
 }
 
-Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
+const Function* CompilationUnit::find_function(
+    const c10::QualifiedName& qn) const {
   for (auto& fn : methods_) {
     if (fn->qualname() == qn) {
       return fn.get();
     }
   }
   return nullptr;
+}
+
+Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
+  // NOLINTNEXTLINE
+  return const_cast<Function*>(
+      static_cast<const CompilationUnit*>(this)->find_function(qn));
 }
 
 Method Module::get_method(const std::string& name) const {
@@ -254,6 +262,40 @@ c10::IValue Method::operator()(std::vector<c10::IValue> stack) const {
   run(stack);
   TORCH_INTERNAL_ASSERT(!stack.empty());
   return stack.front();
+}
+
+c10::optional<std::string> print_type(const c10::Type& t) {
+  auto namedType = t.cast<c10::NamedType>();
+  if (namedType && namedType->name()) {
+    return namedType->name().value().qualifiedName();
+  }
+  if (auto dyn = t.castRaw<c10::DynamicType>()) {
+    return dyn->fallback()->annotation_str();
+  }
+  return c10::nullopt;
+}
+
+TORCH_API ModuleInfo get_module_info(const mobile::Module& module) {
+  ModuleInfo minfo;
+  minfo.operator_version = module.min_operator_version();
+  minfo.bytecode_version = module.bytecode_version();
+  std::vector<std::string> type_name_list;
+  for (const auto& func_ptr : module.compilation_unit().methods()) {
+    const auto& function = *func_ptr;
+    for (int i = 0; i < function.get_code().op_names_.size(); i++) {
+      const auto& op = function.get_code().op_names_[i];
+      minfo.opname_to_num_args[mobile::operator_str(op)] =
+          function.get_code().operator_input_sizes_[i];
+    }
+    for (const c10::TypePtr& tp : function.get_code().types_) {
+      type_name_list.push_back(tp->annotation_str(print_type));
+    }
+    minfo.function_names.insert(function.qualname().qualifiedName());
+  }
+  c10::TypeParser parser(type_name_list);
+  parser.parseList();
+  minfo.type_names = parser.getContainedTypes();
+  return minfo;
 }
 
 } // namespace mobile

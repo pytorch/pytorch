@@ -21,7 +21,7 @@ bool available(
     const float output_min,
     const float output_max) {
          // XNNPACK
-  return xnnpack::internal::available() &&
+  return xnnpack::available() &&
           // Weight
           (2 == weight.ndimension()) &&
           (weight.device().is_cpu()) &&
@@ -136,7 +136,7 @@ Tensor run(
       output_size,
       padded_input.options().dtype(),
       padded_input.suggest_memory_format(),
-      padded_input.names());
+      padded_input.opt_names());
 
   const xnn_status setup_status = xnn_setup_fully_connected_nc_f32(
       context.op.get(),                                   // operator
@@ -187,7 +187,7 @@ unpack_prepacked_sizes_linear(const IValue& ivalue) {
   const auto& bias = std::get<1>(tuple);
   return IValue(std::make_tuple(
       std::get<0>(tuple).sizes(),
-      (bias && bias->defined()) ? c10::optional<IntArrayRef>(bias->sizes()) : c10::nullopt));
+      (bias && bias->defined()) ? at::OptionalIntArrayRef(bias->sizes()) : c10::nullopt));
 }
 
 } // namespace linear

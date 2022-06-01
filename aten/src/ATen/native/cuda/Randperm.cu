@@ -1,8 +1,20 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/cuda/cub.h>
 #include <ATen/native/cuda/Randperm.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/randperm_native.h>
+#endif
 
 #include <limits>
 

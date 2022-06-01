@@ -46,7 +46,7 @@ class TORCH_API LazyGraphExecutor {
   // for the given device. If device is nullptr, the live tensors for all
   // devices will be returned. Returned tensors are sorted by device as primary
   // key, and by unique ID as secondary key.
-  std::vector<LazyTensor> GetLiveTensors(const BackendDevice* device);
+  std::vector<LazyTensorPtr> GetLiveTensors(const BackendDevice* device);
 
   // Makes sure that any outstanding IR operation accumulated over live tensors,
   // gets turned into device data. If wait is true, the sync operation will be
@@ -62,7 +62,7 @@ class TORCH_API LazyGraphExecutor {
   // will be run synchronously. The devices argument, if not empty, tells the
   // devices which should be partecipating into the replicated computation.
   void SyncTensorsGraph(
-      std::vector<LazyTensor>* tensors,
+      std::vector<LazyTensorPtr>* tensors,
       c10::ArrayRef<std::string> devices,
       bool wait,
       bool sync_ltc_data);
@@ -77,13 +77,13 @@ class TORCH_API LazyGraphExecutor {
 
   // Retrieves the PyTorch CPU tensors behind the lazy tensors IR operations.
   // All the tensors must be on the same device.
-  std::vector<at::Tensor> GetTensors(std::vector<LazyTensor>* tensors);
+  std::vector<at::Tensor> GetTensors(std::vector<LazyTensorPtr>* tensors);
 
   size_t IncTrimCounter();
 
   // Dumps the backend specific text of the computation accumulated in the graph
   // which is attached the tensors.
-  std::string DumpBackendComputation(const std::vector<LazyTensor>& tensors);
+  std::string DumpBackendComputation(const std::vector<LazyTensorPtr>& tensors);
 
   Value GetDeviceDataIrValue(
       const at::Scalar& value,
@@ -113,6 +113,19 @@ class TORCH_API LazyGraphExecutor {
   void SetNoOpExecutionMode(bool enable_noop) {
     noop_execution_mode_ = enable_noop;
   }
+
+  struct CachedComputation {
+    explicit CachedComputation(ComputationPtr computation)
+        : computation(std::move(computation)) {}
+
+    ComputationPtr computation;
+  };
+
+  using ComputationCache = Cache<hash_t, CachedComputation, HashReducer>;
+
+  ComputationCache* GetComputationCache();
+
+  hash_t GetGraphHash(const std::vector<LazyTensorPtr>& tensors);
 
  private:
   struct SyncTensorsConfig {
@@ -148,15 +161,6 @@ class TORCH_API LazyGraphExecutor {
     std::vector<BackendDataPtr> parameters_data;
   };
 
-  struct CachedComputation {
-    explicit CachedComputation(ComputationPtr computation)
-        : computation(std::move(computation)) {}
-
-    ComputationPtr computation;
-  };
-
-  using ComputationCache = Cache<hash_t, CachedComputation, HashReducer>;
-
   struct Async {
     Async(
         SyncTensorCollection* coll,
@@ -176,43 +180,44 @@ class TORCH_API LazyGraphExecutor {
   };
 
   SyncTensorCollection CollectSyncTensors(
-      const std::vector<LazyTensor>& tensors,
+      const std::vector<LazyTensorPtr>& tensors,
       const SyncTensorsConfig& config);
 
+  // Waits for this SyncTensorCollection's device barrier and acuire the lock.
+  void TensorCollectionBarrier(SyncTensorCollection* coll);
+
   std::vector<Value> CollectRoots(
-      const std::vector<LazyTensor>& tensors,
+      const std::vector<LazyTensorPtr>& tensors,
       c10::ArrayRef<size_t> indices);
 
   std::vector<BackendDataPtr> FetchTensorData(
-      std::vector<LazyTensor>* tensors,
+      std::vector<LazyTensorPtr>* tensors,
       const SyncTensorsConfig& config,
       c10::ArrayRef<size_t> indices);
 
   PostOrderData RunPostOrder(
-      const std::vector<LazyTensor>& tensors,
-      c10::ArrayRef<size_t> indices);
+      const std::vector<LazyTensorPtr>& tensors,
+      SyncTensorCollection* coll);
   std::shared_ptr<Async> TryRunCachedSync(
-      std::vector<LazyTensor>* tensors,
+      std::vector<LazyTensorPtr>* tensors,
       SyncTensorCollection* coll,
       PostOrderData* po_data);
 
   CompilationResult Compile(
-      const std::vector<LazyTensor>& tensors,
+      const std::vector<LazyTensorPtr>& tensors,
       c10::ArrayRef<std::string> devices,
       const SyncTensorCollection& coll,
       PostOrderData* po_data);
 
-  ComputationCache* GetComputationCache();
-
   ComputationCache::TypePtr LookupCachedCompile(const hash_t& hash);
 
   void BuildInputOutputAliases(
-      const std::vector<LazyTensor>& tensors,
+      const std::vector<LazyTensorPtr>& tensors,
       c10::ArrayRef<size_t> indices,
       LoweringContext* lowering_ctx);
 
   std::shared_ptr<Async> SyncTensorsGraphInternal(
-      std::vector<LazyTensor>* tensors,
+      std::vector<LazyTensorPtr>* tensors,
       c10::ArrayRef<std::string> devices,
       const SyncTensorsConfig& config);
 
@@ -226,22 +231,22 @@ class TORCH_API LazyGraphExecutor {
       ComputationCache::TypePtr cached_computation);
 
   std::shared_ptr<Async> ScheduleSyncTensorsGraph(
-      std::vector<LazyTensor>* tensors,
+      std::vector<LazyTensorPtr>* tensors,
       SyncTensorCollection* coll,
       std::vector<BackendDataPtr> parameters_data,
       ComputationCache::TypePtr cached_computation);
 
-  std::vector<at::Tensor> GetTensorsFused(std::vector<LazyTensor>* tensors);
+  std::vector<at::Tensor> GetTensorsFused(std::vector<LazyTensorPtr>* tensors);
 
   std::vector<at::Tensor> FetchTensors(
-      std::vector<LazyTensor>* tensors,
+      std::vector<LazyTensorPtr>* tensors,
       c10::ArrayRef<BackendDataPtr> tensors_data,
       const std::vector<size_t>* indices);
 
   // Gathers the device data for all the input tensors, after an
   // asynchronous operation.
   std::vector<BackendDataPtr> GatherTensorsData(
-      const std::vector<LazyTensor>& tensors,
+      const std::vector<LazyTensorPtr>& tensors,
       c10::ArrayRef<size_t> indices,
       c10::ArrayRef<BackendDataPtr> tensors_data);
 

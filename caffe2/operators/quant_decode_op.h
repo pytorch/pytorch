@@ -36,7 +36,7 @@ void Decode(
     }
 
     int sz = output->numel();
-    for (const auto i : c10::irange(sz)) {
+    for (C10_UNUSED const auto i : c10::irange(sz)) {
       DCHECK_LE(*code_ptr, cb_size);
       *out_ptr++ = cb_ptr[*code_ptr++];
     }

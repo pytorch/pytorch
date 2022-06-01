@@ -385,7 +385,7 @@ class TestSequenceOps(serial.SerializedTestCase):
             ["shrunk_data"])
 
         def op_ref(data, indices):
-            unique_indices = np.unique(indices)
+            unique_indices = np.unique(indices) if len(indices)>0 else np.array([],dtype=np.int64)
             sorted_indices = np.sort(unique_indices)
             shrunk_data = np.delete(data, sorted_indices, axis=0)
             return (shrunk_data,)

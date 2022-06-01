@@ -94,7 +94,7 @@ constexpr double real_impl <c10::complex<double>, double> (c10::complex<double> 
 }
 
 template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
-constexpr VALUE_TYPE imag_impl (SCALAR_TYPE z) {
+constexpr VALUE_TYPE imag_impl (SCALAR_TYPE /*z*/) {
   return 0;
 }
 
@@ -121,6 +121,11 @@ constexpr double imag_impl <c10::complex<double>, double> (c10::complex<double> 
 template <typename TYPE>
 inline TYPE conj_impl (TYPE z) {
   return z; //No-Op
+}
+
+template<>
+inline c10::complex<at::Half> conj_impl <c10::complex<at::Half>> (c10::complex<at::Half> z) {
+  return c10::complex<at::Half>{z.real(), -z.imag()};
 }
 
 template<>

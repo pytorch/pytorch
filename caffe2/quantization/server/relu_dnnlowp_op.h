@@ -3,7 +3,7 @@
 #include "caffe2/operators/relu_op.h"
 
 #include "caffe2/core/tensor_int8.h"
-#include "caffe2_dnnlowp_utils.h"
+#include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"
 
 namespace caffe2 {
 

@@ -292,7 +292,7 @@ void MKLDNNLayerNormOp(Stack& stack, bool inplace) {
   TORCH_INTERNAL_ASSERT(weight_ival.isTensor());
   weight = weight_ival.toTensor();
 
-  auto shape = pop(stack).toIntVector();
+  auto shape = pop(stack).toDimVector();
   auto input = pop(stack).toTensor();
 
   at::Tensor dst, mean, rstd;

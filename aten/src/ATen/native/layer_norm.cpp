@@ -18,7 +18,7 @@
 namespace at {
 namespace native {
 
-void layer_norm_cpu_out(
+void layer_norm_with_mean_rstd_out(
     at::Tensor& out,
     at::Tensor& mean,
     at::Tensor& rstd,
@@ -50,6 +50,20 @@ void layer_norm_cpu_out(
   rstd = rstd.view(stat_shape);
 }
 
+void layer_norm_cpu_out(
+    at::Tensor& out,
+    const at::Tensor& input,
+    const Tensor& gamma,
+    const Tensor& beta,
+    double eps,
+    int64_t M,
+    int64_t N) {
+  if (M <= 0) {
+    return;
+  }
+  LayerNormKernel(kCPU, input, gamma, beta, M, N, eps, &out, /*mean=*/nullptr, /*rstd=*/nullptr);
+}
+
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
     const Tensor& input,
     IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
@@ -78,7 +92,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
   Tensor mean = at::empty({M}, X->options());
   Tensor rstd = at::empty({M}, X->options());
 
-  layer_norm_cpu_out(Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
+  layer_norm_with_mean_rstd_out(Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 

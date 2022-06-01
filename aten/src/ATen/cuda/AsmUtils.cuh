@@ -11,9 +11,9 @@ struct Bitfield {};
 
 template <>
 struct Bitfield<unsigned int> {
-  static __device__ __forceinline__
+  static __device__ __host__ __forceinline__
   unsigned int getBitfield(unsigned int val, int pos, int len) {
-#if defined(USE_ROCM)
+#if !defined(__CUDA_ARCH__)
     pos &= 0xff;
     len &= 0xff;
 
@@ -26,9 +26,9 @@ struct Bitfield<unsigned int> {
 #endif
   }
 
-  static __device__ __forceinline__
+  static __device__ __host__ __forceinline__
   unsigned int setBitfield(unsigned int val, unsigned int toInsert, int pos, int len) {
-#if defined(USE_ROCM)
+#if !defined(__CUDA_ARCH__)
     pos &= 0xff;
     len &= 0xff;
 
@@ -49,9 +49,9 @@ struct Bitfield<unsigned int> {
 
 template <>
 struct Bitfield<uint64_t> {
-  static __device__ __forceinline__
+  static __device__ __host__ __forceinline__
   uint64_t getBitfield(uint64_t val, int pos, int len) {
-#if defined(USE_ROCM)
+#if !defined(__CUDA_ARCH__)
     pos &= 0xff;
     len &= 0xff;
 
@@ -64,9 +64,9 @@ struct Bitfield<uint64_t> {
 #endif
   }
 
-  static __device__ __forceinline__
+  static __device__ __host__ __forceinline__
   uint64_t setBitfield(uint64_t val, uint64_t toInsert, int pos, int len) {
-#if defined(USE_ROCM)
+#if !defined(__CUDA_ARCH__)
     pos &= 0xff;
     len &= 0xff;
 

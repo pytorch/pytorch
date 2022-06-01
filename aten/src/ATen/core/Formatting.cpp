@@ -12,6 +12,28 @@ namespace c10 {
 std::ostream& operator<<(std::ostream & out, Backend b) {
   return out << toString(b);
 }
+
+std::ostream& operator<<(std::ostream & out, Scalar s) {
+  if (s.isFloatingPoint()) {
+    return out << s.toDouble();
+  }
+  if (s.isComplex()) {
+    return out << s.toComplexDouble();
+  }
+  if (s.isBoolean()) {
+    return out << (s.toBool() ? "true" : "false");
+  }
+  if (s.isIntegral(false)) {
+    return out << s.toLong();
+  }
+  throw std::logic_error("Unknown type in Scalar");
+}
+
+std::string toString(Scalar s) {
+  std::stringstream out;
+  out << s;
+  return out.str();
+}
 }
 namespace at {
 
@@ -173,7 +195,7 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
     for (const auto l : c10::irange(self.size(0))) {
       Tensor row = self.select(0,l);
       double *row_ptr = row.data_ptr<double>();
-      for(int64_t c = firstColumn; c < lastColumn+1; c++) {
+      for (const auto c : c10::irange(firstColumn, lastColumn+1)) {
         stream << std::setw(sz) << row_ptr[c]/scale;
         if(c == lastColumn) {
           stream << std::endl;
@@ -226,7 +248,7 @@ void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
     }
     stream << "(";
     Tensor tensor = self;
-    for(int64_t i=0; i < self.ndimension()-2; i++) {
+    for (const auto i : c10::irange(self.ndimension()-2)) {
       tensor = tensor.select(0, counter[i]);
       stream << counter[i]+1 << ",";
     }

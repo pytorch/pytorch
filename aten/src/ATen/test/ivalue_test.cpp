@@ -32,6 +32,7 @@ TEST(IValueTest, Basic) {
   ASSERT_EQ(foo2.toDouble(), 4.0);
   ASSERT_EQ(foo.use_count(), 2);
   ASSERT_TRUE(baz.toIntVector() == std::vector<int64_t>({3, 4, 5}));
+  ASSERT_TRUE(baz.toDimVector() == at::DimVector({3, 4, 5}));
 
   auto move_it = std::move(baz).toIntList();
   ASSERT_EQ(foo.use_count(), 2);
@@ -399,7 +400,6 @@ TEST(IValueTest, FutureSetError) {
     EXPECT_THAT(e.what(), ::testing::HasSubstr("bar"));
   }
 }
-
 
 TEST(IValueTest, ValueEquality) {
   EXPECT_EQ(IValue("asdf"), IValue("asdf"));
@@ -801,6 +801,23 @@ TEST(IValueTest, ToWeakAndBack) {
     WeakIValue weak(sample);
     EXPECT_IVALUE_EQ(sample, weak.lock());
   }
+}
+
+// Storage and Generator did not set is_intrusive_ptr if they were
+// undefined, which led use_count to return 1 instead of 0 for these
+// cases.
+TEST(IValueTest, UseCountCornerCases) {
+  at::Storage undefinedStorage;
+  at::Generator undefinedGenerator;
+  at::Tensor undefinedTensor;
+
+  IValue ivEmptyStorage(undefinedStorage);
+  IValue ivEmptyGenerator(undefinedGenerator);
+  IValue ivEmptyTensor(undefinedTensor);
+
+  ASSERT_EQ(1, ivEmptyStorage.use_count());
+  ASSERT_EQ(1, ivEmptyGenerator.use_count());
+  ASSERT_EQ(0, ivEmptyTensor.use_count());
 }
 
 // TODO(gmagogsfm): Add type conversion test?

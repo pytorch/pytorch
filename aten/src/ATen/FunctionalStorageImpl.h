@@ -72,7 +72,7 @@ class Alias {
     const at::Tensor& base() const;
     size_t generation() const { return generation_; }
     void add_update(const at::Tensor& updated_val, const std::vector<ViewMeta>& metas);
-    void apply_updates();
+    bool apply_updates();
   private:
     // NB: base_ should always point to a tensor BELOW the current functionalization layer.
     // This is mainly to avoid reference cycles.
@@ -96,7 +96,7 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   explicit FunctionalStorageImpl(const Tensor& value);
 
   void add_update(const Tensor& updated_val, const std::vector<ViewMeta>& view_metas);
-  void apply_updates();
+  bool apply_updates();
   const Tensor& base();
   size_t generation() const;
 

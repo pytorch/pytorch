@@ -1,10 +1,21 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/IndexKernel.h>
 #include <ATen/native/TensorAdvancedIndexing.h>  // For at::native::index_out
+#include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/Functions.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/masked_scatter_native.h>
+#include <ATen/ops/masked_select_native.h>
+#endif
+
 
 namespace at {
 namespace native {

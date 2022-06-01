@@ -25,7 +25,7 @@ struct IsContiguous<0, 0, traits, s> {
 // will be called when there is no output
 template <typename traits, int s>
 struct IsContiguous<0, -1, traits, s> {
-  static bool eval(const int64_t* strides) {
+  static bool eval(const int64_t* /*strides*/) {
     return true;
   }
 };

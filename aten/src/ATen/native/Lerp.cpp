@@ -18,7 +18,7 @@ TORCH_META_FUNC(lerp_Tensor)(
 }
 
 TORCH_META_FUNC(lerp_Scalar)(
-    const Tensor& self, const Tensor& end, const Scalar& weight) {
+    const Tensor& self, const Tensor& end, const Scalar& /*weight*/) {
   TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(),
               " for `end` but got dtype ", end.dtype());
   build_binary_op(maybe_get_output(), self, end);
@@ -29,12 +29,12 @@ TORCH_META_FUNC(lerp_Scalar)(
 namespace native {
 
 TORCH_IMPL_FUNC(lerp_Tensor)(
-    const Tensor& self, const Tensor& end, const Tensor& weight, const Tensor &out) {
+    const Tensor& /*self*/, const Tensor& /*end*/, const Tensor& weight, const Tensor& /*out*/) {
   lerp_kernel_tensor_weight(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(lerp_Scalar)(
-    const Tensor& self, const Tensor& end, const Scalar& weight, const Tensor &out) {
+    const Tensor& /*self*/, const Tensor& /*end*/, const Scalar& weight, const Tensor& /*out*/) {
   lerp_kernel_scalar_weight(device_type(), *this, weight);
 }
 

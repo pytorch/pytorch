@@ -1,4 +1,3 @@
-import argparse
 from typing import Any, Callable, Tuple, Dict, Optional
 import logging
 
@@ -18,6 +17,7 @@ from .tools_common import (
     FxNetAccFusionsFinder,
     Names
 )
+from dataclasses import dataclass
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,43 +46,26 @@ class FxNetMinimizerResultMismatchError(Exception):
 
     pass
 
-
+@dataclass
 class _MinimizerSettingBase:
-    def __init__(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument(
-            "--accumulate_error",
-            default=False,
-            action="store_true",
-            help="Instead of using a's input for both converted module to verify, use the "
-            "previous outputs of each converted module as input to accumulate the errors.",
-        )
+    """
+    Args:
+    `accumulate_error`: Instead of using a's input for both converted module to verify
+    , use the previous outputs of each converted module as input to accumulate the
+    errors.
 
-        parser.add_argument(
-            "--traverse_method",
-            default="sequential",
-            choices=["sequential", "binary", "accumulate"],
-            help="Determine the way of traverse the nodes in FX module.",
-        )
-        parser.add_argument(
-            "--find_all",
-            default=False,
-            action="store_true",
-            help="Minimizer will go through the entire model and return all problematic nodes.",
-        )
-        parser.add_argument(
-            "--return_intermediate",
-            default=False,
-            action="store_true",
-            help="If true, when using `run_nodes()` function to run the model, intermediate results "
-            "of all the ops will be returned as output.",
-        )
-        args, unknown = parser.parse_known_args()
+    `traverse_method`: "sequential" or "binary" or "accumulate"
+    Determine the way of traverse the nodes in FX module.
 
-        self.accumulate_error: bool = args.accumulate_error
-        self.traverse_method: str = args.traverse_method
-        self.find_all: bool = args.find_all
-        self.return_intermediate: bool = args.return_intermediate
+    `find_all`: Minimizer will go through the entire model and return all problematic nodes.
+
+    `return_intermediate`: If true, when using `run_nodes()` function to run the
+    model, intermediate results of all the ops will be returned as output.
+    """
+    accumulate_error: bool = False
+    traverse_method: str = "sequential"
+    find_all: bool = False
+    return_intermediate: bool = False
 
     def __str__(self):
         settings_str = "FX Minimizer Settings:\n"

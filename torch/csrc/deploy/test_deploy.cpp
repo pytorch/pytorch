@@ -182,13 +182,14 @@ TEST(TorchpyTest, ErrorsReplicatingObj) {
   auto obj = session1.fromMovable(replicatedObj);
   // should throw an error when trying to access obj from different session
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(session2.createMovable(obj), c10::Error);
+  EXPECT_THROW(session2.createMovable(obj), std::runtime_error);
   try {
     session2.createMovable(obj);
-  } catch (c10::Error& error) {
+  } catch (std::runtime_error& error) {
     EXPECT_TRUE(
-        error.msg().find(
-            "Cannot create movable from an object that lives in different session") !=
+        std::string(error.what())
+            .find(
+                "Cannot create movable from an object that lives in different session") !=
         std::string::npos);
   }
 }
@@ -197,15 +198,15 @@ TEST(TorchpyTest, ThrowsSafely) {
   // See explanation in deploy.h
   torch::deploy::InterpreterManager manager(3);
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(manager.loadPackage("some garbage path"), c10::Error);
+  EXPECT_THROW(manager.loadPackage("some garbage path"), std::runtime_error);
 
   torch::deploy::Package p = manager.loadPackage(path("SIMPLE", simple));
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(p.loadPickle("some other", "garbage path"), c10::Error);
+  EXPECT_THROW(p.loadPickle("some other", "garbage path"), std::runtime_error);
 
   auto model = p.loadPickle("model", "model.pkl");
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(model(at::IValue("unexpected input")), c10::Error);
+  EXPECT_THROW(model(at::IValue("unexpected input")), std::runtime_error);
 }
 
 TEST(TorchpyTest, AcquireMultipleSessionsInTheSamePackage) {
@@ -238,7 +239,7 @@ TEST(TorchpyTest, TensorSharingNotAllowed) {
   auto t = obj.toIValue().toTensor();
   // try to feed it to the other interpreter, should error
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  ASSERT_THROW(I1.global("torch", "sigmoid")({t}), c10::Error);
+  ASSERT_THROW(I1.global("torch", "sigmoid")({t}), std::runtime_error);
 }
 
 TEST(TorchpyTest, TaggingRace) {
@@ -259,7 +260,7 @@ TEST(TorchpyTest, TaggingRace) {
         try {
           I.fromIValue(t);
           success++;
-        } catch (const c10::Error& e) {
+        } catch (const std::runtime_error& e) {
           failed++;
         }
       }
@@ -279,7 +280,7 @@ TEST(TorchpyTest, DisarmHook) {
   torch::deploy::InterpreterManager m(1);
   auto I = m.acquireOne();
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  ASSERT_THROW(I.fromIValue(t), c10::Error); // NOT a segfault
+  ASSERT_THROW(I.fromIValue(t), std::runtime_error); // NOT a segfault
 }
 
 TEST(TorchpyTest, RegisterModule) {
@@ -291,6 +292,7 @@ TEST(TorchpyTest, RegisterModule) {
   }
 }
 
+#ifdef FBCODE_CAFFE2
 TEST(TorchpyTest, FxModule) {
   size_t nthreads = 3;
   torch::deploy::InterpreterManager manager(nthreads);
@@ -317,6 +319,7 @@ TEST(TorchpyTest, FxModule) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }
+#endif
 
 // Moving a tensor between interpreters should share the underlying storage.
 TEST(TorchpyTest, TensorSerializationSharing) {
@@ -448,6 +451,18 @@ result = torch.Tensor([1,2,3])
   EXPECT_TRUE(w_grad0.equal(w_grad1));
 }
 
+TEST(TorchpyTest, ImportlibMetadata) {
+  torch::deploy::InterpreterManager m(1);
+  m.registerModuleSource("importlib_test", R"PYTHON(
+from importlib.metadata import version
+
+result = version("torch")
+)PYTHON");
+  auto I = m.allInstances()[0].acquireSession();
+  auto ver = I.global("importlib_test", "result").toIValue().toString();
+  ASSERT_EQ(ver->string(), "0.0.1+fake_multipy");
+}
+
 // OSS build does not have bultin numpy support yet. Use this flag to guard the
 // test case.
 #if HAS_NUMPY
@@ -478,6 +493,42 @@ TEST(TorchpyTest, TestPyYAML) {
   EXPECT_EQ(kDocument, dump.toIValue().toString()->string());
 }
 #endif
+
+TEST(TorchpyTest, PrintInstruction) {
+  const auto jit_script_with_print = R"JIT(
+  def forward(self, a):
+    print(a)
+    return a + a
+  )JIT";
+
+  auto input = torch::autograd::make_variable(at::randn({2, 3}));
+  auto expected_forward = input + input;
+
+  auto module = std::make_shared<torch::jit::Module>(
+      "Module", std::make_shared<at::CompilationUnit>());
+  module->define(jit_script_with_print);
+
+  std::vector<at::IValue> inputs{at::IValue(input)};
+
+  // Checking that a module containing prim::Print() works fine.
+  auto result1 = (*module)(inputs);
+  EXPECT_TRUE(result1.toTensor().equal(expected_forward));
+
+  {
+    auto interpreterManager =
+        std::make_shared<torch::deploy::InterpreterManager>(1);
+
+    // Checking that a module containing prim::Print() still works fine
+    // after Python environment was created.
+    auto result2 = (*module)(inputs);
+    EXPECT_TRUE(result2.toTensor().equal(expected_forward));
+  }
+
+  // Checking that a module containing prim::Print() still works fine
+  // after Python environment was created and then destroyed.
+  auto result3 = (*module)(inputs);
+  EXPECT_TRUE(result3.toTensor().equal(expected_forward));
+}
 
 int main(int argc, char* argv[]) {
   ::testing::InitGoogleTest(&argc, argv);

@@ -17,7 +17,7 @@ bool use_channel_shuffle(
   //   and all dimensions must be positive.
   // * The number of groups must be larger than 1 and
   //   the number of channels must be divisible by the number of groups.
-  return xnnpack::internal::available() &&
+  return xnnpack::available() &&
       // Input
       (4 == input.dim()) &&
       (input.device().is_cpu()) &&
@@ -55,7 +55,7 @@ Tensor channel_shuffle(
       },
       input_padded_contig_nhwc.options().dtype(),
       MemoryFormat::ChannelsLast,
-      input_padded_contig_nhwc.names());
+      input_padded_contig_nhwc.opt_names());
 
   int64_t channels_per_group =
       input_padded_contig_nhwc.size(Layout::Activation4D::channels) / groups;

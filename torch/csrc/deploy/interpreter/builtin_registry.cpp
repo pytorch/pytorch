@@ -1,6 +1,7 @@
 #include <Python.h>
 #include <c10/util/Exception.h>
 #include <fmt/format.h>
+#include <torch/csrc/deploy/Exception.h>
 #include <torch/csrc/deploy/interpreter/builtin_registry.h>
 
 namespace torch {
@@ -9,17 +10,24 @@ namespace deploy {
 // These numbers of modules should not change as long as the cpython version
 // embedded in the build remains fixed
 static const size_t NUM_FROZEN_PY_BUILTIN_MODULES = 6;
+#ifndef FBCODE_CAFFE2
 static const size_t NUM_FROZEN_PY_STDLIB_MODULES = 680;
+#endif
 
-extern "C" struct _frozen _PyImport_FrozenModules_torch[];
 extern "C" PyObject* initModule(void);
 
 REGISTER_TORCH_DEPLOY_BUILTIN(cpython_internal, PyImport_FrozenModules);
+
+#ifdef FBCODE_CAFFE2
+REGISTER_TORCH_DEPLOY_BUILTIN(frozentorch, nullptr, "torch._C", initModule);
+#else
+extern "C" struct _frozen _PyImport_FrozenModules_torch[];
 REGISTER_TORCH_DEPLOY_BUILTIN(
     frozentorch,
     _PyImport_FrozenModules_torch,
     "torch._C",
     initModule);
+#endif
 
 BuiltinRegistryItem::BuiltinRegistryItem(
     const char* _name,
@@ -37,7 +45,7 @@ BuiltinRegistryItem::BuiltinRegistryItem(
 
   fprintf(
       stderr,
-      "torch::deploy builtin %s contains %d modules\n",
+      "torch::deploy builtin %s contains %u modules\n",
       name,
       numModules);
 }
@@ -50,7 +58,6 @@ BuiltinRegistry* BuiltinRegistry::get() {
 void BuiltinRegistry::runPreInitialization() {
   TORCH_INTERNAL_ASSERT(!Py_IsInitialized());
   sanityCheck();
-
   PyImport_FrozenModules = BuiltinRegistry::getAllFrozenModules();
   TORCH_INTERNAL_ASSERT(PyImport_FrozenModules != nullptr);
 
@@ -59,6 +66,7 @@ void BuiltinRegistry::runPreInitialization() {
 
 const char* metaPathSetupTemplate = R"PYTHON(
 import sys
+from importlib.metadata import DistributionFinder, Distribution
 # We need to register a custom meta path finder because we are registering
 # `torch._C` as a builtin module.
 #
@@ -67,12 +75,36 @@ import sys
 # are top-level imports.  Since `torch._C` is a submodule of `torch`, the
 # BuiltinImporter skips it.
 class F:
+    MODULES = {<<<DEPLOY_BUILTIN_MODULES_CSV>>>}
+
     def find_spec(self, fullname, path, target=None):
-        if fullname in [<<<DEPLOY_BUILTIN_MODULES_CSV>>>]:
+        if fullname in self.MODULES:
             # Load this module using `BuiltinImporter`, but set `path` to None
             # in order to trick it into loading our module.
             return sys.meta_path[1].find_spec(fullname, path=None, target=None)
         return None
+
+    def find_distributions(self, context=DistributionFinder.Context()):
+        modules = {"torch"} | self.MODULES
+        # Insert dummy distribution records for each builtin module so
+        # importlib.metadata.version(...) works.
+        if context.name is None:
+            for name in modules:
+                yield DummyDistribution(name)
+        if context.name in modules:
+            yield DummyDistribution(context.name)
+
+class DummyDistribution(Distribution):
+    def __init__(self, name):
+        self._metadata = {
+            "Name": name,
+            "Version": "0.0.1+fake_multipy",
+        }
+
+    @property
+    def metadata(self):
+        return self._metadata
+
 sys.meta_path.insert(0, F())
 )PYTHON";
 
@@ -80,9 +112,9 @@ void BuiltinRegistry::runPostInitialization() {
   TORCH_INTERNAL_ASSERT(Py_IsInitialized());
   std::string metaPathSetupScript(metaPathSetupTemplate);
   std::string replaceKey = "<<<DEPLOY_BUILTIN_MODULES_CSV>>>";
-  auto itr = metaPathSetupScript.find(replaceKey);
-  if (itr != std::string::npos) {
-    metaPathSetupScript.replace(itr, replaceKey.size(), getBuiltinModulesCSV());
+  size_t pos = metaPathSetupScript.find(replaceKey);
+  if (pos != std::string::npos) {
+    metaPathSetupScript.replace(pos, replaceKey.size(), getBuiltinModulesCSV());
   }
   int r = PyRun_SimpleString(metaPathSetupScript.c_str());
   TORCH_INTERNAL_ASSERT(r == 0);
@@ -103,8 +135,8 @@ BuiltinRegistryItem* BuiltinRegistry::getItem(const std::string& name) {
                                        : get()->items_[itr->second].get();
 }
 
-int BuiltinRegistry::totalNumModules() {
-  int tot = 0;
+unsigned BuiltinRegistry::totalNumModules() {
+  unsigned tot = 0;
   for (const auto& itemptr : get()->items_) {
     tot += itemptr->numModules;
   }
@@ -113,7 +145,7 @@ int BuiltinRegistry::totalNumModules() {
 
 struct _frozen* BuiltinRegistry::getAllFrozenModules() {
   /* Allocate new memory for the combined table */
-  int totNumModules = totalNumModules();
+  size_t totNumModules = totalNumModules();
   struct _frozen* p = nullptr;
   if (totNumModules > 0 &&
       totNumModules <= SIZE_MAX / sizeof(struct _frozen) - 1) {
@@ -128,7 +160,7 @@ struct _frozen* BuiltinRegistry::getAllFrozenModules() {
   memset(&p[0], 0, sizeof(p[0]));
 
   /* Copy the tables into the new memory */
-  int off = 0;
+  unsigned off = 0;
   for (const auto& itemptr : items()) {
     if (itemptr->numModules > 0) {
       memcpy(
@@ -152,6 +184,10 @@ void BuiltinRegistry::sanityCheck() {
       "Missing python builtin frozen modules");
 
   auto* frozenpython = getItem("frozenpython");
+#ifdef FBCODE_CAFFE2
+  TORCH_INTERNAL_ASSERT(
+      frozenpython != nullptr, "Missing frozen python modules");
+#else
   auto* frozentorch = getItem("frozentorch");
   // Check frozenpython+frozentorch together since in OSS frozenpython is empty
   // and frozentorch contains stdlib+torch, while in fbcode they are separated
@@ -162,6 +198,7 @@ void BuiltinRegistry::sanityCheck() {
           frozenpython->numModules + frozentorch->numModules >
               NUM_FROZEN_PY_STDLIB_MODULES + 1,
       "Missing frozen python stdlib or torch modules");
+#endif
 }
 
 std::vector<std::pair<const char*, void*>> BuiltinRegistry::

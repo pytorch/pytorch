@@ -1,7 +1,7 @@
-#import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNConvOp.h>
 #import <ATen/native/metal/mpscnn/MPSCNNNeuronOp.h>
+#import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 
 #include <c10/util/Exception.h>
 
@@ -14,7 +14,7 @@
 - (id)initWithWeights:(void*)weights
                  Bias:(float*)bias
                  Desc:(MPSCNNConvolutionDescriptor*)desc
-    API_AVAILABLE(ios(10.0), macos(10.13)) {
+    API_AVAILABLE(ios(11.0), macos(10.13)) {
   self = [super init];
   if (self) {
     _weights = (float*)weights;
@@ -36,7 +36,7 @@
   return _bias;
 }
 
-- (MPSDataType)dataType API_AVAILABLE(ios(10.0), macos(10.13)) {
+- (MPSDataType)dataType API_AVAILABLE(ios(11.0), macos(10.13)) {
   return MPSDataTypeFloat32;
 }
 
@@ -71,7 +71,7 @@
 + (MPSCNNConvOp*)conv2d:(const Conv2DParams&)params
                 weights:(float*)w
                    bias:(float*)b
-           neuronFilter:(NeuronType)t API_AVAILABLE(ios(10.0), macos(10.13)) {
+           neuronFilter:(NeuronType)t API_AVAILABLE(ios(11.0), macos(10.13)) {
   using namespace at::native::metal::mpscnn;
   TORCH_CHECK(
       params.DX == params.DY == 1, "Dilated convolution is not supported yet.");
@@ -79,7 +79,7 @@
   const int64_t iC = params.C;
   const int64_t kH = params.KH;
   const int64_t kW = params.KW;
-  MPSCNNNeuron* neuron = neuronType(t);
+  MPSCNNNeuron* neuron = at::native::metal::neuron(t);
   MPSCNNConvolutionDescriptor* desc = nil;
   if (params.isDepthwise()) {
     if (@available(iOS 11.0, *)) {
@@ -87,9 +87,14 @@
           cnnConvolutionDescriptorWithKernelWidth:kW
                                      kernelHeight:kH
                              inputFeatureChannels:iC
-                            outputFeatureChannels:oC
-                                     neuronFilter:neuron];
+                            outputFeatureChannels:oC];
+
       desc.groups = 1;
+#if TARGET_OS_MACCATALYST
+      desc.fusedNeuronDescriptor = at::native::metal::neuronDescriptor(t);
+#else
+      desc.neuron = neuron;
+#endif
     } else {
       TORCH_CHECK(
           false,
@@ -103,13 +108,23 @@
         channels in each group to be multiple of 4 for \
         group > 1.");
     }
-    desc = [MPSCNNConvolutionDescriptor
-        cnnConvolutionDescriptorWithKernelWidth:kW
-                                   kernelHeight:kH
-                           inputFeatureChannels:iC
-                          outputFeatureChannels:oC
-                                   neuronFilter:neuron];
-    desc.groups = params.G;
+    if (@available(iOS 11.0, *)) {
+      desc = [MPSCNNConvolutionDescriptor
+          cnnConvolutionDescriptorWithKernelWidth:kW
+                                     kernelHeight:kH
+                             inputFeatureChannels:iC
+                            outputFeatureChannels:oC];
+      desc.groups = params.G;
+#if TARGET_OS_MACCATALYST
+      desc.fusedNeuronDescriptor = at::native::metal::neuronDescriptor(t);
+#else
+      desc.neuron = neuron;
+#endif
+    } else {
+      TORCH_CHECK(
+          false,
+          "MPSCNNConvolutionDescriptor is only available on iOS 11.0 and above");
+    }
   }
   desc.strideInPixelsX = params.SX;
   desc.strideInPixelsY = params.SY;
@@ -124,15 +139,8 @@
                weights:dataSource];
 
   } else {
-#if TARGET_OS_IPHONE
-    // Fallback on earlier versions
-    conv = [[MPSCNNConvolution alloc]
-               initWithDevice:[MetalContext sharedInstance].device
-        convolutionDescriptor:desc
-                kernelWeights:w
-                    biasTerms:b
-                        flags:MPSCNNConvolutionFlagsNone];
-#endif
+    TORCH_CHECK(
+        false, "MPSCNNConvolution is only available on iOS 11.0 and above");
   }
   [conv setEdgeMode:MPSImageEdgeModeZero];
   MPSOffset offset;

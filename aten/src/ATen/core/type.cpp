@@ -1,5 +1,8 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/dynamic_type.h>
+#include <ATen/core/function_schema.h>
+#include <ATen/core/enum_type.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
@@ -7,6 +10,28 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/function.h>
 #include <iostream>
+
+namespace std {
+template<>
+struct hash<std::tuple<std::string, c10::TypePtr, c10::TypePtr>> {
+  size_t operator()(std::tuple<std::string, c10::TypePtr, c10::TypePtr> const& t) const {
+    // This hashing is all hidden behind a static initializer so it
+    // doesn't have to be optimal
+    auto hash = std::hash<std::string>()(std::get<0>(t));
+    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
+    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<2>(t)));
+    return hash;
+  }
+};
+template<>
+struct hash<std::tuple<std::string, c10::TypePtr>> {
+  size_t operator()(std::tuple<std::string, c10::TypePtr> const& t) const {
+    auto hash = std::hash<std::string>()(std::get<0>(t));
+    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
+    return hash;
+  }
+};
+} // namespace std
 
 namespace c10 {
 
@@ -16,26 +41,6 @@ static_assert(
 static_assert(
     std::is_same<decltype(getTypePtr<std::tuple<int64_t, int64_t>>()), const TupleTypePtr&>::value,
     "getTypePtr<std::tuple<int64_t, int64_t>> not returning const ref!");
-
-namespace {
-inline bool is_contiguous_strides(
-    const IntArrayRef sizes,
-    const IntArrayRef strides) {
-  int n_dim = static_cast<int>(sizes.size());
-
-  if (n_dim == 0 || strides[n_dim-1] != 1) {
-    return false;
-  }
-
-  for (int i = n_dim - 2; i >= 0; i--) {
-    if (strides[i] != strides[i+1] * sizes[i+1]) {
-      return false;
-    }
-  }
-  return true;
-}
-
-} // namespace
 
 TypeVerbosity type_verbosity() {
   static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
@@ -165,12 +170,6 @@ AnyTypePtr AnyType::get() {
   return value;
 }
 
-const TensorTypePtr& TensorType::get() {
-  static auto value = TensorType::create(
-      {}, {}, SymbolicShape(), VaryingShape<Stride>{}, {});
-  return value;
-}
-
 NumberTypePtr NumberType::get() {
   static NumberTypePtr value(new NumberType());
   return value;
@@ -231,16 +230,16 @@ LayoutTypePtr LayoutType::get() {
 static LayoutTypePtr value(new LayoutType());
 return value;
 }
+MemoryFormatTypePtr MemoryFormatType::get() {
+static MemoryFormatTypePtr value(new MemoryFormatType());
+return value;
+}
 PyObjectTypePtr PyObjectType::get() {
   static PyObjectTypePtr value(new PyObjectType());
   return value;
 }
 CapsuleTypePtr CapsuleType::get() {
   static CapsuleTypePtr value(new CapsuleType());
-  return value;
-}
-ListTypePtr ListType::ofTensors() {
-  static auto value = ListType::create(TensorType::get());
   return value;
 }
 ListTypePtr ListType::ofInts() {
@@ -264,6 +263,47 @@ ListTypePtr ListType::ofStrings() {
   return value;
 }
 
+TypePtr OptionalType::get(TypePtr inner) {
+  static ska::flat_hash_map<TypePtr, TypePtr> containerTypePtrs;
+  static std::mutex mutex;
+  // Perf from the lock is ok because this function is guarded behind
+  // a static initializer; it should only be called once per type.
+  std::lock_guard<std::mutex> lock(mutex);
+  if (containerTypePtrs.find(inner) == containerTypePtrs.end()) {
+    TypePtr t = TypeFactory::create<OptionalType>(inner);
+    containerTypePtrs.emplace(inner, std::move(t));
+  }
+  return containerTypePtrs[inner];
+}
+
+TypePtr ListType::get(std::string identifier, TypePtr inner) {
+  static ska::flat_hash_map<std::tuple<std::string, TypePtr>, TypePtr> containerTypePtrs;
+  static std::mutex mutex;
+  // Perf from the lock is ok because this function is guarded behind
+  // a static initializer; it should only be called once per type.
+  auto key = std::make_tuple(identifier, inner);
+  std::lock_guard<std::mutex> lock(mutex);
+  if (containerTypePtrs.find(key) == containerTypePtrs.end()) {
+    TypePtr t = ListType::create(inner);
+    containerTypePtrs.emplace(key, std::move(t));
+  }
+  return containerTypePtrs[key];
+}
+
+TypePtr DictType::get(std::string identifier, TypePtr key, TypePtr value) {
+  static ska::flat_hash_map<std::tuple<std::string, TypePtr, TypePtr>, TypePtr> containerTypePtrs;
+  static std::mutex mutex;
+  // Perf from the lock is ok because this function is guarded behind
+  // a static initializer; it should only be called once per type.
+  auto map_key = std::make_tuple(identifier, key, value);
+  std::lock_guard<std::mutex> lock(mutex);
+  if (containerTypePtrs.find(map_key) == containerTypePtrs.end()) {
+    TypePtr t = DictType::create(key, value);
+    containerTypePtrs.emplace(map_key, std::move(t));
+  }
+  return containerTypePtrs[map_key];
+}
+
 AnyListTypePtr AnyListType::get() {
   static AnyListTypePtr value(new AnyListType());
   return value;
@@ -281,6 +321,11 @@ AnyClassTypePtr AnyClassType::get() {
 
 AnyEnumTypePtr AnyEnumType::get() {
   static AnyEnumTypePtr value(new AnyEnumType());
+  return value;
+}
+
+SymIntTypePtr SymIntType::get() {
+  static SymIntTypePtr value(new SymIntType());
   return value;
 }
 
@@ -409,6 +454,9 @@ MatchTypeReturn matchTypeVariables(
     const TypePtr& actual,
     TypeEnv& type_env) {
   if (!formal->hasFreeVariables()) {
+    if (auto dyn = formal->castRaw<c10::DynamicType>()) {
+      return matchTypeVariables(dyn->fallback(), actual, type_env);
+    }
     return MatchTypeReturn::Success();
   }
 
@@ -539,6 +587,9 @@ MatchTypeReturn matchTypeVariables(
 // change return types like List[List[t]] into List[List[int]]
 TORCH_API TypePtr tryEvalTypeVariables(const TypePtr& type, std::unordered_map<std::string, TypePtr>& type_env) {
   if (!type->hasFreeVariables()) {
+    if (auto dyn = type->castRaw<c10::DynamicType>()) {
+      return tryEvalTypeVariables(dyn->fallback(), type_env);
+    }
     return type;
   }
 
@@ -619,188 +670,33 @@ bool Type::is_module() const {
   return false;
 }
 
-std::string TensorType::str() const {
-  return "Tensor";
+TupleTypePtr TupleType::createNamed(
+    const c10::optional<c10::QualifiedName>& qualName,
+    const std::vector<std::string>& field_names,
+    const std::vector<TypePtr>& field_types) {
+  std::vector<IValue> empty_defaults;
+  return TupleType::createNamed(qualName, field_names, field_types, empty_defaults);
 }
 
-template <typename T>
-VaryingShape<T> VaryingShape<T>::merge(const VaryingShape<T>& other) const {
-  if (!dims_ || !other.dims_ || dims_->size() != other.dims_->size()) {
-    return VaryingShape<T>();
-  }
-  ListOfOptionalElements dims;
-  for (size_t i = 0, n = dims_->size(); i < n; i++) {
-    dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
-  }
-  return VaryingShape<T>(std::move(dims));
-}
-
-VaryingShape<int64_t> TensorType::sizes() const {
-  if (!sizes_.rank()) {
-    return VaryingShape<int64_t>();
-  }
-  return VaryingShape<int64_t>(
-      fmap(*sizes_.sizes(), [](ShapeSymbol ss) {
-        // we turn symbolic shapes into unknowns
-        return ss.is_static()
-            ? c10::optional<int64_t>(ss.static_size())
-            : c10::nullopt;
-      }));
-}
-
-TensorTypePtr TensorType::merge(const TensorType& other, bool merge_sizes) const {
-  auto scalar_type = merge_primitive(scalarType(), other.scalarType());
-  auto dev = merge_primitive(device(), other.device());
-  auto sprops = stride_properties().merge(other.stride_properties());
-  auto gr = merge_primitive(requiresGrad(), other.requiresGrad());
-  auto undef = merge_primitive(undefined(), other.undefined());
-  return TensorType::create(
-      scalar_type,
-      dev,
-      merge_sizes ? symbolic_sizes().merge(other.symbolic_sizes())
-                  : symbolic_sizes(),
-      sprops,
-      gr,
-      undef);
-}
-
-template <typename T>
-bool is_null_or_equal(c10::optional<T> a, c10::IntArrayRef b) {
-  return !a.has_value() || a.value() == b;
-}
-
-bool TensorType::matchTensor(const at::Tensor& t) {
-  bool undef = undefined().value_or(!t.defined());
-  if (undef != !t.defined()) {
-    // When the followings are true, we consider it's not a match:
-    // - undefined().has_value() == true
-    // - undefined().value() != !t.defined()
-    return false;
-  } else if (!t.defined()) {
-    // When the followings are true, we consider it's a match:
-    // - t is not defined
-    // - undefined() == null or undefined().value() == true
-    return true;
-  }
-  // Here we know t.defined() == true and compare all other properties.
-  bool rg = at::GradMode::is_enabled() && t.requires_grad();
-  bool matched_strides = (!stride_properties().size()) ||
-      (!t.has_storage() && !stride_properties().isComplete()) ||
-      stride_properties() ==
-          computeStrideProps(t.sizes(), t.strides(), t.is_contiguous());
-  return scalarType().value_or(t.scalar_type()) == t.scalar_type()
-    && device().value_or(t.device()) == t.device()
-    && requiresGrad().value_or(rg) == rg
-    && matched_strides
-    && is_null_or_equal(sizes().concrete_sizes(), t.sizes());
-}
-
-bool TensorType::equals(const c10::Type& rhs) const {
-  if (rhs.kind() != kind()) {
-    return false;
-  }
-  auto rt = rhs.expect<TensorType>();
-
-  return scalar_type_ == rt->scalarType() && sizes() == rt->sizes() &&
-      stride_properties() == rt->stride_properties() &&
-      device() == rt->device() && requiresGrad() == rt->requiresGrad() &&
-      undefined() == rt->undefined();
-}
-
-template <typename T>
-std::ostream& operator<<(std::ostream& out, const VaryingShape<T>& vs) {
-  out << "(";
-  if (!vs.size()) {
-    out << "*)";
-    return out;
-  }
-
-  for (size_t i = 0; i < vs.size(); i++) {
-    if (i > 0) {
-      out << ", ";
-    }
-    if (vs[i].has_value()) {
-      out << vs[i].value();
-    } else {
-      out << "*";
-    }
-  }
-  out << ")";
-  return out;
-}
-
-template std::ostream& operator<<(
-    std::ostream& out,
-    const VaryingShape<int64_t>& vs);
-template std::ostream& operator<<(
-    std::ostream& out,
-    const VaryingShape<Stride>& vs);
-
-std::ostream& operator<<(
-    std::ostream& os,
-    const SymbolicShape& ss) {
-  // TODO: Unranked SymbolicShape printing is ambiguous with that of
-  // dynamic-shaped vector.
-  if(!ss.rank()) {
-    os << "(*)";
-    return os;
-  }
-
-  auto sizes = ss.sizes().value();
-
-  os << "(";
-  for (size_t i = 0; i < ss.rank().value(); i++) {
-    if (i > 0) {
-      os << ", ";
-    }
-    if(sizes[i].is_static()) {
-      os << sizes[i];
-    } else {
-      os << "*";
-    }
-  }
-  os << ")";
-
-  return os;
-}
-
-std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s) {
-  if (s.value_ >= 0) {
-    os << s.value_;
-  } else {
-    os << "SS(" << s.value_ << ')';
-  }
-  return os;
-}
-
-std::ostream& operator<<(std::ostream& os, const Stride& s) {
-  os << "{";
-  if (s.stride_index_.has_value()) {
-    os << *s.stride_index_;
-  } else {
-    os << "*";
-  }
-  os << ":";
-  if (s.stride_.has_value()) {
-    os << *s.stride_;
-  } else {
-    os << "*";
-  }
-  os << '}';
-  return os;
+TupleTypePtr TupleType::createNamed(
+    const c10::optional<c10::QualifiedName>& qualName,
+    const std::vector<c10::string_view>& field_names,
+    const std::vector<TypePtr>& field_types) {
+  std::vector<IValue> empty_defaults;
+  return createWithSpec(qualName, field_names, field_types, empty_defaults);
 }
 
 TupleTypePtr TupleType::createNamed(
     const c10::optional<c10::QualifiedName>& qualName,
     const std::vector<std::string>& field_names,
-    const std::vector<TypePtr>& field_types) {
-      std::vector<IValue> empty_defaults;
-      return TupleType::createNamed(qualName, field_names, field_types, empty_defaults);
-    }
+    const std::vector<TypePtr>& field_types,
+    std::vector<IValue>& field_defaults) {
+  return createWithSpec(qualName, field_names, field_types, field_defaults);
+}
 
-
-TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qualName,
-    const std::vector<std::string>& field_names,
+template <typename S>
+TupleTypePtr TupleType::createWithSpec(const c10::optional<c10::QualifiedName>& qualName,
+    const std::vector<S>& field_names,
     const std::vector<TypePtr>& field_types,
     std::vector<IValue>& field_defaults) {
   TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
@@ -811,7 +707,7 @@ TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qua
   for (size_t i = 0; i < field_names.size(); ++i) {
     if (i < min_default_idx) {
       Argument arg{
-          /*name=*/field_names[i],
+          /*name=*/std::string{field_names[i]},
           /*type=*/field_types[i],
           /*N=*/i};
       arguments.emplace_back(std::move(arg));
@@ -823,7 +719,7 @@ TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qua
                   "mutability could lead to potential memory aliasing "
                   "problems");
       Argument arg{
-          /*name=*/field_names[i],
+          /*name=*/std::string{field_names[i]},
           /*type=*/field_types[i],
           /*N=*/i,
           /*default_value=*/field_defaults[j]};
@@ -994,233 +890,6 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
     ss << "]";
   }
   return ss.str();
-}
-
-VaryingShape<int64_t> TensorType::strides() const {
-  if (!strides_.size().has_value()) {
-    return VaryingShape<int64_t>();
-  }
-  std::vector<c10::optional<int64_t>> ss(*strides_.size());
-  for (size_t i = 0; i < *strides_.size(); i++) {
-    if (!strides_[i].has_value()) {
-      continue;
-    }
-    auto s = *strides_[i];
-    if (s.stride_index_.has_value() && s.stride_.has_value()) {
-      ss[*s.stride_index_] = *s.stride_;
-    }
-  }
-  return VaryingShape<int64_t>(ss);
-}
-
-VaryingShape<Stride> TensorType::computeStrideProps(
-    at::IntArrayRef sizes,
-    at::IntArrayRef strides,
-    bool tensor_contiguity) {
-  int n_dim = static_cast<int>(sizes.size());
-  std::vector<size_t> stride_indices(n_dim);
-
-  // Sorting strides in ascending order
-  // Example:
-  //  Prior to sorting
-  //  Idx:     [0,   1,  2,  3]
-  //  sizes:   [8,   1, 10, 16]
-  //  Strides: [160, 1, 16,  1]
-  //  After sorting
-  //  Idx:     [1,  3,  2,   0]
-  //  sizes:   [1, 16, 10,   8]
-  //  Strides: [1,  1, 16, 160]
-  //
-  // The logic below follows what TensorIterator uses in its logic:
-  //   1. Fast_set_up is the short-cut to identify a. channels_last and
-  //      b. contiguous format, which is what we have in the below logic.
-  //   2. In more generla cases, it does best effort to preserve permutatoin.
-  if (is_channels_last_strides_2d(sizes, strides) || is_channels_last_strides_3d(sizes, strides)) {
-    // case 1.a. short cut channels last
-    std::iota(stride_indices.rbegin() + 1, stride_indices.rend() - 1, 2);
-    stride_indices[0] = 1;
-    stride_indices[n_dim - 1] = 0;
-  } else if (is_contiguous_strides(sizes, strides)) {
-    // case 1.b. short cut contiguous
-    std::iota(stride_indices.rbegin(), stride_indices.rend(), 0);
-  } else {
-    std::iota(stride_indices.begin(), stride_indices.end(), 0);
-    // case 2.
-    //
-    // For broadcasted dimension where stride is 0, we have to stick to
-    // TensorIterator behavior in eager, where they introduce an ambiguous
-    // comparison result to preserve permutation by best effort.
-    // For more details, see NOTE: [Computing output strides]
-    auto should_swap = [&](size_t a, size_t b) {
-      if (strides[a] == 0 || strides[b] == 0) {
-        return 0;
-      } else if (strides[a] < strides[b]) {
-        return -1;
-      } else if (strides[a] > strides[b]) {
-        return 1;
-      } else { // strides[a] == strides[b]
-        if (sizes[a] < sizes[b] || a > b ) {
-          return 1;
-        }
-      }
-      return 0;
-    };
-    for (int i = 1; i < n_dim; i++) {
-      int dim1 = i;
-      for (int dim0 = i - 1; dim0 >= 0; dim0--) {
-        int comparison = should_swap(stride_indices[dim0], stride_indices[dim1]);
-        if (comparison > 0) {
-          std::swap(stride_indices[dim0], stride_indices[dim1]);
-          dim1 = dim0;
-        } else if (comparison < 0) {
-          break;
-        }
-      }
-    }
-  }
-  std::vector<Stride> stride_properties;
-  for (size_t i = 0; i < stride_indices.size(); i++) {
-    bool contiguous_ = tensor_contiguity;
-    if (!contiguous_) {
-      // innermost stride expected to be 1
-      // TODO: turn contiguous_ into an enum CONTIGUOUS, NONCONTIGUOUS,
-      // BROADCASTED
-      if (i == 0) {
-        contiguous_ = strides[stride_indices[i]] == 1;
-      } else {
-        contiguous_ = strides[stride_indices[i]] == 1 ||
-            (strides[stride_indices[i]] != 0 &&
-             strides[stride_indices[i]] ==
-                 strides[stride_indices[i - 1]] * sizes[stride_indices[i - 1]]);
-      }
-    }
-    stride_properties.emplace_back(stride_indices[i], contiguous_, strides[stride_indices[i]]);
-  }
-
-  return VaryingShape<Stride>{stride_properties};
-}
-
-std::atomic<size_t> ShapeSymbol::num_symbols{1};
-
-template struct VaryingShape<c10::ShapeSymbol>;
-template struct VaryingShape<bool>;
-template struct VaryingShape<size_t>;
-template struct VaryingShape<int64_t>;
-
-TensorType::TensorType(
-    c10::optional<at::ScalarType> scalar_type,
-    c10::optional<Device> device,
-    // NOLINTNEXTLINE(modernize-pass-by-value)
-    const SymbolicShape& sizes,
-    const VaryingShape<Stride>& strides,
-    c10::optional<bool> requires_grad,
-    c10::optional<bool> undefined)
-    : SharedType(TypeKind::TensorType),
-      scalar_type_(scalar_type),
-      device_(device),
-      sizes_(sizes),
-      strides_(strides),
-      requires_grad_(requires_grad),
-      undefined_(undefined) {}
-
-TensorTypePtr TensorType::create(const at::Tensor& t) {
-  VaryingShape<bool> contiguity;
-  VaryingShape<size_t> stride_indices;
-  VaryingShape<int64_t> strides;
-  VaryingShape<int64_t> sizes;
-  if (!t.is_mkldnn() && !t.is_sparse() && !t.is_sparse_csr()) {
-    sizes = VaryingShape<int64_t>{t.sizes().vec()};
-    strides = VaryingShape<int64_t>{t.strides().vec()};
-    return TensorType::create(
-        t.scalar_type(), t.device(), sizes, strides, t.requires_grad(), false, t.is_contiguous());
-  }
-
-  return TensorType::create(
-      t.scalar_type(),
-      t.device(),
-      SymbolicShape(),
-      VaryingShape<Stride>{},
-      t.requires_grad(),
-      false);
-}
-
-TensorTypePtr TensorType::create(
-    c10::optional<at::ScalarType> scalar_type,
-    c10::optional<Device> device,
-    const VaryingShape<int64_t>& sizes,
-    const VaryingShape<int64_t>& strides,
-    c10::optional<bool> requires_grad,
-    c10::optional<bool> undefined, bool tensor_contiguity) {
-  if(strides.concrete_sizes() && strides.concrete_sizes().has_value()){
-    // handles case where strides are set
-    TORCH_INTERNAL_ASSERT(sizes.concrete_sizes()->size() == strides.concrete_sizes()->size());
-    auto sprops = strides.concrete_sizes().has_value()
-      ? computeStrideProps(*sizes.concrete_sizes(), *strides.concrete_sizes(), tensor_contiguity)
-      : VaryingShape<Stride>();
-    auto symbol_sizes = SymbolicShape(*sizes.concrete_sizes());
-    return TensorType::create(
-      scalar_type, device, symbol_sizes, sprops, requires_grad, undefined);
-  } else {
-    // strides are all null, but still have number of strides equal to number of ranks
-    TORCH_INTERNAL_ASSERT(sizes.sizes() && sizes.size());
-    auto symbol_sizes = SymbolicShape(*sizes.sizes());
-    return TensorType::create(
-      scalar_type, device, symbol_sizes, VaryingShape<Stride>(*sizes.size()), requires_grad, undefined);
-  }
-}
-
-TensorTypePtr TensorType::create(
-    c10::optional<at::ScalarType> scalar_type,
-    c10::optional<Device> device,
-    const SymbolicShape& sizes,
-    const VaryingShape<Stride>& strides,
-    c10::optional<bool> requires_grad,
-    c10::optional<bool> undefined) {
-  auto pt = TensorTypePtr(new TensorType(
-      scalar_type, device, sizes, strides, requires_grad, undefined));
-  return pt;
-}
-
-TensorTypePtr TensorType::create(
-    c10::optional<at::ScalarType> scalar_type,
-    c10::optional<Device> device,
-    c10::optional<size_t> dim,
-    c10::optional<bool> requires_grad) {
-  return TensorType::create(
-      scalar_type,
-      device,
-      SymbolicShape(dim),
-      VaryingShape<Stride>(dim),
-      requires_grad);
-}
-
-TensorTypePtr TensorType::createContiguous(
-    at::ScalarType scalar_type,
-    at::Device device,
-    at::IntArrayRef sizes) {
-  auto strides = contiguousStridesOf(sizes);
-  TORCH_INTERNAL_ASSERT(strides.size() == sizes.size());
-  return create(
-      scalar_type,
-      device,
-      VaryingShape<int64_t>(sizes),
-      VaryingShape<int64_t>(strides),
-      c10::nullopt);
-}
-
-const SymbolicShape& TensorType::symbolic_sizes() const {
-  return sizes_;
-}
-
-bool TensorType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
-  if (auto rhs_p = rhs.cast<TensorType>()) {
-    // if we have the same pointer, avoid computing the merge
-    if (this == rhs_p.get()) {
-      return true;
-    }
-    return *merge(*rhs_p) == *rhs_p;
-  }
-  return Type::isSubtypeOfExt(rhs, why_not);
 }
 
 InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_module) {

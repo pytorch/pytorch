@@ -1,6 +1,6 @@
 #pragma once
 
-#include "fully_connected_dnnlowp_op.h"
+#include "caffe2/quantization/server/fully_connected_dnnlowp_op.h"
 
 namespace caffe2 {
 

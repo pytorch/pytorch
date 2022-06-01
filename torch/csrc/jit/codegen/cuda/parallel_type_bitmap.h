@@ -1,8 +1,9 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
+#include <array>
 #include <bitset>
 #include <map>
 #include <unordered_map>
@@ -160,6 +161,20 @@ class ParallelTypeBitmap {
     *this |= ParallelTypeBitmap(kBIDBits);
   }
 
+  //! Clear all of the TID flags
+  void clearAllTID() {
+    auto tid_bits = ParallelTypeBitmap(kTIDBits);
+    auto not_tid_bits = ~tid_bits;
+    *this &= not_tid_bits;
+  }
+
+  //! Clear all of the BID flags
+  void clearAllBID() {
+    auto bid_bits = ParallelTypeBitmap(kBIDBits);
+    auto not_bid_bits = ~bid_bits;
+    *this &= not_bid_bits;
+  }
+
   //! Get an iterator to traverse set types
   Iterator begin() const {
     return Iterator::begin(*this);
@@ -270,6 +285,52 @@ inline ParallelTypeBitmap::Iterator ParallelTypeBitmap::Iterator::end(
     const ParallelTypeBitmap& map) {
   return Iterator(map, kOffsetEnd);
 }
+
+//! Map from ParallelType to template type T
+template <typename T>
+class ParallelTypeMap {
+ public:
+  ParallelTypeMap() = default;
+
+  ParallelTypeMap(const T& init) {
+    std::fill(map_.begin(), map_.end(), init);
+  }
+
+  T& operator[](ParallelType pt) {
+    return map_[getParallelTypeBitMapOffset(pt)];
+  }
+
+  const T& operator[](ParallelType pt) const {
+    return map_[getParallelTypeBitMapOffset(pt)];
+  }
+
+  T& at(ParallelType pt) {
+    return map_.at(getParallelTypeBitMapOffset(pt));
+  }
+
+  const T& at(ParallelType pt) const {
+    return map_.at(getParallelTypeBitMapOffset(pt));
+  }
+
+  auto begin() {
+    return map_.begin();
+  }
+
+  auto begin() const {
+    return map_.begin();
+  }
+
+  auto end() {
+    return map_.begin();
+  }
+
+  auto end() const {
+    return map_.begin();
+  }
+
+ private:
+  std::array<T, ParallelTypeBitmap::kNumParallelTypes> map_;
+};
 
 } // namespace cuda
 } // namespace fuser

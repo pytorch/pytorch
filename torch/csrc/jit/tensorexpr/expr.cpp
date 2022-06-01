@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/expr.h>
 
 #include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
 namespace torch {
 namespace jit {
@@ -425,20 +426,128 @@ Buf::Buf(
   TORCH_CHECK(var);
 }
 
-ExprHandle Buf::make(
-    const std::string& name_hint,
-    const std::vector<ExprHandle>& dims,
-    Dtype dtype) {
-  return ExprHandle(
-      alloc<Buf>(name_hint, ExprHandleVectorToExprVector(dims), dtype));
+BufHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
+  return Buf::make("", dims, dtype);
 }
 
-ExprHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
-  return Buf::make("", dims, dtype);
+BufHandle Buf::make(
+    const std::string& name_hint,
+    const std::vector<ExprHandle>& dims,
+    const std::vector<ExprHandle>& strides,
+    Dtype dtype) {
+  return BufHandle(alloc<Buf>(
+      name_hint,
+      ExprHandleVectorToExprVector(dims),
+      dtype,
+      nullptr,
+      ExprHandleVectorToExprVector(strides)));
+}
+
+BufHandle Buf::make(
+    const std::string& name_hint,
+    const std::vector<ExprHandle>& dims,
+    Dtype dtype,
+    c10::optional<ExprHandle> initializer,
+    c10::optional<std::vector<ExprHandle>> strides,
+    c10::optional<ExprHandle> qscale,
+    c10::optional<ExprHandle> qzero) {
+  c10::optional<std::vector<ExprPtr>> opt_strides;
+  if (strides) {
+    opt_strides = ExprHandleVectorToExprVector(*strides);
+  }
+  return BufHandle(alloc<Buf>(
+      name_hint,
+      ExprHandleVectorToExprVector(dims),
+      dtype,
+      initializer ? initializer->node() : nullptr,
+      opt_strides,
+      qscale ? qscale->node() : nullptr,
+      qzero ? qzero->node() : nullptr));
+}
+
+bool Buf::is_contiguous(at::MemoryFormat memory_format) const {
+  auto ndims = dims_.size();
+  std::vector<int64_t> dim_order(ndims);
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    if (dims_.size() != 4)
+      return false;
+    dim_order = {1, 3, 2, 0};
+  } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+    if (dims_.size() != 5)
+      return false;
+    dim_order = {1, 4, 3, 2, 0};
+  } else {
+    if (dims_.empty()) {
+      // Scalar tensor
+      TORCH_CHECK(strides_.empty());
+      return true; // Align with the isContiguous logic in the kernel.cpp
+    }
+    for (size_t i = 0; i < ndims; i++) {
+      dim_order[i] = ndims - i - 1; // Reverse
+    }
+  }
+
+  bool res = is_stride_one(dim_order[0]);
+  if (!res)
+    return false;
+
+  for (size_t i = 1; i < ndims; i++) {
+    auto cur_dim = dim_order[i];
+    auto pre_dim = dim_order[i - 1];
+    res &= is_cont_with(cur_dim, pre_dim);
+    if (!res)
+      return false;
+  }
+
+  return true;
 }
 
 std::vector<ExprHandle> BufHandle::dims() const {
   return ExprVectorToExprHandleVector(node()->dims());
+}
+
+bool Buf::is_cont_with(int cur_dim, int adjacent_dim) const {
+  auto is_cont_fn = [](ExprPtr adjacent_dim,
+                       ExprPtr adjacent_stride,
+                       ExprPtr cur_stride) {
+    // For static shape
+    bool res = exprEquals(
+        cur_stride,
+        (ExprHandle(adjacent_dim) * ExprHandle(adjacent_stride)).node());
+    if (res)
+      return res;
+
+    // For symbolic shape
+    auto mul_node = to<Mul>(cur_stride);
+    if (!mul_node) {
+      return false;
+    }
+
+    // lhs and rhs could be other dim or stride
+    auto lhs_ = mul_node->lhs();
+    auto rhs_ = mul_node->rhs();
+
+    bool same_stride = false;
+    auto same_dim = exprEquals(lhs_, adjacent_dim) || (adjacent_dim == lhs_);
+    if (same_dim) {
+      // lhs_ is dim while rhs_ is stride
+      same_stride =
+          exprEquals(rhs_, adjacent_stride) || (adjacent_stride == rhs_);
+    } else {
+      // lhs_ is stride while rhs_ is dim
+      same_dim = exprEquals(rhs_, adjacent_dim) || (adjacent_dim == rhs_);
+      same_stride =
+          exprEquals(lhs_, adjacent_stride) || (adjacent_stride == lhs_);
+    }
+
+    return same_dim && same_stride;
+  };
+  return is_cont_fn(
+      dims_[adjacent_dim], strides_[adjacent_dim], strides_[cur_dim]);
+}
+
+bool Buf::is_stride_one(int cur_dim) const {
+  return exprEquals(strides_[cur_dim], alloc<LongImm>(1));
 }
 
 ExprHandle expr_to_vec(ExprHandle v, int lanes) {

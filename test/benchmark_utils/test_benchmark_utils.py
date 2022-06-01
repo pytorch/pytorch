@@ -170,6 +170,7 @@ class TestBenchmarkUtils(TestCase):
 
     @slowTest
     @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
+    @unittest.skipIf(True, "Failing on clang, see 74398")
     def test_timer_tiny_fast_snippet(self):
         timer = benchmark_utils.Timer(
             'auto x = 1;(void)x;',
@@ -181,6 +182,7 @@ class TestBenchmarkUtils(TestCase):
 
     @slowTest
     @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
+    @unittest.skipIf(True, "Failing on clang, see 74398")
     def test_cpp_timer(self):
         timer = benchmark_utils.Timer(
             """
@@ -547,6 +549,7 @@ class TestBenchmarkUtils(TestCase):
     @slowTest
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
     @unittest.skipIf(IS_SANDCASTLE, "Valgrind is OSS only.")
+    @unittest.skipIf(True, "Failing on clang, see 74398")
     def test_collect_cpp_callgrind(self):
         timer = benchmark_utils.Timer(
             "x += 1;",
