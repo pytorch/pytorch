@@ -1556,9 +1556,9 @@ def error_inputs_hsplit(op_info, device, **kwargs):
                                   dtype=torch.float32,
                                   device=device),
                       args=("abc",),)
-    return (ErrorInput(si1, error_regex=err_msg1),
-            ErrorInput(si2, error_regex=err_msg2),
-            ErrorInput(si3, error_type=TypeError, error_regex=err_msg3),)
+    yield ErrorInput(si1, error_regex=err_msg1)
+    yield ErrorInput(si2, error_regex=err_msg2)
+    yield ErrorInput(si3, error_type=TypeError, error_regex=err_msg3)
 
 def error_inputs_vsplit(op_info, device, **kwargs):
     err_msg1 = ("torch.vsplit requires a tensor with at least 2 dimension, "
@@ -1581,9 +1581,9 @@ def error_inputs_vsplit(op_info, device, **kwargs):
                                   dtype=torch.float32,
                                   device=device),
                       args=("abc",),)
-    return (ErrorInput(si1, error_regex=err_msg1),
-            ErrorInput(si2, error_regex=err_msg2),
-            ErrorInput(si3, error_type=TypeError, error_regex=err_msg3),)
+    yield ErrorInput(si1, error_regex=err_msg1)
+    yield ErrorInput(si2, error_regex=err_msg2)
+    yield ErrorInput(si3, error_type=TypeError, error_regex=err_msg3)
 
 def error_inputs_dsplit(op_info, device, **kwargs):
     err_msg1 = ("torch.dsplit requires a tensor with at least 3 dimension, "

@@ -1827,68 +1827,59 @@ def tensor_split(
 def hsplit(
     a: TensorLikeType, indices_or_sections: DimsType
 ) -> Tuple[TensorLikeType, ...]:
-    if a.ndim < 1:
-        msg = (
-            "torch.hsplit requires a tensor with at least 1 dimension, but got a tensor with "
-            + str(a.ndim)
-            + " dimensions!"
-        )
-        raise RuntimeError(msg)
+    msg = (
+        "torch.hsplit requires a tensor with at least 1 dimension, but got a tensor with "
+        + str(a.ndim)
+        + " dimensions!"
+    )
+    check(a.ndim >= 1, lambda: msg)
     dim = 0 if a.ndim == 1 else 1
     if isinstance(indices_or_sections, int):
         split_size = indices_or_sections
-        if not (split_size != 0 and a.shape[dim] % split_size == 0):
-            msg = (
-                "torch.hsplit attempted to split along dimension "
-                + str(dim)
-                + ", but the size of the dimension "
-                + str(a.shape[dim])
-                + " is not divisible by the split_size "
-                + str(split_size)
-                + "!"
-            )
-            raise RuntimeError()
+        msg = (
+            "torch.hsplit attempted to split along dimension "
+            + str(dim)
+            + ", but the size of the dimension "
+            + str(a.shape[dim])
+            + " is not divisible by the split_size "
+            + str(split_size)
+            + "!"
+        )
+        check((split_size != 0 and a.shape[dim] % split_size == 0), lambda: msg)
         return tensor_split(a, split_size, dim)
-    elif isinstance(indices_or_sections, (list, tuple)):
-        split_sizes = indices_or_sections
-        return tensor_split(a, split_sizes, dim)
-    else:
+    if not isinstance(indices_or_sections, (list, tuple)):
         raise TypeError(
             "hsplit(): received an invalid combination of arguments. "
-            "Expected indices_or_sections to be of type int, list of ints or tuple of ints"
+            "Expected indices_or_sections to be of type int, list of ints or tuple of ints "
+            f"but got type {type(indices_or_sections)}"
         )
+
+    split_sizes = indices_or_sections
+    return tensor_split(a, split_sizes, dim)
 
 
 def vsplit(
     a: TensorLikeType, indices_or_sections: DimsType
 ) -> Tuple[TensorLikeType, ...]:
-    if a.ndim < 2:
-        msg = (
-            "torch.vsplit requires a tensor with at least 2 dimension, but got a tensor with "
-            + str(a.ndim)
-            + " dimensions!"
-        )
-        raise RuntimeError(msg)
+    msg = (
+        "torch.vsplit requires a tensor with at least 2 dimension, but got a tensor with "
+        + str(a.ndim)
+        + " dimensions!"
+    )
+    check(a.ndim >= 2, lambda: msg)
     if isinstance(indices_or_sections, int):
         split_size = indices_or_sections
-        if not (split_size != 0 and a.shape[0] % split_size == 0):
-            msg = (
-                "torch.vsplit attempted to split along dimension 0, but the size of the dimension "
-                + str(a.shape[0])
-                + " is not divisible by the split_size "
-                + str(split_size)
-                + "!"
-            )
-            raise RuntimeError(msg)
+        check((split_size != 0 and a.shape[0] % split_size == 0), lambda: msg)
         return tensor_split(a, split_size, 0)
-    elif isinstance(indices_or_sections, (list, tuple)):
-        split_sizes = indices_or_sections
-        return tensor_split(a, split_sizes, 0)
-    else:
+    if not isinstance(indices_or_sections, (list, tuple)):
         raise TypeError(
             "vsplit(): received an invalid combination of arguments. "
             "Expected indices_or_sections to be of type int, list of ints or tuple of ints"
+            f"but got type {type(indices_or_sections)}"
         )
+
+    split_sizes = indices_or_sections
+    return tensor_split(a, split_sizes, 0)
 
 
 def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
