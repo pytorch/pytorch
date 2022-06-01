@@ -1,4 +1,3 @@
-#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/function_extraction.h>
 
@@ -821,7 +820,6 @@ void FunctionExtractor::ScopeContext::PopulateInputsOutputs(
 void FunctionExtractor::HandleNoScopeNodes(
     scope_ctx_map& scope_ctxs,
     node_list no_scope_nlist) {
-  HANDEL_TH_ERRORS
   GRAPH_UPDATE("No scope node count: ", no_scope_nlist.size());
   for (auto n : no_scope_nlist) {
     TORCH_WARN(
@@ -830,7 +828,6 @@ void FunctionExtractor::HandleNoScopeNodes(
   TORCH_INTERNAL_ASSERT(
       no_scope_nlist.size() == 0,
       "ONNX function extraction cannot determine the scope for the above nodes.");
-  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 std::tuple<FunctionExtractor::scope_ctx_map, node_list> FunctionExtractor::

@@ -1,10 +1,10 @@
-#include <torch/csrc/Exceptions.h>
-#include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
 
 #include <ATen/ScalarOps.h>
 #include <c10/util/irange.h>
+
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
 
 namespace torch {
 namespace jit {
@@ -221,14 +221,12 @@ static void fuseListAndListUnpack(Block* b) {
 } // namespace
 
 void PreprocessForONNX(std::shared_ptr<Graph>& graph) {
-  HANDLE_TH_ERRORS
   FuseWithListUnpack(graph->block());
   GRAPH_DUMP("After FuseWithListUnpack: ", graph);
   ReplaceAddWithConcat(graph->block());
   GRAPH_DUMP("After ReplaceAddWithConcat: ", graph);
   fuseListAndListUnpack(graph->block());
   GRAPH_DUMP("After fuseListAndListUnpack: ", graph);
-  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 } // namespace jit

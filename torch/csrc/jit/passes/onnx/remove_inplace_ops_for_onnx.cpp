@@ -1,4 +1,3 @@
-#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
@@ -314,7 +313,6 @@ static std::pair<Value*, Value*> PrepareSetItemForONNX(Node* n) {
 //   ...
 
 static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
-  HANDLE_TH_ERRORS
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
       PrepareForRemoveMutations(mr, child_block);
@@ -353,7 +351,6 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
       }
     } while (needsRestart);
   }
-  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 static void PrepareForRemoveMutations(std::shared_ptr<Graph> graph) {
@@ -869,7 +866,6 @@ void InplaceConverter::convertMutationForONNX() {
 void RemoveInplaceOpsForONNX(
     const std::shared_ptr<Graph>& graph,
     Module* model = nullptr) {
-  HANDLE_TH_ERRORS
   ImplicitCastForBinaryInplaceOps(graph->block());
   PrepareForRemoveMutations(graph);
   MutationRemover mr(graph);
@@ -877,7 +873,6 @@ void RemoveInplaceOpsForONNX(
   mr.removeListMutation();
   InplaceConverter ic(graph, &mr, model);
   ic.convertMutationForONNX();
-  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 } // namespace jit
