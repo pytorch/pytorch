@@ -3,6 +3,8 @@ from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
 __all__ = [
+    'chebyshev_polynomial_t',
+    'chebyshev_polynomial_u',
     'complete_elliptic_integral_k_e',
     'complete_elliptic_integral_k_k',
     'digamma',
@@ -17,12 +19,18 @@ __all__ = [
     'gammainc',
     'gammaincc',
     'gammaln',
+    'hermite_polynomial_h',
+    'hermite_polynomial_he',
     'i0',
     'i0e',
     'i1',
     'i1e',
+    'laguerre_polynomial_l',
+    'log1p',
     'log1p',
     'log_ndtr',
+    'log_ndtr',
+    'log_softmax',
     'log_softmax',
     'logit',
     'logsumexp',
@@ -853,6 +861,61 @@ Example::
 
 """.format(**common_args))
 
+chebyshev_polynomial_t = _add_docstr(_special.special_chebyshev_polynomial_t,
+                                     r"""
+chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the first kind :math:`T_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. If :math:`n < 6` or :math:`|\text{input}| > 1` the recursion:
+
+.. math::
+    T_{n + 1}(\text{input}) = 2 \times \text{input} \times T_{n}(\text{input}) - T_{n - 1}(\text{input})
+
+is evaluated. Otherwise, the explicit trigonometric formula:
+
+.. math::
+    T_{n}(\text{input}) = \text{cos}(n \times \text{arccos}(x))
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+chebyshev_polynomial_u = _add_docstr(_special.special_chebyshev_polynomial_u,
+                                     r"""
+chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the second kind :math:`U_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`,
+:math:`2 \times \text{input}` is returned. If :math:`n < 6` or
+:math:`|\text{input}| > 1`, the recursion:
+
+.. math::
+    T_{n + 1}(\text{input}) = 2 \times \text{input} \times T_{n}(\text{input}) - T_{n - 1}(\text{input})
+
+is evaluated. Otherwise, the explicit trigonometric formula:
+
+.. math::
+    \frac{\text{sin}((n + 1) \times \text{arccos}(\text{input}))}{\text{sin}(\text{arccos}(\text{input}))}
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
 complete_elliptic_integral_k_e = _add_docstr(_special.special_complete_elliptic_integral_k_e,
                                              r"""
 complete_elliptic_integral_k_e(input, *, out=None) -> Tensor
@@ -872,6 +935,72 @@ complete_elliptic_integral_k_k(input, *, out=None) -> Tensor
 
 Complete elliptic integral of the first kind :math:`K(m)`.
 
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+hermite_polynomial_h = _add_docstr(_special.special_hermite_polynomial_h,
+                                   r"""
+hermite_polynomial_h(input, n, *, out=None) -> Tensor
+
+Physicist’s Hermite polynomial :math:`H_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    H_{n + 1}(\text{input}) = 2 \times \text{input} \times H_{n}(\text{input}) - H_{n - 1}(\text{input})
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+hermite_polynomial_he = _add_docstr(_special.special_hermite_polynomial_he,
+                                    r"""
+hermite_polynomial_he(input, n, *, out=None) -> Tensor
+
+Probabilist’s Hermite polynomial :math:`He_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    He_{n + 1}(\text{input}) = 2 \times \text{input} \times He_{n}(\text{input}) - He_{n - 1}(\text{input})
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+laguerre_polynomial_l = _add_docstr(_special.special_laguerre_polynomial_l,
+                                    r"""
+laguerre_polynomial_l(input, n, *, out=None) -> Tensor
+
+Laguerre polynomial :math:`L_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    L_{n + 1}(\text{input}) = 2 \times \text{input} \times L_{n}(\text{input}) - L_{n - 1}(\text{input})
+
+is evaluated.
+
+""" + r"""
 Args:
     {input}
 
