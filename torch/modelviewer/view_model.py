@@ -2,7 +2,7 @@ import netron
 from modelviewer import ModelViewer
 
 # Provide path of trained model
-model_path = 'alexnet-owt-4df8aa71.pth'
+model_path = 'cifar_net.pth'
 model = ModelViewer.get_model(model_path)
 layer_list, ref = ModelViewer.get_layers(model)
 print(layer_list)
