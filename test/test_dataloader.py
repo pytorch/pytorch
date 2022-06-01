@@ -2168,7 +2168,7 @@ class TestDataLoader2(TestCase):
     def test_basics(self):
         # TODO(VitalyFedyunin): This test will start breaking if we remove guaranteed order
         # of traversing workers
-        dp = IterableWrapper(list(range(1000)))
+        dp = IterableWrapper(list(range(1000))).sharding_filter()
         dl = DataLoader(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
         dl2 = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
         dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2, parallelism_mode='thread')
@@ -2189,24 +2189,18 @@ class TestDataLoader2(TestCase):
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False)
         self.assertEqual(items, list(dl))
 
-        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False,
-                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
-        self.assertEqual(items, list(dl))
-
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
         self.assertNotEqual(items, list(dl))
         self.assertEqual(items, sorted(list(dl)))
 
-        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True,
-                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
         self.assertNotEqual(items, list(dl))
         self.assertEqual(items, sorted(list(dl)))
 
         dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
         self.assertEqual(list(dl), items)
 
-        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True,
-                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
         self.assertEqual(list(dl), items)
 
 
