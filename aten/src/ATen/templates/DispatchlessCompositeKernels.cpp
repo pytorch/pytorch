@@ -1,4 +1,5 @@
 // ${generated_comment}
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <c10/core/TensorImpl.h>
 #include <c10/core/Allocator.h>
