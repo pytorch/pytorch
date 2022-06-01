@@ -323,7 +323,7 @@ def _handle_row_wise_sharding_sharded_tensor(
     Returns:
         A :class:`_PartialTensor` object which stores the partial local result.
     """
-    local_input = input.local_shards()[0].tensor
+    local_input = input.local_tensor()
     if input.sharding_spec().dim not in (-1, len(input.size()) - 1):
         raise NotImplementedError(
             "The case when the input does not come from col-wise sharded "
