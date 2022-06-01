@@ -860,6 +860,14 @@ def _floor_divide(
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(a, Number) and isinstance(b, Tensor):
         a = scalar_tensor(a, dtype=b.dtype, device=b.device)
+    elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
+        if a.device == torch.device("cpu"):
+            msg = "Expected divisor (b) to be on the same device ({0}) as dividend (a), but it is found on {1}!".format(
+                a.device, b.device
+            )
+            raise RuntimeError(msg)
+        else:
+            b = prims.device_put(b, device=a.device)
 
     mod = fmod(a, b)
     div = true_divide(sub(a, mod), b)
