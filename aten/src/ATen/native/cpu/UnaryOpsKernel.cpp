@@ -569,7 +569,7 @@ void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
 static void complete_elliptic_integral_k_e_kernel(TensorIteratorBase& iterator) {
     AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "complete_elliptic_integral_k_e_cpu", [&]() {
         cpu_kernel(iterator, [](scalar_t x) -> scalar_t {
-            return complete_elliptic_integral_k_e(x);
+            return complete_elliptic_integral_k_e_forward(x);
         });
     });
 } // complete_elliptic_integral_k_e_kernel(TensorIteratorBase& iterator)
@@ -577,7 +577,7 @@ static void complete_elliptic_integral_k_e_kernel(TensorIteratorBase& iterator) 
 static void complete_elliptic_integral_k_k_kernel(TensorIteratorBase& iterator) {
     AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "complete_elliptic_integral_k_k_cpu", [&]() {
         cpu_kernel(iterator, [](scalar_t x) -> scalar_t {
-            return complete_elliptic_integral_k_k(x);
+            return complete_elliptic_integral_k_k_forward(x);
         });
     });
 } // complete_elliptic_integral_k_k_kernel(TensorIteratorBase& iterator)

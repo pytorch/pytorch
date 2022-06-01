@@ -384,7 +384,7 @@ void complete_elliptic_integral_k_e_kernel_cuda(TensorIteratorBase& iterator) {
 #else
     AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "complete_elliptic_integral_k_e_cuda", [&]() {
         gpu_kernel(iterator, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
-            return complete_elliptic_integral_k_e<scalar_t>(x);
+            return complete_elliptic_integral_k_e_forward<scalar_t>(x);
         });
     });
 #endif
@@ -400,7 +400,7 @@ void complete_elliptic_integral_k_k_kernel_cuda(TensorIteratorBase& iterator) {
 #else
     AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "complete_elliptic_integral_k_k_cuda", [&]() {
         gpu_kernel(iterator, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
-            return complete_elliptic_integral_k_k<scalar_t>(x);
+            return complete_elliptic_integral_k_k_forward<scalar_t>(x);
         });
     });
 #endif
