@@ -5,6 +5,12 @@ from gitutils import _check_output
 from rockset import Client, ParamDict  # type: ignore[import]
 import os
 
+rs = Client(api_key=os.getenv("ROCKSET_API_KEY", None))
+qlambda = rs.QueryLambda.retrieve(  
+    'commit_jobs_query',
+    version='c2a4dbce081d0144',
+    workspace='commons')
+
 def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Print latest commits")
@@ -20,7 +26,7 @@ def print_latest_commits(minutes: int = 30) -> None:
             "git",
             "rev-list",
             f"--max-age={timestamp_since}",
-            "--remotes=*origin/master",
+            "--remotes=*master",
         ],
         encoding="ascii",
     ).splitlines()
@@ -30,14 +36,9 @@ def print_latest_commits(minutes: int = 30) -> None:
         print_commit_status(commit)
 
 def print_commit_status(sha: str) -> None:
-    rs = Client(api_key=os.getenv("ROCKSET_API_KEY", None))
-    qlambda = rs.QueryLambda.retrieve(
-        'commit_jobs_query',
-        version='c2a4dbce081d0144',
-        workspace='commons')
-
     params = ParamDict()
     params['sha'] = sha
+    print(params)
     results = qlambda.execute(parameters=params)
     for check in results['results']:
         print(f"\t{check['conclusion']:>10}: {check['name']}")
