@@ -1842,11 +1842,12 @@ Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, int64
 }
 
 Tensor mse_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
-  if (reduction == at::Reduction::None) {
+  if (reduction != at::Reduction::Mean) {
     return mse_loss_backward(grad, input, target, reduction);
   }
   auto r = mse_loss_backward(ones_like(grad_output), input, target, reduction);
-  return (r * grad).sum();
+  //return (r * grad).sum();
+  return r * grad;
 }
 
 Tensor soft_margin_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
