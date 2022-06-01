@@ -5,15 +5,17 @@ import sys
 
 import torch
 import torch.distributed as dist
-from torch.distributed._shard import shard_parameter
+from torch.distributed._shard.api import (
+    shard_parameter,
+    _collect_local_shard,
+    _reshard_output,
+)
 from torch.distributed._shard.sharded_optim import (
     ShardedOptimizer,
     named_params_with_sharded_tensor,
 )
 from torch.distributed._shard.sharded_tensor import (
     empty,
-    _collect_local_shard,
-    _reshard_output,
 )
 from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
@@ -68,6 +70,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         inp = torch.rand(*input_size).cuda(self.rank)
         reshard_spec = copy.deepcopy(spec)
         reshard_spec.dim = 0
+        reshard_spec.placements.sort(key=lambda placement: placement.rank())
         sharded_linear = _collect_local_shard(
             _reshard_output(sharded_linear, reshard_spec)
         )
@@ -189,6 +192,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
     def test_sharded_linear_errors(self):
         for spec in generate_chunk_sharding_specs_for_test(0):
             fc1 = torch.nn.Linear(10, 10).cuda(self.rank)
+            shard_parameter(fc1, "weight", spec)
             shard_parameter(fc1, "bias", spec)
             with self.assertRaisesRegex(TypeError, 'bias needs to be torch.Tensor'):
                 fc1(torch.rand(10, 10).cuda(self.rank))
@@ -241,7 +245,10 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             ])
 
             fc6.weight = empty(enumerable_spec, 10, 10)
-            with self.assertRaisesRegex(ValueError, 'Only ChunkShardingSpec supported for ShardedTensor ops!'):
+            # Sharded Tensor metadata has parenthesis imbalance issue when using re.compile
+            error_msg = r"torch function 'linear', with args: (?s).* "
+            r"and kwargs: None not supported for ShardedTensor!"
+            with self.assertRaisesRegex(RuntimeError, error_msg):
                 fc6(torch.rand(10, 10).cuda(self.rank))
 
             fc7 = torch.nn.Linear(10, 80).cuda(self.rank)

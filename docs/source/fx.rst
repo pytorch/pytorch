@@ -1115,6 +1115,7 @@ API Reference
 .. Adding it here for coverage but this doesn't add anything to the
 .. rendered doc.
 .. py:module:: torch.fx.passes
+.. py:module:: torch.fx.passes.tests
 .. py:module:: torch.fx.experimental
 .. py:module:: torch.fx.experimental.unification
 .. py:module:: torch.fx.experimental.unification.multipledispatch

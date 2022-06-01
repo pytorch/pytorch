@@ -231,6 +231,7 @@ def build_constructor_arg_db():
         }),
         torch.nn.quantized.ReLU6: ((), {}),
         torch.nn.quantized.Sigmoid: ((0.1, 0), {}),
+        torch.nn.quantized.Softmax: ((), {}),
         torch.nn.quantized.FloatFunctional: ((), {}),
         torch.nn.quantized.FXFloatFunctional: ((), {}),
         torch.nn.quantized.QFunctional: ((), {}),
@@ -364,7 +365,6 @@ def generate_tests(test_cls, constructor_arg_db):
         torch.nn.Module,
         torch.nn.Container,  # deprecated
         torch.nn.NLLLoss2d,  # deprecated
-        torch.nn.quantized._ConvNd,  # base class in __all__ for some reason
         # TODO: Remove these 2 from this list once the ASan issue is fixed.
         # See https://github.com/pytorch/pytorch/issues/55396
         torch.nn.quantized.Embedding,

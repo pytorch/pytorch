@@ -45,10 +45,11 @@ bool supportedConvNode(Node* n) {
   }
 }
 
-void FoldFrozenConvBatchnorm(Block* b) {
+bool FoldFrozenConvBatchnorm(Block* b) {
+  bool graph_modified = false;
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      FoldFrozenConvBatchnorm(block);
+      graph_modified |= FoldFrozenConvBatchnorm(block);
     }
 
     if (n->kind() == aten::batch_norm &&
@@ -79,7 +80,18 @@ void FoldFrozenConvBatchnorm(Block* b) {
       // implementation taken from torch/nn/utils/fusion.py
       Tensor conv_b;
       if (conv->namedInput("bias")->type() == NoneType::get()) {
-        conv_b = at::zeros_like(bn_rm);
+        // If this is on GPU and bias is none and weight was half/bfloat, but
+        // bn_rm was float, then probably this was a case where autocasting
+        // casted inputs to conv. And since CUDA conv implementation requires
+        // all the inputs to have the same scalar dtype, we need to make this
+        // placeholder have the same type as conv_w.
+        at::ScalarType bias_dtype = bn_rm.scalar_type();
+        at::ScalarType weight_dtype = conv_w.scalar_type();
+        if ((weight_dtype == at::kHalf || weight_dtype == at::kBFloat16) &&
+            bias_dtype == at::kFloat) {
+          bias_dtype = weight_dtype;
+        }
+        conv_b = at::zeros_like(bn_rm, at::TensorOptions().dtype(bias_dtype));
       } else {
         conv_b = constant_as<Tensor>(conv->namedInput("bias")).value();
       }
@@ -118,8 +130,10 @@ void FoldFrozenConvBatchnorm(Block* b) {
       conv->replaceInputWith(conv_b_value, fused_conv_b);
 
       bn->output()->replaceAllUsesWith(conv->output());
+      graph_modified = true;
     }
   }
+  return graph_modified;
 }
 
 bool supportedAddOrSub(Node* n) {
@@ -173,7 +187,6 @@ bool checkConvAndBroadcastingOpPreConditions(Node* conv, Node* op) {
     return false;
   }
 
-  auto conv_w = constant_as<Tensor>(conv->namedInput("weight")).value();
   Tensor weight_tensor =
       constant_as<Tensor>(conv->namedInput("weight")).value();
 
@@ -188,12 +201,11 @@ bool checkConvAndBroadcastingOpPreConditions(Node* conv, Node* op) {
     if (!opDoesNotBroadCastWithConv(op_tensor, weight_tensor)) {
       return false;
     }
-    if (!op_tensor.is_floating_point()) {
-      return false;
-    }
-    if (c10::promoteTypes(
+
+    if (!op_tensor.is_floating_point() &&
+        c10::promoteTypes(
             op_tensor.scalar_type(), weight_tensor.scalar_type()) !=
-        weight_tensor.scalar_type()) {
+            weight_tensor.scalar_type()) {
       return false;
     }
   }
@@ -227,17 +239,18 @@ Tensor resizeConstantScalarOrTensorToShape(
   return ret_tensor;
 }
 
-void FoldFrozenConvAddOrSub(Block* b) {
+bool FoldFrozenConvAddOrSub(Block* b) {
+  bool graph_modified = false;
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      FoldFrozenConvAddOrSub(block);
+      graph_modified |= FoldFrozenConvAddOrSub(block);
     }
 
     if (supportedAddOrSub(n) && supportedConvNode(n->inputs().at(0)->node())) {
       auto conv = n->inputs().at(0)->node();
-      auto add_or_div = n;
+      auto add_or_sub = n;
 
-      if (!checkConvAndBroadcastingOpPreConditions(conv, add_or_div)) {
+      if (!checkConvAndBroadcastingOpPreConditions(conv, add_or_sub)) {
         continue;
       }
 
@@ -245,38 +258,40 @@ void FoldFrozenConvAddOrSub(Block* b) {
           constant_as<Tensor>(conv->namedInput("weight")).value();
 
       Tensor add_or_sub_tensor = resizeConstantScalarOrTensorToShape(
-          add_or_div->inputs().at(1),
+          add_or_sub->inputs().at(1),
           {weight_tensor.size(0)},
           weight_tensor.options());
       Tensor bias;
       if (conv->namedInput("bias")->type() == NoneType::get()) {
-        bias = at::zeros_like(add_or_sub_tensor);
+        bias = at::zeros_like(add_or_sub_tensor, weight_tensor.dtype());
       } else {
         bias = constant_as<Tensor>(conv->namedInput("bias")).value();
       }
 
       WithInsertPoint guard(conv);
 
-      add_or_div->replaceInputWith(
+      add_or_sub->replaceInputWith(
           conv->output(), b->owningGraph()->insertConstant(bias));
-      add_or_div->replaceInput(
+      add_or_sub->replaceInput(
           1, b->owningGraph()->insertConstant(add_or_sub_tensor));
 
-      auto stack_out = runNodeIfInputsAreConstant(add_or_div);
+      auto stack_out = runNodeIfInputsAreConstant(add_or_sub);
       TORCH_INTERNAL_ASSERT(stack_out && stack_out->size() == 1);
-      Tensor fuse_bias = (*stack_out)[0].toTensor();
+      Tensor fuse_bias = (*stack_out)[0].toTensor().to(bias.dtype());
 
       auto fused_conv_b = b->owningGraph()->insertConstant(fuse_bias);
       auto conv_b_value = conv->namedInput("bias");
 
       fused_conv_b->setDebugName(
           conv_b_value->debugName() + "_fused_" +
-          add_or_div->kind().toUnqualString());
+          add_or_sub->kind().toUnqualString());
       conv->replaceInputWith(conv_b_value, fused_conv_b);
-      add_or_div->output()->replaceAllUsesWith(conv->output());
+      add_or_sub->output()->replaceAllUsesWith(conv->output());
+      graph_modified = true;
       // DCE run after cleans up nodes
     }
   }
+  return graph_modified;
 }
 
 bool supportedMulOrDiv(Node* n) {
@@ -290,10 +305,11 @@ bool supportedMulOrDiv(Node* n) {
   return n->isMemberOf(add_set);
 }
 
-void FoldFrozenConvMulOrDiv(Block* b) {
+bool FoldFrozenConvMulOrDiv(Block* b) {
+  bool graph_modified = false;
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      FoldFrozenConvMulOrDiv(block);
+      graph_modified |= FoldFrozenConvMulOrDiv(block);
     }
 
     if (supportedMulOrDiv(n) && supportedConvNode(n->inputs().at(0)->node())) {
@@ -331,7 +347,7 @@ void FoldFrozenConvMulOrDiv(Block* b) {
 
       auto stack_out = runNodeIfInputsAreConstant(mul_or_div);
       TORCH_INTERNAL_ASSERT(stack_out && stack_out->size() == 1);
-      Tensor fuse_weight = (*stack_out)[0].toTensor();
+      Tensor fuse_weight = (*stack_out)[0].toTensor().to(weight_tensor.dtype());
 
       auto fused_conv_weight = b->owningGraph()->insertConstant(fuse_weight);
       auto conv_weight_value = conv->namedInput("weight");
@@ -355,7 +371,7 @@ void FoldFrozenConvMulOrDiv(Block* b) {
 
         auto stack_out = runNodeIfInputsAreConstant(mul_or_div);
         TORCH_INTERNAL_ASSERT(stack_out && stack_out->size() == 1);
-        Tensor fuse_bias = (*stack_out)[0].toTensor();
+        Tensor fuse_bias = (*stack_out)[0].toTensor().to(bias.dtype());
 
         auto fused_conv_bias = b->owningGraph()->insertConstant(fuse_bias);
         auto conv_b_value = conv->namedInput("bias");
@@ -365,26 +381,31 @@ void FoldFrozenConvMulOrDiv(Block* b) {
             mul_or_div->kind().toUnqualString());
         conv->replaceInputWith(conv_b_value, fused_conv_bias);
       }
+      graph_modified = true;
       // DCE run after cleans up nodes
     }
   }
+  return graph_modified;
 }
 
 } // namespace
 
-void FoldFrozenConvBatchnorm(std::shared_ptr<Graph>& graph) {
-  FoldFrozenConvBatchnorm(graph->block());
+bool FoldFrozenConvBatchnorm(std::shared_ptr<Graph>& graph) {
+  bool graph_modified = FoldFrozenConvBatchnorm(graph->block());
   EliminateDeadCode(graph);
+  return graph_modified;
 }
 
-void FoldFrozenConvAddOrSub(std::shared_ptr<Graph>& graph) {
-  FoldFrozenConvAddOrSub(graph->block());
+bool FoldFrozenConvAddOrSub(std::shared_ptr<Graph>& graph) {
+  bool graph_modified = FoldFrozenConvAddOrSub(graph->block());
   EliminateDeadCode(graph);
+  return graph_modified;
 }
 
-void FoldFrozenConvMulOrDiv(std::shared_ptr<Graph>& graph) {
-  FoldFrozenConvMulOrDiv(graph->block());
+bool FoldFrozenConvMulOrDiv(std::shared_ptr<Graph>& graph) {
+  bool graph_modified = FoldFrozenConvMulOrDiv(graph->block());
   EliminateDeadCode(graph);
+  return graph_modified;
 }
 
 } // namespace jit

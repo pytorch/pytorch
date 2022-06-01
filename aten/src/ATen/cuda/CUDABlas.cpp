@@ -15,6 +15,11 @@
 #include <cublasLt.h>
 #endif
 
+#ifdef USE_ROCM
+#define PYTORCH_ROCBLAS_VERSION_DECIMAL (ROCBLAS_VERSION_MAJOR * 100 + ROCBLAS_VERSION_MINOR)
+#define USE_GEMM_FLAGS_FP16_ALT_IMPL (PYTORCH_ROCBLAS_VERSION_DECIMAL >= 242)
+#endif
+
 #define CUDABLAS_POSINT_CHECK(FD, X)         \
   TORCH_CHECK(                               \
       (X > 0 && X <= INT_MAX),               \
@@ -246,13 +251,17 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   float falpha = alpha;
   float fbeta = beta;
 #ifdef USE_ROCM
+  int flag = 0;
+#if USE_GEMM_FLAGS_FP16_ALT_IMPL
+  flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
+#endif
   TORCH_CUDABLAS_CHECK(rocblas_gemm_strided_batched_ex(handle, opa, opb, (int)m, (int)n, (int)k,
                                    (void*)&falpha, a, rocblas_datatype_f16_r, (int)lda, stridea,
                                    b, rocblas_datatype_f16_r, (int)ldb, strideb,
                                    (void*)&fbeta, c, rocblas_datatype_f16_r, (int)ldc, stridec,
                                    c, rocblas_datatype_f16_r, (int)ldc, stridec,
                                    (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
-                                   0, 0));
+                                   0, flag));
 #else
   #if defined(CUDA_VERSION) && CUDA_VERSION < 11000
     // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
@@ -392,6 +401,10 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::Half);
 #ifdef USE_ROCM
+  int flag = 0;
+#if USE_GEMM_FLAGS_FP16_ALT_IMPL
+  flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
+#endif
   TORCH_CUDABLAS_CHECK(rocblas_gemm_ex(
       handle,
       opa,
@@ -416,7 +429,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       rocblas_datatype_f32_r,
       rocblas_gemm_algo_standard,
       0,
-      0));
+      flag));
 #else
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 5) {
@@ -634,7 +647,8 @@ void gemm_and_bias(
     int64_t mat2_ld,
     const Dtype* bias,
     Dtype* result_ptr,
-    int64_t result_ld) {
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation) {
   using opmath_t = at::opmath_type<Dtype>;
   opmath_t beta_val = 0; // bias is added in epilogue
 
@@ -670,6 +684,13 @@ void gemm_and_bias(
       &transb,
       sizeof(transb)));
   cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_BIAS;
+  if (activation == GEMMAndBiasActivationEpilogue::RELU) {
+    epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
+  } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
+#if CUDA_VERSION >= 11040
+    epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
+#endif
+  }
   TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
       computeDesc.descriptor(),
       CUBLASLT_MATMUL_DESC_EPILOGUE,
@@ -752,7 +773,8 @@ template void gemm_and_bias(
     int64_t mat2_ld,
     const double* bias,
     double* result_ptr,
-    int64_t result_ld);
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
 
 template void gemm_and_bias(
     bool transpose_mat1,
@@ -767,7 +789,8 @@ template void gemm_and_bias(
     int64_t mat2_ld,
     const float* bias,
     float* result_ptr,
-    int64_t result_ld);
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
 
 template void gemm_and_bias(
     bool transpose_mat1,
@@ -782,7 +805,8 @@ template void gemm_and_bias(
     int64_t mat2_ld,
     const at::Half* bias,
     at::Half* result_ptr,
-    int64_t result_ld);
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
 
 template void gemm_and_bias(
     bool transpose_mat1,
@@ -797,7 +821,8 @@ template void gemm_and_bias(
     int64_t mat2_ld,
     const at::BFloat16* bias,
     at::BFloat16* result_ptr,
-    int64_t result_ld);
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
 #endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER)
 
 template <>

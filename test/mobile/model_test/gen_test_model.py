@@ -108,19 +108,27 @@ models_need_trace = [
 
 def calcOpsCoverage(ops):
     with open(production_ops_path) as input_yaml_file:
-        production_ops = yaml.safe_load(input_yaml_file)
+        production_ops_dict = yaml.safe_load(input_yaml_file)
 
-    production_ops = set(production_ops["root_operators"])
+    production_ops = set(production_ops_dict["root_operators"].keys())
     all_generated_ops = set(ops)
     covered_ops = production_ops.intersection(all_generated_ops)
     uncovered_ops = production_ops - covered_ops
-    coverage = 100 * len(covered_ops) / len(production_ops)
-    print(f"\n{len(uncovered_ops)} uncovered ops: {uncovered_ops}")
-    print(
-        f"\nGenerated {len(all_generated_ops)} ops and covered "
-        + f"{len(covered_ops)}/{len(production_ops)} ({round(coverage, 2)}%) production ops. "
-        + f"(pytorch ver {torch.__version__}) \n"
-    )
+    coverage = round(100 * len(covered_ops) / len(production_ops), 2)
+
+    # weighted coverage (take op occurances into account)
+    total_occurances = sum(production_ops_dict["root_operators"].values())
+    covered_ops_dict = {op: production_ops_dict["root_operators"][op] for op in covered_ops}
+    uncovered_ops_dict = {op: production_ops_dict["root_operators"][op] for op in uncovered_ops}
+    covered_occurances = sum(covered_ops_dict.values())
+    occurances_coverage = round(100 * covered_occurances / total_occurances, 2)
+
+    print(f"\n{len(uncovered_ops)} uncovered ops: {uncovered_ops}\n")
+    print(f"Generated {len(all_generated_ops)} ops")
+    print(f"Covered {len(covered_ops)}/{len(production_ops)} ({coverage}%) production ops")
+    print(f"Covered {covered_occurances}/{total_occurances} ({occurances_coverage}%) occurances")
+    print(f"pytorch ver {torch.__version__}\n")
+
     with open(coverage_out_path, "w") as f:
         yaml.safe_dump(
             {
@@ -129,8 +137,8 @@ def calcOpsCoverage(ops):
                 "_generated_ops": len(all_generated_ops),
                 "_uncovered_ops": len(uncovered_ops),
                 "_coverage": round(coverage, 2),
-                "uncovered_ops": sorted(list(uncovered_ops)),
-                "covered_ops": sorted(list(covered_ops)),
+                "uncovered_ops": uncovered_ops_dict,
+                "covered_ops": covered_ops_dict,
                 "all_generated_ops": sorted(list(all_generated_ops)),
             },
             f,

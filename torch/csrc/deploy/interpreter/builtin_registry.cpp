@@ -66,6 +66,7 @@ void BuiltinRegistry::runPreInitialization() {
 
 const char* metaPathSetupTemplate = R"PYTHON(
 import sys
+from importlib.metadata import DistributionFinder, Distribution
 # We need to register a custom meta path finder because we are registering
 # `torch._C` as a builtin module.
 #
@@ -74,12 +75,36 @@ import sys
 # are top-level imports.  Since `torch._C` is a submodule of `torch`, the
 # BuiltinImporter skips it.
 class F:
+    MODULES = {<<<DEPLOY_BUILTIN_MODULES_CSV>>>}
+
     def find_spec(self, fullname, path, target=None):
-        if fullname in [<<<DEPLOY_BUILTIN_MODULES_CSV>>>]:
+        if fullname in self.MODULES:
             # Load this module using `BuiltinImporter`, but set `path` to None
             # in order to trick it into loading our module.
             return sys.meta_path[1].find_spec(fullname, path=None, target=None)
         return None
+
+    def find_distributions(self, context=DistributionFinder.Context()):
+        modules = {"torch"} | self.MODULES
+        # Insert dummy distribution records for each builtin module so
+        # importlib.metadata.version(...) works.
+        if context.name is None:
+            for name in modules:
+                yield DummyDistribution(name)
+        if context.name in modules:
+            yield DummyDistribution(context.name)
+
+class DummyDistribution(Distribution):
+    def __init__(self, name):
+        self._metadata = {
+            "Name": name,
+            "Version": "0.0.1+fake_multipy",
+        }
+
+    @property
+    def metadata(self):
+        return self._metadata
+
 sys.meta_path.insert(0, F())
 )PYTHON";
 
@@ -87,9 +112,9 @@ void BuiltinRegistry::runPostInitialization() {
   TORCH_INTERNAL_ASSERT(Py_IsInitialized());
   std::string metaPathSetupScript(metaPathSetupTemplate);
   std::string replaceKey = "<<<DEPLOY_BUILTIN_MODULES_CSV>>>";
-  auto itr = metaPathSetupScript.find(replaceKey);
-  if (itr != std::string::npos) {
-    metaPathSetupScript.replace(itr, replaceKey.size(), getBuiltinModulesCSV());
+  size_t pos = metaPathSetupScript.find(replaceKey);
+  if (pos != std::string::npos) {
+    metaPathSetupScript.replace(pos, replaceKey.size(), getBuiltinModulesCSV());
   }
   int r = PyRun_SimpleString(metaPathSetupScript.c_str());
   TORCH_INTERNAL_ASSERT(r == 0);

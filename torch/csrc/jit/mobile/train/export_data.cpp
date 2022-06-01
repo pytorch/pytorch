@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/mobile/train/export_data.h>
 
+#include <torch/csrc/jit/mobile/import_export_common.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/pickler.h>
@@ -12,7 +13,6 @@
 
 #if defined(ENABLE_FLATBUFFER)
 #include <flatbuffers/flatbuffers.h>
-#include <torch/csrc/jit/mobile/import_export_common.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #endif // defined(ENABLE_FLATBUFFER)
 
@@ -76,6 +76,8 @@ class IValuePickler final {
   TypeNameUniquer type_name_uniquer_;
 };
 
+} // namespace
+
 /**
  * Converts a map of named tensors to a c10::Dict.
  */
@@ -87,8 +89,6 @@ c10::Dict<std::string, at::Tensor> tensor_map_to_dict(
   }
   return dict;
 }
-
-#if defined(ENABLE_FLATBUFFER)
 
 /**
  * Returns a Module with a single attribute, with the attribute name specified
@@ -117,9 +117,6 @@ mobile::Module tensor_dict_to_mobile(
   return mobile::Module(object, mcu);
 }
 
-#endif // defined(ENABLE_FLATBUFFER)
-
-} // namespace
 } // namespace mobile
 
 void _save_parameters(

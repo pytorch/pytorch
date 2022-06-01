@@ -13,7 +13,7 @@ constexpr int num_threads() {
   return 256;
 }
 #else
-constexpr int num_threads() {
+constexpr uint32_t num_threads() {
   return C10_WARP_SIZE * 4;
 }
 #endif

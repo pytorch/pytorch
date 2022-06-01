@@ -21,6 +21,7 @@
 
 #if defined(ENABLE_FLATBUFFER)
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #endif
 
 #include <caffe2/serialize/file_adapter.h>
@@ -295,11 +296,12 @@ Module import_ir_module(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
+  in.seekg(0, in.beg);
   auto format = getFileFormat(in);
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
 #if defined(ENABLE_FLATBUFFER)
-      return load_jit_module_from_stream(in, device);
+      return load_jit_module_from_stream(in, extra_files, device);
 #else
       TORCH_CHECK(
           false, "Flatbuffer input file but the build hasn't enable flatbuffer")
@@ -350,7 +352,7 @@ Module import_ir_module(
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
 #if defined(ENABLE_FLATBUFFER)
-      return load_jit_module_from_file(filename, device);
+      return load_jit_module_from_file(filename, extra_files, device);
 #else
       TORCH_CHECK(
           false, "Flatbuffer input file but the build hasn't enable flatbuffer")
@@ -394,11 +396,12 @@ Module load(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
+  in.seekg(0, in.beg);
   auto format = getFileFormat(in);
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
 #if defined(ENABLE_FLATBUFFER)
-      return load_jit_module_from_stream(in, device);
+      return load_jit_module_from_stream(in, extra_files, device);
 #else
       TORCH_CHECK(
           false, "Flatbuffer input file but the build hasn't enable flatbuffer")
@@ -429,7 +432,7 @@ Module load(
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
 #if defined(ENABLE_FLATBUFFER)
-      return load_jit_module_from_file(filename, device);
+      return load_jit_module_from_file(filename, extra_files, device);
 #else
       TORCH_CHECK(
           false, "Flatbuffer input file but the build hasn't enable flatbuffer")
@@ -526,13 +529,13 @@ Module jitModuleFromSourceAndConstants(
   SourceImporter importer(
       compilation_unit,
       &constants,
-      [&source](const std::string& qualifier) -> std::shared_ptr<SourceView> {
+      [&source](const std::string& qualifier) -> std::shared_ptr<Source> {
         auto source_iter = source.find(qualifier);
         if (source_iter == source.end()) {
           return nullptr;
         }
         return std::make_shared<Source>(
-            source_iter->second, qualifier, 1, nullptr);
+            source_iter->second, qualifier, 1, nullptr, Source::COPIES_STRING);
       },
       version);
   auto type_resolver = [&](const c10::QualifiedName& qn) {

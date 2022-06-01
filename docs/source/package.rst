@@ -16,7 +16,7 @@ will help you learn more about ``torch.package`` and how to use it.
 
 .. warning::
 
-    This module depends on the ``pickle`` module which is is not secure. Only unpackage data you trust.
+    This module depends on the ``pickle`` module which is not secure. Only unpackage data you trust.
 
     It is possible to construct malicious pickle data which will **execute arbitrary code during unpickling**.
     Never unpackage data that could have come from an untrusted source, or that could have been tampered with.
@@ -379,7 +379,7 @@ API for accessing resources from inside a package.
 ::
 
     with PackageExporter(f) as exporter:
-        # saves text to one/a.txt in the archive
+        # saves text to my_resource/a.txt in the archive
         exporter.save_text("my_resource", "a.txt", "hello world!")
         # saves the tensor to my_pickle/obj.pkl
         exporter.save_pickle("my_pickle", "obj.pkl", torch.ones(2, 2))

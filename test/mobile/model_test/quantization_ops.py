@@ -83,6 +83,7 @@ class DynamicQuantModule:
                     ),
                 ]
             )
+            # self.a = torch.nn.utils.rnn.pad_sequence([torch.tensor([1,2,3]), torch.tensor([3,4])], batch_first=True)
 
         def forward(self):
             input = torch.randn(5, 3, 4)
@@ -98,6 +99,7 @@ class DynamicQuantModule:
                 self.gru(input, h),
                 self.grucell(input[0], h[0]),
                 self.lstm(input, (h, c)),
+                # self.lstm(torch.nn.utils.rnn.pack_padded_sequence(self.a, lengths=torch.tensor([3,2,1])), (h, c)),
                 self.lstmcell(input[0], (h[0], c[0])),
                 self.transformers[0](trans_input, tgt),
                 self.transformers[1](trans_input),

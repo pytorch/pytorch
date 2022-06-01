@@ -195,7 +195,7 @@ void PerfNetObserver::Start() {
   int skipIters = ObserverConfig::getSkipIters();
   int sampleRate = visitCount > 0 ? netFollowupSampleRate : netInitSampleRate;
   // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
-  if (skipIters <= numRuns_ && sampleRate > 0 && rand() % sampleRate == 0) {
+  if (skipIters <= static_cast<int>(numRuns_) && sampleRate > 0 && rand() % sampleRate == 0) {
     visitCount++;
     if (visitCount == netFollowupSampleCount) {
       visitCount = 0;
@@ -238,9 +238,9 @@ void PerfNetObserver::Stop() {
 
   if (logType_ == PerfNetObserver::OPERATOR_DELAY) {
     const auto& operators = subject_->GetOperators();
-    for (int idx = 0; idx < operators.size(); ++idx) {
+    for (unsigned idx = 0; idx < operators.size(); ++idx) {
       const auto* op = operators[idx];
-      auto name = getObserverName(op, idx);
+      auto name = getObserverName(op, static_cast<int>(idx));
       PerformanceInformation p;
       const PerfOperatorObserver* opObserver =
           static_cast<const PerfOperatorObserver*>(observerMap_[op]);

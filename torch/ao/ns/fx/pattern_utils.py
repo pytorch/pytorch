@@ -8,9 +8,7 @@ from torch.fx.graph import Node
 
 from torch.ao.quantization.utils import getattr_from_fqn
 from .ns_types import NSNodeTargetType
-from torch.ao.quantization.fx.pattern_utils import get_default_quant_patterns
-from torch.ao.quantization.fx.backend_config import get_native_backend_config_dict
-from torch.ao.quantization.fx.backend_config.utils import get_pattern_to_quantize_handlers
+from torch.ao.quantization.fx.backend_config_utils import get_native_quant_patterns
 from torch.ao.quantization import (
     ObserverBase,
     FakeQuantizeBase,
@@ -68,15 +66,18 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
     # * multiple ops: (torch.nn.ReLU, torch.nn.Conv2d)
     # For fusions, we only care about patterns composed of multiple ops.
     # TODO(future PR): allow customizations from default patterns.
-    # TODO: we can remove this call, and get all patterns from backend_config_dict in
-    # the future when the frontend refactor is done in fx graph mode quantization
-    all_quant_patterns = get_default_quant_patterns()
-    # some of the patterns are moved to (native) backend_config_dict so we need to
-    # add them back here
-    for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config_dict()).items():
-        all_quant_patterns[pattern] = quantize_handler
+    all_quant_patterns = get_native_quant_patterns()
+
     default_base_op_idx = 0
     for quant_pattern, _quant_handler in all_quant_patterns.items():
+        # TODO: this is a temporary hack to flatten the patterns from quantization so
+        # that it works with the ns matcher function, maybe we should use `is_match`
+        # in torch.ao.quantization.fx.match_utils to match the patterns
+        if isinstance(quant_pattern, tuple) and len(quant_pattern) == 2 and \
+           isinstance(quant_pattern[1], tuple) and len(quant_pattern[1]) == 2:
+            # flatten the pattern with form (nn.ReLU, (nn.BatchNorm2d, nn.Conv2d))
+            quant_pattern = (quant_pattern[0], quant_pattern[1][0], quant_pattern[1][1])
+
         # Only patterns of multiple ops are fusions, ignore
         # patterns which contain a single ops (they get matched
         # without caring about fusions).

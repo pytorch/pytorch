@@ -226,6 +226,7 @@ class BytecodeDeserializer final {
   // operators from the given model. If it's less than the current runtime,
   // upgrader will be applied at loading stage.
   uint64_t operator_version_;
+  uint64_t bytecode_version_;
 };
 
 BytecodeDeserializer::BytecodeDeserializer(
@@ -311,25 +312,26 @@ void BytecodeDeserializer::parseMethods(
   TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
   // introduced. The old models (some of them already in production) without
-  // version number don't have to be re-generated.
-  int64_t model_version = 0x3L;
+  // version number are seen as version 3 (deprecated).
+  constexpr uint64_t default_version = 0x3L;
+  bytecode_version_ = default_version;
   size_t method_i_start = 0;
   if (vals[0].isInt()) {
-    model_version = vals[0].toInt();
+    bytecode_version_ = vals[0].toInt();
     method_i_start = 1;
   }
   TORCH_CHECK(
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
+      caffe2::serialize::kMinSupportedBytecodeVersion <= bytecode_version_ &&
           // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-          model_version <= caffe2::serialize::kMaxSupportedBytecodeVersion,
+          bytecode_version_ <= caffe2::serialize::kMaxSupportedBytecodeVersion,
       "Lite Interpreter version number does not match. ",
       "The model version must be between ",
       caffe2::serialize::kMinSupportedBytecodeVersion,
       " and ",
       caffe2::serialize::kMaxSupportedBytecodeVersion,
       " but the model version is ",
-      model_version);
+      bytecode_version_);
 
   if (debug_handles) {
     TORCH_CHECK(
@@ -345,7 +347,8 @@ void BytecodeDeserializer::parseMethods(
     auto codeTableElements =
         std::move(std::move(m_tuple[1]).toTupleRef()).elements();
     IValue* schemaTable = // older files do not store function schema
-        (model_version > 0x4L || (model_version == 0x4L && m_tuple.size() >= 3))
+        (bytecode_version_ > 0x4L ||
+         (bytecode_version_ == 0x4L && m_tuple.size() >= 3))
         ? &m_tuple[2]
         : nullptr;
     auto function =
@@ -383,11 +386,7 @@ void BytecodeDeserializer::parseMethods(
     }
     init_upgrader(function.get());
     // 1. First pass all operators from models
-    parseOperators(
-        std::move(ops_list),
-        model_version,
-        module_load_options_,
-        function.get());
+    parseOperators(std::move(ops_list), module_load_options_, function.get());
 
     // 2. Decides if upgrader is needed
     bool use_upgrader =
@@ -413,7 +412,7 @@ void BytecodeDeserializer::parseMethods(
     function->set_register_size(register_size);
 
     parseFunctionSchema(
-        function_name, schemaTable, model_version, function.get());
+        function_name, schemaTable, bytecode_version_, function.get());
 
     mcu.register_function(std::move(function));
   }
@@ -469,6 +468,8 @@ mobile::Module BytecodeDeserializer::deserialize(
   operator_version_ = reader_->version();
   parseMethods(std::move(bvals), std::move(debug_handles), *mcu);
   auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);
+  m.set_min_operator_version(operator_version_);
+  m.set_bytecode_version(bytecode_version_);
   m.setHasDebugHandles(has_debug_handles);
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   MobileDebugTable debug_table = MobileDebugTable(reader_, compilation_unit_);
@@ -540,6 +541,7 @@ mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
+  in.seekg(0, in.beg);
   auto format = getFileFormat(in);
   switch (format) {
     case FileFormat::ZipFileFormat: {
@@ -557,6 +559,7 @@ mobile::Module _load_for_mobile(
           mobile::serialization::GetMutableModule(data.get());
       mobile::Module m = initialize_mobile_module(flatbuffer_module);
       parseExtraFiles(flatbuffer_module, extra_files);
+      m.set_delete_memory(data);
       return m;
     }
 #else
@@ -606,6 +609,7 @@ mobile::Module _load_for_mobile(
           mobile::serialization::GetMutableModule(data.get());
       mobile::Module m = initialize_mobile_module(flatbuffer_module);
       parseExtraFiles(flatbuffer_module, extra_files);
+      m.set_delete_memory(data);
       return m;
     }
 #else

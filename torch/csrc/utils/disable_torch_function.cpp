@@ -223,8 +223,9 @@ inline bool has_torch_function_attr(PyObject* obj) {
 }
 
 namespace torch {
-auto check_has_torch_function(PyObject* obj) -> bool
-{
+auto check_has_torch_function(PyObject* obj, bool ignore_mode) -> bool {
+  if (!ignore_mode && at::impl::PythonTorchFunctionTLS::get_mode())
+    return true;
   PyTypeObject *tp = Py_TYPE(obj);
   return (
     !THPVariable_CheckTypeExact(tp) &&

@@ -23,6 +23,9 @@ void check_group_norm_inputs(
     int64_t C,
     int64_t num_groups) {
   TORCH_CHECK(
+      num_groups > 0,
+      "Expected num groups to be greater than 0, got ", num_groups);
+  TORCH_CHECK(
       C % num_groups == 0,
       "Expected number of channels in input to be divisible by ",
       "num_groups, but got input of shape ",

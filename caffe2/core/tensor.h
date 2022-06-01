@@ -4,6 +4,7 @@
 #include <c10/macros/Macros.h>
 #include "caffe2/core/storage.h"
 
+#include <c10/core/SymIntArrayRef.h>
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
@@ -426,6 +427,10 @@ class TORCH_API Tensor final {
 
   inline at::IntArrayRef sizes() const {
     return impl_.get()->sizes();
+  }
+
+  inline c10::SymIntArrayRef sym_sizes() const {
+    return impl_->sym_sizes();
   }
 
   inline int64_t size_from_dim(int k) const {

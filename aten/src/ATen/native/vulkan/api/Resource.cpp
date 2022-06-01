@@ -364,8 +364,8 @@ Resource::Pool::Pool(
   : device_(gpu.device),
     allocator_(
         create_allocator(
-            gpu.adapter->runtime->instance(),
-            gpu.adapter->handle,
+            gpu.instance,
+            gpu.adapter->physical_handle(),
             device_),
         vmaDestroyAllocator),
     memory_{

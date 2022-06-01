@@ -7,7 +7,8 @@
 
 namespace {
 
-static void cat_op_channel_perf(benchmark::State& state) {
+// using Vulkan Timestamp Queries for the pure GPU execution time only
+static void cat_op_channel_perf_gpu_only(benchmark::State& state) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -26,12 +27,12 @@ static void cat_op_channel_perf(benchmark::State& state) {
   const auto in_vulkan3 = in_cpu3.vulkan();
 
   // Act
-  while (state.KeepRunning()) {
-    const auto out_vulkan = at::cat({in_vulkan1, in_vulkan2, in_vulkan3}, 1);
-
-    // to avoid out-of-memory issues, release resources by waiting and flushing all GPU operations
-    at::native::vulkan::api::context()->wait(out_vulkan);
-    at::native::vulkan::api::context()->flush();
+  for (auto _ : state) {
+    at::native::vulkan::api::context()->querypool().enable();
+    const auto vulkan_out = at::cat({in_vulkan1, in_vulkan2, in_vulkan3}, 1);
+    vulkan_out.cpu();
+    auto perf_info = at::native::vulkan::api::context()->querypool().disable(true);
+    state.SetIterationTime(perf_info[0].execution_time_us / 1'000'000.); // us to sec
   }
 }
 
@@ -94,13 +95,14 @@ static void CommonBenchmarkSettings(benchmark::internal::Benchmark* b) {
 
 } // namespace
 
-BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Threads(1)->Iterations(1000)->Args({3, 40, 221, 193}); // big multiple of 4 channels
-BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Threads(1)->Iterations(1000)->Args({3, 20, 221, 193}); // big multiple of 4 channels
-BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Threads(1)->Iterations(1000)->Args({3, 39, 221, 193}); // big non-multiple of 4 channels
-BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Threads(1)->Iterations(5000)->Args({3, 4, 221, 193}); // small multiple of 4 channels
-BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Threads(1)->Iterations(5000)->Args({3, 3, 221, 193}); // small non-multiple of 4 channels
-BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Threads(3)->Iterations(1000)->Args({3, 40, 221, 193}); // big multiple of 4 channels (multi-thread)
-BENCHMARK(gru_op_perf)->Apply(CommonBenchmarkSettings)->Threads(1)->Iterations(1000)->Args({384, 384, 2}); // McLaren Model inputs
+BENCHMARK(cat_op_channel_perf_gpu_only)->Apply(CommonBenchmarkSettings)->UseManualTime()->Threads(1)->Iterations(100)->Args({3, 40, 221, 193});  // big multiple of 4 channels
+BENCHMARK(cat_op_channel_perf_gpu_only)->Apply(CommonBenchmarkSettings)->UseManualTime()->Threads(1)->Iterations(100)->Args({3, 20, 221, 193});  // big multiple of 4 channels
+BENCHMARK(cat_op_channel_perf_gpu_only)->Apply(CommonBenchmarkSettings)->UseManualTime()->Threads(1)->Iterations(100)->Args({3, 39, 221, 193});  // big non-multiple of 4 channels
+BENCHMARK(cat_op_channel_perf_gpu_only)->Apply(CommonBenchmarkSettings)->UseManualTime()->Threads(1)->Iterations(100)->Args({3, 4, 221, 193});   // small multiple of 4 channels
+BENCHMARK(cat_op_channel_perf_gpu_only)->Apply(CommonBenchmarkSettings)->UseManualTime()->Threads(1)->Iterations(100)->Args({3, 3, 221, 193});   // small non-multiple of 4 channels
+BENCHMARK(cat_op_channel_perf_gpu_only)->Apply(CommonBenchmarkSettings)->UseManualTime()->Threads(3)->Iterations(100)->Args({3, 40, 221, 193});  // big multiple of 4 channels (multi-thread)
+BENCHMARK(gru_op_perf)->Apply(CommonBenchmarkSettings)->Threads(1)->Iterations(100)->Args({384, 384, 2});                                        // McLaren Model inputs
+
 BENCHMARK_MAIN();
 
 #endif /* USE_VULKAN_API */
