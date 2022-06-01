@@ -310,6 +310,7 @@ cmake_python_include_dir = sysconfig.get_path("include")
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
+package_type = os.getenv('PACKAGE_TYPE', 'libtorch')
 version = get_torch_version()
 report("Building wheel {}-{}".format(package_name, version))
 
@@ -430,12 +431,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
     # Copy libiomp5.dylib inside the wheel package on OS X
     def _embed_libiomp(self):
-
-        report('In _embed_libiomp')
-        if not IS_DARWIN:
-            return
-
-        report('--Is Darwin _embed_libiomp')
         lib_dir = os.path.join(self.build_lib, 'torch', 'lib')
         libtorch_cpu_path = os.path.join(lib_dir, 'libtorch_cpu.dylib')
         if not os.path.exists(libtorch_cpu_path):
@@ -456,25 +451,24 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
         omp_lib_name = 'libiomp5.dylib'
         if os.path.join('@rpath', omp_lib_name) not in libs:
-            report('--libiomp5 not in libs returning')
             return
 
         # Copy libiomp5 from rpath locations
-        report('--Copy libiomp5 from rpath locations')
         for rpath in rpaths:
             source_lib = os.path.join(rpath, omp_lib_name)
             if not os.path.exists(source_lib):
                 continue
             target_lib = os.path.join(self.build_lib, 'torch', 'lib', omp_lib_name)
-            report('--Copying libomp to: '+target_lib + ' from '+ source_lib)
-            report('--Make sure we call install_name_tool on source libiomp5')
-            report(subprocess.check_output(['install_name_tool', '-id', '@rpath/libiomp5.dylib', source_lib]).decode('utf-8').split('\n'))
 
+            subprocess.check_call(['install_name_tool', '-delete_rpath', rpath, source_lib])
             self.copy_file(source_lib, target_lib)
-
-            report('--Make sure we call install_name_tool on target  libiomp5')
-            report(subprocess.check_output(['install_name_tool', '-id', '@rpath/libiomp5.dylib', target_lib]).decode('utf-8').split('\n'))
+            subprocess.check_call(['install_name_tool', '-delete_rpath', rpath, target_lib])
             break
+
+        # Delete rpath from those libs
+        for rpath in rpaths:
+            for lib in [libtorch_cpu_path, libtorch_path, libtorch_python_path]:
+                subprocess.check_call(['install_name_tool', '-delete_rpath', rpath, lib])
 
     def run(self):
         # Report build options. This is run after the build completes so # `CMakeCache.txt` exists and we can get an
@@ -536,7 +530,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
-        self._embed_libiomp()
+        if IS_DARWIN and package_type == 'libtorch':
+            self._embed_libiomp()
 
         # Copy the essential export library to compile C++ extensions.
         if IS_WINDOWS:
