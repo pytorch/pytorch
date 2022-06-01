@@ -84,6 +84,25 @@ class TestPrims(TestCase):
             self.assertEqual(a.expand_as(result), result)
             """
 
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_nvfuser_impl_is_used(self, device):
+        # This test is to ensure that when the nvfuser implementation exists it is used
+        # Assuming one-to-one mapping between prims and nvfuser implementations
+        # This test is not intended to test the correctness of the nvfuser implementation
+        from torch._C._nvfuser import FusionDefinition as fd
+
+        prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.Ops))
+        ops_without_nvfuser_impl = {
+            name
+            for name in prim_nvfuser_ops
+            if getattr(torch.ops.prims, name).default.impl_nvfuser is None
+        }
+        assert (
+            len(ops_without_nvfuser_impl) == 0
+        ), (f"The following prims do not have 'impl_nvfuser' defined: {ops_without_nvfuser_impl} ",
+            "while there exists nvfuser implementations for them.")
+
 
 class TestPrimsBasic(TestCase):
     def test_torch_ops(self):
