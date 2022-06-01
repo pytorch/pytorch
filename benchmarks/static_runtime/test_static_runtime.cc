@@ -131,6 +131,52 @@ TEST(StaticRuntime, Max) {
   testStaticRuntime(src_max_pointwise, {input, input_other}, {large_input, large_input_other});
 }
 
+TEST(StaticRuntime, Mean) {
+  const auto src_default = R"JIT(
+    def forward(self, input):
+        return torch.mean(input).clone()
+  )JIT";
+  const auto src_dtype = R"JIT(
+    def forward(self, input, dtype: int):
+        return torch.mean(input, dtype=dtype).clone()
+  )JIT";
+  const auto src_dim = R"JIT(
+    def forward(self, input, dim: List[int]):
+        return torch.mean(input, dim).clone()
+  )JIT";
+  const auto src_dim_keepdim = R"JIT(
+    def forward(self, input, dim: List[int]):
+        return torch.mean(input, dim, keepdim=True).clone()
+  )JIT";
+  const auto src_dim_dtype = R"JIT(
+    def forward(self, input, dim: List[int], dtype: int):
+        return torch.mean(input, dim, dtype=dtype).clone()
+  )JIT";
+
+  auto input = at::randn({2, 3, 2});
+  auto large_input = at::randn({8, 7, 6, 8});
+
+  std::vector<IValue> args_default = {input};
+  std::vector<IValue> args_dtype = {input, torch::kFloat};
+  std::vector<IValue> args_dim = {input, c10::List<int64_t>{0, 2}};
+  std::vector<IValue> args_dim_keepdim = {input, c10::List<int64_t>{1, 2}};
+  std::vector<IValue> args_dim_dtype = {input, c10::List<int64_t>{0, 1}, torch::kBFloat16};
+
+  testStaticRuntime(src_default, args_default);
+  testStaticRuntime(src_dtype, args_dtype);
+  testStaticRuntime(src_dim, args_dim);
+  testStaticRuntime(src_dim_keepdim, args_dim_keepdim);
+  testStaticRuntime(src_dim_dtype, args_dim_dtype);
+
+  std::vector<IValue> large_args_dim = {large_input, c10::List<int64_t>{0, 3}};
+  std::vector<IValue> large_args_dim_keepdim = {large_input, c10::List<int64_t>{1, 2}};
+  std::vector<IValue> large_args_dim_dtype = {large_input, c10::List<int64_t>{1, 3}, torch::kBFloat16};
+
+  testStaticRuntime(src_dim, args_dim, large_args_dim);
+  testStaticRuntime(src_dim_keepdim, args_dim_keepdim, large_args_dim_keepdim);
+  testStaticRuntime(src_dim_dtype, args_dim_dtype, large_args_dim_dtype);
+}
+
 TEST(StaticRuntime, Sigmoid) {
   const auto sigmoid_script = R"JIT(
     def forward(self, inp: Tensor):
