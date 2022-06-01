@@ -15,13 +15,12 @@ def print_latest_commits(minutes: int = 30) -> None:
     current_time = datetime.now()
     time_since = current_time - timedelta(minutes=minutes)
     timestamp_since = datetime.timestamp(time_since)
-
     commits = _check_output(
         [
             "git",
             "rev-list",
             f"--max-age={timestamp_since}",
-            "--all",
+            "--remotes=*master",
         ],
         encoding="ascii",
     ).splitlines()
@@ -41,7 +40,7 @@ def print_commit_status(sha: str) -> None:
     params['sha'] = sha
     results = qlambda.execute(parameters=params)
     for check in results['results']:
-        print(f"\t{check['jobName']}: {check['conclusion']}")
+        print(f"\t{check['name']}: {check['conclusion']}")
 
 def main() -> None:
     args = parse_args()
