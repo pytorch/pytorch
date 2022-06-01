@@ -81,7 +81,8 @@ void signbit_kernel_cuda(TensorIteratorBase& iter){
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return signbit(a); });
+      using opmath_t = at::opmath_type<scalar_t>;
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return signbit(opmath_t{a}); });
     });
   }
 }

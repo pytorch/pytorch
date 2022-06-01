@@ -304,7 +304,8 @@ static void signbit_kernel(TensorIteratorBase& iter){
       cpu_kernel(iter, [](scalar_t a) -> bool { return a < 0; }); });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
-     cpu_kernel(iter, [](scalar_t a) -> bool { return std::signbit(a); }); });
+      using opmath_t = at::opmath_type<scalar_t>;
+     cpu_kernel(iter, [](scalar_t a) -> bool { return std::signbit(opmath_t{a}); }); });
   }
 }
 
