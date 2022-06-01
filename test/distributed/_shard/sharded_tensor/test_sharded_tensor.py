@@ -1603,6 +1603,61 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         for meta in metas:
             self.assertEqual(str(meta.placement.device()), "cpu")
 
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_sharded_tensor_to_cuda(self):
+        cpu_spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cpu",
+                "rank:1/cpu",
+                "rank:2/cpu",
+                "rank:3/cpu",
+            ],
+        )
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 10, 20
+        # CUDA sharded tensor should return a new ShardedTensor, but same
+        # local shards(no movements)
+        st_cuda = sharded_tensor.zeros(spec, h, w)
+        new_st_cuda = st_cuda.cuda()
+        self.assertTrue(st_cuda is not new_st_cuda)
+        self.assertTrue(st_cuda.local_tensor() is new_st_cuda.local_tensor())
+
+        gloo_pg = dist.new_group(backend="gloo")
+
+        # CPU sharded tensor to GPU
+        st_cpu = sharded_tensor.zeros(cpu_spec, h, w, process_group=gloo_pg)
+        # test ability to move st to GPU
+        spec_before_move = st_cpu.sharding_spec()
+        new_st_gpu = st_cpu.cuda()
+        # check the spec is still ChunkShardingSpec
+        spec_after_move = new_st_gpu.sharding_spec()
+        self.assertIsInstance(spec_after_move, ChunkShardingSpec)
+        # test specs before and after the move almost the same except placement device
+        self.assertEqual(spec_before_move.dim, spec_after_move.dim)
+        self.assertEqual(len(spec_before_move.placements), len(spec_after_move.placements))
+        for i, remote_device_after in enumerate(spec_after_move.placements):
+            remote_device_before = spec_before_move.placements[i]
+            self.assertEqual(remote_device_before.rank(), remote_device_after.rank())
+            self.assertEqual(str(remote_device_before.device().type), "cpu")
+            self.assertEqual(str(remote_device_after.device().type), "cuda")
+
+        # ensure metdata also get changed to GPU
+        metas = new_st_gpu.metadata().shards_metadata
+        for meta in metas:
+            self.assertEqual(str(meta.placement.device().type), "cuda")
+
+
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_uneven_shards(self):
