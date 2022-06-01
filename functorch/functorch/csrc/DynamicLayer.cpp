@@ -479,8 +479,6 @@ TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   JVP_DECOMP(_softmax_backward_data);
   OP_DECOMPOSE(log_sigmoid);
   JVP_DECOMP(log_sigmoid_forward);
-  JVP_DECOMP(binary_cross_entropy);
-  JVP_DECOMP(binary_cross_entropy_backward);
   JVP_DECOMP(native_layer_norm_backward);
 }
 
