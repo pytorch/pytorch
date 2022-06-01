@@ -2379,7 +2379,7 @@ def sample_inputs_jiterator(op, device, dtype, requires_grad, **kwargs):
 
         yield SampleInput(lhs, args=tuple(args), kwargs=sample_kwargs, broadcasts_input=broadcasts_input)
 
-def sample_inputs_broadcast_sizes(op, device, dtype, requires_grad, **kwargs):
+def sample_inputs_broadcast_shapes(op, device, dtype, requires_grad, **kwargs):
     shapes = (
         ((), ()),
         ((S,), ()),
@@ -10684,12 +10684,10 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_broadcast_to),
     OpInfo('broadcast_shapes',
            op=torch.broadcast_shapes,
-           ref=np.broadcast_to,
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           ref=np.broadcast_shapes,
+           dtypes=(torch.bool),
            supports_out=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_broadcast_to),
+           sample_inputs_func=sample_inputs_broadcast_shapes),
     OpInfo('broadcast_tensors',
            ref=np.broadcast_arrays,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -19724,7 +19722,7 @@ python_ref_db = [
         torch_opinfo_name="broadcast_shapes",
         # dtype doesn't matter since we don't use it
         dtypes=(torch.bool),
-        sample_inputs_func=sample_inputs_broadcast_sizes,
+        sample_inputs_func=sample_inputs_broadcast_shapes,
     ),
     PythonRefInfo(
         "_refs.broadcast_tensors",
