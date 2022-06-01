@@ -10,7 +10,7 @@ from typing import Tuple
 class NonUniformQuantizationObserverBase(ObserverBase):
     quant_min = None
     quant_max = None
-    
+
     def __init__(
         self,
         min_val: torch.Tensor,
@@ -27,7 +27,7 @@ class APoTObserver(NonUniformQuantizationObserverBase):
     alpha = 0
     gamma = 0
     level_indices = torch.Tensor()
-    
+
     def __init__(
         self,
         min_val: torch.Tensor,
