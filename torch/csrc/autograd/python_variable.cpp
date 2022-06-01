@@ -241,7 +241,7 @@ class PyInterpreterHolder {
 PyInterpreterHolder self_interpreter;
 
 c10::TensorImpl::SizesStridesPolicy parseSizesStridesPolicyArgument(
-    const std::string& arg) {
+    c10::string_view arg) {
   if (arg == "strides") {
     return c10::TensorImpl::SizesStridesPolicy::CustomStrides;
   }
@@ -575,7 +575,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   // ```
   data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
   data.set_requires_grad(r.toBool(2));
-  const auto sizes_strides_policy = r.stringOptional(3);
+  const auto sizes_strides_policy = r.stringViewOptional(3);
   if (sizes_strides_policy.has_value()) {
     data.unsafeGetTensorImpl()->set_sizes_strides_policy(
         parseSizesStridesPolicyArgument(*sizes_strides_policy));
@@ -640,7 +640,7 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
         .make_tensor();
   data.set_requires_grad(r.toBool(9));
 
-  const auto sizes_strides_policy = r.stringOptional(10);
+  const auto sizes_strides_policy = r.stringViewOptional(10);
   if (sizes_strides_policy.has_value()) {
     data.unsafeGetTensorImpl()->set_sizes_strides_policy(
         parseSizesStridesPolicyArgument(*sizes_strides_policy));
