@@ -18,7 +18,7 @@ class ModelViewer:
     @staticmethod
     def get_layers(model):
         # get the list of layers from model
-        keysList = [key for key in model]
+        keysList = list(model)
         # retreive the tensor size of each layer from the model
         # save as dictionary for faster access
         d = {}
@@ -59,8 +59,8 @@ class ModelViewer:
                 name += "\n"
                 name += str(i)
                 name += "\n"
-            ax.text(x, y, name, color='black', fontsize= 13, fontfamily="monospace",
-                            bbox = dict(boxstyle="round", facecolor='none', edgecolor='black', ec=(0,0,0), fc=(0.949, 0.964, 0.917)))
+            ax.text(x, y, name, color='black', fontsize=13, fontfamily="monospace",
+                    bbox=dict(boxstyle="round", facecolor='none', edgecolor='black', ec=(0, 0, 0), fc=(0.949, 0.964, 0.917)))
             y = y - step_size
         plt.show()
         return fig
