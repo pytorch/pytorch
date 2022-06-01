@@ -6,7 +6,6 @@ import functools
 import torch
 from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
 from typing import Tuple, Any, Union, Callable, Dict, Optional
-import typing
 from torch.nn.utils.parametrize import is_parametrized
 from collections import OrderedDict
 from inspect import signature
@@ -411,7 +410,7 @@ def _get_signature_locals(f: Callable, loc: Dict[str, Any]) -> Dict[str, Any]:
     """
     return {k: v for k, v in loc.items() if k in signature(f).parameters}
 
-def _get_default_kwargs(f: Callable) -> typing.OrderedDict[str, Any]:
+def _get_default_kwargs(f: Callable) -> "OrderedDict[str, Any]":
     """ Get all default keyword arguments from function signature
 
     Example::
@@ -431,7 +430,7 @@ def _get_default_kwargs(f: Callable) -> typing.OrderedDict[str, Any]:
             kwargs[name] = {}
     return OrderedDict(kwargs)
 
-def _normalize_kwargs(func: Callable, loc: Dict[str, Any]) -> typing.OrderedDict[str, Any]:
+def _normalize_kwargs(func: Callable, loc: Dict[str, Any]) -> "OrderedDict[str, Any]":
     """ Given a function and local function arguments, normalize the keyword
     arguments by filling in default arguments from function signature
 

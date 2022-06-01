@@ -13180,8 +13180,7 @@ class TestNNDeviceType(NNTestCase):
                 gn = nn.GroupNorm(g, shape[1])
 
     def _test_GroupNorm_cuda_half(self):
-        with torch.no_grad():
-            input = torch.empty(2, 4, 3, 2, device="cuda", dtype=torch.half, requires_grad=True).random_(1, 10)
+        input = torch.zeros(2, 4, 3, 2, requires_grad=True).cuda().half().random_(1, 10)
         m = nn.GroupNorm(2, 4).to("cuda", torch.half)
         output = m(input)
         output.sum().backward()
