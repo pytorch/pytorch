@@ -158,6 +158,12 @@ class vTensor final {
     waited on.
   */
 
+  inline void wait_for_fence() const {
+    view_->wait_for_fence();
+  }
+
+  api::VulkanBuffer& host_buffer(api::Command::Buffer&, const Access::Flags) &;
+
   template<typename Type>
   Future<Type, Access::Read> host(api::Command::Buffer&) const &;
 
@@ -262,6 +268,8 @@ class vTensor final {
     */
 
     api::VulkanBuffer& staging(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
+
+    void wait_for_fence() const;
     vTensor::Memory& wait() const;
 
     /*
@@ -345,7 +353,7 @@ class vTensor final {
     api::VulkanImage& image(CMD&, Stage::Flags, Access::Flags) const;
     api::VulkanBuffer& staging() const;
     api::VulkanBuffer& staging(CMD&, Stage::Flags, Access::Flags) const;
-    Fence& fence(Access::Flags) const;
+    api::VulkanFence& fence(Access::Flags) const;
 
     // Validation
     void verify() const;
@@ -356,7 +364,7 @@ class vTensor final {
     mutable api::VulkanImage image_;
     mutable api::VulkanBuffer staging_;
     mutable Memory staging_memory_;
-    mutable Fence fence_;
+    mutable api::VulkanFence fence_;
 
     // Context
     api::Context* context_;
