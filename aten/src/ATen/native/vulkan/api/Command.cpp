@@ -8,6 +8,28 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
+
+//
+// CommandStream
+//
+
+CommandStream::CommandStream(const VkDevice device)
+  : device_(device),
+    pool_(VK_NULL_HANDLE) {
+}
+
+CommandStream::CommandStream(CommandStream&& other) noexcept
+  : device_(other.device_),
+    pool_(other.pool_) {
+  other.pool_ = VK_NULL_HANDLE;
+}
+
+CommandStream::~CommandStream() {
+  if C10_LIKELY(VK_NULL_HANDLE == pool_) {
+    return;
+  }
+}
+
 namespace {
 
 std::mutex queue_mutex;

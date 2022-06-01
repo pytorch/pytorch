@@ -14,6 +14,24 @@ namespace native {
 namespace vulkan {
 namespace api {
 
+class CommandStream final {
+ public:
+  explicit CommandStream(const VkDevice);
+
+  CommandStream(const CommandStream&) = delete;
+  CommandStream& operator=(const CommandStream&) = delete;
+
+  CommandStream(CommandStream&&) noexcept;
+  CommandStream& operator=(CommandStream&&) = delete;
+
+  ~CommandStream();
+
+ private:
+  VkDevice device_;
+  VkCommandPool pool_;
+};
+
+
 struct Command final {
   class Pool;
 
