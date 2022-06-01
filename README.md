@@ -23,6 +23,7 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
   - [Binaries](#binaries)
     - [NVIDIA Jetson Platforms](#nvidia-jetson-platforms)
   - [From Source](#from-source)
+    - [Prerequisites](#prerequisites)
     - [Install Dependencies](#install-dependencies)
     - [Get the PyTorch Source](#get-the-pytorch-source)
     - [Install PyTorch](#install-pytorch)
@@ -152,8 +153,11 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 
 ### From Source
 
+#### Prerequisites
 If you are installing from source, you will need Python 3.7 or later and a C++14 compiler. Also, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
 You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
+
+(For Linux installations, the recommended Python versions are 3.7.6+ or 3.8.1+)
 
 Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
 
@@ -162,6 +166,8 @@ If you want to compile with CUDA support, install
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardwares
+
+Note that CUDA is not supported on macOS
 
 If you want to disable CUDA support, export the environment variable `USE_CUDA=0`.
 Other potentially useful environment variables may be found in `setup.py`.
@@ -177,25 +183,33 @@ Other potentially useful environment variables may be found in `setup.py`.
 
 #### Install Dependencies
 
-Common
+**Common**
+
 ```bash
-conda install astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses
+conda install astunparse numpy ninja pyyaml setuptools cmake cffi typing_extensions future six requests dataclasses
 ```
 
-On Linux
+**On Linux**
+
 ```bash
+conda install mkl mkl-include
 # CUDA only: Add LAPACK support for the GPU if needed
 conda install -c pytorch magma-cuda110  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
 ```
 
-On MacOS
+**On MacOS**
+
 ```bash
+# Add this package on intel x86 processor machines only
+conda install mkl mkl-include
 # Add these packages if torch.distributed is needed
 conda install pkg-config libuv
 ```
 
-On Windows
+**On Windows**
+
 ```bash
+conda install mkl mkl-include
 # Add these packages if torch.distributed is needed.
 # Distributed package support on Windows is a prototype feature and is subject to changes.
 conda install -c conda-forge libuv=1.39
@@ -211,15 +225,18 @@ git submodule update --init --recursive --jobs 0
 ```
 
 #### Install PyTorch
-On Linux
+**On Linux**
+
+If you're compiling for AMD ROCm then first run this command:
+```bash
+# Only run this if you're compiling for ROCm
+python tools/amd_build/build_amd.py
+```
+
+Install PyTorch
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py install
-```
-
-Note that if you are compiling for ROCm, you must run this command first:
-```bash
-python tools/amd_build/build_amd.py
 ```
 
 Note that if you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
@@ -232,16 +249,14 @@ error: command 'g++' failed with exit status 1
 
 This is caused by `ld` from Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.7.6+ and 3.8.1+.
 
-On macOS
+**On macOS**
+
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
 
-CUDA is not supported on macOS.
-
-
-On Windows
+**On Windows**
 
 Choose Correct Visual Studio Version.
 
@@ -255,7 +270,7 @@ come with Visual Studio Code by default.
 
 If you want to build legacy python code, please refer to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
 
-Build with CPU
+**Build with CPU**
 
 It's fairly easy to build with CPU.
 ```cmd
@@ -265,7 +280,7 @@ python setup.py install
 
 Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/master/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
 
-Build with CUDA
+**Build with CUDA**
 
 [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build Pytorch with CUDA.
 NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto already installed CUDA run CUDA installation once again and check the corresponding checkbox.
