@@ -17,6 +17,7 @@
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/OpMathType.h>
 
+#include <c10/util/math_compat.h>
 #include <c10/util/MathConstants.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/irange.h>
@@ -296,19 +297,14 @@ void sign_kernel(TensorIteratorBase& iter){
   }
 }
 
-static void signbit_kernel(TensorIteratorBase& iter) {
-  auto dtype = iter.input_dtype();
-  if (at::isFloatingType(dtype)) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kBFloat16, ScalarType::Half, dtype, "signbit_cpu", [&]() {
-          cpu_kernel(iter, [](scalar_t a) -> bool { return std::signbit(a); });
-        });
+static void signbit_kernel(TensorIteratorBase& iter){
+  // NOTE: signbit does not always support integral arguments.
+  if (at::isIntegralType(iter.input_dtype(), /*includeBool=*/false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.input_dtype(), "signbit_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a) -> bool { return a < 0; }); });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(dtype, "signbit_cpu", [&]() {
-      // don't use std::signbit for integral as it unnecessarily upcasts
-      // it to double
-      cpu_kernel(iter, [](scalar_t a) -> bool { return a < 0; });
-    });
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
+     cpu_kernel(iter, [](scalar_t a) -> bool { return std::signbit(a); }); });
   }
 }
 
