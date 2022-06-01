@@ -1302,17 +1302,20 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
         buffer = z
     return min - torch.log1p(z), buffer
 
+# The implementation matches torch.ops.aten.norm
 # torch.ops.aten.norm only supports numeric p, does not support Frobenius norm or nuclear norm
+# For 2-norm and -2 matrix norm, it doesn't compute the singular values, it just compute the norm the same as when p > 2.
 @register_decomposition([aten.norm.Scalar, aten.norm.ScalarOpt_dim])
 @reduction_complex_to_real
-def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = False):
+def norm(self: Tensor, p: float, dim: List[int] = None, keepdim: bool = False):
     if dim is None:
         dim = []
 
-    self_ = self.abs()
     if p == 0:
-        result = (self_ != 0).sum(dim, keepdim=keepdim)
-    elif p == float('inf'):
+        return (self != 0).sum(dim, keepdim=keepdim)
+
+    self_ = self.abs()
+    if p == float('inf'):
         result = self_.amax(dim, keepdim=keepdim)
     elif p == -float('inf'):
         result = self_.amin(dim, keepdim=keepdim)
@@ -1323,3 +1326,16 @@ def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = Fals
     else:
         result = self_.pow(p).sum(dim, keepdim=keepdim).pow(1 / p)
     return result
+    # def fast_pow(x, p):
+    #     if p == 1.0:
+    #         return x
+    #     elif p == 2.0:
+    #         return prims.square(x)
+    #     elif p == 0.5:
+    #         return prims.sqrt(x)
+            
+    #     else:
+    #         return prims.pow(x, p)
+    # if not (ord % 2.0 == 0.0 and is_float_dtype(x.dtype)):
+    #         x = prims.abs(x)
+    #     return to_result_dtype(fast_pow(reduce_sum(fast_pow(x, ord)), 1.0 / ord))
