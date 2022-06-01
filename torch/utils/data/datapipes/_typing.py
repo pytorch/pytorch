@@ -2,7 +2,6 @@
 # https://github.com/python/cpython/blob/master/Lib/typing.py
 
 import collections
-import contextlib
 import functools
 import inspect
 import numbers
