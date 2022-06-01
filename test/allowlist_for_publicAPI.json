@@ -2969,6 +2969,7 @@
     "gammainc",
     "gammaincc",
     "gammaln",
+    "hermite_polynomial_h",
     "i0",
     "i0e",
     "i1",
