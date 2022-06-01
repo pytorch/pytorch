@@ -15663,7 +15663,7 @@ op_db: List[OpInfo] = [
                                     dtypes=(torch.chalf,),),
                        # Ref: https://github.com/pytorch/pytorch/issues/78413
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    dtypes=( torch.bfloat16, torch.float16, torch.float32, torch.float64),),
+                                    dtypes=(torch.bfloat16, torch.float16, torch.float32, torch.float64),),
                    )),
     UnaryUfuncInfo('isfinite',
                    ref=np.isfinite,
