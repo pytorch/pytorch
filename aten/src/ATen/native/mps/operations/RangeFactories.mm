@@ -121,17 +121,21 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
             MPSGraphTensor* outputTensor = [mpsGraph additionWithPrimaryTensor:scaledCoords
                                                                secondaryTensor:startTensor
                                                                           name:nil];
-            if(start.to<double>() <= end.to<double>()) {
-              outputTensor = [mpsGraph clampWithTensor:outputTensor
-                                        minValueTensor:startTensor
-                                        maxValueTensor:endTensor
-                                                  name:nil];
-            } else {
-              outputTensor = [mpsGraph clampWithTensor:outputTensor
-                                        minValueTensor:endTensor
-                                        maxValueTensor:startTensor
-                                                  name:nil];
-            }
+            MPSGraphTensor* predicateTensor = [mpsGraph lessThanOrEqualToWithPrimaryTensor:startTensor
+                                                                           secondaryTensor:endTensor
+                                                                                      name:nil];
+            MPSGraphTensor* startEndClampTensor = [mpsGraph clampWithTensor:outputTensor
+                                                             minValueTensor:startTensor
+                                                             maxValueTensor:endTensor
+                                                                       name:nil];
+            MPSGraphTensor* endStartClampTensor = [mpsGraph clampWithTensor:outputTensor
+                                                             minValueTensor:endTensor
+                                                             maxValueTensor:startTensor
+                                                                       name:nil];
+            outputTensor = [mpsGraph selectWithPredicateTensor:predicateTensor
+                                           truePredicateTensor:startEndClampTensor
+                                          falsePredicateTensor:endStartClampTensor
+                                                          name:nil];
 
             if(getMPSDataType(result.scalar_type()) != MPSDataTypeFloat32) {
               outputTensor = [mpsGraph castTensor:outputTensor toType:getMPSDataType(result.scalar_type()) name:@"output"];
