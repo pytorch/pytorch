@@ -1061,6 +1061,16 @@ class TestMeta(TestCase):
 
 instantiate_device_type_tests(TestMeta, globals())
 
+def print_op_str_if_not_supported(op_str):
+    op = OperatorName.parse(op_str)
+    packet = getattr(torch.ops.aten, str(op.name))
+    overload = getattr(packet, op.overload_name if op.overload_name else "default")
+    if any(overload in d for d in [meta_dispatch_skips, meta_dispatch_device_skips['cuda']]):
+        print(f"{overload}  # SKIP")
+    if any(overload in d for d in [meta_dispatch_expected_failures, meta_dispatch_device_expected_failures['cuda']]):
+        print(overload)
+
+
 if __name__ == "__main__":
     COMPARE_XLA = os.getenv('PYTORCH_COMPARE_XLA', None)
     if COMPARE_XLA is not None:
@@ -1068,13 +1078,14 @@ if __name__ == "__main__":
             d = yaml.load(f, Loader=YamlLoader)
             ops = d.get("full_codegen", []) + d.get("supported", []) + d.get("autograd", [])
             for op_str in ops:
-                op = OperatorName.parse(op_str)
-                packet = getattr(torch.ops.aten, str(op.name))
-                overload = getattr(packet, op.overload_name if op.overload_name else "default")
-                if any(overload in d for d in [meta_dispatch_skips, meta_dispatch_device_skips['cuda']]):
-                    print(f"{overload}  # SKIP")
-                if any(overload in d for d in [meta_dispatch_expected_failures, meta_dispatch_device_expected_failures['cuda']]):
-                    print(overload)
+                print_op_str_if_not_supported(op_str)
+        sys.exit(0)
+
+    COMPARE_TEXT = os.getenv('PYTORCH_COMPARE_TEXT', None)
+    if COMPARE_TEXT is not None:
+        with open(COMPARE_TEXT, "r") as f:
+            for op_str in f:
+                print_op_str_if_not_supported(op_str.strip())
         sys.exit(0)
 
     run_tests()
