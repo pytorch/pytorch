@@ -2398,9 +2398,13 @@
   mat2: maybe_multiply(mat1.mH().mm(grad.sparse_mask(self)), alpha.conj())
 
 - name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta) -> Tensor
-  grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction, beta)
+  grad_output: smooth_l1_loss_backward(grad, self, target, reduction, beta)
   self: smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction, beta)
   target: -smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction, beta)
+  result: "  smooth_l1_loss_double_backward(self_t * grad_output_p, self_p, target_p, reduction, beta)
+           - smooth_l1_loss_double_backward(target_t * grad_output_p, self_p, target_p, reduction, beta)
+           + smooth_l1_loss_backward(grad_output_t, self_p, target_p, reduction, beta)
+          "
 
 - name: huber_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float delta) -> Tensor
   grad_output: huber_loss_double_backward_grad_output(grad, grad_output, self, target, reduction, delta)
