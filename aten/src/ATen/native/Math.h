@@ -2309,7 +2309,7 @@ static inline C10_HOST_DEVICE T complete_elliptic_integral_k_e_forward(T x) {
     }
 
     if (x > T(1.0)) {
-        return complete_elliptic_integral_m_e_forward(T(1.0) - T(1.0) / x) * std::sqrt(x);
+        return complete_elliptic_integral_k_e_forward(T(1.0) - T(1.0) / x) * std::sqrt(x);
     }
 
     T p = 0.0;
@@ -2368,7 +2368,7 @@ static inline C10_HOST_DEVICE T complete_elliptic_integral_k_k_forward(T x) {
             return T(0.0);
         }
 
-        return complete_elliptic_integral_m_k_forward(T(1.0) / x) / std::sqrt(x);
+        return complete_elliptic_integral_k_k_forward(T(1.0) / x) / std::sqrt(x);
     }
 
     if (x > std::numeric_limits<T>::epsilon()) {
