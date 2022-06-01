@@ -15,7 +15,6 @@ import textwrap
 import typing
 import warnings
 import zipfile
-from http.client import REQUEST_URI_TOO_LONG
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
