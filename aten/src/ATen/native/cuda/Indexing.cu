@@ -2,7 +2,6 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
-#include <thrust/execution_policy.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
@@ -36,8 +35,6 @@
 #include <ATen/cuda/cub.h>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
-
-#include <thrust/binary_search.h>
 
 #include <limits>
 
@@ -1257,19 +1254,23 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & val
 
 namespace {
 
-template<class ForwardIt, class T>
+// ForwardIt: only legacy random access iterator is supported.
+template<class ForwardIt, class T, bool is_lower = true>
 static __host__ __device__ __forceinline__
-ForwardIt find_bound(ForwardIt first, ForwardIt last, const T& value)
-{
-    ForwardIt it;
-    std::ptrdiff_t count, step;
+ForwardIt find_bound(ForwardIt __restrict__ first, ForwardIt __restrict__ last, const T& value) {
+    ForwardIt __restrict__ it;
+    typename std::iterator_traits<ForwardIt>::difference_type count, step;
+    // NOTE: std::distance(first, last) compiles but produces wrong results here,
+    // so only legacy random access iterators are safe in this code.
     count = last - first;
 
     while (count > 0) {
       it = first;
       step = count / 2;
-      std::advance(it, step);
-      if (*it < value) {
+      // avoiding std::advance(it, step),
+      // although it does work unlike std::distance
+      it += step;
+      if (is_lower ? *it < value : value >= *it) {
         first = ++it;
         count -= step + 1;
       }
@@ -1372,25 +1373,20 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
               [ptr_intrsc_counts_nneg_index, ptr_sorted_dim_indices, nnz] GPU_LAMBDA (
                 index_t idx_val, index_t idx_idx
               ) -> index_t {
-                // TODO: thrust could be slow. Try writing a custom kernel
-                auto* lb = find_bound(
+                auto* lb = find_bound<index_t*, index_t, true>(
                   ptr_sorted_dim_indices,
                   ptr_sorted_dim_indices + nnz,
                   idx_val
                 );
-                auto equal_range_iters = thrust::equal_range(
-                  thrust::seq,
+                auto* ub = find_bound<index_t*, index_t, false>(
                   ptr_sorted_dim_indices,
                   ptr_sorted_dim_indices + nnz,
                   idx_val
                 );
-                if (*lb == idx_val) {
-                  equal_range_iters = thrust::make_pair(lb, equal_range_iters.second);
-                }
-                const auto idx_count = equal_range_iters.second - equal_range_iters.first;
+                const auto idx_count = ub - lb;
                 ptr_intrsc_counts_nneg_index[idx_idx] = idx_count;
 
-                return equal_range_iters.first - ptr_sorted_dim_indices;
+                return lb - ptr_sorted_dim_indices;
               }
           );
       });
