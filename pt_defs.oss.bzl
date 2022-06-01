@@ -1,9 +1,5 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load(
-    "//tools:build_variables.bzl",
-    "aten_native_source_list",
-)
-load(
     "//tools:ufunc_defs.bzl",
     "aten_ufunc_generated_cpu_kernel_sources",
     "aten_ufunc_generated_cpu_sources",
@@ -11,6 +7,7 @@ load(
 )
 load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
+load(":build_variables.bzl", "aten_native_source_list")
 
 USED_PT_BACKENDS = [
     "CPU",

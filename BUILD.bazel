@@ -4,25 +4,11 @@ load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
 load("//third_party:substitution.bzl", "header_template_rule")
 load("//:tools/bazel.bzl", "rules")
-load("//:tools/build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "lazy_tensor_ts_sources")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
-load("//:aten.bzl", "intern_build_aten_ops")
-load(
-    ":build.bzl",
-    "GENERATED_AUTOGRAD_CPP",
-    "GENERATED_AUTOGRAD_PYTHON",
-    "GENERATED_CPP",
-    "GENERATED_CPP_CORE",
-    "GENERATED_CPP_CUDA",
-    "GENERATED_H",
-    "GENERATED_H_CORE",
-    "GENERATED_H_CUDA",
-    "aten_core_hdrs",
-    "aten_core_srcs",
-    "define_targets",
-)
-load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
+load("//:aten.bzl", "intern_build_aten_ops", "generate_aten", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
+load(":build.bzl", "define_targets", "GENERATED_AUTOGRAD_CPP", "GENERATED_AUTOGRAD_PYTHON")
+load(":build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "lazy_tensor_ts_sources")
 
 define_targets(rules = rules)
 
@@ -35,6 +21,7 @@ COMMON_COPTS = [
     "-DTH_HAVE_THREAD",
     "-DUSE_FBGEMM",
     "-DUSE_DISTRIBUTED",
+    "-DAT_PER_OPERATOR_HEADERS",
     "-DATEN_THREADING=NATIVE",
     "-DNO_CUDNN_DESTROY_HANDLE",
 ] + if_cuda([
@@ -42,7 +29,78 @@ COMMON_COPTS = [
     "-DUSE_CUDNN",
 ])
 
+aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/tags.yaml"] + glob(["aten/src/ATen/templates/**"])
 
+generated_cpu_cpp = [
+    "aten/src/ATen/RegisterBackendSelect.cpp",
+    "aten/src/ATen/RegisterCPU.cpp",
+    "aten/src/ATen/RegisterFunctionalization_0.cpp",
+    "aten/src/ATen/RegisterFunctionalization_1.cpp",
+    "aten/src/ATen/RegisterFunctionalization_2.cpp",
+    "aten/src/ATen/RegisterFunctionalization_3.cpp",
+    # "aten/src/ATen/RegisterFunctionalizationEverything.cpp",
+    "aten/src/ATen/RegisterMkldnnCPU.cpp",
+    "aten/src/ATen/RegisterNestedTensorCPU.cpp",
+    "aten/src/ATen/RegisterQuantizedCPU.cpp",
+    "aten/src/ATen/RegisterSparseCPU.cpp",
+    "aten/src/ATen/RegisterSparseCsrCPU.cpp",
+    "aten/src/ATen/RegisterZeroTensor.cpp",
+    "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
+    "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
+    "aten/src/ATen/RegisterMeta.cpp",
+    "aten/src/ATen/RegisterSchema.cpp",
+    "aten/src/ATen/CPUFunctions.h",
+    "aten/src/ATen/CPUFunctions_inl.h",
+    "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
+    "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
+    "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/CompositeViewCopyKernels.cpp",
+    "aten/src/ATen/FunctionalInverses.h",
+    "aten/src/ATen/Functions.h",
+    "aten/src/ATen/Functions.cpp",
+    "aten/src/ATen/RedispatchFunctions.h",
+    "aten/src/ATen/Operators.h",
+    "aten/src/ATen/Operators_0.cpp",
+    "aten/src/ATen/Operators_1.cpp",
+    "aten/src/ATen/Operators_2.cpp",
+    "aten/src/ATen/Operators_3.cpp",
+    "aten/src/ATen/Operators_4.cpp",
+    "aten/src/ATen/NativeFunctions.h",
+    "aten/src/ATen/MetaFunctions.h",
+    "aten/src/ATen/MetaFunctions_inl.h",
+    "aten/src/ATen/MethodOperators.h",
+    "aten/src/ATen/NativeMetaFunctions.h",
+    "aten/src/ATen/RegistrationDeclarations.h",
+    "aten/src/ATen/core/aten_interned_strings.h",
+    "aten/src/ATen/core/TensorBody.h",
+    "aten/src/ATen/core/TensorMethods.cpp",
+    "aten/src/ATen/core/ATenOpList.cpp",
+]
+
+generated_cuda_cpp = [
+    "aten/src/ATen/CUDAFunctions.h",
+    "aten/src/ATen/CUDAFunctions_inl.h",
+    "aten/src/ATen/RegisterCUDA.cpp",
+    "aten/src/ATen/RegisterNestedTensorCUDA.cpp",
+    "aten/src/ATen/RegisterQuantizedCUDA.cpp",
+    "aten/src/ATen/RegisterSparseCUDA.cpp",
+    "aten/src/ATen/RegisterSparseCsrCUDA.cpp",
+]
+
+generate_aten(
+    name = "generated_aten_cpp",
+    srcs = aten_generation_srcs,
+    outs = (
+        generated_cpu_cpp +
+        generated_cuda_cpp +
+        aten_ufunc_generated_cpu_sources("aten/src/ATen/{}") +
+        aten_ufunc_generated_cpu_kernel_sources("aten/src/ATen/{}") +
+        aten_ufunc_generated_cuda_sources("aten/src/ATen/{}") +
+        ["aten/src/ATen/Declarations.yaml"]
+    ),
+    generator = "//torchgen:gen",
+)
 
 filegroup(
     name = "cpp_generated_code",
@@ -62,6 +120,18 @@ filegroup(
         "aten/src/ATen/detail/*.cpp",
         "aten/src/ATen/cpu/*.cpp",
     ]),
+)
+
+filegroup(
+    name = "ATen_CORE_SRCS",
+    srcs = glob(
+        [
+            "aten/src/ATen/core/**/*.cpp",
+        ],
+        exclude = [
+            "aten/src/ATen/core/**/*_test.cpp",
+        ],
+    ),
 )
 
 filegroup(
@@ -143,9 +213,11 @@ filegroup(
             "aten/src/ATen/native/cudnn/*.cpp",
             "aten/src/ATen/native/miopen/*.cpp",
             "aten/src/ATen/native/nested/cuda/*.cpp",
+            "aten/src/ATen/native/quantized/cuda/*.cpp",
             "aten/src/ATen/native/quantized/cudnn/*.cpp",
             "aten/src/ATen/native/sparse/cuda/*.cpp",
             "aten/src/ATen/native/transformers/cuda/*.cpp",
+            "aten/src/THC/*.cpp",
         ],
     ),
 )
@@ -203,36 +275,27 @@ header_template_rule(
 
 cc_library(
     name = "aten_headers",
-    hdrs = glob([
+    hdrs = [
+        "torch/csrc/Export.h",
+        "torch/csrc/jit/frontend/function_schema_parser.h",
+    ] + glob([
         "aten/src/**/*.h",
         "aten/src/**/*.hpp",
         "aten/src/ATen/cuda/**/*.cuh",
         "aten/src/ATen/native/**/*.cuh",
+        "aten/src/TH/**/*.cpp",
         "aten/src/THC/*.cuh",
-    ], exclude = aten_core_hdrs(rules = rules)
+        "aten/src/THC/generic/*.cu",
+    ],
     ) + [
         ":aten_src_ATen_config",
-        ":gen_aten",
+        ":generated_aten_cpp",
     ],
-    strip_include_prefix = "aten/src/",
+    includes = [
+        "aten/src",
+    ],
     deps = [
-        ":aten_core_headers",
-        ":torch_base_headers",
         "//c10:headers",
-    ],
-)
-
-# Temporary library to enable us to use strip_include_prefix =
-# "aten/src/" in aten_headers above. Only use this in aten_headers.
-cc_library(
-    name = "torch_base_headers",
-    hdrs = [
-        "torch/csrc/Export.h",
-        "torch/csrc/jit/frontend/function_schema_parser.h",
-    ],
-    deps = [
-        "//c10/macros",
-        "//c10/util:base",
     ],
 )
 
@@ -258,7 +321,8 @@ intern_build_aten_ops(
 
 cc_library(
     name = "aten",
-    srcs = aten_core_srcs(rules = rules) + [
+    srcs = [
+        ":ATen_CORE_SRCS",
         ":ATen_QUANTIZED_SRCS",
         ":aten_base_cpp",
         ":aten_base_metal",
@@ -272,7 +336,7 @@ cc_library(
         ":aten_native_transformers_cpp",
         ":aten_native_xnnpack",
         ":aten_src_ATen_config",
-    ] + GENERATED_CPP + GENERATED_H_CORE + GENERATED_H + GENERATED_CPP_CORE + aten_ufunc_generated_cpu_sources("aten/src/ATen/{}"),
+    ] + generated_cpu_cpp + aten_ufunc_generated_cpu_sources("aten/src/ATen/{}"),
     copts = ATEN_COPTS,
     data = if_cuda(
         [":libcaffe2_nvrtc.so"],
@@ -319,10 +383,9 @@ cc_binary(
 
 cc_library(
     name = "aten_cuda_cpp",
-    srcs = [":aten_cuda_cpp_srcs"] + GENERATED_H_CUDA + GENERATED_CPP_CUDA,
+    srcs = [":aten_cuda_cpp_srcs"] + generated_cuda_cpp,
     hdrs = [":aten_src_ATen_cuda_config"],
     copts = ATEN_COPTS,
-    strip_include_prefix = "aten/src/",
     visibility = ["//visibility:public"],
     deps = [
         ":aten",
@@ -1789,3 +1852,26 @@ test_suite(
         "//c10/test:tests",
     ],
 )
+
+# An internal genrule that we are converging with refers to these file
+# as if they are from this package, so we alias them for
+# compatibility.
+
+[
+    alias(
+        name = paths.basename(path),
+        actual = path,
+    )
+    for path in [
+        "aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp",
+        "aten/src/ATen/templates/DispatchKeyNativeFunctions.h",
+        "aten/src/ATen/templates/LazyIr.h",
+        "aten/src/ATen/templates/LazyNonNativeIr.h",
+        "aten/src/ATen/templates/RegisterDispatchKey.cpp",
+        "aten/src/ATen/native/native_functions.yaml",
+        "aten/src/ATen/native/tags.yaml",
+        "aten/src/ATen/native/ts_native_functions.yaml",
+        "torch/csrc/lazy/core/shape_inference.h",
+        "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
+    ]
+]
