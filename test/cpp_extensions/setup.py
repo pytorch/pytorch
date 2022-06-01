@@ -72,10 +72,11 @@ if (not IS_WINDOWS) and torch.cuda.is_available() and CUDA_HOME is not None:
         sources=[
             'cuda_dlink_extension.cpp',
             'cuda_dlink_extension_kernel.cu',
+            'cuda_dlink_extension_add.cu',
         ],
         dlink=True,
         extra_compile_args={'cxx': CXX_FLAGS,
-                            'nvcc': ['-O2']})
+                            'nvcc': ['-O2', '-dc']})
     ext_modules.append(extension)
 
 setup(

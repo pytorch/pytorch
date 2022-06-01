@@ -126,11 +126,10 @@ class TestCppExtensionAOT(common.TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cuda_rdc_dlink_libs(self):
         from torch_test_cpp_extension import cuda_dlink
-        a = torch.randn(4, dtype=torch.float, device='cuda')
-        b = torch.randn(4, dtype=torch.float, device='cuda')
-        c = torch.randn(4, dtype=torch.float, device='cuda')
-        ref = a * b + c
-        test = cuda_dlink.addmm(a, b, c)
+        a = torch.randn(8, dtype=torch.float, device='cuda')
+        b = torch.randn(8, dtype=torch.float, device='cuda')
+        ref = a + b
+        test = cuda_dlink.add(a, b)
         self.assertEqual(test, ref)
 
 class TestORTTensor(common.TestCase):
