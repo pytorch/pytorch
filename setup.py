@@ -459,10 +459,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             if not os.path.exists(source_lib):
                 continue
             target_lib = os.path.join(self.build_lib, 'torch', 'lib', omp_lib_name)
-
-            subprocess.check_call(['install_name_tool', '-delete_rpath', rpath, source_lib])
             self.copy_file(source_lib, target_lib)
-            subprocess.check_call(['install_name_tool', '-delete_rpath', rpath, target_lib])
             break
 
         # Delete rpath from those libs
