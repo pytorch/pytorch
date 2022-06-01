@@ -2393,7 +2393,7 @@ def sample_inputs_broadcast_shapes(op, device, dtype, requires_grad, **kwargs):
     )
 
     # restricting test runs on cpu/bool to prevent repetitive runs
-    if dtype is torch.float32
+    if dtype is torch.float32:
         for shape in shapes:
             inp, *arg0 = shape
             yield SampleInput(inp, args=arg0)
