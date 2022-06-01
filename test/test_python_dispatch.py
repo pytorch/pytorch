@@ -1253,7 +1253,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             class ExampleTensor1(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_strides=True)
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1262,7 +1262,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             class ExampleTensor2(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_strides=True)
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1273,7 +1273,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             class ExampleTensor3(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_strides=True)
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
