@@ -614,6 +614,7 @@ class FullyShardedDataParallel(nn.Module):
         cpu_offload: Optional[CPUOffload] = None,
         auto_wrap_policy: Optional[Callable] = None,
         backward_prefetch: Optional[BackwardPrefetch] = None,
+        forward_prefetch: bool = False,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
@@ -775,6 +776,7 @@ class FullyShardedDataParallel(nn.Module):
         self.numel_padded_per_param: List[int] = []
         self.cpu_offload = cpu_offload or CPUOffload()
         self.backward_prefetch = backward_prefetch
+        self.forward_prefetch = forward_prefetch
         self.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
         self.mixed_precision = mixed_precision
         # Original buffer type (mapping since all buffers may not be of same type). In
@@ -1676,6 +1678,19 @@ class FullyShardedDataParallel(nn.Module):
         else:
             return False
 
+    def _need_prefetch_forward_full_params(self) -> bool:
+        if (
+            self.forward_prefetch is True
+            and self._fsdp_graph_order is not None
+            and self._my_fsdp_idx_in_graph is not None
+            and self._my_fsdp_idx_in_graph < len(self._fsdp_graph_order) - 1
+            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph + 1].training_state
+            != TrainingState_.FORWARD
+        ):
+            return True
+        else:
+            return False
+
     def _need_prefetch_post_backward_hook(self) -> bool:
         if (
             self.backward_prefetch == BackwardPrefetch.BACKWARD_POST
@@ -2283,11 +2298,21 @@ class FullyShardedDataParallel(nn.Module):
                     input_dtype, *args, **kwargs
                 )
 
+            if self._my_fsdp_idx_in_graph > 0 and self._fsdp_graph_order[
+                    self._my_fsdp_idx_in_graph - 1]._need_prefetch_forward_full_params():
+                # Always wait for all_gather before rebuilding full params, just in case
+                # full params have already been prefetched in previous layer's forward pass.
+                torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
             # All-gather full parameters, moving them to compute_device if
             # necessary.
             self._rebuild_full_params()
             # Wait for all_gather full parameters to finish before computation
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
+            # Prefetch next layer's full params in forward pass
+            if self._need_prefetch_pre_backward_hook():
+                self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()
 
             # Register backward hooks to reshard params and reduce-scatter grads.
             # These need to be re-registered every forward pass in some cases where grad_fn
