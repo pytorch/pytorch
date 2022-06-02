@@ -31,12 +31,12 @@ from torch.testing._internal.common_distributed import (
 )
 
 from torch.testing._internal.common_utils import (
-    TestCase,
-    load_tests,
-    run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
     instantiate_parametrized_tests,
-    parametrize
+    load_tests,
+    parametrize,
+    run_tests,
 )
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -901,6 +901,7 @@ class CommonDistributedDataParallelTest(object):
         )
 
         self._test_not_nan(model, x)
+
 
 class ComputeBucketAssignmentTest(TestCase):
     def test_single_limit_single_dtype(self):
