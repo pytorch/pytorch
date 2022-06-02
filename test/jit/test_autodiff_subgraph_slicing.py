@@ -373,9 +373,18 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
 
     def test_aliased_outputs(self):
+        def add_requires_grad_to_value(v):
+            if isinstance(v.type(), torch._C.TensorType):
+                v.setType(v.type().withRequiresGrad(True))
+
+        def add_requires_grad_everywhere(graph):
+            for n in graph.nodes():
+                for v in n.outputs():
+                    add_requires_grad_to_value(v)
+            for v in graph.inputs():
+                add_requires_grad_to_value(v)
 
         with enable_profiling_mode_for_profiling_tests():
-
 
             # Case 1: aliasing between relu and t
             # is within a DifferentiableGraph. It should be valid
@@ -388,6 +397,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
     """
 
             graph = torch._C.parse_ir(input_str)
+            add_requires_grad_everywhere(graph)
             torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
             FileCheck().check("with prim::DifferentiableGraph") \
                 .check("aten::relu").check("aten::t") \
@@ -409,10 +419,11 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 """
 
             graph = torch._C.parse_ir(input_str)
+            add_requires_grad_everywhere(graph)
             torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
-            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+            FileCheck().check(" = prim::DifferentiableGraph") \
                 .check("with prim::DifferentiableGraph") \
-                .check("Tensor = aten::relu") \
+                .check(" = aten::relu") \
                 .check_not("aten::split_with_sizes") \
                 .run(graph)
 
@@ -431,10 +442,11 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 """
 
             graph = torch._C.parse_ir(input_str)
+            add_requires_grad_everywhere(graph)
             torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
-            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+            FileCheck().check(" = prim::DifferentiableGraph") \
                 .check("with prim::DifferentiableGraph") \
-                .check("Tensor = aten::relu") \
+                .check(" = aten::relu") \
                 .check_not("aten::split_with_sizes") \
                 .run(graph)
 
@@ -453,10 +465,11 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 """
 
             graph = torch._C.parse_ir(input_str)
+            add_requires_grad_everywhere(graph)
             torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
-            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+            FileCheck().check(" = prim::DifferentiableGraph") \
                 .check("with prim::DifferentiableGraph") \
-                .check("Tensor = aten::relu") \
+                .check(" = aten::relu") \
                 .check_not("aten::t") \
                 .run(graph)
 
@@ -477,10 +490,11 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 """
 
             graph = torch._C.parse_ir(input_str)
+            add_requires_grad_everywhere(graph)
             torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
-            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+            FileCheck().check(" = prim::DifferentiableGraph") \
                 .check("with prim::DifferentiableGraph") \
-                .check("Tensor = aten::relu") \
+                .check(" = aten::relu") \
                 .check_not("aten::t") \
                 .run(graph)
 

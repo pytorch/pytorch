@@ -1159,10 +1159,22 @@ class TestJit(JitTestCase):
         def f(x, y):
             return x + x + y + x + y + x + y + x + y + x
 
+        def add_requires_grad_to_value(v):
+            if isinstance(v.type(), torch._C.TensorType):
+                v.setType(v.type().withRequiresGrad(True))
+
+        def add_requires_grad_everywhere(graph):
+            for n in graph.nodes():
+                for v in n.outputs():
+                    add_requires_grad_to_value(v)
+            for v in graph.inputs():
+                add_requires_grad_to_value(v)
+
         def count_constants(graph):
             return sum(node.kind() == 'prim::Constant' for node in graph.nodes())
 
         graph = f.graph.copy()
+        add_requires_grad_everywhere(graph)
         self.run_pass('cse', graph)
         self.run_pass('create_autodiff_subgraphs', graph)
         nodes = list(graph.nodes())
