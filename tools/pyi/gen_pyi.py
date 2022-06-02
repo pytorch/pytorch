@@ -429,6 +429,9 @@ def gen_pyi(
                 " device: Optional[_device] = None,"
                 " requires_grad: bool = False) -> Tensor: ..."
             ],
+            "_is_functional_tensor": [
+                "def _is_functional_tensor(t: Tensor) -> _bool: ..."
+            ],
             "range": [
                 "def range(start: Number, end: Number,"
                 " step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...".format(

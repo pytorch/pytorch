@@ -4,7 +4,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import itertools
 from torch.testing._internal.jit_utils import RUN_CUDA
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, FakeTensorConverter
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import unittest
 
@@ -79,6 +79,25 @@ def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
         contains_type(e, maybe_contained_type) for e in type.containedTypes()
     )
 
+
+class FakeTensorConverterTest(TestCase):
+    def memoized_conversion_to_meta(self):
+        x = torch.rand(2, 2, 2)
+        converter = FakeTensorConverter()
+        self.assertIs(converter(x), converter(x))
+
+    def memoized_conversion_from_meta(self):
+        x = torch.rand(2, 2).to(device='meta')
+        converter = FakeTensorConverter()
+        self.assertIs(converter(x, "cpu"), converter(x, "cpu"))
+
+    def test_separate_tensor_storages(self):
+        x = torch.rand(2, 2, 2)
+        y = x[0]
+        converter = FakeTensorConverter()
+        x_conv = converter(x)
+        y_conv = converter(y)
+        self.assertEqual(torch._C._storage_id(x_conv), torch._C._storage_id(y_conv))
 
 class FakeTensorOperatorInvariants(TestCase):
     @staticmethod
