@@ -1220,8 +1220,12 @@ class _NnapiSerializer(object):
             raise Exception(
                 "Most hardware backends prefer NHWC quantized tensors.  "
                 "Try setting `t.nnapi_nhwc = True` on your tensor inputs.  ")
-        _, scale = self.get_constant_value(node.inputsAt(1), "FloatType")
-        _, zero_point = self.get_constant_value(node.inputsAt(2), "IntType")
+        if node.inputsAt(1).type().kind() == "TensorType":
+            scale = self.get_constant_value(node.inputsAt(1), "TensorType")[1].item()
+            zero_point = self.get_constant_value(node.inputsAt(2), "TensorType")[1].item()
+        else:
+            _, scale = self.get_constant_value(node.inputsAt(1), "FloatType")
+            _, zero_point = self.get_constant_value(node.inputsAt(2), "IntType")
         _, scalar_type = self.get_constant_value(node.inputsAt(3), "IntType")
         if scalar_type != TorchScalarTypes.QUINT8.value:
             raise Exception(
