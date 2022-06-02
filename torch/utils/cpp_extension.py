@@ -1078,6 +1078,10 @@ def CUDAExtension(name, sources, *args, **kwargs):
         extra_compile_args_dlink += ['-dlink']
         extra_compile_args_dlink += [f'-L{x}' for x in library_dirs]
         extra_compile_args_dlink += [f'-l{x}' for x in dlink_libraries]
+
+        if (torch.version.cuda is not None) and packaging.version.parse(torch.version.cuda) >= packaging.version.parse('11.2'):
+            extra_compile_args_dlink += ['-dlto']   # Device Link Time Optimization started from cuda 11.2
+
         extra_compile_args['nvcc_dlink'] = extra_compile_args_dlink
 
         kwargs['extra_compile_args'] = extra_compile_args
