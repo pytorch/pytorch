@@ -609,6 +609,13 @@ def is_complex_dtype(dtype: torch.dtype) -> bool:
     return dtype in _complex_dtypes
 
 
+def is_grad_dtype(dtype: torch.dtype) -> bool:
+    """
+    Checks if the dtype can require a gradient.
+    """
+    return is_float_dtype(dtype) or is_complex_dtype(dtype)
+
+
 _complex_to_real_dtype_map = {
     torch.complex128: torch.float64,
     torch.complex64: torch.float32,
@@ -1180,3 +1187,14 @@ def check_in_bounds_for_storage(
             )
         )
         raise ValueError(msg)
+
+
+def check(b, s):
+    """
+    Helper function for raising a RuntimeError if a boolean condition fails.
+    Error message is a callable producing a string (to avoid wasting time
+    string formatting in non-error case, and also to make it easier for torchdynamo
+    to trace.)
+    """
+    if not b:
+        raise RuntimeError(s())
