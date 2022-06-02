@@ -1385,6 +1385,28 @@ TEST_F(VulkanAPITest, hardswish) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, threshold) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const float threshold = 2f;
+  const float value = 8f;
+
+  const auto out_cpu = at::threshold(in_cpu, threshold, value);
+  const auto out_vulkan = at::threshold(in_vulkan, threshold, value);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, hardswish_) {
   if (!at::is_vulkan_available()) {
     return;
