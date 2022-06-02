@@ -9,6 +9,7 @@ import sys
 import tempfile
 import threading
 import time
+import unittest
 from contextlib import contextmanager
 from datetime import timedelta
 from itertools import product
@@ -43,11 +44,11 @@ from torch.testing._internal.common_distributed import (
     with_nccl_blocking_wait,
 )
 from torch.testing._internal.common_utils import (
-    TestCase,
-    run_tests,
-    retry_on_connect_failures,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
+    TestCase,
+    retry_on_connect_failures,
+    run_tests,
     sandcastle_skip,
     sandcastle_skip_if,
 )
@@ -966,6 +967,51 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         if self.rank == 0:
             with self.assertRaisesRegex(RuntimeError, 'Tensors must be contiguous'):
                 dist.send(send_tensor_view, 1)
+
+
+    @unittest.skipIf(TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @skip_if_lt_x_gpu(2)
+    def test_sync_batch_norm_cuda_graph_capture(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+
+        model = torch.nn.Sequential(
+            nn.BatchNorm2d(2),
+            nn.Linear(30, 2),
+        ).to(device=self.rank)
+
+        model = nn.SyncBatchNorm.convert_sync_batchnorm(
+            model,
+            process_group=pg,
+        )
+
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+        model.train()
+
+        static_input = torch.zeros(
+            (3, 2, 30, 30),
+            dtype=torch.float32,
+            device=self.rank
+        )
+
+        # capture
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            model(static_input).sum().backward()
+
+        grad_dict = {}
+        for n, p in model.named_parameters():
+            grad_dict[n] = p.grad
+        optimizer.zero_grad(set_to_none=True)
+
+        # replay
+        g.replay()
+
+        # verify grads are the same
+        for n, p in model.named_parameters():
+            self.assertEqual(grad_dict[n], p.grad)
 
 
 class DistributedDataParallelTest(

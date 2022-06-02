@@ -32,11 +32,10 @@ from torch.testing._internal.common_distributed import (
 
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_WITH_ROCM,
     TestCase,
     instantiate_parametrized_tests,
     load_tests,
-    parametrize
+    parametrize,
     run_tests,
 )
 
@@ -902,55 +901,6 @@ class CommonDistributedDataParallelTest(object):
         )
 
         self._test_not_nan(model, x)
-
-
-    @unittest.skipIf(TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    @skip_if_lt_x_gpu(2)
-    def test_sync_batch_norm_cuda_graph_capture(self):
-        pg = self._get_process_group()
-
-        model = torch.nn.Sequential(
-            nn.Conv2d(2, 2, 3),
-            nn.BatchNorm2d(2),
-            nn.Linear(28, 2),
-        ).to(device=self.rank)
-        model = DistributedDataParallel(
-            model,
-            device_ids=[self.rank],
-            process_group=pg,
-        )
-        model = nn.SyncBatchNorm.convert_sync_batchnorm(
-            model,
-            process_group=pg,
-        )
-
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
-
-        model.train()
-
-        static_input = torch.zeros(
-            (3, 2, 30, 30),
-            dtype=torch.float32,
-            device=self.rank
-        )
-
-        # capture
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
-            model(static_input).sum().backward()
-
-        grad_dict = {}
-        for n, p in model.named_parameters():
-            grad_dict[n] = p.grad
-        optimizer.zero_grad(set_to_none=True)
-
-        # replay
-        g.replay()
-
-        # verify grads are the same
-        for n, p in model.named_parameters():
-            self.assertEqual(grad_dict[n], p.grad)
 
 
 class ComputeBucketAssignmentTest(TestCase):
