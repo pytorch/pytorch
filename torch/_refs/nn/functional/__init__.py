@@ -133,9 +133,7 @@ def elu(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def relu(
-    a: TensorLikeType, inplace: bool = False
-) -> TensorLikeType:
+def relu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.relu
     """
@@ -143,7 +141,7 @@ def relu(
     if inplace:
         raise NotImplementedError
 
-    return torch.where(torch.gt(a, 0), a, torch.zeros_like(a))
+    return torch.where(torch.gt(a, 0), a, 0)
 
 
 @register_decomposition(torch.ops.aten.leaky_relu)
