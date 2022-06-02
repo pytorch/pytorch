@@ -287,7 +287,7 @@ void sign_kernel(TensorIteratorBase& iter){
           [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
           [=](Vectorized<scalar_t> self_vec){
 
-              // Comparison operators returns bitmak.
+              // Comparison operators returns bitmask.
               auto left = Vectorized<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
               auto right = Vectorized<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
 
