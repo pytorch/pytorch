@@ -95,7 +95,8 @@ class Tensor(torch._C._TensorBase):
             # does accurate alias tracking; however, the code below
             # doesn't work because of
             # https://github.com/pytorch/pytorch/issues/47442
-            if self.is_sparse or self.device.type in ['lazy', 'xla', 'mlc', 'ort', 'meta', 'hpu'] or \
+            # Update the test in test_serialization if you remove 'meta' from here
+            if self.is_sparse or self.device.type in ['lazy', 'xla', 'mps', 'ort', 'meta', 'hpu'] or \
                     (type(self) is not Tensor and self.data_ptr() == 0):
                 new_tensor = self.clone()
                 if type(new_tensor) is not type(self):
@@ -150,7 +151,8 @@ class Tensor(torch._C._TensorBase):
                         new_tensor = new_tensor.conj_physical()
                     if self.is_neg():
                         new_tensor = new_tensor.neg()
-                    new_tensor.requires_grad = self.requires_grad
+            if self.requires_grad:
+                new_tensor.requires_grad_()
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
 
@@ -200,9 +202,6 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage, (self,), self)
 
-        if self.dtype not in torch.storage._dtype_to_storage_type_map():
-            raise RuntimeError(f'unsupported Storage type: {self.dtype}')
-
         return torch._TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
 
     def _reduce_ex_internal(self, proto):
@@ -210,7 +209,7 @@ class Tensor(torch._C._TensorBase):
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
-        # Note: Numpy array is chosen to be the rebuild component for XLA, ORT, MLC Tensors.
+        # Note: Numpy array is chosen to be the rebuild component for XLA, ORT Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
         #    Otherwise in torch.load CPU storage is reconstructed with randomly
@@ -220,8 +219,12 @@ class Tensor(torch._C._TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ['xla', 'ort', 'mlc', 'hpu']:
-            return (torch._utils._rebuild_device_tensor_from_numpy, (self.cpu().numpy(),
+        if self.device.type in ['xla', 'ort', 'mps', 'hpu']:
+            # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
+            # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
+            # this would reconstruct the BFloat16 tensor from numpy.
+            numpy_tensor = self.cpu().numpy() if self.dtype != torch.bfloat16 else self.cpu().to(torch.float32).numpy()
+            return (torch._utils._rebuild_device_tensor_from_numpy, (numpy_tensor,
                                                                      self.dtype,
                                                                      str(self.device),
                                                                      self.requires_grad))
@@ -331,11 +334,12 @@ class Tensor(torch._C._TensorBase):
         # See Note [Don't serialize hooks]
         self.requires_grad, _, self._backward_hooks = state
 
-    def __repr__(self):
+    def __repr__(self, *, tensor_contents=None):
         if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.__repr__, (self,), self)
+            return handle_torch_function(Tensor.__repr__, (self,), self,
+                                         tensor_contents=tensor_contents)
         # All strings are unicode in Python 3.
-        return torch._tensor_str._str(self)
+        return torch._tensor_str._str(self, tensor_contents=tensor_contents)
 
     def backward(self, gradient=None, retain_graph=None, create_graph=False, inputs=None):
         r"""Computes the gradient of current tensor w.r.t. graph leaves.
@@ -530,6 +534,10 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.norm, (self,), self, p=p, dim=dim, keepdim=keepdim, dtype=dtype)
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
+    def solve(self, other):
+        from ._linalg_utils import solve
+        return solve(self, other)
+
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa
@@ -642,6 +650,7 @@ class Tensor(torch._C._TensorBase):
     __itruediv__ = _C._TensorBase.__idiv__
 
     __pow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(_C._TensorBase.pow)
+    __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(_C._TensorBase.pow_)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmod__(self, other):
@@ -655,31 +664,17 @@ class Tensor(torch._C._TensorBase):
         return object.__format__(self, format_spec)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __ipow__(self, other):  # type: ignore[misc]
-        return NotImplemented
-
-    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rpow__(self, other):
         dtype = torch.result_type(other, self)
         return torch.tensor(other, dtype=dtype, device=self.device) ** self
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
-        warnings.warn("__floordiv__ is deprecated, and its behavior will change in a future version of pytorch. "
-                      "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
-                      "This results in incorrect rounding for negative values. "
-                      "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
-                      "or for actual floor division, use torch.div(a, b, rounding_mode='floor').", stacklevel=3)
-        return torch.div(self, other, rounding_mode='trunc')
+        return torch.floor_divide(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
-        warnings.warn("__rfloordiv__ is deprecated, and its behavior will change in a future version of pytorch. "
-                      "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
-                      "This results in incorrect rounding for negative values. "
-                      "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
-                      "or for actual floor division, use torch.div(a, b, rounding_mode='floor').", stacklevel=3)
-        return torch.div(other, self, rounding_mode='trunc')
+        return torch.floor_divide(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rlshift__(self, other):

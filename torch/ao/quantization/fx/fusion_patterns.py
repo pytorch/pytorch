@@ -1,7 +1,7 @@
 import torch
 from torch.fx.graph import Node, Graph
 from ..utils import _parent_name
-from .quantization_types import NodePattern, Pattern
+from torch.ao.quantization.quantization_types import NodePattern, Pattern
 from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, Union, List

@@ -4,6 +4,8 @@ from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import MapDataPipe
 from typing import Iterator, List, Optional, TypeVar
 
+__all__ = ["ShufflerMapDataPipe", ]
+
 
 T_co = TypeVar('T_co', covariant=True)
 

@@ -1,6 +1,13 @@
 set(DEPLOY_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 add_subdirectory(interpreter)
 
+if(DEFINED GLIBCXX_USE_CXX11_ABI)
+  if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=1")
+    set(TORCH_CXX_FLAGS "-D_GLIBCXX_USE_CXX11_ABI=1")
+  endif()
+endif()
+
 # we do not want to have torch_deployinterpreter linked against libstdc++ or libc because
 # when loading it with RTLD_DEEPBIND it will resolve std::cout/stdout to the copy in libc++/libc instead of the
 # ones in the main process (see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=42679).

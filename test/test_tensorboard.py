@@ -42,7 +42,7 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_CROSSREF
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)
@@ -54,6 +54,8 @@ class BaseTestCase(TestCase):
     def setUp(self):
         if not TEST_TENSORBOARD:
             return self.skipTest("Skip the test since TensorBoard is not installed")
+        if TEST_WITH_CROSSREF:
+            return self.skipTest("Don't run TensorBoard tests with crossref")
         self.temp_dirs = []
 
     def createSummaryWriter(self):

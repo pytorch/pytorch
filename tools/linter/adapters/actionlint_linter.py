@@ -43,6 +43,7 @@ RESULTS_RE: Pattern[str] = re.compile(
     """
 )
 
+
 def run_command(
     args: List[str],
 ) -> "subprocess.CompletedProcess[bytes]":
@@ -64,9 +65,7 @@ def check_files(
     files: List[str],
 ) -> List[LintMessage]:
     try:
-        proc = run_command(
-            [binary] + files
-        )
+        proc = run_command([binary] + files)
     except OSError as err:
         return [
             LintMessage(

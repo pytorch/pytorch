@@ -242,8 +242,8 @@ def grad(
         return handle_torch_function(
             grad,
             overridable_args,
-            outputs,
-            inputs,
+            t_outputs,
+            t_inputs,
             grad_outputs=grad_outputs,
             retain_graph=retain_graph,
             create_graph=create_graph,
@@ -271,7 +271,7 @@ def grad(
             return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
                 t_outputs, gO, retain_graph, create_graph, t_inputs,
                 allow_unused, accumulate_grad=False)  # Calls into the C++ engine to run the backward pass
-        return _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(grad_outputs)
+        return _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(grad_outputs_)
     else:
         return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs, grad_outputs_, retain_graph, create_graph, t_inputs,
@@ -296,8 +296,13 @@ def _is_checkpoint_valid():
 
 
 def variable(*args, **kwargs):
-    warnings.warn("torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead")
-    return torch.tensor(*args, **kwargs)
+    raise RuntimeError("torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead")
+
+# Monkey patching variable.Variable to fix FX codegen. FX generates a call by roughly doing
+# f"{fn.__module__}.{fn.__name__}(...). This yields torch.autograd.variable.Variable(...) in the
+# output of an FX graph.  Unfortunately the module name torch.autograd.variable is shadowed by the
+# deprecated function - variable(...).
+variable.Variable = Variable  # type: ignore[attr-defined]
 
 if not torch._C._autograd_init():
     raise RuntimeError("autograd initialization failed")

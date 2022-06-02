@@ -1,5 +1,6 @@
 #ifndef C10_MACROS_MACROS_H_
 #define C10_MACROS_MACROS_H_
+#include <cassert>
 
 /* Main entry for c10/macros.
  *
@@ -331,8 +332,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) || defined(__XROS__) || \
-    defined(USE_ROCM)
+#if defined(__ANDROID__) || defined(__APPLE__) || defined(USE_ROCM)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
@@ -399,6 +399,12 @@ __host__ __device__
 #define C10_IOS 1
 #define C10_MOBILE 1
 #endif // ANDROID / IOS
+
+#if defined(C10_MOBILE) && C10_MOBILE
+#define C10_ALWAYS_INLINE_UNLESS_MOBILE inline
+#else
+#define C10_ALWAYS_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE
+#endif
 
 // Portable determination of whether type T is trivially copyable.
 // Warning: __has_trivial_copy for GCC may not always detect the non-POD
@@ -481,8 +487,7 @@ __host__ __device__
 #endif
 
 #ifndef HAS_DEMANGLE
-#if defined(__ANDROID__) || defined(_WIN32) || defined(__EMSCRIPTEN__) || \
-    defined(__XROS__)
+#if defined(__ANDROID__) || defined(_WIN32) || defined(__EMSCRIPTEN__)
 #define HAS_DEMANGLE 0
 #elif defined(__APPLE__) && \
     (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE)

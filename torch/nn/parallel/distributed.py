@@ -1,5 +1,4 @@
 import sys
-import collections.abc
 import copy
 from dataclasses import dataclass
 from typing import Callable, Any, Type
@@ -19,10 +18,16 @@ from torch.distributed.algorithms.join import (
     Joinable,
     JoinHook,
 )
+
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 RPC_AVAILABLE = False
 if dist.is_available():
+    from torch.distributed.utils import (
+        _verify_param_shape_across_processes,
+        _sync_module_states,
+        _to_kwargs,
+    )
     from torch.distributed.distributed_c10d import ReduceOp, _get_default_group
 if torch.distributed.rpc.is_available():
     RPC_AVAILABLE = True
@@ -31,8 +36,8 @@ if torch.distributed.rpc.is_available():
 from torch._utils import _get_device_index
 
 from ..modules import Module
-from ._functions import _get_stream
-from .scatter_gather import gather, is_namedtuple, scatter_kwargs
+from ._replicated_tensor_ddp_utils import _ddp_with_replicated_tensor_enabled
+from .scatter_gather import gather, is_namedtuple, scatter_kwargs  # noqa: F401
 
 
 logger = logging.getLogger(__name__)
@@ -230,7 +235,6 @@ class _DDPJoinHook(JoinHook):
         processes.
         """
         self.ddp._sync_final_model(is_last_joiner)
-
 
 class DistributedDataParallel(Module, Joinable):
     r"""Implements distributed data parallelism that is based on
@@ -606,6 +610,9 @@ class DistributedDataParallel(Module, Joinable):
         else:
             self.parameters_to_ignore = []
 
+        self._use_replicated_tensor_module = _ddp_with_replicated_tensor_enabled()
+        self._build_replicated_tensor_module()
+
         if check_reduction:
             # This argument is no longer used since the reducer
             # will ensure reduction completes even if some parameters
@@ -636,9 +643,15 @@ class DistributedDataParallel(Module, Joinable):
         # Build parameters for reducer.
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
         # Verify model equivalence.
-        dist._verify_params_across_processes(self.process_group, parameters)
+        _verify_param_shape_across_processes(self.process_group, parameters)
         # Sync params and buffers. Ensures all DDP models start off at the same value.
-        self._sync_params_and_buffers(authoritative_rank=0)
+        _sync_module_states(
+            module=self.module,
+            process_group=self.process_group,
+            broadcast_bucket_size=self.broadcast_bucket_size,
+            src=0,
+            params_and_buffers_to_ignore=self.parameters_to_ignore,
+        )
         # In debug mode, build a mapping of parameter index -> parameter.
         param_to_name_mapping = self._build_debug_param_to_name_mapping(parameters)
         # Builds reducer.
@@ -650,20 +663,13 @@ class DistributedDataParallel(Module, Joinable):
         if static_graph:
             self._set_static_graph()
 
-    def _sync_params_and_buffers(self, authoritative_rank=0):
-        module_states = []
-        for name, param in self.module.named_parameters():
-            if name not in self.parameters_to_ignore:
-                module_states.append(param.detach())
-
-        for name, buffer in self.module.named_buffers():
-            if name not in self.parameters_to_ignore:
-                module_states.append(buffer.detach())
-
-        if len(module_states) > 0:
-            self._distributed_broadcast_coalesced(
-                module_states, self.broadcast_bucket_size, authoritative_rank
-            )
+    def _build_replicated_tensor_module(self):
+        if self._use_replicated_tensor_module:
+            # Create a module with ReplicatedTensor without copying tensors. Avoid
+            # registering '_replicated_tensor_module' as a submodule by directly
+            # adding to self.__dict__.
+            from ._replicated_tensor_ddp_interop import _replicate_module
+            self.__dict__['_replicated_tensor_module'] = _replicate_module(self.module, self.process_group)
 
     def _log_and_throw(self, err_type, err_msg):
         if self.logger is not None:
@@ -765,12 +771,15 @@ class DistributedDataParallel(Module, Joinable):
         del attrs["process_group"]
         del attrs["reducer"]
         del attrs["logger"]
+        if self._use_replicated_tensor_module:
+            del attrs["_replicated_tensor_module"]
         return attrs
 
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
         super(DistributedDataParallel, self).__setstate__(state)
+        self._build_replicated_tensor_module()
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
@@ -947,6 +956,20 @@ class DistributedDataParallel(Module, Joinable):
         finally:
             self.require_backward_grad_sync = old_require_backward_grad_sync
 
+    def _run_ddp_forward(self, *inputs, **kwargs):
+        module_to_run = self._replicated_tensor_module if self._use_replicated_tensor_module else self.module
+
+        if self.device_ids:
+            inputs, kwargs = _to_kwargs(
+                inputs,
+                kwargs,
+                self.device_ids[0],
+                self.use_side_stream_for_tensor_copies
+            )
+            return module_to_run(*inputs[0], **kwargs[0])
+        else:
+            return module_to_run(*inputs, **kwargs)
+
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
             if torch.is_grad_enabled() and self.require_backward_grad_sync:
@@ -982,11 +1005,7 @@ class DistributedDataParallel(Module, Joinable):
                 # Notify joined ranks whether they should sync in backwards pass or not.
                 self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
-            if self.device_ids:
-                inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
-                output = self.module(*inputs[0], **kwargs[0])
-            else:
-                output = self.module(*inputs, **kwargs)
+            output = self._run_ddp_forward(*inputs, **kwargs)
 
             # sync params according to location (before/after forward) user
             # specified as part of hook, if hook was specified.
@@ -1051,77 +1070,19 @@ class DistributedDataParallel(Module, Joinable):
     def scatter(self, inputs, kwargs, device_ids):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
 
-    def _recursive_to(self, inputs, target_gpu):
-        r"""
-        Recursively moves input to the target_gpu.
-        """
-
-        def to_map(obj):
-            if isinstance(obj, torch.Tensor):
-                if obj.device == torch.device("cuda", target_gpu):
-                    return (obj,)
-                if not self.use_side_stream_for_tensor_copies:
-                    return (obj.to(target_gpu),)
-                else:
-                    # Perform CPU -> GPU copies in a background stream. This code is
-                    # motivated from similar logic in torch/nn/parallel/_functions.py
-                    stream = _get_stream(target_gpu)
-                    with torch.cuda.stream(stream):
-                        output = obj.to(target_gpu)
-                    # synchronize with the copy stream
-                    with torch.cuda.device(target_gpu):
-                        current_stream = torch.cuda.current_stream()
-                        # Sync the current stream with the copy stream
-                        current_stream.wait_stream(stream)
-                        # Ensure tensor memory is not reused until work on
-                        # main stream is complete
-                        output.record_stream(current_stream)
-                    return (output,)
-            if is_namedtuple(obj):
-                return [type(obj)(*args) for args in zip(*map(to_map, obj))]
-            if isinstance(obj, tuple) and len(obj) > 0:
-                return list(zip(*map(to_map, obj)))
-            if isinstance(obj, str):
-                # Needs to be checked, otherwise it's taken as a sequence infinitely.
-                # This is because the elements of a string are also strings, and so on.
-                return [obj]
-            if isinstance(obj, collections.abc.Sequence) and len(obj) > 0:
-                try:
-                    return [type(obj)(i) for i in zip(*map(to_map, obj))]
-                except TypeError:
-                    # The sequence type may not support `__init__(iterable)` (e.g., `range`).
-                    return [list(i) for i in zip(*map(to_map, obj))]
-            if isinstance(obj, collections.abc.Mapping) and len(obj) > 0:
-                try:
-                    return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
-                except TypeError:
-                    # The mapping type may not support `__init__(iterable)`.
-                    return [dict(i) for i in zip(*map(to_map, obj.items()))]
-            return [obj]
-
-        # Avoid reference cycle
-        try:
-            res = to_map(inputs)
-        finally:
-            to_map = None
-        return res
-
     def to_kwargs(self, inputs, kwargs, device_id):
-        inputs = self._recursive_to(inputs, device_id) if inputs else []
-        kwargs = self._recursive_to(kwargs, device_id) if kwargs else []
-        if len(inputs) < len(kwargs):
-            inputs.extend([() for _ in range(len(kwargs) - len(inputs))])
-        elif len(kwargs) < len(inputs):
-            kwargs.extend([{} for _ in range(len(inputs) - len(kwargs))])
-        inputs = tuple(inputs)
-        kwargs = tuple(kwargs)
-        return inputs, kwargs
+        # Kept for BC
+        return _to_kwargs(
+            inputs, kwargs, device_id, self.use_side_stream_for_tensor_copies
+        )
 
     def gather(self, outputs, output_device):
         return gather(outputs, output_device, dim=self.dim)
 
     def train(self, mode=True):
         super(DistributedDataParallel, self).train(mode)
+        if self._use_replicated_tensor_module:
+            self._replicated_tensor_module.train(mode)
         return self
 
     # When running in join mode, schedules an allreduce to notify joined ranks
@@ -1153,7 +1114,13 @@ class DistributedDataParallel(Module, Joinable):
         self._authoritative_rank = self._find_common_rank(
             self._distributed_rank, is_last_joiner
         )
-        self._sync_params_and_buffers(authoritative_rank=self._authoritative_rank)
+        _sync_module_states(
+            module=self.module,
+            process_group=self.process_group,
+            broadcast_bucket_size=self.broadcast_bucket_size,
+            src=self._authoritative_rank,
+            params_and_buffers_to_ignore=self.parameters_to_ignore
+        )
 
     # Schedule comm ops to match those scheduled in the reducer's backward
     # pass.

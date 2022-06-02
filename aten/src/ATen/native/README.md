@@ -291,7 +291,7 @@ If two backends have the same dispatch function, you can write `CPU, CUDA: func`
 to reuse the same function name in both cases.
 
 Available backend options can be found by searching `dispatch_keys` in
-[codegen](https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py).
+[codegen](https://github.com/pytorch/pytorch/blob/master/torchgen/gen.py).
 There are also two special "generic" backends:
 
   - `CompositeExplicitAutograd` (previously known as `DefaultBackend`):

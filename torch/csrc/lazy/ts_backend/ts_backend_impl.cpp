@@ -5,6 +5,7 @@
 #include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
+#include <torch/csrc/lazy/ts_backend/ir_builder.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
 namespace at {
@@ -43,6 +44,12 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
     auto type = (env_use_cuda || FLAGS_torch_lazy_ts_cuda) ? at::kCUDA : at::kCPU;
     default_device_type_ = TSBackendDeviceType(type);
   }
+
+  const IrBuilder* GetIrBuilder() const override {
+    static const IrBuilder* builder = new TorchScriptIrBuilder();
+    return builder;
+  }
+
   std::unique_ptr<torch::lazy::LoweringContext> CreateLoweringContext(
       const std::string& name,
       torch::lazy::BackendDevice device,
@@ -96,6 +103,14 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
       const at::Scalar& scalar,
       const torch::lazy::BackendDevice& device) const override {
     return std::make_shared<TSData>(scalar, device);
+  }
+
+  torch::lazy::BackendDataPtr GetComputationDataFromNode(Node* node) const {
+    auto* device_data_node = dynamic_cast<DeviceData*>(node);
+    if (!device_data_node) {
+      return nullptr;
+    }
+    return device_data_node->data();
   }
 
   std::string GetComputationBackendText(
@@ -167,9 +182,13 @@ torch::lazy::BackendDataPtr TSBackendImpl::CreateDataPlaceholder(
 
 std::vector<torch::lazy::ComputationPtr> TSBackendImpl::Compile(
     std::vector<torch::lazy::ComputationPtr> instances) const {
+
   for (const auto& instance : instances) {
     auto ts_computation =
         static_cast<torch::lazy::TSComputation*>(instance.get());
+    if (!ts_computation->in_mark_step) {
+      LOG(WARNING) << "Compile outside of mark step";
+    }
   }
   return instances;
 }
@@ -243,5 +262,6 @@ void InitTorchScriptBackend() {
   static std::unique_ptr<BackendRegistrar> s_registrar;
   s_registrar = std::make_unique<BackendRegistrar>(GetTSBackendImpl());
 }
+
 } // namespace lazy
 } // namespace torch

@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/passes.h>
+#include <torch/csrc/jit/testing/file_check.h>
 #include <stdexcept>
 
 #include "deep_wide_pt.h"
@@ -92,6 +94,43 @@ TEST(StaticRuntime, UnaryOps) {
   testStaticRuntime(aten_sum_1_true, args, args2);
 }
 
+TEST(StaticRuntime, Max) {
+  auto src_max_reduce = R"JIT(
+    def forward(self, input):
+        return torch.max(input).clone()
+  )JIT";
+
+  auto src_max_dim = R"JIT(
+    def forward(self, input, dim: int):
+        values, indices = torch.max(input, dim)
+        return values.clone(), indices.clone()
+  )JIT";
+
+  auto src_max_dim_keepdim = R"JIT(
+    def forward(self, input, dim: int):
+        values, indices = torch.max(input, dim, keepdim=True)
+        return values.clone(), indices.clone()
+  )JIT";
+
+  auto src_max_pointwise = R"JIT(
+    def forward(self, input, other):
+        return torch.max(input, other).clone()
+  )JIT";
+
+  auto input = at::randn({2, 3, 2});
+  auto input_other = at::randn({2, 3, 2});
+  auto large_input = at::randn({8, 9, 10});
+  auto large_input_other = at::randn({8, 9, 10});
+
+  testStaticRuntime(src_max_reduce, {input});
+  testStaticRuntime(src_max_dim, {input, 1});
+  testStaticRuntime(src_max_dim, {input, 1}, {large_input, 0});
+  testStaticRuntime(src_max_dim_keepdim, {input, 0});
+  testStaticRuntime(src_max_dim_keepdim, {input, 0}, {large_input, 2});
+  testStaticRuntime(src_max_pointwise, {input, input_other});
+  testStaticRuntime(src_max_pointwise, {input, input_other}, {large_input, large_input_other});
+}
+
 TEST(StaticRuntime, Sigmoid) {
   const auto sigmoid_script = R"JIT(
     def forward(self, inp: Tensor):
@@ -170,6 +209,44 @@ TEST(StaticRuntime, Clamp) {
 
   testStaticRuntime(clamp_script_1, {a, -1, 1}, {b, -1, 1});
   testStaticRuntime(clamp_script_2, {a, min_t, max_t}, {b, max_t1, min_t1});
+}
+
+TEST(StaticRuntime, ClampMinOnly) {
+  const auto src = R"JIT(
+    def forward(self, inp: Tensor, min: float):
+        a = torch.clamp(inp, min, None).clone()
+        return (a)
+  )JIT";
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+  testStaticRuntime(src, {a, 0.5});
+  testStaticRuntime(src, {a, 0.5}, {b, 0.25});
+}
+
+TEST(StaticRuntime, ClampMaxOnly) {
+  const auto src = R"JIT(
+    def forward(self, inp: Tensor, max: float):
+        a = torch.clamp(inp, None, max).clone()
+        return (a)
+  )JIT";
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+  testStaticRuntime(src, {a, 0.5});
+  testStaticRuntime(src, {a, 0.5}, {b, 0.25});
+}
+
+TEST(StaticRuntime, ClampIntTensor) {
+  const auto src = R"JIT(
+    def forward(self, inp: Tensor, min: float, max: float):
+        a = torch.clamp(inp, min, max).clone()
+        return (a)
+  )JIT";
+  auto a = at::randint(0, 20, {2, 3});
+  auto b = at::randint(0, 20, {4, 3, 2});
+  auto min = 5.0f;
+  auto max = 5.0f;
+  testStaticRuntime(src, {a, min, max});
+  testStaticRuntime(src, {a, min, max}, {b, min, max});
 }
 
 TEST(StaticRuntime, LenWithTuple) {
@@ -393,6 +470,99 @@ TEST(StaticRuntime, EmbeddingBagWithManagedOutput) {
 
   testStaticRuntime(embedding_bag_managed_output, args);
   testStaticRuntime(embedding_bag_managed_output, args, args2);
+}
+
+TEST(StaticRuntime, EmbeddingBagWithExtraneousOutput) {
+  const std::string embedding_bag_default_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=0]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=0]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res : Tensor = aten::clone(%y0, %none)
+        return (%res)
+  )IR";
+  auto graph = getGraphFromIR(embedding_bag_default_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  const std::string embedding_bag_mean_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=1]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=0]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res : Tensor = aten::clone(%y0, %none)
+        return (%res)
+  )IR";
+  graph = getGraphFromIR(embedding_bag_mean_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  const std::string embedding_bag_max_last_offset_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=2]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=1]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res : Tensor = aten::clone(%y0, %none)
+        return (%res)
+  )IR";
+  graph = getGraphFromIR(embedding_bag_max_last_offset_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  const std::string embedding_bag_normal_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=0]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=0]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res0 : Tensor = aten::clone(%y0, %none)
+        %res1 : Tensor = aten::clone(%y1, %none)
+        %res2 : Tensor = aten::clone(%y2, %none)
+        %res3 : Tensor = aten::clone(%y3, %none)
+        return (%res0, %res1, %res2, %res3)
+  )IR";
+  graph = getGraphFromIR(embedding_bag_normal_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check_not("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  at::Tensor weight = torch::randn({3, 11}, at::ScalarType::Float);
+  at::Tensor input = torch::tensor({0, 1, 0, 2});
+  at::Tensor offset = torch::tensor({0, 2, 4});
+  std::vector<IValue> args{weight, input, offset};
+  testStaticRuntime(embedding_bag_default_ir, args);
+  testStaticRuntime(embedding_bag_mean_ir, args);
+  testStaticRuntime(embedding_bag_max_last_offset_ir, args);
+
+  at::Tensor weight2 = torch::randn({10, 11}, at::ScalarType::Float);
+  at::Tensor input2 = torch::tensor({0, 1, 0, 2, 1});
+  at::Tensor offset2 = torch::tensor({0, 1, 2, 3, 4, 5});
+  std::vector<IValue> args2{weight2, input2, offset2};
+  testStaticRuntime(embedding_bag_default_ir, args, args2);
+  testStaticRuntime(embedding_bag_mean_ir, args, args2);
+  testStaticRuntime(embedding_bag_max_last_offset_ir, args, args2);
 }
 
 TEST(StaticRuntime, LayerNorm) {
@@ -1882,7 +2052,7 @@ TEST(StaticRuntime, Transpose) {
 }
 
 TEST(StaticRuntime, Permute) {
-  const auto permute_script = R"JIT(
+  auto permute_script = R"JIT(
     def forward(self, a: Tensor, dims: List[int]):
         return torch.permute(a, dims).clone()
   )JIT";
@@ -1897,6 +2067,16 @@ TEST(StaticRuntime, Permute) {
 
   testStaticRuntime(permute_script, args_a);
   testStaticRuntime(permute_script, args_a, args_b);
+
+  permute_script = R"JIT(
+    def forward(self, a: Tensor, dims: List[int], shape: List[int]):
+        return torch.permute(a, dims).reshape(shape).clone()
+  )JIT";
+
+  a = at::randn({8, 16, 4});
+  dims_a = {0, 2, 1};
+  dims_b = {-1, 16};
+  testStaticRuntime(permute_script, {a, dims_a, dims_b});
 }
 
 TEST(StaticRuntime, Slice) {
@@ -2038,7 +2218,7 @@ TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
         %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
         %output = quantized::linear_dynamic_fp16(%input, %packed_params)
         %ret = aten::clone(%output, %bias)
-        return (%output)
+        return (%ret)
   )IR";
   at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
   at::Tensor input = torch::randn({3, 2}, torch::kFloat);
@@ -2059,7 +2239,7 @@ TEST(StaticRuntime, QuantizedLinearReluDynamicFp16) {
         %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
         %output = quantized::linear_relu_dynamic_fp16(%input, %packed_params)
         %ret = aten::clone(%output, %bias)
-        return (%output)
+        return (%ret)
   )IR";
   at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
   at::Tensor input = torch::randn({3, 2}, torch::kFloat);
@@ -2149,7 +2329,7 @@ TEST(StaticRuntime, FmodScalar) {
   testStaticRuntime(fmod_scalar, {a, 3}, {c, 4});
 }
 
-TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
+TEST(StaticRuntime, QEmbeddingBagBytePrepack) {
   const std::string embedding_bag_byte_prepack_script = R"IR(
     graph(%input: Tensor):
         %none : None = prim::Constant()
@@ -2163,6 +2343,23 @@ TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
 
   testStaticRuntime(embedding_bag_byte_prepack_script, {a});
   testStaticRuntime(embedding_bag_byte_prepack_script, {a}, {b});
+}
+
+TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
+  const auto src = R"IR(
+    graph(%input: Tensor):
+        %none : None = prim::Constant()
+        %weight: Tensor = quantized::embedding_bag_byte_prepack(%input)
+        %output: Tensor = quantized::embedding_bag_byte_unpack(%weight)
+        %res: Tensor = aten::clone(%output, %none)
+        return (%res)
+  )IR";
+
+  auto a = torch::randn({8, 16}, at::ScalarType::Float);
+  auto b = torch::randn({8 * 2, 16 * 2}, at::ScalarType::Float);
+
+  testStaticRuntime(src, {a});
+  testStaticRuntime(src, {a}, {b});
 }
 
 TEST(StaticRuntime, LinalgNorm_ScalarOrd) {
@@ -3178,4 +3375,45 @@ TEST(StaticRuntime, NestedBlockIfReturnList) {
   std::vector<IValue> args2{
       at::randn({42, 42}), at::randn({42, 42}), true, false};
   testStaticRuntime(src, args1, args2);
+}
+
+TEST(StaticRuntime, ClampNaNToNum) {
+  const auto src1 = R"JIT(
+    def forward(self, a):
+        return torch.clamp(a, min=1.0, max=2.0).nan_to_num().clone()
+  )JIT";
+
+  const auto src2 = R"JIT(
+    def forward(self, a, nan: float):
+        return torch.clamp(a, min=-1.0, max=2.0).nan_to_num(nan=nan).clone()
+  )JIT";
+
+  const auto src3 = R"JIT(
+    def forward(self, a):
+        return torch.clamp(a, min=1.0, max=-1.0).nan_to_num().clone()
+  )JIT";
+
+  auto a = at::tensor({
+      std::numeric_limits<float>::quiet_NaN(),
+      std::numeric_limits<float>::infinity(),
+      -std::numeric_limits<float>::infinity(),
+      0.0f,
+      3.0f
+    });
+  auto b = a.repeat({10, 5});
+
+  // Have to use_allclose even though all NaNs will be replaced - testStaticRuntime
+  // also checks inputs at the end to make sure they're not changed
+  testStaticRuntime(src1, {a}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src1, {a}, {b}, /*use_allclose=*/true, /*use_equalnan=*/true);
+
+  testStaticRuntime(src2, {a, 42.0}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src2, {a, 2.0}, {b, 1.0}, /*use_allclose=*/true, /*use_equalnan=*/true);
+
+  testStaticRuntime(src3, {a}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src3, {a}, {b}, /*use_allclose=*/true, /*use_equalnan=*/true);
+
+  // Non-NNC path
+  testStaticRuntime(src1, {a.to(at::kDouble)}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src1, {a.to(at::kDouble)}, {b.to(at::kDouble)}, /*use_allclose=*/true, /*use_equalnan=*/true);
 }

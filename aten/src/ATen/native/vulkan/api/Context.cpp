@@ -1,6 +1,7 @@
 #include <ATen/native/vulkan/api/Context.h>
-#include <ATen/vulkan/Context.h>
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Copy.h>
+#include <ATen/vulkan/Context.h>
 
 #include <sstream>
 
@@ -187,7 +188,6 @@ Descriptor::Set dispatch_prologue(
     const Shader::Descriptor& shader_descriptor,
     const Shader::WorkGroup& local_work_group_size) {
   Context* const context = api::context();
-  const GPU gpu = context->gpu();
   Descriptor& descriptor = context->descriptor();
   Pipeline& pipeline = context->pipeline();
   Shader& shader = context->shader();

@@ -45,8 +45,8 @@ fi
 ################################################################################
 # C++ tests #
 ################################################################################
-# Don't run cpp tests a second time in the sharded ort_test2 job
-if [[ "$BUILD_ENVIRONMENT" != *ort_test2* ]]; then
+# Only run cpp tests in the first shard, don't run cpp tests a second time in the second shard
+if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
   echo "Running C++ tests.."
   for test in $(find "$cpp_test_dir" -executable -type f); do
     case "$test" in

@@ -6,8 +6,8 @@ with open("README.md", "r", encoding="utf-8") as fh:
 setuptools.setup(
     name="coverage-plugins",
     version="0.0.1",
-    author='PyTorch Team',
-    author_email='packages@pytorch.org',
+    author="PyTorch Team",
+    author_email="packages@pytorch.org",
     description="plug-in to coverage for PyTorch JIT",
     long_description=long_description,
     long_description_content_type="text/markdown",

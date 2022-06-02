@@ -5,6 +5,7 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
@@ -48,7 +49,7 @@ class ReduceMaximum {
 public:
   template <typename scalar_t>
   constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
-    *self_data = std::max(*self_data, *src_data);
+    *self_data = at::_isnan<scalar_t>(*src_data) ? *src_data : std::max(*self_data, *src_data);
   }
 };
 static ReduceMaximum reduce_maximum;
@@ -57,7 +58,7 @@ class ReduceMinimum {
 public:
   template <typename scalar_t>
   constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
-    *self_data = std::min(*self_data, *src_data);
+    *self_data = at::_isnan<scalar_t>(*src_data) ? *src_data : std::min(*self_data, *src_data);
   }
 };
 static ReduceMinimum reduce_minimum;

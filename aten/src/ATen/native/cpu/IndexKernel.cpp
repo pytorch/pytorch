@@ -103,7 +103,7 @@ void cpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
 }
 
 void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
     iter.dtype(), "index_cpu", [&] {
     cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
       *(scalar_t*)dst = *(scalar_t*)(src + offset);
@@ -234,7 +234,7 @@ void take_kernel(
 
 void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
   // NOTE: duplicate indices are only supported if accumulate is true.
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
     iter.dtype(), "index_put", [&] {
     // See Note [Enabling Deterministic Operations]
     // Parallel cpu_index_kernel with accumulation is nondeterministic, so we
@@ -409,7 +409,7 @@ void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
 }
 
 void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kBool, kBFloat16, kHalf,
     iter.dtype(), "masked_fill", [&] {
       scalar_t scalar_val = value.to<scalar_t>();
       auto mask_dtype = iter.input_dtype(0);

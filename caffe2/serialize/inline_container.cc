@@ -5,6 +5,9 @@
 #include <ostream>
 #include <fstream>
 #include <algorithm>
+#include <sys/stat.h>
+#include <sys/types.h>
+
 
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
@@ -47,6 +50,17 @@ static std::string basename(const std::string& name) {
     }
   }
   return name.substr(start, end - start);
+}
+
+static std::string parentdir(const std::string& name) {
+  size_t end = name.find_last_of('/');
+  if(end == std::string::npos)
+    end = name.find_last_of('\\');
+
+  if(end == std::string::npos)
+    return "";
+
+  return name.substr(0, end);
 }
 
 size_t PyTorchStreamReader::read(uint64_t pos, char* buf, size_t n) {
@@ -338,6 +352,13 @@ void PyTorchStreamWriter::setup(const string& file_name) {
         file_name,
         std::ofstream::out | std::ofstream::trunc | std::ofstream::binary);
     valid("opening archive ", file_name.c_str());
+
+    const std::string dir_name = parentdir(file_name);
+    if(!dir_name.empty()) {
+      struct stat st;
+      bool dir_exists = (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
+      TORCH_CHECK(dir_exists, "Parent directory ", dir_name, " does not exist.");
+    }
     TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
     writer_func_ = [this](const void* buf, size_t nbytes) -> size_t {
       file_stream_.write(static_cast<const char*>(buf), nbytes);

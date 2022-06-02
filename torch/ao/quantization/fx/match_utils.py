@@ -4,7 +4,7 @@ from torch.fx.graph import (
     Graph,
     Node,
 )
-from .quantization_types import Pattern
+from torch.ao.quantization.quantization_types import Pattern
 from .quantization_patterns import (
     QuantizeHandler,
 )
