@@ -224,6 +224,8 @@ Parallelism
     get_num_interop_threads
     set_num_interop_threads
 
+.. _torch-rst-local-disable-grad:
+
 Locally disabling gradient computation
 --------------------------------------
 The context managers :func:`torch.no_grad`, :func:`torch.enable_grad`, and
