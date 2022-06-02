@@ -24,6 +24,8 @@ __all__ = [
     "set_profiler_for_iterdatapipe",
 ]
 
+set_profiler_for_iterdatapipe.__module__ = "torch.utils.data.datapipes.datapipe"
+
 T = TypeVar('T')
 T_co = TypeVar('T_co', covariant=True)
 
