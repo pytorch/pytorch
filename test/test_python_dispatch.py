@@ -1482,7 +1482,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
     def test_maybe_tuple_bug(self):
         class T(torch.Tensor):
             @classmethod
-            def __torch_function__(self, *args, **kwargs):
+            def __torch_function__(cls, *args, **kwargs):
                 pass
         a = torch.rand(3)
 
