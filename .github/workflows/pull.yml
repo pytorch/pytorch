@@ -14,20 +14,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-xenial-py3_7-gcc5_4-build:
-    name: linux-xenial-py3.7-gcc5.4
+  linux-focal-py3_7-gcc7-build:
+    name: linux-focal-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-py3.7-gcc5.4
-      docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
+      build-environment: linux-focal-py3.7-gcc7
+      docker-image-name: pytorch-linux-focal-py3.7-gcc7
 
-  linux-xenial-py3_7-gcc5_4-test:
-    name: linux-xenial-py3.7-gcc5.4
+  linux-focal-py3_7-gcc7-test:
+    name: linux-focal-py3.7-gcc7
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-xenial-py3_7-gcc5_4-build
+    needs: linux-focal-py3_7-gcc7-build
     with:
-      build-environment: linux-xenial-py3.7-gcc5.4
-      docker-image: ${{ needs.linux-xenial-py3_7-gcc5_4-build.outputs.docker-image }}
+      build-environment: linux-focal-py3.7-gcc7
+      docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -37,13 +37,6 @@ jobs:
           { config: "backwards_compat", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
-
-  linux-focal-py3_7-gcc7-build:
-    name: linux-focal-py3.7-gcc7
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-focal-py3.7-gcc7
-      docker-image-name: pytorch-linux-focal-py3.7-gcc7
 
   linux-docs:
     name: linux-docs
@@ -281,13 +274,15 @@ jobs:
       build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
 
-  linux-xenial-py3_7-gcc5_4-mobile-lightweight-dispatch-build:
-    name: linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build
-      docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
-      build-generates-artifacts: false
+  # https://github.com/pytorch/pytorch/issues/78540
+  # linux-focal-py3_7-gcc7-mobile-lightweight-dispatch-build:
+  #   if: false()
+  #   name: linux-focal-py3.7-gcc7-mobile-lightweight-dispatch-build
+  #   uses: ./.github/workflows/_linux-build.yml
+  #   with:
+  #     build-environment: linux-focal-py3.7-gcc7-mobile-lightweight-dispatch-build
+  #     docker-image-name: pytorch-linux-focal-py3.7-gcc7
+  #     build-generates-artifacts: false
 
   deploy-linux-xenial-cuda11_3-py3_7-gcc7-build:
     name: deploy-linux-xenial-cuda11.3-py3.7-gcc7
