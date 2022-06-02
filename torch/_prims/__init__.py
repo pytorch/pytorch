@@ -76,7 +76,6 @@ __all__ = [
     "sin",
     "sinh",
     "sqrt",
-    "square",
     "tan",
     "tanh",
     #
@@ -869,13 +868,6 @@ sqrt = _make_elementwise_unary_prim(
     "sqrt",
     impl_aten=torch.sqrt,
     impl_nvfuser=_sqrt_nvfuser,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-)
-
-square = _make_elementwise_unary_prim(
-    "square",
-    impl_aten=torch.square,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
