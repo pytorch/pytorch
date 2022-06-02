@@ -314,8 +314,8 @@ class DataLoader(Generic[T_co]):
                 raise ValueError('batch_sampler option is mutually exclusive '
                                  'with batch_size, shuffle, sampler, and '
                                  'drop_last')
-            batch_size = None
-            drop_last = False
+            batch_size = getattr(batch_sampler, 'batch_size', None)
+            drop_last = getattr(batch_sampler, 'drop_last', False)
         elif batch_size is None:
             # no auto_collation
             if drop_last:
