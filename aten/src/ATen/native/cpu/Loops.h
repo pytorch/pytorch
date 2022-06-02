@@ -28,7 +28,6 @@
 
 #include <stdint.h>
 #include <c10/util/C++17.h>
-#include <c10/util/Load.h>
 #include <c10/util/irange.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/cpu/IsContiguous.h>
@@ -50,8 +49,8 @@ typename traits::ArgsTuple
 dereference_impl(char* C10_RESTRICT data[], const int64_t* strides, int64_t i,
                  std::index_sequence<INDEX...>) {
   return std::make_tuple(
-      c10::load<typename traits::template arg<INDEX>::type>(
-          data[INDEX] + i * strides[INDEX])...);
+      *(typename traits::template arg<INDEX>::type*)
+        (data[INDEX] + i * strides[INDEX])...);
 }
 
 template <typename traits>
