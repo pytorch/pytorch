@@ -3,8 +3,8 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <c10/util/irange.h>
