@@ -10,6 +10,7 @@ jobs:
   upload-test-stats:
     if: github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'cancelled'
     runs-on: [self-hosted, linux.2xlarge]
+    name: Upload test stats for ${{ github.even.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
 
     steps:
       - name: Print workflow information
