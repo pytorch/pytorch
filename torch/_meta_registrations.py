@@ -136,12 +136,15 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
 @torch.library.impl(meta_lib, "index.Tensor")
 def meta_index_Tensor(self, indices):
     # aten::index is the internal advanced indexing implementation
-    check(len(indices) <= self.ndim, f"too many indices for tensor of dimension {self.ndim} (got {len(indices)})")
+    check(len(indices) <= self.ndim, lambda: f"too many indices for tensor of dimension {self.ndim} (got {len(indices)})")
     # checkIndexTensorTypes
     result = []
     for i, index in enumerate(indices):
         if index is not None:
-            check(index.dtype in [torch.long, torch.int8, torch.bool], "tensors used as indices must be long, byte or bool tensors")
+            check(
+                index.dtype in [torch.long, torch.int8, torch.bool],
+                lambda: "tensors used as indices must be long, byte or bool tensors"
+            )
             if index.dtype in [torch.int8, torch.bool]:
                 nonzero = index.nonzero()
                 for j in range(index.ndim):
