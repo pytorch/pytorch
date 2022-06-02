@@ -2354,7 +2354,566 @@ static inline C10_HOST_DEVICE T airy_ai_forward(T x) {
     }
 
     return ai;
-} // airy_ai_forward(T x)
+} // T airy_ai_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T airy_bi_forward(T x) {
+    static const T BN16[] = {
+            -2.53240795869364152689e-01,
+            +5.75285167332467384228e-01,
+            -3.29907036873225371650e-01,
+            +6.44404068948199951727e-02,
+            -3.82519546641336734394e-03,
+    };
+
+    static const T BD16[] = {
+            -7.15685095054035237902e+00,
+            +1.06039580715664694291e+01,
+            -5.23246636471251500874e+00,
+            +9.57395864378383833152e-01,
+            -5.50828147163549611107e-02,
+    };
+
+    static const T AFN[] = {
+            -1.31696323418331795333e-01,
+            -6.26456544431912369773e-01,
+            -6.93158036036933542233e-01,
+            -2.79779981545119124951e-01,
+            -4.91900132609500318020e-02,
+            -4.06265923594885404393e-03,
+            -1.59276496239262096340e-04,
+            -2.77649108155232920844e-06,
+            -1.67787698489114633780e-08,
+    };
+
+    static const T AFD[] = {
+            +1.33560420706553243746e+01,
+            +3.26825032795224613948e+01,
+            +2.67367040941499554804e+01,
+            +9.18707402907259625840e+00,
+            +1.47529146771666414581e+00,
+            +1.15687173795188044134e-01,
+            +4.40291641615211203805e-03,
+            +7.54720348287414296618e-05,
+            +4.51850092970580378464e-07,
+    };
+
+    static const T AGN[] = {
+            +1.97339932091685679179e-02,
+            +3.91103029615688277255e-01,
+            +1.06579897599595591108e+00,
+            +9.39169229816650230044e-01,
+            +3.51465656105547619242e-01,
+            +6.33888919628925490927e-02,
+            +5.85804113048388458567e-03,
+            +2.82851600836737019778e-04,
+            +6.98793669997260967291e-06,
+            +8.11789239554389293311e-08,
+            +3.41551784765923618484e-10,
+    };
+
+    static const T AGD[] = {
+            +9.30892908077441974853e+00,
+            +1.98352928718312140417e+01,
+            +1.55646628932864612953e+01,
+            +5.47686069422975497931e+00,
+            +9.54293611618961883998e-01,
+            +8.64580826352392193095e-02,
+            +4.12656523824222607191e-03,
+            +1.01259085116509135510e-04,
+            +1.17166733214413521882e-06,
+            +4.91834570062930015649e-09,
+    };
+
+    int domain_flag = 0;
+
+    T bi;
+
+    if (x > T(103.892)) {
+        return std::numeric_limits<T>::infinity();
+    }
+
+    T f;
+    T g;
+    T k;
+
+    if (x < T(-2.09)) {
+        T z = T(1.0) / (T(-2.0) * x * std::sqrt(-x) / T(3.0));
+
+        T afn = 0.0;
+
+        for (uint8_t index = 0; index <= 8; index++) {
+            afn = afn * (z * z) + AFN[index];
+        }
+
+        T afd = 0.0;
+
+        for (uint8_t index = 0; index <= 8; index++) {
+            afd = afd * (z * z) + AFD[index];
+        }
+
+        T agn = 0.0;
+
+        for (uint8_t index = 0; index <= 10 + 0; index++) {
+            agn = agn * (z * z) + AGN[index];
+        }
+
+        T agd = 0.0;
+
+        for (uint8_t index = 0; index <= 10 - 1; index++) {
+            agd = agd * (z * z) + AGD[index];
+        }
+
+        T t = T(-2.0) * x * std::sqrt(-x) / T(3.0) + T(0.25) * M_PI;
+
+        return T(5.64189583547756286948e-01) / std::sqrt(std::sqrt(-x)) * (std::cos(t) * (T(1.0) + z * z * afn / afd) + std::sin(t) * (z * agn / agd));
+    }
+
+    if (x >= T(2.09)) {
+        domain_flag = 5;
+
+        T zeta = T(2.0) * x * std::sqrt(x) / T(3.0);
+
+        if (x > T(8.3203353)) {
+            T bn16 = 0.0;
+
+            for (uint8_t index = 0; index <= 4; index++) {
+                bn16 = bn16 * (T(1.0) / zeta) + BN16[index];
+            }
+
+            T bd16 = 0.0;
+
+            for (uint8_t index = 0; index <= 4; index++) {
+                bd16 = bd16 * (T(1.0) / zeta) + BD16[index];
+            }
+
+            return T(5.64189583547756286948e-01) * std::exp(zeta) * (T(1.0) + T(1.0) / zeta * bn16 / bd16) / std::sqrt(std::sqrt(x));
+        }
+    }
+
+    f = 1.0;
+    g = x;
+    k = 1.0;
+
+    T m = 1.0;
+    T n = x;
+    T t = 1.0;
+    T z = x * x * x;
+
+    while (t > std::numeric_limits<T>::epsilon()) {
+        m *= z;
+        k += T(1.0);
+        m /= k;
+        n *= z;
+        k += T(1.0);
+        n /= k;
+        m /= k;
+        f += m;
+        k += T(1.0);
+        n /= k;
+        g += n;
+
+        t = std::abs(m / f);
+    }
+
+    if ((domain_flag & 2) == 0) {
+        return T(1.732050807568877293527) * (T(0.355028053887817239260) * f + T(0.258819403792806798405) * g);
+    }
+
+    return bi;
+} // T airy_bi_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T airy_derivative_ai_forward(T x) {
+    static const T APN[] = {
+            +6.13759184814035759225e-01,
+            +1.47454670787755323881e+01,
+            +8.20584123476060982430e+01,
+            +1.71184781360976385540e+02,
+            +1.59317847137141783523e+02,
+            +6.99778599330103016170e+01,
+            +1.39470856980481566958e+01,
+            +1.00000000000000000550e+00,
+    };
+
+    static const T APD[] = {
+            +3.34203677749736953049e-01,
+            +1.11810297306158156705e+01,
+            +7.11727352147859965283e+01,
+            +1.58778084372838313640e+02,
+            +1.53206427475809220834e+02,
+            +6.86752304592780337944e+01,
+            +1.38498634758259442477e+01,
+            +9.99999999999999994502e-01,
+    };
+
+    static const T APFN[] = {
+            +1.85365624022535566142e-01,
+            +8.86712188052584095637e-01,
+            +9.87391981747398547272e-01,
+            +4.01241082318003734092e-01,
+            +7.10304926289631174579e-02,
+            +5.90618657995661810071e-03,
+            +2.33051409401776799569e-04,
+            +4.08718778289035454598e-06,
+            +2.48379932900442457853e-08,
+    };
+
+    static const T APFD[] = {
+            +1.47345854687502542552e+01,
+            +3.75423933435489594466e+01,
+            +3.14657751203046424330e+01,
+            +1.09969125207298778536e+01,
+            +1.78885054766999417817e+00,
+            +1.41733275753662636873e-01,
+            +5.44066067017226003627e-03,
+            +9.39421290654511171663e-05,
+            +5.65978713036027009243e-07,
+    };
+
+    static const T APGN[] = {
+            -3.55615429033082288335e-02,
+            -6.37311518129435504426e-01,
+            -1.70856738884312371053e+00,
+            -1.50221872117316635393e+00,
+            -5.63606665822102676611e-01,
+            -1.02101031120216891789e-01,
+            -9.48396695961445269093e-03,
+            -4.60325307486780994357e-04,
+            -1.14300836484517375919e-05,
+            -1.33415518685547420648e-07,
+            -5.63803833958893494476e-10,
+    };
+
+    static const T APGD[] = {
+            +9.85865801696130355144e+00,
+            +2.16401867356585941885e+01,
+            +1.73130776389749389525e+01,
+            +6.17872175280828766327e+00,
+            +1.08848694396321495475e+00,
+            +9.95005543440888479402e-02,
+            +4.78468199683886610842e-03,
+            +1.18159633322838625562e-04,
+            +1.37480673554219441465e-06,
+            +5.79912514929147598821e-09,
+    };
+
+    int domain_flag = 0;
+
+    T derivative_ai;
+
+    if (x > T(103.892)) {
+        return T(0.0);
+    }
+
+    T f;
+    T g;
+    T k;
+
+    if (x < T(-2.09)) {
+        T z = T(1.0) / (T(-2.0) * x * std::sqrt(-x) / T(3.0));
+
+        T t = T(-2.0) * x * std::sqrt(-x) / T(3.0) + T(0.25) * M_PI;
+
+        T apfn = 0.0;
+
+        for (uint8_t index = 0; index <= 8; index++) {
+            apfn = apfn * (z * z) + APFN[index];
+        }
+
+        T apfd = 0.0;
+
+        for (uint8_t index = 0; index <= 8; index++) {
+            apfd = apfd * (z * z) + APFD[index];
+        }
+
+        T apgn = 0.0;
+
+        for (uint8_t index = 0; index <= 10 + 0; index++) {
+            apgn = apgn * (z * z) + APGN[index];
+        }
+
+        T apgd = 0.0;
+
+        for (uint8_t index = 0; index <= 10 - 1; index++) {
+            apgd = apgd * (z * z) + APGD[index];
+        }
+
+        return -(T(5.64189583547756286948e-01) * std::sqrt(std::sqrt(-x))) * (std::cos(t) * (T(1.0) + z * z * apfn / apfd) + std::sin(t) * (z * apgn / apgd));
+    }
+
+    if (x >= T(2.09)) {
+        domain_flag = 5;
+
+        T zeta = T(2.0) * x * std::sqrt(x) / T(3.0);
+
+        T apn = 0.0;
+
+        for (uint8_t index = 0; index <= 7; index++) {
+            apn = apn * (T(1.0) / zeta) + APN[index];
+        }
+
+        T apd = 0.0;
+
+        for (uint8_t index = 0; index <= 7; index++) {
+            apd = apd * (T(1.0) / zeta) + APD[index];
+        }
+
+        derivative_ai = apn / apd * (T(-0.5) * T(5.64189583547756286948e-01) * std::sqrt(std::sqrt(x)) / std::exp(zeta));
+
+        if (x > T(8.3203353)) {
+            return derivative_ai;
+        }
+    }
+
+    f = 1.0;
+    g = x;
+    k = 1.0;
+
+    T m = 1.0;
+    T n = x;
+    T t = 1.0;
+    T z = x * x * x;
+
+    while (t > std::numeric_limits<T>::epsilon()) {
+        m *= z;
+        k += T(1.0);
+        m /= k;
+        n *= z;
+        k += T(1.0);
+        n /= k;
+        m /= k;
+        f += m;
+        k += T(1.0);
+        n /= k;
+        g += n;
+
+        t = std::abs(m / f);
+    }
+
+    k = 4.0;
+    m = x * x / T(2.0);
+    n = z / T(3.0);
+
+    f = m;
+    g = T(1.0) + n;
+    m = m / T(3.0);
+    t = 1.0;
+
+    while (t > std::numeric_limits<T>::epsilon()) {
+        m *= z;
+        n /= k;
+        k += T(1.0);
+        n *= z;
+        m /= k;
+        f += m;
+        k += T(1.0);
+        n /= k;
+        m /= k;
+        g += n;
+        k += T(1.0);
+
+        t = std::abs(n / g);
+    }
+
+    if ((domain_flag & 4) == 0) {
+        derivative_ai = T(0.355028053887817239260) * f - T(0.258819403792806798405) * g;
+    }
+
+    return derivative_ai;
+} // T airy_derivative_ai(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T airy_derivative_bi_forward(T x) {
+    static const T BPPN[] = {
+            +4.65461162774651610328e-01,
+            -1.08992173800493920734e+00,
+            +6.38800117371827987759e-01,
+            -1.26844349553102907034e-01,
+            +7.62487844342109852105e-03,
+    };
+
+    static const T BPPD[] = {
+            -8.70622787633159124240e+00,
+            +1.38993162704553213172e+01,
+            -7.14116144616431159572e+00,
+            +1.34008595960680518666e+00,
+            -7.84273211323341930448e-02,
+    };
+
+    static const T APFN[] = {
+            +1.85365624022535566142e-01,
+            +8.86712188052584095637e-01,
+            +9.87391981747398547272e-01,
+            +4.01241082318003734092e-01,
+            +7.10304926289631174579e-02,
+            +5.90618657995661810071e-03,
+            +2.33051409401776799569e-04,
+            +4.08718778289035454598e-06,
+            +2.48379932900442457853e-08,
+    };
+
+    static const T APFD[] = {
+            +1.47345854687502542552e+01,
+            +3.75423933435489594466e+01,
+            +3.14657751203046424330e+01,
+            +1.09969125207298778536e+01,
+            +1.78885054766999417817e+00,
+            +1.41733275753662636873e-01,
+            +5.44066067017226003627e-03,
+            +9.39421290654511171663e-05,
+            +5.65978713036027009243e-07,
+    };
+
+    static const T APGN[] = {
+            -3.55615429033082288335e-02,
+            -6.37311518129435504426e-01,
+            -1.70856738884312371053e+00,
+            -1.50221872117316635393e+00,
+            -5.63606665822102676611e-01,
+            -1.02101031120216891789e-01,
+            -9.48396695961445269093e-03,
+            -4.60325307486780994357e-04,
+            -1.14300836484517375919e-05,
+            -1.33415518685547420648e-07,
+            -5.63803833958893494476e-10,
+    };
+
+    static const T APGD[] = {
+            +9.85865801696130355144e+00,
+            +2.16401867356585941885e+01,
+            +1.73130776389749389525e+01,
+            +6.17872175280828766327e+00,
+            +1.08848694396321495475e+00,
+            +9.95005543440888479402e-02,
+            +4.78468199683886610842e-03,
+            +1.18159633322838625562e-04,
+            +1.37480673554219441465e-06,
+            +5.79912514929147598821e-09,
+    };
+
+    int domain_flag = 0;
+
+    T derivative_bi;
+
+    if (x > T(103.892)) {
+        return std::numeric_limits<T>::infinity();
+    }
+
+    T f;
+    T g;
+    T k;
+
+    if (x < T(-2.09)) {
+        T z = T(1.0) / (T(-2.0) * x * std::sqrt(-x) / T(3.0));
+
+        T t = T(-2.0) * x * std::sqrt(-x) / T(3.0) + T(0.25) * M_PI;
+
+        T apfn = 0.0;
+
+        for (uint8_t index = 0; index <= 8; index++) {
+            apfn = apfn * (z * z) + APFN[index];
+        }
+
+        T apfd = 0.0;
+
+        for (uint8_t index = 0; index <= 8; index++) {
+            apfd = apfd * (z * z) + APFD[index];
+        }
+
+        T apgn = 0.0;
+
+        for (uint8_t index = 0; index <= 10 + 0; index++) {
+            apgn = apgn * (z * z) + APGN[index];
+        }
+
+        T apgd = 0.0;
+
+        for (uint8_t index = 0; index <= 10 - 1; index++) {
+            apgd = apgd * (z * z) + APGD[index];
+        }
+
+        return (T(5.64189583547756286948e-01) * std::sqrt(std::sqrt(-x))) * (std::sin(t) * (T(1.0) + z * z * apfn / apfd) - std::cos(t) * (z * apgn / apgd));
+    }
+
+    if (x >= T(2.09)) {
+        domain_flag = 5;
+
+        T zeta = T(2.0) * x * std::sqrt(x) / T(3.0);
+
+        if (x > T(8.3203353)) {
+            T bppn = 0.0;
+
+            for (uint8_t index = 0; index <= 4; index++) {
+                bppn = bppn * (T(1.0) / zeta) + BPPN[index];
+            }
+
+            T bppd = 0.0;
+
+            for (uint8_t index = 0; index <= 4; index++) {
+                bppd = bppd * (T(1.0) / zeta) + BPPD[index];
+            }
+
+            return T(5.64189583547756286948e-01) * std::exp(zeta) * std::sqrt(std::sqrt(x)) * (T(1.0) + T(1.0) / zeta * bppn / bppd);
+        }
+    }
+
+    k = 1.0;
+    f = 1.0;
+    g = x;
+
+    T m = 1.0;
+    T n = x;
+    T t = 1.0;
+    T z = x * x * x;
+
+    while (t > std::numeric_limits<T>::epsilon()) {
+        m *= z;
+        k += T(1.0);
+        m /= k;
+        n *= z;
+        k += T(1.0);
+        n /= k;
+        m /= k;
+        f += m;
+        k += T(1.0);
+        n /= k;
+        g += n;
+
+        t = std::abs(m / f);
+    }
+
+    k = 4.0;
+    m = x * x / T(2.0);
+    n = z / T(3.0);
+
+    f = m;
+    g = T(1.0) + n;
+    m = m / T(3.0);
+    t = 1.0;
+
+    while (t > std::numeric_limits<T>::epsilon()) {
+        m *= z;
+        n /= k;
+        k += T(1.0);
+        n *= z;
+        m /= k;
+        f += m;
+        k += T(1.0);
+        n /= k;
+        m /= k;
+        g += n;
+        k += T(1.0);
+
+        t = std::abs(n / g);
+    }
+
+    if ((domain_flag & 8) == 0) {
+        derivative_bi = T(1.732050807568877293527) * (T(0.355028053887817239260) * f + T(0.258819403792806798405) * g);
+    }
+
+    return derivative_bi;
+} // T airy_derivative_bi(T x)
 
 template<typename T>
 static inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
@@ -2466,7 +3025,7 @@ static inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
     }
 
     return (pp / pq * std::cos(x - T(0.785398163397448309615660845819875721)) - T(5.0) / x * (qp / qq) * std::sin(x - T(0.785398163397448309615660845819875721))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
-} // bessel_j0_forward(T x)
+} // T bessel_j0_forward(T x)
 
 template<typename T>
 static inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
@@ -2574,7 +3133,7 @@ static inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
     }
 
     return (pp / pq * std::cos(x - T(2.356194490192344928846982537459627163)) - T(5.0) / x * (qp / qq) * std::sin(x - T(2.356194490192344928846982537459627163))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
-} // bessel_j1_forward(T x)
+} // T bessel_j1_forward(T x)
 
 template<typename T>
 static inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
@@ -2689,7 +3248,7 @@ static inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
     }
 
     return (pp / pq * std::sin(x - T(0.785398163397448309615660845819875721)) + T(5.0) / x * (qp / qq) * std::cos(x - T(0.785398163397448309615660845819875721))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
-} // bessel_y0_forward(T x)
+} // T bessel_y0_forward(T x)
 
 template<typename T>
 static inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
@@ -2803,7 +3362,7 @@ static inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
     }
 
     return (pp / pq * std::sin(x - T(2.356194490192344928846982537459627163)) + T(5.0) / x * (qp / qq) * std::cos(x - T(2.356194490192344928846982537459627163))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
-} // bessel_y1_forward(T x)
+} // T bessel_y1_forward(T x)
 
 template<typename T>
 static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, int64_t n) {
@@ -2842,12 +3401,12 @@ static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, int64_t n) {
     }
 
     return r;
-} // chebyshev_polynomial_t_forward(T x, int64_t n)
+} // T chebyshev_polynomial_t_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
 static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, T n) {
     return chebyshev_polynomial_t_forward(x, static_cast<int64_t>(n));
-} // chebyshev_polynomial_t_forward(T x, T n)
+} // T chebyshev_polynomial_t_forward(T x, T n)
 
 template<typename T>
 static inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, int64_t n) {
@@ -2890,12 +3449,12 @@ static inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, int64_t n) {
     }
 
     return r;
-} // chebyshev_polynomial_u_forward(T x, int64_t n)
+} // T chebyshev_polynomial_u_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
 static inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, T n) {
     return chebyshev_polynomial_u_forward(x, static_cast<int64_t>(n));
-} // chebyshev_polynomial_u_forward(T x, T n)
+} // T chebyshev_polynomial_u_forward(T x, T n)
 
 template<typename T>
 static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
@@ -2922,12 +3481,12 @@ static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
     }
 
     return r;
-} // hermite_polynomial_h_forward(T x, int64_t n)
+} // T hermite_polynomial_h_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
 static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
     return hermite_polynomial_h_forward(x, static_cast<int64_t>(n));
-} // hermite_polynomial_h_forward(T x, T n)
+} // T hermite_polynomial_h_forward(T x, T n)
 
 template<typename T>
 static inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, int64_t n) {
@@ -2954,12 +3513,12 @@ static inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, int64_t n) {
     }
 
     return r;
-} // hermite_polynomial_he_forward(T x, int64_t n)
+} // T hermite_polynomial_he_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
 static inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, T n) {
     return hermite_polynomial_he_forward(x, static_cast<int64_t>(n));
-} // hermite_polynomial_he_forward(T x, T n)
+} // T hermite_polynomial_he_forward(T x, T n)
 
 template<typename T>
 static inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
@@ -2990,12 +3549,12 @@ static inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
     }
 
     return r;
-} // laguerre_polynomial_l_forward(T x, int64_t n)
+} // T laguerre_polynomial_l_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
 static inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, T n) {
     return laguerre_polynomial_l_forward(x, static_cast<int64_t>(n));
-} // laguerre_polynomial_l_forward(T x, T n)
+} // T laguerre_polynomial_l_forward(T x, T n)
 
 template<typename T>
 static inline C10_HOST_DEVICE T modified_bessel_i0_forward(T x) {
@@ -3084,7 +3643,7 @@ static inline C10_HOST_DEVICE T modified_bessel_i0_forward(T x) {
     }
 
     return std::exp(std::abs(x)) * (T(0.5) * (b - p)) / std::sqrt(std::abs(x));
-} // modified_bessel_i0_forward(T x)
+} // T modified_bessel_i0_forward(T x)
 
 template<typename T>
 static inline C10_HOST_DEVICE T modified_bessel_i1_forward(T x) {
@@ -3180,7 +3739,7 @@ static inline C10_HOST_DEVICE T modified_bessel_i1_forward(T x) {
     }
 
     return std::exp(std::abs(x)) * (T(0.5) * (b - p)) / std::sqrt(std::abs(x));
-} // modified_bessel_i1_forward(T x)
+} // T modified_bessel_i1_forward(T x)
 
 template<typename T>
 static inline C10_HOST_DEVICE T modified_bessel_k0_forward(T x) {
@@ -3257,7 +3816,7 @@ static inline C10_HOST_DEVICE T modified_bessel_k0_forward(T x) {
     }
 
     return std::exp(-x) * (T(0.5) * (b - p)) / std::sqrt(x);
-} // modified_bessel_k0_forward(T x)
+} // T modified_bessel_k0_forward(T x)
 
 template<typename T>
 static inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
@@ -3335,6 +3894,82 @@ static inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
     }
 
     return std::exp(-x) * (T(0.5) * (b - p)) / std::sqrt(x);
-} // modified_bessel_k1_forward(T x)
+} // T modified_bessel_k1_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T spherical_bessel_j0_forward(T x) {
+    if (std::abs(x) < 0.5) {
+        return T(1.0) + x * x * (T(-1.0) / T(6.0) + x * x * (T(1.0) / T(120.0) + x * x * (T(-1.0) / T(5040.0) + x * x * (T(1.0) / T(362880.0) + x * x * (T(-1.0) / T(39916800.0) + x * x * (T(1.0) / T(6227020800.0)))))));
+    }
+
+    return std::sin(x) / x;
+} // T spherical_bessel_j0_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T spherical_bessel_j1_forward(T x) {
+    if (x == T(0.0)) {
+        return T(0.0);
+    }
+
+    if (std::abs(x) < T(3.1) * std::numeric_limits<T>::min()) {
+        return std::numeric_limits<T>::quiet_NaN();
+    }
+
+    if (std::abs(x) < T(0.25)) {
+        return x / T(3.0) * (T(1.0) + x * x * (T(-1.0) / T(10.0) + x * x * (T(1.0) / T(280.0) + x * x * (T(-1.0) / T(15120.0) + x * x * (T(1.0) / T(1330560.0) + x * x * (T(-1.0) / T(172972800.0)))))));
+    }
+
+    return (std::sin(x) / x - std::cos(x)) / x;
+} // T spherical_bessel_j1_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T spherical_bessel_y0_forward(T x) {
+    if (x <= 0.0) {
+        return std::numeric_limits<T>::quiet_NaN();
+    }
+
+    if (T(1.0) / std::numeric_limits<T>::max() > T(0.0) && x < T(1.0) / std::numeric_limits<T>::max()) {
+        return std::numeric_limits<T>::quiet_NaN();
+    }
+
+    return -std::cos(x) / x;
+} // T spherical_bessel_y0_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T spherical_bessel_y1_forward(T x) {
+    return x;
+} // T spherical_bessel_y1_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T spherical_modified_bessel_i0_forward(T x) {
+    if (x == T(0.0)) {
+        return T(1.0);
+    }
+
+    if (std::abs(x) < T(0.2)) {
+        return std::exp(-std::abs(x)) * (T(1.0) + std::abs(x) * std::abs(x) * (T(1.0) / T(6.0) + std::abs(x) * std::abs(x) * (T(1.0) / T(120.0) + std::abs(x) * std::abs(x) * (T(1.0) / T(5040.0) + std::abs(x) * std::abs(x) * (T(1.0) / T(362880.0) + std::abs(x) * std::abs(x) * (T(1.0) / T(39916800.0)))))));
+    }
+
+    if (std::abs(x) < T(-0.5) * T(-3.6043653389117154e+01)) {
+        return (T(1.0) - std::exp(T(-2.0) * std::abs(x))) / (T(2.0) * std::abs(x));
+    }
+
+    return T(1.0) / (T(2.0) * std::abs(x));
+} // T spherical_modified_bessel_i0_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T spherical_modified_bessel_i1_forward(T x) {
+    return x;
+}
+
+template<typename T>
+static inline C10_HOST_DEVICE T spherical_modified_bessel_k0_forward(T x) {
+    return x;
+}
+
+template<typename T>
+static inline C10_HOST_DEVICE T spherical_modified_bessel_k1_forward(T x) {
+    return x;
+}
 
 C10_CLANG_DIAGNOSTIC_POP()
