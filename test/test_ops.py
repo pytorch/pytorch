@@ -57,6 +57,7 @@ from torch.testing._internal import composite_compliance
 
 from torch.utils._pytree import tree_flatten
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
+from torch.utils._mode_utils import no_dispatch
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -1354,16 +1355,24 @@ class TestTagsMode(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        rs = func(*args, **kwargs)
-
-        # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm.out
-        # which mutate not necessarily the first input.
-        if isinstance(rs, torch.Tensor) and isinstance(args[0], torch.Tensor):
-            if rs is args[0]:
-                unequal_size = rs.size() != args[0].size()
-                unequal_strides = rs.stride() != args[0].stride()
-                if unequal_size or unequal_strides:
-                    assert torch.Tags.inplace_view in func.tags
+        if isinstance(args[0], torch.Tensor):
+            old_size = args[0].size()
+            old_stride = args[0].stride()
+            with no_dispatch():
+                rs = func(*args, **kwargs)
+            # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm.out
+            # which mutate not necessarily the first input.
+            if isinstance(rs, torch.Tensor) and rs is args[0]:
+                unequal_size = rs.size() != old_size
+                unequal_strides = rs.stride() != old_stride
+                # resize_ should probably have inplace_view tag. Not adding the tag since it
+                # breaks some codegen logic
+                if (unequal_size or unequal_strides) and (func is not torch.ops.aten.resize_.default):
+                    # TODO: use self.assertIn when we have separate tests for each tag
+                    assert torch.Tag.inplace_view in func.tags
+        else:
+            with no_dispatch():
+                rs = func(*args, **kwargs)
         return rs
 
 # Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
