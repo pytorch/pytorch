@@ -798,7 +798,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(custom_device_)) {
       return device_custom().is_meta();
     }
-    constexpr auto meta_ks = DispatchKeySet(DispatchKey::Meta);
+    constexpr auto meta_ks = DispatchKeySet(BackendComponent::MetaBit);
     return key_set_.has_all(meta_ks);
   }
 
