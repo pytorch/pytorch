@@ -185,7 +185,7 @@ Tensor& normal_mps_out(const Tensor& mean, const Tensor& std, c10::optional<Gene
 
   @autoreleasepool {
     MPSShape* input_shape = getMPSShape(output);
-    string key = "normal_mps_out:" + getMPSShapeString(input_shape) + ":" + getMPSTypeString(output.scalar_type());
+    string key = "normal_mps_out:" + getMPSShapeString(input_shape) + ":" + getMPSTypeString(output.scalar_type()) + ":" + to_string(seed_);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
@@ -210,6 +210,7 @@ Tensor& normal_mps_out(const Tensor& mean, const Tensor& std, c10::optional<Gene
           // MPSGenerator
           MPSGraphTensor* randomTensor = [mpsGraph randomTensorWithShape:input_shape
                                                               descriptor:desc
+                                                                    seed:seed_
                                                                     name:nil];
           MPSGraphTensor* scaleTensor = [mpsGraph multiplicationWithPrimaryTensor:randomTensor
                                                                   secondaryTensor:stdTensor
