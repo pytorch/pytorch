@@ -47,6 +47,12 @@ class CheckpointWrapperTest(TestCase):
             self.assertEqual(p1, p2)
 
     def test_checkpoint_wrapper_parity(self):
+        """
+        Tests that using checkpoint_wrapper or the functional
+        torch.utils.checkpoint (with the same reentrant config)
+        results in the same maximum memory usage, i.e. they are
+        equivalent memory usage wise.
+        """
         class Model(nn.Module):
             def __init__(self, n: int, use_cp: bool, use_wrapper: bool = False, use_reentrant=True):
                 super().__init__()
