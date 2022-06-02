@@ -843,6 +843,8 @@ libtorch_python_core_sources = [
     "torch/csrc/python_dimname.cpp",
     "torch/csrc/Size.cpp",
     "torch/csrc/Storage.cpp",
+    "torch/csrc/StorageMethods.cpp",
+    "torch/csrc/StorageSharing.cpp",
     "torch/csrc/Stream.cpp",
     "torch/csrc/TypeInfo.cpp",
     "torch/csrc/api/src/python/init.cpp",
