@@ -30,9 +30,9 @@
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/python_numbers.h>
 
 #include <torch/library.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
