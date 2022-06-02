@@ -110,17 +110,6 @@ def checkpoint_wrapper(
         (nn.Module):
             Wrapped module
     """
-    # saved tensor hooks based-checkpoint wrapper is not yet supported.
-    if checkpoint_impl == CheckpointImpl.NO_REENTRANT:
-        raise ValueError(
-            "No support for non-reentrant based checkpoint implementation."
-        )
-
-    if offload_to_cpu and checkpoint_impl != CheckpointImpl.REENTRANT:
-        raise ValueError(
-            "No support for CPU offload activations and non-reentrant based "
-            "checkpoint implementation."
-        )
 
     return CheckpointWrapper(module, checkpoint_impl, offload_to_cpu)
 
