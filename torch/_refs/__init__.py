@@ -622,8 +622,13 @@ sqrt = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
+
+def _square(a: TensorLikeType) -> TensorLikeType:
+    return mul(a, a)
+
+
 square = _make_elementwise_unary_reference(
-    prims.square,
+    _square,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
     aten_op=None,  # CompositeImplicitAutograd,
 )
