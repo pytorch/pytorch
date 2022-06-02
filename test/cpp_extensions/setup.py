@@ -66,7 +66,7 @@ if (not IS_WINDOWS) and torch.cuda.is_available() and CUDA_HOME is not None:
     )
     ext_modules.append(cusolver_extension)
 
-if (not IS_WINDOWS) and torch.cuda.is_available() and CUDA_HOME is not None:
+if USE_NINJA and (not IS_WINDOWS) and torch.cuda.is_available() and CUDA_HOME is not None:
     extension = CUDAExtension(
         name='torch_test_cpp_extension.cuda_dlink',
         sources=[

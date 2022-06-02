@@ -124,7 +124,8 @@ class TestCppExtensionAOT(common.TestCase):
     @common.skipIfRocm
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    def test_cuda_rdc_dlink_libs(self):
+    @unittest.skipIf(os.getenv('USE_NINJA', '0') == '0', "cuda extension with dlink requires ninja to build")
+    def test_cuda_dlink_libs(self):
         from torch_test_cpp_extension import cuda_dlink
         a = torch.randn(8, dtype=torch.float, device='cuda')
         b = torch.randn(8, dtype=torch.float, device='cuda')

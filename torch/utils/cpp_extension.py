@@ -455,6 +455,9 @@ class BuildExtension(build_ext, object):
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
 
+            if 'nvcc_dlink' in extension.extra_compile_args:
+                assert self.use_ninja, f"With dlink=True, ninja is required to build cuda extension {extension.name}."
+
         # Register .cu, .cuh and .hip as valid source extensions.
         self.compiler.src_extensions += ['.cu', '.cuh', '.hip']
         # Save the original _compile method for later.
