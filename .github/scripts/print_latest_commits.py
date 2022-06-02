@@ -7,8 +7,8 @@ import os
 
 rs = Client(api_key=os.getenv("ROCKSET_API_KEY", None))
 qlambda = rs.QueryLambda.retrieve(
-    'commit_jobs_query',
-    version='c2a4dbce081d0144',
+    'commit_jobs_batch_query',
+    version='15aba20837ae9d75',
     workspace='commons')
 
 def parse_args() -> Any:
@@ -26,21 +26,23 @@ def print_latest_commits(minutes: int = 30) -> None:
             "git",
             "rev-list",
             f"--max-age={timestamp_since}",
-            "--remotes=*origin/master",
+            "--remotes=*master",
         ],
         encoding="ascii",
     ).splitlines()
 
+    params = ParamDict()
+    params['shas'] = ",".join(commits)
+    results = qlambda.execute(parameters=params)
+
     for commit in commits:
         print(commit)
-        print_commit_status(commit)
+        print_commit_status_batch(commit, results)
 
-def print_commit_status(sha: str) -> None:
-    params = ParamDict()
-    params['sha'] = sha
-    results = qlambda.execute(parameters=params)
+def print_commit_status_batch(commit, results) -> None:
     for check in results['results']:
-        print(f"\t{check['conclusion']:>10}: {check['name']}")
+        if check['sha'] == commit:
+            print(f"\t{check['conclusion']:>10}: {check['name']}")
 
 def main() -> None:
     args = parse_args()
