@@ -2364,6 +2364,24 @@ def sample_inputs_jiterator(op, device, dtype, requires_grad, **kwargs):
 
         yield SampleInput(lhs, args=tuple(args), kwargs=sample_kwargs, broadcasts_input=broadcasts_input)
 
+def sample_inputs_broadcast_shapes(op, device, dtype, requires_grad, **kwargs):
+    shapes = (
+        ((), ()),
+        ((S,), ()),
+        ((S, 1), (S,)),
+        ((S, 1), S),
+        ((M, S), ()),
+        ((S, M, S), (M, S)),
+        ((S, M, S), (S, M, S)),
+        ((M, 1, S), (M, S)),
+        ((M, 1, S), (1, M, S)),
+        ((0, 1, 3), (0, 10, 3))
+    )
+
+    for shape in shapes:
+        inp, *arg0 = shape
+        yield SampleInput(inp, args=arg0)
+
 # The base reference input generation for elementwise binary operations
 def _reference_inputs_elementwise_binary(op, device, dtype, requires_grad, exclude_zero, **kwargs):
     yield from op.sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
@@ -10648,6 +10666,27 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_broadcast_to),
+    OpInfo('broadcast_shapes',
+           op=torch.broadcast_shapes,
+           ref=np.broadcast_shapes if np.lib.NumpyVersion(np.__version__) >= '1.20.0' else None,
+           dtypes=_dispatch_dtypes((torch.float32,)),
+           supports_out=False,
+           supports_gradgrad=False,
+           assert_autodiffed=False,
+           supports_autograd=False,
+           supports_scripting=False,
+           sample_inputs_func=sample_inputs_broadcast_shapes,
+           skips=(
+               # https://github.com/pytorch/pytorch/issues/64997
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # skip dtype tests since broadcast_shape is not device dependent.
+               # having dtypes limited to torch.float32 would cause test_dtypes to report unexpected success
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
+               # skip these tests since we have non tensor input
+               DecorateInfo(unittest.skip('Skipped!'), "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+           )),
     OpInfo('broadcast_tensors',
            ref=np.broadcast_arrays,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -19678,6 +19717,10 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_conj_view'),
         ),
+    ),
+    PythonRefInfo(
+        "_refs.broadcast_shapes",
+        torch_opinfo_name="broadcast_shapes",
     ),
     PythonRefInfo(
         "_refs.broadcast_tensors",
