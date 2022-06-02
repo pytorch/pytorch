@@ -46,7 +46,7 @@
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
 # related to Github Actions
-/.github/ @seemethere @janeyx99 @atalman
+/.github/ @pytorch/pytorch-dev-infra
 
 # Custom Test Infrastructure
 /test/run_test.py @pytorch/pytorch-dev-infra
