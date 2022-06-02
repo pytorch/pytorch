@@ -1,7 +1,6 @@
 import torch
 from torch._prims import utils
 from torch._prims.utils import check
-import torch._refs as refs
 
 from typing import List
 
@@ -153,6 +152,7 @@ def meta_index_Tensor(self, indices):
             result.append(index)
     indices = result
     # expand_outplace
+    import torch._refs as refs  # avoid import cycle in mypy
     indices = list(refs._maybe_broadcast(*indices))
     # add missing null tensors
     while len(indices) < self.ndim:
@@ -226,6 +226,11 @@ def meta_linalg_qr_helper(input, mode):
         reduced_mode = True
     else:
         raise RuntimeError(f"qr received unrecognized mode {mode}")
+    check(input.ndim >= 2, lambda: f"expected matrix or batch of matrices, but got {input.ndim}-D tensor")
+    check(
+        utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
+        lambda: f"expected float or complex tensor, but got {input.dtype}"
+    )
     m = input.size(-2)
     n = input.size(-1)
     mn = min(m, n)
