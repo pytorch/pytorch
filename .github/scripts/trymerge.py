@@ -383,7 +383,6 @@ def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Merge PR into default branch")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--on-green", action="store_true")
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--comment-id", type=int)
@@ -945,16 +944,11 @@ def main() -> None:
         gh_post_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
 
-    if args.on_green:
-        try:
-            merge_on_green(args.pr_num, repo, dry_run=args.dry_run)
-        except Exception as e:
-            handle_exception(e)
-    else:
-        try:
-            pr.merge_into(repo, dry_run=args.dry_run, force=args.force, comment_id=args.comment_id)
-        except Exception as e:
-            handle_exception(e)
+    try:
+        merge_on_green(args.pr_num, repo, dry_run=args.dry_run)
+    except Exception as e:
+        handle_exception(e)
+
 
 
 if __name__ == "__main__":
