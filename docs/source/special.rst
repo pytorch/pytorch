@@ -6,8 +6,8 @@ torch.special
 
 A special function is a mathematical function that frequently arises in the
 solutions of classical problems in fields like geometry, mathematical analysis,
-or probability theory. PyTorch aims to provide practical closed-form solutions
-for a broad and deep set of special functions.
+or probability theory. PyTorch provides practical closed-form solutions for a
+broad and deep set of special functions.
 
 .. automodule:: torch.special
 .. currentmodule:: torch.special
@@ -68,8 +68,8 @@ Trigonometric Functions
 Logistic Functions
 ^^^^^^^^^^^^^^^^^^
 
-.. autofunction:: log_softmax
 .. autofunction:: softmax
+.. autofunction:: log_softmax
 
 Number Theoretic Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -79,7 +79,18 @@ Number Theoretic Functions
 Information Theoretic Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+.. note::
+    Loss functions (e.g., Huber and Kullback-Leibler divergence functions) are
+    found in the ``torch.nn.functional`` module.
+
 .. autofunction:: entr
+
+Distance Functions
+^^^^^^^^^^^^^^^^^^
+
+.. note::
+    Distance functions (e.g., cowise similarity and pairwise functions) are
+    presently found in the ``torch.nn.functional`` module.
 
 Error Functions and Exponential Integrals
 -----------------------------------------
@@ -98,21 +109,6 @@ Gamma and Related Functions
 Gamma Functions
 ^^^^^^^^^^^^^^^
 
-The `complete` gamma function is an extension of the factorial function to real
-and complex numbers:
-
-.. math::
-    \Gamma(n) = (n - 1)!
-
-.. autofunction:: gamma
-
-The complete gamma function :math:`\Gamma(x)` can be generalized to the `upper`
-incomplete gamma function :math:`\Gamma(a, x)` and `lower` incomplete gamma
-function :math:`\gamma(a,x)`.
-
-.. autofunction:: upper_incomplete_gamma
-.. autofunction:: lower_incomplete_gamma
-
 .. autofunction:: gammaln
 .. autofunction:: multigammaln
 
@@ -123,22 +119,6 @@ Polygamma Functions
 .. autofunction:: polygamma
 .. autofunction:: psi
 
-Combinatorial Functions
-^^^^^^^^^^^^^^^^^^^^^^^
-
-.. autofunction:: factorial
-
-.. autofunction:: falling_factorial
-.. autofunction:: rising_factorial
-
-.. autofunction:: superfactorial_sf
-.. autofunction:: hyperfactorial_h
-
-.. autofunction:: binomial_coefficient
-
-Barnes G-Functions
-^^^^^^^^^^^^^^^^^^
-
 Orthogonal Polynomials
 ----------------------
 
@@ -147,15 +127,32 @@ Chebyshev Polynomials
 
 .. autofunction:: chebyshev_polynomial_t
 .. autofunction:: chebyshev_polynomial_u
-
-Shifted Chebyshev Polynomials
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. autofunction:: chebyshev_polynomial_v
+.. autofunction:: chebyshev_polynomial_w
 
 Hermite Polynomials
 ^^^^^^^^^^^^^^^^^^^
 
 .. autofunction:: hermite_polynomial_h
 .. autofunction:: hermite_polynomial_he
+
+Laguerre Polynomials
+^^^^^^^^^^^^^^^^^^^^
+
+.. autofunction:: laguerre_polynomial_l
+
+Legendre Polynomials
+^^^^^^^^^^^^^^^^^^^^
+
+.. autofunction:: legendre_polynomial_p
+
+Shifted Chebyshev Polynomials
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autofunction:: shifted_chebyshev_polynomial_t
+.. autofunction:: shifted_chebyshev_polynomial_u
+.. autofunction:: shifted_chebyshev_polynomial_v
+.. autofunction:: shifted_chebyshev_polynomial_w
 
 Bessel and Related Functions
 ----------------------------
@@ -188,6 +185,9 @@ method to Bessel’s equation:
 
 where :math:`\Gamma(x)` is the Euler gamma function (``torch.special.gamma``).
 
+.. autofunction:: bessel_j0
+.. autofunction:: bessel_j1
+
 The Bessel functions of the second kind, denoted :math:`Y_{\alpha}(x)`, are
 solutions to Bessel differential equation that have a singularity at the origin
 and are multivalued. For non-integer :math:`\alpha`, :math:`Y_{\alpha}(x)` is
@@ -211,6 +211,9 @@ the series:
 where :math:`\psi(x)` is the digamma function, the logarithmic derivative of the
 gamma function (``torch.special.digamma``).
 
+.. autofunction:: bessel_y0
+.. autofunction:: bessel_y1
+
 Modified Bessel Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -224,14 +227,17 @@ are defined as:
 .. math::
     I_{\alpha}(x)=i^{-\alpha}J_{\alpha}(ix)=\sum _{m=0}^{\infty }{\frac {1}{m!\,\Gamma (m+\alpha +1)}}\left({\frac {x}{2}}\right)^{2m+\alpha}
 
-.. autofunction:: i0
-.. autofunction:: i1
+.. autofunction:: modified_bessel_i0
+.. autofunction:: modified_bessel_i1
 
-The modified Bessel functions of the second kind, denoted :math:`I_{\alpha}(x)`,
+The modified Bessel functions of the second kind, denoted :math:`K_{\alpha}(x)`,
 are defined as:
 
 .. math::
     K_{\alpha}(x)={\frac{\pi}{2}}{\frac{I_{-\alpha}(x)-I_{\alpha}(x)}{\sin\alpha\pi}}
+
+.. autofunction:: modified_bessel_k0
+.. autofunction:: modified_bessel_k1
 
 Scaled Modified Bessel Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -265,6 +271,8 @@ integral:
 .. math::
     \operatorname{Ai}(x)={\dfrac{1}{\pi}}\int_{0}^{\infty}\cos\left({\dfrac{t^{3}}{3}}+xt\right)\,dt\equiv{\dfrac{1}{\pi}}\lim_{b\to\infty}\int_{0}^{b}\cos\left({\dfrac{t^{3}}{3}}+xt\right)\,dt
 
+.. autofunction:: airy_ai
+
 :math:`y = \operatorname{Ai}(x)` satisfies the Airy equation:
 
 .. math::
@@ -281,7 +289,6 @@ same amplitude of oscillation as :math:`\operatorname{Ai}(x)` as
 .. math::
     \operatorname{Bi}(x)={\frac{1}{\pi}}\int_{0}^{\infty}\left[\exp \left(-{\tfrac{t^{3}}{3}}+xt\right)+\sin\left({\tfrac{t^{3}}{3}}+xt\right)\,\right]dt.
 
-.. autofunction:: airy_ai
 .. autofunction:: airy_bi
 
 Zeta and Related Functions
@@ -298,6 +305,6 @@ Probability Theoretic Functions
 Cumulative Distribution Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. autofunction:: log_ndtr
 .. autofunction:: ndtr
 .. autofunction:: ndtri
+.. autofunction:: log_ndtr
