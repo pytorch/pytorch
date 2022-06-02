@@ -19831,11 +19831,6 @@ python_ref_db = [
         "_refs.roll",
         torch_opinfo_name="roll",
         validate_view_consistency=False,
-        skips=(
-            # TODO: decide on the error message for the reference implementation
-            # See https://github.com/pytorch/pytorch/issues/78252
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     PythonRefInfo(
         "_refs.rot90",
