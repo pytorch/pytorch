@@ -2176,9 +2176,7 @@ copy_to = _make_prim(
 )
 
 
-def _resize_meta(
-    a: TensorLikeType, shape: Union[torch.Size, List[int], Tuple[int, ...]]
-):
+def _resize_meta(a: TensorLikeType, shape: ShapeType):
     return TensorMeta(a, shape=shape, strides=utils.make_contiguous_strides_for(shape))
 
 
