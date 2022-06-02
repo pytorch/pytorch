@@ -13368,8 +13368,9 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_fwgrad_bwgrad", dtypes=(torch.float64,)),
         ),
     ),
-    OpInfo('nn.functional.relu',
+    UnaryUfuncInfo('nn.functional.relu',
            aten_name="relu",
+           ref=lambda x: np.where(a <= 0, 0, a),
            supports_autograd=True,
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
@@ -19644,7 +19645,7 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
         ),
     ),
-    PythonRefInfo(
+    ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu",
         torch_opinfo_name="nn.functional.relu",
         decorators=(

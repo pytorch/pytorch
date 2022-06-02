@@ -141,7 +141,7 @@ def relu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     if inplace:
         raise NotImplementedError
 
-    return torch.where(torch.gt(a, 0), a, 0)
+    return torch.where(torch.le(a, 0), 0, a)
 
 
 @register_decomposition(torch.ops.aten.leaky_relu)
