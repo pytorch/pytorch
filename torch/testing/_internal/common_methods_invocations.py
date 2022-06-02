@@ -10681,7 +10681,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # skip dtype tests since broadcast_shape is not device dependent.
                # having dtypes limited to torch.float32 would cause test_dtypes to report unexpected success
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes_broadcast_shapes'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
                # skip these tests since we have non tensor input
                DecorateInfo(unittest.skip('Skipped!'), "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
