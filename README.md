@@ -156,7 +156,7 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 #### Prerequisites
 If you are installing from source, you will need:
 - Python 3.7 or later (for Linux, Python 3.7.6+ or 3.8.1+ is needed)
-- A C++14 compiler, such as cmake
+- A C++14 compatible compiler, such as clang
 
 We highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
@@ -268,9 +268,10 @@ come with Visual Studio Code by default.
 
 If you want to build legacy python code, please refer to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
 
-**Build with CPU**
+**CPU-only builds**
 
-It's fairly easy to build with CPU.
+In this mode PyTorch computations will run on your CPU, not your GPU
+
 ```cmd
 conda activate
 python setup.py install
@@ -278,7 +279,9 @@ python setup.py install
 
 Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/master/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
 
-**Build with CUDA**
+**CUDA based build**
+
+In this mode PyTorch computations will leverage your GPU via CUDA for faster number crunching
 
 [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build Pytorch with CUDA.
 NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto already installed CUDA run CUDA installation once again and check the corresponding checkbox.
