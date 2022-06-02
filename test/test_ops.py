@@ -48,6 +48,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     skipMeta,
 )
+from torch.utils._pytree import tree_map
 import torch._prims as prims
 from torch._prims.context import TorchRefsMode
 
@@ -1106,6 +1107,16 @@ class TestCommon(TestCase):
                 *transformed_sample.args,
                 **transformed_sample.kwargs,
             )
+            # Since range of chalf is much less compared to cfloat,
+            # we get `inf`s easily (eg. with `pow`, `exp`),
+            # so we cast `cfloat` back to `chalf`.
+            expected = tree_map(lambda x: x.to(torch.complex32) if isinstance(
+                x, torch.Tensor) and x.dtype is torch.complex64 else x, expected)
+
+            # `exact_dtype` is False because for ops like real, imag
+            # we get different dtypes for `actual` and `expected`
+            # `chalf` input -> `half` output
+            # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
 
 
