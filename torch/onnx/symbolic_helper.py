@@ -271,8 +271,8 @@ def quantized_args(
 
     Args:
         arg_q_descriptors: A sequence of bool, where each element represents if the
-          argument is QTensor for quantized version of this operator. If defaults
-          to false for unspecified (variable length) arguments.
+          argument is QTensor for quantized version of this operator. It defaults
+          to False for unspecified (variable length) arguments.
         scale: Quantized output scale. If None, derive from
           the first quantized input scale.
         zero_point: Quantized output zero point. If None,
