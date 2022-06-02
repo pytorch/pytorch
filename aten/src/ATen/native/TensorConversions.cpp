@@ -8,6 +8,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
 
+
 namespace at {
 namespace native {
 
@@ -147,6 +148,7 @@ Tensor _to_copy(
   auto r = self.is_quantized() ? at::empty_like(self, memory_format)
                                : at::empty(self.sizes(),
                                  options.memory_format(memory_format).pinned_memory(pin_out), c10::nullopt);
+
   r.copy_(self, non_blocking);
   return r;
 }

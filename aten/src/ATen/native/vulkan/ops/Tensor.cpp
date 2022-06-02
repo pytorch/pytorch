@@ -805,20 +805,36 @@ void vTensor::View::CMD::copy_buffer_to_image(
       3u * plane,
     },
   };
-
-  view_.context_->dispatch(
+  // image().descriptor.format == VK_FORMAT_R8G8B8A8_UINT
+  if (image.format == VK_FORMAT_R8G8B8A8_UINT) {
+    view_.context_->dispatch(
       command_buffer_,
       {
         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
-      VK_KERNEL(nchw_to_image),
+      VK_KERNEL(nchw_to_image_alt),
       extents,
       adaptive_work_group_size(extents),
       image,
       buffer,
       view_.context_->resource().pool.uniform(block).object);
+  } else {
+    view_.context_->dispatch(
+        command_buffer_,
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        VK_KERNEL(nchw_to_image),
+        extents,
+        adaptive_work_group_size(extents),
+        image,
+        buffer,
+        view_.context_->resource().pool.uniform(block).object);
+  }
 }
 
 void vTensor::View::CMD::copy_image_to_buffer(
@@ -866,7 +882,22 @@ void vTensor::View::CMD::copy_image_to_buffer(
     },
   };
 
-  view_.context_->dispatch(
+  if (image.format == VK_FORMAT_R8G8B8A8_UINT) {
+    view_.context_->dispatch(
+      command_buffer_,
+      {
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      },
+      VK_KERNEL(image_to_nchw_alt),
+      view_.extents(),
+      adaptive_work_group_size(view_.extents()),
+      image,
+      buffer,
+      view_.context_->resource().pool.uniform(block).object);
+  } else {
+    view_.context_->dispatch(
       command_buffer_,
       {
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -879,6 +910,7 @@ void vTensor::View::CMD::copy_image_to_buffer(
       image,
       buffer,
       view_.context_->resource().pool.uniform(block).object);
+  }
 }
 
 void vTensor::View::CMD::submit(const api::Resource::Fence fence) {

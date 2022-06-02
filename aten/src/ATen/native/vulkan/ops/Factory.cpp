@@ -26,6 +26,27 @@ Tensor empty_memory_format(
     });
 }
 
+Tensor _empty_affine_quantized(
+    const IntArrayRef sizes,
+    const c10::optional<ScalarType> dtype,
+    const c10::optional<c10::Layout> layout,
+    const c10::optional<Device> device,
+    const c10::optional<bool> pin_memory,
+    const double scale,
+    const int64_t zero_point,
+    const optional<MemoryFormat> memory_format) {
+  return convert(vTensor{
+      api::context(),
+      sizes,
+      TensorOptions()
+          .dtype(dtype)
+          .layout(layout)
+          .device(device)
+          .pinned_memory(pin_memory)
+          .memory_format(memory_format),
+    });
+}
+
 Tensor empty_strided(
     const IntArrayRef sizes,
     const IntArrayRef /* strides */,
@@ -46,6 +67,7 @@ Tensor empty_strided(
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::empty.memory_format"), at::native::vulkan::ops::empty_memory_format);
+  m.impl(TORCH_SELECTIVE_NAME("aten::_empty_affine_quantized"), at::native::vulkan::ops::_empty_affine_quantized);
   m.impl(TORCH_SELECTIVE_NAME("aten::empty_strided"), TORCH_FN(at::native::vulkan::ops::empty_strided));
 }
 

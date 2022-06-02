@@ -1,6 +1,8 @@
 #include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
+//#include <xplat/caffe2/c10/util/quint8.h>
+//#include "gen/03598924/xplat/caffe2/c10/c10#header-mode-symlink-tree-with-header-map,headers/c10/util/qint8.h"
 
 namespace at {
 namespace native {
@@ -10,10 +12,14 @@ namespace ops {
 Tensor& copy_(Tensor& self, const Tensor& src) {
   api::Context* const context = api::context();
 
+
+
   api::Command::Pool& command_pool = context->command().pool;
   {
     // X -> Vulkan
     if (at::kVulkan == self.device().type()) {
+
+
       vTensor& v_self = convert(self);
 
       // Vulkan -> Vulkan
@@ -21,7 +27,6 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
        api::Command::Buffer& command_buffer = command_pool.stream();
        {
           api::OpProfiler profiler(command_buffer, context->querypool(), "copy_");
-
           command_buffer.copy(
               // - Read-only access is implied on const tensors.  Memory barriers
               //   are automatically inserted if a RAW hazard is detected.
@@ -44,8 +49,11 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
       }
       // CPU -> Vulkan
       else {
+
+
         api::Command::Buffer& command_buffer = command_pool.stream(); // Don't collect the timestamp since the command buffer doesn't record anything
         const Tensor cpu_src = src.device().is_cpu() ? src : src.cpu();
+
         // Requesting write-only host access to the tensor never triggers a sync
         // as the contents will be overwritten regardless.  Having said that,
         // appropriate barriers are inserted automatically if WAR or WAW hazards
@@ -72,10 +80,28 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
 
         Future::Payload v_self_payload = v_self_future.wait();
 
-        memcpy(
+
+
+        if (src.dtype() == c10::kQUInt8) {
+          memcpy(
+            v_self_payload.get(),
+            cpu_src.contiguous().data_ptr<c10::quint8>(),
+            std::min(src.nbytes(), self.nbytes()));
+        } else {
+          memcpy(
             v_self_payload.get(),
             cpu_src.contiguous().data_ptr<float>(),
             std::min(src.nbytes(), self.nbytes()));
+        }
+
+
+
+        if (src.dtype() == c10::kQUInt8) {
+
+          v_self.image(command_buffer, vTensor::Stage::Compute);
+
+        }
+
       }
     }
     // Vulkan -> X
@@ -94,6 +120,7 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
         // the same or another processor.  Same considerations regarding hazard
         // avoidance as above applies.
 
+
         using Future = vTensor::Future<const void, vTensor::Access::Read>;
         const Future v_src_future = v_src.host<const void>(command_buffer);
 
@@ -108,10 +135,23 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
 
         const Future::Payload v_src_payload = v_src_future.wait();
 
-        memcpy(
+
+
+        if (self.dtype() == c10::kQUInt8) {
+          memcpy(
+            self.data_ptr<c10::quint8>(),
+            v_src_payload.get(),
+            std::min(src.nbytes(), self.nbytes()));
+        } else {
+          memcpy(
             self.data_ptr<float>(),
             v_src_payload.get(),
             std::min(src.nbytes(), self.nbytes()));
+        }
+
+        if (src.dtype() == c10::kQUInt8) {
+          v_src.image(command_buffer, vTensor::Stage::Compute);
+        }
       }
       else {
         TORCH_CHECK(false, "Unsupported!");
