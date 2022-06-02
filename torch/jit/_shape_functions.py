@@ -959,6 +959,16 @@ def add_bounded_compute_mapping(operator_schema: str, lower_bound_func: Callable
     fns = (process_func(lower_bound_func), process_func(upper_bound_func))
     bounded_compute_graph_mapping[operator_schema] = fns
 
+def stack(inputs: List[List[int]], dim: int) -> List[int]:
+    assert len(inputs) > 0, "stack requires at least 1 input"
+    input_0 = inputs[0]
+    for i in range(1, len(inputs)):
+        assert inputs[i] == input_0
+    result = _copy(input_0)
+    result.insert(dim, len(inputs))
+    return result
+
+
 add_shape_compute_mapping("aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", unary)
 add_shape_compute_mapping("aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", unary)
 add_shape_compute_mapping("aten::dropout(Tensor input, float p, bool train) -> Tensor", unary)
@@ -998,6 +1008,7 @@ add_shape_compute_mapping("aten::conv3d(Tensor input, Tensor weight, Tensor? bia
 add_shape_compute_mapping("aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", conv_backwards)
 add_shape_compute_mapping("aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", flatten)
 add_shape_compute_mapping("aten::cat(Tensor[] tensors, int dim=0) -> Tensor", cat)
+add_shape_compute_mapping("stack(Tensor[] tensors, int dim=0) -> Tensor", stack)
 add_shape_compute_mapping("aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", permute)
 add_shape_compute_mapping("aten::view(Tensor(a) self, int[] size) -> Tensor(a)", view)
 add_shape_compute_mapping("aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", expand)
