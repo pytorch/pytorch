@@ -55,7 +55,8 @@ from torch._prims.context import TorchRefsMode
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal import composite_compliance
 
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_flatten
+from torch.utils._python_dispatch import enable_torch_dispatch_mode
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -1343,38 +1344,17 @@ class TestMathBits(TestCase):
             torch.is_complex,
         )
 
-# A simple wrapper tensor subclass that runs runs
-# correctness checks to ensure that operators have expected
-# tags based on their input and ouput tensor properties
-class WrapperToTestTags(torch.Tensor):
-    elem: torch.Tensor
-
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
+# A mode that when enabled runs runs correctness checks to ensure
+# that operators have expected tags based on their input and
+# ouput tensor properties
+class TestTagsMode(torch.Tensor):
     @staticmethod
-    def __new__(cls, elem, *args, **kwargs):
-        # The WrapperTensor shouldn't hold any
-        # memory for the class in question, but it should still
-        # advertise the same device as before
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-            cls, elem.size(),
-            strides=elem.stride(), storage_offset=elem.storage_offset(),
-            dtype=elem.dtype, layout=elem.layout,
-            device=elem.device, requires_grad=kwargs.get("requires_grad", False)
-        )
-        # ...the real tensor is held as an element on the tensor.
-        r.elem = elem.detach() if r.requires_grad else elem
-        return r
+    def __new__(cls, elem):
+        raise RuntimeError("this mode mixin cannot actually be instantiated")
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        def unwrap(e):
-            return e.elem if isinstance(e, cls) else e
-
-        def wrap(e):
-            return cls(e) if isinstance(e, torch.Tensor) else e
-
-        rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+        rs = func(*args, **kwargs)
 
         # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm.out
         # which mutate not necessarily the first input.
@@ -1395,8 +1375,8 @@ class TestTags(TestCase):
         for sample in samples:
             # TODO: Test tags for ops that return a list of tensors
             if isinstance(sample.input, torch.Tensor):
-                tensor = WrapperToTestTags(sample.input)
-                res = op(tensor, *sample.args, **sample.kwargs)
+                with enable_torch_dispatch_mode(TestTagsMode):
+                    res = op(sample.input, *sample.args, **sample.kwargs)
 
 
 class TestRefsOpsInfo(TestCase):
