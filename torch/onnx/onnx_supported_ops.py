@@ -38,7 +38,7 @@ class _TorchSchema:
 
     def __hash__(self):
         # TODO(thiagocrepaldi): handle overload_name?
-        return hash((self.name))
+        return hash(self.name)
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, _TorchSchema):
