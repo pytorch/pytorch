@@ -16490,6 +16490,9 @@ class TestNNDeviceType(NNTestCase):
                     if TEST_WITH_ROCM else (torch.float, torch.double, torch.half)))
     @dtypes(torch.float32)
     def test_embedding_max_norm_fwd_AD(self, device, dtype):
+        if torch.device(device).type == 'xla':
+            self.skipTest("forward AD doesn't work on xla")
+
         # can't use gradcheck since in place renorm makes analytical gradients different from produced ones
         weight = torch.randn((4, 4), device=device, dtype=dtype) * 2
         tangent = torch.ones((4, 4), device=device, dtype=dtype)
