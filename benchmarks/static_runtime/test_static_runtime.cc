@@ -152,29 +152,61 @@ TEST(StaticRuntime, Sigmoid) {
 }
 
 TEST(StaticRuntime, Clone) {
+  /*
+  Clone called two times to trigger memory planner for output of first clone.
+  The output of last op(second clone) is not managed by memory planner since it
+  needs to be returned to the client and cannot be reused by planner.
+  */
   const auto clone_script_0 = R"JIT(
     def forward(self, input):
-        a = torch.clone(input)
+        a = torch.clone(input).clone()
         return (a * a)
   )JIT";
 
+  // Case: clone with different set of memory_formats
   const auto clone_script_1 = R"JIT(
     def forward(self, input: Tensor, memory_format: int):
-        a = torch.clone(input, memory_format=memory_format)
+        a = torch.clone(input, memory_format=memory_format).clone()
         return (a * a)
+  )JIT";
+
+  /*
+  Case: input stride set to 0 (due to expand op)
+  calls native clone instead of out variant
+  */
+  const auto clone_script_2 = R"JIT(
+    def forward(self, input: Tensor, other:Tensor):
+        a = input.expand_as(other)
+        return a.clone().clone()
+  )JIT";
+
+  /*
+  Case: testing the case of sliced tensor for
+  testing non-contiguous tensor storage
+  */
+  const auto clone_script_3 = R"JIT(
+    def forward(self, input: Tensor):
+        a = input[:, 0:10:2]
+        return a.clone().clone()
   )JIT";
 
   auto a = at::randn({2, 3});
   auto b = at::randn({3, 2}).as_strided({3, 2}, {1, 3});
-  auto c = at::randn({1, 2, 3, 4});
+  auto b_larger = at::randn({30, 20}).as_strided({30, 20}, {1, 3});
+  auto c = at::randn({1, 20, 13, 8});
   auto d = at::randn({1, 0, 3, 4});
+  auto e = at::randn({2, 1});
+  auto f = at::randn({2, 10});
+  auto g = at::randn({3, 20});
   std::vector<IValue> args_0{b, c10::MemoryFormat::Contiguous};
-  std::vector<IValue> args_1{b, c10::MemoryFormat::Preserve};
+  std::vector<IValue> args_1{b_larger, c10::MemoryFormat::Preserve};
   std::vector<IValue> args_2{c, c10::MemoryFormat::ChannelsLast};
   std::vector<IValue> args_3{d, c10::MemoryFormat::ChannelsLast};
+  std::vector<IValue> args_4{e,a};
+  std::vector<IValue> args_5{e,f};
 
   testStaticRuntime(clone_script_0, {a});
-  testStaticRuntime(clone_script_0, {a}, {b});
+  testStaticRuntime(clone_script_0, {a}, {b_larger});
 
   testStaticRuntime(clone_script_1, args_0);
   testStaticRuntime(clone_script_1, args_1);
@@ -182,6 +214,12 @@ TEST(StaticRuntime, Clone) {
   testStaticRuntime(clone_script_1, args_3);
   testStaticRuntime(clone_script_1, args_0, args_1);
   testStaticRuntime(clone_script_1, args_3, args_2);
+
+  testStaticRuntime(clone_script_2, args_4);
+  testStaticRuntime(clone_script_2, args_4, args_5);
+
+  testStaticRuntime(clone_script_3, {f});
+  testStaticRuntime(clone_script_3, {f}, {g});
 }
 
 TEST(StaticRuntime, Clamp) {
