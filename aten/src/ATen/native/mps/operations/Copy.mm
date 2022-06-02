@@ -367,7 +367,7 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_,
   id<MTLBuffer> destBuffer = __builtin_bit_cast(id<MTLBuffer>, dst_.storage().data());
 
 
-  if (!src.is_contiguous()) {
+  if (src_.is_view()) {
     src = src_.to(dst_.dtype()).expand_as(dst_).contiguous();
   } else {
     src = src_;
