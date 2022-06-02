@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <type_traits>
-#include <c10/core/DynamicCast.h>
 #include <c10/util/Exception.h>
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
