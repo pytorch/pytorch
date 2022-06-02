@@ -16,4 +16,6 @@ runs:
         DOCKER_IMAGE: ${{ inputs.docker-image }}
       run: |
         retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
-        retry docker pull "${DOCKER_IMAGE}"
+        if docker inspect --type=image "${DOCKER_IMAGE}"; then
+          retry docker pull "${DOCKER_IMAGE}"
+        fi
