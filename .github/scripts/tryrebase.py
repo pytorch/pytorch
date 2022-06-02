@@ -18,9 +18,9 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def rebase_onto(pr: GitHubPR, repo: GitRepo, branch: str, dry_run: bool = False) -> None:
+def rebase_onto(pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = False) -> None:
     branch = f"pull/{pr.pr_num}/head"
-    onto_branch = f"refs/remotes/origin/{branch}"
+    onto_branch = f"refs/remotes/origin/{onto_branch}"
     remote_url = f"https://github.com/{pr.info['headRepository']['nameWithOwner']}.git"
     refspec = f"{branch}:{pr.head_ref()}"
 
@@ -40,11 +40,11 @@ def rebase_onto(pr: GitHubPR, repo: GitRepo, branch: str, dry_run: bool = False)
                         "git pull --rebase`)", dry_run=dry_run)
 
 
-def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, branch: str, dry_run: bool = False) -> None:
+def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = False) -> None:
     if subprocess.run([sys.executable, "-m", "ghstack", "--help"], capture_output=True).returncode != 0:
         subprocess.run([sys.executable, "-m", "pip", "install", "ghstack"])
     orig_ref = f"{re.sub(r'/head$', '/orig', pr.head_ref())}"
-    onto_branch = f"refs/remotes/origin/{branch}"
+    onto_branch = f"refs/remotes/origin/{onto_branch}"
 
     repo.fetch(orig_ref, orig_ref)
     repo._run_git("rebase", onto_branch, orig_ref)
@@ -104,7 +104,7 @@ def main() -> None:
     org, project = repo.gh_owner_and_name()
 
     pr = GitHubPR(org, project, args.pr_num)
-    branch = args.branch if args.branch else pr.default_branch()
+    onto_branch = args.branch if args.branch else pr.default_branch()
 
     if pr.is_closed():
         gh_post_comment(org, project, args.pr_num, f"PR #{args.pr_num} is closed, won't rebase", dry_run=args.dry_run)
@@ -112,9 +112,9 @@ def main() -> None:
 
     try:
         if pr.is_ghstack_pr():
-            rebase_ghstack_onto(pr, repo, branch, dry_run=args.dry_run)
+            rebase_ghstack_onto(pr, repo, onto_branch, dry_run=args.dry_run)
             return
-        rebase_onto(pr, repo, branch, dry_run=args.dry_run)
+        rebase_onto(pr, repo, onto_branch, dry_run=args.dry_run)
     except Exception as e:
         msg = f"Rebase failed due to {e}"
         run_url = os.getenv("GH_RUN_URL")
