@@ -123,3 +123,54 @@ def checkpoint_wrapper(
         )
 
     return CheckpointWrapper(module, checkpoint_impl, offload_to_cpu)
+
+
+def apply_activation_checkpointing_wrapper(
+    model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=lambda _, _unused: True
+):
+    """
+    Applies :func:`checkpoint_wrapper` to modules within `model` based on a user-defined
+    configuration. For each module within `model`, the `check_fn` is used to decide
+    whether `module` should be wrapped with :func:`checkpoint_wrapper` or not.
+
+    Note::
+        This function modifies `model` in place and replaces appropriate layers with
+        their checkpoint-wrapped modules.
+    Usage::
+        model = nn.Sequential(
+            nn.Linear(10, 10), nn.Linear(10, 10), nn.Linear(10, 10)
+        )
+        check_fn = lambda m, l: isinstance(l, nn.Linear)
+        apply_activation_checkpointing(model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=check_fn)
+    Args:
+        module (nn.Module):
+            The model who's submodules (or self) should be wrapped with activation checkpointing.
+        checkpoint_wrapper_fn (Optional[Callable[nn.Module]])
+            A `Callable` which will wrap modules
+        check_fn (Optional[Callable[nn.Module, nn.Module]])
+            A lambda function which will be passed overall model and current layer and returns
+            ``True`` or ``False`` depending on whether input layer should be wrapped.
+    Returns: None (`model` is modified inplace)
+    """
+    layers = []
+    for name, layer in model.named_modules():
+        if check_fn(model, layer):
+            toks = name.strip().split(".")
+            module = layer
+            layer = model
+            print(toks)
+            for token in toks[:-1]:
+                # isnumeric() check to handle case where layers are in a list,
+                # see https://discuss.pytorch.org/t/how-to-replace-a-layer-with-own-custom-variant/43586/12
+                print(token)
+                if not token.isnumeric():
+                    print(f" not isnumeric code {token}")
+                    layer = getattr(layer, token)
+                else:
+                    print(f"isnumeric code")
+                    layer = layer[int(token)]
+            new_layer = checkpoint_wrapper_fn(module)
+            layers.append((layer, toks[-1], new_layer))
+
+    for parent, attr, checkpointed in layers:
+        setattr(parent, attr, checkpointed)
