@@ -9,7 +9,7 @@
 
 # NOTE: If testing pytorch/builder changes you can change this variable to change what pytorch/builder reference
 #       the binary builds will check out
-{%- set builder_branch = "main" -%}
+{%- set builder_branch = "add_check_for_git_version" -%}
 
 {%- macro concurrency(build_environment) -%}
 concurrency:
