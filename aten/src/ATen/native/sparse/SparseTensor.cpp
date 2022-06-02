@@ -1,5 +1,4 @@
 // Basic functions on sparse tensors
-#include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <ATen/core/Tensor.h>
@@ -892,96 +891,6 @@ Tensor empty_like_sparse_coo(
   } else {
     return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
   }
-}
-
-/******************************************************************************
- * Build sparse from diagonals
- ******************************************************************************/
-
-// --------------------------------------------------------------------
-// spdiags(D, O, (N,M)) -> S
-//
-// Take rows of D and place them on the diagonals specified by offsets O of a
-// new (NxM) sparse matrix S If D is (P x Q) then O must be a row vector (P, ).
-// It does not matter if Q values fit  on any diagonal of S, or if S has no
-// O[i]th diagonal (those values/diagonals are simply skipped)
-// --------------------------------------------------------------------
-
-SparseTensor spdiags_sparse_coo(
-    const Tensor& diagonals,
-    Tensor offsets,
-    IntArrayRef shape) {
-  TORCH_CHECK(diagonals.dim() == 2, "Diagonals must be 2d");
-  TORCH_CHECK(shape.size() == 2, "Output shape must be 2d");
-  auto const n_diag = diagonals.size(0);
-  TORCH_CHECK(
-      n_diag == offsets.dim(),
-      "Number of diagonals(",
-      n_diag,
-      ") does not match the number of offsets (",
-      offsets.dim(),
-      ")");
-
-  // TORCH_CHECK(offsets.ndimension() == 1, "Offsets should be 1d");
-  TensorOptions sparse_options = diagonals.options().layout(kSparse);
-  TensorOptions indices_options =
-      offsets.options().device(sparse_options.device());
-
-  const int64_t P = shape[0]; // row dim out
-  const int64_t Q = shape[1]; // col dim out
-  const int64_t N = diagonals.size(-1); // row dim in
-  // Theoretical maximum number of elements we will set along a diagonal
-  const int64_t min_PQN = std::min(std::min(P, Q), N);
-
-  // Conservative estimate: For rectangular PxQ with P>Q (more rows) there could
-  // be P-Q negative offset diagonals Which are "full" up to the smaller of size
-  // allowed by max len of diagonals in out or len of input.
-  // We can get a theoretical max for nnz by assuming the worst case where all
-  // diagonals are of this "full" type.
-  const int64_t max_nnz = n_diag * min_PQN;
-  // Note: when offsets are positive we push the start point in the row of D
-  // forward.
-  Tensor indices = at::empty({2, max_nnz}, indices_options);
-  Tensor values = at::empty({max_nnz}, diagonals.options());
-
-  // Get accessors on input, and output
-  auto indices_accessor = indices.accessor<int64_t, 2>();
-  auto offsets_accessor = offsets.accessor<int64_t, 1>();
-  int64_t actual_nnz = 0;
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      at::ScalarType::BFloat16,
-      at::ScalarType::Half,
-      at::ScalarType::Bool,
-      values.scalar_type(),
-      "spdiags",
-      [&] {
-        scalar_t* values_ptr = values.data_ptr<scalar_t>();
-        scalar_t* diagonals_ptr = diagonals.data_ptr<scalar_t>();
-        int64_t diagonals_stride = diagonals.stride(0);
-
-        for (auto const d_i : c10::irange(n_diag)) {
-          int64_t const& off_i = offsets_accessor[d_i];
-          int64_t row_out = off_i < 0 ? std::abs(off_i) : 0;
-          int64_t col_out_begin = off_i > 0 ? off_i : 0;
-
-          int64_t const max_read =
-              std::min(min_PQN, std::min(P - off_i, Q + off_i));
-
-          for (auto const col_off : c10::irange(col_out_begin, max_read)) {
-            auto const diagonals_pos = (diagonals_stride * d_i) + col_off;
-            values_ptr[actual_nnz] = diagonals_ptr[diagonals_pos];
-            // Set row
-            indices_accessor[0][actual_nnz] = row_out;
-            // Set col
-            indices_accessor[1][actual_nnz] = col_off;
-            ++row_out;
-            ++actual_nnz;
-          }
-        }
-      });
-  Tensor sparse = at::sparse_coo_tensor(indices, values, shape, sparse_options);
-  get_sparse_impl(sparse)->set_nnz_and_narrow(actual_nnz);
-  return sparse;
 }
 
 } // namespace native
