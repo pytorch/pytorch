@@ -2,7 +2,6 @@ import torch
 from torch._prims import utils
 from torch._prims.utils import check
 from torch._prims.wrappers import out_wrapper_multi
-import torch._refs as refs
 
 from typing import List
 
@@ -154,6 +153,7 @@ def meta_index_Tensor(self, indices):
             result.append(index)
     indices = result
     # expand_outplace
+    import torch._refs as refs  # avoid import cycle in mypy
     indices = list(refs._maybe_broadcast(*indices))
     # add missing null tensors
     while len(indices) < self.ndim:
@@ -227,6 +227,11 @@ def meta_linalg_qr_helper(input, mode):
         reduced_mode = True
     else:
         raise RuntimeError(f"qr received unrecognized mode {mode}")
+    check(input.ndim >= 2, lambda: f"expected matrix or batch of matrices, but got {input.ndim}-D tensor")
+    check(
+        utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
+        lambda: f"expected float or complex tensor, but got {input.dtype}"
+    )
     m = input.size(-2)
     n = input.size(-1)
     mn = min(m, n)
@@ -247,14 +252,13 @@ def meta_linalg_qr_helper(input, mode):
 
 @out_wrapper_multi("L", "info")
 def meta_linalg_cholesky_ex(input, upper=False, check_errors=False):
-    info_output_dtype = torch.int
-    # TODO: check linalg compatible dtype
-    # linalg_cholesky_out_info
-    assert input.dim() >= 2
-    assert input.size(-1) == input.size(-2)
-    L_sizes = list(input.size())
-    L_sizes[-1], L_sizes[-2] = L_sizes[-2], L_sizes[-1]
-    L = input.new_empty(L_sizes)
+    check(input.ndim >= 2, lambda: f"expected matrix or batch of matrices, but got {input.ndim}-D tensor")
+    check(
+        utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
+        lambda: f"expected float or complex tensor, but got {input.dtype}"
+    )
+    check(input.size(-1) == input.size(-2), lambda: f"expected square matrix but got {input.shape}")
+    L = input.new_empty(input.size())
     L.transpose_(-2, -1)
     info_sizes = input.size()[:-2]
     info = input.new_empty(info_sizes, dtype=torch.int)
