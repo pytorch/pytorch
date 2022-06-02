@@ -152,6 +152,7 @@ class LineLoader(YamlLoader):
 
 
 _GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
+_GLOBAL_PARSE_TAGS_YAML_CACHE = {}
 
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple("ParsedYaml", ["native_functions", "backend_indices"])
@@ -220,11 +221,13 @@ def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> Set[str]:
 
 @functools.lru_cache(maxsize=None)
 def parse_tags_yaml(path: str) -> Set[str]:
-    # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
-    with open(path, "r") as f:
-        es = yaml.load(f, Loader=LineLoader)
-        valid_tags = parse_tags_yaml_struct(es, path=path)
-    return valid_tags
+    global _GLOBAL_PARSE_TAGS_YAML_CACHE
+    if path not in _GLOBAL_PARSE_TAGS_YAML_CACHE:
+        with open(path, "r") as f:
+            es = yaml.load(f, Loader=LineLoader)
+            _GLOBAL_PARSE_TAGS_YAML_CACHE[path] = parse_tags_yaml_struct(es, path=path)
+
+    return _GLOBAL_PARSE_TAGS_YAML_CACHE[path]
 
 
 def parse_native_yaml(
@@ -234,7 +237,6 @@ def parse_native_yaml(
     *,
     skip_native_fns_gen: bool = False,
 ) -> ParsedYaml:
-    # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
         valid_tags = parse_tags_yaml(tags_yaml_path)
@@ -500,7 +502,8 @@ class RegisterSchema:
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_native_function_selected(f):
             return None
-        return f"m.def({cpp_string(str(f.func))});\n"
+        tags = "{" + ", ".join([f"at::Tag::{tag}" for tag in f.tags]) + "}"
+        return f"m.def({cpp_string(str(f.func))}, {tags});\n"
 
 
 # Generates Operators.h and Operators.cpp.
@@ -1713,6 +1716,7 @@ def gen_per_operator_headers(
 def gen_headers(
     *,
     native_functions: Sequence[NativeFunction],
+    valid_tags: Set[str],
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     structured_native_functions: Sequence[NativeFunctionsGroup],
     static_dispatch_idx: List[BackendIndex],
@@ -1839,6 +1843,11 @@ def gen_headers(
         }
 
     core_fm.write("aten_interned_strings.h", gen_aten_interned_strings)
+
+    def gen_tags_enum() -> Dict[str, str]:
+        return {"enum_of_valid_tags": (",\n".join([f"{tag}" for tag in valid_tags]))}
+
+    core_fm.write("enum_tag.h", gen_tags_enum)
 
 
 def gen_source_files(
@@ -2396,6 +2405,7 @@ def main() -> None:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
 
     parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
+    valid_tags = _GLOBAL_PARSE_TAGS_YAML_CACHE[tags_yaml_path]
     native_functions, backend_indices = (
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,
@@ -2501,6 +2511,7 @@ def main() -> None:
     if "headers" in options.generate:
         gen_headers(
             native_functions=native_functions,
+            valid_tags=valid_tags,
             grouped_native_functions=grouped_native_functions,
             structured_native_functions=structured_native_functions,
             static_dispatch_idx=static_dispatch_idx,

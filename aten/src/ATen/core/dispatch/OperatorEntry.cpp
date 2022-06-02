@@ -19,6 +19,7 @@ namespace {
 OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 : name_(std::move(operator_name))
 , schema_()
+, tags_()
 , dispatchTable_()
 , dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
 , kernels_()
@@ -57,7 +58,7 @@ const AnnotatedKernel& OperatorEntry::ambiguousAutogradOtherKernel() const {
   return kernel;
 }
 
-void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug) {
+void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug, std::vector<at::Tag> tags) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
   for (const auto& kernel : kernels_) {
     for (const auto &j : kernel.second) {
@@ -69,6 +70,7 @@ void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug)
   // NB: don't register schema until after we've checked everything!
   dispatchKeyExtractor_.registerSchema(schema);
   schema_ = AnnotatedSchema(std::move(schema), std::move(debug));
+  tags_ = std::move(tags);
 }
 
 void OperatorEntry::deregisterSchema() {
@@ -206,6 +208,10 @@ const AnnotatedKernel* OperatorEntry::getKernelForDispatchKey(DispatchKey dispat
     return &kern_it->second.front();
   }
   return nullptr;
+}
+
+const std::vector<at::Tag>& OperatorEntry::getTags() const {
+  return tags_;
 }
 
 std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTableEntryWithDebug(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const {

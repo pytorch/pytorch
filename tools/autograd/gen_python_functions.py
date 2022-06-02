@@ -57,7 +57,7 @@ from torchgen.api.python import (
     namedtuple_fieldnames,
     signature,
 )
-from torchgen.gen import cpp_string, parse_native_yaml
+from torchgen.gen import cpp_string, parse_native_yaml, parse_tags_yaml
 from torchgen.context import with_native_function
 from torchgen.model import (
     Argument,
@@ -324,6 +324,17 @@ def gen(
     create_python_return_type_bindings(
         fm, functions, lambda fn: True, "python_return_types.cpp"
     )
+
+    valid_tags = parse_tags_yaml(tags_yaml_path)
+
+    def gen_tags_enum() -> Dict[str, str]:
+        return {
+            "enum_of_valid_tags": (
+                "".join([f'\n.value("{tag}", at::Tag::{tag})' for tag in valid_tags])
+            )
+        }
+
+    fm.write("python_enum_tag.cpp", gen_tags_enum)
 
 
 def group_filter_overloads(
