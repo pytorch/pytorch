@@ -1205,6 +1205,14 @@ class TestMPS(TestCase):
         mps_x.transpose_(0, 1)
         self.assertEqual(cpu_x, mps_x.to('cpu'))
 
+    def test_expand_cpu_to_mps_copy(self):
+        # https://github.com/pytorch/pytorch/issues/78642
+
+        x = torch.tensor(1).expand([10]).to("mps")
+        x_cpu = torch.tensor(1).expand([10])
+
+        self.assertEqual(x_cpu, x.cpu())
+
     def test_slice(self):
         values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
         cpu_x = torch.tensor(values, device='cpu')
