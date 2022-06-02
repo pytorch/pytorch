@@ -392,19 +392,8 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
     auto start_tid = event->start_tid_;
     auto frame = stacks.at(start_tid);
 
-    // Handle any events which are allowed to end without an explicit end call.
-    // (E.g. a user scope.)
     while (frame.get() != event.get()) {
       TORCH_INTERNAL_ASSERT(frame != nullptr);
-      c10::visit(
-          c10::overloaded(
-              [](const op_fields& i) {
-                TORCH_INTERNAL_ASSERT(
-                    i.scope_ == at::RecordScope::USER_SCOPE, (int)i.scope_);
-              },
-              [](const ExtraFields<EventType::Backend>& i){},
-              [](const auto&) { TORCH_INTERNAL_ASSERT(false); }),
-          frame->extra_fields_);
       frame->finished_ = true;
       TORCH_INTERNAL_ASSERT(!frame->parent_.expired());
       frame = frame->parent_.lock();
