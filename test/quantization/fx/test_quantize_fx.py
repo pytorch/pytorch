@@ -72,7 +72,7 @@ from torch.ao.quantization import (
 )
 
 from torch.ao.quantization.backend_config.native import (
-    get_native_and_fp16_backend_config_dict,
+    get_test_only_legacy_native_backend_config_dict,
 )
 
 from torch.ao.quantization.qconfig_mapping import (
@@ -3961,7 +3961,7 @@ class TestQuantizeFx(QuantizationTestCase):
             float16_dynamic_qconfig: torch.ops.quantized.linear_relu_dynamic_fp16,
             default_dynamic_qconfig: torch.ops.quantized.linear_relu_dynamic
         }
-        backend_config_dict = get_native_and_fp16_backend_config_dict()
+        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
         for qconfig in [float16_dynamic_qconfig, default_dynamic_qconfig]:
             model = M().eval()
             qconfig_dict = {
@@ -4005,7 +4005,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = self.linear_relu(x)
                 return x
 
-        backend_config_dict = get_native_and_fp16_backend_config_dict()
+        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
         for qconfig in [float16_dynamic_qconfig, default_dynamic_qconfig]:
             model = M().eval()
             qconfig_dict = {
@@ -4049,7 +4049,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 y2 = self.mod2(x)
                 return y1 + y2
 
-        backend_config_dict = get_native_and_fp16_backend_config_dict()
+        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
         for qconfig in [float16_dynamic_qconfig, default_dynamic_qconfig]:
             model = M().eval()
             qconfig_dict = {
@@ -4816,7 +4816,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             (True, False),  # functional relu
             (True, False),  # is_reference
         )
-        backend_config_dict = get_native_and_fp16_backend_config_dict()
+        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
         for use_bias, has_relu, f_relu, is_reference in options:
             model = FuncLinear(use_bias, has_relu, f_relu)
             if is_reference:
@@ -4873,7 +4873,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             (True, False),  # functional relu
             (True, False),  # is_reference
         )
-        backend_config_dict = get_native_and_fp16_backend_config_dict()
+        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
         for use_bias, has_relu, f_relu, is_reference in options:
             model = FuncLinear(use_bias, has_relu, f_relu)
             linear_fun = ns.call_function(torch.nn.functional.linear)
@@ -5123,7 +5123,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         custom_qconfig_dict = {
             "object_type": [(binary_op, float16_static_qconfig)]
         }
-        backend_config_dict = get_native_and_fp16_backend_config_dict()
+        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
         for is_inplace, is_scalar in options:
             node_occurrence = {
                 # output_conv1, output_add1, output_add2 for scalar
@@ -5170,7 +5170,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             "": float16_static_qconfig,
             "object_type": [(torch.nn.Conv2d, None)]
         }
-        backend_config_dict = get_native_and_fp16_backend_config_dict()
+        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
         for is_inplace_op, is_functional_relu, is_scalar in options:
             node_occurrence = {
                 ns.call_method("to"): 3 if is_scalar else 4
@@ -5981,7 +5981,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         qconfig_dict = {
             "": float16_static_qconfig
         }
-        backend_config_dict = get_native_and_fp16_backend_config_dict()
+        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
         node_occurrence = {
             ns.call_method("to"): 7
         }
@@ -6698,7 +6698,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 (torch.nn.functional.linear, default_qconfig)
             ]
         }
-        backend_config_dict = get_native_and_fp16_backend_config_dict()
+        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
         example_inputs = (torch.randn(1, 4),)
         m = prepare_fx(
             m, qconfig_dict, example_inputs=example_inputs,
@@ -6752,7 +6752,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             ]
         }
         example_inputs = (torch.randn(1, 4),)
-        backend_config_dict = get_native_and_fp16_backend_config_dict()
+        backend_config_dict = get_test_only_legacy_native_backend_config_dict()
         m = prepare_fx(
             m, qconfig_dict, example_inputs=example_inputs,
             backend_config_dict=backend_config_dict)

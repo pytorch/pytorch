@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 
 #include <c10/util/irange.h>
 #include <c10/util/math_compat.h>
@@ -11,7 +11,7 @@
 #include <limits>
 #include <vector>
 
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 
 namespace at {
 namespace native {
