@@ -1302,14 +1302,14 @@ TORCH_IMPL_FUNC(softplus_out_mps) (
               MPSGraph* mpsGraph = make_mps_graph();
               newCachedGraph = new CachedGraph(mpsGraph);
               MPSGraphTensor *inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-                
+
               MPSGraphTensor *reluTensor = [mpsGraph reLUWithTensor:inputTensor
                                                                name:nil];
-              
+
               MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0
                                                                   shape:@[@1]
                                                                dataType:getMPSDataType(self.scalar_type())];
-                
+
               MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta.to<double>()
                                                                   shape:@[@1]
                                                                dataType:getMPSDataType(self.scalar_type())];
@@ -1329,10 +1329,10 @@ TORCH_IMPL_FUNC(softplus_out_mps) (
               MPSGraphTensor* expPlusOneTensor = [mpsGraph additionWithPrimaryTensor:expTensor
                                                                      secondaryTensor:unitTensor
                                                                                 name:nil];
-              
+
               MPSGraphTensor* logTensor = [mpsGraph logarithmWithTensor:expPlusOneTensor
                                                                    name:nil];
-              
+
               MPSGraphTensor* softplusTensor = [mpsGraph multiplicationWithPrimaryTensor:logTensor
                                                                        secondaryTensor:reciprocalBetaTensor
                                                                             name:nil];
@@ -1340,7 +1340,7 @@ TORCH_IMPL_FUNC(softplus_out_mps) (
                                                              truePredicateTensor:reluTensor
                                                             falsePredicateTensor:softplusTensor
                                                                             name:nil];
-              
+
               newCachedGraph->inputTensor_ = inputTensor;
                 newCachedGraph->outputTensor_ = outputTensor;
             }
@@ -1361,7 +1361,7 @@ TORCH_IMPL_FUNC(softplus_out_mps) (
         runMPSGraph(stream, cachedGraph->graph(), feeds, results);
       }
 
-  
+
 }
 
 TORCH_IMPL_FUNC(silu_out_mps) (
