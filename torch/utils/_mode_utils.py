@@ -1,6 +1,8 @@
 import functools
+import torch
 from typing import Iterator
 from dataclasses import dataclass
+from contextlib import contextmanager
 
 # This file has all the logic to dedupe logic between torch dispatch and
 # torch function modes
@@ -8,28 +10,15 @@ from dataclasses import dataclass
 # Specifically, it has the helper functions for enable_ and push_X_mode and the
 # ModeInfo class, which is extended by each where they are different
 
-
-# a helper class for the error message in the _wrap_init function. This can't be shared with ModeInfo because
-# that causes a circular dependency. It also must has only strings attributes to avoid circular dependencies
-@dataclass
-class MetaInitErrorInfo:
-    mode_name: str
-    mode_class_name: str  # name of the mode class that extends the meta class here
-
-
 # used by both TorchFunctionMode and TorchDispatchMode, this will wrap the init
 # function to require an "inner" kwarg
-def _wrap_init(f, meta_init_error_info):
+def _wrap_init(f):
     undef = object()
 
     @functools.wraps(f)
     def wrapped(self, *args, inner=undef, **kwargs):
-        if inner is undef:
-            raise TypeError(
-                f"missing inner keyword argument; instead of constructing a {meta_init_error_info.mode_class_name} "
-                f"directly, pass the constructor to push_{meta_init_error_info.mode_name}_mode"
-            )
-        self.inner = inner
+        if inner is not undef:
+            self.inner = inner
         return f(self, *args, **kwargs)
     return wrapped
 
@@ -130,3 +119,11 @@ def _push_mode(ctor, mode_info: _ModeInfo) -> Iterator[object]:
         yield mode
     finally:
         mode_info.set_mode(old)
+
+@contextmanager
+def no_dispatch():
+    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
+    try:
+        yield
+    finally:
+        del guard
