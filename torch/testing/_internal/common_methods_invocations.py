@@ -16252,6 +16252,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 104448
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),),
+           assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_getitem),
     OpInfo('index_put',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
