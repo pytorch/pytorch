@@ -644,7 +644,7 @@ implementation more permissive about what operations are allowed::
           if kwargs is None:
               kwargs = {}
           args = [a._t if hasattr(a, '_t') else a for a in args]
-          metadatas = tuple(a._metadata if hasattr(a, '_metadata') for a in args)
+          metadatas = tuple(a._metadata for a in args if hasattr(a, '_metadata'))
           assert len(metadatas) > 0
           ret = func(*args, **kwargs)
           return MetadataTensor(ret, metadata=metadatas[0])

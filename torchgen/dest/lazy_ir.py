@@ -587,7 +587,7 @@ def generate_non_native_lazy_ir_nodes(
     nodes = []
     for op in non_native:
         # Set default properties for Non-Native IRs
-        properties = LazyIrProperties("ShapeCache", "CanBeReused")
+        properties = LazyIrProperties("ShapeCache", "CanBeReused", "LowerDeclOnly")
         for p in op.get("properties", []):
             setattr(properties, p, True)
 
