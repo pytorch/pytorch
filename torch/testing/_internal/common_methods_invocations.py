@@ -14882,6 +14882,7 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_roll,
+        decorators=(onlyNativeDeviceTypes,),
     ),
     OpInfo(
         "rot90",
