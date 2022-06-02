@@ -1,11 +1,17 @@
-from typing import Dict, List, NamedTuple, Any, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 import torch
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
-from torch.fx.node import Node, Target, Argument, map_arg, map_aggregate
-from torch.fx.node import _get_qualified_name
+from torch.fx.node import (
+    _get_qualified_name,
+    Argument,
+    map_aggregate,
+    map_arg,
+    Node,
+    Target,
+)
 from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.passes.shape_prop import ShapeProp
 
@@ -259,28 +265,20 @@ def _update_weight_fused_dtypes(weight, name, node):
     users of this get_attr node is a quantized EB and this is the weight for the EB, and
     update the dtype accordingly.
     """
-    user_targets = {
-        _get_qualified_name(n.target)
-        .replace("fx2trt_oss.tracer.acc_tracer.", "")
-        .replace("glow.fb.fx.", ""): n
-        for n in node.users.keys()
-        if n.op == "call_function"
-    }
+    if len(node.users) == 0:
+        return
+    user = list(node.users)[0]
+    if user.op != "call_function":
+        return
+    user_target = _get_qualified_name(user.target)
     if (
-        "acc_ops.embedding_bag_byte_rowwise_offsets" in user_targets
-        and str(
-            user_targets["acc_ops.embedding_bag_byte_rowwise_offsets"].kwargs["weight"]
-        )
-        == name
+        user_target.endswith("acc_ops.embedding_bag_byte_rowwise_offsets")
+        and node == user.kwargs["weight"]
     ):
         weight[name]["dtype"] = "acc.uint8fused"
-    # Same as above, but for the 4 bit version.
-    if (
-        "acc_ops.embedding_bag_4bit_rowwise_offsets" in user_targets
-        and str(
-            user_targets["acc_ops.embedding_bag_4bit_rowwise_offsets"].kwargs["weight"]
-        )
-        == name
+    elif (
+        user_target.endswith("acc_ops.embedding_bag_4bit_rowwise_offsets")
+        and node == user.kwargs["weight"]
     ):
         weight[name]["dtype"] = "acc.uint4fused"
 
@@ -422,6 +420,15 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 _update_weight_fused_dtypes(weight, qualname, node)
                 serialized_dict["weights"].update(weight)
                 weights[qualname] = target
+        elif node.op == "placeholder":
+            ph_type = node.meta.get("ph_type", "")
+            assert (
+                ph_type == "" or ph_type == "input_ph" or ph_type == "output_ph"
+            ), "When present, placeholder type must be 'input_ph' or 'ouput_ph'"
+            if ph_type == "input_ph":
+                node_rep["ph_type"] = "input_ph"
+            elif ph_type == "output_ph":
+                node_rep["ph_type"] = "output_ph"
 
         node_rep["op_code"] = node.op
         node_rep["name"] = node.name

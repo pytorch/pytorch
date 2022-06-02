@@ -619,13 +619,10 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase, _TypedStorage, _LegacyStorage
+from .storage import _StorageBase, _TypedStorage, _LegacyStorage, _UntypedStorage
 
 # NOTE: New <type>Storage classes should never be added. When adding a new
 # dtype, use torch.storage._TypedStorage directly.
-
-class _UntypedStorage(_C.ByteStorageBase, _StorageBase):
-    pass
 
 class ByteStorage(_LegacyStorage):
     @classproperty
@@ -784,7 +781,8 @@ from .functional import *  # noqa: F403
 # Remove unnecessary members
 ################################################################################
 
-del ByteStorageBase
+del _StorageBase
+del _LegacyStorage
 
 ################################################################################
 # Define _assert
@@ -819,11 +817,6 @@ from torch.autograd import (
 from torch import fft as fft
 from torch import futures as futures
 from torch import nn as nn
-import torch.nn.intrinsic
-import torch.nn.quantizable
-import torch.nn.quantized
-# AO depends on nn, as well as quantized stuff -- so should be after those.
-from torch import ao as ao
 from torch import optim as optim
 import torch.optim._multi_tensor
 from torch import multiprocessing as multiprocessing
@@ -848,6 +841,14 @@ import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
 from torch import profiler as profiler
+
+# Quantized, sparse, AO, etc. should be last to get imported, as nothing
+# is expected to depend on them.
+import torch.nn.intrinsic
+import torch.nn.quantizable
+import torch.nn.quantized
+# AO depends on nn, as well as quantized stuff -- so should be after those.
+from torch import ao as ao
 
 _C._init_names(list(torch._storage_classes))
 
@@ -919,6 +920,8 @@ def _register_device_module(device_type, module):
         raise RuntimeError("The runtime module of '{}' has already "
                            "been registered with '{}'".format(device_type, getattr(m, device_type)))
     setattr(m, device_type, module)
+    torch_module_name = '.'.join([__name__, device_type])
+    sys.modules[torch_module_name] = module
 
 # expose return_types
 from . import return_types

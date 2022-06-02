@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import functools
 from torch.utils._pytree import tree_map, tree_flatten
 import torch._prims.utils as utils
+from torch._prims.wrappers import out_wrapper_multi
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -179,12 +180,6 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 @pw_cast_for_opmath
 def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
     return torch.where(self <= threshold, grad_output.new_zeros(()), grad_output)
-
-
-@register_decomposition(aten.leaky_relu)
-@pw_cast_for_opmath
-def leaky_relu(self: Tensor, negative_slope: float = 0.01) -> Tensor:
-    return torch.where(self > 0, self, self * negative_slope)
 
 
 @register_decomposition(aten.leaky_relu_backward)
@@ -392,7 +387,7 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
-@register_decomposition(aten.huber_loss, register_meta=True)
+@register_decomposition(aten.huber_loss)
 @pw_cast_for_opmath
 def huber_loss(
     self: Tensor,
@@ -666,18 +661,7 @@ def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     return grad_output * (mask.type_as(grad_output) * scale)
 
 
-@register_decomposition(aten.logit)
-@pw_cast_for_int_to_real
-def logit(self: Tensor, eps: Optional[float] = None) -> Tensor:
-    if eps is None:
-        eps = -1.0
-    lo = eps
-    hi = 1 - eps
-    self = torch.clamp(self, lo, hi)
-    return (self / (1 - self)).log()
-
-
-@register_decomposition(aten.logit_backward)
+@register_decomposition(aten.logit_backward.default)
 @pw_cast_for_opmath
 def logit_backward(
     grad_output: Tensor, self: Tensor, eps: Optional[float] = None
@@ -699,11 +683,10 @@ def logit_backward(
 
 
 @register_decomposition(aten.native_dropout)
-@pw_cast_for_opmath
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
     if train:
-        bool_mask = torch.rand_like(input) < p
-        res = bool_mask * input * float(1.0 / p)
+        bool_mask = torch.rand_like(input) > p
+        res = bool_mask * input * float(1.0 / (1.0 - p))
         return (res, bool_mask)
     else:
         return (input, torch.ones_like(input, dtype=torch.bool))
@@ -849,10 +832,24 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
         return out
     return beta * self + out
 
+# This computes the mean and variance along the specifized normalization dims,
+# then normalizes along those dims. Finally, it returns the mean and variance of
+# the normalized dims. Note that it intentionally leaves outputs upcasted.
+# Example:
+# input: [2, 3, 4, 5], norm_dims: [1, 3]
+# mean: [2, 1, 4, 1]
+def normalize(input, norm_dims, eps):
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    input_acc = input.to(dtype=computation_dtype)
+    biased_var = torch.var(input_acc, dim=norm_dims, unbiased=False, keepdim=True)
+    mean = torch.mean(input_acc, dim=norm_dims, keepdim=True)
+    rstd = torch.rsqrt(biased_var + eps)
 
-# TODO: Correct the type promotion semantics
-@register_decomposition(aten.native_layer_norm)
-@pw_cast_for_opmath
+    out = ((input - mean) * rstd)
+    return out, mean, rstd
+
+
+@register_decomposition(aten.native_layer_norm.default)
 def native_layer_norm(
     input: Tensor,
     normalized_shape: List[int],
@@ -860,51 +857,69 @@ def native_layer_norm(
     bias: Optional[Tensor],
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor]:
-    input_shape = input.shape
-    input_ndim = input.dim()
+    computation_dtype = utils.get_computation_dtype(input.dtype)
 
-    axis = input_ndim - len(normalized_shape)
-    M = prod(input_shape[:axis])  # type: ignore[arg-type]
-
-    # Hmm... not sure how I get around this...
-    # Basically, native_batch_norm doesn't support 0-entry tensors, while
-    # native_layer_norm does (and is tested by OpInfos!)
-    if M > 0:
-        input_reshaped = input.view(1, M, -1)
+    axis = input.dim() - len(normalized_shape)
+    if prod(list(input.shape[:axis])) == 0:
+        mean = input.new_zeros((0,), dtype=computation_dtype)
+        rstd = input.new_zeros((0,), dtype=computation_dtype)
+        out = input
     else:
-        return (input, input.new_zeros((0,)), input.new_zeros((0,)))
+        reduction_dims = list(range(axis, input.dim()))
+        out, mean, rstd = normalize(input, reduction_dims, eps)
 
-    # Unlike Batch Normalization, which applies scalar scale and bias for each
-    # entire channel/plane with the affine option, Layer Normalization applies
-    # per-element scale and bias. E.g. For input {N, C, H, W}, weight for
-    # batchnorm has shape {C} while weight for layernorm has shape {H, W} or {W}.
-    out, mean, rstd = aten.native_batch_norm(
-        input_reshaped,
-        weight=None,
-        bias=None,
-        running_mean=None,
-        running_var=None,
-        training=True,
-        momentum=0.0,
-        eps=eps,
-    )
-    out = out.view(input_shape)
-    if weight is not None:
-        out = out * weight
-    if bias is not None:
-        out = out + bias
+        if weight is not None:
+            out = out * weight
+        if bias is not None:
+            out = out + bias
 
-    stat_shape = list(input_shape[:axis])
-    for _ in range(axis, input.dim()):
-        stat_shape.append(1)
-    mean = mean.view(stat_shape)
-    rstd = rstd.view(stat_shape)
+        out = out.to(dtype=input.dtype)
+
+    if input.device.type == 'cpu':
+        mean = mean.to(dtype=input.dtype)
+        rstd = rstd.to(dtype=input.dtype)
     return (out, mean, rstd)
 
 
-# TODO: Correct the type promotion semantics
+@register_decomposition(aten.native_group_norm.default, disable_meta=True)
+def native_group_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    N: int,
+    C: int,
+    HxW: int,
+    group: int,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    orig_shape = input.shape
+    input = input.view(N, group, C // group, HxW)
+    reduction_dims = [2, 3]
+    out, mean, rstd = normalize(input, reduction_dims, eps)
+    mean = _squeeze_multiple(mean, reduction_dims)
+    rstd = _squeeze_multiple(rstd, reduction_dims)
+    out = out.view(orig_shape)
+    if weight is not None:
+        weight = _unsqueeze_to_dim(weight, out.dim() - 1)
+        out = out * weight
+    if bias is not None:
+        bias = _unsqueeze_to_dim(bias, out.dim() - 1)
+        out = out + bias
+
+    out = out.to(dtype=input.dtype)
+    mean = mean.to(dtype=input.dtype)
+    rstd = rstd.to(dtype=input.dtype)
+    return (out, mean, rstd)
+
+
+def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
+    if x is not None:
+        return x.to(dtype)
+    return x
+
+
+# TODO: Take a closer look at the type promotion semantics
 @register_decomposition(aten.native_layer_norm_backward)
-@pw_cast_for_opmath
 def native_layer_norm_backward(
     grad_out: Tensor,
     input: Tensor,
@@ -917,6 +932,12 @@ def native_layer_norm_backward(
 ) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
     input_shape = input.shape
     input_ndim = input.dim()
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    grad_out_cast, input_cast, weight_cast, bias_cast = [
+        x.to(computation_dtype) if x is not None else x
+        for x in (grad_out, input, weight, bias)
+    ]
+    assert grad_out_cast is not None
 
     axis = input_ndim - len(normalized_shape)
     inner_dims = input_shape[axis:]
@@ -938,11 +959,11 @@ def native_layer_norm_backward(
             input.new_zeros(input_shape[axis:]),
         )
 
-    x_hat = (input - mean) * rstd
-    if weight is not None:
-        grad_x_hat = grad_out * weight
+    x_hat = (input_cast - mean) * rstd
+    if weight_cast is not None:
+        grad_x_hat = grad_out_cast * weight_cast
     else:
-        grad_x_hat = grad_out
+        grad_x_hat = grad_out_cast
     a = grad_x_hat * N
     b = torch.sum(grad_x_hat, inner_dim_indices, True)
     c1 = torch.mul(grad_x_hat, x_hat)
@@ -950,35 +971,30 @@ def native_layer_norm_backward(
     c3 = torch.mul(x_hat, c2)
 
     inner = a - b - c3
-
+    d_input: Optional[Tensor] = None
+    d_weight: Optional[Tensor] = None
+    d_bias: Optional[Tensor] = None
     if output_mask[0]:
-        d_input: Optional[Tensor] = (rstd / N) * inner
-    else:
-        d_input = None
+        d_input = (rstd / N) * inner
 
-    if output_mask[1] and weight is not None:
+    if output_mask[1] and weight_cast is not None:
         if len(outer_dim_indices) > 0:
-            d_weight: Optional[Tensor] = torch.sum(
-                grad_out * x_hat, outer_dim_indices, False
+            d_weight = torch.sum(
+                grad_out_cast * x_hat, outer_dim_indices, False
             )
         else:
-            d_weight = grad_out * x_hat
-    else:
-        d_weight = None
+            d_weight = grad_out_cast * x_hat
 
-    if output_mask[2] and bias is not None:
+    if output_mask[2] and bias_cast is not None:
         if len(outer_dim_indices) > 0:
-            d_bias: Optional[Tensor] = torch.sum(grad_out, outer_dim_indices, False)
+            d_bias = torch.sum(grad_out_cast, outer_dim_indices, False)
         else:
-            d_bias = grad_out
-    else:
-        d_bias = None
-    return (d_input, d_weight, d_bias)
+            d_bias = grad_out_cast
+
+    return _maybe_cast(d_input, input.dtype), _maybe_cast(d_weight, input.dtype), _maybe_cast(d_bias, input.dtype)
 
 
-# TODO: Correct the type promotion semantics
 @register_decomposition(aten.native_batch_norm)
-@pw_cast_for_opmath
 def native_batch_norm(
     input: Tensor,
     weight: Optional[Tensor],
@@ -990,13 +1006,12 @@ def native_batch_norm(
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor]:
     reduction_dims = [0] + list(range(2, input.dim()))
+    computation_dtype = utils.get_computation_dtype(input.dtype)
     if training:
-        # save_mean = torch.sum(input / (input.shape[0] * input.shape[2]), dim=reduction_dims)
-        biased_var, save_mean = torch.var_mean(
-            input, dim=reduction_dims, unbiased=False
-        )
-        save_invstd = 1 / (torch.sqrt(biased_var + eps))
+        output, mean, rstd = normalize(input, reduction_dims, eps)
 
+        save_mean = _squeeze_multiple(mean, reduction_dims)
+        save_rstd = _squeeze_multiple(rstd, reduction_dims)
         if running_mean is not None:
             running_mean.copy_(momentum * save_mean + (1 - momentum) * running_mean)
         if running_var is not None:
@@ -1004,21 +1019,24 @@ def native_batch_norm(
             # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
             # But... that would require re-implementing var here, for negligible numerics gain on a tensor whose
             # numerics probably don't matter.
-            unbiased_var = biased_var * (n / (n - 1))
+            unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (n / (n - 1))
             running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
-        mean = save_mean
-        invstd = save_invstd
     else:
         assert running_mean is not None and running_var is not None
+        running_mean = running_mean.to(dtype=computation_dtype)
+        running_var = running_var.to(dtype=computation_dtype)
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
         # Very annoying inconsistency where CPU and CUDA give different shapes
-        if input.device.type == "cuda":
+        if input.device.type != "cpu":
             save_mean = running_mean
-            save_invstd = invstd
+            save_rstd = invstd
         else:
             save_mean = input.new_zeros((0,))
-            save_invstd = input.new_zeros((0,))
+            save_rstd = input.new_zeros((0,))
+        mean = _unsqueeze_to_dim(mean, input.dim() - 1)
+        invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
+        output = ((input - mean) * invstd)
 
     if weight is None:
         weight = input.new_ones(())
@@ -1026,12 +1044,13 @@ def native_batch_norm(
     if bias is None:
         bias = input.new_zeros(())
 
-    mean = _unsqueeze_to_dim(mean, input.dim() - 1)
-    invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
     weight = _unsqueeze_to_dim(weight, input.dim() - 1)
     bias = _unsqueeze_to_dim(bias, input.dim() - 1)
-    output = ((input - mean) * invstd) * weight + bias
-    return output, save_mean, save_invstd
+    output = output * weight + bias
+    if input.device.type == 'cpu':
+        save_mean = save_mean.to(dtype=input.dtype)
+        save_rstd = save_rstd.to(dtype=input.dtype)
+    return output.to(dtype=input.dtype), save_mean, save_rstd
 
 
 @register_decomposition(aten.clamp_min)
@@ -1050,12 +1069,6 @@ def _fused_dropout_decomposition(input, p, generator=None):
     mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
     res = mask.type_as(input) * input * (1.0 / p)
     return (res, mask)
-
-
-# TODO: these logical decomps are buggy for complex inputs
-@register_decomposition(aten.logical_xor)
-def logical_xor(self: Tensor, other: Tensor) -> Tensor:
-    return self.to(dtype=torch.bool) ^ other.to(dtype=torch.bool)
 
 
 @register_decomposition(aten.logical_not)
@@ -1125,7 +1138,7 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition(aten.detach)
+@register_decomposition(aten.detach, disable_meta=True)
 def detach_decomposition(x):
     return x
 
@@ -1277,7 +1290,8 @@ def trace(self: Tensor) -> Tensor:
 
 
 # nb: Should use acc_t, not op_math
-@register_decomposition(aten.log_sigmoid_forward.default)
+@register_decomposition(aten.log_sigmoid_forward)
+@out_wrapper_multi('output', 'buffer')
 @pw_cast_for_opmath
 def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)

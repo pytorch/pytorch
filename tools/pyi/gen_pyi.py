@@ -614,7 +614,8 @@ def gen_pyi(
             ],
             "as_subclass": ["def as_subclass(self, cls: Tensor) -> Tensor: ..."],
             "_make_subclass": [
-                "def _make_subclass(cls, data: Tensor, require_grad: _bool = False) -> Tensor: ..."
+                "def _make_subclass(cls, data: Tensor, require_grad: _bool = False, dispatch_strides: _bool=False,"
+                " dispatch_device: _bool=False) -> Tensor: ..."
             ],
             "__getitem__": ["def __getitem__(self, {}) -> Tensor: ...".format(INDICES)],
             "__setitem__": [
@@ -668,6 +669,7 @@ def gen_pyi(
             "is_sparse_csr": ["is_sparse_csr: _bool"],
             "is_quantized": ["is_quantized: _bool"],
             "is_meta": ["is_meta: _bool"],
+            "is_mps": ["is_mps: _bool"],
             "is_ort": ["is_ort: _bool"],
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],
@@ -786,33 +788,7 @@ def gen_pyi(
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    # TODO: These are deprecated, maybe we shouldn't type hint them
-    legacy_storage_base_hints = []
-    dt = (
-        "Double",
-        "Float",
-        "Long",
-        "Int",
-        "Short",
-        "Char",
-        "Byte",
-        "Bool",
-        "Half",
-        "BFloat16",
-        "ComplexDouble",
-        "ComplexFloat",
-        "QUInt8",
-        "QInt8",
-        "QInt32",
-        "QUInt4x2",
-        "QUInt2x4",
-    )
-    for c in dt:
-        legacy_storage_base_hints.append("class {}StorageBase(object): ...".format(c))
-    for c in dt:
-        legacy_storage_base_hints.append(
-            "class Cuda{}StorageBase(object): ...".format(c)
-        )
+    legacy_storage_base_hints = ["class StorageBase(object): ..."]
 
     legacy_class_hints = []
     for c in (
