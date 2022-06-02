@@ -57,7 +57,6 @@ from torch.testing._internal import composite_compliance
 
 from torch.utils._pytree import tree_flatten
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
-from torch.utils._mode_utils import no_dispatch
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -1345,7 +1344,7 @@ class TestMathBits(TestCase):
             torch.is_complex,
         )
 
-# input strides and size may have altered due to the result of an inplace op
+# input strides and size may have been altered due to the result of an inplace op
 def test_inplace_view(func, input, rs, input_size, input_strides):
     if func is None:
         return
@@ -1364,7 +1363,7 @@ def test_inplace_view(func, input, rs, input_size, input_strides):
                 # TODO: use self.assertIn when we have separate tests for each tag
                 assert torch.Tag.inplace_view in func.tags
 
-# A mode that when enabled runs runs correctness checks to ensure
+# A mode that when enabled runs correctness checks to ensure
 # that operators have expected tags based on their input and
 # ouput tensor properties
 class TestTagsMode(torch.Tensor):
@@ -1377,12 +1376,10 @@ class TestTagsMode(torch.Tensor):
         if isinstance(args[0], torch.Tensor):
             old_size = args[0].size()
             old_stride = args[0].stride()
-            with no_dispatch():
-                rs = func(*args, **kwargs)
+            rs = func(*args, **kwargs)
             test_inplace_view(func, args[0], rs, old_size, old_stride)
         else:
-            with no_dispatch():
-                rs = func(*args, **kwargs)
+            rs = func(*args, **kwargs)
         return rs
 
 # Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
