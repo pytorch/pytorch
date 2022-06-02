@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
-import torch.nn.qat as nnqat
+import torch.ao.nn.qat as nnqat
 import torch.ao.nn.quantized._reference as nnqr
 from ..observer import (
     default_fixed_qparams_range_0to1_observer,
