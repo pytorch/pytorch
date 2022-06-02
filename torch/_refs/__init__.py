@@ -974,6 +974,7 @@ def _lcm(a: TensorLikeType, b: TensorLikeType):
     return where(eq(g, 0), 0, abs(mul(true_divide(a, g), b)))
 
 
+# TODO: add docstring
 lcm = _make_elementwise_binary_reference(
     _lcm,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
