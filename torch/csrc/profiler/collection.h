@@ -6,8 +6,6 @@
 #include <type_traits>
 #include <utility>
 
-#include <fmt/format.h>
-
 #include <ATen/Context.h>
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
@@ -162,18 +160,6 @@ struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
       : PyExtraFieldsBase(end_time_ns, python_tid, caller),
         callsite_{args.first},
         module_{args.second} {}
-
-  std::string name() const {
-    if (module_.has_value()) {
-      return fmt::format(
-          "nn.Module: {}_{}", module_->cls_name_.str(), module_->id_);
-    }
-    return fmt::format(
-        "{}({}): {}",
-        callsite_.filename_.str(),
-        callsite_.line_no_,
-        callsite_.funcname_.str());
-  }
 
   PyFrameState callsite_;
   c10::optional<NNModuleInfo> module_;

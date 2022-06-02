@@ -79,7 +79,9 @@ namespace {
 template <template <CallType> class ClassT>
 class CallTypeHelper final {
  private:
-  static_assert(CallType::PyCall == 0);
+  static_assert(
+      CallType::PyCall == 0,
+      "CallTypeHelper uses integer math which depends on a zero start.");
   static constexpr size_t End = CallTypeSize;
 
   template <size_t... I>

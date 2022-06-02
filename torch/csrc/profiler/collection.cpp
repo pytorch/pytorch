@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <queue>
 
+#include <fmt/format.h>
+
 #include <ATen/record_function.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/flat_hash_map.h>
@@ -197,6 +199,18 @@ PythonTracerBase& PythonTracerBase::get() {
         extra_fields_);                                                 \
   }
 
+std::string toString(const ExtraFields<EventType::PyCall>& e) {
+  if (e.module_.has_value()) {
+    return fmt::format(
+        "nn.Module: {}_{}", e.module_->cls_name_.str(), e.module_->id_);
+  }
+  return fmt::format(
+      "{}({}): {}",
+      e.callsite_.filename_.str(),
+      e.callsite_.line_no_,
+      e.callsite_.funcname_.str());
+}
+
 using torch::profiler::impl::kineto::KinetoActivityType;
 namespace {
 KinetoActivityType scopeToType(at::RecordScope scope) {
@@ -211,7 +225,7 @@ DEFINE_VISITOR(
     e.name_,
     e.name_,
     "[memory]",
-    e.name(),
+    toString(e),
     e.function_name_.str());
 DEFINE_VISITOR(
     kinetoType,
@@ -447,17 +461,6 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
 
     while (frame.get() != event.get()) {
       TORCH_INTERNAL_ASSERT(frame != nullptr);
-      c10::visit(
-          c10::overloaded(
-              [](const op_fields& i) {
-                if (i.scope_ == at::RecordScope::FUNCTION ||
-                    i.scope_ == at::RecordScope::BACKWARD_FUNCTION ||
-                    i.scope_ == at::RecordScope::TORCHSCRIPT_FUNCTION) {
-                  TORCH_INTERNAL_ASSERT(false, (int)i.scope_);
-                }
-              },
-              [](const auto&) {}),
-          frame->extra_fields_);
       frame->finished_ = true;
       TORCH_INTERNAL_ASSERT(!frame->parent_.expired());
       frame = frame->parent_.lock();
