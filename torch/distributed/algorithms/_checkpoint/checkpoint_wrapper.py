@@ -152,25 +152,27 @@ def apply_activation_checkpointing_wrapper(
             ``True`` or ``False`` depending on whether input layer should be wrapped.
     Returns: None (`model` is modified inplace)
     """
-    layers = []
-    for name, layer in model.named_modules():
-        if check_fn(model, layer):
-            toks = name.strip().split(".")
-            module = layer
-            layer = model
-            print(toks)
-            for token in toks[:-1]:
+    # checkpointed_submodules will create a list of (parent, child_attr, wrapped_child)
+    # which will allow us to set the checkpoint wrapped child on the parent appropriately.
+    checkpointed_submodules = []
+    for name, submodule in model.named_modules():
+        if check_fn(model, submodule):
+            # This submodule should be wrapped with activation checkpointing
+            tokens = name.strip().split(".")
+            submodule_parent = model
+            # Get parent layer of module by iterating through the tokenized FQN.
+            for token in tokens[:-1]:
                 # isnumeric() check to handle case where layers are in a list,
                 # see https://discuss.pytorch.org/t/how-to-replace-a-layer-with-own-custom-variant/43586/12
-                print(token)
                 if not token.isnumeric():
-                    print(f" not isnumeric code {token}")
-                    layer = getattr(layer, token)
+                    submodule_parent = getattr(submodule_parent, token)
                 else:
-                    print(f"isnumeric code")
-                    layer = layer[int(token)]
-            new_layer = checkpoint_wrapper_fn(module)
-            layers.append((layer, toks[-1], new_layer))
+                    submodule_parent = submodule_parent[int(token)]
+            # Create a checkpoint-wrapped version of submodule
+            checkpoint_wrapped_submodule = checkpoint_wrapper_fn(submodule)
+            # Add a tuple (parent, child_attr, wrapped_child) to set the checkpoint wrapped
+            # child after we've collected all such children to checkpoint-wrap.
+            checkpointed_submodules.append((submodule_parent, tokens[-1], checkpoint_wrapped_submodule))
 
-    for parent, attr, checkpointed in layers:
+    for parent, attr, checkpointed in checkpointed_submodules:
         setattr(parent, attr, checkpointed)
