@@ -339,7 +339,7 @@ public:
     return operatorDef_->op.checkInvariants();
   }
 
-  const std::vector<at::Tag>& getTags() const {
+  c10::ArrayRef<at::Tag> getTags() const {
     return operatorDef_->op.getTags();
   }
 

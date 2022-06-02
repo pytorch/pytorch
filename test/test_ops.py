@@ -56,7 +56,7 @@ import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal import composite_compliance
 
 from torch.utils._pytree import tree_flatten
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
+from torch.utils._python_dispatch import push_torch_dispatch_mode, TorchDispatchMode
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -1366,13 +1366,8 @@ def test_inplace_view(func, input, rs, input_size, input_strides):
 # A mode that when enabled runs correctness checks to ensure
 # that operators have expected tags based on their input and
 # ouput tensor properties
-class TestTagsMode(torch.Tensor):
-    @staticmethod
-    def __new__(cls, elem):
-        raise RuntimeError("this mode mixin cannot actually be instantiated")
-
-    @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+class TestTagsMode(TorchDispatchMode):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if isinstance(args[0], torch.Tensor):
             old_size = args[0].size()
             old_stride = args[0].stride()
@@ -1394,7 +1389,7 @@ class TestTags(TestCase):
             if isinstance(input, torch.Tensor):
                 old_size = input.size()
                 old_stride = input.stride()
-                with enable_torch_dispatch_mode(TestTagsMode):
+                with push_torch_dispatch_mode(TestTagsMode):
                     rs = op(input, *sample.args, **sample.kwargs)
                 # TODO: add test for aliases: https://github.com/pytorch/pytorch/issues/78761
                 aten_name = op.aten_name if op.aten_name is not None else op.name
