@@ -35,7 +35,8 @@ class TestPythonRegistration(TestCase):
         # RuntimeError: impl("aten::neg", ...):
         # Explicitly provided namespace (aten) in operator name does not match ...
         with self.assertRaisesRegex(RuntimeError, "operator name does not match namespace"):
-            my_lib3 = Library("foo", "IMPL")
+            my_lib3 = Library("foo", "DEF")
+            my_lib3.define("neg(Tensor self) -> Tensor")
             my_lib3.impl(torch.ops.aten.neg.default, my_neg, "AutogradCPU")
             del my_lib3
 
@@ -64,6 +65,11 @@ class TestPythonRegistration(TestCase):
         # Validate that the old behavior is restored for neg and mul
         self.assertFalse(torch.neg(x).is_neg())
         self.assertTrue(torch.mul(x, y)._is_zerotensor())
+
+    def test_error_if_fn_not_callable(self):
+        with self.assertRaisesRegex(TypeError, "Input function is required to be a callable"):
+            my_lib = Library("aten", "IMPL")
+            my_lib.impl(torch.ops.aten.neg.default, [], "AutogradCPU")
 
     def test_override_cpu_sum(self) -> None:
         # Example 1
