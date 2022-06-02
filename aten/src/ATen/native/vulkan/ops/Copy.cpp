@@ -1,5 +1,6 @@
 #include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/quantized/cpu/quant_utils.h>
 
 namespace at {
 namespace native {
@@ -45,7 +46,6 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
       else {
         api::Command::Buffer& command_buffer = command_pool.stream(); // Don't collect the timestamp since the command buffer doesn't record anything
         const Tensor cpu_src = src.device().is_cpu() ? src : src.cpu();
-
         // Requesting write-only host access to the tensor never triggers a sync
         // as the contents will be overwritten regardless.  Having said that,
         // appropriate barriers are inserted automatically if WAR or WAW hazards
