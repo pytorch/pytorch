@@ -1,10 +1,3 @@
-load(
-    ":ufunc_defs.bzl",
-    "aten_ufunc_generated_cpu_kernel_sources",
-    "aten_ufunc_generated_cpu_sources",
-    "aten_ufunc_generated_cuda_sources",
-)
-
 def define_targets(rules):
     rules.cc_library(
         name = "caffe2_serialize",
@@ -29,66 +22,13 @@ def define_targets(rules):
         ],
     )
 
-    #
-    # ATen generated code
-    # You need to keep this is sync with the files written out
-    # by gen.py (in the cmake build system, we track generated files
-    # via generated_cpp.txt and generated_cpp.txt-cuda
-    #
-    # Sure would be nice to use gen.py to create this list dynamically
-    # instead of hardcoding, no? Well, we can't, as discussed in this
-    # thread:
-    # https://fb.facebook.com/groups/askbuck/permalink/1924258337622772/
-
-    gen_aten_srcs = [
-        "aten/src/ATen/native/native_functions.yaml",
-        "aten/src/ATen/native/tags.yaml",
-    ] + rules.glob(["aten/src/ATen/templates/*"])
-
-    gen_aten_cmd = " ".join([
-        "$(location //torchgen:gen)",
-        "--install_dir=$(RULEDIR)",
-        "--source-path aten/src/ATen",
-    ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []))
-
-    gen_aten_outs_cuda = (
-        GENERATED_H_CUDA + GENERATED_CPP_CUDA +
-        aten_ufunc_generated_cuda_sources()
-    )
-
-    gen_aten_outs = (
-        GENERATED_H + GENERATED_H_CORE +
-        GENERATED_CPP + GENERATED_CPP_CORE +
-        aten_ufunc_generated_cpu_sources() +
-        aten_ufunc_generated_cpu_kernel_sources() + [
-            "Declarations.yaml",
-        ] + gen_aten_outs_cuda
-    )
-
-    rules.genrule(
-        name = "gen_aten",
-        srcs = gen_aten_srcs,
-        tools = ["//torchgen:gen"],
-        outs = gen_aten_outs,
-        cmd = gen_aten_cmd,
-    )
-
-    rules.genrule(
-        name = "gen_aten_hip",
-        srcs = gen_aten_srcs,
-        tools = ["//torchgen:gen"],
-        outs = gen_aten_outs_cuda,
-        cmd = gen_aten_cmd + " --rocm",
-        features = ["-create_bazel_outputs"],
-        tags = ["-bazel"],
-    )
-
     rules.genrule(
         name = "generate-code",
         srcs = [
             ":DispatchKeyNativeFunctions.cpp",
             ":DispatchKeyNativeFunctions.h",
             ":LazyIr.h",
+            ":LazyNonNativeIr.h",
             ":RegisterDispatchKey.cpp",
             ":native_functions.yaml",
             ":shape_inference.h",
@@ -168,14 +108,6 @@ GENERATED_H_CUDA = [
     "CUDAFunctions_inl.h",
 ]
 
-GENERATED_CPP_CUDA = [
-    "RegisterCUDA.cpp",
-    "RegisterNestedTensorCUDA.cpp",
-    "RegisterSparseCUDA.cpp",
-    "RegisterSparseCsrCUDA.cpp",
-    "RegisterQuantizedCUDA.cpp",
-]
-
 GENERATED_CPP = [
     "Functions.cpp",
     "RegisterBackendSelect.cpp",
@@ -232,6 +164,7 @@ GENERATED_TESTING_PY = [
 
 GENERATED_LAZY_H = [
     "torch/csrc/lazy/generated/LazyIr.h",
+    "torch/csrc/lazy/generated/LazyNonNativeIr.h",
     "torch/csrc/lazy/generated/LazyNativeFunctions.h",
 ]
 
