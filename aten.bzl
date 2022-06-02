@@ -1,6 +1,6 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@rules_cc//cc:defs.bzl", "cc_library")
-load("//:tools/ufunc_defs.bzl", "aten_ufunc_headers")
+load(":build_variables.bzl", "aten_ufunc_headers")
 
 CPU_CAPABILITY_NAMES = ["DEFAULT", "AVX2"]
 CAPABILITY_COMPILER_FLAGS = {
