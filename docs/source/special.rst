@@ -122,6 +122,12 @@ Polygamma Functions
 Orthogonal Polynomials
 ----------------------
 
+An orthogonal polynomial is a family of polynomials such that any two different
+polynomials in a sequence are orthogonal to each under some inner product.
+PyTorch provides the most common orthogonal polynomials: Hermite (both physicist
+and probabilist standardizations), Laguerre, and Jacobi (including Chebyshev and
+Legendre).
+
 Chebyshev Polynomials
 ^^^^^^^^^^^^^^^^^^^^^
 
