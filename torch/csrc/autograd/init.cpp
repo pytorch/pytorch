@@ -281,7 +281,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
             })
         .def_property_readonly(
             "parent", [](const Result& r) { return r.parent_.lock(); })
-        .def_readonly("children", &Result::children_);
+        .def_readonly("children", &Result::children_)
+        .def_readonly("correlation_id", &Result::correlationID)
+        .def_readonly("start_time_ns", &Result::start_time_ns_)
+        .def_readonly("end_time_ns", &Result::endTimeNS);
   }
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
