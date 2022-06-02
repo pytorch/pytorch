@@ -107,6 +107,9 @@ namespace {
 void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::TensorBase& self_base, uint64_t level, bool is_inplace_op) {
   TORCH_CHECK(!new_grad_base._fw_grad(level).defined(), "Setting a forward grad that "
               "itself has a forward gradient at the same level", level, " is not supported.");
+  TORCH_INTERNAL_ASSERT((new_grad_base.is_floating_point() || new_grad_base.is_complex()) &&
+                        (self_base.is_floating_point() || self_base.is_complex()),
+                        "Expected both tensor and its forward grad to be floating point or complex");
   // Lazy initialization
   {
     std::lock_guard<std::mutex> lock(mutex_);
