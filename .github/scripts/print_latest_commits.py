@@ -36,10 +36,10 @@ def print_latest_commits(minutes: int = 30) -> None:
     results = qlambda.execute(parameters=params)
 
     for commit in commits:
-        print(commit)
-        print_commit_status_batch(commit, results)
+        print_commit_status(commit, results)
 
-def print_commit_status_batch(commit, results) -> None:
+def print_commit_status(commit, results) -> None:
+    print(commit)
     for check in results['results']:
         if check['sha'] == commit:
             print(f"\t{check['conclusion']:>10}: {check['name']}")
