@@ -2760,6 +2760,15 @@
 - name: special_airy_ai(Tensor self) -> Tensor
   self: non_differentiable
 
+- name: special_airy_bi(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_airy_derivative_ai(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_airy_derivative_bi(Tensor self) -> Tensor
+  self: non_differentiable
+
 - name: special_bessel_j0(Tensor self) -> Tensor
   self: non_differentiable
 
@@ -2832,4 +2841,28 @@
   self: non_differentiable
 
 - name: special_modified_bessel_k1(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: scaled_modified_bessel_i0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: scaled_modified_bessel_i1(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: scaled_modified_bessel_k0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: scaled_modified_bessel_k1(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: spherical_bessel_j0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: spherical_bessel_j1(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: spherical_bessel_y0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: spherical_bessel_y1(Tensor self) -> Tensor
   self: non_differentiable
