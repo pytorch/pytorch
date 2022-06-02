@@ -90,8 +90,10 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     MPSGraphCache* cache_ = MPSGraphCache::getInstance();
     MPSStream* stream = getCurrentMPSStream();
 
+    bool start_less_end = (start.to<double>() <= end.to<double>());
+
     @autoreleasepool {
-      string key = "linspace_out_mps:" + getTensorsStringKey({result}) + ":" + to_string(steps);
+      string key = "linspace_out_mps:" + getTensorsStringKey({result}) + ":" + to_string(steps) + to_string(start_less_end);
       CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
       if(!cachedGraph) {
@@ -121,7 +123,7 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
             MPSGraphTensor* outputTensor = [mpsGraph additionWithPrimaryTensor:scaledCoords
                                                                secondaryTensor:startTensor
                                                                           name:nil];
-            if(start.to<double>() <= end.to<double>()) {
+            if(start_less_end) {
               outputTensor = [mpsGraph clampWithTensor:outputTensor
                                         minValueTensor:startTensor
                                         maxValueTensor:endTensor
