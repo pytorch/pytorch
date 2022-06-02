@@ -426,7 +426,7 @@ ONNX operators that represent the function's behavior in ONNX. For example::
             return input.clamp(min=0)
 
         @staticmethod
-        def symbolic(g: torch._C.graph, input: torch._C.Value) -> torch._C.Value:
+        def symbolic(g: torch._C.Graph, input: torch._C.Value) -> torch._C.Value:
             return g.op("Clip", input, g.op("Constant", value_t=torch.tensor(0, dtype=torch.float)))
 
 PythonOp Symbolic
