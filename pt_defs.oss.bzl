@@ -419,7 +419,6 @@ def build_aten_cpu(name, srcs, deps = []):
             ":generated_aten_headers_cpu",
             ":jit_core_headers",
             ":pthreadpool",
-            ":th_header",
             "//third_party:ruy_lib",
         ],
     )
