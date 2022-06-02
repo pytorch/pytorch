@@ -2066,9 +2066,6 @@ real(input) -> Tensor
 Returns a new tensor containing real values of the :attr:`self` tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
 
-.. warning::
-    :func:`real` is only supported for tensors with complex dtypes.
-
 Args:
     {input}
 
