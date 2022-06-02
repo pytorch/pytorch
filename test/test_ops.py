@@ -1359,6 +1359,7 @@ def test_inplace_view(func, input, rs, input_size, input_strides):
         if (unequal_size or unequal_strides):
             if isinstance(func, torch._ops.OpOverloadPacket):
                 func = func.default
+            # Reference: https://github.com/pytorch/pytorch/issues/78759
             if func is not torch.ops.aten.resize_.default:
                 # TODO: use self.assertIn when we have separate tests for each tag
                 assert torch.Tag.inplace_view in func.tags
@@ -1398,7 +1399,7 @@ class TestTags(TestCase):
                 old_stride = input.stride()
                 with enable_torch_dispatch_mode(TestTagsMode):
                     rs = op(input, *sample.args, **sample.kwargs)
-                # TODO: add test for aliases
+                # TODO: add test for aliases: https://github.com/pytorch/pytorch/issues/78761
                 aten_name = op.aten_name if op.aten_name is not None else op.name
                 opoverloadpacket = getattr(torch.ops.aten, aten_name, None)
                 test_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
