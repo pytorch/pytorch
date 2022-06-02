@@ -251,7 +251,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
-    "test_type_hints",
     "test_openmp",
 ]
 
