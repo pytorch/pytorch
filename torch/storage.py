@@ -63,12 +63,18 @@ class _StorageBase(object):
     @classmethod
     def _new_shared_cuda(cls, *args, **kwargs) -> T: ...  # noqa: E704
     def _shared_incref(self, *args, **kwargs): ...  # noqa: E704
+    @classmethod
+    def _free_weak_ref(cls, *args, **kwargs): ...  # noqa: E704
 
     def __str__(self):
-        data_str = ' ' + '\n '.join(str(self[i]) for i in range(self.size()))
-        return data_str + (
-            f'\n[{torch.typename(self)}(device={self.device}) '
+        info_str = (
+            f'[{torch.typename(self)}(device={self.device}) '
             f'of size {len(self)}]')
+        if self.device.type == 'meta':
+            return '...\n' + info_str
+        else:
+            data_str = ' ' + '\n '.join(str(self[i]) for i in range(self.size()))
+            return data_str + '\n' + info_str
 
     def __repr__(self):
         return str(self)
@@ -209,7 +215,10 @@ class _StorageBase(object):
 
 
 class _UntypedStorage(torch._C.StorageBase, _StorageBase):
-    pass
+    def __getitem__(self, *args, **kwargs):
+        if self.device.type == 'meta':
+            raise NotImplementedError("Not available for 'meta' device type")
+        return super().__getitem__(*args, **kwargs)
 
 
 def _load_from_bytes(b):
@@ -470,6 +479,8 @@ class _TypedStorage:
     def __setitem__(self, idx, value):
         if not isinstance(idx, (int, slice)):
             raise RuntimeError(f"can't index a {type(self)} with {type(idx)}")
+        if torch.is_storage(value):
+            raise RuntimeError(f'cannot set item with value type {type(value)}')
         if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
             interpret_dtypes = {
                 torch.quint8: torch.uint8,
@@ -488,6 +499,9 @@ class _TypedStorage:
         tmp_tensor[idx] = value
 
     def __getitem__(self, idx):
+        if self.device.type == 'meta':
+            raise NotImplementedError("Not available for 'meta' device type")
+
         # NOTE: Before _TypedStorage existed, indexing with a slice used to be
         # possible for <type>Storage objects. However, it would return
         # a storage view, which would be a hassle to implement in _TypedStorage,
@@ -545,10 +559,14 @@ class _TypedStorage:
         return self._storage.get_device()
 
     def __str__(self):
-        data_str = ' ' + '\n '.join(str(self[i]) for i in range(self.size()))
-        return data_str + (
-            f'\n[{torch.typename(self)}(dtype={self.dtype}, '
+        info_str = (
+            f'[{torch.typename(self)}(dtype={self.dtype}, '
             f'device={self.device}) of size {len(self)}]')
+        if self.device.type == 'meta':
+            return '...\n' + info_str
+        else:
+            data_str = ' ' + '\n '.join(str(self[i]) for i in range(self.size()))
+            return data_str + '\n' + info_str
 
     def __repr__(self):
         return str(self)
@@ -633,7 +651,7 @@ class _TypedStorage:
 
     @classmethod
     def _free_weak_ref(cls, *args, **kwargs):
-        return eval(cls.__module__)._UntypedStorage._free_weak_ref(*args, **kwargs)
+        return _UntypedStorage._free_weak_ref(*args, **kwargs)
 
     def _weak_ref(self, *args, **kwargs):
         return self._storage._weak_ref(*args, **kwargs)
