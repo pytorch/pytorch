@@ -90,8 +90,10 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     MPSGraphCache* cache_ = MPSGraphCache::getInstance();
     MPSStream* stream = getCurrentMPSStream();
 
+    bool start_less_end = (start.to<double>() <= end.to<double>());
+
     @autoreleasepool {
-      string key = "linspace_out_mps:" + getTensorsStringKey({result}) + ":" + to_string(steps);
+      string key = "linspace_out_mps:" + getTensorsStringKey({result}) + ":" + to_string(steps) + to_string(start_less_end);
       CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
       if(!cachedGraph) {
@@ -121,21 +123,17 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
             MPSGraphTensor* outputTensor = [mpsGraph additionWithPrimaryTensor:scaledCoords
                                                                secondaryTensor:startTensor
                                                                           name:nil];
-            MPSGraphTensor* predicateTensor = [mpsGraph lessThanOrEqualToWithPrimaryTensor:startTensor
-                                                                           secondaryTensor:endTensor
-                                                                                      name:nil];
-            MPSGraphTensor* startEndClampTensor = [mpsGraph clampWithTensor:outputTensor
-                                                             minValueTensor:startTensor
-                                                             maxValueTensor:endTensor
-                                                                       name:nil];
-            MPSGraphTensor* endStartClampTensor = [mpsGraph clampWithTensor:outputTensor
-                                                             minValueTensor:endTensor
-                                                             maxValueTensor:startTensor
-                                                                       name:nil];
-            outputTensor = [mpsGraph selectWithPredicateTensor:predicateTensor
-                                           truePredicateTensor:startEndClampTensor
-                                          falsePredicateTensor:endStartClampTensor
-                                                          name:nil];
+            if(start_less_end) {
+              outputTensor = [mpsGraph clampWithTensor:outputTensor
+                                        minValueTensor:startTensor
+                                        maxValueTensor:endTensor
+                                                  name:nil];
+            } else {
+              outputTensor = [mpsGraph clampWithTensor:outputTensor
+                                        minValueTensor:endTensor
+                                        maxValueTensor:startTensor
+                                                  name:nil];
+            }
 
             if(getMPSDataType(result.scalar_type()) != MPSDataTypeFloat32) {
               outputTensor = [mpsGraph castTensor:outputTensor toType:getMPSDataType(result.scalar_type()) name:@"output"];
