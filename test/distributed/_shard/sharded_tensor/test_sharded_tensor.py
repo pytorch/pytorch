@@ -403,6 +403,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         st = sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
         st_metadata = st.metadata()
         self.assertEqual(torch.Size([10, 20]), st_metadata.size)
+        self.assertEqual(torch.Size([10, 20]), st.size())
         self.assertEqual(torch.float, st.dtype)
         self.assertEqual(torch.strided, st.layout)
         self.assertEqual(False, st.requires_grad)
@@ -431,7 +432,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         # test read only properties, they're read only as we can't simply change
         # the global metadata without changing the underlying shard's properties
-        with self.assertRaisesRegex(AttributeError, "can't set attribute"):
+        with self.assertRaisesRegex(RuntimeError, "torch function '__set__'"):
             st.requires_grad = True
 
     @with_comms
@@ -951,7 +952,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         with self.assertRaisesRegex(ValueError, 'Only torch.strided layout is currently supported'):
-            sharded_tensor.empty(spec, 10, 20, layout=torch.sparse)
+            sharded_tensor.empty(spec, 10, 20, layout=torch.sparse_coo)
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         with self.assertRaisesRegex(ValueError, 'Only torch.contiguous_format memory_format is currently supported'):
@@ -1068,11 +1069,19 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
         self.assertEqual(st.size(1), 20)
 
+        # Test with negative indexed size
+        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        self.assertEqual(st.size(-1), 20)
+
+        # Test with dim/ndim
+        self.assertEqual(st.dim(), 2)
+        self.assertEqual(st.ndim, 2)
+
         # Test with invalid input
         st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
-        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[-2, 2\\)'):
+        with self.assertRaisesRegex(IndexError, 'Dimension out of range'):
             st.size(-3)
-        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[-2, 2\\)'):
+        with self.assertRaisesRegex(IndexError, 'Dimension out of range'):
             st.size(2)
 
         with self.assertRaises(TypeError):
@@ -1536,7 +1545,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         # CPU sharded tensor should return the same instance (no copy)
         st_cpu = sharded_tensor.zeros(cpu_spec, h, w, process_group=gloo_pg)
         new_st_cpu = st_cpu.cpu()
-        self.assertEqual(st_cpu, new_st_cpu)
+        self.assertTrue(st_cpu is new_st_cpu)
 
         # GPU sharded tensor to cpu
         st = sharded_tensor.zeros(spec, h, w)
@@ -1544,7 +1553,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         spec_before_move = st.sharding_spec()
         new_st = st.cpu(process_group=gloo_pg)
         # return a copy of orginal st
-        self.assertNotEqual(st, new_st)
+        self.assertFalse(st is new_st)
         # check the spec is still ChunkShardingSpec
         spec_after_move = new_st.sharding_spec()
         self.assertIsInstance(spec_after_move, ChunkShardingSpec)
@@ -1577,7 +1586,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         st = sharded_tensor.zeros(mixed_spec, h, w, process_group=gloo_pg)
         new_st = st.cpu()
         # return a copy of orginal st
-        self.assertNotEqual(st, new_st)
+        self.assertFalse(st is new_st)
         # check the spec is still ChunkShardingSpec
         spec_after_move = new_st.sharding_spec()
         self.assertIsInstance(spec_after_move, ChunkShardingSpec)
