@@ -768,7 +768,7 @@ Example::
 
 add_docstr(torch.as_strided,
            r"""
-as_strided(input, size, stride, storage_offset=0) -> Tensor
+as_strided(input, size, stride, storage_offset=None) -> Tensor
 
 Create a view of an existing `torch.Tensor` :attr:`input` with specified
 :attr:`size`, :attr:`stride` and :attr:`storage_offset`.
@@ -786,7 +786,8 @@ Args:
     {input}
     size (tuple or ints): the shape of the output tensor
     stride (tuple or ints): the stride of the output tensor
-    storage_offset (int, optional): the offset in the underlying storage of the output tensor
+    storage_offset (int, optional): the offset in the underlying storage of the output tensor.
+    If ``None``, the storage_offset of the output tensor will match the input tensor.
 
 Example::
 

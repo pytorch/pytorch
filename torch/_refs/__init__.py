@@ -172,8 +172,10 @@ __all__ = [
     #
     "as_strided",
     "broadcast_tensors",
+    "broadcast_to",
     "cat",
     "chunk",
+    "column_stack",
     "flatten",
     "flip",
     "fliplr",
@@ -1565,6 +1567,12 @@ def broadcast_tensors(*tensors) -> List[TensorLikeType]:
     return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
 
 
+def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
+    start = len(size) - len(a.shape)
+    dims = tuple(range(start, len(a.shape) + start))
+    return prims.broadcast_in_dim(a, size, dims)
+
+
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("tensors",),
@@ -1597,6 +1605,15 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
         return empty((0,), dtype=t.dtype, device=t.device, requires_grad=requires_grad)
 
     return prims.cat(filtered, dim)
+
+
+@out_wrapper
+def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
+    aligned_tensors = tuple(
+        x if x.ndim > 1 else prims.expand_dims(x, list(range(x.ndim, 2)))
+        for x in tensors
+    )
+    return cat(aligned_tensors, 1)
 
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
