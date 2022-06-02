@@ -19084,6 +19084,62 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
+    UnaryUfuncInfo(
+        'special.bessel_j0',
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float32: 1e-04,
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.j0 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.bessel_j1',
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float32: 1e-04,
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.j1 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.bessel_y0',
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float32: 1e-04,
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.y0 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.bessel_y1',
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float32: 1e-04,
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.y1 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
     BinaryUfuncInfo(
         'special.chebyshev_polynomial_t',
         dtypes=all_types_and(torch.bool),
@@ -19137,6 +19193,62 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
         supports_one_python_scalar=True,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.modified_bessel_i0',
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float32: 1e-03,
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.i0 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.modified_bessel_i1',
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float32: 1e-03,
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.i1 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.modified_bessel_k0',
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float32: 1e-03,
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.k0 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.modified_bessel_k1',
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float32: 1e-03,
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.k1 if TEST_SCIPY else _NOTHING,
         supports_autograd=False,
     ),
 ]
