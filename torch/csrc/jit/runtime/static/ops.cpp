@@ -1049,12 +1049,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
   };
 });
 
-// TODO(T98923825): Uncomment this once the bug in this gets fixed.
-/*
 REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
-          "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) ->
-Tensor"))) { LogAndDumpSchema(n); return nullptr;
+          "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) ->Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
   }
   return [](ProcessedNode* p_node) {
     const auto& src = p_node->Input(0).toTensor();
@@ -1062,10 +1061,20 @@ Tensor"))) { LogAndDumpSchema(n); return nullptr;
         p_node->Input(1).toOptional<c10::MemoryFormat>();
     auto memory_format =
         optional_memory_format.value_or(c10::MemoryFormat::Preserve);
-
+    /*
+      disable out_variant of clone for case with stride = 0 and
+      memory formats other than preserve. Perform dynamic allocation
+      instead of memory reuse for simpler implementation. We could,
+      in principle, figure out copy of strides.
+    */
+    if ((at::has_internal_overlap(src.unsafeGetTensorImpl()) ==
+         at::MemOverlap::YES) ||
+        (memory_format != c10::MemoryFormat::Preserve)) {
+      p_node->Output(0) = at::native::clone(src, memory_format);
+      return;
+    }
     if (p_node->Output(0).isNone()) {
-      if (memory_format == c10::MemoryFormat::Preserve &&
-          src.is_non_overlapping_and_dense()) {
+      if (src.is_non_overlapping_and_dense()) {
         // Copy all strides
         p_node->Output(0) =
             at::empty_strided(src.sizes(), src.strides(), src.options());
@@ -1080,7 +1089,6 @@ Tensor"))) { LogAndDumpSchema(n); return nullptr;
     at::native::copy_(out_t, src, false);
   };
 });
-*/
 
 REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_byte_rowwise_offsets,
