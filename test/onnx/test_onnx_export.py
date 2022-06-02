@@ -5,6 +5,7 @@ import io
 import itertools
 import os
 import sys
+import tempfile
 import unittest.mock
 from typing import Callable, Iterable, Optional, Tuple, Union
 
@@ -141,3 +142,73 @@ class TestONNXExport(TestCase):
             return src.to(device="cpu")
 
         self._helper_test_to_(cast_device_cpu_string)
+
+    def test_embedding_model_with_external_data(self):
+        class LargeModel(torch.nn.Module):
+            def __init__(self):
+                super(LargeModel, self).__init__()
+                dim = 15
+                n = 4 * 100
+                self.emb = torch.nn.Embedding(n, dim)
+                self.lin1 = torch.nn.Linear(dim, 1)
+                self.seq = torch.nn.Sequential(
+                    self.emb,
+                    self.lin1,
+                )
+
+            def forward(self, input):
+                return self.seq(input)
+
+        model = LargeModel()
+        x = torch.tensor([2], dtype=torch.long)
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            model_file_name = os.path.join(tmpdirname, "model.onnx")
+            torch.onnx.export(model, x, model_file_name)
+
+    def test_large_model_with_external_data(self):
+        class LargeModel(torch.nn.Module):
+            def __init__(self):
+                super(LargeModel, self).__init__()
+                dim = 5
+                n = 40 * 4 * 10**6
+                self.emb = torch.nn.Embedding(n, dim)
+                self.lin1 = torch.nn.Linear(dim, 1)
+                self.seq = torch.nn.Sequential(
+                    self.emb,
+                    self.lin1,
+                )
+
+            def forward(self, input):
+                return self.seq(input)
+
+        model = LargeModel()
+        x = torch.tensor([2], dtype=torch.long)
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            model_file_name = os.path.join(tmpdirname, "model.onnx")
+            torch.onnx.export(model, x, model_file_name)
+
+    def test_large_model_with_non_str_file(self):
+        class LargeModel(torch.nn.Module):
+            def __init__(self):
+                super(LargeModel, self).__init__()
+                dim = 5
+                n = 40 * 4 * 10**6
+                self.emb = torch.nn.Embedding(n, dim)
+                self.lin1 = torch.nn.Linear(dim, 1)
+                self.seq = torch.nn.Sequential(
+                    self.emb,
+                    self.lin1,
+                )
+
+            def forward(self, input):
+                return self.seq(input)
+
+        x = torch.tensor([2], dtype=torch.long)
+        f = io.BytesIO()
+        err_msg = (
+            "The serialized model is larger than the 2GiB limit imposed by the protobuf library. "
+            "Therefore the output file must be a file path, so that the ONNX external data can be written to "
+            "the same directory. Please specify the output file name."
+        )
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            torch.onnx.export(LargeModel(), x, f)

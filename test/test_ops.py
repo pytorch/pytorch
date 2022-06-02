@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     noncontiguous_like,
     TEST_WITH_ASAN,
+    TEST_WITH_UBSAN,
     IS_WINDOWS,
     IS_FBCODE,
     first_sample,
@@ -370,7 +371,8 @@ class TestCommon(TestCase):
                 prims.utils.compare_tensor_meta(result, meta_result)
             elif isinstance(result, Sequence):
                 for a, b in zip(result, meta_result):
-                    prims.utils.compare_tensor_meta(a, b)
+                    if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
+                        prims.utils.compare_tensor_meta(a, b)
 
     def _ref_test_helper(self, ctx, device, dtype, op):
         if dtype is torch.chalf:
@@ -384,9 +386,10 @@ class TestCommon(TestCase):
             torch_result = op.torch_opinfo(sample.input, *sample.args, **sample.kwargs)
 
             for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(torch_result)[0]):
-                prims.utils.compare_tensor_meta(a, b)
-                if getattr(op, 'validate_view_consistency', True):
-                    self.assertEqual(a._is_view(), b._is_view())
+                if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
+                    prims.utils.compare_tensor_meta(a, b)
+                    if getattr(op, 'validate_view_consistency', True):
+                        self.assertEqual(a._is_view(), b._is_view())
 
             # Computes the dtype the more precise computatino would occur in
             precise_dtype = torch.bool
@@ -1105,6 +1108,31 @@ class TestCommon(TestCase):
                 **transformed_sample.kwargs,
             )
             self.assertEqual(actual, expected, exact_dtype=False)
+
+    @ops(op_db, allowed_dtypes=(torch.bool,))
+    @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
+    def test_non_standard_bool_values(self, device, dtype, op):
+        # Test boolean values other than 0x00 and 0x01 (gh-54789)
+        def convert_boolean_tensors(x):
+            if not isinstance(x, torch.Tensor) or x.dtype != torch.bool:
+                return x
+
+            # Map False -> 0 and True -> Random value in [2, 255]
+            true_vals = torch.randint(2, 255, x.shape, dtype=torch.uint8, device=x.device)
+            false_vals = torch.zeros((), dtype=torch.uint8, device=x.device)
+            x_int = torch.where(x, true_vals, false_vals)
+
+            ret = x_int.view(torch.bool)
+            self.assertEqual(ret, x)
+            return ret
+
+        for sample in op.sample_inputs(device, dtype):
+            expect = op(sample.input, *sample.args, **sample.kwargs)
+
+            transformed = sample.transform(convert_boolean_tensors)
+            actual = op(transformed.input, *transformed.args, **transformed.kwargs)
+
+            self.assertEqual(expect, actual)
 
 
 class TestCompositeCompliance(TestCase):
