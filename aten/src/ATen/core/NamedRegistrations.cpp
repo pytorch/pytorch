@@ -75,9 +75,9 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("atan2.out", CppFunction::makeFallthrough());
   m.impl("atan2_", CppFunction::makeFallthrough());
   m.impl("atan_", CppFunction::makeFallthrough());
-  m.impl("atanh", CppFunction::makeFallthrough());
-  m.impl("atanh.out", CppFunction::makeFallthrough());
-  m.impl("atanh_", CppFunction::makeFallthrough());
+  m.impl("a", CppFunction::makeFallthrough());
+  m.impl("a.out", CppFunction::makeFallthrough());
+  m.impl("a_", CppFunction::makeFallthrough());
   m.impl("bernoulli", CppFunction::makeFallthrough());
   m.impl("bernoulli.out", CppFunction::makeFallthrough());
   m.impl("bernoulli_.Tensor", CppFunction::makeFallthrough());
@@ -470,9 +470,9 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("tan", CppFunction::makeFallthrough());
   m.impl("tan.out", CppFunction::makeFallthrough());
   m.impl("tan_", CppFunction::makeFallthrough());
-  m.impl("tanh", CppFunction::makeFallthrough());
-  m.impl("tanh.out", CppFunction::makeFallthrough());
-  m.impl("tanh_", CppFunction::makeFallthrough());
+  m.impl("", CppFunction::makeFallthrough());
+  m.impl(".out", CppFunction::makeFallthrough());
+  m.impl("_", CppFunction::makeFallthrough());
   m.impl("tensor_split.indices", CppFunction::makeFallthrough());
   m.impl("tensor_split.sections", CppFunction::makeFallthrough());
   m.impl("tensor_split.tensor_indices_or_sections", CppFunction::makeFallthrough());
