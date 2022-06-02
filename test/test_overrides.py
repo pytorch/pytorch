@@ -1199,7 +1199,7 @@ class TestTorchFunctionMode(TestCase):
         class A(TorchFunctionMode):
             pass
         with self.assertRaisesRegex(ValueError, 'instance of TorchFunctionMode'):
-            with torch.overrides.push_torch_function_mode(A(inner=None)):
+            with torch.overrides.push_torch_function_mode(A()):
                 pass
 
     def test_push_mode_returns_unrelated(self):
@@ -1207,14 +1207,11 @@ class TestTorchFunctionMode(TestCase):
             with torch.overrides.push_torch_function_mode(lambda *, inner: None):
                 pass
 
-    def test_missing_inner_mode_ctor(self):
-        self.assertRaisesRegex(TypeError, 'push_torch_function_mode', lambda: TorchFunctionMode())
-
     def test_enable_torch_function_mode_trivial(self):
         class A(TorchFunctionMode):
             def __torch_function__(self, *args, **kwargs):
                 return -40
-        a = A(inner=None)
+        a = A()
         with torch.overrides.enable_torch_function_mode(a):
             with torch.overrides.enable_torch_function_mode(a):
                 self.assertEqual(bar(None), -40)
@@ -1226,8 +1223,8 @@ class TestTorchFunctionMode(TestCase):
 
             def __torch_function__(self, *args, **kwargs):
                 return self.val
-        a1 = A(-40, inner=None)
-        a2 = A(-41, inner=None)
+        a1 = A(-40)
+        a2 = A(-41)
         with torch.overrides.enable_torch_function_mode(a1):
             with torch.overrides.enable_torch_function_mode(a2, replace=a1):
                 self.assertEqual(bar(None), -41)
@@ -1239,11 +1236,75 @@ class TestTorchFunctionMode(TestCase):
 
             def __torch_function__(self, *args, **kwargs):
                 return self.val
-        a1 = A(-40, inner=None)
-        a2 = A(-41, inner=None)
+        a1 = A(-40)
+        a2 = A(-41)
         with torch.overrides.enable_torch_function_mode(a1):
             with torch.overrides.enable_torch_function_mode(a2, ignore_preexisting=True):
                 self.assertEqual(bar(None), -41)
+
+    def test_ctor_no_inner(self):
+        class A(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                return torch.zeros([])
+
+        with torch.overrides.enable_torch_function_mode(A()):
+            x = torch.randn((3, 4))
+
+        self.assertEqual(x, torch.zeros([]))
+
+    def test_with_mode(self):
+        class ErrorA(RuntimeError):
+            pass
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                raise ErrorA()
+
+        with self.assertRaises(ErrorA):
+            with A():
+                torch.empty([])
+
+    def test_with_mode_created_separately(self):
+        class ErrorA(RuntimeError):
+            pass
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                raise ErrorA()
+
+        x = A()
+        with self.assertRaises(ErrorA):
+            with x:
+                torch.empty([])
+
+    def test_with_nested_modes(self):
+        out = []
+
+        class A(TorchFunctionMode):
+            def __init__(self, msg):
+                self.msg = msg
+
+            def __torch_function__(self, func, _, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                out.append(self.msg)
+                return func(*args, **kwargs)
+
+        with A("layer1"):
+            with A("layer2"):
+                torch.empty([])
+
+        self.assertEquals(out, ["layer2", "layer1"])
+
+    def test_error_using_same_mode(self):
+        class A(TorchFunctionMode):
+            pass
+
+        x = A()
+        with x:
+            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode"):
+                with x:
+                    pass
 
     def test_reentrant_mode_idiom(self):
         log = []
