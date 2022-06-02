@@ -2069,16 +2069,18 @@ def hsplit(
     dim = 0 if a.ndim == 1 else 1
     if isinstance(indices_or_sections, int):
         split_size = indices_or_sections
-        msg = (
-            "torch.hsplit attempted to split along dimension "
-            + str(dim)
-            + ", but the size of the dimension "
-            + str(a.shape[dim])
-            + " is not divisible by the split_size "
-            + str(split_size)
-            + "!"
+        check(
+            (split_size != 0 and a.shape[dim] % split_size == 0),
+            lambda: (
+                "torch.hsplit attempted to split along dimension "
+                + str(dim)
+                + ", but the size of the dimension "
+                + str(a.shape[dim])
+                + " is not divisible by the split_size "
+                + str(split_size)
+                + "!"
+            ),
         )
-        check((split_size != 0 and a.shape[dim] % split_size == 0), lambda: msg)
         return tensor_split(a, split_size, dim)
     if not isinstance(indices_or_sections, (list, tuple)):
         raise TypeError(
@@ -2094,15 +2096,27 @@ def hsplit(
 def vsplit(
     a: TensorLikeType, indices_or_sections: DimsType
 ) -> Tuple[TensorLikeType, ...]:
-    msg = (
-        "torch.vsplit requires a tensor with at least 2 dimension, but got a tensor with "
-        + str(a.ndim)
-        + " dimensions!"
+    check(
+        a.ndim >= 2,
+        lambda: (
+            "torch.vsplit requires a tensor with at least 2 dimension, but got a tensor with "
+            + str(a.ndim)
+            + " dimensions!"
+        ),
     )
-    check(a.ndim >= 2, lambda: msg)
     if isinstance(indices_or_sections, int):
         split_size = indices_or_sections
-        check((split_size != 0 and a.shape[0] % split_size == 0), lambda: msg)
+        check(
+            (split_size != 0 and a.shape[0] % split_size == 0),
+            lambda: (
+                "torch.vsplit attempted to split along dimension 0 "
+                + ", but the size of the dimension "
+                + str(a.shape[0])
+                + " is not divisible by the split_size "
+                + str(split_size)
+                + "!"
+            ),
+        )
         return tensor_split(a, split_size, 0)
     if not isinstance(indices_or_sections, (list, tuple)):
         raise TypeError(
