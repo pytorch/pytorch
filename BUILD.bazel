@@ -217,7 +217,6 @@ filegroup(
             "aten/src/ATen/native/quantized/cudnn/*.cpp",
             "aten/src/ATen/native/sparse/cuda/*.cpp",
             "aten/src/ATen/native/transformers/cuda/*.cpp",
-            "aten/src/THC/*.cpp",
         ],
     ),
 )
@@ -283,9 +282,7 @@ cc_library(
         "aten/src/**/*.hpp",
         "aten/src/ATen/cuda/**/*.cuh",
         "aten/src/ATen/native/**/*.cuh",
-        "aten/src/TH/**/*.cpp",
         "aten/src/THC/*.cuh",
-        "aten/src/THC/generic/*.cu",
     ],
     ) + [
         ":aten_src_ATen_config",
