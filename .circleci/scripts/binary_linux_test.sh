@@ -76,7 +76,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg"
-  retry pip install -q future numpy protobuf typing-extensions six
+  retry pip install -q future numpy protobuf==3.19.4 typing-extensions six
 fi
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   pkg="\$(ls /final_pkgs/*-latest.zip)"
