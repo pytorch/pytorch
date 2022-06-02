@@ -14100,6 +14100,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16),
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_autograd=True,
         assert_autodiffed=False,
         supports_gradgrad=True,

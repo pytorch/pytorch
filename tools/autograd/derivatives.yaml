@@ -1933,6 +1933,8 @@
 
 - name: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   grad_output, self, weight: prelu_double_backward(grads[0], grads[1], grad_output, self, weight)
+  result0: prelu_backward_self_jvp(self_p, weight_p, weight_t, grad_output_p, grad_output_t)
+  result1: prelu_backward_weight_jvp(weight_p, self_p, self_t, grad_output_p, grad_output_t)
 
 - name: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   self: rrelu_with_noise_backward(grad, self, noise, lower, upper, training, false)

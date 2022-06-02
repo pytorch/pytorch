@@ -2532,6 +2532,56 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
   }
 }
 
+Tensor prelu_backward_self_jvp(
+    const Tensor& x,
+    const Tensor& w,
+    const Tensor& dw,
+    const Tensor& g,
+    const Tensor& dg
+) {
+  const auto ndim = x.dim();
+  auto as_nd = [ndim](const Tensor& t) {
+    std::vector<int64_t> sizes(ndim, 1), strides(ndim, 0);
+    if (ndim >= 2) {
+      sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
+      strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
+      return t.as_strided(sizes, strides);
+    }
+    return t.as_strided(sizes, strides);
+  };
+  auto w_ = as_nd(w);
+  auto dw_ = as_nd(dw);
+  return at::where(x >= 0, dg, dg * w_ + g * dw_);
+}
+
+Tensor prelu_backward_weight_jvp(
+    const Tensor& w,
+    const Tensor& x,
+    const Tensor& dx,
+    const Tensor& g,
+    const Tensor& dg
+) {
+  const auto dw_full = at::where(x >= 0, at::zeros({}, x.options()), g * dx + dg * x);
+
+  const auto ndim = x.dim();
+  std::vector<int64_t> reduction_dims;
+  reduction_dims.reserve(ndim);
+  // we always reduce over the 0th dim.
+  reduction_dims.push_back(0);
+  if (ndim >= 2) {
+    // reduce over the 1th dim if w is a 0-dim tensor
+    if (!w.dim()) {
+      reduction_dims.push_back(1);
+    }
+    // reduce over dims which are >= 2.
+    for (int64_t i = 2; i < ndim; ++i) {
+      reduction_dims.push_back(i);
+    }
+  }
+  const auto dw = dw_full.sum(reduction_dims);
+  return dw;
+}
+
 Tensor gelu_double_backward(
                 const Tensor & ggI,
                 const Tensor & gO,

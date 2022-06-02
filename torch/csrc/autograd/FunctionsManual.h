@@ -312,6 +312,20 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
     const Tensor & grad_out,
     const Tensor & input_,
     const Tensor & weight_);
+Tensor prelu_backward_self_jvp(
+    const Tensor& x,
+    const Tensor& w,
+    const Tensor& dw,
+    const Tensor& g,
+    const Tensor& dg
+);
+Tensor prelu_backward_weight_jvp(
+    const Tensor& w,
+    const Tensor& x,
+    const Tensor& dx,
+    const Tensor& g,
+    const Tensor& dg
+);
 Tensor gelu_double_backward(
     const Tensor & ggI,
     const Tensor & gO,
