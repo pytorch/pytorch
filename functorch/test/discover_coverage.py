@@ -597,6 +597,8 @@ VJP_EXEMPTIONS = {
     'nn.functional.dropout',  # not actually problem, randomness testing artifact
     'nn.functional.dropout2d',  # not actually problem, randomness testing artifact
     'nn.functional.rrelu',  # not actually problem, randomness testing artifact
+    'bernoulli',  # not actually problem, randomness testing artifact
+    'normal',  # not actually problem, randomness testing artifact
 }
 
 VMAP_EXEMPTIONS = {
@@ -862,6 +864,9 @@ opset = OperatorSet.from_top125()
 # pprint.pprint(result)
 # result = opset.query(Operator.supports_jvpvjp, (Support.NO, Support.UNKNOWN))
 # pprint.pprint(result)
+print("supports_vjp")
+result = opset.query(Operator.supports_vjp, (Support.NO, Support.UNKNOWN))
+pprint.pprint(result)
 print("supports_jvp")
 result = opset.query(Operator.supports_jvp, (Support.NO, Support.UNKNOWN))
 pprint.pprint(result)
