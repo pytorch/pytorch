@@ -74,6 +74,7 @@ class CheckpointWrapperTest(TestCase):
         inp = torch.randn(4, 10, requires_grad=True)
         for i in range(6):
             loss = model(inp).sum().backward()
+            self.assertTrue(loss.requires_grad)
             # ensure checkpointed part of model has gradients
             for j in range(3):
                 weight_lin = model.seq[j].lin.mod.weight
