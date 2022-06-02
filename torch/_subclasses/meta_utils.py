@@ -9,6 +9,7 @@ def safe_is_leaf(t):
         # inference mode can trigger this
         return False
 
+
 # This is a class for converting multiple tensors into meta tensors which
 # share the same view/storage structure.  The operation model is you allocate
 # one of these, and then call it repeatedly on all the tensors you want to
@@ -107,7 +108,11 @@ class MetaConverter:
                 # don't work
                 t.is_neg(), t.is_conj(),
                 # conjugate fallback does not support meta tensors
-                t.dtype in (torch.complex128, torch.complex64),
+                t.dtype in (torch.complex128, torch.complex64, torch.complex32),
+                t.device.type in ("lazy", "meta"),
+                # We need a way to test if a tensor is batched but there
+                # is no official APi to do it
+                # torch._C._is_batched(t),
             ]):
                 # TODO: sparse should support meta
                 # NB technically to('meta') does work but our logging
@@ -116,16 +121,6 @@ class MetaConverter:
                 # the to conversion isn't really right anyhow.
                 self.miss += 1
                 return t
-            elif any([
-                t.device.type in ("lazy", "meta"), t.is_complex(),
-                # We need a way to test if a tensor is batched but there
-                # is no official APi to do it
-                # torch._C._is_batched(t),
-            ]):
-                # TODO: this stuff should support storage
-                # (well, maybe not batched)
-                self.hit += 1
-                return t.to("meta")
             else:
                 self.hit += 1
                 r = self.meta_tensor(t)
