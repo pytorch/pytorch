@@ -257,7 +257,7 @@ auto handle_torch_function_no_python_arg_parser(
     TORCH_INTERNAL_ASSERT(args != nullptr);
     // Disable mode on the inside; this makes for a more user-friendly
     // experience if you try to, e.g., print your tensors.
-    at::optional<torch::overrides::no_torch_function_mode> tf_g;
+    at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
     at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
     if (is_torch_function) {
       tf_g.emplace();

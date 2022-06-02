@@ -24,7 +24,7 @@
 namespace at {
 namespace native {
 namespace {
-// TODO: This function is the same as that of qpool.cpp. We should refactor this into quantized directory
+// TODO: This function is the same as that of Pooling.cpp. We should refactor this into quantized directory
 // so that we don't need to duplicate the function
 void check_maxpool2d_params(
     IntArrayRef kernel_size,
@@ -189,7 +189,6 @@ Tensor quantized_max_pool2d_cudnn(
       stride[0], // vertical stride
       stride[1])); // horizontal stride
 
-  auto dataType = getCudnnDataType(input);
   float one{1};
   float zero{0.0};
   TensorDescriptor xDesc;

@@ -11,7 +11,7 @@ import json
 import os
 from hashlib import sha256
 
-from trymerge import find_matching_merge_rule, gh_graphql, gh_get_team_members, GitHubPR, MergeRule
+from trymerge import find_matching_merge_rule, gh_graphql, gh_get_team_members, GitHubPR, MergeRule, MandatoryChecksMissingError
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import cast, Any, List, Optional
 from unittest import TestCase, main, mock
@@ -77,7 +77,7 @@ class TestGitHubPR(TestCase):
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_match_rules(self, mocked_gql: Any) -> None:
         "Tests that PR passes merge rules"
-        pr = GitHubPR("pytorch", "pytorch", 71759)
+        pr = GitHubPR("pytorch", "pytorch", 77700)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
 
@@ -107,6 +107,12 @@ class TestGitHubPR(TestCase):
         self.assertTrue(author is not None)
         self.assertTrue("@" in author)
         self.assertTrue(pr.get_diff_revision() is None)
+
+        # PR with multiple contributors, but creator id is not among authors
+        pr = GitHubPR("pytorch", "pytorch", 75095)
+        self.assertEqual(pr.get_pr_creator_login(), "mruberry")
+        author = pr.get_author()
+        self.assertTrue(author is not None)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_large_diff(self, mocked_gql: Any) -> None:
@@ -170,7 +176,27 @@ class TestGitHubPR(TestCase):
         """
         pr = GitHubPR("pytorch", "pytorch", 76118)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        self.assertRaisesRegex(RuntimeError, ".*has not been run.*", lambda: find_matching_merge_rule(pr, repo))
+        self.assertRaisesRegex(MandatoryChecksMissingError,
+                               ".*are pending/not yet run.*",
+                               lambda: find_matching_merge_rule(pr, repo))
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_get_author_many_reviews(self, mocked_gql: Any) -> None:
+        """ Tests that all reviews can be fetched
+        """
+        pr = GitHubPR("pytorch", "pytorch", 76123)
+        approved_by = pr.get_approved_by()
+        self.assertGreater(len(approved_by), 0)
+        assert pr._reviews is not None  # to pacify mypy
+        self.assertGreater(len(pr._reviews), 100)
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_get_checkruns_many_runs(self, mocked_gql: Any) -> None:
+        """ Tests that all checkruns can be fetched
+        """
+        pr = GitHubPR("pytorch", "pytorch", 77700)
+        conclusions = pr.get_checkrun_conclusions()
+        self.assertTrue("linux-docs / build-docs (cpp)" in conclusions.keys())
 
 
 if __name__ == "__main__":

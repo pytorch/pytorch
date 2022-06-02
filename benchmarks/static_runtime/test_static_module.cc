@@ -1698,3 +1698,69 @@ TEST(EliminateNoOpSlice, NoneStart) {
   EliminateNoOpSlice(graph);
   EXPECT_FALSE(hasNodeWithKind(graph, "aten::slice"));
 }
+
+#ifdef FBCODE_CAFFE2
+// FuseClampNaNToNum pass is disabled externally to avoid MSVC errors in CI
+TEST(FuseClampNaNToNum, FusionHappens) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        y = torch.clamp(x, min=0.0, max=1.0)
+        z = y.nan_to_num()
+        return z.clone()
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  FuseClampNaNToNum(graph);
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::clamp"));
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::nan_to_num"));
+  EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::clamp_nan_to_num"));
+  // Correctness of the op is exercised in StaticRuntime.clamp_nan_to_num
+}
+
+TEST(FuseClampNaNToNum, NoFusion) {
+  const auto src1 = R"JIT(
+    def forward(self, x, a: float, b: float):
+        y = torch.clamp(x, a, b)
+        z = y.nan_to_num()
+        return z.clone()
+  )JIT";
+
+  const auto src2 = R"JIT(
+    def forward(self, x):
+        y = torch.clamp(x, min=0.0)
+        z = y.nan_to_num()
+        return z.clone()
+  )JIT";
+
+  const auto src3 = R"JIT(
+    def forward(self, x):
+        y = torch.clamp(x, max=0.0)
+        z = y.nan_to_num()
+        return z.clone()
+  )JIT";
+
+  const auto src4 = R"JIT(
+    def forward(self, x):
+        y = torch.clamp(x)
+        z = y.nan_to_num()
+        return z.clone()
+  )JIT";
+
+
+  auto checkScript = [](const char* src) {
+    torch::jit::Module mod("m");
+    mod.define(src);
+    auto graph = mod.get_method("forward").graph();
+    FuseClampNaNToNum(graph);
+    EXPECT_TRUE(hasNodeWithKind(graph, "aten::clamp"));
+    EXPECT_TRUE(hasNodeWithKind(graph, "aten::nan_to_num"));
+    EXPECT_FALSE(hasNodeWithKind(graph, "static_runtime::clamp_nan_to_num"));
+  };
+
+  checkScript(src1);
+  checkScript(src2);
+  checkScript(src3);
+  checkScript(src4);
+}
+#endif

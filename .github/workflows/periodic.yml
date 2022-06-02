@@ -6,7 +6,6 @@ on:
   push:
     tags:
       - ciflow/periodic/*
-      - ciflow/all/*
   workflow_dispatch:
 
 concurrency:
@@ -79,6 +78,29 @@ jobs:
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
+        ]}
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
+
+  linux-bionic-rocm5_1-py3_7-distributed-build:
+    name: linux-bionic-rocm5.1-py3.7-distributed
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-rocm5.1-py3.7
+      docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7
+
+  linux-bionic-rocm5_1-py3_7-distributed-test:
+    name: linux-bionic-rocm5.1-py3.7-distributed
+    uses: ./.github/workflows/_rocm-test.yml
+    needs: linux-bionic-rocm5_1-py3_7-distributed-build
+    with:
+      build-environment: linux-bionic-rocm5.1-py3.7
+      docker-image: ${{ needs.linux-bionic-rocm5_1-py3_7-distributed-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
         ]}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}

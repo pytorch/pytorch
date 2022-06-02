@@ -17,8 +17,12 @@ namespace lazy {
 
 class TestLeafNode : public Node {
  public:
+  static OpKind ClassOpKind() {
+    return OpKind();
+  }
+
   explicit TestLeafNode(size_t param)
-      : Node(OpKind(), /* num_outputs */ 1),
+      : Node(ClassOpKind(), /* num_outputs */ 1),
         hash_(Hash(param)),
         param_(param) {}
   ~TestLeafNode() override = default;
@@ -45,7 +49,7 @@ TEST(IrTest, BasicTest) {
 
   EXPECT_EQ(node1->num_outputs(), 1);
 
-  const TestLeafNode* leafptr = NodeCast<TestLeafNode>(node1.get(), OpKind());
+  const TestLeafNode* leafptr = NodeCast<TestLeafNode>(node1.get());
   EXPECT_TRUE(leafptr != nullptr);
 }
 
@@ -102,7 +106,7 @@ TEST(IrTest, TsNodeTest) {
 
   EXPECT_EQ(node1->num_outputs(), 1);
 
-  const TsNode* leafptr = NodeCast<TsNode>(node1.get(), OpKind(at::aten::view));
+  const TsNode* leafptr = dynamic_cast<const TsNode*>(node1.get());
   EXPECT_TRUE(leafptr != nullptr);
 }
 
