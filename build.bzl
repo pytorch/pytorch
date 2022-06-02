@@ -97,6 +97,7 @@ def define_targets(rules):
             ":DispatchKeyNativeFunctions.cpp",
             ":DispatchKeyNativeFunctions.h",
             ":LazyIr.h",
+            ":LazyNonNativeIr.h",
             ":RegisterDispatchKey.cpp",
             ":native_functions.yaml",
             ":shape_inference.h",
@@ -261,6 +262,7 @@ GENERATED_TESTING_PY = [
 
 GENERATED_LAZY_H = [
     "torch/csrc/lazy/generated/LazyIr.h",
+    "torch/csrc/lazy/generated/LazyNonNativeIr.h",
     "torch/csrc/lazy/generated/LazyNativeFunctions.h",
 ]
 
