@@ -171,6 +171,7 @@ __all__ = [
     # View & Shape Ops
     #
     "as_strided",
+    "broadcast_shapes",
     "broadcast_tensors",
     "broadcast_to",
     "cat",
@@ -216,7 +217,10 @@ Tensor = torch.Tensor
 
 
 def _broadcast_shapes(*_shapes):
-    shapes = tuple(filter(lambda x: x is not None, _shapes))
+    shapes = tuple(
+        (x,) if isinstance(x, int) else x
+        for x in filter(lambda x: x is not None, _shapes)
+    )
 
     # Short-circuits on no input
     if len(shapes) == 0:
@@ -1566,6 +1570,10 @@ def as_strided(
     a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int = 0
 ) -> TensorLikeType:
     return prims.as_strided(a, size, stride, storage_offset)
+
+
+def broadcast_shapes(*shapes) -> ShapeType:
+    return torch.Size(_broadcast_shapes(*shapes))
 
 
 def broadcast_tensors(*tensors) -> List[TensorLikeType]:
