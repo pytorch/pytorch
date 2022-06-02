@@ -81,16 +81,18 @@ class FakeTensorConverter(object):
         return None
 
     def from_real_tensor(self, fake_mode, t):
-        if self._get_memo(t) is not None:
-            return self.tensor_memo[t]
+        maybe_memo = self._get_memo(t)
+        if maybe_memo is not None:
+            return maybe_memo
         existing_device = t.device
         out = FakeTensor(fake_mode, self.meta_converter(t), existing_device)
         self.tensor_memo[t] = out
         return out
 
     def from_meta_and_device(self, fake_mode, t, device):
-        if self._get_memo(t) is not None:
-            return self.tensor_memo[t]
+        maybe_memo = self._get_memo(t)
+        if maybe_memo is not None:
+            return maybe_memo
         out = FakeTensor(fake_mode, t, device)
         self.tensor_memo[t] = out
         return out
