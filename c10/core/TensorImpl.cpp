@@ -406,6 +406,9 @@ IntArrayRef TensorImpl::strides_custom() const {
       " do not have strides");
 }
 int64_t TensorImpl::dim_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->dim(this);
+  }
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have dim");
 }
