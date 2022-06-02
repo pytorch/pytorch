@@ -61,6 +61,7 @@ def parse_backend_yaml(
         "supported",
         "autograd",
         "full_codegen",
+        "non_native",
     ]
 
     backend = yaml_values.pop("backend", None)
@@ -97,6 +98,9 @@ def parse_backend_yaml(
     # full_codegen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
     full_codegen = yaml_values.pop("full_codegen", [])
     supported.extend(full_codegen)
+
+    # non_native is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
+    non_native = yaml_values.pop("non_native", {})
 
     assert (
         len(yaml_values.keys()) == 0
@@ -487,7 +491,8 @@ def run(
     native_yaml_path = os.path.join(
         pytorch_root, "aten/src/ATen/native/native_functions.yaml"
     )
-    parsed_yaml = parse_native_yaml(native_yaml_path)
+    tags_yaml_path = os.path.join(pytorch_root, "aten/src/ATen/native/tags.yaml")
+    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path)
     native_functions, backend_indices = (
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,

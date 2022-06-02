@@ -31,7 +31,7 @@ class TORCH_API TsNode : public lazy::Node {
 
   hash_t shapeHash() const override;
 
-  const std::string& getPythonStacktrace() const { return python_stacktrace_; }
+  const std::string getPythonStacktrace() const;
 
   // Lower is a backend-specific method since it returns a backend specific
   // type. hence, it is convenient to define it differently per-backend rather
@@ -46,7 +46,6 @@ class TORCH_API TsNode : public lazy::Node {
   // in this case, we will use the dag hash WITHOUT size info if dynamic shape is enabled
   // and use the dag hash WITH size info otherwise.
   hash_t dag_hash_;
-  std::string python_stacktrace_;
 };
 
 // Note: this OpKind is separate from ltc_ops.h since it would be a circular import otherwise, I like leaving TensorList
@@ -65,8 +64,16 @@ const OpKind tensor_list_opkind = OpKind::Get("lazy_tensors::tensor_list");
 // TODO(whc) once Shape() API is moved to Node base, also make it virtual, and then implement it as NotImplemented for
 // TensorList, also fixing the assertion that would fail.
 struct TORCH_API TensorList : public TsNode {
+  static OpKind ClassOpKind() {
+    return tensor_list_opkind;
+  }
+
   TensorList() = delete;
   TensorList(OpList values);
+
+  bool CanBeReused(OpList values) const {
+    return operands() == std::vector<Output>(values.begin(), values.end());
+  }
 
   TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
                    TSLoweringContext* loctx) const override;

@@ -22,6 +22,13 @@ BackendRegistrar::BackendRegistrar(
   backend_impl_registry.store(backend_impl_interface);
 }
 
+// Get IrBuilder from backend. Use TorchScriptIrBuilder by default
+const IrBuilder* getIrBuilder() {
+  static const IrBuilder* builder = getBackend()->GetIrBuilder();
+  return builder;
+}
+
+
 at::Tensor MakeTensorFromComputationData(
     const BackendDataPtr data,
     c10::optional<at::ScalarType> logical_scalar_type) {

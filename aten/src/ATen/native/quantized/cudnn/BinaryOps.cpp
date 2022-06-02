@@ -59,7 +59,7 @@ void setAddParams(
 // this can be increased, if necessary
 std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
 
-// TODO: this is also in qadd.cpp and some other cpp files in quantized/cpu/. I think we should
+// TODO: this is also in BinaryOps.cpp and some other cpp files in quantized/cpu/. I think we should
 // move everything into a utilities file in quantized/ directory later.
 inline void check_inputs(const Tensor& qa, const Tensor& qb) {
   TORCH_CHECK(
@@ -109,14 +109,18 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   at::Tensor add_output = at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat), memory_format);
   at::Tensor quantized_output = at::_empty_affine_quantized(qa.sizes(), at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
                                                             output_scale, output_zero_point, memory_format);
-  // TODO: When cudnn enables support for broadcasting, we can remove this tensor
-  at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), memory_format);
-  requantize_multiplier_tensor.fill_(qa.q_scale() / output_scale);
+  double requantize_multiplier = qa.q_scale() / output_scale;
+  at::Tensor requantize_multiplier_tensor = cudnn_utils::getRequantMultiplierTensor(requantize_multiplier, quantized_output.dim());
   at::Tensor rhs_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), memory_format);
   rhs_multiplier_tensor.fill_(qb.q_scale() / qa.q_scale());
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
   CacheKey key;
+  // memset is needed here because there is implicit packing added for CacheKey, and this can result in uninitialized padded values that are
+  // used for hashing (see how at::native::ParamsHash is defined). without memset, we can potentially come across a situation where two
+  // CacheKey objects have the same user defined parameters, but
+  // different padded values, resulting in different hash outputs.
+  memset(&key, 0, sizeof(key));
   bool deterministic{true};
   bool allow_tf32{false};
   setAddParams(&key.params, qa, qb, deterministic, allow_tf32);
@@ -132,9 +136,9 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     std::vector<int64_t> uids;
     data_ptrs.reserve(8);
     uids.reserve(8);
-    data_ptrs = {reinterpret_cast<int8_t*>(qb.data_ptr()), rhs_multiplier_tensor.data_ptr(), add_output.data_ptr(),
-                 reinterpret_cast<int8_t*>(qa.data_ptr()), add_output.data_ptr(), requantize_multiplier_tensor.data_ptr(),
-                 reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
+    data_ptrs = {qb.data_ptr<int8_t>(), rhs_multiplier_tensor.data_ptr(), add_output.data_ptr(),
+                 qa.data_ptr<int8_t>(), add_output.data_ptr(), requantize_multiplier_tensor.data_ptr(),
+                 quantized_output.data_ptr<int8_t>()};
     uids = {'b', 'm', 'c', 'a', 'p', 'r', 'q'};
     if (kReluFused) {
         data_ptrs.emplace_back(add_output.data_ptr()),
@@ -236,7 +240,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
 
-  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
+  TORCH_CHECK(false, "Unable to find an engine to execute this computation in Quantized Add Cudnn");
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {

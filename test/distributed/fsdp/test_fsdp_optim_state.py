@@ -1,8 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
+import bisect
 import sys
 from enum import Enum, auto
-from typing import Any, Dict, List, Type
+from typing import Any, Dict, List, Tuple, Type
 
 import torch
 from torch import distributed as dist
@@ -158,6 +159,54 @@ class NestedModel(torch.nn.Module):
         )
         model.block0 = FSDP(model.block0, process_group=group)
         return model
+
+    @staticmethod
+    def wrap_with_unmanaged_params(
+        model,
+        add_to_fsdp_module: bool,
+        group=None,
+    ) -> Tuple[torch.nn.Module, List[torch.nn.Parameter]]:
+        """Registers unmanaged parameters before wrapping with :meth:`wrap`."""
+        device = next(model.parameters()).device
+        unmanaged_param = torch.nn.Parameter(torch.randn(5, 5, device=device))
+        # Either register the parameter to a module to be wrapped with FSDP
+        # (`model.block2[2]`) or a module not to be wrapped with FSDP (`model`)
+        register_module = model.block2[2] if add_to_fsdp_module else model
+        register_module.register_parameter(
+            "unmanaged_param", unmanaged_param,
+        )
+        # For simplicity, we only add a single unmanaged parameter, but should
+        # be easy to generalize if needed
+        return NestedModel.wrap(model, group), [unmanaged_param]
+
+    @staticmethod
+    def add_unmanaged_param_entry(osd, unmanaged_param, step) -> None:
+        """Adds an entry for the unmanaged parameter ``unmanaged_param``
+        assuming Adam optimizer and a single parameter group."""
+        # The unmanaged parameters should be passed to this method in
+        # `model.parameters()` order since their parameter IDs will be assigned
+        # in order of the skipped IDs
+        # Assign a parameter ID to the unmanaged parameter
+        unmanaged_param_id = -1
+        param_ids = osd["param_groups"][0]["params"]
+        for i in range(1, len(param_ids)):
+            diff = param_ids[i] - param_ids[i - 1]
+            if diff != 1:
+                assert diff > 1, f"Invalid IDs: {param_ids[i - 1]} {param_ids[i]}"
+                unmanaged_param_id = param_ids[i - 1] + 1
+                break
+        if unmanaged_param_id == -1:
+            unmanaged_param_id = len(param_ids)  # last ID skipped
+        assert unmanaged_param_id >= 0, "One parameter ID should be skipped"
+        # Add a state entry for the unmanaged parameter
+        state_device = next(iter(next(iter(osd["state"].values())).values())).device
+        osd["state"][unmanaged_param_id] = {
+            "step": torch.tensor(float(step), device=state_device),
+            "exp_avg": torch.randn(unmanaged_param.shape, device=state_device),
+            "exp_avg_sq": torch.randn(unmanaged_param.shape, device=state_device),
+        }
+        # Insert the ID into the parameter group in order
+        bisect.insort(osd["param_groups"][0]["params"], unmanaged_param_id)
 
     # NOTE: We exclude `self.bias` from either parameter group to test the
     # case where the optimizer input does not include all model parameters
@@ -397,8 +446,7 @@ class TestFSDPOptimState(FSDPTest):
             full_osd, ref_osd, check_same_param_keys=check_same_param_keys,
         )
 
-    # Require 4 GPUs since we test halving the world size
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])
     @parametrize("wrap_alt", [False, True])
     @parametrize("halve_world_size", [False, True])
@@ -418,8 +466,7 @@ class TestFSDPOptimState(FSDPTest):
             wrap_alt=wrap_alt,
         )
 
-    # Require 4 GPUs since we test halving the world size
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     def test_shard_full_optim_state_dict_transformer(self) -> None:
         """Tests :meth:`shard_full_optim_state_dict` for an FSDP-root
         transformer model with shared parameters."""
@@ -429,8 +476,7 @@ class TestFSDPOptimState(FSDPTest):
             osd_comm_method=_OSDCommMethod.BROADCAST_OBJECT_LIST,
         )
 
-    # Require 4 GPUs since we test halving the world size
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])
     @parametrize("wrap_alt", [False, True])
     @parametrize("halve_world_size", [False, True])
@@ -450,8 +496,7 @@ class TestFSDPOptimState(FSDPTest):
             wrap_alt=wrap_alt,
         )
 
-    # Require 4 GPUs since we test halving the world size
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     def test_scatter_full_optim_state_dict_transformer(self) -> None:
         """Tests :meth:`scatter_full_optim_state_dict` for an FSDP-root
         transformer model with shared parameters."""
@@ -559,6 +604,73 @@ class TestFSDPOptimState(FSDPTest):
         # As a sanity check, check that we can load and run a few iterations
         optim2.load_state_dict(sharded_osd1)
         self._step_model(model2, optim2, num_iters=NUM_ITERS)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("add_to_fsdp_module", [False, True])
+    def test_shard_full_optim_state_dict_unmanaged_params(
+        self,
+        add_to_fsdp_module: bool,
+    ):
+        """
+        Tests :meth:`shard_full_optim_state_dict` when there are unmanaged
+        parameters.
+          - If ``add_to_fsdp_module=True``, then the unmanaged parameters are
+          added to a module to be wrapped with FSDP, in which case there should
+          be an error since we require that all unflattened parameter
+          comprising a flattened parameter have the same scalar state (e.g.
+          Adam "step") but the added parameter is missing its entry.
+          - If ``add_to_fsdp_module=False``, then the unmanaged parameters are
+          added to a module not to be wrapped with FSDP, in which case there
+          should be no error (emulating model parallel use cases where some
+          parameters may be managed externally to FSDP).
+        We do not separately test unmanaged parameters for
+        :meth:`scatter_full_optim_state_dict` to save CI cost since it calls
+        into the same subroutine :meth:`_flatten_full_optim_state_dict`.
+        """
+        NUM_ITERS = 1
+        # Create a normal wrapped model
+        model, optim, optim_input = self._init_nested_model(wrap=True)
+        self._step_model(model, optim, num_iters=NUM_ITERS)
+        full_osd = FSDP.full_optim_state_dict(
+            model, optim, optim_input, rank0_only=False,
+        )  # save on all ranks to avoid having to broadcast from rank 0
+        # Create a new model with the same structure but additional unmanaged
+        # parameters, representing the model for which we want to load
+        device = torch.device("cuda")
+        model = NestedModel().to(device)
+        model, unmanaged_params = NestedModel.wrap_with_unmanaged_params(
+            model, add_to_fsdp_module,
+        )
+        optim_input = list(model.parameters())
+        if add_to_fsdp_module:
+            # If we add the unmanaged parameters to a module wrapped with FSDP,
+            # then the flattened parameter will be comprised of some
+            # unflattened parameters with zero-dimensional tensor state (i.e.
+            # Adam "step") and others without (i.e. the unmanaged parameters),
+            # which triggers an error that we have to ensure correctness
+            error_prefix = "^(All unflattened parameters comprising a " \
+                "single flattened parameter must have scalar state with the " \
+                "same value and dtype)"
+            with self.assertRaisesRegex(ValueError, error_prefix):
+                FSDP.shard_full_optim_state_dict(
+                    full_osd, model, optim_input,
+                )
+        else:
+            # If we add the unmanaged parameters to a module not wrapped with
+            # FSDP, then we simply ignore them without erroring to enable
+            # model parallelism use cases, where some parameters are managed
+            # externally to FSDP
+            sharded_osd = FSDP.shard_full_optim_state_dict(
+                full_osd, model, optim_input,
+            )
+            # Add entries for the unmanaged parameters to be able to load
+            for unmanaged_param in unmanaged_params:
+                NestedModel.add_unmanaged_param_entry(
+                    sharded_osd, unmanaged_param, NUM_ITERS,
+                )
+            # Check that we can load the optimizer state dict
+            optim = torch.optim.Adam(optim_input, lr=1e-3)
+            optim.load_state_dict(sharded_osd)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])

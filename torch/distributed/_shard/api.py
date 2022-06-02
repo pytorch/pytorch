@@ -7,6 +7,7 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
     _PartialTensor
 )
+from .replicated_tensor import ReplicatedTensor
 from .sharding_spec import (
     ShardingSpec,
     ChunkShardingSpec
@@ -14,7 +15,7 @@ from .sharding_spec import (
 from .sharding_plan import (
     ShardingPlan
 )
-from .replicated_tensor import ReplicatedTensor
+from .sharder import Sharder
 
 def _shard_tensor(
     tensor: torch.Tensor, sharding_spec: ShardingSpec, src_rank=0, process_group=None
@@ -257,21 +258,45 @@ def shard_module(
         process_group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
     """
+    # record Sharder paths for sanity check on the plan to ensure items in the plan
+    # does not conflict with the submodule tree that the Sharder is working with
+    sharder_paths = []
+    for name, spec in plan.plan.items():
+        if isinstance(spec, Sharder):
+            sharder_paths.append(name)
+
     # shard the parameter according to the ShardingPlan
     for name, spec in plan.plan.items():
         if isinstance(spec, ShardingSpec):
             # if found a sharding spec, try to shard the parameter
             module_path, _, param_name = name.rpartition(".")
+
+            for sharder_path in sharder_paths:
+                if module_path.startswith(sharder_path):
+                    raise RuntimeError(f"ShardingPlan is in-valid, trying to shard a parameter: {name},"
+                                       f" but there's already a Sharder entry for module {sharder_path},"
+                                       f" parameter sharding should not conflict with the submodule tree"
+                                       f" that a Sharder is working with!")
+
             mod = module.get_submodule(module_path)
             shard_parameter(
                 mod,
                 param_name,
-                plan.plan[name],
+                spec,
                 src_rank=src_rank,
                 process_group=process_group
             )
+        elif isinstance(spec, Sharder):
+            parent_mod_path, _, mod_name = name.rpartition(".")
+            if name == "":
+                raise KeyError("Module path must not be empty for custom sharder!")
+            mod = module.get_submodule(name)
+            parent_mod = module.get_submodule(parent_mod_path)
+            sharded_mod = spec.shard(mod)
+            # swap this submodule with the sharded module
+            parent_mod.mod_name = sharded_mod
         else:
-            raise TypeError(f"Only `ShardingSpec` is supported to shard '{name}'")
+            raise TypeError(f"Only `ShardingSpec` and `Sharder` are supported to shard '{name}'")
 
     # reshard output if there's an entry in `reshard_output` for this module
     if plan.output_plan is not None:

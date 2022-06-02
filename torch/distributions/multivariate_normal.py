@@ -192,6 +192,10 @@ class MultivariateNormal(Distribution):
         return self.loc
 
     @property
+    def mode(self):
+        return self.loc
+
+    @property
     def variance(self):
         return self._unbroadcasted_scale_tril.pow(2).sum(-1).expand(
             self._batch_shape + self._event_shape)

@@ -161,12 +161,9 @@ def argumenttype_ivalue_convert(
 def _gen_code_base_type(
     arg_name: str, out_name: str, ctype: CType
 ) -> Tuple[List[str], List[str]]:
-    return (
-        [
-            f"{ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.to<{ctype.cpp_type(strip_ref=True)}>();"
-        ],
-        [],
-    )
+    return [
+        f"{ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.to<{ctype.cpp_type(strip_ref=True)}>();"
+    ], []
 
 
 def _gen_code_optional_type(

@@ -80,6 +80,8 @@ VIEW_FUNCTIONS = {
     "values": "self",
     "crow_indices": "self",
     "col_indices": "self",
+    "ccol_indices": "self",
+    "row_indices": "self",
     # sparse_coo ctor output should really be views of both indices and values,
     # but we only supports making as view of a single variable, and indices is
     # discrete anyways.
@@ -563,6 +565,7 @@ def gen_inplace_or_view_type_env(
 def gen_inplace_or_view_type(
     out: str,
     native_yaml_path: str,
+    tags_yaml_path: str,
     fns_with_infos: List[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
 ) -> None:
