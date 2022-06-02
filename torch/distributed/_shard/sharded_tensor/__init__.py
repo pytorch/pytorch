@@ -9,6 +9,7 @@ import torch.distributed._shard.sharding_spec as shard_spec
 from torch.distributed._shard.partial_tensor import _PartialTensor
 
 from .api import (
+    _CUSTOM_SHARDED_OPS,
     _SHARDED_OPS,
     Shard,
     ShardedTensor,
@@ -411,7 +412,7 @@ def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict,
                 if isinstance(state_dict[key], ShardedTensor):
                     setattr(submodule, attr_name, state_dict[key])
 
-def sharded_op_impl(func):
+def custom_sharded_op_impl(func):
     """
     Provides a way for users to write their own custom sharded operator. This
     can be used to override existing ShardedTensor operators or write a new
@@ -420,7 +421,7 @@ def sharded_op_impl(func):
     parameters, the function provided will be invoked for that operator.
 
     Example::
-        >>> @sharded_op_impl(torch.nn.functional.linear)
+        >>> @custom_sharded_op_impl(torch.nn.functional.linear)
         >>> def my_custom_sharded_linear(types, args, kwargs, process_group):
         >>>   ....
         >>>
@@ -440,6 +441,16 @@ def sharded_op_impl(func):
     Args:
         func(Callable): Torch function for which we want to provide a sharded
             implementation (ex: torch.nn.functional.linear)
+    """
+    return functools.partial(
+        _decorator_func,
+        op=func,
+        op_table=_CUSTOM_SHARDED_OPS
+    )
+
+def _sharded_op_impl(func):
+    """
+    Decorator to register a default sharded op.
     """
     return functools.partial(
         _decorator_func,
