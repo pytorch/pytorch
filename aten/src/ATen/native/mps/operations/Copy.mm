@@ -114,7 +114,7 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
   // 0 sizes won't result in any change in the shape of the Tensor so we can
   // skip it. Also if the memory is contiguous we don't need to do
   // gather-scatter operations using graph.
-  if (size.size() > 0 && (!result.is_contiguous())) {
+  if (size.size() > 0) {
 
     // If self itself was a view tensor, that means we need to chain the graphs
     // else we will create a new entry in the cache
@@ -131,8 +131,7 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
     MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
     @autoreleasepool {
-      string lookup_key = mps::getStridedKey(self, self.sizes(), self.strides(),
-                      self.storage_offset());
+      string lookup_key = mps::getStridedKey(self, size, stride, storage_offset);
       CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(lookup_key));
 
       if(!cachedGraph) {
@@ -163,28 +162,6 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
           });
           cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
         }
-      } else {
-        // Else part takes care of the chaining where multiple view operations
-        // were implemented on the same underlying data storage ptr
-        string insert_key = mps::getStridedKey(self, size, stride, storage_offset);
-        MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(insert_key, ^ MPSCachedGraph * () {
-        CachedGraph *newCachedGraph = nil;
-          @autoreleasepool {
-              MPSGraph* mpsGraph = cachedGraph->graph();
-              newCachedGraph = new CachedGraph(mpsGraph);
-              newCachedGraph->inputTensor_ = cachedGraph->inputTensor_;
-              newCachedGraph->outputTensor_ = chainViewOperation(mpsGraph, size,
-                                                                 stride,
-                                                                 storage_offset,
-                                                                 cachedGraph->outputTensor_,
-                                                                 self);
-              newCachedGraph->size_ = size;
-              newCachedGraph->stride_ = stride;
-              newCachedGraph->storage_offset_ = storage_offset;
-          }
-          return newCachedGraph;
-        });
-        cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
       }
     }
   }
@@ -287,11 +264,6 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_,
   } else {
     dst = dst_;
   }
-  dst._set_conj(dst_.is_conj());
-  src._set_conj(src_.is_conj());
-
-  dst._set_neg(dst_.is_neg());
-  src._set_neg(src_.is_neg());
 
   auto storage_byte_offset = src_.storage_offset() * src_.itemsize();
   id<MTLBuffer> sourceBuffer = __builtin_bit_cast(id<MTLBuffer>, src_.storage().data());
@@ -372,7 +344,7 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_,
   id<MTLBuffer> destBuffer = __builtin_bit_cast(id<MTLBuffer>, dst_.storage().data());
 
 
-  if (!src.is_contiguous()) {
+  if (src_.is_view()) {
     src = src_.to(dst_.dtype()).expand_as(dst_).contiguous();
   } else {
     src = src_;
@@ -399,6 +371,8 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_,
                                          options:options
                                      deallocator:nil];
     sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
+    if (src_.is_view() || !src_.is_contiguous())
+      sourceOffset += src_.storage_offset() * src_.itemsize();
 
     dispatch_sync(stream->queue(), ^() {
       @autoreleasepool {
@@ -483,9 +457,9 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_,
         id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
         id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
         [blitEncoder copyFromBuffer:sourceBuffer
-                      sourceOffset:0
+                      sourceOffset:src_byte_offset
                           toBuffer:destBuffer
-                 destinationOffset:0
+                 destinationOffset:dst_byte_offset
                               size:size];
         [blitEncoder endEncoding];
         stream->commitAndWait();

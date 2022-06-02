@@ -4,10 +4,10 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/native/quantized/cpu/BinaryOps.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/conv_serialization.h>
-#include <ATen/native/quantized/cpu/qadd.h>
-#include <ATen/native/quantized/cpu/quant_utils.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/xnnpack/OpContext.h>
 #include <ATen/quantized/QTensorImpl.h>
