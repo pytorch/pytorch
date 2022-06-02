@@ -120,6 +120,13 @@ class FakeTensorTest(TestCase):
                 torch.nn.functional.conv2d(inputs, filters, padding=1)
 
         with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_cpu_fallback=True)):
+            # intentionally bad inputs
+            filters = torch.randn(8, 20, 3, 3).cuda()
+            inputs = torch.randn(1, 7, 10, 5).cuda()
+            with self.assertRaises(RuntimeError):
+                torch.nn.functional.conv2d(inputs, filters, padding=1)
+
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_cpu_fallback=True)):
             filters = torch.randn(8, 4, 3, 3).cuda()
             inputs = torch.randn(1, 4, 5, 5).cuda()
 
