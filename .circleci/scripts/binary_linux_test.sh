@@ -59,7 +59,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       ninja \
       dataclasses \
       typing-extensions \
-      protobuf==3.19.4 \
+      defaults::protobuf \
       six
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
       retry conda install -c pytorch -y cpuonly
