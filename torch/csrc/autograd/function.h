@@ -151,9 +151,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     // probably operate with names.
     at::NoNamesGuard no_names_guard;
 
-    auto step_callbacks = at::getStepCallbacks(at::RecordScope::BACKWARD_FUNCTION);
-    if (!step_callbacks.empty()) {
-      at::RecordFunction guard(std::move(step_callbacks));
+    auto step_callbacks = at::getStepCallbacksUnlessEmpty(at::RecordScope::BACKWARD_FUNCTION);
+    if (C10_UNLIKELY(step_callbacks.has_value())) {
+      at::RecordFunction guard(std::move(*step_callbacks));
       // Using sequence number and thread id to correlate with
       // the forward pass function
       guard.setForwardThreadId(thread_id_);
