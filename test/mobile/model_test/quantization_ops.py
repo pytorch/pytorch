@@ -5,14 +5,14 @@ import torch.nn as nn
 class GeneralQuantModule(torch.nn.Module):
     def __init__(self):
         super(GeneralQuantModule, self).__init__()
-        self.embedding = torch.nn.quantized.Embedding(
+        self.embedding = torch.ao.nn.quantized.Embedding(
             num_embeddings=10, embedding_dim=12
         )
         self.embedding_input = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8])
-        self.func = torch.nn.quantized.QFunctional()
-        self.conv1 = torch.nn.quantized.ConvTranspose1d(16, 33, 3, stride=2)
-        self.conv2 = torch.nn.quantized.ConvTranspose2d(16, 33, 3, stride=2)
-        self.conv3 = torch.nn.quantized.ConvTranspose3d(16, 33, 3, stride=2)
+        self.func = torch.ao.nn.quantized.QFunctional()
+        self.conv1 = torch.ao.nn.quantized.ConvTranspose1d(16, 33, 3, stride=2)
+        self.conv2 = torch.ao.nn.quantized.ConvTranspose2d(16, 33, 3, stride=2)
+        self.conv3 = torch.ao.nn.quantized.ConvTranspose3d(16, 33, 3, stride=2)
 
     def forward(self):
         a = torch.quantize_per_tensor(torch.tensor([3.0]), 1.0, 0, torch.qint32)

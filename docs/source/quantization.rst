@@ -307,15 +307,15 @@ For static quantization techniques which quantize activations, the user needs
 to do the following in addition:
 
 1. Specify where activations are quantized and de-quantized. This is done using
-   :class:`~torch.quantization.QuantStub` and
-   :class:`~torch.quantization.DeQuantStub` modules.
-2. Use :class:`torch.nn.quantized.FloatFunctional` to wrap tensor operations
+   :class:`~torch.ao.quantization.QuantStub` and
+   :class:`~torch.ao.quantization.DeQuantStub` modules.
+2. Use :class:`~torch.ao.nn.quantized.FloatFunctional` to wrap tensor operations
    that require special handling for quantization into modules. Examples
    are operations like ``add`` and ``cat`` which require special handling to
    determine output quantization parameters.
 3. Fuse modules: combine operations/modules into a single module to obtain
    higher accuracy and performance. This is done using the
-   :func:`torch.quantization.fuse_modules` API, which takes in lists of modules
+   :func:`~torch.ao.quantization.fuse_modules` API, which takes in lists of modules
    to be fused. We currently support the following fusions:
    [Conv, Relu], [Conv, BatchNorm], [Conv, BatchNorm, Relu], [Linear, Relu]
 
@@ -792,7 +792,7 @@ be done at a future time.
 Example::
 
     import torch
-    import torch.nn.quantized as nnq
+    import torch.ao.nn.quantized as nnq
     import torch.quantization.quantize_fx
 
     # original fp32 module to replace

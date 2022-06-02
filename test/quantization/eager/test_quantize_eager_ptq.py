@@ -2,7 +2,7 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 from torch.nn.utils.rnn import PackedSequence
 from torch.ao.quantization import (
     quantize,
@@ -326,9 +326,9 @@ class TestQuantizeEagerOps(QuantizationTestCase):
 
         def checkQuantized(model):
             self.checkNoPrepModules(model)
-            self.assertEqual(type(model.myadd), torch.nn.quantized.QFunctional)
-            self.assertEqual(type(model.mycat), torch.nn.quantized.QFunctional)
-            self.assertEqual(type(model.myadd_relu), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.myadd), torch.ao.nn.quantized.QFunctional)
+            self.assertEqual(type(model.mycat), torch.ao.nn.quantized.QFunctional)
+            self.assertEqual(type(model.myadd_relu), torch.ao.nn.quantized.QFunctional)
             self.checkNoQconfig(model)
 
         checkQuantized(model)
@@ -776,7 +776,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
             prepare(model, inplace=True)
             convert(model, inplace=True)
             self.assertTrue('QuantizedEmbedding' in str(model))
-            self.assertEqual(type(model.emb), torch.nn.quantized.Embedding)
+            self.assertEqual(type(model.emb), torch.ao.nn.quantized.Embedding)
             self.checkScriptable(model, [[indices]], check_save_load=True)
 
             idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
@@ -836,7 +836,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
 
             # Test to make sure module is quantized correctly.
             self.assertTrue('QuantizedEmbeddingBag' in str(quantized_model))
-            self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.EmbeddingBag, torch.quint8)
+            self.checkDynamicQuantizedModule(quantized_model.emb, torch.ao.nn.quantized.EmbeddingBag, torch.quint8)
             self.checkScriptable(quantized_model, [[indices, offsets, per_sample_weights]], check_save_load=True)
 
             class EmbeddingBagWithLinear(torch.nn.Module):
@@ -857,7 +857,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
 
             self.assertTrue('QuantizedEmbeddingBag' in str(quantized_model))
             self.checkLinear(model2.fc)
-            self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.EmbeddingBag, torch.quint8)
+            self.checkDynamicQuantizedModule(quantized_model.emb, torch.ao.nn.quantized.EmbeddingBag, torch.quint8)
 
     @skipIfNoFBGEMM
     def test_custom_module_class(self):

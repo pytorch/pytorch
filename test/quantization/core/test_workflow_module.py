@@ -1198,8 +1198,8 @@ class TestFusedObsFakeQuantModule(TestCase):
                                    mapping=get_embedding_static_quant_module_mappings())
 
             # Ensure that EmbeddingBags are now quantized with the appropriate bitwidth.
-            self.assertEqual(type(inference_gm.emb1), torch.nn.quantized.EmbeddingBag)
-            self.assertEqual(type(inference_gm.emb2), torch.nn.quantized.EmbeddingBag)
+            self.assertEqual(type(inference_gm.emb1), torch.ao.nn.quantized.EmbeddingBag)
+            self.assertEqual(type(inference_gm.emb2), torch.ao.nn.quantized.EmbeddingBag)
             self.assertEqual(inference_gm.emb1.dtype, qconfig.weight().dtype)
             self.assertEqual(inference_gm.emb2.dtype, qconfig.weight().dtype)
 
@@ -1233,9 +1233,9 @@ class TestFusedObsFakeQuantModule(TestCase):
                 inference_gm = convert(quant_model,
                                        mapping=get_embedding_static_quant_module_mappings())
                 # Ensure that Embedding is now quantized
-                self.assertEqual(type(inference_gm.emb), torch.nn.quantized.Embedding)
+                self.assertEqual(type(inference_gm.emb), torch.ao.nn.quantized.Embedding)
                 # Ensure that Linear is now quantized
-                self.assertEqual(type(inference_gm.linear), torch.nn.quantized.Linear)
+                self.assertEqual(type(inference_gm.linear), torch.ao.nn.quantized.Linear)
 
     def test_default_fused_qat_config(self):
         class Model(nn.Module):

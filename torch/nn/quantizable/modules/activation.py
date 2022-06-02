@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as nnF
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 
 from torch import Tensor
 from typing import Optional, Tuple
