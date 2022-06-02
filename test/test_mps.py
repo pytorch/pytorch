@@ -1186,6 +1186,16 @@ class TestMPS(TestCase):
         helper((2, 8, 4, 5), 0.2)
         helper((2, 3, 4, 5), 1.0)  # value of 1 should be ignored internally
 
+    def test_buffer_size_match(self):
+        # this test shouldn't cause any crash
+        size = 16
+        cpu_A = torch.rand(size, device='cpu')
+        cpu_F = torch.rand(size, size, size, device='cpu')
+
+        mps_A = cpu_A.to('mps')
+        mps_F = cpu_F.to('mps')
+        self.assertEqual(cpu_A @ cpu_F, mps_A @ mps_F)
+
     def test_transpose_inplace(self):
         values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
         cpu_x = torch.tensor(values, device='cpu')
@@ -3700,6 +3710,19 @@ class TestNLLLoss(TestCase):
         for shape in [(5, 5), (5, 6), (6, 5), (5,), (6,)]:
             for diag in [0, 1, 2, 3, 4, -1, -2, -3, -4]:
                 helper(shape, diag=diag)
+
+    # Test linspace
+    def test_linspace(self):
+        def helper(start, end, steps, dtype=torch.float32):
+            cpu_result = torch.tensor(np.linspace(start, end, steps), dtype=dtype)
+            result = torch.linspace(start, end, steps, dtype=dtype, device='mps')
+            self.assertEqual(cpu_result, result)
+
+        for dtype in [torch.float32, torch.int32, torch.uint8, torch.int64]:
+            helper(2, 5, 10, dtype)
+            helper(2, 2, 10, dtype)
+            helper(5, 2, 10, dtype)
+            helper(2, 2, 0, dtype)
 
     # Test softmax
     def test_softmax(self):
