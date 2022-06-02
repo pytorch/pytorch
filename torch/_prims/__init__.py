@@ -76,7 +76,6 @@ __all__ = [
     "sin",
     "sinh",
     "sqrt",
-    "square",
     "tan",
     "tanh",
     "trunc",
@@ -871,13 +870,6 @@ sqrt = _make_elementwise_unary_prim(
     "sqrt",
     impl_aten=torch.sqrt,
     impl_nvfuser=_sqrt_nvfuser,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-)
-
-square = _make_elementwise_unary_prim(
-    "square",
-    impl_aten=torch.square,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -2188,9 +2180,7 @@ copy_to = _make_prim(
 )
 
 
-def _resize_meta(
-    a: TensorLikeType, shape: Union[torch.Size, List[int], Tuple[int, ...]]
-):
+def _resize_meta(a: TensorLikeType, shape: ShapeType):
     return TensorMeta(a, shape=shape, strides=utils.make_contiguous_strides_for(shape))
 
 
