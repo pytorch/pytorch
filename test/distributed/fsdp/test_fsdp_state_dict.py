@@ -188,32 +188,6 @@ class TestFSDPStateDict(FSDPTest):
                     self.assertEqual(fsdp_state_dict, {})
 
     @skip_if_lt_x_gpu(2)
-    def test_load_activation_checkpointed_module(self):
-        # TODO: move this tests to checkpoint_wrapper tests once there is a dedicated
-        # test suite for them: https://github.com/pytorch/pytorch/issues/77478.
-        lin = nn.Linear(10, 10, bias=False).cuda()
-        lin = checkpoint_wrapper(lin)
-        state_dict = deepcopy(lin.state_dict())
-        # Load into non-checkpoint wrapped linear module
-        lin_new = nn.Linear(10, 10, bias=False).cuda()
-        lin_new.load_state_dict(state_dict)
-        for p1, p2 in zip(lin.parameters(), lin_new.parameters()):
-            self.assertEqual(p1, p2)
-
-        # Load non-checkpoint wrapped module into checkpoint wrapped one
-        # Make params different
-        for p in lin_new.parameters():
-            with torch.no_grad():
-                p.add_(0.5)
-
-        state_dict = deepcopy(lin_new.state_dict())
-        # Verify checkpoint wrapped linear can load unwrapped linear
-        lin.load_state_dict(state_dict)
-        print(type(lin))
-        for p1, p2 in zip(lin.parameters(), lin_new.parameters()):
-            self.assertEqual(p1, p2)
-
-    @skip_if_lt_x_gpu(2)
     @parametrize("checkpoint_wrap", ["first", "second", "both"])
     def test_fsdp_state_dict_with_activation_checkpoint(self, checkpoint_wrap):
         for model_call in [
