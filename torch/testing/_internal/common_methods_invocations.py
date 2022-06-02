@@ -2378,11 +2378,9 @@ def sample_inputs_broadcast_shapes(op, device, dtype, requires_grad, **kwargs):
         ((0, 1, 3), (0, 10, 3))
     )
 
-    # restricting test runs on cpu/bool to prevent repetitive runs
-    if dtype is torch.float32:
-        for shape in shapes:
-            inp, *arg0 = shape
-            yield SampleInput(inp, args=arg0)
+    for shape in shapes:
+        inp, *arg0 = shape
+        yield SampleInput(inp, args=arg0)
 
 # The base reference input generation for elementwise binary operations
 def _reference_inputs_elementwise_binary(op, device, dtype, requires_grad, exclude_zero, **kwargs):
@@ -10679,6 +10677,11 @@ op_db: List[OpInfo] = [
            supports_scripting=False,
            sample_inputs_func=sample_inputs_broadcast_shapes,
            skips=(
+               # https://github.com/pytorch/pytorch/issues/64997
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # skip dtype tests since broadcast_shape is not device dependent.
+               # having dtypes limited to torch.float32 would cause test_dtypes to report unexpected success
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes_broadcast_shapes'),
                # skip these tests since we have non tensor input
                DecorateInfo(unittest.skip('Skipped!'), "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
