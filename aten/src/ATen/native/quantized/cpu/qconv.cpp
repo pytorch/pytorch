@@ -7,11 +7,11 @@
 #include <ATen/SmallVector.h>
 #include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/native/quantized/cpu/xnnpack_utils.h>
-#include <ATen/native/quantized/cpu/onednn_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/XnnpackUtils.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/ConvUtils.h>
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
