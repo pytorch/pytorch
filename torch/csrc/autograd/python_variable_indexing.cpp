@@ -318,7 +318,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   variable_list variableIndices;
   int64_t specified_dims = count_specified_dimensions(holder.get());
   if (specified_dims == -1) {
-    return handle_torch_function_indexing(self, index);
+    return handle_torch_function_indexing(self, holder.get());
   }
   Variable sliced = applySlicing(
     self_, holder.get(), variableIndices, /*is_tracing=*/is_tracing, self_.device(), self_.sizes(), specified_dims);
