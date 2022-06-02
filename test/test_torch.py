@@ -265,6 +265,107 @@ class TestTorchDeviceType(TestCase):
                 error_storage = a.to(error_dtype).storage()
                 b = torch.tensor([], device=device, dtype=dtype).set_(error_storage)
 
+    def _check_storage_meta(self, s, s_check):
+        self.assertTrue(
+            isinstance(s, (torch._UntypedStorage, torch._TypedStorage)) and
+            isinstance(s_check, type(s)),
+            (
+                's and s_check must both be one of _UntypedStorage or '
+                '_TypedStorage, but got'
+                f' {type(s).__name__} and {type(s_check).__name__}'))
+
+        self.assertEqual(s.device.type, 'meta')
+        self.assertEqual(s.nbytes(), s_check.nbytes())
+        self.assertEqual(s.size(), s_check.size())
+        self.assertEqual(s.data_ptr(), 0)
+
+        with self.assertRaisesRegex(NotImplementedError, r'Not available'):
+            s[0]
+
+        if isinstance(s, torch._TypedStorage):
+            self.assertEqual(s.dtype, s_check.dtype)
+            self._check_storage_meta(s._untyped(), s_check._untyped())
+
+    @onlyNativeDeviceTypes
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_typed_storage_meta(self, device, dtype):
+        args_list = [
+            [],
+            [0],
+            [100],
+            [[1, 2, 3, 4, 5, 6]],
+        ]
+        for args in args_list:
+            s_check = torch._TypedStorage(*args, dtype=dtype, device=device)
+            s = torch._TypedStorage(*args, dtype=dtype, device='meta')
+            self._check_storage_meta(s, s_check)
+
+    @onlyNativeDeviceTypes
+    def test_untyped_storage_meta(self, device):
+        args_list = [
+            [],
+            [0],
+            [100],
+            [[1, 2, 3, 4, 5, 6]],
+        ]
+        for args in args_list:
+            s_check = torch._UntypedStorage(*args, device=device)
+            s = torch._UntypedStorage(*args, device='meta')
+            self._check_storage_meta(s, s_check)
+
+    @onlyNativeDeviceTypes
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_storage_meta_from_tensor(self, device, dtype):
+        t_check = make_tensor((4, 5, 3), dtype=dtype, device=device, low=-9, high=9)
+        t = t_check.to('meta')
+
+        s_check = t_check.storage()
+        s = t.storage()
+        self._check_storage_meta(s, s_check)
+
+    @onlyCPU
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_storage_meta_errors(self, device, dtype):
+        s0 = torch._TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
+
+        with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+            s0.cpu()
+
+        with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
+            s0._share_fd_cpu_()
+
+        with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
+            s0._share_filename_cpu_()
+
+        if torch.cuda.is_available():
+            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+                s0.cuda()
+
+            with self.assertRaisesRegex(RuntimeError, r'only available on CUDA'):
+                s0._share_cuda_()
+
+            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+                s0.pin_memory()
+
+        with self.assertRaisesRegex(RuntimeError, r'got unexpected device type'):
+            s0.resize_(10)
+
+        with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
+            s0.share_memory_()
+
+        with self.assertRaisesRegex(NotImplementedError, r'Not available'):
+            s0.tolist()
+
+        with tempfile.NamedTemporaryFile() as f:
+            with self.assertRaisesRegex(RuntimeError, r'Device not recognized'):
+                s0._write_file(f, True, True, s0.element_size())
+
+        for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
+            s1 = torch._TypedStorage([1, 2, 3, 4], device=device, dtype=dtype)
+
+            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+                s1.copy_(s0)
+
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy(self, device, dtype):
         from copy import deepcopy
@@ -646,7 +747,8 @@ class TestTorchDeviceType(TestCase):
             warning = w[0]
 
             # Checks for cpp context in the warning message
-            self.assertTrue(re.search(s, str(warning.message)) is not None)
+            escaped_warning_message = str(warning.message).encode('unicode_escape')
+            self.assertTrue(re.search(s, str(escaped_warning_message), re.IGNORECASE) is not None)
 
             # Checks the Python features of the warning
             # Note: the eager mode warning refers to the line in the function
@@ -661,7 +763,8 @@ class TestTorchDeviceType(TestCase):
             warning = w[0]
 
             # Checks for cpp context in the warning message
-            self.assertTrue(re.search(s, str(warning.message)) is not None)
+            escaped_warning_message = str(warning.message).encode('unicode_escape')
+            self.assertTrue(re.search(s, str(escaped_warning_message), re.IGNORECASE) is not None)
 
             # Checks the Python features of the warning
             # Note: the jitted warning's lineno refers to the call to the jitted
@@ -706,6 +809,43 @@ class TestTorchDeviceType(TestCase):
         with self.assertWarnsOnceRegex(UserWarning, '.*non-writable.*'):
             torch.from_numpy(a)
             torch.from_numpy(a)
+
+    @onlyNativeDeviceTypes
+    def test_complex_half_experimental_warning(self, device):
+        msg = 'ComplexHalf support is experimental'
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            t = torch.randn(3, dtype=torch.chalf, device=device)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.rand(3, dtype=torch.chalf, device=device)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.empty(3, dtype=torch.chalf, device=device)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.ones(3, dtype=torch.chalf, device=device)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.zeros(3, dtype=torch.chalf, device=device)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.randn_like(t)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.rand_like(t)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.empty_like(t)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.ones_like(t)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.zeros_like(t)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            # t + 1 allocates a new tensor for result using empty
+            t + 1
 
     # TODO: this test should be in test_nn.py
     def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
@@ -3711,7 +3851,7 @@ else:
         ind_01 = torch.tensor([0, 1], dtype=torch.int64, device=device)
         self.assertEqual(c_clone, c.index_fill_(0, ind_empty, -1))
         self.assertEqual(c_clone, c.index_fill_(2, ind_empty, -1))
-        self.assertEqual(c_clone, c.index_fill_(2, torch.tensor([0, 1], dtype=torch.int64, device=device), -1))
+        self.assertEqual(c_clone, c.index_fill_(2, ind_01, -1))
         self.assertEqual(c_clone, c.index_copy_(0, ind_empty, torch.empty((0, 1, 2, 0), device=device)))
         self.assertEqual(c_clone, c.index_copy_(2, ind_empty, torch.empty((0, 1, 0, 0), device=device)))
         self.assertEqual(c_clone, c.index_copy_(2, ind_01, torch.empty((0, 1, 2, 0), device=device)))
@@ -3746,6 +3886,19 @@ else:
         self.assertEqual(c, c.index_select(0, ind_empty))
         c = torch.randn((0, 1, 2), device=device)
         self.assertEqual(c, c.index_select(0, ind_empty))
+        w = torch.randn((0, 3), device=device)
+        self.assertEqual((0, 2), w.index_select(1, ind_01).shape)
+        w = torch.randn((3, 0), device=device)
+        self.assertEqual((2, 0), w.index_select(0, ind_01).shape)
+        ind_01_int32 = torch.tensor([0, 1], dtype=torch.int32, device=device)
+        self.assertEqual((2, 0), w.index_select(0, ind_01_int32).shape)
+        if device == 'cpu':
+            w = torch.randn((0, 3), device=device)
+            with self.assertRaisesRegex(RuntimeError, "self indexing axis dim should be positive"):
+                torch.index_select(w, 0, ind_01)
+            ind_05 = torch.tensor([0, 5], dtype=torch.int64, device=device)
+            with self.assertRaisesRegex(RuntimeError, "INDICES element is out of DATA bounds"):
+                torch.index_select(w, 1, ind_05)
 
     # FIXME: find a test suite for the pdist operator
     def _brute_pdist(self, inp, p=2):
@@ -6286,7 +6439,7 @@ class TestTorch(TestCase):
             torch.storage._LegacyStorage()
 
         for storage_class in torch._storage_classes:
-            if storage_class in [torch._UntypedStorage, torch.cuda._UntypedStorage, torch._TypedStorage]:
+            if storage_class in [torch._UntypedStorage, torch._TypedStorage]:
                 continue
 
             device = 'cuda' if storage_class.__module__ == 'torch.cuda' else 'cpu'
@@ -6367,23 +6520,23 @@ class TestTorch(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"Too many positional arguments"):
                 torch._TypedStorage(0, 0, dtype=dtype, device=device)
 
+            if isinstance(s, torch._TypedStorage):
+                s_other = torch._TypedStorage([1, 2, 3, 4], device=device, dtype=dtype)
+
+                with self.assertRaisesRegex(RuntimeError, r'cannot set item'):
+                    s.fill_(s_other)
+
     def test_storage_error_no_attribute(self):
         storage_classes = [
             torch.cuda.ByteStorage,
             torch.cuda.FloatStorage,
-            torch.cuda._UntypedStorage,
         ]
         for storage_class in storage_classes:
             with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
                 storage_class.from_buffer()
 
-            if storage_class == torch.cuda._UntypedStorage:
-                with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
-                    storage_class._new_with_weak_ptr()
-
-            else:
-                with self.assertRaisesRegex(AttributeError, r'has no attribute'):
-                    storage_class._new_with_weak_ptr()
+            with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
+                storage_class._new_with_weak_ptr()
 
             with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
                 storage_class._new_shared_filename(0, 0, 0)
@@ -7280,11 +7433,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             """Expected out tensor to have device meta, but got cpu instead"""
         )
 
-    def test_detach_meta(self):
-        x = torch.empty(2, device='meta')
-        # This used to segfault
-        self.assertRaises(RuntimeError, lambda: x.detach().storage())
-
     def test_add_meta_scalar(self):
         # From https://github.com/pytorch/pytorch/issues/53815
         x = torch.empty(2, device='meta')
@@ -7424,12 +7572,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # raise a nice error.
         with self.assertRaisesRegex(
                 RuntimeError,
-                # message includes both Double and Long
-                '(?=.*Double)(?=.*Long)'):
+                # message includes both Double and ComplexFloat
+                '(?=.*Double)(?=.*ComplexFloat)'):
 
             # Calls model with a LongTensor input but DoubleTensor weights
             input = torch.randn(1, 1, 1, 6, dtype=torch.double)
-            weight = torch.zeros(1, 1, 1, 3, dtype=torch.long)
+            weight = torch.zeros(1, 1, 1, 3, dtype=torch.complex64)
             model = torch.nn.Conv2d(1, 1, (1, 3), stride=1, padding=0, bias=False)
             model.weight.data = weight
             out = model(input)
@@ -7659,7 +7807,11 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_to(self):
         self._test_to_with_layout(torch.strided)
-        self._test_to_with_layout(torch.sparse_csr)
+        is_cuda10_2_or_higher = (
+            (torch.version.cuda is not None)
+            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+        if is_cuda10_2_or_higher:  # in cuda10_1 sparse_csr is beta
+            self._test_to_with_layout(torch.sparse_csr)
 
     # FIXME: describe this test
     def test_as_subclass(self):

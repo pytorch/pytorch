@@ -94,6 +94,43 @@ TEST(StaticRuntime, UnaryOps) {
   testStaticRuntime(aten_sum_1_true, args, args2);
 }
 
+TEST(StaticRuntime, Max) {
+  auto src_max_reduce = R"JIT(
+    def forward(self, input):
+        return torch.max(input).clone()
+  )JIT";
+
+  auto src_max_dim = R"JIT(
+    def forward(self, input, dim: int):
+        values, indices = torch.max(input, dim)
+        return values.clone(), indices.clone()
+  )JIT";
+
+  auto src_max_dim_keepdim = R"JIT(
+    def forward(self, input, dim: int):
+        values, indices = torch.max(input, dim, keepdim=True)
+        return values.clone(), indices.clone()
+  )JIT";
+
+  auto src_max_pointwise = R"JIT(
+    def forward(self, input, other):
+        return torch.max(input, other).clone()
+  )JIT";
+
+  auto input = at::randn({2, 3, 2});
+  auto input_other = at::randn({2, 3, 2});
+  auto large_input = at::randn({8, 9, 10});
+  auto large_input_other = at::randn({8, 9, 10});
+
+  testStaticRuntime(src_max_reduce, {input});
+  testStaticRuntime(src_max_dim, {input, 1});
+  testStaticRuntime(src_max_dim, {input, 1}, {large_input, 0});
+  testStaticRuntime(src_max_dim_keepdim, {input, 0});
+  testStaticRuntime(src_max_dim_keepdim, {input, 0}, {large_input, 2});
+  testStaticRuntime(src_max_pointwise, {input, input_other});
+  testStaticRuntime(src_max_pointwise, {input, input_other}, {large_input, large_input_other});
+}
+
 TEST(StaticRuntime, Sigmoid) {
   const auto sigmoid_script = R"JIT(
     def forward(self, inp: Tensor):
@@ -2015,7 +2052,7 @@ TEST(StaticRuntime, Transpose) {
 }
 
 TEST(StaticRuntime, Permute) {
-  const auto permute_script = R"JIT(
+  auto permute_script = R"JIT(
     def forward(self, a: Tensor, dims: List[int]):
         return torch.permute(a, dims).clone()
   )JIT";
@@ -2030,6 +2067,16 @@ TEST(StaticRuntime, Permute) {
 
   testStaticRuntime(permute_script, args_a);
   testStaticRuntime(permute_script, args_a, args_b);
+
+  permute_script = R"JIT(
+    def forward(self, a: Tensor, dims: List[int], shape: List[int]):
+        return torch.permute(a, dims).reshape(shape).clone()
+  )JIT";
+
+  a = at::randn({8, 16, 4});
+  dims_a = {0, 2, 1};
+  dims_b = {-1, 16};
+  testStaticRuntime(permute_script, {a, dims_a, dims_b});
 }
 
 TEST(StaticRuntime, Slice) {
@@ -2282,7 +2329,7 @@ TEST(StaticRuntime, FmodScalar) {
   testStaticRuntime(fmod_scalar, {a, 3}, {c, 4});
 }
 
-TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
+TEST(StaticRuntime, QEmbeddingBagBytePrepack) {
   const std::string embedding_bag_byte_prepack_script = R"IR(
     graph(%input: Tensor):
         %none : None = prim::Constant()
@@ -2296,6 +2343,23 @@ TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
 
   testStaticRuntime(embedding_bag_byte_prepack_script, {a});
   testStaticRuntime(embedding_bag_byte_prepack_script, {a}, {b});
+}
+
+TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
+  const auto src = R"IR(
+    graph(%input: Tensor):
+        %none : None = prim::Constant()
+        %weight: Tensor = quantized::embedding_bag_byte_prepack(%input)
+        %output: Tensor = quantized::embedding_bag_byte_unpack(%weight)
+        %res: Tensor = aten::clone(%output, %none)
+        return (%res)
+  )IR";
+
+  auto a = torch::randn({8, 16}, at::ScalarType::Float);
+  auto b = torch::randn({8 * 2, 16 * 2}, at::ScalarType::Float);
+
+  testStaticRuntime(src, {a});
+  testStaticRuntime(src, {a}, {b});
 }
 
 TEST(StaticRuntime, LinalgNorm_ScalarOrd) {
@@ -3311,30 +3375,6 @@ TEST(StaticRuntime, NestedBlockIfReturnList) {
   std::vector<IValue> args2{
       at::randn({42, 42}), at::randn({42, 42}), true, false};
   testStaticRuntime(src, args1, args2);
-}
-
-TEST(StaticRuntime, QuantizedLinearDynamicFp16ReluFusion) {
-  const auto src = R"IR(
-    graph(%input: Tensor, %weights: Tensor):
-        %bias: None = prim::Constant()
-        %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
-        %x = quantized::linear_dynamic_fp16(%input, %packed_params)
-        %y = aten::relu(%x)
-        %ret = aten::clone(%y, %bias)
-        return (%ret)
-  )IR";
-  at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
-  at::Tensor input = torch::randn({3, 2}, torch::kFloat);
-
-  at::Tensor weight_2 = torch::randn({4, 3}, torch::kFloat);
-  at::Tensor input_2 = torch::randn({5, 3}, torch::kFloat);
-
-  testStaticRuntime(src, {input, weight}, {input_2, weight_2});
-
-  auto graph = getGraphFromIR(src);
-  QuantizedLinearReluFusion(graph);
-  EXPECT_FALSE(hasNodeWithKind(graph, "quantized::linear_dynamic_fp16"));
-  EXPECT_TRUE(hasNodeWithKind(graph, "quantized::linear_relu_dynamic_fp16"));
 }
 
 TEST(StaticRuntime, ClampNaNToNum) {

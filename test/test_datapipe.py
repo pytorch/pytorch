@@ -434,7 +434,7 @@ class TestIterableDataPipeBasic(TestCase):
         numbers = NumbersDataset(10)
         n1, n2, n3 = numbers.demux(3, lambda x: x % 3)
         n = n1.mux(n2, n3)
-        self.assertEqual(list(range(10)), list(n))
+        self.assertEqual(list(range(9)), list(n))
 
         # Functional Test: Uneven DataPipes
         source_numbers = list(range(0, 10)) + [10, 12]
@@ -443,7 +443,7 @@ class TestIterableDataPipeBasic(TestCase):
         self.assertEqual([0, 2, 4, 6, 8, 10, 12], list(n1))
         self.assertEqual([1, 3, 5, 7, 9], list(n2))
         n = n1.mux(n2)
-        self.assertEqual(source_numbers, list(n))
+        self.assertEqual(list(range(10)), list(n))
 
     @suppress_warnings  # Suppress warning for lambda fn
     def test_map_with_col_file_handle_datapipe(self):
@@ -580,16 +580,19 @@ def _fake_filter_fn_constant(constant, data):
     return data >= constant
 
 
-def _worker_init_fn(worker_id):
-    random.seed(123)
-
-
 def _mul_10(x):
     return x * 10
 
 
 def _mod_3_test(x):
     return x % 3 == 1
+
+
+def _worker_init_fn(worker_id):
+    info = torch.utils.data.get_worker_info()
+    num_workers = info.num_workers
+    datapipe = info.dataset
+    torch.utils.data.graph_settings.apply_sharding(datapipe, num_workers, worker_id)
 
 
 class TestFunctionalIterDataPipe(TestCase):
@@ -929,7 +932,7 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp2 = dp.iter.IterableWrapper([10])
         input_dp3 = dp.iter.IterableWrapper([100, 200, 300])
         output_dp = input_dp1.mux(input_dp2, input_dp3)
-        expected_output = [1, 10, 100, 2, 200, 3, 300, 4]
+        expected_output = [1, 10, 100]
         self.assertEqual(len(expected_output), len(output_dp))
         self.assertEqual(expected_output, list(output_dp))
 
@@ -937,8 +940,8 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp1 = dp.iter.IterableWrapper([0, 1, 2, 3])
         input_dp2 = dp.iter.IterableWrapper([])
         output_dp = input_dp1.mux(input_dp2)
-        self.assertEqual(len(input_dp1), len(output_dp))
-        self.assertEqual(list(input_dp1), list(output_dp))
+        self.assertEqual(len(input_dp2), len(output_dp))
+        self.assertEqual(list(input_dp2), list(output_dp))
 
         # __len__ Test: raises TypeError when __len__ is called and an input doesn't have __len__
         input_dp1 = dp.iter.IterableWrapper(range(10))
@@ -1469,26 +1472,95 @@ class TestFunctionalIterDataPipe(TestCase):
             len(dp1)
 
     def test_shuffle_iterdatapipe(self):
-        exp = list(range(20))
+        exp = list(range(100))
         input_ds = dp.iter.IterableWrapper(exp)
 
         with self.assertRaises(AssertionError):
             shuffle_dp = input_ds.shuffle(buffer_size=0)
 
-        for bs in (5, 20, 25):
-            shuffle_dp = input_ds.shuffle(buffer_size=bs)
-            self.assertEqual(len(shuffle_dp), len(input_ds))
+        def _create_dp(buffer_size):
+            input_ds = dp.iter.IterableWrapper(list(range(100)))
+            return input_ds.shuffle(buffer_size=bs).sharding_filter()
 
-            random.seed(123)
+        for bs in (5, 20, 33):
+            shuffle_dp = _create_dp(bs)
+            self.assertEqual(len(shuffle_dp), len(exp))
+
+            torch.manual_seed(123)
             res = list(shuffle_dp)
             self.assertEqual(sorted(res), exp)
 
             # Test Deterministic
-            for num_workers in (0, 1):
-                random.seed(123)
-                dl = DataLoader(shuffle_dp, num_workers=num_workers, worker_init_fn=_worker_init_fn, shuffle=True)
-                dl_res = list(dl)
-                self.assertEqual(res, dl_res)
+            for num_workers in (0, 1, 2):
+                mp_ctx = "spawn" if num_workers > 0 else None
+                dl = DataLoader(
+                    shuffle_dp,
+                    num_workers=num_workers,
+                    shuffle=True,
+                    multiprocessing_context=mp_ctx,
+                    worker_init_fn=_worker_init_fn
+                )
+
+                # No seed
+                dl_res_ns = list(dl)
+                self.assertEqual(len(dl_res_ns), len(exp))
+                self.assertEqual(sorted(dl_res_ns), sorted(exp))
+
+                # Same seeds
+                dl_res = []
+                for epoch in range(2):
+                    torch.manual_seed(123)
+                    dl_res.append(list(dl))
+                self.assertEqual(dl_res[0], dl_res[1])
+
+                # Different seeds
+                torch.manual_seed(321)
+                dl_res.append(list(dl))
+
+                self.assertEqual(len(dl_res[0]), len(dl_res[2]))
+                self.assertNotEqual(dl_res[0], dl_res[2])
+                self.assertEqual(sorted(dl_res[0]), sorted(dl_res[2]))
+
+                if num_workers == 0:
+                    continue
+
+                # Persistent workers
+                ps_dl_res = []
+                for _ in range(2):
+                    dl = DataLoader(
+                        shuffle_dp,
+                        num_workers=num_workers,
+                        shuffle=True,
+                        multiprocessing_context="spawn",
+                        worker_init_fn=_worker_init_fn,
+                        persistent_workers=True
+                    )
+                    ps_res = []
+                    torch.manual_seed(123)
+                    for epoch in range(2):
+                        ps_res.extend(list(dl))
+                    ps_dl_res.append(ps_res)
+                self.assertEqual(ps_dl_res[0], ps_dl_res[1])
+
+                # Different Seeds
+                dl = DataLoader(
+                    shuffle_dp,
+                    num_workers=num_workers,
+                    shuffle=True,
+                    multiprocessing_context="spawn",
+                    worker_init_fn=_worker_init_fn,
+                    persistent_workers=True
+                )
+                ps_res = []
+                torch.manual_seed(321)
+                for epoch in range(2):
+                    ps_res.extend(list(dl))
+                ps_dl_res.append(ps_res)
+
+                self.assertEqual(len(ps_dl_res[0]), len(ps_dl_res[2]))
+                self.assertNotEqual(ps_dl_res[0], ps_dl_res[2])
+                self.assertEqual(sorted(ps_dl_res[0]), sorted(ps_dl_res[2]))
+
 
         shuffle_dp_nl = IDP_NoLen(range(20)).shuffle(buffer_size=5)
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
@@ -2125,7 +2197,7 @@ class TestSerialization(TestCase):
         dl = DataLoader(idp, num_workers=2, shuffle=True,
                         multiprocessing_context='spawn', collate_fn=unbatch, batch_size=1)
         result = list(dl)
-        self.assertEquals([1, 1, 2, 2, 3, 3], sorted(result))
+        self.assertEqual([1, 1, 2, 2, 3, 3], sorted(result))
 
     @skipIfNoDill
     def test_spawn_lambdas_map(self):
@@ -2133,7 +2205,7 @@ class TestSerialization(TestCase):
         dl = DataLoader(mdp, num_workers=2, shuffle=True,
                         multiprocessing_context='spawn', collate_fn=unbatch, batch_size=1)
         result = list(dl)
-        self.assertEquals([1, 2, 3, 4, 5, 6], sorted(result))
+        self.assertEqual([1, 2, 3, 4, 5, 6], sorted(result))
 
 
 class TestCircularSerialization(TestCase):
@@ -2275,15 +2347,14 @@ class TestSharding(TestCase):
         sharded_dp = self._get_pipeline().sharding_filter()
         torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, 1)
         items = list(sharded_dp)
-        self.assertEqual([1, 20, 40, 70], items)
+        self.assertEqual([1, 20], items)
 
-        all_items = list(self._get_pipeline())
+        all_items = [0, 1, 10, 4, 20, 7]
         items = []
         for i in range(3):
             sharded_dp = self._get_pipeline().sharding_filter()
             torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, i)
             items += list(sharded_dp)
-
         self.assertEqual(sorted(all_items), sorted(items))
 
     def test_sharding_length(self):

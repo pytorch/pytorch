@@ -164,7 +164,7 @@ class TestBinaryUfuncs(TestCase):
                 # Assumes x is a scalar
                 return 1
 
-            if _numel(l) < 10 and _numel(r) < 10:
+            if _numel(l) <= 100 and _numel(r) <= 100:
                 msg = (
                     "Failed to produce expected results! Input lhs tensor was"
                     " {0}, rhs tensor was {1}, torch result is {2}, and reference result is"
@@ -746,8 +746,9 @@ class TestBinaryUfuncs(TestCase):
             if _supported((torch.complex128,)):
                 rhs_c128_scalar_tensor = make_rhs_scalar_tensor(dtype=torch.complex128)
                 result = op(lhs_f32, rhs_c128_scalar_tensor)
+                # Value type of 1D+ Tensor (lhs_f32) takes priority over scalar tensor (rhs_c128).
                 expected_dtype = (
-                    torch.complex128 if not op.always_returns_bool else torch.bool
+                    torch.complex64 if not op.always_returns_bool else torch.bool
                 )
                 self.assertEqual(result.dtype, expected_dtype)
 
@@ -1260,8 +1261,7 @@ class TestBinaryUfuncs(TestCase):
         t *= 1
         t /= 1
         t **= 1
-        with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
-            t //= 1
+        t //= 1
         t %= 1
         self.assertEqual(expected, t.data_ptr())
 
@@ -1456,7 +1456,13 @@ class TestBinaryUfuncs(TestCase):
             self._do_pow_for_exponents(m1, exponents + complex_exponents, pow, 10e-4)
         else:
             self._do_pow_for_exponents(m1, exponents, math.pow, None)
-            self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
+            if dtype != torch.half:
+                self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
+            else:
+                # Half Tensor with complex exponents leads to computation dtype
+                # of ComplexHalf for which this ops is not supported yet
+                with self.assertRaisesRegex(RuntimeError, "not implemented for 'ComplexHalf'"):
+                    self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
 
         # base - number, exponent - tensor
         # contiguous
@@ -1745,8 +1751,17 @@ class TestBinaryUfuncs(TestCase):
         first_exp[0] = first_exp[10] = first_exp[20] = 0
         second_exp[0] = second_exp[10] = second_exp[20] = 0
         for base in complexes:
-            self._test_pow(base, first_exp)
-            self._test_pow(base, second_exp)
+            # Half Tensor with complex base leads to computation dtype
+            # of ComplexHalf for which this ops is not supported yet
+            # NOTE: pow has fast-path when base is 1 which supports
+            # ComplexHalf
+            if dtype is torch.half and base != (1 + 0j):
+                with self.assertRaisesRegex(RuntimeError, "not implemented for 'ComplexHalf'"):
+                    self._test_pow(base, first_exp)
+                    self._test_pow(base, second_exp)
+            else:
+                self._test_pow(base, first_exp)
+                self._test_pow(base, second_exp)
 
     @onlyNativeDeviceTypes
     @skipMeta
@@ -1886,8 +1901,6 @@ class TestBinaryUfuncs(TestCase):
     def test_div_and_floordiv_vs_python(self, device):
         # Tests torch division ops which can handle both arguments being
         #   scalars.
-        # NOTE: torch.floor_divide currently truncates instead of flooring.
-        #   the quotient. See https://github.com/pytorch/pytorch/issues/43874.
         def _scalar_helper(python_op, torch_op):
             for a, b in product(range(-10, 10), range(-10, 10)):
                 for op in (lambda x: x * 0.5, lambda x: math.floor(x)):
@@ -1910,19 +1923,16 @@ class TestBinaryUfuncs(TestCase):
                         actual_first_tensor = torch_op(a_t, b)
                         actual_second_tensor = torch_op(a, b_t)
 
-                        self.assertEqual(actual_scalar, expected_div)
-                        self.assertEqual(actual_tensor.item(), expected_div)
+                        self.assertEqual(actual_scalar, expected)
+                        self.assertEqual(actual_tensor.item(), expected)
                         self.assertEqual(actual_first_tensor, actual_tensor)
                         self.assertEqual(actual_second_tensor, actual_tensor)
 
             _scalar_helper(operator.truediv, operator.truediv)
             _scalar_helper(operator.truediv, torch.true_divide)
-            with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
-                _scalar_helper(lambda a, b: math.trunc(a / b), operator.floordiv)
-                _scalar_helper(lambda a, b: math.trunc(a / b), torch.floor_divide)
+            _scalar_helper(lambda a, b: math.floor(a / b), operator.floordiv)
+            _scalar_helper(lambda a, b: math.floor(a / b), torch.floor_divide)
 
-    # NOTE: torch.floor_divide currently truncates instead of flooring.
-    # See https://github.com/pytorch/pytorch/issues/43874.
     @onlyNativeDeviceTypes
     def test_div_and_floordiv_script_vs_python(self, device):
         # Creates jitted functions of two tensors
@@ -1944,13 +1954,12 @@ class TestBinaryUfuncs(TestCase):
                     continue
 
                 expected_div = a / b
-                expected_truncdiv = math.trunc(a / b)
+                expected_floordiv = math.floor(a / b)
                 a_t = torch.tensor(a, device=device)
                 b_t = torch.tensor(b, device=device)
 
                 self.assertEqual(scripted_div(a_t, b_t), expected_div)
-                with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
-                    self.assertEqual(scripted_floordiv(a_t, b_t), expected_truncdiv)
+                self.assertEqual(scripted_floordiv(a_t, b_t), expected_floordiv)
 
         # Creates jitted functions of one tensor
         def _wrapped_div_scalar(a):
@@ -1980,8 +1989,6 @@ class TestBinaryUfuncs(TestCase):
                 a_t = torch.tensor(a, device=device)
 
                 self.assertEqual(a / 5, scripted_div_scalar(a_t))
-                with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
-                    self.assertEqual(math.trunc(a / 5), scripted_floordiv_scalar(a_t))
 
                 # Skips zero divisors
                 if a == 0:
@@ -1998,8 +2005,6 @@ class TestBinaryUfuncs(TestCase):
                     # See issue gh-52387
                     self.assertEqual(5 // a, scripted_rfloordiv_scalar(a_t))
 
-    # NOTE: torch.floor_divide currently truncates instead of flooring
-    #   the quotient. See https://github.com/pytorch/pytorch/issues/43874.
     @onlyNativeDeviceTypes
     def test_idiv_and_ifloordiv_vs_python(self, device):
         def _wrapped_idiv_tensor(a, b):
@@ -2059,7 +2064,6 @@ class TestBinaryUfuncs(TestCase):
 
                 expected_idiv = a / b
                 expected_ifloordiv = a // b
-                expected_itruncdiv = math.trunc(a / b)
 
                 a_t = torch.tensor(a, device=device)
                 b_t = torch.tensor(b, device=device)
@@ -2094,39 +2098,27 @@ class TestBinaryUfuncs(TestCase):
                 if not a_t.is_floating_point() and b_t.is_floating_point():
                     # Inplace modification fails because a float tensor is required
                     #   if the divisor is a float tensor
-                    with self.assertRaises(RuntimeError), self.assertWarnsOnceRegex(
-                        UserWarning, "floor_divide"
-                    ):
-                        a_t.clone().floor_divide_(b_t)
-                    with self.assertRaises(RuntimeError), self.assertWarnsOnceRegex(
-                        UserWarning, "floor_divide"
-                    ):
-                        scripted_floor_divide_tensor(a_t.clone(), b_t)
+                    a_t.clone().floor_divide_(b_t)
+                    scripted_floor_divide__tensor(a_t.clone(), b_t)
                     tmp = a_t.clone()
-                    with self.assertRaises(RuntimeError), self.assertWarnsOnceRegex(
-                        UserWarning, "floor_divide"
-                    ):
-                        tmp //= b_t
+                    tmp //= b_t
                 else:
                     # Inplace modification is OK when both or neither tensor is
                     #   a float tensor
-                    with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
-                        self.assertEqual(
-                            a_t.clone().floor_divide_(b_t).item(), expected_itruncdiv
-                        )
-                        self.assertEqual(
-                            scripted_floor_divide__tensor(a_t.clone(), b_t).item(),
-                            expected_itruncdiv,
-                        )
-                    tmp = a_t.clone()
-                    with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
-                        tmp //= b_t
-                    self.assertEqual(tmp.item(), expected_itruncdiv)
-
-                with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
                     self.assertEqual(
-                        scripted_floor_divide__scalar(a_t), math.trunc(a / 5)
+                        a_t.clone().floor_divide_(b_t).item(), expected_ifloordiv
                     )
+                    self.assertEqual(
+                        scripted_floor_divide__tensor(a_t.clone(), b_t).item(),
+                        expected_ifloordiv,
+                    )
+                    tmp = a_t.clone()
+                    tmp //= b_t
+                    self.assertEqual(tmp.item(), expected_ifloordiv)
+
+                self.assertEqual(
+                    scripted_floor_divide__scalar(a_t), math.floor(a / 5)
+                )
 
     # Tests binary op equivalence with Python builtin ops
     # Also tests that reverse operations are equivalent to forward ops
@@ -2731,9 +2723,8 @@ class TestBinaryUfuncs(TestCase):
         x = torch.randn(10, device=device).mul(30).to(dtype)
         y = torch.arange(1, 11, dtype=dtype, device=device)
 
-        with self.assertWarnsOnceRegex(UserWarning, "__floordiv__"):
-            z = x // y
-        z_alt = torch.trunc(x.double() / y.double()).to(dtype)
+        z = x // y
+        z_alt = torch.floor(x.double() / y.double()).to(dtype)
 
         self.assertEqual(z.dtype, x.dtype)
         self.assertEqual(z, z_alt)
@@ -2745,35 +2736,13 @@ class TestBinaryUfuncs(TestCase):
     def test_floor_divide_scalar(self, device, dtype):
         x = torch.randn(100, device=device).mul(10).to(dtype)
 
-        with self.assertWarnsOnceRegex(UserWarning, "__floordiv__"):
-            z = x // 3
+        z = x // 3
         z_alt = torch.tensor(
-            [math.trunc(v.item() / 3.0) for v in x], dtype=x.dtype, device=device
+            [math.floor(v.item() / 3.0) for v in x], dtype=x.dtype, device=device
         )
 
         self.assertEqual(z.dtype, x.dtype)
         self.assertEqual(z, z_alt)
-
-    # Note: this tests fails on XLA
-    @onlyNativeDeviceTypes
-    @dtypes(torch.float, torch.long)
-    def test_floor_divide_out(self, device, dtype):
-        x = torch.randn(10, device=device).mul(10).to(dtype)
-        y = torch.arange(1, 11, dtype=dtype, device=device)
-        o = torch.empty(10, dtype=dtype, device=device)
-
-        with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
-            torch.floor_divide(x, y, out=o)
-            self.assertEqual(o, x // y)
-
-            # Tests scalar with out
-            torch.floor_divide(x, 2, out=o)
-            self.assertEqual(o, x // 2)
-
-            if dtype == torch.int:
-                o = torch.empty(10, dtype=torch.float, device=device)
-                torch.floor_divide(x, y, out=o)
-                self.assertEqual(o, torch.floor_divide(x.float(), y.float()))
 
     @onlyCPU
     @dtypes(*get_all_math_dtypes("cpu"))
