@@ -993,9 +993,21 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     Relocatable device code linking:
 
-    This extension supports the extra linking step needed for relocatable device code by setting ``dlink`` to ``True``.
-    Relocatable device code libraries can optionally be passed via ``dlink_libraries``.
-    Extra device linking flags (e.g. ``-dlto``) can be passed as a list via the ``nvcc_dlink`` key of ``extra_compile_args``.
+    If you want to reference device symbols across compilation units (across object files),
+    the object files need to be built with `relocatable device code` (-rdc=true or -dc).
+    An exception to this rule is "dynamic parallelism" (nested kernel launches)  which is not used a lot anymore.
+    `Relocatable device code` is less optimized so it needs to be used only on object files that need it.
+    Using `-dlto` (Device Link Time Optimization) at the device code compilation step and `dlink` step
+    help reduce the protentional perf degradation of `-rdc`.
+    Note that it needs to be used at both steps to be useful.
+
+    If you have `rdc` objects you need to have an extra `-dlink` (device linking) step before the CPU symbol linking step.
+    There is also a case where `-dlink` is used without `-rdc`:
+    when an extension is linked against a static lib containing rdc-compiled objects
+    like the [NVSHMEM library](https://developer.nvidia.com/nvshmem).
+
+    Note: Ninja is required to build a CUDA Extension with RDC linking.
+
     Example:
         >>> CUDAExtension(
                     name='cuda_extension',
