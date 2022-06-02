@@ -1,7 +1,7 @@
 import copy
 import torch
 from torch.distributed._shard.sharded_tensor import (
-    sharded_op_impl,
+    _sharded_op_impl,
     Shard,
     ShardedTensor,
 )
@@ -10,7 +10,7 @@ from ._common import (
 )
 from torch.distributed._shard.common_op_utils import _register_default_op
 
-@sharded_op_impl(torch.Tensor.__deepcopy__)
+@_sharded_op_impl(torch.Tensor.__deepcopy__)
 def tensor_deepcopy(types, args=(), kwargs=None, pg=None):
     # NOTE: we directly implement deepcopy magic method
     # instead of using the default tensor.__deepcopy__
@@ -31,18 +31,18 @@ def tensor_deepcopy(types, args=(), kwargs=None, pg=None):
 
 
 # Tensor properties access
-_register_default_op(torch.Tensor.requires_grad.__get__, sharded_op_impl)  # type: ignore[attr-defined]
-_register_default_op(torch.Tensor.shape.__get__, sharded_op_impl)  # type: ignore[attr-defined]
-_register_default_op(torch.Tensor.dtype.__get__, sharded_op_impl)  # type: ignore[attr-defined]
-_register_default_op(torch.Tensor.layout.__get__, sharded_op_impl)  # type: ignore[attr-defined]
-_register_default_op(torch.Tensor.size, sharded_op_impl)
-_register_default_op(torch.Tensor.dim, sharded_op_impl)
-_register_default_op(torch.Tensor.ndim.__get__, sharded_op_impl)  # type: ignore[attr-defined]
-_register_default_op(torch.Tensor.is_contiguous, sharded_op_impl)
-_register_default_op(torch.Tensor.contiguous, sharded_op_impl)
+_register_default_op(torch.Tensor.requires_grad.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
+_register_default_op(torch.Tensor.shape.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
+_register_default_op(torch.Tensor.dtype.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
+_register_default_op(torch.Tensor.layout.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
+_register_default_op(torch.Tensor.size, _sharded_op_impl)
+_register_default_op(torch.Tensor.dim, _sharded_op_impl)
+_register_default_op(torch.Tensor.ndim.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
+_register_default_op(torch.Tensor.is_contiguous, _sharded_op_impl)
+_register_default_op(torch.Tensor.contiguous, _sharded_op_impl)
 
 # __reduce_ex__ to dispatch to get_state/set_state
-_register_default_op(torch.Tensor.__reduce_ex__, sharded_op_impl)
+_register_default_op(torch.Tensor.__reduce_ex__, _sharded_op_impl)
 
 def sharded_type_as_check(*args, **kwargs):
     """
@@ -153,7 +153,7 @@ _register_sharded_op_on_local_shards(
     customized_func=sharded_detach,
 )
 
-@sharded_op_impl(torch.Tensor.requires_grad_)
+@_sharded_op_impl(torch.Tensor.requires_grad_)
 def tensor_requires_grad_set(types, args=(), kwargs=None, pg=None):
     self_st = args[0]
     requires_grad = args[1]
