@@ -38,6 +38,7 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         # self.has_customized_qrange = (quant_min is not None) and (quant_max is not None)
         # self.quant_min, self.quant_max = calculate_qmin_qmax(quant_min, quant_max, self.has_customized_qrange, self.dtype, self.reduce_range)
 
+    # introduce signed numbers
     def _calculate_qparams(self, min_val: torch.Tensor, max_val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         # compute n and store as member variable
         self.n = b // k
@@ -66,7 +67,10 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         self.gamma = self.alpha / p_sum
 
         # get all possible quantization levels
-        levels = torch.zeros(size=(self.n, self.b))
+
+        # tensor size: 2**b x 2**b
+        tensor_size = 2**self.b
+        levels = torch.zeros(size=(tensor_size, tensor_size))
         for level0 in range(self.b):
             for level1 in range(self.b):
                 levels[level0][level1] = gamma * (p0[level0] + p1[level1])
@@ -101,8 +105,18 @@ class APoTObserver(NonUniformQuantizationObserverBase):
     def calculate_qparams(self):
         return self._calculate_qparams(self.min_val, self.max_val)
 
-    # def _calculate_qparams(self):
-    #     return NonUniformQuantizationObserverBase._calculate_qparams()
+    def _calculate_qparams(self, min_val, max_val):
+        return super(APoTObserver, self)._calculate_qparams(min_val, max_val)
 
     def forward(self, x_orig):
-        pass
+        r"""Records the running minimum and maximum of ``x``."""
+        if x_orig.numel() == 0:
+            return x_orig
+        x = x_orig.detach()  # avoid keeping autograd tape
+        x = x.to(self.min_val.dtype)
+        min_val_cur, max_val_cur = torch.aminmax(x)
+        min_val = torch.min(min_val_cur, self.min_val)
+        max_val = torch.max(max_val_cur, self.max_val)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
+        return x_orig
