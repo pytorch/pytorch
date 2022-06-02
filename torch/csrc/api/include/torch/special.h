@@ -565,7 +565,7 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
   return torch::special_softmax(self, dim, dtype);
 }
 
-/// Bessel function of the first kind of order 1.
+/// Airy function of the first kind Ai(x).
 ///
 /// See https://pytorch.org/docs/master/special.html#torch.special.airy_ai.
 ///
@@ -582,6 +582,76 @@ inline Tensor airy_ai(const Tensor& self) {
 
 inline Tensor& airy_ai_out(Tensor& result, const Tensor& self) {
   return torch::special_airy_ai_out(result, self);
+}
+
+/// Bessel function of the first kind of order 0.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.bessel_j0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::bessel_j0(x);
+/// ```
+inline Tensor bessel_j0(const Tensor& self) {
+  return torch::special_bessel_j0(self);
+}
+
+inline Tensor& bessel_j0_out(Tensor& result, const Tensor& self) {
+  return torch::special_bessel_j0_out(result, self);
+}
+
+/// Bessel function of the first kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.bessel_j1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::bessel_j1(x);
+/// ```
+inline Tensor bessel_j1(const Tensor& self) {
+  return torch::special_bessel_j1(self);
+}
+
+inline Tensor& bessel_j1_out(Tensor& result, const Tensor& self) {
+  return torch::special_bessel_j1_out(result, self);
+}
+
+/// Bessel function of the second kind of order 0.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.bessel_y0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::bessel_y0(x);
+/// ```
+inline Tensor bessel_y0(const Tensor& self) {
+  return torch::special_bessel_y0(self);
+}
+
+inline Tensor& bessel_y0_out(Tensor& result, const Tensor& self) {
+  return torch::special_bessel_y0_out(result, self);
+}
+
+/// Bessel function of the second kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.bessel_y1.
+/// torch::special::bessel_y1(x);
+/// ```
+inline Tensor bessel_y1(const Tensor& self) {
+  return torch::special_bessel_y1(self);
+}
+
+inline Tensor& bessel_y1_out(Tensor& result, const Tensor& self) {
+  return torch::special_bessel_y1_out(result, self);
 }
 
 /// Chebyshev polynomial of the first kind.
@@ -762,6 +832,82 @@ inline Tensor& laguerre_polynomial_l_out(Tensor& output, const Scalar& x, const 
 
 inline Tensor& laguerre_polynomial_l_out(Tensor& output, const Tensor& x, const Scalar& n) {
   return torch::special_laguerre_polynomial_l_out(output, x, n);
+}
+
+/// Modified Bessel function of the first kind of order 0.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_i0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::modified_bessel_i0(x);
+/// ```
+inline Tensor modified_bessel_i0(const Tensor& self) {
+  return torch::special_modified_bessel_i0(self);
+}
+
+inline Tensor& modified_bessel_i0_out(Tensor& result, const Tensor& self) {
+  return torch::special_modified_bessel_i0_out(result, self);
+}
+
+/// Modified Bessel function of the first kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_i1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::modified_bessel_i1(x);
+/// ```
+inline Tensor modified_bessel_i1(const Tensor& self) {
+  return torch::special_modified_bessel_i1(self);
+}
+
+inline Tensor& modified_bessel_i1_out(Tensor& result, const Tensor& self) {
+  return torch::special_modified_bessel_i1_out(result, self);
+}
+
+/// Modified Bessel function of the second kind of order 0.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_k0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::modified_bessel_k0(x);
+/// ```
+inline Tensor modified_bessel_k0(const Tensor& self) {
+  return torch::special_modified_bessel_k0(self);
+}
+
+inline Tensor& modified_bessel_k0_out(Tensor& result, const Tensor& self) {
+  return torch::special_modified_bessel_k0_out(result, self);
+}
+
+/// Modified Bessel function of the second kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_k1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::modified_bessel_k1(x);
+/// ```
+inline Tensor modified_bessel_k1(const Tensor& self) {
+  return torch::special_modified_bessel_k1(self);
+}
+
+inline Tensor& modified_bessel_k1_out(Tensor& result, const Tensor& self) {
+  return torch::special_modified_bessel_k1_out(result, self);
 }
 
 }} // torch::special

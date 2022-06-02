@@ -1186,6 +1186,16 @@ class TestMPS(TestCase):
         helper((2, 8, 4, 5), 0.2)
         helper((2, 3, 4, 5), 1.0)  # value of 1 should be ignored internally
 
+    def test_buffer_size_match(self):
+        # this test shouldn't cause any crash
+        size = 16
+        cpu_A = torch.rand(size, device='cpu')
+        cpu_F = torch.rand(size, size, size, device='cpu')
+
+        mps_A = cpu_A.to('mps')
+        mps_F = cpu_F.to('mps')
+        self.assertEqual(cpu_A @ cpu_F, mps_A @ mps_F)
+
     def test_transpose_inplace(self):
         values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
         cpu_x = torch.tensor(values, device='cpu')
@@ -1194,6 +1204,14 @@ class TestMPS(TestCase):
         cpu_x.transpose_(0, 1)
         mps_x.transpose_(0, 1)
         self.assertEqual(cpu_x, mps_x.to('cpu'))
+
+    def test_expand_cpu_to_mps_copy(self):
+        # https://github.com/pytorch/pytorch/issues/78642
+
+        x = torch.tensor(1).expand([10]).to("mps")
+        x_cpu = torch.tensor(1).expand([10])
+
+        self.assertEqual(x_cpu, x.cpu())
 
     def test_slice(self):
         values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
@@ -3701,6 +3719,19 @@ class TestNLLLoss(TestCase):
             for diag in [0, 1, 2, 3, 4, -1, -2, -3, -4]:
                 helper(shape, diag=diag)
 
+    # Test linspace
+    def test_linspace(self):
+        def helper(start, end, steps, dtype=torch.float32):
+            cpu_result = torch.tensor(np.linspace(start, end, steps), dtype=dtype)
+            result = torch.linspace(start, end, steps, dtype=dtype, device='mps')
+            self.assertEqual(cpu_result, result)
+
+        for dtype in [torch.float32, torch.int32, torch.uint8, torch.int64]:
+            helper(2, 5, 10, dtype)
+            helper(2, 2, 10, dtype)
+            helper(5, 2, 10, dtype)
+            helper(2, 2, 0, dtype)
+
     # Test softmax
     def test_softmax(self):
         def helper(shape, dim, channels_last=False):
@@ -4124,6 +4155,32 @@ class TestNNMPS(NNTestCase):
         expect = F.conv2d(x, y)
         actual = F.conv2d(x, y, padding='valid')
         self.assertEqual(expect.to('cpu'), actual.to('cpu'))
+
+    def test_gemm_permute_transpose(self):
+        batch_size = 32
+        n = 20
+        hidden = 768
+        num_attention_heads = 12
+        attention_head_size = hidden // num_attention_heads
+
+        def transpose_for_scores(x: torch.Tensor) -> torch.Tensor:
+            new_x_shape = x.size()[:-1] + (num_attention_heads, attention_head_size)
+            x = x.view(new_x_shape)
+            return x.permute(0, 2, 1, 3)
+
+        def attention2(key, *, workaround=False, device):
+            key = transpose_for_scores(key)
+            res = key.transpose(-1, -2)
+            return res
+
+        A = torch.randn(batch_size, n, hidden)
+        A_mps = A.detach().clone().to("mps")
+
+        r1 = attention2(A, device="cpu")
+        r2 = attention2(A_mps, device="mps")
+
+        r2_cpu = r2.to("cpu")
+        self.assertEqual(r1, r2_cpu)
 
     # def test_conv2d_same_padding(self, device='mps'):
         # x = torch.rand(1, 1, 10, 11, device=device)

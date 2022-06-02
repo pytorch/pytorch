@@ -1838,6 +1838,14 @@ class TestNN(NNTestCase):
         parameters += param_list[-2:]
         check()
 
+    def test_ParameterList_meta(self):
+        p = torch.nn.Parameter(torch.empty(1, device='meta'))
+        self.assertExpectedInline(str(p), """\
+Parameter containing:
+tensor(..., device='meta', size=(1,), requires_grad=True)""")
+        pl = torch.nn.ParameterList([p])
+        self.assertExpectedInline(str(pl), """ParameterList(  (0): Parameter containing: [torch.float64 of size 1])""")
+
     def test_ParameterList_replication(self):
         # The actual replication code from DP cannot be used on CPU so doing it manually here
         def make_param():
@@ -16459,6 +16467,37 @@ class TestNNDeviceType(NNTestCase):
         tensorTwice[0, 3] = 8
         self.assertEqual(embedding.weight.grad._indices(), tensorTwice)
         self.assertEqual(embedding.weight.grad._values(), onesTwice)
+
+    @dtypesIfCUDA(*((torch.float, torch.double, torch.bfloat16, torch.half)
+                    if TEST_WITH_ROCM else (torch.float, torch.double, torch.half)))
+    @dtypes(torch.float32)
+    def test_embedding_max_norm_backward(self, device, dtype):
+        # can't use gradcheck since in place renorm makes analytical gradients different from produced ones
+        weight = torch.randn((4, 4), device=device, dtype=dtype) * 2
+        weight.requires_grad_()
+        inp_list = [0, 1, 2, 2]
+        inp = torch.tensor(inp_list, device=device)
+        out = nn.functional.embedding(inp, weight, max_norm=1.).sum()
+        out.backward()
+
+        expected_grad = torch.tensor([[1., 1., 2., 0.]], device=device, dtype=dtype).transpose(0, 1).expand(4, 4)
+        self.assertEqual(weight.grad, expected_grad)
+
+    @dtypesIfCUDA(*((torch.float, torch.double, torch.bfloat16, torch.half)
+                    if TEST_WITH_ROCM else (torch.float, torch.double, torch.half)))
+    @dtypes(torch.float32)
+    def test_embedding_max_norm_fwd_AD(self, device, dtype):
+        # can't use gradcheck since in place renorm makes analytical gradients different from produced ones
+        weight = torch.randn((4, 4), device=device, dtype=dtype) * 2
+        tangent = torch.ones((4, 4), device=device, dtype=dtype)
+        inp = torch.tensor([[0, 1], [2, 2]], device=device)
+        with torch.autograd.forward_ad.dual_level():
+            dual_weight = torch.autograd.forward_ad.make_dual(weight, tangent)
+            out = nn.functional.embedding(inp, dual_weight, max_norm=1.)
+            jvp = torch.autograd.forward_ad.unpack_dual(out).tangent
+
+        expected_grad = torch.ones((2, 2, 4), device=device, dtype=dtype)
+        self.assertEqual(jvp, expected_grad)
 
     @dtypesIfCUDA(*((torch.float, torch.double, torch.bfloat16, torch.half)
                     if TEST_WITH_ROCM else (torch.float, torch.double, torch.half)))
