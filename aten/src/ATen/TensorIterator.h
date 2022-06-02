@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/DynamicCast.h>
 #include <c10/util/FunctionRef.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/SmallVector.h>
