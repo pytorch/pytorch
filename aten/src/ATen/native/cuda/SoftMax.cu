@@ -969,7 +969,7 @@ Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const c10:
   // expand mask to [B, H, T, T] and treat it like regular mask
   // TODO We should have special fast kernel for TxT mask as well
   bool is_TxT_mask = input_.dim() == 4 && mask_.dim() == 2 && input_.size(3) == mask_.size(1) && input_.size(2) == mask_.size(0) && mask_.size(0) == mask_.size(1);
-  TORCH_CHECK(mask_.sizes() == input_.sizes() || is_BxT_mask || is_TxT_mask, "Mask shape should match input");
+  TORCH_CHECK(mask_.sizes() == input_.sizes() || is_BxT_mask || is_TxT_mask, "Mask shape should match input. mask: ", mask_.sizes(), " input: ", input_.sizes());
 
   auto input = input_.dim() == 0 ? input_.view(1) : input_;
   auto mask = mask_.dim() == 0 ? mask_.view(1) : mask_;
