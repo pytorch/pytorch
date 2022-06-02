@@ -623,6 +623,12 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
+    @opsToleranceOverride('TestOperators', 'test_vmapvjp', (
+        tol1('linalg.svd',
+             {torch.float32: tol(atol=1.5e-04, rtol=1e-04)}, device_type="cuda"),
+        tol1('svd',
+             {torch.float32: tol(atol=1.5e-04, rtol=1e-04)}, device_type="cuda"),
+    ))
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail)
     def test_vmapvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1031,7 +1037,6 @@ class TestOperators(TestCase):
         # fallback path doesn't work
         # All of the following are bugs and need to be fixed
         xfail('__getitem__', ''),
-        xfail('clamp', ''),
         xfail('index_put', ''),
         xfail('matrix_exp'),
         xfail('view_as_complex'),
