@@ -72,16 +72,8 @@ Locally disabling gradient computation
 
 See :ref:`locally-disable-grad-doc` for more information on the differences
 between no-grad and inference mode as well as other related mechanisms that
-may be confused with the two.
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    no_grad
-    enable_grad
-    set_grad_enabled
-    inference_mode
+may be confused with the two. Also see :ref:`torch-rst-local-disable-grad`
+for a list of functions that can be used to locally disable gradients.
 
 .. _default-grad-layouts:
 
