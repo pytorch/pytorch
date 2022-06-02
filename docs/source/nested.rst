@@ -60,3 +60,10 @@ nested_tensor([
 ])
 >>> nt.unbind()
 [tensor([0., 1., 2.], device='cuda:0'), tensor([3., 4., 5., 6., 7.], device='cuda:0')]
+
+.. currentmodule:: torch
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Tensor.to_padded_tensor
