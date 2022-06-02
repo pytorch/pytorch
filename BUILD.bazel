@@ -32,6 +32,9 @@ COMMON_COPTS = [
 aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/tags.yaml"] + glob(["aten/src/ATen/templates/**"])
 
 generated_cpu_cpp = [
+    "aten/src/ATen/DispatchlessCPU.cpp",
+    "aten/src/ATen/DispatchlessMeta.cpp",
+    "aten/src/ATen/DispatchlessCompositeExplicitAutograd.cpp",
     "aten/src/ATen/RegisterBackendSelect.cpp",
     "aten/src/ATen/RegisterCPU.cpp",
     "aten/src/ATen/RegisterFunctionalization_0.cpp",
@@ -79,6 +82,7 @@ generated_cpu_cpp = [
 ]
 
 generated_cuda_cpp = [
+    "aten/src/ATen/DispatchlessCUDA.cpp",
     "aten/src/ATen/CUDAFunctions.h",
     "aten/src/ATen/CUDAFunctions_inl.h",
     "aten/src/ATen/RegisterCUDA.cpp",
