@@ -1345,6 +1345,24 @@ class TestMathBits(TestCase):
             torch.is_complex,
         )
 
+# input strides and size may have altered due to the result of an inplace op
+def test_inplace_view(func, input, rs, input_size, input_strides):
+    if func is None:
+        return
+    # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm.out
+    # which mutate not necessarily the first input.
+    if isinstance(rs, torch.Tensor) and rs is input:
+        unequal_size = rs.size() != input_size
+        unequal_strides = rs.stride() != input_strides
+        # resize_ should probably have inplace_view tag. Not adding the tag since it
+        # breaks some codegen logic
+        if (unequal_size or unequal_strides):
+            if isinstance(func, torch._ops.OpOverloadPacket):
+                func = func.default
+            if func is not torch.ops.aten.resize_.default:
+                # TODO: use self.assertIn when we have separate tests for each tag
+                assert torch.Tag.inplace_view in func.tags
+
 # A mode that when enabled runs runs correctness checks to ensure
 # that operators have expected tags based on their input and
 # ouput tensor properties
@@ -1360,16 +1378,7 @@ class TestTagsMode(torch.Tensor):
             old_stride = args[0].stride()
             with no_dispatch():
                 rs = func(*args, **kwargs)
-            # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm.out
-            # which mutate not necessarily the first input.
-            if isinstance(rs, torch.Tensor) and rs is args[0]:
-                unequal_size = rs.size() != old_size
-                unequal_strides = rs.stride() != old_stride
-                # resize_ should probably have inplace_view tag. Not adding the tag since it
-                # breaks some codegen logic
-                if (unequal_size or unequal_strides) and (func is not torch.ops.aten.resize_.default):
-                    # TODO: use self.assertIn when we have separate tests for each tag
-                    assert torch.Tag.inplace_view in func.tags
+            test_inplace_view(func, args[0], rs, old_size, old_stride)
         else:
             with no_dispatch():
                 rs = func(*args, **kwargs)
@@ -1383,9 +1392,16 @@ class TestTags(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
             # TODO: Test tags for ops that return a list of tensors
-            if isinstance(sample.input, torch.Tensor):
+            input = sample.input
+            if isinstance(input, torch.Tensor):
+                old_size = input.size()
+                old_stride = input.stride()
                 with enable_torch_dispatch_mode(TestTagsMode):
-                    res = op(sample.input, *sample.args, **sample.kwargs)
+                    rs = op(input, *sample.args, **sample.kwargs)
+                # TODO: add test for aliases
+                aten_name = op.aten_name if op.aten_name is not None else op.name
+                opoverloadpacket = getattr(torch.ops.aten, aten_name, None)
+                test_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
 
 
 class TestRefsOpsInfo(TestCase):
