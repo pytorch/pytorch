@@ -35,7 +35,8 @@ class TestPythonRegistration(TestCase):
         # RuntimeError: impl("aten::neg", ...):
         # Explicitly provided namespace (aten) in operator name does not match ...
         with self.assertRaisesRegex(RuntimeError, "operator name does not match namespace"):
-            my_lib3 = Library("foo", "IMPL")
+            my_lib3 = Library("foo", "DEF")
+            my_lib3.define("neg(Tensor self) -> Tensor")
             my_lib3.impl(torch.ops.aten.neg.default, my_neg, "AutogradCPU")
             del my_lib3
 
@@ -64,6 +65,11 @@ class TestPythonRegistration(TestCase):
         # Validate that the old behavior is restored for neg and mul
         self.assertFalse(torch.neg(x).is_neg())
         self.assertTrue(torch.mul(x, y)._is_zerotensor())
+
+    def test_error_if_fn_not_callable(self):
+        with self.assertRaisesRegex(TypeError, "Input function is required to be a callable"):
+            my_lib = Library("aten", "IMPL")
+            my_lib.impl(torch.ops.aten.neg.default, [], "AutogradCPU")
 
     def test_override_cpu_sum(self) -> None:
         # Example 1
@@ -850,7 +856,7 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
                     kwargs = {}
                 return func(*args, **kwargs)
 
-        x = TestMode(inner=None)
+        x = TestMode()
         y = torch.tensor([2.])
         with enable_torch_dispatch_mode(x):
             y + y
@@ -974,7 +980,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
         class A(TorchDispatchMode):
             pass
         with self.assertRaisesRegex(ValueError, 'instance of TorchDispatchMode'):
-            with push_torch_dispatch_mode(A(inner=None)):
+            with push_torch_dispatch_mode(A()):
                 pass
 
     def test_push_mode_returns_unrelated(self):
@@ -982,8 +988,102 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             with push_torch_dispatch_mode(lambda *, inner: None):
                 pass
 
-    def test_missing_inner_mode_ctor(self):
-        self.assertRaisesRegex(TypeError, 'push_torch_dispatch_mode', lambda: TorchDispatchMode())
+    def test_ctor_no_inner(self):
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.zeros([])
+
+        with enable_torch_dispatch_mode(A()):
+            x = torch.randn((3, 4))
+
+        self.assertEqual(x, torch.zeros([]))
+
+    def test_with_mode(self):
+        class ErrorA(RuntimeError):
+            pass
+
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise ErrorA()
+
+        with self.assertRaises(ErrorA):
+            with A():
+                torch.empty([])
+
+    def test_with_mode_created_separately(self):
+        class ErrorA(RuntimeError):
+            pass
+
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise ErrorA()
+
+        x = A()
+        with self.assertRaises(ErrorA):
+            with x:
+                torch.empty([])
+
+    def test_with_nested_modes(self):
+        class ErrorA(RuntimeError):
+            def __init__(self, msg):
+                return super().__init__(msg)
+
+        class A(TorchDispatchMode):
+            def __init__(self, msg):
+                self.msg = msg
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise ErrorA(self.msg)
+
+        with self.assertRaisesRegex(ErrorA, "layer2"):
+            with A("layer1"):
+                with A("layer2"):
+                    torch.empty([])
+
+    def test_ctor_in_with_modes(self):
+        class ModeTensor(torch.Tensor):
+            def __new__(cls, elem, mode):
+                r = torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+                r.elem = elem
+                r.mode = mode
+                return r
+
+            def __torch_dispatch(self, func, types, args=(), kwargs=None):
+                with self.mode:
+                    return func(*args, **kwargs)
+
+        class Mode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                def unwrap(e):
+                    if isinstance(e, ModeTensor):
+                        return e.elem
+                    else:
+                        return e
+
+                def wrap(t):
+                    if isinstance(t, torch.Tensor):
+                        return ModeTensor(t, self)
+                    else:
+                        return t
+
+                return wrap(func(*tuple(unwrap(a) for a in args), **kwargs))
+
+        x = torch.tensor(4.)
+        with Mode():
+            y = x + x
+            z = y + y
+        self.assertIsInstance(y, ModeTensor)
+        self.assertIsInstance(z, ModeTensor)
+
+    def test_error_using_same_mode(self):
+        class A(TorchDispatchMode):
+            pass
+
+        x = A()
+        with x:
+            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode"):
+                with x:
+                    pass
 
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
@@ -1253,7 +1353,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             class ExampleTensor1(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_strides=True)
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1262,7 +1362,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             class ExampleTensor2(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_strides=True)
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1273,7 +1373,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             class ExampleTensor3(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_strides=True)
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
