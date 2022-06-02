@@ -337,8 +337,8 @@ def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
             args = tree_map(to_cpu, args)
             kwargs = tree_map(to_cpu, kwargs)
             r = func(*args , **kwargs)
-        except Exception as e:
-            raise orig_not_implemented_exception from e
+        except Exception as new_exception:
+            raise orig_not_implemented_exception from new_exception
 
         tensor_impls = set()
         storages = set()
