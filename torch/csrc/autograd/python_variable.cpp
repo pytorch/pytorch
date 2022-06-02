@@ -32,6 +32,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/python_numbers.h>
 
 #include <torch/library.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -2066,7 +2067,7 @@ int64_t concrete_dim_fn(
       py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
       ", expected int");
 
-  return PyLong_AsLong(out.ptr());
+  return THPUtils_unpackLong(out.ptr());
 }
 
 c10::Device concrete_device_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {
