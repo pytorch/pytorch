@@ -26,6 +26,9 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
 
+if TEST_SCIPY:
+    import scipy.sparse
+
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -3490,6 +3493,69 @@ class TestSparse(TestCase):
         test(4, 6, [7, 3, 1, 3, 0], [2, 7, 3, 1, 3, 0])
         test(4, 6, [7, 3, 1, 3, 1, 3], [7, 3, 1, 3, 2, 3])
         test(4, 6, [7, 3, 1, 3, 2, 1], [7, 3, 1, 3, 2, 3])
+
+    @onlyCPU
+    @dtypes(*floating_and_complex_types())
+    def test_sparse_spdiags(self, device, dtype):
+
+        make_diags = functools.partial(make_tensor, dtype=dtype, device=device)
+        make_offsets = functools.partial(torch.tensor, dtype=torch.long, device=device)
+
+        if TEST_SCIPY:
+
+            def reference(diags, offsets, shape):
+                return scipy.sparse.spdiags(diags.numpy(), offsets.numpy(), *shape).to_array()
+
+        else:
+
+            def reference(diags, offsets, shape):
+                result = np.zeros(shape, dtype=dtype, device=device)
+                for i, off in enumerate(offsets):
+                    res_view = result.diagonal(off)
+                    data = diags[i]
+                    if off > 0:
+                        data = data[off:]
+
+                    m = min(res_view.shape[0], data.shape[0])
+                    res_view[:m] = data[:m]
+                return result
+
+        def check_valid(diags, offsets, shape, layout=None):
+            ref_out = reference(diags, offsets, shape)
+            out = torch.sparse.spdiags(diags, offsets, shape, layout=layout)
+            if layout is None:
+                ex_layout = torch.sparse_coo
+            else:
+                ex_layout = layout
+
+            self.assertTrue(out.layout == ex_layout, f"Output layout {out.layout} expected {ex_layout}")
+            self.assertEqual(out.to_dense(), ref_out, f"Result:\n{out.to_dense()} does not match reference:\n{ref_out}")
+
+        def check_invalid(args, error):
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.sparse.spdiags(*args)
+
+        def valid_cases():
+            # some normal cases
+            yield (make_diags((1, 5)), make_offsets([0]), (5, 5))
+            yield (make_diags((3, 3)), make_offsets([-1, 0, 1], (4, 4)))
+            # noncontigous input
+            yield (make_diags((4, 4), noncontiguous=True), make_offsets([-1, 1, 0, 2, -2]), (5, 5))
+            # correct dimensionality but empty diags
+            yield (make_diags((0, 3)), make_offsets(size=(0,)), (3, 3))
+            # forward rotation of upper diagonals
+            yield (make_diags((3, 8)), make_offsets([1, 2, 3]), (4, 4))
+            # rotation exausts input space to read from
+            yield (make_diags((2, 3)), make_offsets([2, 3]), (2, 2))
+            # Simple cases repeated with special output format
+            yield (make_diags((1, 5)), make_offsets([0]), (5, 5), torch.sparse_csc)
+            yield (make_diags((3, 3)), make_offsets([-1, 0, 1]), (4, 4), torch.sparse_csr)
+
+        def invalid_cases():
+            yield (make_diags((5,)), make_offsets([0, 1, 2, 3, 4]), (3, 3)), "Diagonals must be 2d"
+            yield (make_diags((1, 3)), make_offsets([0]), (3, 2, 3)), "Output shape must be 2d"
+            yield (make_diags((2, 3)), make_offsets([[1, 2], [0, 3]]), (3, 3)), "Offsets must be 1d"
+            yield (make_diags((2, 3)),)
 
 
 class TestSparseOneOff(TestCase):

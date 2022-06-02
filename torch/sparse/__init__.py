@@ -262,3 +262,106 @@ Args:
         performed. This is useful for preventing data type
         overflows. Default: None
 """)
+
+
+spdiags = _add_docstr(_sparse._spdiags, r"""
+sparse.spdiags(diagonals, offsets, shape, layout=None) -> Tensor
+
+Creates a sparse tensor by placing the values from rows of
+:attr:`diagonals` along specified diagonals of the output
+
+The :attr:`offsets` controls which diagonals are set.
+
+- If :attr:`offsets[i]` = 0, it is the main diagonal
+- If :attr:`offsets[i]` < 0, it is below the main diagonal
+- If :attr:`offsets[i]` > 0, it is above the main diagonal
+
+The number of rows in :attr:`diagonals` must match the length of
+:attr:`offsets`, and an offset may not be repeated.
+
+Args:
+    diagonals (Tensor): Maxtrix storing diagonals row-wise
+    offsets (Tensor): The diagonals to be set, stored as a vector
+    shape (tuple of ints): The desired shape of the result
+Keyword args:
+    layout (:class:`torch.layout`, optional): The desired layout of the
+        returned tensor. ``torch.sparse_coo`` and ``torch.sparse_csr``
+        are supported. Default: ``torch.sparse_coo``
+
+Examples:
+
+Set the main and first two lower diagonals of a matrix::
+
+    >>> a = torch.arange(9).reshape(3, 3)
+    >>> a
+    tensor([[0, 1, 2],
+            [3, 4, 5],
+            [6, 7, 8])
+    >>> s = torch.sparse.spdiags(diags, torch.tensor([0, -1, -2]), (3,3))
+    >>> s
+
+    >>> s.to_dense()
+
+
+Change the output layout::
+
+    >>> a = torch.arange(9).reshape(3, 3)
+    >>> a
+    tensor([[0, 1, 2],[3, 4, 5], [6, 7, 8])
+    >>> s = torch.sparse.spdiags(diags, torch.tensor([0, -1, -2]), (3,3), layout=torch.sparse_csr)
+    >>> s
+    tensor(indices=tensor([[0, 1, 2, 1, 2, 2],
+                           [0, 1, 2, 0, 1, 0]]),
+           values=tensor([0, 1, 2, 3, 4, 6]),
+           size=(3, 3), nnz=6, layout=torch.sparse_coo)
+    >>> s.to_dense()
+    tensor([[0, 0, 0],
+            [3, 1, 0],
+            [6, 4, 2]])
+
+Set partial diagonals of a large output::
+
+    >>> a = torch.tensor([[1, 2], [3, 4]])
+    >>> torch.sparse.spdiags(a, [0, -1], (10, 10)).to_dense()
+    tensor([[1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [3, 2, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 4, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])
+
+
+It is not an error if the diagonal specified by an offset is not supported by output shape::
+
+    >>> a = torch.tensor([[1, 2], [3, 4]])
+    >>> torch.sparse.spdiags(a, torch.tensor([-1, -10]), (3,3)).to_dense()
+    tensor([[0, 0, 0],
+            [1, 0, 0],
+            [0, 2, 0]])
+
+
+
+.. note::
+
+    When setting the values along a given diagonal the index into the diagonal
+    and the index into the row of :attr:`diagonals` is taken as the
+    column index in the output. This has the effect that when setting a diagonal
+    with a positive offset `k` the first value along that diagonal will be
+    the value in position `k` of the row of :attr:`diagonals`
+
+Specifying a positive offset::
+
+    >>> a = torch.tensor([[1,2,3],[1,2,3],[1,2,3]])
+    >>> torch.sparse.spdiags(a, torch.tensor([0, 1, 2]), (5, 5)).to_dense()
+    tensor([[1, 2, 3, 0, 0],
+            [0, 2, 3, 0, 0],
+            [0, 0, 3, 0, 0],
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0]])
+
+
+""")
