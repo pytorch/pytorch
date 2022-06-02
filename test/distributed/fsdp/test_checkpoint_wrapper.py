@@ -68,7 +68,10 @@ class CheckpointWrapperTest(TestCase):
 
         model = MyModel()
         n_linear = sum(1 if isinstance(x, nn.Linear) else 0 for x in model.modules())
-        check_fn = lambda m, l: isinstance(l, nn.Linear)
+
+        def check_fn(_, l):
+            return isinstance(l, nn.Linear)
+
         apply_activation_checkpointing_wrapper(
             model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=check_fn
         )
