@@ -108,6 +108,14 @@ GENERATED_H_CUDA = [
     "CUDAFunctions_inl.h",
 ]
 
+GENERATED_CPP_CUDA = [
+    "RegisterCUDA.cpp",
+    "RegisterNestedTensorCUDA.cpp",
+    "RegisterSparseCUDA.cpp",
+    "RegisterSparseCsrCUDA.cpp",
+    "RegisterQuantizedCUDA.cpp",
+]
+
 GENERATED_CPP = [
     "Functions.cpp",
     "RegisterBackendSelect.cpp",
