@@ -405,10 +405,11 @@ def canonicalize_dim(rank: int, idx: int) -> int:
         _idx = idx
 
     if _idx < 0 or _idx > _rank:
-        msg = "Received out of bounds index {0} for tensor of rank {1}!".format(
-            idx, rank
+        # Same error message as in aten/src/ATen/WrapDimUtils.h:49
+        msg = "Dimension out of range (expected to be in range of [{0}, {1}], but got {2})".format(
+            -rank, rank - 1, idx
         )
-        raise ValueError(msg)
+        raise IndexError(msg)
 
     return _idx
 
