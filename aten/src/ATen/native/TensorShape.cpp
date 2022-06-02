@@ -1985,11 +1985,6 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
   }
 }
 
-Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
-  auto res = index_select_sparse_cpu(self.to(at::kCPU), dim, index.to(at::kCPU));
-  return res.to(self.device());
-}
-
 Tensor slice(
     const Tensor& self,
     int64_t dim,
