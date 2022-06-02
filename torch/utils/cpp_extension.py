@@ -2127,7 +2127,7 @@ def _write_ninja_file(path,
         build.append(f'build {object_file}: {rule} {source_file}')
 
     if cuda_dlink_post_cflags:
-        devlink_out = os.path.abspath(objects[0]) + '.dlink.o'
+        devlink_out = os.path.join(os.path.dirname(objects[0]), 'dlink.o')
         devlink_rule = ['rule cuda_devlink']
         devlink_rule.append('  command = $nvcc $in -o $out $cuda_dlink_post_cflags')
         devlink = [f'build {devlink_out}: cuda_devlink {" ".join(objects)}']
