@@ -5235,20 +5235,20 @@ add_docstr_all('to_padded_tensor',
                r"""
 to_padded_tensor(padding, output_size=None) -> Tensor
 
-Returns a new (non-nested) Tensor by padding the nested tensor
+Returns a new (non-nested) Tensor by padding the nested tensor.
 The leading entries will be filled with the nested data,
-while the trailing entries will be padded
+while the trailing entries will be padded.
 
 .. warning::
 
     :func:`to_padded_tensor` always copies the underlying data,
-    since the nested and the non-nested tensors differ in memory layout
+    since the nested and the non-nested tensors differ in memory layout.
 
 Args:
-    padding (float): The padding value for the trailing entries
+    padding (float): The padding value for the trailing entries.
     output_size (Tuple[int]): The size of the output tensor.
-                              If not given, will infer by taking the max size of each nested sub-tensor along each dimension
-                              If given, it must be large enough to contain all nested data
+                              If given, it must be large enough to contain all nested data;
+                              else, will infer by taking the max size of each nested sub-tensor along each dimension.
 
 Example::
 
