@@ -18,7 +18,6 @@ import torch
 import torch.multiprocessing as multiprocessing
 import torch.utils.data.graph_settings
 import torch.distributed as dist
-import torch.distributed.distributed_c10d as c10d
 
 from torch._utils import ExceptionWrapper
 from torch._six import string_classes
@@ -98,7 +97,7 @@ def _sharding_worker_init_fn(worker_init_fn, worker_id):
     info = torch.utils.data.get_worker_info()
     total_workers = info.num_workers
     datapipe = info.dataset
-    if dist.is_available() and c10d.is_initialized():
+    if dist.is_available() and dist.is_initialized():
         total_workers *= dist.get_world_size()
         global_worker_id = dist.get_rank() * info.num_workers + global_worker_id
     torch.utils.data.graph_settings.apply_sharding(datapipe, total_workers, global_worker_id)
