@@ -615,7 +615,7 @@ Utilities
 
 Operator Tags
 ------------------------------------
-.. autoclass:: Tags
+.. autoclass:: Tag
     :members:
 
 .. Empty submodules added only for tracking.
