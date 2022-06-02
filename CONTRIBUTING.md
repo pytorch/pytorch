@@ -85,7 +85,7 @@ To develop PyTorch on your machine, here are some tips:
 
 ### Prerequisites
 * CMake. We recommend installing it with [Homebrew](https://brew.sh/)
-with `brew install cmake` if you are developing on MacOS or Linux system.
+with `brew install cmake` if you are developing on MacOS.
 * Python >= 3.7 (3.7.6+ recommended)
 
 ### Instructions
