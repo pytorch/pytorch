@@ -52,22 +52,26 @@ class FakeTensorTest(TestCase):
         self.assertEqual(out.device.type, "cuda")
 
     def test_constructor(self):
-        with enable_torch_dispatch_mode(FakeTensorMode):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
             x = torch.rand([4, 4], device="cpu")
 
         self.assertTrue(isinstance(x, FakeTensor))
         self.assertTrue(x.device.type == "cpu")
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_fake_mode_non_fake_inputs(self):
-        x = torch.tensor(0.1)
-        y = torch.rand([4, 4], device="cuda")
-
-        with enable_torch_dispatch_mode(FakeTensorMode):
+    def test_mode(self):
+        x = FakeTensor.from_tensor(torch.rand([1]))
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+            y = torch.rand([4], device="cpu")
             out = x + y
 
-        self.assertTrue(isinstance(out, FakeTensor))
-        self.assertTrue(out.device.type == "cuda")
+        self.assertTrue(isinstance(y, FakeTensor))
+
+    def test_fake_mode_error(self):
+        x = torch.rand([4, 4])
+
+        with self.assertRaisesRegex(Exception, "non-Fake Tensor inputs"):
+            with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+                y = x[0]
 
 
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
