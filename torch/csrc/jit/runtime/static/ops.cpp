@@ -1702,6 +1702,43 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
   return nullptr;
 });
 
+REGISTER_OPERATOR_FUNCTOR(aten::mean, aten_mean, [](Node* n) -> SROperator {
+  if (n->matches(torch::schema(
+          "aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto dim = p_node->Input(1).toDimVector();
+      const bool keepdim = p_node->Input(2).toBool();
+      const auto dtype = p_node->Input(3).toOptional<at::ScalarType>();
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = create_empty_from(
+            self, dtype.value_or(self.dtype().toScalarType()));
+      }
+      auto& output = p_node->Output(0).toTensor();
+      fastResizeToZero(output);
+      at::cpu::mean_out(output, self, dim, keepdim, dtype);
+    };
+  }
+
+  if (n->matches(torch::schema(
+          "aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto dtype = p_node->Input(1).toOptional<at::ScalarType>();
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = create_empty_from(
+            self, dtype.value_or(self.dtype().toScalarType()));
+      }
+      auto& output = p_node->Output(0).toTensor();
+      fastResizeToZero(output);
+      at::cpu::mean_out(output, self, /*dim=*/{}, /*keepdim=*/false, dtype);
+    };
+  }
+
+  LogAndDumpSchema(n);
+  return nullptr;
+});
+
 REGISTER_OPERATOR_FUNCTOR(aten::repeat, aten_repeat, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::repeat(Tensor self, int[] repeats) -> Tensor"))) {
