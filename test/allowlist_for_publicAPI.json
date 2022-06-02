@@ -2374,10 +2374,10 @@
   "torch.ao.nn.quantized": [
     "MaxPool2d"
   ],
-  "torch.nn.quantized.dynamic.modules.conv": [
+  "torch.ao.nn.quantized.dynamic.modules.conv": [
     "Tensor"
   ],
-  "torch.nn.quantized.dynamic.modules.rnn": [
+  "torch.ao.nn.quantized.dynamic.modules.rnn": [
     "Dict",
     "List",
     "Optional",

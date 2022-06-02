@@ -324,7 +324,7 @@ c10::optional<Assign> SourceImporterImpl::
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
-      {"__torch__.torch.nn.quantized.dynamic.modules.linear.Linear",
+      {"__torch__.torch.ao.nn.quantized.dynamic.modules.linear.Linear",
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
@@ -361,7 +361,10 @@ c10::optional<Assign> SourceImporterImpl::
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}},
-  };
+      {"__torch__.torch.nn.quantized.dynamic.modules.linear.Linear",
+       {"_packed_params",
+        "Tensor",
+        "__torch__.torch.classes.quantized.LinearPackedParamsBase"}}};
   // @lint-ignore-every CLANGTIDY facebook-hte-StdRegexIsAwful
   static std::regex mangle_re("\\.___torch_mangle_\\d+");
   auto demangled_classname =
