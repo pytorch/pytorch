@@ -131,8 +131,7 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
     MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
     @autoreleasepool {
-      string lookup_key = mps::getStridedKey(self, self.sizes(), self.strides(),
-                      self.storage_offset());
+      string lookup_key = mps::getStridedKey(self, size, stride, storage_offset);
       CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(lookup_key));
 
       if(!cachedGraph) {
@@ -163,28 +162,6 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
           });
           cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
         }
-      } else {
-        // Else part takes care of the chaining where multiple view operations
-        // were implemented on the same underlying data storage ptr
-        string insert_key = mps::getStridedKey(self, size, stride, storage_offset);
-        MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(insert_key, ^ MPSCachedGraph * () {
-        CachedGraph *newCachedGraph = nil;
-          @autoreleasepool {
-              MPSGraph* mpsGraph = cachedGraph->graph();
-              newCachedGraph = new CachedGraph(mpsGraph);
-              newCachedGraph->inputTensor_ = cachedGraph->inputTensor_;
-              newCachedGraph->outputTensor_ = chainViewOperation(mpsGraph, size,
-                                                                 stride,
-                                                                 storage_offset,
-                                                                 cachedGraph->outputTensor_,
-                                                                 self);
-              newCachedGraph->size_ = size;
-              newCachedGraph->stride_ = stride;
-              newCachedGraph->storage_offset_ = storage_offset;
-          }
-          return newCachedGraph;
-        });
-        cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
       }
     }
   }
@@ -367,7 +344,7 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_,
   id<MTLBuffer> destBuffer = __builtin_bit_cast(id<MTLBuffer>, dst_.storage().data());
 
 
-  if (!src.is_contiguous()) {
+  if (src_.is_view()) {
     src = src_.to(dst_.dtype()).expand_as(dst_).contiguous();
   } else {
     src = src_;
