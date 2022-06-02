@@ -1324,16 +1324,16 @@ class TestMPS(TestCase):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
+            cpu_y = cpu_x.repeat(repeats)
             y = x.repeat(repeats)
-            ref_y = cpu_x.repeat(repeats)
 
-            cpu_grad = torch.randn(ref_y.shape)
+            cpu_grad = torch.randn(cpu_y.shape)
             grad = cpu_grad.to('mps')
 
+            cpu_y.backward(gradient=cpu_grad)
             y.backward(gradient=grad)
-            ref_y.backward(gradient=cpu_grad)
 
-            self.assertEqual(y, ref_y)
+            self.assertEqual(y, cpu_y)
             self.assertEqual(x.grad, cpu_x.grad)
 
         helper((2, 3, 4, 5), (2, 3, 4, 5))
@@ -4411,12 +4411,6 @@ class TestConsistency(TestCase):
     # by doing `EXPECTTEST_ACCEPT=1 python test_mps.py TestConsistencyCPU`
     # You most likely do NOT want to modify this manually
     ALLOWLIST_OP = {
-        '__radd__': ['torch.bool',
-                     'torch.float32',
-                     'torch.int16',
-                     'torch.int32',
-                     'torch.int64',
-                     'torch.uint8'],
         '__rand__': ['torch.bool',
                      'torch.int16',
                      'torch.int32',
@@ -4440,12 +4434,6 @@ class TestConsistency(TestCase):
                      'torch.uint8'],
         '_masked.normalize': ['torch.float32'],
         'abs': ['torch.float16',
-                'torch.float32',
-                'torch.int16',
-                'torch.int32',
-                'torch.int64',
-                'torch.uint8'],
-        'add': ['torch.bool',
                 'torch.float32',
                 'torch.int16',
                 'torch.int32',
@@ -4820,12 +4808,6 @@ class TestConsistency(TestCase):
               'torch.uint8'],
         'tanh': ['torch.float32'],
         'tensordot': ['torch.float32'],
-        'tile': ['torch.float16',
-                 'torch.float32',
-                 'torch.int16',
-                 'torch.int32',
-                 'torch.int64',
-                 'torch.uint8'],
         'topk': ['torch.float32'],
         'tril': ['torch.bool',
                  'torch.float16',
@@ -4963,6 +4945,9 @@ class TestConsistency(TestCase):
         'inner': None,
         'dstack': None,
         'take_along_dim': None,
+        'tile': ['torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
+        '__radd__': ['torch.bool'],
+        'add': ['torch.bool'],
     }
 
     # Used for accept mode only

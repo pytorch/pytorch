@@ -75,7 +75,16 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   TORCH_CHECK(repeats.size() >= (size_t)self.dim(),
            "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
 
-  if (self.sizes() == repeats) {
+  bool already_correct_size = repeats.size() == (size_t)self.dim();
+  if (already_correct_size) {
+    for(const auto i : c10::irange(repeats.size())) {
+      if (repeats[i] != 1) {
+        already_correct_size = false;
+        break;
+      }
+    }
+  }
+  if (already_correct_size) {
     // Nothing to be done
     return self.clone();
   }
