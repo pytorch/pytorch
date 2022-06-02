@@ -965,7 +965,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "withRequiresGrad",
           [](const TypePtr& self, bool requires_grad) {
-            return self->expectRef<TensorType>().withRequiresGrad(requires_grad);
+            return self->expectRef<TensorType>().withRequiresGrad(
+                requires_grad);
           })
       .def_property_readonly(
           "annotation_str", [](const std::shared_ptr<Type>& self) {
