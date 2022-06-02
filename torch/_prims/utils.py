@@ -39,6 +39,20 @@ DimsType = Union[int, List[int], Tuple[int, ...]]
 DimsSequenceType = Union[List[int], Tuple[int, ...]]
 NumberType = Union[bool, int, float, complex]
 Number = (bool, int, float, complex)
+DeviceLikeType = Union[str, torch.device]
+
+
+torch_function_passthrough = {
+    torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.numel,
+    torch.Tensor.stride,
+    torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.device.__get__,  # type: ignore[attr-defined]
+    # For TorchRefsMode only
+    torch.Tensor.__format__,
+    torch.Tensor.__repr__,
+}
 
 
 class TensorMeta(torch.Tensor):
@@ -121,14 +135,7 @@ class TensorMeta(torch.Tensor):
         if kwargs is None:
             kwargs = {}
 
-        if func in {
-            torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.numel,
-            torch.Tensor.stride,
-            torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.device.__get__,  # type: ignore[attr-defined]
-        }:
+        if func in torch_function_passthrough:
             return super().__torch_function__(func, types, args, kwargs)
 
         if not hasattr(func, "meta"):
@@ -158,6 +165,7 @@ class TensorMeta(torch.Tensor):
 TensorLikeType = Union[torch.Tensor, TensorMeta]
 TensorLike = (torch.Tensor, TensorMeta)
 TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
+TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 
 
 # TODO: look at using torch.testing.assert_close instead with an option
@@ -193,12 +201,13 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
             msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
             raise AssertionError(msg)
 
-    same_strides, idx = check_significant_strides(a, b)
-    if not same_strides:
-        msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
-            a.stride(), b.stride(), idx
-        )
-        raise RuntimeError(msg)
+    # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
+    # same_strides, idx = check_significant_strides(a, b)
+    # if not same_strides:
+    #     msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
+    #         a.stride(), b.stride(), idx
+    #     )
+    # raise RuntimeError(msg)
 
 
 def check_significant_strides(
@@ -259,7 +268,6 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
     check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
 
     # Filters the tensors to actual tensors
-    all_tensors = all(isinstance(a, TensorLike) for a in tensors)
     tensors = tuple(
         a for a in tensors if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
     )
@@ -312,9 +320,6 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
         permuted_shape[idx] = shape[x]
 
     new_strides = make_contiguous_strides_for(permuted_shape)
-    # print(f"new_strides is {new_strides}")
-    # print(f"shape is {shape}")
-    # print(f"permuted_shape is {permuted_shape}")
     permuted_strides = [-1] * ndim
     for idx, x in enumerate(perm):
         permuted_strides[x] = new_strides[idx]
@@ -484,10 +489,18 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
             raise RuntimeError(msg)
 
 
+def canonicalize_device(device: Union[str, torch.device]) -> torch.device:
+    if isinstance(device, torch.device):
+        return device
+
+    assert isinstance(device, str)
+    return torch.device(device)
+
+
 # Asserts if any of the following are true:
 #   - a non-scalar or non-Tensor is given
 #   - the shape of any tensors is distinct
-def check_same_shape(*args, allow_cpu_scalar_tensors):
+def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
     """
     Checks that all Tensors in args have the same shape.
 
@@ -519,6 +532,58 @@ def check_same_shape(*args, allow_cpu_scalar_tensors):
             raise RuntimeError(msg)
 
 
+def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
+    shape = None
+    scalar_shape = None
+
+    for arg in args:
+        if isinstance(arg, Number):
+            continue
+        elif isinstance(arg, TensorLike):
+            if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
+                scalar_shape = arg.shape
+                continue
+
+            if shape is None:
+                shape = arg.shape
+
+            if not is_same_shape(shape, arg.shape):
+                return None
+        else:
+            return None
+
+    return shape if shape is not None else scalar_shape
+
+
+def extract_shape_from_varargs(
+    shape: Union[ShapeType, Tuple[ShapeType]]
+) -> Tuple[int, ...]:
+    """
+    Returns a shape from varargs.
+
+    In PyTorch, operations that accept shapes often accept them as varargs, like
+    foo(*shape). However a user can pass the shape as a sequence of integers,
+    like this:
+
+      foo(1, 2, 3)
+
+    or as a sequence of integers
+
+      foo((1, 2, 3))
+
+    In the first case shape will be a tuple of integers, and in the second case it's a tuple
+    containing a tuple of integers. This validates those inputs and canonicalizes them
+    to a tuple of integers.
+    """
+
+    # Handles tuple unwrapping
+    if len(shape) == 1 and isinstance(shape[0], tuple):
+        shape = shape[0]
+
+    validate_shape(shape)  # type: ignore[arg-type]
+    return shape  # type: ignore[return-value]
+
+
 _integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
 _float_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 _complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
@@ -542,6 +607,13 @@ def is_float_dtype(dtype: torch.dtype) -> bool:
 def is_complex_dtype(dtype: torch.dtype) -> bool:
     assert isinstance(dtype, torch.dtype)
     return dtype in _complex_dtypes
+
+
+def is_grad_dtype(dtype: torch.dtype) -> bool:
+    """
+    Checks if the dtype can require a gradient.
+    """
+    return is_float_dtype(dtype) or is_complex_dtype(dtype)
 
 
 _complex_to_real_dtype_map = {
@@ -799,7 +871,7 @@ _computation_dtype_map = {
 }
 
 
-def _get_computation_dtype(dtype: torch.dtype) -> torch.dtype:
+def get_computation_dtype(dtype: torch.dtype) -> torch.dtype:
     return _computation_dtype_map.get(dtype, dtype)
 
 
@@ -810,6 +882,13 @@ class ELEMENTWISE_TYPE_PROMOTION_KIND(Enum):
     ALWAYS_BOOL = (3,)
     COMPLEX_TO_FLOAT = (4,)
     BOOL_TO_LONG = (5,)
+
+
+class REDUCTION_OUTPUT_TYPE_KIND(Enum):
+    SAME = (0,)
+    COMPLEX_TO_FLOAT = (1,)  # for complex types outputs corresponding real type
+    KEEP_PROMOTED_TYPE = (2,)  # keep output in opmath type, needed for mean
+    ALWAYS_BOOL = (3,)
 
 
 # TODO: document type promotion kinds
@@ -924,7 +1003,7 @@ def elementwise_dtypes(
     result_dtype = None
 
     def _find_highest_dtype_filtered(
-        args, filter, *, float_as_complex=False, all_tensors_equal=False
+        args, filter, *, float_as_complex=False
     ) -> Optional[torch.dtype]:
         zero_dim_tensor_dtype = None
         one_plus_dim_tensor_dtype = None
@@ -933,12 +1012,12 @@ def elementwise_dtypes(
                 _dtype = x.dtype
                 if float_as_complex and is_float_dtype(_dtype):
                     _dtype = corresponding_complex_dtype(_dtype)
-                if x.ndim == 0 and not all_tensors_equal:
+                if x.ndim == 0:
                     zero_dim_tensor_dtype = get_higher_dtype(
                         zero_dim_tensor_dtype, _dtype
                     )
                 else:
-                    # x.ndim > 0 or all_tensors_equal
+                    # x.ndim > 0
                     one_plus_dim_tensor_dtype = get_higher_dtype(
                         one_plus_dim_tensor_dtype, _dtype
                     )
@@ -955,32 +1034,11 @@ def elementwise_dtypes(
             torch.get_default_dtype() if result_dtype is None else result_dtype
         )
     elif highest_type is complex:
-        # NOTE: complex x float type promotion is incorrectly implemented in PyTorch today
-        # it will treat zero dim and non-zero-dim float and complex tensors equally
-        # unless there's a non-zero-dim complex tensor
-        # the following captures this oddity
-        has_one_plus_dim_complex_tensor = False
-        for x in args:
-            if isinstance(x, TensorLike) and x.ndim > 0 and is_complex_dtype(x.dtype):
-                has_one_plus_dim_complex_tensor = True
-                break
-
-        if has_one_plus_dim_complex_tensor:
-            result_dtype = _find_highest_dtype_filtered(
-                args,
-                lambda x: is_float_dtype(x) or is_complex_dtype(x),
-                float_as_complex=True,
-            )
-        else:
-            # no complex tensors of rank 1+
-            # NOTE: bugged case where all tensors are equal
-            result_dtype = _find_highest_dtype_filtered(
-                args,
-                lambda x: is_float_dtype(x) or is_complex_dtype(x),
-                float_as_complex=True,
-                all_tensors_equal=True,
-            )
-
+        result_dtype = _find_highest_dtype_filtered(
+            args,
+            lambda x: is_float_dtype(x) or is_complex_dtype(x),
+            float_as_complex=True,
+        )
         if result_dtype is None:
             result_dtype = corresponding_complex_dtype(torch.get_default_dtype())
     elif highest_type is int:
@@ -991,29 +1049,56 @@ def elementwise_dtypes(
         result_dtype = torch.bool
 
     if type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT:
-        return _get_computation_dtype(result_dtype), result_dtype
+        return get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH:
         return result_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT:
         if is_integer_dtype(result_dtype) or is_boolean_dtype(result_dtype):
             result_dtype = torch.get_default_dtype()
-        return _get_computation_dtype(result_dtype), result_dtype
+        return get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
         # NOTE: computation can still occur in a complex dtype
-        computation_dtype = _get_computation_dtype(result_dtype)
+        computation_dtype = get_computation_dtype(result_dtype)
         if is_complex_dtype(result_dtype):
             result_dtype = corresponding_real_dtype(result_dtype)
         return computation_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG:
         if is_boolean_dtype(result_dtype):
             return torch.long, torch.long
-        return _get_computation_dtype(result_dtype), result_dtype
+        return get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
-        return _get_computation_dtype(result_dtype), torch.bool
+        return get_computation_dtype(result_dtype), torch.bool
     else:
         raise ValueError(
             "Unknown type promotion kind {0}".format(str(type_promotion_kind))
         )
+
+
+def reduction_dtypes(
+    arg,
+    output_dtype_kind: REDUCTION_OUTPUT_TYPE_KIND,
+    dtype: Optional[torch.dtype] = None,
+) -> Tuple[torch.dtype, Optional[torch.dtype]]:
+    # even though some reductions, like amin or amax, don't strictly require type promotion,
+    # all the math ops (including comparisons) are still defined only for a computation type,
+    # so promotion will still happen. We are doing it explicitly here
+    inp_dtype = dtype if dtype is not None else arg.dtype
+    computation_dtype = get_computation_dtype(inp_dtype)
+    if (
+        output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME
+        or output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
+    ):
+        result_dtype = dtype if dtype else arg.dtype
+        if (
+            output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
+            and is_complex_dtype(result_dtype)
+        ):
+            result_dtype = corresponding_real_dtype(result_dtype)
+    elif output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.KEEP_PROMOTED_TYPE:
+        result_dtype = None
+    else:  # ALWAYS_BOOL
+        result_dtype = torch.bool
+    return computation_dtype, result_dtype
 
 
 def wrap_device(d: Union[str, torch.device]) -> torch.device:
@@ -1102,3 +1187,14 @@ def check_in_bounds_for_storage(
             )
         )
         raise ValueError(msg)
+
+
+def check(b, s):
+    """
+    Helper function for raising a RuntimeError if a boolean condition fails.
+    Error message is a callable producing a string (to avoid wasting time
+    string formatting in non-error case, and also to make it easier for torchdynamo
+    to trace.)
+    """
+    if not b:
+        raise RuntimeError(s())

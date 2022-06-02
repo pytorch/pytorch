@@ -30,5 +30,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          STABLE: ${{ github.event.client_payload.stable}}
         run: |
-          python3 .github/scripts/tryrebase.py "${PR_NUM}"
+          set -ex
+          if [ -n "${STABLE}" ]; then
+            python3 .github/scripts/tryrebase.py --stable "${PR_NUM}"
+          else
+            python3 .github/scripts/tryrebase.py "${PR_NUM}"
+          fi

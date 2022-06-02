@@ -113,7 +113,7 @@ TORCH_META_FUNC(gather)
   // For more details, see: https://github.com/pytorch/pytorch/pull/63312#discussion_r694794832
   // and https://github.com/pytorch/pytorch/issues/63837
   bool check_result = result.defined();
-  set_output(index.sizes(), self.options());
+  set_output_raw_strided(0, index.sizes(), {}, self.options());
   if (check_result) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
@@ -152,7 +152,7 @@ void scatter_meta_impl(
     }
   }
 
-  meta.set_output(self.sizes(), self.options());
+  meta.set_output_raw_strided(0, self.sizes(), {}, self.options());
   if (reduce.has_value()) {
     // Check if we have a valid reduce operator.
     get_operator_enum(reduce.value(), use_new_options);
@@ -215,7 +215,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
   // For more details, see: https://github.com/pytorch/pytorch/pull/63312#discussion_r694794832
   // and https://github.com/pytorch/pytorch/issues/63837
   bool check_result = result.defined();
-  set_output(self.sizes(), self.options());
+  set_output_raw_strided(0, self.sizes(), {}, self.options());
   if (check_result) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, index);
@@ -288,7 +288,7 @@ void index_func_meta_impl(
 
   auto& result = meta.maybe_get_output(0);
   bool is_defined = result.defined();
-  meta.set_output(self.sizes(), self.options());
+  meta.set_output_raw_strided(0, self.sizes(), {}, self.options());
   if (is_defined) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, index);
@@ -298,7 +298,7 @@ void index_func_meta_impl(
   // A hack to run TensorIterator checks in the meta function.
   // See comment: https://github.com/pytorch/pytorch/pull/65993#discussion_r760307417
   // TODO: (@krshrimali) Try inheriting from TensorIteratorBase instead.
-  if (result.device() == kMeta) {
+  if (result.device() == kMeta && result.dim() > 0) {
     auto selfSlice = result.select(dim, 0);
     auto sourceSlice = source.select(dim, 0);
     auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
@@ -1139,7 +1139,18 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
   auto index_contig = index.contiguous();
 
   if (self.dim() > 1) {
-    if (numel == 0 || self.numel() == 0) {
+    if (numel == 0) {
+      return result;
+    }
+    if (self.numel() == 0) {
+      auto src_indexing_axis_dim = self.size(dim);
+      TORCH_CHECK(src_indexing_axis_dim > 0,
+                  "index_select(): self indexing axis dim should be positive");
+      AT_DISPATCH_INDEX_TYPES(
+      index_contig.scalar_type(), "index_select_empty_self_bound_check", [&]() {
+        const auto* idxs = index_contig.data_ptr<index_t>();
+        check_indexarray_range<index_t>(idxs, numel, src_indexing_axis_dim);
+      });
       return result;
     }
 
