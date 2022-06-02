@@ -391,7 +391,7 @@ This module implements the quantized versions of the nn layers such as
     InstanceNorm3d
 
 torch.ao.nn.quantized.functional
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. automodule:: torch.ao.nn.quantized.functional
 
 This module implements the quantized versions of the functional layers such as

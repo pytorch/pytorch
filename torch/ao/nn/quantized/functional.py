@@ -524,7 +524,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
 
     .. warning::
         This function is deprecated in favor of
-        :func:`torch.ao.nn.quantized.functional.interpolate`.
+        :func:`torch.nn.quantized.functional.interpolate`.
         This is equivalent with ``nn.quantized.functional.interpolate(...)``.
 
     See :func:`torch.nn.functional.interpolate` for implementation details.
@@ -576,7 +576,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):
 
     .. warning::
         This function is deprecated in favor of
-        :func:`torch.ao.nn.quantized.functional.interpolate`.
+        :func:`torch.nn.quantized.functional.interpolate`.
         This is equivalent with
         ``nn.quantized.functional.interpolate(..., mode='bilinear', align_corners=True)``.
 
@@ -598,7 +598,7 @@ def upsample_nearest(input, size=None, scale_factor=None):
 
     .. warning::
         This function is deprecated in favor of
-        :func:`torch.ao.nn.quantized.functional.interpolate`.
+        :func:`torch.nn.quantized.functional.interpolate`.
         This is equivalent with ``nn.quantized.functional.interpolate(..., mode='nearest')``.
 
     .. note:: The input quantization parameters propagate to the output.

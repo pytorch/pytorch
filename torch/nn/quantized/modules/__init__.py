@@ -5,8 +5,6 @@ Note::
     Please, use `torch.ao.nn.quantized` instead.
 """
 
-from torch.nn.modules.pooling import MaxPool2d
-
 from torch.ao.nn.quantized.modules.activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid, Softmax
 from torch.ao.nn.quantized.modules.batchnorm import BatchNorm2d, BatchNorm3d
 from torch.ao.nn.quantized.modules.conv import Conv1d, Conv2d, Conv3d
@@ -17,6 +15,7 @@ from torch.ao.nn.quantized.modules.functional_modules import FloatFunctional, FX
 from torch.ao.nn.quantized.modules.linear import Linear
 from torch.ao.nn.quantized.modules.normalization import LayerNorm, GroupNorm, InstanceNorm1d, InstanceNorm2d, InstanceNorm3d
 
+from torch.ao.nn.quantized.modules import MaxPool2d
 from torch.ao.nn.quantized.modules import Quantize, DeQuantize
 
 # The following imports are needed in case the user decides
@@ -33,9 +32,6 @@ from . import linear
 from . import normalization
 
 __all__ = [
-    # Subpackages, in case the users import files directly
-    # s.a. `from torch.nn.quantized.modules import conv`
-    # Modules
     'BatchNorm2d',
     'BatchNorm3d',
     'Conv1d',

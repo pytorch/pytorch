@@ -1,6 +1,5 @@
 import torch
 
-
 class LayerNorm(torch.nn.LayerNorm):
     r"""This is the quantized version of :class:`~torch.nn.LayerNorm`.
 
