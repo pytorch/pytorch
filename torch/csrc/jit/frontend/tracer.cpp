@@ -66,6 +66,12 @@ void badArgType(const T& v) {
 thread_local std::shared_ptr<TracingState> tracing_state;
 } // namespace detail
 
+static std::atomic<bool> tracer_state_warn_mode{true};
+
+std::atomic<bool>& getTracerStateWarnMode() {
+  return tracer_state_warn_mode;
+}
+
 std::function<void()> pauseTracing() {
   // NOLINTNEXTLINE
   std::shared_ptr<tracer::TracingState> state = getTracingState();
