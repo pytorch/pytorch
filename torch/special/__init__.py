@@ -4,6 +4,9 @@ from torch._torch_docs import common_args, multi_dim_common
 
 __all__ = [
     'airy_ai',
+    'airy_bi',
+    'airy_derivative_ai',
+    'airy_derivative_bi',
     'bessel_j0',
     'bessel_j1',
     'bessel_y0',
@@ -44,8 +47,16 @@ __all__ = [
     'polygamma',
     'psi',
     'round',
+    'scaled_modified_bessel_i0',
+    'scaled_modified_bessel_i1',
+    'scaled_modified_bessel_k0',
+    'scaled_modified_bessel_k1',
     'sinc',
     'softmax',
+    'spherical_bessel_j0',
+    'spherical_bessel_j1',
+    'spherical_bessel_y0',
+    'spherical_bessel_y1',
     'xlog1py',
     'xlogy',
     'zeta',
@@ -869,7 +880,7 @@ airy_ai = _add_docstr(_special.special_airy_ai,
                       r"""
 airy_ai(input, *, out=None) -> Tensor
 
-Airy function :math:`Ai(\text{input})`.
+Airy function :math:`\text{Ai}(\text{input})`.
 
 """ + r"""
 Args:
@@ -879,6 +890,47 @@ Keyword args:
     {out}
 """.format(**common_args))
 
+airy_bi = _add_docstr(_special.special_airy_bi,
+                      r"""
+airy_bi(input, *, out=None) -> Tensor
+
+Airy function :math:`\text{Bi}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+airy_derivative_ai = _add_docstr(_special.special_airy_derivative_ai,
+                                 r"""
+airy_derivative_ai(input, *, out=None) -> Tensor
+
+Derivative of Airy function :math:`\text{Ai}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+airy_derivative_bi = _add_docstr(_special.special_airy_derivative_bi,
+                                 r"""
+airy_derivative_bi(input, *, out=None) -> Tensor
+
+Derivative of Airy function :math:`\text{Bi}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
 
 bessel_j0 = _add_docstr(_special.special_bessel_j0,
                         r"""
@@ -1111,4 +1163,124 @@ Args:
 
 Keyword args:
 {out}
+""".format(**common_args))
+
+scaled_modified_bessel_i0 = _add_docstr(_special.special_scaled_modified_bessel_i0,
+                                        r"""
+scaled_modified_bessel_i0(input, *, out=None) -> Tensor
+
+Scaled modified Bessel function of the first kind of order :math:`0`, 
+:math:`\text{exp}(\text{input})\text{I}_{0}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+scaled_modified_bessel_i1 = _add_docstr(_special.special_scaled_modified_bessel_i1,
+                                        r"""
+scaled_modified_bessel_i1(input, *, out=None) -> Tensor
+
+Scaled modified Bessel function of the first kind of order :math:`1`, 
+:math:`\text{exp}(\text{input})\text{I}_{1}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+scaled_modified_bessel_k0 = _add_docstr(_special.special_scaled_modified_bessel_k0,
+                                        r"""
+scaled_modified_bessel_k0(input, *, out=None) -> Tensor
+
+Scaled modified Bessel function of the second kind of order :math:`0`, 
+:math:`\text{exp}(\text{input})\text{K}_{0}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+scaled_modified_bessel_k1 = _add_docstr(_special.special_scaled_modified_bessel_k1,
+                                        r"""
+scaled_modified_bessel_k1(input, *, out=None) -> Tensor
+
+Scaled modified Bessel function of the second kind of order :math:`1`, 
+:math:`\text{exp}(\text{input})\text{K}_{1}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+spherical_bessel_j0 = _add_docstr(_special.special_spherical_bessel_j0,
+                                  r"""
+spherical_bessel_j0(input, *, out=None) -> Tensor
+
+Spherical Bessel function of the first kind of order :math:`0`, 
+:math:`\text{j}_{0}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+spherical_bessel_j1 = _add_docstr(_special.special_spherical_bessel_j1,
+                                  r"""
+spherical_bessel_j1(input, *, out=None) -> Tensor
+
+Spherical Bessel function of the first kind of order :math:`1`, 
+:math:`\text{j}_{1}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+spherical_bessel_y0 = _add_docstr(_special.special_spherical_bessel_y0,
+                                  r"""
+spherical_bessel_y0(input, *, out=None) -> Tensor
+
+Spherical Bessel function of the second kind of order :math:`0`, 
+:math:`\text{y}_{0}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+spherical_bessel_y1 = _add_docstr(_special.special_spherical_bessel_y1,
+                                  r"""
+spherical_bessel_y1(input, *, out=None) -> Tensor
+
+Spherical Bessel function of the second kind of order :math:`1`, 
+:math:`\text{y}_{1}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
 """.format(**common_args))
