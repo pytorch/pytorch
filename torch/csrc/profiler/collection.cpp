@@ -394,17 +394,6 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
 
     while (frame.get() != event.get()) {
       TORCH_INTERNAL_ASSERT(frame != nullptr);
-      c10::visit(
-          c10::overloaded(
-              [](const op_fields& i) {
-                if (i.scope_ == at::RecordScope::FUNCTION ||
-                    i.scope_ == at::RecordScope::BACKWARD_FUNCTION ||
-                    i.scope_ == at::RecordScope::TORCHSCRIPT_FUNCTION) {
-                  TORCH_INTERNAL_ASSERT(false, (int)i.scope_);
-                }
-              },
-              [](const auto&) {}),
-          frame->extra_fields_);
       frame->finished_ = true;
       TORCH_INTERNAL_ASSERT(!frame->parent_.expired());
       frame = frame->parent_.lock();
