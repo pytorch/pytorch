@@ -19,8 +19,7 @@ namespace nn {
 /// is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
 /// Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and
 /// Illia Polosukhin. 2017. Attention is all you need. In Advances in Neural Information
-/// Processing Systems, pages 6000-6010. Users can build the BERT(https://arxiv.org/abs/1810.04805)
-/// model with corresponding parameters.
+/// Processing Systems, pages 6000-6010.
 ///
 /// See https://pytorch.org/docs/stable/generated/torch.nn.Transformer.html to
 /// learn about the exact behavior of this transformer model
