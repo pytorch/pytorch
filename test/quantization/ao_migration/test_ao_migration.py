@@ -120,9 +120,6 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
             'functional_modules',
             'linear',
             'normalization',
-            # Skip the packages that are not yet migrated, but are still
-            # part of the `nn.quantized`.
-            '_reference',
         ]
         self._test_package_import('quantized', base='nn', skip=skip)
 
@@ -306,3 +303,74 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
             'ConvTranspose3d',
         ]
         self._test_function_import('dynamic', module_list, base='nn.quantized')
+
+    def test_package_import_nn_quantized_reference(self):
+        self._test_package_import('_reference', base='nn.quantized')
+
+    def test_package_import_nn_quantized_reference_modules(self):
+        r"""Tests the migration of the torch.nn.quantized._reference.modules"""
+        self._test_package_import('modules', base='nn.quantized._reference')
+        self._test_package_import('modules.conv', base='nn.quantized._reference')
+        self._test_package_import('modules.linear', base='nn.quantized._reference')
+        self._test_package_import('modules.rnn', base='nn.quantized._reference')
+        self._test_package_import('modules.sparse', base='nn.quantized._reference')
+
+    def test_import_nn_quantized_reference_import(self):
+        module_list = [
+            # Modules
+            'Linear',
+            'Conv1d',
+            'Conv2d',
+            'Conv3d',
+            'ConvTranspose1d',
+            'ConvTranspose2d',
+            'ConvTranspose3d',
+            'RNNCell',
+            'LSTMCell',
+            'GRUCell',
+            'LSTM',
+            'Embedding',
+            'EmbeddingBag',
+        ]
+        self._test_function_import('_reference', module_list, base='nn.quantized')
+
+    def test_reference_modules_conv(self):
+        function_list = [
+            '_ConvNd',
+            'Conv1d',
+            'Conv2d',
+            'Conv3d',
+            '_ConvTransposeNd',
+            'ConvTranspose1d',
+            'ConvTranspose2d',
+            'ConvTranspose3d',
+        ]
+        self._test_function_import('conv', function_list,
+                                   base='nn.quantized._reference.modules')
+
+    def test_reference_modules_linear(self):
+        function_list = [
+            'Linear',
+        ]
+        self._test_function_import('linear', function_list,
+                                   base='nn.quantized._reference.modules')
+
+    def test_reference_modules_rnn(self):
+        function_list = [
+            'RNNCellBase',
+            'RNNCell',
+            'LSTMCell',
+            'GRUCell',
+            'RNNBase',
+            'LSTM',
+        ]
+        self._test_function_import('rnn', function_list,
+                                   base='nn.quantized._reference.modules')
+
+    def test_reference_modules_sparse(self):
+        function_list = [
+            'Embedding',
+            'EmbeddingBag',
+        ]
+        self._test_function_import('sparse', function_list,
+                                   base='nn.quantized._reference.modules')
