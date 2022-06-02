@@ -4436,6 +4436,57 @@ for shape in [(1,), ()]:
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    def test_checkpointing_without_reentrant_memory_savings(self):
+        class MyModel(nn.Module):
+            def __init__(self, n, use_checkpoint, use_reentrant):
+                super().__init__()
+                self.n = n
+                self.use_checkpoint = use_checkpoint
+                self.use_reentrant = use_reentrant
+                self.layers = nn.ModuleList()
+                for i in range(self.n):
+                    layer = nn.Sequential(
+                        nn.Linear(256, 256), nn.Linear(256, 256), nn.Linear(256, 256)
+                    )
+                    self.layers.append(layer)
+
+            def forward(self, x):
+                for i in range(self.n):
+                    if not self.use_checkpoint:
+                        x = self.layers[i](x)
+                    else:
+                        x = checkpoint(self.layers[i], x, use_reentrant=self.use_reentrant)
+
+                return x
+
+        model_no_checkpoint = MyModel(8, use_checkpoint=False, use_reentrant=False).cuda()
+        model_reentrant_checkpoint = MyModel(8, use_checkpoint=True, use_reentrant=True).cuda()
+        model_no_reentrant_checkpoint = MyModel(8, use_checkpoint=True, use_reentrant=False).cuda()
+
+        # Large batch size to ensure activation sizes >> gradient sizes, so activation checkpointing
+        # results in memory savings.
+        x = torch.randn(10000, 256, requires_grad=True, device='cuda')
+
+        torch.cuda.reset_peak_memory_stats()
+        loss = model_no_checkpoint(x.clone()).sum()
+        loss.backward()
+        mem_no_checkpoint = torch.cuda.max_memory_allocated()
+
+        torch.cuda.reset_peak_memory_stats()
+        loss = model_reentrant_checkpoint(x.clone()).sum()
+        loss.backward()
+        mem_reentrant_checkpoint = torch.cuda.max_memory_allocated()
+
+        torch.cuda.reset_peak_memory_stats()
+        loss = model_no_reentrant_checkpoint(x.clone()).sum()
+        loss.backward()
+        mem_no_reentrant_checkpoint = torch.cuda.max_memory_allocated()
+
+        print(mem_no_checkpoint, mem_reentrant_checkpoint, mem_no_reentrant_checkpoint)
+        self.assertTrue(mem_reentrant_checkpoint < mem_no_checkpoint)
+        self.assertTrue(mem_no_reentrant_checkpoint <= mem_reentrant_checkpoint)
+
     @slowTest
     @parametrize("input_requires_grad", [True, False])
     def test_checkpointing_without_reentrant(self, input_requires_grad):
