@@ -29,6 +29,7 @@ from torch._prims.wrappers import (
     _safe_copy_out,
 )
 
+from collections.abc import Iterable
 from functools import reduce, partial
 from typing import Sequence, Optional, Union, Callable, List, Tuple
 import operator
@@ -170,10 +171,16 @@ __all__ = [
     #
     # View & Shape Ops
     #
+    "atleast_1d",
+    "atleast_2d",
+    "atleast_3d",
     "as_strided",
+    "broadcast_shapes",
     "broadcast_tensors",
+    "broadcast_to",
     "cat",
     "chunk",
+    "column_stack",
     "flatten",
     "flip",
     "fliplr",
@@ -181,6 +188,8 @@ __all__ = [
     "narrow",
     "permute",
     "reshape",
+    "roll",
+    "rot90",
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
@@ -214,7 +223,10 @@ Tensor = torch.Tensor
 
 
 def _broadcast_shapes(*_shapes):
-    shapes = tuple(filter(lambda x: x is not None, _shapes))
+    shapes = tuple(
+        (x,) if isinstance(x, int) else x
+        for x in filter(lambda x: x is not None, _shapes)
+    )
 
     # Short-circuits on no input
     if len(shapes) == 0:
@@ -620,8 +632,13 @@ sqrt = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
+
+def _square(a: TensorLikeType) -> TensorLikeType:
+    return mul(a, a)
+
+
 square = _make_elementwise_unary_reference(
-    prims.square,
+    _square,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
     aten_op=None,  # CompositeImplicitAutograd,
 )
@@ -1414,18 +1431,22 @@ def std(
     if dim == () or dim == []:
         dim = None
 
+    opmath_dtype, dtype = utils.reduction_dtypes(
+        a, REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
+    )
+
     result = _reduction(
         a,
         partial(prims.var, correction=correction),
         dims=dim,
         keepdims=keepdim,
-        dtype=None,
+        dtype=opmath_dtype,
         out=None,
         has_identity=True,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
     )
     result = sqrt(result)
-    return result
+    return _maybe_convert_to_dtype(result, dtype)  # type: ignore[return-value,arg-type]
 
 
 def mean(
@@ -1469,6 +1490,7 @@ def mean(
     return result
 
 
+@register_decomposition(torch.ops.aten.std_mean.correction)
 def std_mean(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -1550,14 +1572,63 @@ def addr(
             return beta * self + alpha * torch.outer(vec1, vec2)
 
 
+def atleast_1d(
+    *args: TensorLikeType,
+) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
+    """Reference implementation of :func:`torch.atleast_1d`."""
+    args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
+    res = tuple(a if a.ndim >= 1 else unsqueeze(a, 0) for a in args_)
+    return res if len(res) > 1 else res[0]
+
+
+# Helper function with assert to avoid MyPy error
+# of incompatible type passed to unsqueeze
+def _unsqueeze_atleast(
+    at_least_fn: Callable, dim: int, arg: TensorLikeType
+) -> TensorLikeType:
+    arg_ = at_least_fn(arg)
+    assert isinstance(arg_, TensorLike)
+    return unsqueeze(arg_, dim)
+
+
+def atleast_2d(
+    *args: TensorLikeType,
+) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
+    """Reference implementation of :func:`torch.atleast_2d`."""
+    args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
+    unsqueeze_atleast_1d = partial(_unsqueeze_atleast, atleast_1d, 0)
+    res = tuple(a if a.ndim >= 2 else unsqueeze_atleast_1d(a) for a in args_)
+    return res if len(res) > 1 else res[0]
+
+
+def atleast_3d(
+    *args: TensorLikeType,
+) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
+    """Reference implementation of :func:`torch.atleast_3d`."""
+    args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
+    unsqueeze_atleast_2d = partial(_unsqueeze_atleast, atleast_2d, -1)
+    res = tuple(a if a.ndim >= 3 else unsqueeze_atleast_2d(a) for a in args_)
+    return res if len(res) > 1 else res[0]
+
+
 def as_strided(
     a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int = 0
 ) -> TensorLikeType:
     return prims.as_strided(a, size, stride, storage_offset)
 
 
+def broadcast_shapes(*shapes) -> ShapeType:
+    return torch.Size(_broadcast_shapes(*shapes))
+
+
 def broadcast_tensors(*tensors) -> List[TensorLikeType]:
     return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
+
+
+def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
+    start = len(size) - len(a.shape)
+    dims = tuple(range(start, len(a.shape) + start))
+    return prims.broadcast_in_dim(a, size, dims)
 
 
 @out_wrapper
@@ -1592,6 +1663,15 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
         return empty((0,), dtype=t.dtype, device=t.device, requires_grad=requires_grad)
 
     return prims.cat(filtered, dim)
+
+
+@out_wrapper
+def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
+    aligned_tensors = tuple(
+        x if x.ndim > 1 else prims.expand_dims(x, list(range(x.ndim, 2)))
+        for x in tensors
+    )
+    return cat(aligned_tensors, 1)
 
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
@@ -1811,6 +1891,79 @@ def _reshape_view_helper(
 
 def reshape(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=True)
+
+
+def roll(
+    a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
+) -> TensorLikeType:
+    """Reference implementation of :func:`torch.roll`."""
+    dims = utils.canonicalize_dims(a.ndim, dims)
+    # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
+    if not isinstance(shifts, Iterable):
+        shifts = (shifts,)
+    if not isinstance(dims, Iterable):
+        dims = (dims,)
+
+    # Avoid modulo by zero
+    if a.numel() == 0:
+        return clone(a)
+
+    len_shifts = len(shifts)
+    len_dims = len(dims)
+    if len_shifts != 1 or len_dims != 1:
+        if len_shifts == 0:
+            raise RuntimeError("`shifts` required")
+        # Takes care of the case when dims is not specified (default)
+        # By default, the tensor is flattened before shifting, after which the original shape is restored
+        if len_dims == 0 and len_shifts == 1:
+            return view(roll(flatten(a), shifts, 0), a.shape)
+        if len_shifts != len_dims:
+            raise RuntimeError(
+                f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}"
+            )
+        assert len_dims > 1
+        tail_shifts = shifts[1:]
+        tail_dims = dims[1:]
+        first_dim_rolled = roll(a, shifts[0], dims[0])
+        return roll(first_dim_rolled, tail_shifts, tail_dims)
+
+    # This path is taken when only one dimension is rolled
+    # For example to get `first_dim_rolled` above
+    dim = dims[0]
+    size = a.shape[dim]
+    start = (size - shifts[0]) % size
+    t0 = narrow(a, dim, start, size - start)
+    t1 = narrow(a, dim, 0, start)
+    return cat((t0, t1), dim)
+
+
+def rot90(
+    a: TensorLikeType, k: int = 1, dims: DimsSequenceType = (0, 1)
+) -> TensorLikeType:
+    """Reference implementation of :func:`torch.rot90`."""
+    dims_ = utils.canonicalize_dims(a.ndim, dims)
+    # Required to silence MyPy errors
+    assert isinstance(dims_, (tuple, list))
+    dims = dims_
+    if len(dims) != 2:
+        raise RuntimeError(
+            f"expected total rotation dims == 2, but got dims = {len(dims)}"
+        )
+    if a.ndim < 2:
+        raise RuntimeError(f"expected total dims >= 2, but got total dims = {a.ndim}")
+    if dims[0] == dims[1]:
+        raise RuntimeError(
+            f"expected rotation dims to be different, but got dim0 = {dims[0]} and dim1 = {dims[1]}"
+        )
+    k = k % 4  # Rotation direction is from the second towards the first axis for k < 0
+    if k == 1:
+        return transpose(flip(a, (dims[1],)), dims[0], dims[1])
+    elif k == 2:
+        return flip(a, dims)
+    elif k == 3:
+        return transpose(flip(a, (dims[0],)), dims[0], dims[1])
+    else:
+        return clone(a)
 
 
 # update to cat then view instead of unsqueezing each tensor
