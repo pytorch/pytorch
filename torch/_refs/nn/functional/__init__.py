@@ -314,6 +314,7 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
     return refs.sub(a, refs.tanh(a))
 
 
+<<<<<<< HEAD
 @register_decomposition(torch.ops.aten.hardtanh)
 @elementwise_unary_scalar_wrapper
 @elementwise_type_promotion_wrapper(
@@ -331,10 +332,24 @@ def hardtanh(
     """
     if inplace:
         raise NotImplementedError
+=======
+@register_decomposition(torch.ops.aten.gelu)
+@out_wrapper
+@elementwise_unary_scalar_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def gelu(a: TensorLikeType, approximate: str = "none") -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.gelu
+    """
+>>>>>>> Ported gelu decomp to ref
     if not isinstance(a, TensorLike):
         raise RuntimeError(
             "Expected a tensor input for an elementwise unary operation!"
         )
+<<<<<<< HEAD
     if utils.is_boolean_dtype(a.dtype):
         raise RuntimeError("Bool inputs not supported for hardtanh")
 
@@ -347,3 +362,19 @@ def hardtanh(
                 "Cannot do hardtanh on an unsigned type with negative limits"
             )
     return torch.clamp(a, min_val, max_val)  # type: ignore[arg-type]
+=======
+    M_SQRT2 = 1.41421356237309504880
+    M_SQRT1_2 = 0.70710678118654752440
+    M_2_SQRTPI = 1.12837916709551257390
+    if approximate == "tanh":
+        kBeta = M_SQRT2 * M_2_SQRTPI * 0.5
+        kKappa = 0.044715
+        x_cube = a * a * a
+        inner = kBeta * (a + kKappa * x_cube)
+        return 0.5 * a * (1 + torch.tanh(inner))
+    elif approximate == "none":
+        kAlpha = M_SQRT1_2
+        return a * 0.5 * (1 + torch.erf(a * kAlpha))
+    else:
+        raise RuntimeError("approximate argument must be either none or tanh.")
+>>>>>>> Ported gelu decomp to ref
