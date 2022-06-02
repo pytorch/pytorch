@@ -969,9 +969,9 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
                 dist.send(send_tensor_view, 1)
 
 
+    @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    @skip_if_lt_x_gpu(2)
     def test_sync_batch_norm_cuda_graph_capture(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
