@@ -385,12 +385,22 @@ Tensor sparse_compressed_to_dense(
     return dst_transposed.transpose(batch_ndim, batch_ndim + 1);
   }
   if (self.layout() == kSparseBsr) {
-    TORCH_CHECK(self.dim() == 2 || self.dim() == 3, "Can only convert 2D or 3D SparseBsr to Strided.");
+    TORCH_CHECK(
+        self.dim() == 2 || self.dim() == 3,
+        "Can only convert 2D or 3D SparseBsr to Strided.");
     auto crow_indices = self.crow_indices();
     auto col_indices = self.col_indices();
     if (self.dim() == 3) {
-      // These are assumed to be the same across all dimensions, because
-      // BSR currently requires the sparsity patterns to match!
+      // This conversion function currently assumes the indices are the same
+      // across all batch dimensions. We don't have metadata or such to
+      // enforce this invariant yet. This means we need to perform this very
+      // expensive check to verify this condition.
+      TORCH_CHECK(
+          crow_indices[0].expand_as(crow_indices).equal(crow_indices),
+          "Expected sparsity pattern to match across batch entries.");
+      TORCH_CHECK(
+          col_indices[0].expand_as(col_indices).equal(col_indices),
+          "Expected sparsity pattern to match across batch entries.");
       crow_indices = crow_indices.select(0, 0);
       col_indices = col_indices.select(0, 0);
     }
@@ -410,7 +420,8 @@ Tensor sparse_compressed_to_dense(
           at::native::_sparse_coo_tensor_unsafe(indices, values, expanded_size)
               .coalesce();
       // Here we are untiling the result.
-      return self_coo.to_dense().transpose(1, 2).reshape({self.size(0), self.size(1)});
+      return self_coo.to_dense().transpose(1, 2).reshape(
+          {self.size(0), self.size(1)});
     }
     if (self.dim() == 3) {
       Tensor dense = at::zeros(self.sizes(), self.options().layout(kStrided));
