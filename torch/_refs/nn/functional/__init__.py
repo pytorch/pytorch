@@ -25,6 +25,7 @@ __all__ = [
     "celu",
     "dropout",
     "elu",
+    "hardswish",
     "hinge_embedding_loss",
     "margin_ranking_loss",
     "mish",
@@ -294,3 +295,15 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
             "Expected a tensor input for an elementwise unary operation!"
         )
     return refs.sub(a, refs.tanh(a))
+
+
+@elementwise_unary_scalar_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def hardswish(a: TensorLikeType) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.hardswish
+    """
+    return torch.div(torch.mul(a, torch.clamp(torch.add(a, 3), min=0, max=6)), 6)

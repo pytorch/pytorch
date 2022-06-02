@@ -19529,6 +19529,10 @@ python_ref_db = [
         "_refs.nn.functional.tanhshrink",
         torch_opinfo_name="nn.functional.tanhshrink",
     ),
+    PythonRefInfo(
+        "_refs.nn.functional.hardswish",
+        torch_opinfo_name="nn.functional.hardswish",
+    ),
     #
     # Elementwise Binary Reference OpInfos
     #
