@@ -644,6 +644,12 @@ inline Tensor& bessel_y0_out(Tensor& result, const Tensor& self) {
 /// Bessel function of the second kind of order 1.
 ///
 /// See https://pytorch.org/docs/master/special.html#torch.special.bessel_y1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
 /// torch::special::bessel_y1(x);
 /// ```
 inline Tensor bessel_y1(const Tensor& self) {
@@ -908,6 +914,158 @@ inline Tensor modified_bessel_k1(const Tensor& self) {
 
 inline Tensor& modified_bessel_k1_out(Tensor& result, const Tensor& self) {
   return torch::special_modified_bessel_k1_out(result, self);
+}
+
+/// Scaled modified Bessel function of the first kind of order 0.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_i0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::scaled_modified_bessel_i0(x);
+/// ```
+inline Tensor scaled_modified_bessel_i0(const Tensor& self) {
+  return torch::special_scaled_modified_bessel_i0(self);
+}
+
+inline Tensor& scaled_modified_bessel_i0_out(Tensor& result, const Tensor& self) {
+  return torch::special_scaled_modified_bessel_i0_out(result, self);
+}
+
+/// Scaled modified Bessel function of the first kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_i1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::scaled_modified_bessel_i1(x);
+/// ```
+inline Tensor scaled_modified_bessel_i1(const Tensor& self) {
+  return torch::special_scaled_modified_bessel_i1(self);
+}
+
+inline Tensor& scaled_modified_bessel_i1_out(Tensor& result, const Tensor& self) {
+  return torch::special_scaled_modified_bessel_i1_out(result, self);
+}
+
+/// Scaled modified Bessel function of the second kind of order 0.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_k0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::scaled_modified_bessel_k0(x);
+/// ```
+inline Tensor scaled_modified_bessel_k0(const Tensor& self) {
+  return torch::special_scaled_modified_bessel_k0(self);
+}
+
+inline Tensor& scaled_modified_bessel_k0_out(Tensor& result, const Tensor& self) {
+  return torch::special_scaled_modified_bessel_k0_out(result, self);
+}
+
+/// Scaled modified Bessel function of the second kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_k1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::scaled_modified_bessel_k1(x);
+/// ```
+inline Tensor scaled_modified_bessel_k1(const Tensor& self) {
+  return torch::special_scaled_modified_bessel_k1(self);
+}
+
+inline Tensor& scaled_modified_bessel_k1_out(Tensor& result, const Tensor& self) {
+  return torch::special_scaled_modified_bessel_k1_out(result, self);
+}
+
+/// Spherical Bessel function of the first kind of order 0.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.spherical_bessel_j0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::spherical_bessel_j0(x);
+/// ```
+inline Tensor spherical_bessel_j0(const Tensor& self) {
+  return torch::special_spherical_bessel_j0(self);
+}
+
+inline Tensor& spherical_bessel_j0_out(Tensor& result, const Tensor& self) {
+  return torch::special_spherical_bessel_j0_out(result, self);
+}
+
+/// Spherical Bessel function of the first kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.spherical_bessel_j1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::spherical_bessel_j1(x);
+/// ```
+inline Tensor spherical_bessel_j1(const Tensor& self) {
+  return torch::special_spherical_bessel_j1(self);
+}
+
+inline Tensor& spherical_bessel_j1_out(Tensor& result, const Tensor& self) {
+  return torch::special_spherical_bessel_j1_out(result, self);
+}
+
+/// Spherical Bessel function of the second kind of order 0.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.spherical_bessel_y0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::spherical_bessel_y0(x);
+/// ```
+inline Tensor spherical_bessel_y0(const Tensor& self) {
+  return torch::special_spherical_bessel_y0(self);
+}
+
+inline Tensor& spherical_bessel_y0_out(Tensor& result, const Tensor& self) {
+  return torch::special_spherical_bessel_y0_out(result, self);
+}
+
+/// Spherical Bessel function of the second kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.spherical_bessel_y1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::spherical_bessel_y1(x);
+/// ```
+inline Tensor spherical_bessel_y1(const Tensor& self) {
+  return torch::special_spherical_bessel_y1(self);
+}
+
+inline Tensor& spherical_bessel_y1_out(Tensor& result, const Tensor& self) {
+  return torch::special_spherical_bessel_y1_out(result, self);
 }
 
 }} // torch::special
