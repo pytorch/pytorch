@@ -240,6 +240,22 @@ class PyInterpreterHolder {
 };
 PyInterpreterHolder self_interpreter;
 
+c10::TensorImpl::SizesStridesPolicy parseSizesStridesPolicyArgument(
+    c10::string_view arg) {
+  if (arg == "strides") {
+    return c10::TensorImpl::SizesStridesPolicy::CustomStrides;
+  }
+
+  if (arg == "sizes") {
+    return c10::TensorImpl::SizesStridesPolicy::CustomSizes;
+  }
+
+  TORCH_CHECK_VALUE(
+      false,
+      "Unknown sizes_strides_policy: ",
+      arg,
+      "; expected 'strides' or 'sizes'");
+}
 } // anonymous namespace
 
 c10::impl::PyInterpreter* getPyInterpreter() {
@@ -538,7 +554,7 @@ static PyObject* THPVariable_as_subclass(PyObject* _self, PyObject* args, PyObje
 static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, bool dispatch_strides=False, bool dispatch_device=False)",
+    "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False)",
   });
   ParsedArgs<5> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -559,8 +575,10 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   // ```
   data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
   data.set_requires_grad(r.toBool(2));
-  if (r.toBool(3)) {
-    data.unsafeGetTensorImpl()->set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomStrides);
+  const auto sizes_strides_policy = r.stringViewOptional(3);
+  if (sizes_strides_policy.has_value()) {
+    data.unsafeGetTensorImpl()->set_sizes_strides_policy(
+        parseSizesStridesPolicyArgument(*sizes_strides_policy));
   }
   if (r.toBool(4)) {
     data.unsafeGetTensorImpl()->set_custom_device(true);
@@ -577,7 +595,10 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   // NB: pin_memory doesn't actually do anything
   // TODO: strides variant?
   static PythonArgParser parser({
-    "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, bool dispatch_strides=False, bool dispatch_device=False)",
+      "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, "
+      "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
+      "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
+      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False)",
   });
   ParsedArgs<12> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -619,8 +640,10 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
         .make_tensor();
   data.set_requires_grad(r.toBool(9));
 
-  if (r.toBool(10)) {
-    data.unsafeGetTensorImpl()->set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomStrides);
+  const auto sizes_strides_policy = r.stringViewOptional(10);
+  if (sizes_strides_policy.has_value()) {
+    data.unsafeGetTensorImpl()->set_sizes_strides_policy(
+        parseSizesStridesPolicyArgument(*sizes_strides_policy));
   }
   if (r.toBool(11)) {
     data.unsafeGetTensorImpl()->set_custom_device(true);
