@@ -97,6 +97,7 @@ def define_targets(rules):
             ":aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp",
             ":aten/src/ATen/templates/DispatchKeyNativeFunctions.h",
             ":aten/src/ATen/templates/LazyIr.h",
+            ":aten/src/ATen/templates/LazyNonNativeIr.h",
             ":aten/src/ATen/templates/RegisterDispatchKey.cpp",
             ":aten/src/ATen/native/native_functions.yaml",
             ":aten/src/ATen/native/tags.yaml",
@@ -261,6 +262,7 @@ GENERATED_TESTING_PY = [
 
 GENERATED_LAZY_H = [
     "torch/csrc/lazy/generated/LazyIr.h",
+    "torch/csrc/lazy/generated/LazyNonNativeIr.h",
     "torch/csrc/lazy/generated/LazyNativeFunctions.h",
 ]
 

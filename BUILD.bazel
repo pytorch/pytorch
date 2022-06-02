@@ -4,7 +4,6 @@ load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
 load("//third_party:substitution.bzl", "header_template_rule")
 load("//:tools/bazel.bzl", "rules")
-load("//:tools/build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "lazy_tensor_ts_sources")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
 load("//:aten.bzl", "intern_build_aten_ops")
@@ -21,6 +20,7 @@ load(
     "aten_core_hdrs",
     "define_targets",
 )
+load(":build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "lazy_tensor_ts_sources")
 load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
 
 define_targets(rules = rules)
@@ -154,6 +154,7 @@ filegroup(
             "aten/src/ATen/native/cudnn/*.cpp",
             "aten/src/ATen/native/miopen/*.cpp",
             "aten/src/ATen/native/nested/cuda/*.cpp",
+            "aten/src/ATen/native/quantized/cuda/*.cpp",
             "aten/src/ATen/native/quantized/cudnn/*.cpp",
             "aten/src/ATen/native/sparse/cuda/*.cpp",
             "aten/src/ATen/native/transformers/cuda/*.cpp",
@@ -220,6 +221,7 @@ cc_library(
         "aten/src/ATen/cuda/**/*.cuh",
         "aten/src/ATen/native/**/*.cuh",
         "aten/src/THC/*.cuh",
+    ],
     ], exclude = aten_core_hdrs(rules = rules)
     ) + [
         ":aten_src_ATen_config",

@@ -1303,7 +1303,7 @@ TEST(AliasRegistrationTest, ConservativeWithAliasingAnnotationsShouldError) {
   // registration.
   expectThrows<c10::Error>(
       [&graph] { AliasDb aliasDb(graph); },
-      "Tried to register operator foo::rand3(Tensor(a) arg1) -> (Tensor(b)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+      "Tried to register operator foo::rand3(Tensor(a) arg1) -> Tensor(b) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
 }
 
 TEST(AliasRegistrationTest, ConservativeWithAliasingAnnotationsShouldError2) {
@@ -1323,7 +1323,7 @@ TEST(AliasRegistrationTest, ConservativeWithAliasingAnnotationsShouldError2) {
   // registration.
   expectThrows<c10::Error>(
       [&graph] { AliasDb aliasDb(graph); },
-      "Tried to register operator foo::rand4(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+      "Tried to register operator foo::rand4(Tensor(a) arg1) -> Tensor(a) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
 }
 
 TEST(AliasRegistrationTest, FromSchemaWithInferredSchemaShouldError) {
@@ -1337,7 +1337,7 @@ TEST(AliasRegistrationTest, FromSchemaWithInferredSchemaShouldError) {
                 })
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
       },
-      "Tried to register operator foo::rand5(Tensor _0) -> (Tensor _0) with AliasAnalysisKind::FROM_SCHEMA, but the schema is inferred");
+      "Tried to register operator foo::rand5(Tensor _0) -> Tensor _0 with AliasAnalysisKind::FROM_SCHEMA, but the schema is inferred");
 }
 
 TEST(AliasRegistrationTest, FromSchemaInferredPure) {
@@ -1438,7 +1438,7 @@ TEST(AliasRegistrationTest, PureWithAnnotationsShouldError) {
   // registration.
   expectThrows<c10::Error>(
       [&graph] { AliasDb aliasDb(graph); },
-      "Tried to register operator foo::rand11(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+      "Tried to register operator foo::rand11(Tensor(a) arg1) -> Tensor(a) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
 }
 
 TEST(AliasRegistrationTest, AliasMoveAtenListOp) {
@@ -1605,7 +1605,7 @@ TEST(AliasRegistrationTest, PureWithAnnotationsShouldError2) {
   // registration.
   expectThrows<c10::Error>(
       [&graph] { AliasDb aliasDb(graph); },
-      "Tried to register operator foo::rand12(Tensor(a) arg1) -> (Tensor(b)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+      "Tried to register operator foo::rand12(Tensor(a) arg1) -> Tensor(b) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
 }
 } // namespace jit
 } // namespace torch
