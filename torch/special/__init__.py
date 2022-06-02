@@ -949,6 +949,7 @@ is evaluated.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -977,6 +978,7 @@ is evaluated.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -991,6 +993,7 @@ Chebyshev polynomial of the third kind :math:`V_{n}^{\ast}(\text{input})`.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -1005,6 +1008,7 @@ Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -1027,6 +1031,7 @@ is evaluated.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -1049,6 +1054,7 @@ is evaluated.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -1071,6 +1077,7 @@ is evaluated.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -1093,6 +1100,7 @@ is evaluated.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -1163,6 +1171,7 @@ Chebyshev polynomial of the first kind :math:`T_{n}^{\ast}(\text{input})`.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -1177,6 +1186,7 @@ Chebyshev polynomial of the second kind :math:`U_{n}^{\ast}(\text{input})`.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -1191,6 +1201,7 @@ Chebyshev polynomial of the third kind :math:`V_{n}^{\ast}(\text{input})`.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -1205,6 +1216,7 @@ Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
