@@ -148,12 +148,11 @@ class FakeTensorConverterTest(TestCase):
             x = torch.empty(2, 2, device="cpu")
             y = torch.empty(2, 2, device="cpu")
 
-        # TODO: need 
         out = x + y
         self.assertEqual(mode, out.fake_mode)
         self.assertTrue(isinstance(out, FakeTensor))
         self.assertEqual(out.device.type, "cpu")
-    
+
     def test_separate_mode_error(self):
         with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
             x = torch.empty(2, 2, device="cpu")
