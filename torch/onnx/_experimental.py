@@ -1,13 +1,13 @@
 """Experimental classes and functions used by ONNX export."""
 
-from dataclasses import dataclass
+import dataclasses
 from typing import Mapping, Optional, Sequence, Set, Type, Union
 
 import torch
 import torch._C._onnx as _C_onnx
 
 
-@dataclass
+@dataclasses.dataclass
 class ExportOptions:
     """Arguments used by :func:`torch.onnx.export`.
 

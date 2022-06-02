@@ -7,6 +7,7 @@ import contextlib
 import copy
 import difflib
 import io
+import itertools
 import os
 import tempfile
 import warnings
@@ -17,7 +18,7 @@ import numpy as np
 import torch
 import torch._C._onnx as _C_onnx
 from torch import _C
-from torch.onnx import _constants, _experimental, symbolic_helper, utils
+from torch.onnx import _constants, _experimental, _globals, symbolic_helper, utils
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
@@ -286,32 +287,32 @@ class _GraphDiff:
         graph_diff = difflib.ndiff(
             graph_a_str.splitlines(True), graph_b_str.splitlines(True)
         )
-        graph_diff_report = "Graph diff:\n" + self._indent("".join(graph_diff)) + "\n"
+        graph_diff_report = ["Graph diff:", self._indent("".join(graph_diff))]
 
-        for n_ref, n_check in zip(graph_a.nodes(), graph_b.nodes()):
-            if str(n_ref) != str(n_check):
-                graph_diff_report += "First diverging operator:\n"
+        for node_a, node_b in itertools.zip_longest(graph_a.nodes(), graph_b.nodes()):
+            if str(node_a) != str(node_b):
+                graph_diff_report.append("First diverging operator:")
                 node_diff = difflib.ndiff(
-                    str(n_ref).splitlines(True), str(n_check).splitlines(True)
+                    str(node_a).splitlines(True), str(node_b).splitlines(True)
                 )
-                source_printout = f"node diff:\n{self._indent(''.join(node_diff))}\n"
+                source_printout = ["node diff:", self._indent("".join(node_diff))]
 
-                ref_stack = n_ref.sourceRange()
-                if ref_stack:
-                    source_printout += (
-                        f"Reference source location:\n{self._indent(str(ref_stack))}\n"
+                stack_a = node_a.sourceRange() if node_a else None
+                if stack_a:
+                    source_printout.extend(
+                        ["Former source location:", self._indent(str(stack_a))]
                     )
-                check_stack = n_check.sourceRange()
-                if check_stack:
-                    source_printout += (
-                        f"Check source location:\n{self._indent(str(check_stack))}\n"
+                stack_b = node_b.sourceRange() if node_b else None
+                if stack_b:
+                    source_printout.extend(
+                        ["Latter source location:", self._indent(str(stack_b))]
                     )
 
-                graph_diff_report += source_printout
+                graph_diff_report.extend(source_printout)
 
                 break
 
-        return graph_diff_report
+        return "\n".join(graph_diff_report)
 
 
 def _check_jit_model_diff(
@@ -374,8 +375,8 @@ def _check_onnx_model_diff(
         else:
             operator_export_type = _C_onnx.OperatorExportTypes.ONNX
 
-    symbolic_helper._set_opset_version(opset_version)
-    symbolic_helper._set_operator_export_type(operator_export_type)
+    _globals.GLOBALS.export_onnx_opset_version = opset_version
+    _globals.GLOBALS.operator_export_type = operator_export_type
 
     with utils.exporter_context(model, training, verbose):
         val_do_constant_folding = utils._decide_constant_folding(

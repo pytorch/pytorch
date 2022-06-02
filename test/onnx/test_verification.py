@@ -7,7 +7,12 @@ from torch.onnx import _experimental, verification
 
 
 class TestVerification(unittest.TestCase):
-    def test_check_jit_model_diff(self):
+    def setUp(self) -> None:
+        torch.manual_seed(0)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(0)
+
+    def test_check_export_model_diff_return_diff_when_constant_mismatch(self):
         class UnexportableModel(torch.nn.Module):
             def forward(self, x, y):
                 # tensor.data() will be exported as a constant,
@@ -25,11 +30,39 @@ class TestVerification(unittest.TestCase):
             r"Graph diff:(.|\n)*"
             r"First diverging operator:(.|\n)*"
             r"prim::Constant(.|\n)*"
-            r"Reference source location:(.|\n)*"
-            r"Check source location:",
+            r"Former source location:(.|\n)*"
+            r"Latter source location:",
         )
 
-    def test_check_export_model_diff(self):
+    def test_check_export_model_diff_return_diff_when_dynamic_controlflow_mismatch(
+        self,
+    ):
+        class UnexportableModel(torch.nn.Module):
+            def forward(self, x, y):
+                for i in range(x.size(0)):
+                    y = x[i] + y
+                return y
+
+        test_inputs = [
+            ((torch.randn(2, 3), torch.randn(2, 3)), {}),
+            ((torch.randn(4, 3), torch.randn(2, 3)), {}),
+        ]
+
+        export_options = _experimental.ExportOptions(
+            input_names=["x", "y"], dynamic_axes={"x": [0]}
+        )
+        results = verification.check_export_model_diff(
+            UnexportableModel(), test_inputs, export_options
+        )
+        self.assertRegex(
+            results,
+            r"Graph diff:(.|\n)*"
+            r"First diverging operator:(.|\n)*"
+            r"prim::Constant(.|\n)*"
+            r"Latter source location:(.|\n)*",
+        )
+
+    def test_check_onnx_model_diff_return_diff_when_constant_mismatch(self):
         class UnexportableModel(torch.nn.Module):
             def forward(self, x, y):
                 # tensor.data() will be exported as a constant,
@@ -41,19 +74,17 @@ class TestVerification(unittest.TestCase):
             ((torch.randn(2, 3), torch.randn(2, 3)), {}),
         ]
 
-        results = verification._check_onnx_model_diff(
-            UnexportableModel(), test_inputs, _experimental.ExportOptions()
-        )
+        results = verification._check_onnx_model_diff(UnexportableModel(), test_inputs)
         self.assertRegex(
             results,
             r"Graph diff:(.|\n)*"
             r"First diverging operator:(.|\n)*"
             r"onnx::Constant(.|\n)*"
-            r"Reference source location:(.|\n)*"
-            r"Check source location:",
+            r"Former source location:(.|\n)*"
+            r"Latter source location:",
         )
 
-    def test_check_jit_model_no_diff(self):
+    def test_check_export_model_diff_return_empty_when_correct_export(self):
         class SupportedModel(torch.nn.Module):
             def forward(self, x, y):
                 return x + y
