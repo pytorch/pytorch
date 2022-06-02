@@ -2696,6 +2696,13 @@
 - name: NestedTensor_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   self, weight, bias: NestedTensor_linear_backward(grad, self, weight, bias)
 
+- name: NestedTensor_to_buffer(Tensor self) -> Tensor
+  self: NestedTensor_to_buffer_backward(grad, self)
+
+- name: NestedTensor_from_buffer(Tensor self, Tensor shape) -> Tensor
+  self: NestedTensor_from_buffer_backward(grad, self, shape)
+  shape: non_differentiable
+
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
   self: fft_r2c_backward(grad, dim, normalization, onesided, self.size(dim.back()))
