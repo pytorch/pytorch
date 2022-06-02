@@ -310,11 +310,7 @@ class TestViewOps(TestCase):
             res = torch.view_as_real(input)
             self.assertEqual(res[:, :, 0], input.real)
             self.assertEqual(res[:, :, 1], input.imag)
-            # TODO: Add torch.ComplexHalfStorage
-            if dtype != torch.complex32:
-                self.assertTrue(self.is_view_of(t, res))
-            else:
-                self.assertRaises(RuntimeError, lambda: self.is_view_of(t, res))
+            self.assertTrue(self.is_view_of(t, res))
 
         fn()
         fn(contiguous_input=False)
@@ -322,21 +318,13 @@ class TestViewOps(TestCase):
         # tensor with zero elements
         x = torch.tensor([], dtype=dtype, device=device)
         res = torch.view_as_real(x)
-        # TODO: Add torch.ComplexHalfStorage
-        if dtype != torch.complex32:
-            self.assertTrue(self.is_view_of(x, res))
-        else:
-            self.assertRaises(RuntimeError, lambda: self.is_view_of(x, res))
+        self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([0, 2]))
 
         # tensor with zero dim
         x = torch.tensor(2 + 3j, dtype=dtype, device=device)
         res = torch.view_as_real(x)
-        # TODO: Add torch.ComplexHalfStorage
-        if dtype != torch.complex32:
-            self.assertTrue(self.is_view_of(x, res))
-        else:
-            self.assertRaises(RuntimeError, lambda: self.is_view_of(x, res))
+        self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([2]))
 
     @onlyNativeDeviceTypes
@@ -925,6 +913,25 @@ class TestViewOps(TestCase):
         # forward and backward give the same shape + result
         self.assertEqual(a_view_copy, a_view)
         self.assertEqual(a.grad, a_ref.grad)
+
+    def test_view_copy_out(self, device):
+        a = torch.randn(2, 2, device=device)
+        out = torch.empty(2, device=device)
+
+        torch.diagonal_copy(a, out=out)
+        expected = torch.diagonal_copy(a)
+
+        self.assertEqual(expected, out)
+
+        a = torch.randn(4, device=device)
+        out1 = torch.empty(2, device=device)
+        out2 = torch.empty(2, device=device)
+
+        torch.split_copy(a, 2, out=(out1, out2))
+        expected1, expected2 = torch.split_copy(a, 2)
+
+        self.assertEqual(expected1, out1)
+        self.assertEqual(expected2, out2)
 
 class TestOldViewOps(TestCase):
     def test_ravel(self, device):

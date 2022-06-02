@@ -262,13 +262,12 @@ def _get_linear_configs(dtype_configs):
     })
     return linear_configs
 
-def _get_conv_configs():
+def _get_conv_configs(dtype_configs):
     """
     Return all configs related to conv modules and ops.
     """
     conv_configs = []
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-    dtype_configs = [weighted_op_int8_dtype_config]
     for convs in [_Conv1dMetadata, _Conv2dMetadata, _Conv3dMetadata]:
 
         # (1) Single conv modules/functions
@@ -685,6 +684,7 @@ def _get_embedding_op_configs():
 
 def get_native_backend_config_dict():
     """ Get backend_config_dict for PyTorch Native backend (fbgemm/qnnpack). """
+    conv_dtype_configs = [weighted_op_int8_dtype_config]
     linear_dtype_configs = [
         weighted_op_int8_dtype_config,
         default_dynamic_int8_dtype_config,
@@ -706,7 +706,7 @@ def get_native_backend_config_dict():
         "configs": [
             *_DEFAULT_OP_INT8_CONFIGS,
             *_get_linear_configs(linear_dtype_configs),
-            *_get_conv_configs(),
+            *_get_conv_configs(conv_dtype_configs),
             *_get_binary_op_configs(binary_op_dtype_configs),
             *_get_fixed_qparams_op_configs(),
             _CAT_CONFIG,

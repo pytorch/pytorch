@@ -4,6 +4,7 @@ import re
 from typing import Iterable, Tuple, Union
 
 import torch
+import torch._C._onnx as _C_onnx
 from torch.onnx._globals import GLOBALS
 
 
@@ -45,7 +46,7 @@ def _graph_op(
     """
     # Filter out None attributes, this can be convenient client side because
     # now they can pass through None attributes, and have them not show up
-    kwargs = dict((k, v) for k, v in kwargs.items() if v is not None)
+    kwargs = {k: v for k, v in kwargs.items() if v is not None}
 
     def const_if_tensor(arg):
         if arg is None:
@@ -134,9 +135,8 @@ def _scalar(x):
 
 def _is_caffe2_aten_fallback():
     return (
-        GLOBALS.operator_export_type
-        == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-        and torch.onnx._CAFFE2_ATEN_FALLBACK
+        GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+        and _C_onnx._CAFFE2_ATEN_FALLBACK
     )
 
 
@@ -184,7 +184,7 @@ def _graph_constant(
     assert isinstance(value, numbers.Number)
     assert type_ is not None
     isscalar = False
-    if dims is None or dims == 0 or set(dims) == set([0]):
+    if dims is None or dims == 0 or set(dims) == {0}:
         dims = [1]
         isscalar = True
     type_ = type_.lower()

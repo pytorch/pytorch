@@ -12,9 +12,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
-#include <ATen/AccumulateType.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -30,6 +28,7 @@
 #include <ATen/ops/index_reduce_native.h>
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #endif
 
 #include <ATen/cuda/CUDAContext.h>
@@ -52,7 +51,7 @@ __global__ void indexing_backward_kernel(
 //stride_before is the stride of the dimension immediately preceding first indexed dimension
 //if indexing starts from the 0th dimension, stride_before does not matter because blockIdx.z will be 0 in this case
 //outer_dim is number of elements in the first unindexed dimensions
-  using accscalar_t = at::acc_type<scalar_t, true>;
+  using opmath_t = at::opmath_type<scalar_t>;
 
   // Each warp is responsible for an input into the LookupTable.
   // If the preceding input has the same destination index as this input, then the warp
@@ -79,19 +78,19 @@ __global__ void indexing_backward_kernel(
         }
         const int64_t weight_row = ((int64_t) sorted_indices[idx]) * stride + z * stride_before;
         const int64_t grad_row = ((int64_t) indices[idx]) * stride + z * numel * stride;
-        const accscalar_t scale = (accscalar_t)1.0;
+        const opmath_t scale = (opmath_t)1.0;
 
-        accscalar_t gradient[SZ];
-        accscalar_t weight[SZ];
+        opmath_t gradient[SZ];
+        opmath_t weight[SZ];
 
         while (start_feature < stride) {
           #pragma unroll
           for (int ii = 0; ii < SZ; ii++) {
             int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
-              gradient[ii] = static_cast<accscalar_t>(grad_output[grad_row + feature_dim]);
+              gradient[ii] = static_cast<opmath_t>(grad_output[grad_row + feature_dim]);
               if (accumulate) {
-                weight[ii] = static_cast<accscalar_t>(grad_weight[weight_row + feature_dim]);
+                weight[ii] = static_cast<opmath_t>(grad_weight[weight_row + feature_dim]);
               }
             }
           }
@@ -334,7 +333,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
 
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
       expandedValue.scalar_type(), "indexing_backward", [&] {
         indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
           sorted_indices.data_ptr<int64_t>(),
@@ -1196,8 +1195,8 @@ namespace {
 
 template <typename mask_t>
 void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kBool, kHalf, kBFloat16, iter.common_dtype(), "masked_fill_", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kBool, kHalf, kBFloat16, kComplexHalf, iter.common_dtype(), "masked_fill_", [&]() {
         const auto value_ = value.to<scalar_t>();
         gpu_kernel(
             iter, [value_] GPU_LAMBDA(scalar_t self, mask_t mask) -> scalar_t {
@@ -1252,6 +1251,216 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & val
       "with ", value.dim(), " dimension(s).");
   return masked_fill__cuda(self, mask, value.item());
 }
+
+namespace {
+
+// ForwardIt: only legacy random access iterator is supported.
+template<class ForwardIt, class T, bool is_lower = true>
+static __host__ __device__ __forceinline__
+ForwardIt find_bound(ForwardIt first, ForwardIt last, const T& value) {
+    ForwardIt it;
+    typename std::iterator_traits<ForwardIt>::difference_type count, step;
+    // NOTE: std::distance(first, last) compiles but produces wrong results here,
+    // so only legacy random access iterators are safe in this code.
+    count = last - first;
+
+    while (count > 0) {
+      it = first;
+      step = count / 2;
+      // avoiding std::advance(it, step),
+      // although it does work unlike std::distance
+      it += step;
+      if (is_lower ? *it < value : value >= *it) {
+        first = ++it;
+        count -= step + 1;
+      }
+      else {
+        count = step;
+      }
+    }
+    return first;
+}
+
+}
+
+Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
+  const auto ndim = self.dim();
+  TORCH_CHECK_INDEX(ndim, "index_select() cannot be applied to a 0-dim tensor.");
+  TORCH_CHECK_INDEX(
+      index.dim() == 1 && index.dtype() == at::kLong && index.options().layout() == at::kStrided,
+      "index_select() argument index must be 1-D strided (non-sparse) long-tensor.");
+  dim = maybe_wrap_dim(dim, ndim);
+  const auto size = self.size(dim);
+  const auto sparse_dim = self.sparse_dim();
+  const auto dense_dim = self.dense_dim();
+  const auto indices = self._indices();
+  const auto values = self._values();
+  const auto nnz = values.size(0);
+  const auto index_len = index.size(0);
+  auto res_sizes = self.sizes().vec();
+  res_sizes[dim] = index_len;
+
+  // If indexing into sparse dimensions
+  if (dim < sparse_dim) {
+    const auto make_output = [
+      dim, sparse_dim, dense_dim, res_sizes, &self, &indices, &values
+    ](
+        const Tensor& selected_dim_indices,
+        const Tensor& res_dim_indices
+    ) -> Tensor {
+      auto res_indices = indices.index_select(1, selected_dim_indices);
+      res_indices[dim] = res_dim_indices;
+      const auto res_values = values.index_select(0, selected_dim_indices);
+
+      return at::_sparse_coo_tensor_with_dims_and_tensors(
+          sparse_dim, dense_dim, res_sizes, res_indices, res_values, self.options());
+    };
+
+    // short-circuit if index is empty
+    if (!index_len) {
+      return make_output(index, index);
+    }
+
+    const auto nneg_index = [&index, size]() -> Tensor {
+      auto nneg_index = at::empty_like(index, at::MemoryFormat::Contiguous);
+
+      auto iter = TensorIteratorConfig()
+        .add_output(nneg_index)
+        .add_input(index)
+        .build();
+
+      AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_select_sparse_cuda", [&]() {
+          gpu_kernel(iter, [size] GPU_LAMBDA (index_t idx) -> index_t {
+              CUDA_KERNEL_ASSERT(idx >= -size && idx < size
+                  && "index_select(): index out of bounds");
+              return idx < 0 ? idx + size : idx;
+          });
+      });
+      return nneg_index;
+    }();
+
+    const auto dim_indices = indices[dim].contiguous();
+    const auto idx_nneg_index = at::arange(index_len, nneg_index.options());
+    const auto idx_dim_indices = at::arange(nnz, dim_indices.options());
+
+    Tensor sorted_dim_indices, argsort_dim_indices;
+    std::tie(sorted_dim_indices, argsort_dim_indices) = [&]() -> std::tuple<Tensor, Tensor> {
+      if (dim == 0 && self.is_coalesced()) {
+        return std::make_tuple(dim_indices, idx_dim_indices);
+      }
+      else {
+        return dim_indices.sort();
+      }
+    }();
+
+    Tensor intrsc_counts_nneg_index;
+    Tensor intrsc_first_match_nneg_index;
+    std::tie(intrsc_counts_nneg_index, intrsc_first_match_nneg_index) = [&]() -> std::tuple<Tensor, Tensor> {
+      auto intrsc_counts_nneg_index = at::zeros_like(nneg_index);
+      auto intrsc_first_match_nneg_index = at::zeros_like(nneg_index);
+
+      auto iter = TensorIteratorConfig()
+        .add_output(intrsc_first_match_nneg_index)
+        .add_input(nneg_index)
+        .add_input(idx_nneg_index)
+        .build();
+
+      AT_DISPATCH_INDEX_TYPES(nneg_index.scalar_type(), "index_select_sparse_cuda", [&]() {
+          index_t* ptr_intrsc_counts_nneg_index = intrsc_counts_nneg_index.data_ptr<index_t>();
+          index_t* ptr_sorted_dim_indices = sorted_dim_indices.data_ptr<index_t>();
+          gpu_kernel(
+              iter,
+              [ptr_intrsc_counts_nneg_index, ptr_sorted_dim_indices, nnz] GPU_LAMBDA (
+                index_t idx_val, index_t idx_idx
+              ) -> index_t {
+                auto* lb = find_bound<index_t*, index_t, true>(
+                  ptr_sorted_dim_indices,
+                  ptr_sorted_dim_indices + nnz,
+                  idx_val
+                );
+                auto* ub = find_bound<index_t*, index_t, false>(
+                  ptr_sorted_dim_indices,
+                  ptr_sorted_dim_indices + nnz,
+                  idx_val
+                );
+                const auto idx_count = ub - lb;
+                ptr_intrsc_counts_nneg_index[idx_idx] = idx_count;
+
+                return lb - ptr_sorted_dim_indices;
+              }
+          );
+      });
+
+      return std::make_tuple(intrsc_counts_nneg_index, intrsc_first_match_nneg_index);
+    }();
+
+    // Unavoidable sync since the shape of the result is not known in advance
+    auto res_len = intrsc_counts_nneg_index.sum().item<int64_t>();
+    // Short-circuit if empty intersection
+    if (!res_len) {
+      auto empty_idx = at::empty({0}, nneg_index.options());
+      return make_output(empty_idx, empty_idx);
+    }
+
+    Tensor selected_dim_indices, res_dim_indices;
+    std::tie(selected_dim_indices, res_dim_indices) = [&]() -> std::tuple<Tensor, Tensor> {
+      auto res_dim_indices = at::empty({res_len}, nneg_index.options());
+      auto selected_dim_indices = at::empty_like(res_dim_indices);
+      auto selected_dim_indices_offsets = intrsc_counts_nneg_index.cumsum(0)
+        .sub_(intrsc_counts_nneg_index);
+
+      // Need to have output as TensorIterator does not allow having void lambdas.
+      auto dummy_output = at::empty({1}, dim_indices.options()).expand(IntArrayRef({index_len}));
+      auto iter = TensorIteratorConfig()
+        .add_output(dummy_output)
+        // All iterations map to a single element in dummy_output by design,
+        // hence removed output memory overlap check.
+        .set_check_mem_overlap(false)
+        .add_input(idx_nneg_index)
+        .add_input(intrsc_counts_nneg_index)
+        .add_input(selected_dim_indices_offsets)
+        .add_input(intrsc_first_match_nneg_index)
+        .build();
+
+      AT_DISPATCH_INDEX_TYPES(nneg_index.scalar_type(), "index_select_sparse_cuda", [&]() {
+          index_t* ptr_res_dim_indices = res_dim_indices.data_ptr<index_t>();
+          index_t* ptr_selected_dim_indices = selected_dim_indices.data_ptr<index_t>();
+          index_t* ptr_argsort_dim_indices = argsort_dim_indices.data_ptr<index_t>();
+          gpu_kernel(
+              iter,
+              [ptr_res_dim_indices, ptr_selected_dim_indices, ptr_argsort_dim_indices] GPU_LAMBDA (
+                index_t idx_idx, index_t count, index_t offset, index_t first_match
+              ) -> index_t {
+                index_t* __restrict__ ptr_res_dim_indices_out = ptr_res_dim_indices + offset;
+                index_t* __restrict__ ptr_argsort_dim_indices_in = ptr_argsort_dim_indices + first_match;
+                index_t* __restrict__ ptr_selected_dim_indices_out = ptr_selected_dim_indices + offset;
+                for (index_t i = 0; i < count; ++i) {
+                  *ptr_res_dim_indices_out++ = idx_idx;
+                  *ptr_selected_dim_indices_out++ = *ptr_argsort_dim_indices_in++;
+                }
+
+                // A dummy return scalar for a dummy output
+                return static_cast<index_t>(1);
+              }
+          );
+      });
+
+      return std::make_tuple(selected_dim_indices, res_dim_indices);
+    }();
+
+    return make_output(selected_dim_indices, res_dim_indices);
+  }
+  // If indexing into dense dimensions
+  else {
+    // It is sufficient to just perform `index_select` on values
+    // if `dim` refers to dense dimensions.
+    const auto res_values = values.index_select(dim - sparse_dim + 1, index);
+
+    return _sparse_coo_tensor_with_dims_and_tensors(
+        sparse_dim, dense_dim, res_sizes, indices, res_values, self.options());
+  }
+}
+
 
 } // native
 } // at
