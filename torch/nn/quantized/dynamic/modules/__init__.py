@@ -17,11 +17,6 @@ from torch.ao.nn.quantized.dynamic.modules.linear import Linear
 from torch.ao.nn.quantized.dynamic.modules.rnn import LSTM, GRU, LSTMCell, RNNCell, GRUCell
 
 __all__ = [
-    # Subpackages that are implicitly imported
-    'conv',
-    'linear',
-    'rnn',
-    # Modules to import
     'Linear',
     'LSTM',
     'GRU',

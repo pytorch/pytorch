@@ -8,9 +8,9 @@ appropriate file under the `torch/ao/nn/quantized/modules`,
 while adding an import statement here.
 """
 
-from torch.ao.nn.quantized.modules.activation import ReLU6
-from torch.ao.nn.quantized.modules.activation import Hardswish
 from torch.ao.nn.quantized.modules.activation import ELU
+from torch.ao.nn.quantized.modules.activation import Hardswish
 from torch.ao.nn.quantized.modules.activation import LeakyReLU
+from torch.ao.nn.quantized.modules.activation import ReLU6
 from torch.ao.nn.quantized.modules.activation import Sigmoid
 from torch.ao.nn.quantized.modules.activation import Softmax

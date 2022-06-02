@@ -138,7 +138,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_7-cpu
           retention-days: 14
@@ -198,7 +198,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cpu
@@ -319,7 +319,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cpu
@@ -474,7 +474,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_7-cuda10_2
           retention-days: 14
@@ -535,7 +535,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda10_2
@@ -668,7 +668,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda10_2
@@ -826,7 +826,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_7-cuda11_3
           retention-days: 14
@@ -887,7 +887,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_3
@@ -1020,7 +1020,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_3
@@ -1178,7 +1178,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_7-cuda11_6
           retention-days: 14
@@ -1239,7 +1239,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_6
@@ -1372,7 +1372,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_6
@@ -1526,7 +1526,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_8-cpu
           retention-days: 14
@@ -1586,7 +1586,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cpu
@@ -1707,7 +1707,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cpu
@@ -1862,7 +1862,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_8-cuda10_2
           retention-days: 14
@@ -1923,7 +1923,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda10_2
@@ -2056,7 +2056,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda10_2
@@ -2214,7 +2214,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_8-cuda11_3
           retention-days: 14
@@ -2275,7 +2275,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda11_3
@@ -2408,7 +2408,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda11_3
@@ -2566,7 +2566,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_8-cuda11_6
           retention-days: 14
@@ -2627,7 +2627,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda11_6
@@ -2760,7 +2760,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda11_6
@@ -2914,7 +2914,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_9-cpu
           retention-days: 14
@@ -2974,7 +2974,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cpu
@@ -3095,7 +3095,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cpu
@@ -3250,7 +3250,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_9-cuda10_2
           retention-days: 14
@@ -3311,7 +3311,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda10_2
@@ -3444,7 +3444,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda10_2
@@ -3602,7 +3602,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_9-cuda11_3
           retention-days: 14
@@ -3663,7 +3663,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_3
@@ -3796,7 +3796,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_3
@@ -3954,7 +3954,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_9-cuda11_6
           retention-days: 14
@@ -4015,7 +4015,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_6
@@ -4148,7 +4148,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_6
@@ -4302,7 +4302,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_10-cpu
           retention-days: 14
@@ -4362,7 +4362,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cpu
@@ -4483,7 +4483,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cpu
@@ -4638,7 +4638,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_10-cuda10_2
           retention-days: 14
@@ -4699,7 +4699,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda10_2
@@ -4832,7 +4832,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda10_2
@@ -4990,7 +4990,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_10-cuda11_3
           retention-days: 14
@@ -5051,7 +5051,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_3
@@ -5184,7 +5184,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_3
@@ -5342,7 +5342,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: conda-py3_10-cuda11_6
           retention-days: 14
@@ -5403,7 +5403,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_6
@@ -5536,7 +5536,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_6
