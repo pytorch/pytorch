@@ -99,7 +99,7 @@ public:
   // attempt to register a schema when one is already present or vice
   // versa that is an error.  (Refcounting for the registrations is
   // handled in the OperatorHandle in Dispatcher)
-  void registerSchema(FunctionSchema&&, std::string&& debug, const std::vector<at::Tag>& tags = {});
+  void registerSchema(FunctionSchema&&, std::string&& debug, std::vector<at::Tag> tags = {});
   void deregisterSchema();
 
   const OperatorName& operator_name() const {

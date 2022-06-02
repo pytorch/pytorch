@@ -241,6 +241,10 @@ class TestPublicBindings(TestCase):
             "vitals_enabled",
 
             "wait",
+            "Tag",
+            "inplace_view",
+            "view_copy",
+            "generated"
         }
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
 

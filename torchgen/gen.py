@@ -1847,9 +1847,7 @@ def gen_headers(
     def gen_tags_enum() -> Dict[str, str]:
         return {
             "enum_of_valid_tags": (
-                "enum class Tag\n{\n"
-                + ",\n".join([f"{tag}" for tag in valid_tags])
-                + "\n};\n"
+                ",\n".join([f"{tag}" for tag in valid_tags])
             )
         }
 

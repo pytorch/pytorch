@@ -330,9 +330,7 @@ def gen(
     def gen_tags_enum() -> Dict[str, str]:
         return {
             "enum_of_valid_tags": (
-                'py::enum_<at::Tag>(m, "Tag")'
-                + "".join([f'\n.value("{tag}", at::Tag::{tag})' for tag in valid_tags])
-                + "\n.export_values();\n"
+                "".join([f'\n.value("{tag}", at::Tag::{tag})' for tag in valid_tags])
             )
         }
 

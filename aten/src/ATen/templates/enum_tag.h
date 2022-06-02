@@ -4,5 +4,7 @@
 
 namespace at {
     // Enum of valid tags obtained from the entries in tags.yaml
-    ${enum_of_valid_tags}
+    enum class Tag {
+        ${enum_of_valid_tags}
+    };
 }
