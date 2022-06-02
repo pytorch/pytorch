@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Dict
 from datetime import datetime, timedelta
 from gitutils import _check_output
 
@@ -38,7 +38,7 @@ def print_latest_commits(minutes: int = 30) -> None:
     for commit in commits:
         print_commit_status(commit, results)
 
-def print_commit_status(commit, results) -> None:
+def print_commit_status(commit: str, results: Dict[str, Any]) -> None:
     print(commit)
     for check in results['results']:
         if check['sha'] == commit:
