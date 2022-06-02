@@ -260,6 +260,13 @@ class TestReductions(TestCase):
             self.assertEqual(result.dtype, torch.int64)
         elif op.result_dtype is not None:
             self.assertEqual(result.dtype, op.result_dtype)
+        elif op.complex_to_real:
+            _complex_to_real_dtype_map = {
+                torch.complex128: torch.float64,
+                torch.complex64: torch.float32,
+                torch.complex32: torch.float16,
+            }
+            self.assertEqual(result.dtype, _complex_to_real_dtype_map.get(dtype, dtype))
         else:
             self.assertEqual(result.dtype, dtype)
 
