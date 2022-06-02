@@ -385,7 +385,7 @@ class TestCommon(TestCase):
 
             for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(torch_result)[0]):
                 prims.utils.compare_tensor_meta(a, b)
-                if op.validate_view_consistency:
+                if getattr(op, 'validate_view_consistency', True):
                     self.assertEqual(a._is_view(), b._is_view())
 
             # Computes the dtype the more precise computatino would occur in
