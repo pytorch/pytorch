@@ -1169,7 +1169,7 @@ scaled_modified_bessel_i0 = _add_docstr(_special.special_scaled_modified_bessel_
                                         r"""
 scaled_modified_bessel_i0(input, *, out=None) -> Tensor
 
-Scaled modified Bessel function of the first kind of order :math:`0`, 
+Scaled modified Bessel function of the first kind of order :math:`0`,
 :math:`\text{exp}(\text{input})\text{I}_{0}(\text{input})`.
 
 """ + r"""
@@ -1184,7 +1184,7 @@ scaled_modified_bessel_i1 = _add_docstr(_special.special_scaled_modified_bessel_
                                         r"""
 scaled_modified_bessel_i1(input, *, out=None) -> Tensor
 
-Scaled modified Bessel function of the first kind of order :math:`1`, 
+Scaled modified Bessel function of the first kind of order :math:`1`,
 :math:`\text{exp}(\text{input})\text{I}_{1}(\text{input})`.
 
 """ + r"""
@@ -1199,7 +1199,7 @@ scaled_modified_bessel_k0 = _add_docstr(_special.special_scaled_modified_bessel_
                                         r"""
 scaled_modified_bessel_k0(input, *, out=None) -> Tensor
 
-Scaled modified Bessel function of the second kind of order :math:`0`, 
+Scaled modified Bessel function of the second kind of order :math:`0`,
 :math:`\text{exp}(\text{input})\text{K}_{0}(\text{input})`.
 
 """ + r"""
@@ -1214,7 +1214,7 @@ scaled_modified_bessel_k1 = _add_docstr(_special.special_scaled_modified_bessel_
                                         r"""
 scaled_modified_bessel_k1(input, *, out=None) -> Tensor
 
-Scaled modified Bessel function of the second kind of order :math:`1`, 
+Scaled modified Bessel function of the second kind of order :math:`1`,
 :math:`\text{exp}(\text{input})\text{K}_{1}(\text{input})`.
 
 """ + r"""
@@ -1229,7 +1229,7 @@ spherical_bessel_j0 = _add_docstr(_special.special_spherical_bessel_j0,
                                   r"""
 spherical_bessel_j0(input, *, out=None) -> Tensor
 
-Spherical Bessel function of the first kind of order :math:`0`, 
+Spherical Bessel function of the first kind of order :math:`0`,
 :math:`\text{j}_{0}(\text{input})`.
 
 """ + r"""
@@ -1244,7 +1244,7 @@ spherical_bessel_j1 = _add_docstr(_special.special_spherical_bessel_j1,
                                   r"""
 spherical_bessel_j1(input, *, out=None) -> Tensor
 
-Spherical Bessel function of the first kind of order :math:`1`, 
+Spherical Bessel function of the first kind of order :math:`1`,
 :math:`\text{j}_{1}(\text{input})`.
 
 """ + r"""
@@ -1259,7 +1259,7 @@ spherical_bessel_y0 = _add_docstr(_special.special_spherical_bessel_y0,
                                   r"""
 spherical_bessel_y0(input, *, out=None) -> Tensor
 
-Spherical Bessel function of the second kind of order :math:`0`, 
+Spherical Bessel function of the second kind of order :math:`0`,
 :math:`\text{y}_{0}(\text{input})`.
 
 """ + r"""
@@ -1274,7 +1274,7 @@ spherical_bessel_y1 = _add_docstr(_special.special_spherical_bessel_y1,
                                   r"""
 spherical_bessel_y1(input, *, out=None) -> Tensor
 
-Spherical Bessel function of the second kind of order :math:`1`, 
+Spherical Bessel function of the second kind of order :math:`1`,
 :math:`\text{y}_{1}(\text{input})`.
 
 """ + r"""
