@@ -768,7 +768,7 @@ Example::
 
 add_docstr(torch.as_strided,
            r"""
-as_strided(input, size, stride, storage_offset=0) -> Tensor
+as_strided(input, size, stride, storage_offset=None) -> Tensor
 
 Create a view of an existing `torch.Tensor` :attr:`input` with specified
 :attr:`size`, :attr:`stride` and :attr:`storage_offset`.
@@ -786,7 +786,8 @@ Args:
     {input}
     size (tuple or ints): the shape of the output tensor
     stride (tuple or ints): the stride of the output tensor
-    storage_offset (int, optional): the offset in the underlying storage of the output tensor
+    storage_offset (int, optional): the offset in the underlying storage of the output tensor.
+    If ``None``, the storage_offset of the output tensor will match the input tensor.
 
 Example::
 
@@ -1045,15 +1046,13 @@ returned tensor will, by default, infer its datatype from the scalar values, be 
 CPU device, and not share its memory.
 
 .. seealso::
+
     :func:`torch.tensor` creates a tensor that always copies the data from the input object.
-
     :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
-
     :func:`torch.frombuffer` creates a tensor that always shares memory from objects that
-           implement the buffer protocol.
-
+    implement the buffer protocol.
     :func:`torch.from_dlpack` creates a tensor that always shares memory from
-           DLPack capsules.
+    DLPack capsules.
 
 Args:
     obj (object): a tensor, NumPy array, DLPack Capsule, object that implements Python's
@@ -2066,9 +2065,6 @@ real(input) -> Tensor
 
 Returns a new tensor containing real values of the :attr:`self` tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
-
-.. warning::
-    :func:`real` is only supported for tensors with complex dtypes.
 
 Args:
     {input}
