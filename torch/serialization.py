@@ -708,7 +708,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
                                   " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
                                   " silence this warning)", UserWarning)
                     opened_file.seek(orig_position)
-                    return torch.jit.load(opened_file)
+                    return torch.jit.load(opened_file, map_location=map_location)
                 return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
         return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
 
