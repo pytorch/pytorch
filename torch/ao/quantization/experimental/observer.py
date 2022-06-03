@@ -24,7 +24,6 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         self,
         min_val = None,
         max_val = None,
-        level_indices = None,
         b = 0,
         k = 0,
         dtype = torch.quint8) -> None:
@@ -39,7 +38,7 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         # self.quant_min, self.quant_max = calculate_qmin_qmax(quant_min, quant_max, self.has_customized_qrange, self.dtype, self.reduce_range)
 
     # introduce signed numbers
-    def _calculate_qparams(self, min_val: torch.Tensor, max_val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _calculate_qparams(self, min_val: torch.Tensor, max_val: torch.Tensor, signed: bool) -> Tuple[torch.Tensor, torch.Tensor]:
         # compute alpha
         self.alpha = max_val
 
@@ -57,8 +56,14 @@ class NonUniformQuantizationObserverBase(ObserverBase):
                 curr_ele = 2**(-(i+j*n))
                 p_append = torch.tensor([curr_ele])
                 p_curr = torch.cat((p_curr, p_append))
+                # introduce signed numbers
+                if signed:
+                    p_curr = torch.cat((p_curr, torch.tensor([-curr_ele])))
 
-            p_all.append(p_curr)
+            # sort tensor before adding to list
+            sorted, indices = torch.sort(p_curr)
+            print(sorted)
+            p_all.append(sorted)
 
         # gamma calculation:
         # loop through all tensors, add element at index 1 for each tensor
@@ -90,6 +95,7 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         # device = min_val_neg.device
 
 class APoTObserver(NonUniformQuantizationObserverBase):
+    # !!!!! fix this !!!!!
     alpha = 0
     gamma = 0
     level_indices = torch.Tensor()
@@ -98,12 +104,11 @@ class APoTObserver(NonUniformQuantizationObserverBase):
 
     def __init__(
         self,
-        min_val: torch.Tensor,
-        max_val: torch.Tensor,
-        level_indices: torch.Tensor,
-        b: int,
-        k: int) -> None:
-        super(APoTObserver, self).__init__(min_val, max_val, level_indices, b, k)
+        min_val = torch.Tensor(),
+        max_val = torch.Tensor(),
+        b = 0,
+        k = 0) -> None:
+        super(APoTObserver, self).__init__(min_val, max_val, b, k)
 
     def calculate_qparams(self):
         return self._calculate_qparams(self.min_val, self.max_val)
