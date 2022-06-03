@@ -379,6 +379,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("_set_vmap_fallback_warning_enabled", &at::functorch::setVmapFallbackWarningEnabled, "Set vmap fallback warnings");
   m.def("_set_vmap_fallback_enabled", &at::functorch::setVmapFallbackEnabled);
   m.def("_is_vmap_fallback_enabled", &at::functorch::isVmapFallbackEnabled);
+  m.def("set_inplace_requires_grad_allowed", &at::functorch::setInplaceRequiresGradAllowed);
   m.def("dlevel", &at::functorch::dlevel, "dlevel");
   m.def("dump_tensor", &at::functorch::dump_tensor, "dump_tensor");
   m.def("reshape_dim_into", &at::functorch::reshape_dim_into);
