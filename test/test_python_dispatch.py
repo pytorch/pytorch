@@ -1103,8 +1103,14 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             with y:
                 pass
 
+        z = LoggingTensorMode()
         with y:
-            pass
+            with z:
+                pass
+
+        with x:
+            with z:
+                pass
 
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))

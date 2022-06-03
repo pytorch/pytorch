@@ -1327,8 +1327,14 @@ class TestTorchFunctionMode(TestCase):
             with y:
                 pass
 
+        z = A()
         with y:
-            pass
+            with z:
+                pass
+
+        with x:
+            with z:
+                pass
 
     def test_reentrant_mode_idiom(self):
         log = []

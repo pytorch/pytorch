@@ -157,8 +157,8 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
                                    "because the current mode is not its ancestor. Please use a fresh version")
         else:
             self.inner = old
-            if not hasattr(self, "ancestors"):
-                self.ancestors = {}
+            if old is None:
+                self.ancestors: Set[TorchDispatchMode] = set()
             else:
                 self.ancestors = self.inner.ancestors.union({self.inner})
         self.prev = old
