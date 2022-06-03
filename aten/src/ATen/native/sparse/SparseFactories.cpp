@@ -1,6 +1,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/core/ATen_fwd.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/ops/sparse_coo_tensor.h>
 #include <c10/util/ArrayRef.h>
@@ -51,16 +52,16 @@ SparseTensor _spdiags_sparse_cpu_coo(
   auto indices_accessor = indices.accessor<int64_t, 2>();
   auto offsets_accessor = offsets.accessor<int64_t, 1>();
   int64_t actual_nnz = 0;
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       at::ScalarType::BFloat16,
       at::ScalarType::Half,
       at::ScalarType::Bool,
+      at::ScalarType::ComplexHalf,
       values.scalar_type(),
       "spdiags",
       [&] {
-        scalar_t* values_ptr = values.data_ptr<scalar_t>();
-        scalar_t* diagonals_ptr = diagonals.data_ptr<scalar_t>();
-        int64_t diagonals_stride = diagonals.stride(0);
+        auto values_accessor = values.accessor<scalar_t, 1>();
+        auto const diagonals_accessor = diagonals.accessor<scalar_t, 2>();
 
         for (const auto d_i : c10::irange(n_diag)) {
           const int64_t& off_i = offsets_accessor[d_i];
@@ -79,14 +80,12 @@ SparseTensor _spdiags_sparse_cpu_coo(
           const int64_t max_read =
               std::min(diag_slots, std::min(row_slots, col_slots));
 
-          const int64_t diag_read_begin = diagonals_stride * d_i;
 
           for (const auto read_count : c10::irange(max_read)) {
             const auto col = col_out_begin + read_count;
             const auto row = row_out_begin + read_count;
-            const auto diagonals_pos = diag_read_begin + col;
 
-            values_ptr[actual_nnz] = diagonals_ptr[diagonals_pos];
+            values_accessor[actual_nnz] = diagonals_accessor[d_i][col];
             indices_accessor[0][actual_nnz] = row;
             indices_accessor[1][actual_nnz] = col;
             ++actual_nnz;
@@ -100,7 +99,11 @@ SparseTensor _spdiags_sparse_cpu_coo(
   return sparse;
 }
 
-void validate_spdiags_offsets_cpu(const Tensor& offsets) {
+// Check offsets for duplicates, and out-of-bounds diagonals
+void validate_spdiags_offsets_cpu(
+    const Tensor& offsets,
+    const int64_t n_row,
+    const int64_t n_col) {
   std::set<int64_t> seen_offsets;
   auto offsets_accessor = offsets.accessor<int64_t, 1>();
   for (auto i : c10::irange(offsets.size(0))) {
@@ -108,6 +111,15 @@ void validate_spdiags_offsets_cpu(const Tensor& offsets) {
     TORCH_CHECK(
         seen_offsets.insert(off).second,
         "Offset array contains duplicate values");
+    TORCH_CHECK(
+        ((-1 * n_row) < off) && (off < n_col),
+        "Diagonal ",
+        off,
+        " does not exist in output shape (",
+        n_row,
+        ",",
+        n_col,
+        ")");
   }
 }
 
@@ -134,13 +146,11 @@ SparseTensor spdiags_sparse_cpu(
             (*layout == Layout::SparseCsr),
         "Only output layouts (",
         Layout::Sparse,
-        ",",
+        ", ",
         Layout::SparseCsc,
-        ", and",
+        ", and ",
         Layout::SparseCsr,
-        ") are supported. Output layout ",
-        *layout,
-        " was requested.");
+        ") are supported");
   }
 
   SparseTensor result_coo = _spdiags_sparse_cpu_coo(diagonals, offsets, shape);

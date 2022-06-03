@@ -8,7 +8,7 @@ import random
 import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS, gradcheck, coalescedonoff, \
+    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
@@ -3493,22 +3493,21 @@ class TestSparse(TestCase):
         test(4, 6, [7, 3, 1, 3, 1, 3], [7, 3, 1, 3, 2, 3])
         test(4, 6, [7, 3, 1, 3, 2, 1], [7, 3, 1, 3, 2, 3])
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy is not availible")
     @onlyCPU
-    @dtypes(*floating_and_complex_types())
+    @dtypes(*all_types_and_complex_and(torch.bool))
     def test_sparse_spdiags(self, device, dtype):
 
         make_diags = functools.partial(make_tensor, dtype=dtype, device=device)
         make_offsets = functools.partial(torch.tensor, dtype=torch.long, device=device)
 
         if TEST_SCIPY:
-
             def reference(diags, offsets, shape):
-                return scipy.sparse.spdiags(diags.numpy(), offsets.numpy(), *shape).to_array()
+                return scipy.sparse.spdiags(diags, offsets, *shape).toarray()
 
         else:
-
             def reference(diags, offsets, shape):
-                result = np.zeros(shape, dtype=dtype, device=device)
+                result = torch.zeros(shape, dtype=dtype, device=device)
                 for i, off in enumerate(offsets):
                     res_view = result.diagonal(off)
                     data = diags[i]
@@ -3526,9 +3525,9 @@ class TestSparse(TestCase):
                 ex_layout = torch.sparse_coo
             else:
                 ex_layout = layout
-
+            out_dense = out.to_dense()
             self.assertTrue(out.layout == ex_layout, f"Output layout {out.layout} expected {ex_layout}")
-            self.assertEqual(out.to_dense(), ref_out, f"Result:\n{out.to_dense()} does not match reference:\n{ref_out}")
+            self.assertEqual(out_dense, ref_out, f"Result:\n{out_dense} does not match reference:\n{ref_out}")
 
         def check_invalid(args, error):
             with self.assertRaisesRegex(RuntimeError, error):
@@ -3537,11 +3536,11 @@ class TestSparse(TestCase):
         def valid_cases():
             # some normal cases
             yield (make_diags((1, 5)), make_offsets([0]), (5, 5))
-            yield (make_diags((3, 3)), make_offsets([-1, 0, 1], (4, 4)))
+            yield (make_diags((3, 3)), make_offsets([-1, 0, 1]), (4, 4))
             # noncontigous input
-            yield (make_diags((4, 4), noncontiguous=True), make_offsets([-1, 1, 0, 2, -2]), (5, 5))
-            # correct dimensionality but empty diags
-            yield (make_diags((0, 3)), make_offsets(size=(0,)), (3, 3))
+            yield (make_diags((5, 4), noncontiguous=True), make_offsets([-1, 1, 0, 2, -2]), (5, 5))
+            # correct dimensionality, 2d, 2d , and shapes match, but the number of diagonals is zero
+            yield (make_diags((0, 3)), make_offsets([]), (3, 3))
             # forward rotation of upper diagonals
             yield (make_diags((3, 8)), make_offsets([1, 2, 3]), (4, 4))
             # rotation exausts input space to read from
@@ -3550,11 +3549,21 @@ class TestSparse(TestCase):
             yield (make_diags((1, 5)), make_offsets([0]), (5, 5), torch.sparse_csc)
             yield (make_diags((3, 3)), make_offsets([-1, 0, 1]), (4, 4), torch.sparse_csr)
 
+        for case in valid_cases():
+            check_valid(*case)
+
         def invalid_cases():
             yield (make_diags((5,)), make_offsets([0, 1, 2, 3, 4]), (3, 3)), "Diagonals must be 2d"
             yield (make_diags((1, 3)), make_offsets([0]), (3, 2, 3)), "Output shape must be 2d"
             yield (make_diags((2, 3)), make_offsets([[1, 2], [0, 3]]), (3, 3)), "Offsets must be 1d"
-            yield (make_diags((2, 3)),)
+            yield (make_diags((3, 3)), make_offsets([-1, 0]), (3, 3)), \
+                r"Number of diagonals \(\d\) does not match the number of offsets \(\d\)"
+            yield (make_diags((2, 2)), make_offsets([-1, 0]), (2, 3), torch.strided), \
+                r"Only output layouts \(\w+, \w+, and \w+\) are supported"
+
+        for case, error_regex in invalid_cases():
+            check_invalid(case, error_regex)
+
 
 
 class TestSparseOneOff(TestCase):
