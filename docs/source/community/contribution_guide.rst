@@ -2,7 +2,7 @@ PyTorch Contribution Guide
 ==========================
 
 PyTorch is a GPU-accelerated Python tensor computation package for
-building deep neural networks based on tape-based autograd systems.
+building deep neural networks using a on tape-based autograd systems.
 
 Contribution Process
 --------------------
@@ -12,7 +12,7 @@ Governance <governance>` and the technical guide to contributing
 can be found in `CONTRIBUTING.md <https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md>`_.
 
 The PyTorch development process involves a healthy amount of open
-discussions between the core development team and community.
+discussions between the core development team and the community.
 
 PyTorch operates similarly to most open source projects on GitHub.
 However, if you've never contributed to an open source project before,
@@ -31,7 +31,7 @@ here is the basic process.
       We also maintain some labels for issues that are likely to be
       good for new people, e.g., **bootcamp** and **1hr**, although
       these labels are less well maintained.
-   -  Join us on `dev discuss <https://dev-discuss.pytorch.org/>`_ 
+   -  Join us on `dev discuss <https://dev-discuss.pytorch.org/>`_
       and let us know you're interested in getting to
       know PyTorch. We're very happy to help out researchers and
       partners get up to speed with the codebase.
@@ -200,7 +200,7 @@ Promoting PyTorch
 Your use of PyTorch in your projects, research papers, write ups, blogs,
 or general discussions around the internet helps to raise awareness for
 PyTorch and our growing community. Please reach out to
-`marketing@pytorch.org <mailto:marketing@pytorch.org>`__
+`pytorch-marketing@fb.com <http://mailto:pytorch-marketing@fb.com/>`__
 for marketing support.
 
 Triaging Issues
@@ -293,10 +293,10 @@ Frequently Asked Questions
    otherwise help us identify or troubleshoot issues. Commenting on
    tasks or pull requests with your environment details is helpful and
    appreciated.
--  **CI tests failed, what does it mean?** Maybe you need to merge with
-   master or rebase with the latest. Pushing your changes should
-   re-trigger CI tests. If the tests persist, you'll want to trace
-   through the error messages and resolve the related issues.
+-  **CI tests failed, what does it mean?** Maybe your PR is based
+   off a broken master? You can try to rebase your change on top
+   of the latest master. You can also see the current status of
+   master's CI at https://hud.pytorch.org/.
 -  **What are the most high risk changes?** Anything that touches build
    configuration is a risky area. Please avoid changing these unless
    you've had a discussion with the team beforehand.
