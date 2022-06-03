@@ -152,13 +152,13 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
         old = _get_torch_dispatch_mode()
         if hasattr(self, "inner"):
             assert hasattr(self, "ancestors")
-            if old not in self.ancestors:
+            if old is not None and old not in self.ancestors:
                 raise RuntimeError(f"{self} has already been used as a mode and is not valid in the current state, " +
                                    "because the current mode is not its ancestor. Please use a fresh version")
         else:
             self.inner = old
-            if self.inner is None:
-                self.ancestors = {self.inner}
+            if not hasattr(self, "ancestors"):
+                self.ancestors = {}
             else:
                 self.ancestors = self.inner.ancestors.union({self.inner})
         self.prev = old
