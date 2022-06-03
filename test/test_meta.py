@@ -305,6 +305,16 @@ def run_meta_crossref(
         elif func is torch.ops.aten.repeat_interleave.Tensor:
             if kwargs.get("output_size", None) is None:
                 meta_args = args
+        elif func is torch.ops.aten.index.Tensor:
+            # Don't convert boolean tensors to meta as they will have nonzero
+            # called on them
+            indices = []
+            for meta_index, real_index in zip(meta_args[1], args[1]):
+                if meta_index is not None and meta_index.dtype in [torch.int8, torch.bool]:
+                    indices.append(real_index)
+                else:
+                    indices.append(meta_index)
+            meta_args = (meta_args[0], indices)
         try:
             # Suppress warnings, this doesn't matter for test_meta.py
             # but it does matter if you want to use this decorator
@@ -484,7 +494,6 @@ sys.exit()
 """
 
 meta_function_skips = {
-    torch.Tensor.__getitem__: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8, c32},
     torch.aminmax: {b8, f32, f64, i16, i32, i64, i8, u8},
     torch.conj_physical: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.cummax: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},
@@ -670,7 +679,6 @@ meta_dispatch_expected_failures = {
     aten.histogram.bin_ct: {f64, f32},
     aten.histogram.bins_tensor: {f64, f32},
     aten.im2col.default: {bf16, f16, f64, f32},
-    aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32},
     aten.kthvalue.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.linalg_matrix_exp.default: {bf16, f64, f32},
     aten.log_sigmoid_forward.output: {bf16, f64, f32},
@@ -784,7 +792,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.grid_sampler_3d.default: {f16},  # aten::grid_sampler_3d
     aten.histc.default: {i16, i32, i64, i8},  # aten::histc
     aten.histc.out: {i16, i32, i64, i8},  # aten::histc.out
-    aten.index.Tensor: {c32},  # aten::index.Tensor
     aten.kthvalue.default: {f16},  # aten::kthvalue.values
     aten.linalg_cholesky_ex.L: {f32, f64},  # aten::linalg_cholesky_ex.L
     aten.linalg_cholesky_ex.default: {f32, f64},  # aten::linalg_cholesky_ex

@@ -1,6 +1,9 @@
 import torch
+from torch import Tensor
 from torch._prims import utils
 from torch._prims.utils import check
+
+from typing import List, Optional
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
@@ -24,19 +27,6 @@ def meta_index_select(self, dim, index):
 def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.index_select(self, dim, index))
-
-@torch.library.impl(meta_lib, "abs")
-def meta_abs(self):
-    if self.is_complex():
-        float_type = toRealValueType(self.dtype)
-        return self.new_empty(self.size(), dtype=float_type)
-    else:
-        return self.new_empty(self.size())
-
-@torch.library.impl(meta_lib, "abs.out")
-def meta_abs_out(self, out):
-    torch._resize_output_(out, self.size(), self.device)
-    return out.copy_(torch.abs(self))
 
 @torch.library.impl(meta_lib, "max")
 def meta_max(self):
@@ -179,3 +169,100 @@ def meta_linalg_qr_helper(input, mode):
     R = input.new_empty(Rt_shape)
     R.transpose_(-2, -1)
     return (Q, R)
+
+@torch.library.impl(meta_lib, "index.Tensor")
+def meta_index_Tensor(self, indices):
+    check(indices, lambda: "at least one index must be provided")
+    # aten::index is the internal advanced indexing implementation
+    # checkIndexTensorTypes and expandTensors
+    result: List[Optional[Tensor]] = []
+    for i, index in enumerate(indices):
+        if index is not None:
+            check(
+                index.dtype in [torch.long, torch.int8, torch.bool],
+                lambda: "tensors used as indices must be long, byte or bool tensors"
+            )
+            if index.dtype in [torch.int8, torch.bool]:
+                nonzero = index.nonzero()
+                k = len(result)
+                check(
+                    k + index.ndim <= self.ndim,
+                    lambda: f"too many indices for tensor of dimension {self.ndim}",
+                    IndexError
+                )
+                for j in range(index.ndim):
+                    check(
+                        index[j] <= self.shape[k + j],
+                        lambda: f"The shape of the mask {index.shape} at index {i} "
+                                f"does not match the shape of the indexed tensor {self.shape} at index {k + j}",
+                        IndexError
+                    )
+                    result.append(nonzero.select(1, j))
+            else:
+                result.append(index)
+        else:
+            result.append(index)
+    indices = result
+    check(len(indices) <= self.ndim, lambda: f"too many indices for tensor of dimension {self.ndim} (got {len(indices)})")
+    # expand_outplace
+    import torch._refs as refs  # avoid import cycle in mypy
+    indices = list(refs._maybe_broadcast(*indices))
+    # add missing null tensors
+    while len(indices) < self.ndim:
+        indices.append(None)
+
+    # hasContiguousSubspace
+    #   true if all non-null tensors are adjacent
+    # See:
+    # https://numpy.org/doc/stable/user/basics.indexing.html#combining-advanced-and-basic-indexing
+    # https://stackoverflow.com/questions/53841497/why-does-numpy-mixed-basic-advanced-indexing-depend-on-slice-adjacency
+    state = 0
+    has_contiguous_subspace = False
+    for index in indices:
+        if state == 0:
+            if index is not None:
+                state = 1
+        elif state == 1:
+            if index is None:
+                state = 2
+        else:
+            if index is not None:
+                break
+    else:
+        has_contiguous_subspace = True
+
+    # transposeToFront
+    # This is the logic that causes the newly inserted dimensions to show up
+    # at the beginning of the tensor, if they're not contiguous
+    if not has_contiguous_subspace:
+        dims = []
+        transposed_indices = []
+        for i, index in enumerate(indices):
+            if index is not None:
+                dims.append(i)
+                transposed_indices.append(index)
+        for i, index in enumerate(indices):
+            if index is None:
+                dims.append(i)
+                transposed_indices.append(index)
+        self = self.permute(dims)
+        indices = transposed_indices
+
+    # AdvancedIndex::AdvancedIndex
+    # Now we can assume the indices have contiguous subspace
+    # This is simplified from AdvancedIndex which goes to more effort
+    # to put the input and indices in a form so that TensorIterator can
+    # take them.  If we write a ref for this, probably that logic should
+    # get implemented
+    before_shape: List[int] = []
+    after_shape: List[int] = []
+    replacement_shape: List[int] = []
+    for dim, index in enumerate(indices):
+        if index is None:
+            if replacement_shape:
+                after_shape.append(self.shape[dim])
+            else:
+                before_shape.append(self.shape[dim])
+        else:
+            replacement_shape = list(index.shape)
+    return self.new_empty(before_shape + replacement_shape + after_shape)
