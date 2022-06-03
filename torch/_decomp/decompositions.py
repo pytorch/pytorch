@@ -1231,11 +1231,6 @@ def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
     return torch.permute(self, perm)
 
 
-@register_decomposition(aten.t.default)
-def t(self: Tensor) -> Tensor:
-    return self.transpose(0, 0 if self.dim() < 2 else 1)
-
-
 def check_stack_inputs(tensors: List[Tensor]):
     entry_shape = tensors[0].shape
     for i in range(1, len(tensors)):

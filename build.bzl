@@ -101,11 +101,20 @@ GENERATED_H_CORE = [
     "core/TensorBody.h",
     "MethodOperators.h",
     "core/aten_interned_strings.h",
+    "core/enum_tag.h",
 ]
 
 GENERATED_H_CUDA = [
     "CUDAFunctions.h",
     "CUDAFunctions_inl.h",
+]
+
+GENERATED_CPP_CUDA = [
+    "RegisterCUDA.cpp",
+    "RegisterNestedTensorCUDA.cpp",
+    "RegisterSparseCUDA.cpp",
+    "RegisterSparseCsrCUDA.cpp",
+    "RegisterQuantizedCUDA.cpp",
 ]
 
 GENERATED_CPP = [
