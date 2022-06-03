@@ -1096,6 +1096,16 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             with A():
                 x + x
 
+    def test_reenable_ancestor_mode(self):
+        x = LoggingTensorMode()
+        y = LoggingTensorMode()
+        with x:
+            with y:
+                pass
+
+        with y:
+            pass
+
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
         with self.assertRaisesRegex(RuntimeError, "is not supported for tensor subclasses."):
@@ -1285,6 +1295,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 called += 1
                 return super().__torch_dispatch__(func, types, args, kwargs)
 
+        print(torch._C._get_torch_dispatch_mode())
         x = SubTensor(torch.empty(2))
         x.data
         self.assertEqual(called, 1)

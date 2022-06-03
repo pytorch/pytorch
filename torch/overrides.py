@@ -1831,14 +1831,22 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
         raise NotImplementedError()
 
     def __enter__(self):
-        if hasattr(self, "inner"):
-            raise RuntimeError(f"{self} has already been used as a mode, please create and use a fresh version")
         old = _get_torch_function_mode()
-        self.inner = old
+        if hasattr(self, "inner"):
+            if old not in self.ancestors:
+                raise RuntimeError(f"{self} has already been used as a mode and is not valid in the current state, " +
+                                   "because the current mode is not its ancestor. Please use a fresh version")
+        else:
+            self.inner = old
+            if self.inner is None:
+                self.ancestors = {self.inner}
+            else:
+                self.ancestors = self.inner.ancestors.union({self.inner,})
+        self.prev = old
         _set_torch_function_mode(self)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        _set_torch_function_mode(self.inner)
+        _set_torch_function_mode(self.prev)
 
     @classmethod
     def push(cls, *args, **kwargs):
