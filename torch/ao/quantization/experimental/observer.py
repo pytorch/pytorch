@@ -40,6 +40,9 @@ class NonUniformQuantizationObserverBase(ObserverBase):
 
     # introduce signed numbers
     def _calculate_qparams(self, min_val: torch.Tensor, max_val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        # compute alpha
+        self.alpha = max_val
+
         # compute n and store as member variable
         self.n = b // k
 
@@ -71,8 +74,8 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         # tensor size: 2**b x 2**b
         tensor_size = 2**self.b
         levels = torch.zeros(size=(tensor_size, tensor_size))
-        for level0 in range(self.b):
-            for level1 in range(self.b):
+        for level0 in range(tensor_size):
+            for level1 in range(tensor_size):
                 levels[level0][level1] = gamma * (p0[level0] + p1[level1])
 
         # -------------------------------------------------------------------------------------------
