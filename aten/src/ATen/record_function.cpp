@@ -130,6 +130,7 @@ class CacheEntry {
   // The caller is expected to check `GlobalCallbackManager::get().version()'
   // and call CacheEntry::update() if necessary.
   StepCallbacks getActiveCallbacks();
+  c10::optional<StepCallbacks> getActiveCallbacksUnlessEmpty();
 
   // Full rebuild. (E.g. during registration)
   void update(const std::vector<RecordFunctionCallback>& callbacks);
@@ -141,6 +142,8 @@ class CacheEntry {
     // `-1` indicates that a callback is not sampled.
     int tries_left_{-1};
   };
+
+  C10_ALWAYS_INLINE void getActiveCallbacksImpl();
 
   void rebuildActiveCallbacks();
   int sampleTries(double p) const;
@@ -169,6 +172,7 @@ class LocalCallbackManager {
  public:
   const RecordFunctionTLS& getTLS() const;
   StepCallbacks getActiveCallbacks(const RecordScope scope);
+  c10::optional<StepCallbacks> getActiveCallbacksUnlessEmpty(const RecordScope scope);
 
   void setTLS(const RecordFunctionTLS& tls);
   void seed(uint32_t seed);
@@ -178,6 +182,8 @@ class LocalCallbackManager {
   void clearCallbacks();
 
  private:
+  void rebuildActiveCallbacksIfNeeded();
+
   void rebuild_all(const GlobalCallbackManager::snapshot_t& global_snapshot);
 
   void rebuild_callback_scopes(
@@ -271,7 +277,7 @@ void CacheEntry::update(const std::vector<RecordFunctionCallback>& callbacks) {
   rebuildActiveCallbacks();
 }
 
-StepCallbacks CacheEntry::getActiveCallbacks() {
+void CacheEntry::getActiveCallbacksImpl() {
   // We rebuild the active set when `sampling_countdown_` reaches zero, so if it
   // reaches zero at the start of this function something has gone wrong.
   TORCH_INTERNAL_ASSERT(sampling_countdown_ > 0, sampling_countdown_);
@@ -295,7 +301,18 @@ StepCallbacks CacheEntry::getActiveCallbacks() {
       }
     }
   }
+}
 
+StepCallbacks CacheEntry::getActiveCallbacks() {
+  getActiveCallbacksImpl();
+  return active_callbacks_;
+}
+
+c10::optional<StepCallbacks> CacheEntry::getActiveCallbacksUnlessEmpty() {
+  getActiveCallbacksImpl();
+  if (C10_LIKELY(active_callbacks_.empty())) {
+    return c10::nullopt;
+  }
   return active_callbacks_;
 }
 
@@ -365,13 +382,23 @@ const RecordFunctionTLS& LocalCallbackManager::getTLS() const {
   return registered_callbacks_;
 }
 
-StepCallbacks LocalCallbackManager::getActiveCallbacks(
-    const RecordScope scope) {
+void LocalCallbackManager::rebuildActiveCallbacksIfNeeded() {
   const auto global_version = GlobalCallbackManager::get().version();
   if (C10_UNLIKELY(global_version != global_version_)) {
     rebuild_all(GlobalCallbackManager::get().getSnapshot());
   }
+}
+
+StepCallbacks LocalCallbackManager::getActiveCallbacks(
+    const RecordScope scope) {
+  rebuildActiveCallbacksIfNeeded();
   return active_callbacks_[static_cast<size_t>(scope)].getActiveCallbacks();
+}
+
+c10::optional<StepCallbacks> LocalCallbackManager::getActiveCallbacksUnlessEmpty(
+    const RecordScope scope) {
+  rebuildActiveCallbacksIfNeeded();
+  return active_callbacks_[static_cast<size_t>(scope)].getActiveCallbacksUnlessEmpty();
 }
 
 void LocalCallbackManager::setTLS(const RecordFunctionTLS& tls) {
@@ -568,8 +595,24 @@ c10::optional<OperatorName> RecordFunction::operator_name() const {
       fn_);
 }
 
+c10::optional<c10::FunctionSchema> RecordFunction::operator_schema() const {
+  return c10::visit(
+      c10::overloaded(
+          [&](const std::string&) -> c10::optional<c10::FunctionSchema> {
+            return c10::nullopt;
+          },
+          [](const schema_ref_t schema) -> c10::optional<c10::FunctionSchema> {
+            return schema.get();
+          }),
+      fn_);
+}
+
 StepCallbacks getStepCallbacks(RecordScope scope) {
   return LocalCallbackManager::get().getActiveCallbacks(scope);
+}
+
+c10::optional<StepCallbacks> getStepCallbacksUnlessEmpty(RecordScope scope) {
+  return LocalCallbackManager::get().getActiveCallbacksUnlessEmpty(scope);
 }
 
 const RecordFunctionTLS& get_record_function_tls_() {
@@ -672,6 +715,9 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
   fn_ = name;
   sequence_nr_ = sequence_nr;
 
+#ifndef NDEBUG
+    inputs_valid_ = true;
+#endif
   runStartCallbacks();
   invalidateInputs();
 }
@@ -680,6 +726,9 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   fn_ = std::move(name);
   sequence_nr_ = sequence_nr;
 
+#ifndef NDEBUG
+    inputs_valid_ = true;
+#endif
   runStartCallbacks();
   invalidateInputs();
 }
@@ -690,6 +739,9 @@ void RecordFunction::before(
   sequence_nr_ = sequence_nr;
   fn_ = schema;
 
+#ifndef NDEBUG
+    inputs_valid_ = true;
+#endif
   runStartCallbacks();
   invalidateInputs();
 }

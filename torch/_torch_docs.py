@@ -768,7 +768,7 @@ Example::
 
 add_docstr(torch.as_strided,
            r"""
-as_strided(input, size, stride, storage_offset=0) -> Tensor
+as_strided(input, size, stride, storage_offset=None) -> Tensor
 
 Create a view of an existing `torch.Tensor` :attr:`input` with specified
 :attr:`size`, :attr:`stride` and :attr:`storage_offset`.
@@ -786,7 +786,8 @@ Args:
     {input}
     size (tuple or ints): the shape of the output tensor
     stride (tuple or ints): the stride of the output tensor
-    storage_offset (int, optional): the offset in the underlying storage of the output tensor
+    storage_offset (int, optional): the offset in the underlying storage of the output tensor.
+    If ``None``, the storage_offset of the output tensor will match the input tensor.
 
 Example::
 
@@ -1045,15 +1046,13 @@ returned tensor will, by default, infer its datatype from the scalar values, be 
 CPU device, and not share its memory.
 
 .. seealso::
+
     :func:`torch.tensor` creates a tensor that always copies the data from the input object.
-
     :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
-
     :func:`torch.frombuffer` creates a tensor that always shares memory from objects that
-           implement the buffer protocol.
-
+    implement the buffer protocol.
     :func:`torch.from_dlpack` creates a tensor that always shares memory from
-           DLPack capsules.
+    DLPack capsules.
 
 Args:
     obj (object): a tensor, NumPy array, DLPack Capsule, object that implements Python's
@@ -2067,9 +2066,6 @@ real(input) -> Tensor
 Returns a new tensor containing real values of the :attr:`self` tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
 
-.. warning::
-    :func:`real` is only supported for tensors with complex dtypes.
-
 Args:
     {input}
 
@@ -2705,6 +2701,14 @@ Example::
             [ 0.0059,  0.2600,  0.4475, -1.3948],
             [ 0.3667,  0.9567,  2.5757, -0.1751],
             [ 0.2046,  0.0742,  0.2998, -0.1054]])
+    >>> a = torch.tensor([1.])
+    >>> b = torch.tensor([-0.])
+    >>> torch.copysign(a, b)
+    tensor([-1.])
+
+.. note::
+    copysign handles signed zeros. If the other argument has a negative zero (-0),
+    the corresponding output value will be negative.
 
 """.format(**common_args))
 
@@ -3291,6 +3295,47 @@ Examples::
             [0., 0., 0.]])
 """.format(**common_args))
 
+add_docstr(torch.as_strided_scatter,
+           r"""
+as_strided_scatter(input, src, size, stride, storage_offset=0) -> Tensor
+
+Embeds the values of the :attr:`src` tensor into :attr:`input` along
+the elements corresponding to the result of calling
+input.as_strided(size, stride, storage_offset).
+
+This function returns a tensor with fresh storage; it does not
+return a view.
+
+Args:
+    {input}
+    size (tuple or ints): the shape of the output tensor
+    stride (tuple or ints): the stride of the output tensor
+    storage_offset (int, optional): the offset in the underlying storage of the output tensor
+
+.. note::
+
+    :attr:`src` must be of the proper size in order to be embedded
+    into :attr:`input`. Specifically, it should have the same shape as
+    `torch.as_strided(input, size, stride, storage_offset)`
+
+Example::
+
+    >>> a = torch.arange(4).reshape(2, 2) + 1
+    >>> a
+    tensor([[1, 2],
+            [3, 4]])
+    >>> b = torch.zeros(3, 3)
+    >>> b
+    tensor([[0., 0., 0.],
+            [0., 0., 0.],
+            [0., 0., 0.]])
+    >>> torch.as_strided_scatter(b, a, (2, 2), (1, 2))
+    tensor([[1., 3., 2.],
+            [4., 0., 0.],
+            [0., 0., 0.]])
+
+""".format(**common_args))
+
 add_docstr(torch.diff, r"""
 diff(input, n=1, dim=-1, prepend=None, append=None) -> Tensor
 
@@ -3727,19 +3772,17 @@ Example::
 add_docstr(torch.floor_divide, r"""
 floor_divide(input, other, *, out=None) -> Tensor
 
-.. warning::
+.. note::
 
-    :func:`torch.floor_divide` is deprecated and will be removed in a future PyTorch
-    release. Its name is a misnomer because it actually rounds the quotient
-    towards zero instead of taking its floor. To keep the current behavior use
-    :func:`torch.div` with ``rounding_mode='trunc'``. To actually perform floor
-    division, use :func:`torch.div` with ``rounding_mode='floor'``.
+    Before PyTorch 1.13 :func:`torch.floor_divide` incorrectly performed
+    truncation division. To restore the previous behavior use
+    :func:`torch.div` with ``rounding_mode='trunc'``.
 
-Computes :attr:`input` divided by :attr:`other`, elementwise, and rounds each
-quotient towards zero. Equivalently, it truncates the quotient(s):
+Computes :attr:`input` divided by :attr:`other`, elementwise, and floors
+the result.
 
 .. math::
-    \text{{out}}_i = \text{trunc} \left( \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right)
+    \text{{out}}_i = \text{floor} \left( \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right)
 
 """ + r"""
 
@@ -5245,11 +5288,11 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.randn(5)
+    >>> a = torch.rand(5) * 5
     >>> a
-    tensor([-0.7168, -0.5471, -0.8933, -1.4428, -0.1190])
+    tensor([4.7767, 4.3234, 1.2156, 0.2411, 4.5739])
     >>> torch.log(a)
-    tensor([ nan,  nan,  nan,  nan,  nan])
+    tensor([ 1.5637,  1.4640,  0.1952, -1.4226,  1.5204])
 """.format(**common_args))
 
 add_docstr(torch.log10,
@@ -8789,6 +8832,13 @@ Example::
     >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
     >>> torch.signbit(a)
     tensor([ False, True,  False,  False])
+    >>> a = torch.tensor([-0.0, 0.0])
+    >>> torch.signbit(a)
+    tensor([ True,  False])
+
+.. note::
+    signbit handles signed zeros, so negative zero (-0) returns True.
+
 """.format(**common_args))
 
 add_docstr(torch.sgn,
