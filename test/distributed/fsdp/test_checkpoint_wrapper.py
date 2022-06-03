@@ -24,6 +24,7 @@ class CheckpointWrapperTest(TestCase):
         super().setUp()
 
     def test_load_activation_checkpointed_module(self):
+        raise ValueError("intentional")
         lin = nn.Linear(10, 10, bias=False)
         lin = checkpoint_wrapper(lin)
         state_dict = deepcopy(lin.state_dict())
