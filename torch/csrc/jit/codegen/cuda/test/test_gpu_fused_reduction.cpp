@@ -114,7 +114,7 @@ void validateNoParallelBroadcastExist(kir::Kernel* kernel) {
 
 } // namespace
 
-TEST_F(NVFuserTest, FusionReduceAndBroadcast1_CUDA) {
+TEST_F(NVFuserTest, FusionGridAllreduce1_CUDA) {
   const int nx = 999;
   const int tidx = 128;
 
@@ -157,7 +157,7 @@ TEST_F(NVFuserTest, FusionReduceAndBroadcast1_CUDA) {
   testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionReduceAndBroadcast2_CUDA) {
+TEST_F(NVFuserTest, FusionGridAllreduce2_CUDA) {
   const int nx = 99;
   const int tidx = 32;
 
@@ -208,7 +208,7 @@ TEST_F(NVFuserTest, FusionReduceAndBroadcast2_CUDA) {
 
 // Grid reduction with serial non-reduction axis. The global work
 // buffer is double buffered.
-TEST_F(NVFuserTest, FusionReduceAndBroadcast3_CUDA) {
+TEST_F(NVFuserTest, FusionGridAllreduce3_CUDA) {
   const int nx = 100;
   const int ny = 5000;
   const int tidx = 128;
@@ -255,7 +255,7 @@ TEST_F(NVFuserTest, FusionReduceAndBroadcast3_CUDA) {
 }
 
 // Indirect reduction and broadcast
-TEST_F(NVFuserTest, FusionReduceAndBroadcast4_CUDA) {
+TEST_F(NVFuserTest, FusionGridAllreduce4_CUDA) {
   const int nx = 999;
   const int tidx = 128;
 
@@ -300,7 +300,7 @@ TEST_F(NVFuserTest, FusionReduceAndBroadcast4_CUDA) {
 }
 
 // Unused block dimension in the kernel
-TEST_F(NVFuserTest, FusionReduceAndBroadcast5_CUDA) {
+TEST_F(NVFuserTest, FusionGridAllreduce5_CUDA) {
   const int nx = 999;
   const int tidx = 128;
   const int iter = 2;
@@ -361,7 +361,60 @@ TEST_F(NVFuserTest, FusionReduceAndBroadcast5_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t5}, {ref, t5}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionWelfordAndBroadcast1_CUDA) {
+TEST_F(NVFuserTest, FusionGridAllreduce6_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> shape({99, 200});
+
+  const int vec = 4;
+  const int tidx = 32;
+  const int tidy = 8;
+  const int bdimx = ceilDiv(shape[1], vec * tidx);
+  const int bdimy = ceilDiv(shape[0], tidy);
+
+  if (bdimx * bdimy > deviceSMCount()) {
+    GTEST_SKIP() << "Not enough SMs to run this test";
+  }
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = sum(tv1, {0});
+  auto tv3 = broadcast(tv2, {true, false});
+  auto tv4 = add(tv0, tv3);
+  fusion.addOutput(tv4);
+
+  tv1->split(1, vec);
+  tv1->split(1, tidx);
+  tv1->split(0, tidy);
+  TransformPropagator::from(tv1);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDy);
+  tv1->axis(1)->parallelize(ParallelType::TIDy);
+  tv1->axis(2)->parallelize(ParallelType::BIDx);
+  tv1->axis(3)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(tv1, ir_utils::allTvs(&fusion));
+
+  tv1->axis(4)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto t0_double = t0.to(at::kDouble);
+  auto ref = t0_double + t0_double.sum({0}).unsqueeze(0);
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionGridAllreduceWelford1_CUDA) {
   const int nx = 999;
   const int tidx = 128;
 
@@ -409,7 +462,7 @@ TEST_F(NVFuserTest, FusionWelfordAndBroadcast1_CUDA) {
 
 // Grid welford reduction with serial non-reduction axis. The global
 // work buffer is double buffered.
-TEST_F(NVFuserTest, FusionWelfordAndBroadcast2_CUDA) {
+TEST_F(NVFuserTest, FusionGridAllreduceWelford2_CUDA) {
   const int nx = 100;
   const int ny = 5000;
   const int tidx = 128;

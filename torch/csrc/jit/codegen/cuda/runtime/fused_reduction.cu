@@ -264,7 +264,7 @@ class ParallelReduce {
           grid_red_size;
       global_work_buffer += global_buffer_size;
     }
-    flip = ~flip;
+    flip = !flip;
 
     // How many grid reductions have to be performed, in the grid dimension
     const auto num_block_iters = index_utils::
@@ -639,7 +639,7 @@ class ParallelReduce {
       global_work_buffer1 += global_buffer_size;
       global_work_buffer2 += global_buffer_size;
     }
-    flip = ~flip;
+    flip = !flip;
 
     // Per-block partial reduction to global work buffer
     {
