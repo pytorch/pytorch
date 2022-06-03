@@ -120,13 +120,16 @@ def run_torchbench(pytorch_path: str, torchbench_path: str, output_dir: str) -> 
                "--output", os.path.join(output_dir, "result.txt")]
     subprocess.check_call(command, cwd=torchbench_path, env=env)
 
-def run_userbenchmarks(pytorch_path: str, torchbench_path: str, output_dir: str) -> None:
+def run_userbenchmarks(pytorch_path: str, torchbench_path: str, base_sha: str, head_sha: str,
+                       userbenchmark: str, output_dir: str) -> None:
     # Copy system environment so that we will not override
     env = dict(os.environ)
     command = ["python", "./.github/scripts/abtest.py",
                "--pytorch-src", pytorch_path,
-               "--config", os.path.join(output_dir, TORCHBENCH_USERBENCHMARK_CONFIG_NAME),
-               "--output", os.path.join(output_dir, "result-ub.txt")]
+               "--base", base_sha,
+               "--head", head_sha,
+               "--userbenchmark", userbenchmark,
+               "--output-dir", output_dir]
     subprocess.check_call(command, cwd=torchbench_path, env=env)
 
 if __name__ == "__main__":
@@ -164,9 +167,10 @@ if __name__ == "__main__":
             deploy_torchbench_config(output_dir, torchbench_config)
             run_torchbench(pytorch_path=args.pytorch_path, torchbench_path=args.torchbench_path, output_dir=output_dir)
         if userbenchmarks:
-            torchbench_config = gen_abtest_config(args.pr_base_sha, args.pr_head_sha, userbenchmarks)
-            deploy_torchbench_config(output_dir, torchbench_config, config_name=TORCHBENCH_USERBENCHMARK_CONFIG_NAME)
-            run_userbenchmarks(pytorch_path=args.pytorch_path, torchbench_path=args.torchbench_path, output_dir=output_dir)
+            assert len(userbenchmarks) == 1, \
+                f"We don't support running multiple userbenchmarks in single workflow yet. If you need, please submit a feature request."
+            run_userbenchmarks(pytorch_path=args.pytorch_path, torchbench_path=args.torchbench_path,
+                               base_sha=args.pr_base_sha, head_sha=args.pr_head_sha, output_dir=output_dir)
         if not models and not userbenchmarks:
             print("Can't parse valid models or userbenchmarks from the pr body. Quit.")
             exit(-1)
