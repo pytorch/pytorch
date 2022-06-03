@@ -207,10 +207,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       const auto nDims = std::count_if(
           maybe_rfactor_domain.begin(),
           maybe_rfactor_domain.end(),
-          [](const IterDomain* id) {
-            return !id->isReduction() &&
-                id->getIterType() != IterType::BroadcastWithoutStride;
-          });
+          [](const IterDomain* id) { return !id->isReduction(); });
       code_ << ", Tensor<" << tv->dtype() << ", " << nDims << "> "
             << varName(tv);
     }

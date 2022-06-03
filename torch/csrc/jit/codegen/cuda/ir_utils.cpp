@@ -256,6 +256,26 @@ struct SubstituteInExpr : public OptInDispatch {
         transpose_expr->container(), out, in, transpose_expr->new2old());
   }
 
+  void handle(ExpandOp* expand_expr) final {
+    auto out = reference_->sameAs(expand_expr->out())
+        ? substitute_->as<TensorView>()
+        : expand_expr->out();
+    auto in = reference_->sameAs(expand_expr->in())
+        ? substitute_->as<TensorView>()
+        : expand_expr->in();
+
+    auto expanded_extents = expand_expr->expanded_extents();
+    if (substitute_->isA<Int>()) {
+      for (auto i : c10::irange(expanded_extents.size())) {
+        if (!expanded_extents[i]->sameAs(substitute_)) {
+          expanded_extents[i] = substitute_;
+        }
+      }
+    }
+    expr_ = IrBuilder::create<ExpandOp>(
+        expand_expr->container(), out, in, expanded_extents);
+  }
+
   void handle(ShiftOp* shift_expr) final {
     auto out =
         reference_->sameAs(shift_expr->out()) ? substitute_ : shift_expr->out();

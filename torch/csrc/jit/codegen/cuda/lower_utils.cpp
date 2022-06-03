@@ -98,6 +98,7 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::MmaOp ||
        expr->getExprType().value() == ExprType::BroadcastOp ||
        expr->getExprType().value() == ExprType::TransposeOp ||
+       expr->getExprType().value() == ExprType::ExpandOp ||
        expr->getExprType().value() == ExprType::ShiftOp ||
        expr->getExprType().value() == ExprType::GatherOp ||
        expr->getExprType().value() == ExprType::ViewAsScalar ||
@@ -263,8 +264,8 @@ c10::optional<IterDomain*> getMaybeWarpReductionDim(
     return c10::optional<IterDomain*>(reduction_on_xdim);
   }
 
-  if (reduction_on_xdim->extent()->isConst()) {
-    auto extent_value = reduction_on_xdim->extent()->getInt().value();
+  if (reduction_on_xdim->extent()->isConstInt()) {
+    auto extent_value = reduction_on_xdim->extent()->evaluateInt();
     if (extent_value % at::cuda::warp_size() == 0) {
       return c10::optional<IterDomain*>(reduction_on_xdim);
     }

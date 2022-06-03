@@ -325,6 +325,32 @@ void OptOutMutator::mutate(TransposeOp* top) {
   IrBuilder::create<TransposeOp>(container, out, in, new2old);
 }
 
+void OptOutMutator::mutate(ExpandOp* eop) {
+  bool is_same = true;
+
+  TensorView* out = maybeMutated(eop->out())->as<TensorView>();
+  is_same = is_same && out->sameAs(eop->out());
+  TensorView* in = maybeMutated(eop->in())->as<TensorView>();
+  is_same = is_same && in->sameAs(eop->in());
+
+  std::vector<Val*> expanded_extents;
+  expanded_extents.reserve(eop->expanded_extents().size());
+  for (auto expanded_extent : eop->expanded_extents()) {
+    expanded_extents.push_back(maybeMutated(expanded_extent));
+    if (!expanded_extents.back()->sameAs(expanded_extent)) {
+      is_same = false;
+    }
+  }
+
+  if (is_same) {
+    return;
+  }
+
+  auto container = eop->container();
+  container->removeExpr(eop);
+  IrBuilder::create<ExpandOp>(container, out, in, expanded_extents);
+}
+
 void OptOutMutator::mutate(ShiftOp* sop) {
   Val* out = maybeMutated(sop->out())->asVal();
   Val* in = maybeMutated(sop->in())->asVal();

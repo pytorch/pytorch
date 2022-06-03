@@ -415,6 +415,34 @@ class TORCH_CUDA_CU_API TransposeOp : public Expr {
   const std::vector<int> new2old_;
 };
 
+class TORCH_CUDA_CU_API ExpandOp : public Expr {
+ public:
+  ExpandOp(
+      IrBuilderPasskey,
+      TensorView* out,
+      TensorView* in,
+      std::vector<Val*> _expanded_extents);
+
+  ExpandOp(const ExpandOp* src, IrCloner* ir_cloner);
+
+  TensorView* out() const {
+    return out_;
+  }
+
+  TensorView* in() const {
+    return in_;
+  }
+
+  const std::vector<Val*>& expanded_extents() const {
+    return expanded_extents_;
+  }
+
+ private:
+  TensorView* const out_ = nullptr;
+  TensorView* const in_ = nullptr;
+  std::vector<Val*> expanded_extents_;
+};
+
 class TORCH_CUDA_CU_API TernaryOp : public Expr {
  public:
   TernaryOp(
@@ -661,6 +689,7 @@ class TORCH_CUDA_CU_API IterDomainBuilder {
 
   IterDomainBuilder& start(Val* _start);
   IterDomainBuilder& extent(Val* _extent);
+  IterDomainBuilder& expanded_extent(Val* _expanded_extent);
   IterDomainBuilder& stop_offset(Val* _stop_offset);
   IterDomainBuilder& parallel_type(ParallelType _parallel_type);
   IterDomainBuilder& iter_type(IterType _iter_type);
@@ -676,6 +705,7 @@ class TORCH_CUDA_CU_API IterDomainBuilder {
 
   Val* start_ = nullptr;
   Val* extent_ = nullptr;
+  Val* expanded_extent_ = nullptr;
   Val* stop_offset_ = nullptr;
   ParallelType parallel_type_ = ParallelType::Serial;
   IterType iter_type_ = IterType::Iteration;
@@ -705,6 +735,7 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
       IrBuilderPasskey,
       Val* start,
       Val* extent,
+      Val* expanded_extent,
       Val* stop_offset,
       ParallelType parallel_type,
       IterType iter_type,
@@ -758,8 +789,7 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   }
 
   bool isBroadcast() const {
-    return getIterType() == IterType::BroadcastWithStride ||
-        getIterType() == IterType::BroadcastWithoutStride;
+    return getIterType() == IterType::Broadcast;
   }
 
   bool isGather() const {
@@ -793,25 +823,6 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     return (isBlockDim() || isThreadDim());
   }
 
-  //! Convert to strided broadcast, used for supporting broadcast on output
-  void toStridedBroadcast() {
-    TORCH_INTERNAL_ASSERT(
-        isBroadcast(),
-        "toStridedBroadCast: converting an non-broadcast iterdomain",
-        this);
-    iter_type_ = IterType::BroadcastWithStride;
-  }
-
-  // Convert a serial iterdomain to broadcast, used for implicit broadcast
-  void convertToBroadcast() {
-    TORCH_INTERNAL_ASSERT(
-        !isBroadcast() && !isReduction(),
-        "convertToBroadcast: converting an non-serial iterdomain",
-        this);
-
-    iter_type_ = IterType::BroadcastWithStride;
-  }
-
   void parallelize(ParallelType t);
 
   ParallelType getParallelType() const {
@@ -833,6 +844,22 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   Val* extent() const {
     TORCH_INTERNAL_ASSERT(extent_ != nullptr);
     return extent_;
+  }
+
+  bool hasExpandedExtent() const {
+    TORCH_INTERNAL_ASSERT(
+        expanded_extent_ == nullptr || isBroadcast(),
+        "Expanded extent is only relevant for strided broadcast dimensions",
+        " yet found an expanded extent without a strided broadcast iter type.");
+    return expanded_extent_ != nullptr;
+  }
+
+  // Returns the expanded extent of a strided broadcast entry.
+  Val* expandedExtent() const {
+    TORCH_INTERNAL_ASSERT(
+        isBroadcast(),
+        "Expanded extent is only relevant for strided broadcast dimensions.");
+    return expanded_extent_;
   }
 
   //! Dimension padding interface:
@@ -959,6 +986,20 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   //! Valid range is defined as [start:-stop_offset]
   Val* const start_ = nullptr;
   Val* const extent_ = nullptr;
+
+  // Broadcast dimensions are assumed to be size 1 for the sake of code
+  // generation. If a user though calls `expand` on a tensor that dimension is
+  // still considered a broadcast dimension. However if we ever output that
+  // dimension it should be a size dictated by the `expand` operation, and have
+  // a stride of zero. Since this extent is important to track, but not
+  // necessarily generate code for (still want loops on broadcast to be of size
+  // 0), we simply store it separately from extent_. Having an expanded_extent_
+  // is only allowed with broadcasted dimsneions. Only in this instance does it
+  // make sense to have an expanded_extent_, because it's used when users are
+  // expecting return tensors to have a physical domain. If a user simply
+  // "broadcasts" an operation
+  Val* const expanded_extent_ = nullptr;
+
   //! Distance of stop from the end
   Val* const stop_offset_ = nullptr;
   ParallelType parallel_type_ = ParallelType::Serial;

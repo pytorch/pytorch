@@ -23360,6 +23360,96 @@ TEST_F(NVFuserTest, FusionRepro1713_CUDA) {
       __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionExpand_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto w = 2, x = 3, y = 4, z = 5;
+
+  // Test
+  // a simple expand
+  // Expand that's propagated
+  // expand_as
+  // symbolic expand
+
+  // x
+  auto tv0 = makeSymbolicTensor(1);
+  fusion->addInput(tv0);
+
+  auto tv1 = broadcast(tv0, {false, true});
+  auto tv2 = expand(tv1, {tv0->axis(0)->extent(), IrBuilder::create<Int>(y)});
+
+  // x
+  auto tv3 = makeSymbolicTensor(1);
+  fusion->addInput(tv3);
+  auto tv4 = broadcast(tv3, {false, true});
+  auto tv5 = add(tv4, tv2);
+  // [x, e_y]
+
+  // [x, y, z]
+  auto tv6 = makeSymbolicTensor(3);
+  fusion->addInput(tv6);
+
+  // Disjoint set op will cause a segmentation for just this op.
+  auto tmp_7 = set(tv6);
+  fusion->addOutput(tmp_7);
+
+  auto tv7 = broadcast(tv5, {false, false, true});
+
+  auto tv8 = expand_as(tv7, tv6);
+  // [x, e_y, e_z]
+
+  auto w_symbolic = IrBuilder::create<Int>();
+  fusion->addInput(w_symbolic);
+
+  auto tv9 = broadcast(tv8, {true, false, false, false});
+  //[1, x, e_y, e_z]
+
+  auto tv10 = expand(
+      tv9,
+      {w_symbolic,
+       tv9->axis(1)->extent(),
+       tv9->axis(2)->expandedExtent(),
+       tv9->axis(3)->expandedExtent()});
+
+  fusion->addOutput(tv10);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({x}, options);
+  at::Tensor t3 = at::randn({x}, options);
+  at::Tensor t6 = at::randn({x, y, z}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0, t3, t6, w});
+  auto cg_out = cg_outputs[1];
+
+  TORCH_INTERNAL_ASSERT(cg_out.size(0) == w);
+  TORCH_INTERNAL_ASSERT(cg_out.size(1) == x);
+  TORCH_INTERNAL_ASSERT(cg_out.size(2) == y);
+  TORCH_INTERNAL_ASSERT(cg_out.size(3) == z);
+  TORCH_INTERNAL_ASSERT(cg_out.stride(0) == 0);
+  TORCH_INTERNAL_ASSERT(cg_out.stride(1) == 1);
+  TORCH_INTERNAL_ASSERT(cg_out.stride(2) == 0);
+  TORCH_INTERNAL_ASSERT(cg_out.stride(3) == 0);
+
+  auto t10 = t0.unsqueeze(-1)
+                 .expand({x, y})
+                 .add(t3.unsqueeze(-1))
+                 .unsqueeze(-1)
+                 .expand_as(t6)
+                 .unsqueeze(0)
+                 .expand({w, x, y, z});
+
+  testValidate(
+      executor_cache.fusion(),
+      cg_outputs,
+      {t0, t3, t6, w},
+      {t6, t10},
+      __LINE__,
+      __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionReproNoncontigBroadcast_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());

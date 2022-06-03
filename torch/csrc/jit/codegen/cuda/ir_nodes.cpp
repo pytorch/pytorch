@@ -725,6 +725,35 @@ TransposeOp::TransposeOp(const TransposeOp* src, IrCloner* ir_cloner)
       in_(ir_cloner->clone(src->in_)),
       new2old_(src->new2old_) {}
 
+ExpandOp::ExpandOp(
+    IrBuilderPasskey passkey,
+    TensorView* out,
+    TensorView* in,
+    std::vector<Val*> _expanded_extents)
+    : Expr(passkey, ExprType::ExpandOp),
+      out_(out),
+      in_(in),
+      expanded_extents_(std::move(_expanded_extents)) {
+  addOutput(out);
+  addInput(in);
+  for (auto expanded_extent : expanded_extents_) {
+    TORCH_INTERNAL_ASSERT(expanded_extent != nullptr);
+    TORCH_INTERNAL_ASSERT(
+        expanded_extent->isA<Int>(), "Expanded extents must be of Int type.");
+    addInput(expanded_extent);
+  }
+}
+
+ExpandOp::ExpandOp(const ExpandOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)) {
+  expanded_extents_.reserve(src->expanded_extents_.size());
+  for (const auto expanded_extent : src->expanded_extents_) {
+    expanded_extents_.push_back(ir_cloner->clone(expanded_extent));
+  }
+}
+
 ShiftOp::ShiftOp(
     IrBuilderPasskey passkey,
     Val* out,
@@ -920,6 +949,8 @@ IterDomainBuilder::IterDomainBuilder(Val* _start, Val* _extent)
 IterDomainBuilder::IterDomainBuilder(const IterDomain* id)
     : start_(id->start()),
       extent_(id->extent()),
+      expanded_extent_(
+          id->hasExpandedExtent() ? id->expandedExtent() : nullptr),
       stop_offset_(id->stopOffset()),
       parallel_type_(id->getParallelType()),
       iter_type_(id->getIterType()),
@@ -948,6 +979,11 @@ IterDomainBuilder& IterDomainBuilder::start(Val* _start) {
 
 IterDomainBuilder& IterDomainBuilder::extent(Val* _extent) {
   extent_ = _extent;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::expanded_extent(Val* _expanded_extent) {
+  expanded_extent_ = _expanded_extent;
   return *this;
 }
 
@@ -1001,6 +1037,7 @@ IterDomain::IterDomain(
     IrBuilderPasskey passkey,
     Val* start,
     Val* extent,
+    Val* expanded_extent,
     Val* stop_offset,
     ParallelType parallel_type,
     IterType iter_type,
@@ -1011,6 +1048,7 @@ IterDomain::IterDomain(
     : Val(passkey, ValType::IterDomain, DataType::Int),
       start_(start),
       extent_(extent),
+      expanded_extent_(expanded_extent),
       stop_offset_(
           stop_offset == nullptr ? passkey.ir_container_->zeroVal()
                                  : stop_offset),
@@ -1043,6 +1081,7 @@ IterDomain::IterDomain(IrBuilderPasskey passkey, const IterDomainBuilder& args)
           passkey,
           args.start_,
           args.extent_,
+          args.expanded_extent_,
           args.stop_offset_,
           args.parallel_type_,
           args.iter_type_,
@@ -1055,6 +1094,9 @@ IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner),
       start_(ir_cloner->clone(src->start_)),
       extent_(ir_cloner->clone(src->extent_)),
+      expanded_extent_(
+          src->hasExpandedExtent() ? ir_cloner->clone(src->expandedExtent())
+                                   : nullptr),
       stop_offset_(ir_cloner->clone(src->stop_offset_)),
       parallel_type_(src->parallel_type_),
       iter_type_(src->iter_type_),
@@ -1128,12 +1170,7 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
   IterType itype = outer->getIterType();
 
   if (outer->isBroadcast() && inner->isBroadcast()) {
-    if (outer->getIterType() == IterType::BroadcastWithStride ||
-        inner->getIterType() == IterType::BroadcastWithStride) {
-      itype = IterType::BroadcastWithStride;
-    } else {
-      itype = IterType::BroadcastWithoutStride;
-    }
+    itype = IterType::Broadcast;
   } else if (outer->isBroadcast() || inner->isBroadcast()) {
     itype = IterType::Iteration;
   }

@@ -181,19 +181,11 @@ void replaceSymbolicSizes(Fusion* fusion) {
     size_t dim = 0;
     for (auto id : root_td) {
       Val* orig_size = id->extent();
-
       // Output sizes could have reduction axes, which isn't what gets output.
       // NOLINTNEXTLINE(bugprone-branch-clone)
-      if (id->isReduction() ||
-          (id->getIterType() == IterType::BroadcastWithoutStride)) {
+      if (id->isReduction()) {
         continue;
-      } else if (
-          // TODO: Is `id->isRFactorProduct()` needed here? Seems wrong, have to
-          // check the tests.
-          id->isRFactorProduct() ||
-          // NOLINTNEXTLINE(bugprone-branch-clone)
-          (id->getIterType() == IterType::BroadcastWithStride) ||
-          orig_size->isConstScalar()) {
+      } else if (orig_size->isConstScalar()) {
         dim++;
         continue;
       }

@@ -35,18 +35,7 @@ TensorView::TensorView(
     MemoryType mtype)
     : Val(passkey, ValType::TensorView, dtype),
       domain_(domain),
-      memory_type_(mtype) {
-  // Don't do this after transforms
-  if (domain_->domain() == domain_->getRootDomain()) {
-    // Mark the size-1 axes as broadcast to support implicit broadcast semantic
-    for (auto* id : domain_->domain()) {
-      if (!id->isBroadcast() && !id->isReduction() && !id->isGather() &&
-          id->extent()->isOneInt()) {
-        id->convertToBroadcast();
-      }
-    }
-  }
-}
+      memory_type_(mtype) {}
 
 TensorView::TensorView(
     IrBuilderPasskey passkey,
@@ -69,7 +58,7 @@ TensorView::TensorView(
       sizes.push_back(
           IterDomainBuilder(
               passkey.ir_container_->zeroVal(), passkey.ir_container_->oneVal())
-              .iter_type(IterType::BroadcastWithStride)
+              .iter_type(IterType::Broadcast)
               .build());
     } else {
       sizes.push_back(
@@ -1118,7 +1107,7 @@ TensorView* TensorViewBuilder::build() const {
         domain[i] = IterDomainBuilder(
                         FusionGuard::getCurFusion()->zeroVal(),
                         FusionGuard::getCurFusion()->oneVal())
-                        .iter_type(IterType::BroadcastWithStride)
+                        .iter_type(IterType::Broadcast)
                         .build();
       } else {
         domain[i] = IterDomainBuilder(
