@@ -12,19 +12,21 @@ class TestVerification(unittest.TestCase):
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)
 
-    def test_check_export_model_diff_return_diff_when_constant_mismatch(self):
+    def test_check_export_model_diff_returns_diff_when_constant_mismatch(self):
         class UnexportableModel(torch.nn.Module):
             def forward(self, x, y):
                 # tensor.data() will be exported as a constant,
                 # leading to wrong model output under different inputs.
                 return x + y.data
 
-        test_inputs = [
+        test_input_groups = [
             ((torch.randn(2, 3), torch.randn(2, 3)), {}),
             ((torch.randn(2, 3), torch.randn(2, 3)), {}),
         ]
 
-        results = verification.check_export_model_diff(UnexportableModel(), test_inputs)
+        results = verification.check_export_model_diff(
+            UnexportableModel(), test_input_groups
+        )
         self.assertRegex(
             results,
             r"Graph diff:(.|\n)*"
@@ -34,7 +36,7 @@ class TestVerification(unittest.TestCase):
             r"Latter source location:",
         )
 
-    def test_check_export_model_diff_return_diff_when_dynamic_controlflow_mismatch(
+    def test_check_export_model_diff_returns_diff_when_dynamic_controlflow_mismatch(
         self,
     ):
         class UnexportableModel(torch.nn.Module):
@@ -43,7 +45,7 @@ class TestVerification(unittest.TestCase):
                     y = x[i] + y
                 return y
 
-        test_inputs = [
+        test_input_groups = [
             ((torch.randn(2, 3), torch.randn(2, 3)), {}),
             ((torch.randn(4, 3), torch.randn(2, 3)), {}),
         ]
@@ -52,7 +54,7 @@ class TestVerification(unittest.TestCase):
             input_names=["x", "y"], dynamic_axes={"x": [0]}
         )
         results = verification.check_export_model_diff(
-            UnexportableModel(), test_inputs, export_options
+            UnexportableModel(), test_input_groups, export_options
         )
         self.assertRegex(
             results,
@@ -62,39 +64,17 @@ class TestVerification(unittest.TestCase):
             r"Latter source location:(.|\n)*",
         )
 
-    def test_check_onnx_model_diff_return_diff_when_constant_mismatch(self):
-        class UnexportableModel(torch.nn.Module):
-            def forward(self, x, y):
-                # tensor.data() will be exported as a constant,
-                # leading to wrong model output under different inputs.
-                return x + y.data
-
-        test_inputs = [
-            ((torch.randn(2, 3), torch.randn(2, 3)), {}),
-            ((torch.randn(2, 3), torch.randn(2, 3)), {}),
-        ]
-
-        results = verification._check_onnx_model_diff(UnexportableModel(), test_inputs)
-        self.assertRegex(
-            results,
-            r"Graph diff:(.|\n)*"
-            r"First diverging operator:(.|\n)*"
-            r"onnx::Constant(.|\n)*"
-            r"Former source location:(.|\n)*"
-            r"Latter source location:",
-        )
-
-    def test_check_export_model_diff_return_empty_when_correct_export(self):
+    def test_check_export_model_diff_returns_empty_when_correct_export(self):
         class SupportedModel(torch.nn.Module):
             def forward(self, x, y):
                 return x + y
 
-        test_input_sets = [
+        test_input_groups = [
             ((torch.randn(2, 3), torch.randn(2, 3)), {}),
             ((torch.randn(2, 3), torch.randn(2, 3)), {}),
         ]
 
         results = verification.check_export_model_diff(
-            SupportedModel(), test_input_sets
+            SupportedModel(), test_input_groups
         )
         self.assertEqual(results, "")

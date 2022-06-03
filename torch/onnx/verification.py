@@ -11,14 +11,14 @@ import itertools
 import os
 import tempfile
 import warnings
-from typing import Any, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
 import torch
 import torch._C._onnx as _C_onnx
 from torch import _C
-from torch.onnx import _constants, _experimental, _globals, symbolic_helper, utils
+from torch.onnx import _constants, _experimental, _globals, utils
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
@@ -315,44 +315,92 @@ class _GraphDiff:
         return "\n".join(graph_diff_report)
 
 
-def _check_jit_model_diff(
+def _check_graph_diff(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    test_input_sets: Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]],
+    test_input_groups: Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]],
     export_options: _experimental.ExportOptions,
+    model_to_graph_func: Callable[
+        [
+            torch.nn.Module,
+            Tuple[Any, ...],
+            Mapping[str, Any],
+            _experimental.ExportOptions,
+        ],
+        _C.Graph,
+    ],
 ) -> str:
-    if len(test_input_sets) < 2:
-        raise ValueError("Need at least two set of test inputs to compare.")
+    """Check if graph produced by `model_to_graph_func` is the same across `test_input_groups`.
 
+    Args:
+        model: See :func:`check_export_model_diff`.
+        test_input_groups: See :func:`check_export_model_diff`.
+        export_options: See :func:`check_export_model_diff`.
+        model_to_graph_func: A function to convert a PyTorch model to a JIT IR graph.
+
+    Returns:
+        graph_diff_report (str): A string representation of the graph difference.
+    """
+    if len(test_input_groups) < 2:
+        raise ValueError("Need at least two groups of test inputs to compare.")
+
+    ref_jit_graph = None
+    for args, kwargs in test_input_groups:
+        jit_graph = model_to_graph_func(model, args, kwargs, export_options)
+        if ref_jit_graph is None:
+            ref_jit_graph = jit_graph
+            continue
+
+        graph_diff_report = _GraphDiff(ref_jit_graph, jit_graph).diff_report()
+        if graph_diff_report:
+            return graph_diff_report
+    return ""
+
+
+def _traced_graph_from_model(
+    model: Union[torch.nn.Module, torch.jit.ScriptModule],
+    args: Tuple[Any, ...],
+    kwargs: Mapping[str, Any],
+    export_options: _experimental.ExportOptions,
+) -> _C.Graph:
+    """As part of the ONNX export steps, create a traced JIT graph from a PyTorch model.
+
+    Args:
+        model: See :func:`check_export_model_diff`.
+        args: See :func:`check_export_model_diff`.
+        kwargs: See :func:`check_export_model_diff`.
+        export_options: See :func:`check_export_model_diff`.
+
+    Returns:
+        jit_graph (_C.Graph): A traced JIT graph.
+    """
     training = export_options.training
     verbose = export_options.verbose
 
     with utils.exporter_context(model, training, verbose):
-        ref_jit_graph = None
-        for args, kwargs in test_input_sets:
-            export_inputs = _prepare_input_for_export(args, kwargs)
-            model = utils._pre_trace_quant_model(model, export_inputs)
-            jit_graph, _, _, _ = utils._create_jit_graph(model, export_inputs)
-
-            if ref_jit_graph is None:
-                ref_jit_graph = jit_graph
-                continue
-
-            graph_diff_report = _GraphDiff(ref_jit_graph, jit_graph).diff_report()
-            if graph_diff_report:
-                return graph_diff_report
-
-    return ""
+        export_inputs = _prepare_input_for_export(args, kwargs)
+        model = utils._pre_trace_quant_model(model, export_inputs)
+        jit_graph, _, _, _ = utils._create_jit_graph(model, export_inputs)
+        return jit_graph
 
 
-def _check_onnx_model_diff(
+def _onnx_graph_from_model(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    test_input_sets: Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]],
+    args: Tuple[Any, ...],
+    kwargs: Mapping[str, Any],
     export_options: _experimental.ExportOptions,
-) -> str:
-    if len(test_input_sets) < 2:
-        raise ValueError("Need at least two set of test inputs to compare.")
+) -> _C.Graph:
+    """As part of the ONNX export steps, export an ONNX JIT graph from a PyTorch model.
 
-    # TODO: refactor utils.py to remove duplicated code of context setup.
+    Args:
+        model: See :func:`check_export_model_diff`.
+        args: See :func:`check_export_model_diff`.
+        kwargs: See :func:`check_export_model_diff`.
+        export_options: See :func:`check_export_model_diff`.
+
+    Returns:
+        onnx_graph (_C.Graph): An ONNX JIT graph.
+    """
+    # TODO: refactor utils.py to remove duplicated code of context setup. See #78834
     opset_version = export_options.opset_version
     operator_export_type = export_options.operator_export_type
     export_modules_as_functions = export_options.export_modules_as_functions
@@ -379,7 +427,7 @@ def _check_onnx_model_diff(
     _globals.GLOBALS.operator_export_type = operator_export_type
 
     with utils.exporter_context(model, training, verbose):
-        val_do_constant_folding = utils._decide_constant_folding(
+        do_constant_folding = utils._decide_constant_folding(
             export_options.do_constant_folding, operator_export_type, training
         )
 
@@ -387,53 +435,44 @@ def _check_onnx_model_diff(
             dynamic_axes = {}
         utils._validate_dynamic_axes(dynamic_axes, model, input_names, output_names)
 
-        ref_onnx_graph = None
-        for arg, kwargs in test_input_sets:
-            export_inputs = _prepare_input_for_export(arg, kwargs)
-            export_inputs = utils._decide_input_format(model, export_inputs)
-            onnx_graph, _, _ = utils._model_to_graph(
-                model,
-                export_inputs,
-                verbose,
-                input_names,
-                output_names,
-                operator_export_type,
-                val_do_constant_folding,
-                training=training,
-                dynamic_axes=dynamic_axes,
-            )
+        export_inputs = _prepare_input_for_export(args, kwargs)
+        export_inputs = utils._decide_input_format(model, export_inputs)
+        onnx_graph, _, _ = utils._model_to_graph(
+            model,
+            export_inputs,
+            verbose,
+            input_names,
+            output_names,
+            operator_export_type,
+            do_constant_folding,
+            training=training,
+            dynamic_axes=dynamic_axes,
+        )
 
-            if ref_onnx_graph is None:
-                ref_onnx_graph = onnx_graph
-                continue
-
-            graph_diff_report = _GraphDiff(ref_onnx_graph, onnx_graph).diff_report()
-            if graph_diff_report:
-                return graph_diff_report
-
-    return ""
+        return onnx_graph
 
 
 def check_export_model_diff(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    test_input_sets: Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]],
+    test_input_groups: Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]],
     export_options: Optional[_experimental.ExportOptions] = None,
 ) -> str:
-    """Verify exported model discrepancy between different sets of inputs.
+    """Verify exported model discrepancy between different groups of inputs.
 
-    A graph is exported for each set of inputs. The exported graphs are then compared
+    A graph is exported for each group of inputs. The exported graphs are then compared
     to each other, and discrepancies of first pair of nodes are reported. This function
-    first checks the jit graph, and then the onnx graph.
+    first checks the jit graph. If no discrepancies were found, it then checks the onnx
+    graph.
 
     Unless otherwise specified, the jit/ONNX graph is expected to be the same, regardless
-    of the inputs it used for exporting. A discrepancy would imply the graph exported is
-    not accurate when running with other set of inputs, which will typically results in
-    runtime error or output mismatches.
+    of the inputs used for exporting. A discrepancy implies the graph exported is
+    not accurate when run on other groups of inputs, which will typically results in
+    runtime errors or mismatching output.
 
     Args:
         model (torch.nn.Module or torch.jit.ScriptModule): The model to be exported.
-        test_input_sets (Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]]): A sequence
-            of input sets to be used to export the model. Each input set is a pair of
+        test_input_groups (Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]]): A sequence
+            of input groups to be used to export the model. Each input group is a pair of
             (args, kwargs).
         export_options (_experimental.ExportOptions, optional): An _experimental.ExportOptions
             object that controls the export behavior.
@@ -445,18 +484,15 @@ def check_export_model_diff(
         _experimental.ExportOptions() if export_options is None else export_options
     )
 
-    # TODO: refactor utils.py to remove duplicated code of context setup.
-    opset_version = export_options.opset_version
-    if opset_version is None:
-        opset_version = _constants.onnx_default_opset
-    symbolic_helper._set_opset_version(opset_version)
-    symbolic_helper._set_onnx_shape_inference(True)
-
-    jit_diff_report = _check_jit_model_diff(model, test_input_sets, export_options)
+    jit_diff_report = _check_graph_diff(
+        model, test_input_groups, export_options, _traced_graph_from_model
+    )
     if jit_diff_report:
         return jit_diff_report
 
-    return _check_onnx_model_diff(model, test_input_sets, export_options)
+    return _check_graph_diff(
+        model, test_input_groups, export_options, _onnx_graph_from_model
+    )
 
 
 def verify(
@@ -500,7 +536,7 @@ def verify(
         fixed_batch_size (bool, optional): Legacy argument, used only by rnn test cases.
         use_external_data (bool, optional): Explicitly specify whether to export the
             model with external data.
-        additional_test_inputs (list, optional): List of tuples. Each tuple is a set of
+        additional_test_inputs (list, optional): List of tuples. Each tuple is a group of
             input arguments to test. Currently only *args are supported.
         remained_onnx_input_idx (list, optional): If set, only the specified inputs will
             be passed to ONNX model. This is used when there are unused inputs in original
