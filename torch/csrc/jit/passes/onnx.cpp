@@ -11,7 +11,6 @@
 #include <torch/csrc/jit/passes/onnx/onnx_log.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
-#include <torch/csrc/jit/passes/onnx/autograd_function_process.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
@@ -457,7 +456,8 @@ void NodeToONNX(
         "PythonOp", "prim", opset_version);
     if (!py::hasattr(pyobj, "symbolic") &&
         (!PyObject_IsTrue(is_registered_op.ptr()))) {
-      // Simply clone the node, unless either
+      // Inline the subgraph within the prim::PythonOp unless
+      // either of these conditions are satisfied
       // 1. The torch.autograd.Function class of this node object has `symbolic`
       // method defined.
       // 2. Custom export symbolic is registered for prim::PythonOp.

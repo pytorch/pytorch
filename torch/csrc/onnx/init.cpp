@@ -5,7 +5,6 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/jit/passes/onnx.h>
-#include <torch/csrc/jit/passes/onnx/autograd_function_process.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/deduplicate_initializers.h>
