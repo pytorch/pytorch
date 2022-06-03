@@ -210,7 +210,8 @@ void vulkanFoldPrePackingOps(script::Module& m) {
   PrePackingOpsFilterFn filter_fn = [](const Node* n) -> bool {
     return (
         (n->kind() ==
-         Symbol::fromQualString("vulkan_prepack::create_conv2d_clamp_context")) ||
+         Symbol::fromQualString(
+             "vulkan_prepack::create_conv2d_clamp_context")) ||
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::create_linear_context")) ||
         (n->kind() ==
