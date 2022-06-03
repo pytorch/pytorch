@@ -1841,7 +1841,7 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
             if self.inner is None:
                 self.ancestors = {self.inner}
             else:
-                self.ancestors = self.inner.ancestors.union({self.inner,})
+                self.ancestors = self.inner.ancestors.union({self.inner})
         self.prev = old
         _set_torch_function_mode(self)
 
