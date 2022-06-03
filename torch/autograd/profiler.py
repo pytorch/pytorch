@@ -443,12 +443,12 @@ class record_function(ContextDecorator):
         self.handle: torch.Tensor = torch.zeros(())
 
     def __enter__(self):
-        if torch.autograd._profiler_enabled():
+        if torch.jit.is_scripting() or torch.autograd._profiler_enabled():
             self.handle = torch.ops.profiler._record_function_enter(self.name, self.args)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
-        if self.run_callbacks_on_exit and torch.autograd._profiler_enabled():
+        if torch.jit.is_scripting() or (self.run_callbacks_on_exit and torch.autograd._profiler_enabled()):
             torch.ops.profiler._record_function_exit(self.handle)
 
     def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
