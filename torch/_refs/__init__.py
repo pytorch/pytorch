@@ -828,6 +828,9 @@ fmax = _make_elementwise_binary_reference(
     prims.fmax,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmax,
+    has_out=True,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
 )
 
 # TODO: add docstring
@@ -835,6 +838,9 @@ fmin = _make_elementwise_binary_reference(
     prims.fmin,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmin,
+    has_out=True,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
 )
 
 # TODO: add docstring
@@ -842,6 +848,9 @@ fmod = _make_elementwise_binary_reference(
     prims.fmod,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmod,
+    has_out=True,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=True,
 )
 
 # TODO: add docstring

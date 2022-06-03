@@ -19731,29 +19731,17 @@ python_ref_db = [
         "_refs.fmax",
         torch_opinfo_name="fmax",
         supports_rhs_python_scalar=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.fmin",
         torch_opinfo_name="fmin",
         supports_rhs_python_scalar=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.fmod",
         torch_opinfo_name="fmod",
         rhs_make_tensor_kwargs={'exclude_zero': True},
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.bfloat16,), device_type='cpu'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
-                         dtypes=(torch.bfloat16,), device_type='cpu'),
-        ),
+        supports_rhs_python_scalar=True,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.ge",
