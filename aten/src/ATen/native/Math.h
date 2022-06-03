@@ -3897,6 +3897,26 @@ static inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
 } // T modified_bessel_k1_forward(T x)
 
 template<typename T>
+static inline C10_HOST_DEVICE T scaled_modified_bessel_i0_forward(T x) {
+    return x;
+} // T scaled_modified_bessel_i0_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T scaled_modified_bessel_i1_forward(T x) {
+    return x;
+} // T scaled_modified_bessel_i1_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T scaled_modified_bessel_k0_forward(T x) {
+    return x;
+} // T scaled_modified_bessel_k0_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T scaled_modified_bessel_k1_forward(T x) {
+    return x;
+} // T scaled_modified_bessel_k1_forward(T x)
+
+template<typename T>
 static inline C10_HOST_DEVICE T spherical_bessel_j0_forward(T x) {
     if (std::abs(x) < 0.5) {
         return T(1.0) + x * x * (T(-1.0) / T(6.0) + x * x * (T(1.0) / T(120.0) + x * x * (T(-1.0) / T(5040.0) + x * x * (T(1.0) / T(362880.0) + x * x * (T(-1.0) / T(39916800.0) + x * x * (T(1.0) / T(6227020800.0)))))));
@@ -3939,37 +3959,5 @@ template<typename T>
 static inline C10_HOST_DEVICE T spherical_bessel_y1_forward(T x) {
     return x;
 } // T spherical_bessel_y1_forward(T x)
-
-template<typename T>
-static inline C10_HOST_DEVICE T spherical_modified_bessel_i0_forward(T x) {
-    if (x == T(0.0)) {
-        return T(1.0);
-    }
-
-    if (std::abs(x) < T(0.2)) {
-        return std::exp(-std::abs(x)) * (T(1.0) + std::abs(x) * std::abs(x) * (T(1.0) / T(6.0) + std::abs(x) * std::abs(x) * (T(1.0) / T(120.0) + std::abs(x) * std::abs(x) * (T(1.0) / T(5040.0) + std::abs(x) * std::abs(x) * (T(1.0) / T(362880.0) + std::abs(x) * std::abs(x) * (T(1.0) / T(39916800.0)))))));
-    }
-
-    if (std::abs(x) < T(-0.5) * T(-3.6043653389117154e+01)) {
-        return (T(1.0) - std::exp(T(-2.0) * std::abs(x))) / (T(2.0) * std::abs(x));
-    }
-
-    return T(1.0) / (T(2.0) * std::abs(x));
-} // T spherical_modified_bessel_i0_forward(T x)
-
-template<typename T>
-static inline C10_HOST_DEVICE T spherical_modified_bessel_i1_forward(T x) {
-    return x;
-}
-
-template<typename T>
-static inline C10_HOST_DEVICE T spherical_modified_bessel_k0_forward(T x) {
-    return x;
-}
-
-template<typename T>
-static inline C10_HOST_DEVICE T spherical_modified_bessel_k1_forward(T x) {
-    return x;
-}
 
 C10_CLANG_DIAGNOSTIC_POP()
