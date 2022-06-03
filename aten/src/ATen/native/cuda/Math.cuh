@@ -3042,7 +3042,7 @@ const auto scaled_modified_bessel_k1_string = jiterator_stringify(
     } // T scaled_modified_bessel_k1_forward(T x)
 ); // scaled_modified_bessel_k1_string
 
-const auto scaled_modified_bessel_j0_string = jiterator_stringify(
+const auto spherical_bessel_j0_string = jiterator_stringify(
     template<typename T>
     T spherical_bessel_j0_forward(T x) {
         if (abs(x) < 0.5) {
