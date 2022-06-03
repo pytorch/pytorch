@@ -1768,8 +1768,6 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   }
   if (reduction == at::Reduction::Mean) {
     return ggO / input.numel();
-  } else if (reduction == at::Reduction::Sum) {
-    return ggO.sum();
   }
   return ggO;
 }

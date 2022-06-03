@@ -260,6 +260,68 @@ const char* FunctionalTensorWrapper::tensorimpl_type_name() const {
     return "FunctionalTensorWrapper";
 }
 
+template <typename VariableVersion>
+c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_core(
+    VariableVersion&& version_counter,
+    bool allow_tensor_metadata_change) const {
+  if (key_set_.has(DispatchKey::Python) &&
+      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
+    auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
+    if (r) {
+      r->set_version_counter(std::forward<VariableVersion>(version_counter));
+      r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      return r;
+    }
+  }
+  auto impl = c10::make_intrusive<FunctionalTensorWrapper>(value_);
+  copy_tensor_metadata(
+      /*src_impl=*/this,
+      /*dest_impl=*/impl.get(),
+      /*version_counter=*/std::forward<VariableVersion>(version_counter),
+      // I want to confirm with someone that this is reasonable.
+      // The autograd kernel for detach() always creates a view of the output
+      // with "allow_tensor_metadata_changes" set to false.
+      // We *always* want this flag to be true for FunctionalTensorWrapper though,
+      // Since mutations later on can changes the size/stride metadata on the wrapper.
+      /*allow_tensor_metadata_change=*/true);
+  impl->refresh_numel();
+  impl->refresh_contiguous();
+  return impl;
+}
+
+c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const {
+  return shallow_copy_and_detach_core(
+      version_counter, allow_tensor_metadata_change);
+}
+
+c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach(
+    c10::VariableVersion&& version_counter,
+    bool allow_tensor_metadata_change) const {
+  return shallow_copy_and_detach_core(
+      std::move(version_counter), allow_tensor_metadata_change);
+}
+
+at::IntArrayRef FunctionalTensorWrapper::sizes_custom() const {
+  return value_.unsafeGetTensorImpl()->sizes();
+}
+at::IntArrayRef FunctionalTensorWrapper::strides_custom() const {
+  return value_.unsafeGetTensorImpl()->strides();
+}
+int64_t FunctionalTensorWrapper::dim_custom() const {
+  return value_.unsafeGetTensorImpl()->dim();
+}
+int64_t FunctionalTensorWrapper::numel_custom() const {
+  return value_.unsafeGetTensorImpl()->numel();
+}
+bool FunctionalTensorWrapper::is_contiguous_custom(at::MemoryFormat memory_format) const {
+  return value_.unsafeGetTensorImpl()->is_contiguous();
+}
+c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
+  return value_.unsafeGetTensorImpl()->sym_sizes();
+}
+
 namespace functionalization {
 namespace impl {
 
@@ -308,18 +370,24 @@ std::vector<Tensor> to_functional_tensor(const TensorList& t_list) {
   return outputs;
 }
 
-Tensor from_functional_tensor(const Tensor& tensor) {
+Tensor from_functional_tensor(const Tensor& tensor, bool assert_functional) {
   // Note [Wrapped Numbers <> Functionalization]
   if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
       return tensor;
   }
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(tensor));
-  auto impl = unsafeGetFunctionalWrapper(tensor);
-  return impl->value();
+  if (isFunctionalTensor(tensor)) {
+    auto impl = unsafeGetFunctionalWrapper(tensor);
+    return impl->value();
+  } else {
+    // If the current tensor is not functional, then raise an error
+    // if assert_functional is true. Otherwise, return the input.
+    TORCH_INTERNAL_ASSERT(!assert_functional)
+    return tensor;
+  }
 }
-c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t) {
+c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t, bool assert_functional) {
   if (t.has_value()) {
-    return c10::make_optional<Tensor>(from_functional_tensor(*t));
+    return c10::make_optional<Tensor>(from_functional_tensor(*t, assert_functional));
   }
   return c10::nullopt;
 }
@@ -327,7 +395,13 @@ c10::List<Tensor> from_functional_tensor(const c10::List<Tensor>& t_list) {
   c10::List<Tensor> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
-    outputs.push_back(from_functional_tensor(t_list[i]));
+    // from_functional_tensor(Tensor) has asserts to make sure you don't accidentally call
+    // it on a non-functional input,
+    // but from_functional_tensor(TensorList) can recieve a list containing both
+    // functional and non-functional tensors.
+    // Example of when that can happen: torch.cat(function_input_tensor, global_state_tensor).
+    // When that happens, we're okay with only unwrapping the functional tensors.
+    outputs.push_back(from_functional_tensor(t_list[i], /*assert_functional=*/false));
   }
   return outputs;
 }
@@ -335,14 +409,14 @@ c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::opt
   c10::List<c10::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
-    outputs.push_back(from_functional_tensor(t_list[i]));
+    outputs.push_back(from_functional_tensor(t_list[i], /*assert_functional=*/false));
   }
   return outputs;
 }
 std::vector<Tensor> from_functional_tensor(const TensorList& t_list) {
   std::vector<Tensor> outputs(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = from_functional_tensor(t_list[i]);
+    outputs[i] = from_functional_tensor(t_list[i], /*assert_functional=*/false);
   }
   return outputs;
 }

@@ -3,7 +3,7 @@ import functools
 import inspect
 import sys
 import warnings
-from typing import Set
+from typing import Optional, Set
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -235,15 +235,19 @@ def parse_args(*arg_descriptors):
     return decorator
 
 
-def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
+def quantized_args(
+    *arg_q_descriptors: bool,
+    scale: Optional[float] = None,
+    zero_point: Optional[int] = None,
+):
     """A decorator which extends support for quantized version of the base operator.
     Quantization is detected by examining the arguments that are annotated by
     `arg_q_descriptors`.
 
     If quantization is detected, the base operator symbolic function will be wrapped with
-    argument dequantization and output quantization.
+    argument de-quantization and output quantization.
 
-    Otherwise, only base symbolic function will be invoked.
+    Otherwise, only the base symbolic function will be invoked.
 
     For example:
 
@@ -266,11 +270,12 @@ def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
     ```
 
     Args:
-        arg_q_descriptors: list of bool, where each element represents if the
-          argument is QTensor for quantized version of this operator.
-        scale: float default None, quantized output scale. If None, derive from
+        arg_q_descriptors: A sequence of bool, where each element represents if the
+          argument is QTensor for quantized version of this operator. It defaults
+          to False for unspecified (variable length) arguments.
+        scale: Quantized output scale. If None, derive from
           the first quantized input scale.
-        zero_point: int default None, quantized output zero point. If None,
+        zero_point: Quantized output zero point. If None,
           derive from the first quantized input zero point.
     """
 
@@ -287,19 +292,21 @@ def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
             if _zero_point is not None:
                 _zero_point = g.op("Constant", value_t=torch.tensor(_zero_point))
 
-            # some args may be optional, so the length may be smaller
-            assert len(arg_q_descriptors) >= len(args)
-            desc_args = tuple(zip(arg_q_descriptors[: len(args)], args))
+            # Support variable length arguments by marking unspecified ones as non-quantized
+            arg_q_descriptors_extended = arg_q_descriptors + (False,) * (
+                len(args) - len(arg_q_descriptors)
+            )
+            descriptor_args = tuple(zip(arg_q_descriptors_extended, args))
             # Run regular symbolic function if none of the argument is QTensor.
             if not any(
-                (desc and arg.node().kind() == "prim::TupleConstruct")
-                for desc, arg in desc_args
+                (descriptor and arg.node().kind() == "prim::TupleConstruct")
+                for descriptor, arg in descriptor_args
             ):
                 return fn(g, *args, **kwargs)
 
             dequantized_args = []
-            for desc, arg in desc_args:
-                if desc:
+            for descriptor, arg in descriptor_args:
+                if descriptor:
                     dequantized_arg, scale, zero_point, _ = dequantize_helper(g, arg)
                     dequantized_args.append(dequantized_arg)
                     if _scale is None:
@@ -308,7 +315,8 @@ def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
                         _zero_point = zero_point
                 else:
                     dequantized_args.append(arg)
-            # TODO: only support single output
+            # TODO(justinchuby): Only single output is supported for now. We may want to
+            # support multiple outputs in the future.
             output = fn(g, *dequantized_args, **kwargs)
 
             return quantize_helper(g, output, _scale, _zero_point)
@@ -1114,27 +1122,29 @@ def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, na
     return padding
 
 
-def check_training_mode(op_train_mode, op_name):
-    op_train_mode = True if op_train_mode == 1 else False
-    if GLOBALS.training_mode is not None and op_train_mode != GLOBALS.training_mode:
-        op_mode = "training " if op_train_mode else "inference"
-        training_mode = "training " if GLOBALS.training_mode else "inference"
-        # setting the model mode could result in op_mode != _flags.training_mode
-        # if the model is a FuncModule. In this case we warn the user of
-        # the state and export depending on op_mode
-        # This is to support use-cases of fixing certain layer weights
-        # in training.
-        warnings.warn(
-            "ONNX export mode is set to "
-            + training_mode
-            + " mode, but operator "
-            + op_name
-            + " is set to "
-            + op_mode
-            + " mode. The operators will be exported in "
-            + op_mode
-            + ", as specified by the functional operator."
-        )
+def check_training_mode(op_train_mode: int, op_name: str) -> None:
+    """Warns the user if the model's training mode and the export mode do not agree."""
+    if GLOBALS.training_mode == _C_onnx.TrainingMode.PRESERVE:
+        return
+
+    if op_train_mode:
+        op_mode_enum = _C_onnx.TrainingMode.TRAINING
+    else:
+        op_mode_enum = _C_onnx.TrainingMode.EVAL
+    if op_mode_enum == GLOBALS.training_mode:
+        # The modes agree. Do nothing
+        return
+
+    op_mode_text = f"train={bool(op_train_mode)}"
+    # Setting the model mode could result in op_mode != GLOBALS.training_mode
+    # if the model is a FuncModule. In this case we warn the user of
+    # the state and export depending on op_mode
+    # This is to support use-cases of fixing certain layer weights
+    # in training.
+    warnings.warn(
+        f"ONNX export mode is set to {GLOBALS.training_mode}, but operator '{op_name}' "
+        f"is set to {op_mode_text}. Exporting with {op_mode_text}."
+    )
 
 
 def _flatten_helper(g, input, start_dim, end_dim, dim):
