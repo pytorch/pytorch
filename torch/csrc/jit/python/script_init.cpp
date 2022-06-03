@@ -1503,6 +1503,14 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "name",
           [](const StrongFunctionPtr& self) { return self.function_->name(); })
+      .def(
+          "_set_ignore_amp",
+          [](StrongFunctionPtr& self, bool ignore) {
+            auto fn = self.function_;
+            TORCH_INTERNAL_ASSERT(fn->isGraphFunction());
+            GraphFunction& g_fn = toGraphFunction(*fn);
+            g_fn._set_ignore_amp(ignore);
+          })
       .def_property_readonly(
           "qualified_name",
           [](const StrongFunctionPtr& self) {
@@ -1891,9 +1899,30 @@ void initJitScriptBindings(PyObject* module) {
     return _get_model_bytecode_version(filename);
   });
   m.def(
+      "_get_model_extra_files",
+      [](const std::string& filename, const py::dict& py_extra_files) {
+        c10::optional<at::Device> optional_device;
+        ExtraFilesMap cpp_extra_files = ExtraFilesMap();
+        _load_for_mobile(filename, optional_device, cpp_extra_files);
+        extra_files_to_python(cpp_extra_files, py_extra_files);
+
+        return py_extra_files;
+      });
+  m.def(
       "_get_model_bytecode_version_from_buffer", [](const std::string& buffer) {
         std::istringstream in(buffer);
         return _get_model_bytecode_version(in);
+      });
+  m.def(
+      "_get_model_extra_files_from_buffer",
+      [](const std::string& buffer, const py::dict& py_extra_files) {
+        c10::optional<at::Device> optional_device;
+        ExtraFilesMap cpp_extra_files = ExtraFilesMap();
+        std::istringstream in(buffer);
+        _load_for_mobile(in, optional_device, cpp_extra_files);
+        extra_files_to_python(cpp_extra_files, py_extra_files);
+
+        return py_extra_files;
       });
   m.def("_get_mobile_model_contained_types", [](const std::string& filename) {
     return _get_mobile_model_contained_types(filename);

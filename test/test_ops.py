@@ -6,6 +6,8 @@ import warnings
 import unittest
 import itertools
 import torch
+import contextlib
+from importlib import import_module
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -25,6 +27,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_FBCODE,
     first_sample,
+    parametrize,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -45,10 +48,14 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     skipMeta,
 )
+from torch.utils._pytree import tree_map
 import torch._prims as prims
+from torch._prims.context import TorchRefsMode
 
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal import composite_compliance
+
+from torch.utils._pytree import tree_flatten
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -157,7 +164,27 @@ class TestCommon(TestCase):
                     unsupported(dtype)
                     continue
 
-                # Checks for backward support in the same dtype
+                # Checks for backward support in the same dtype, if the input has
+                # one or more tensors requiring grad
+                def _tensor_requires_grad(x):
+                    if isinstance(x, dict):
+                        for k, v in x.items():
+                            if _tensor_requires_grad(v):
+                                return True
+                    if isinstance(x, (list, tuple)):
+                        for a in x:
+                            if _tensor_requires_grad(a):
+                                return True
+                    if isinstance(x, torch.Tensor) and x.requires_grad:
+                        return True
+
+                    return False
+
+                requires_grad = _tensor_requires_grad(sample.input) \
+                    or _tensor_requires_grad(sample.args) or _tensor_requires_grad(sample.kwargs)
+                if not requires_grad:
+                    continue
+
                 try:
                     result = sample.output_process_fn_grad(result)
                     if isinstance(result, torch.Tensor):
@@ -305,7 +332,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
-    def test_reference_testing(self, device, dtype, op):
+    def test_numpy_ref(self, device, dtype, op):
         try:
             # Sets the default dtype to NumPy's default dtype of double
             cur_default = torch.get_default_dtype()
@@ -319,14 +346,18 @@ class TestCommon(TestCase):
 
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
-    # TODO: include stride propagation.
+    # See https://github.com/pytorch/pytorch/issues/78050 for a discussion of stride propagation.
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
-    def test_python_reference_meta_functions(self, device, dtype, op):
+    def test_python_ref_meta(self, device, dtype, op):
+        if dtype is torch.chalf:
+            self.skipTest("Skipping chalf until it has more operator support")
+
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
                 return prims.utils.TensorMeta(x)
+            return x
 
         # TODO: iterate over requires_grad true/false
         inps = tuple(op.reference_inputs(device, dtype, requires_grad=False))
@@ -335,53 +366,156 @@ class TestCommon(TestCase):
 
             meta_sample = sample.transform(_to_tensormeta)
             meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
+
             if isinstance(result, torch.Tensor):
                 prims.utils.compare_tensor_meta(result, meta_result)
             elif isinstance(result, Sequence):
                 for a, b in zip(result, meta_result):
-                    prims.utils.compare_tensor_meta(a, b)
+                    if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
+                        prims.utils.compare_tensor_meta(a, b)
 
-    # Tests that experimental Python References perform the same computation
-    # as the operators they reference.
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyNativeDeviceTypes
-    @ops(python_ref_db)
-    def test_python_reference_consistency(self, device, dtype, op):
+    def _ref_test_helper(self, ctx, device, dtype, op):
+        if dtype is torch.chalf:
+            self.skipTest("Skipping chalf until it has more operator support")
+
+        # NOTE: this test works by comparing the reference
+        ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
-            actual = op(sample.input, *sample.args, **sample.kwargs)
-            expected = op.torch_opinfo(sample.input, *sample.args, **sample.kwargs)
+            with ctx():
+                ref_result = op(sample.input, *sample.args, **sample.kwargs)
+            torch_result = op.torch_opinfo(sample.input, *sample.args, **sample.kwargs)
 
-            self.assertEqual(
-                actual,
-                expected,
-                exact_stride=False,
-                exact_device=True,
-                exact_layout=True,
-                exact_is_coalesced=True,
-            )
-
-            if isinstance(actual, torch.Tensor):
-                assert isinstance(expected, torch.Tensor)
-                prims.utils.compare_significant_strides(actual, expected)
-                if getattr(op, 'validate_view_consistency', True):
-                    self.assertEqual(actual._is_view(), expected._is_view())
-            if isinstance(actual, Sequence):
-                assert isinstance(expected, Sequence)
-                for a, b in zip(actual, expected):
-                    prims.utils.compare_significant_strides(a, b)
+            for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(torch_result)[0]):
+                if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
+                    prims.utils.compare_tensor_meta(a, b)
                     if getattr(op, 'validate_view_consistency', True):
                         self.assertEqual(a._is_view(), b._is_view())
 
+            # Computes the dtype the more precise computatino would occur in
+            precise_dtype = torch.bool
+            if prims.utils.is_integer_dtype(dtype):
+                # Note: bool and integer dtypes do not have more
+                # precise dtypes -- they simply must be close
+                precise_dtype = dtype
+            if prims.utils.is_float_dtype(dtype):
+                precise_dtype = torch.double
+            if prims.utils.is_complex_dtype(dtype):
+                precise_dtype = torch.cdouble
+
+            # Checks if the results are close
+            try:
+                self.assertEqual(
+                    ref_result,
+                    torch_result,
+                    exact_stride=False,
+                    exact_device=True,
+                    exact_layout=True,
+                    exact_is_coalesced=True,
+                )
+            except AssertionError as e:
+                # Raises the error if the precise dtype comparison wouldn't be
+                # different
+                if dtype is precise_dtype:
+                    raise e
+
+                ex = e
+
+
+            # Goes to next sample if these results are close
+            if not ex:
+                continue
+
+            # If the results are not close, checks that the
+            # reference is more accurate than the torch op
+            def _make_precise(x):
+                if isinstance(x, torch.Tensor) and x.dtype is dtype:
+                    return x.to(precise_dtype)
+                return x
+
+            precise_sample = sample.transform(_make_precise)
+            precise_result = op.torch_opinfo(precise_sample.input, *precise_sample.args, **precise_sample.kwargs)
+
+            def _distance(a, b):
+                # Special-cases boolean comparisons
+                if prims.utils.is_boolean_dtype(a.dtype):
+                    assert b.dtype is torch.bool
+                    return (a ^ b).sum()
+
+                same = (a == b)
+                if prims.utils.is_float_dtype(a.dtype) or prims.utils.is_complex_dtype(a.dtype):
+                    same = torch.logical_or(same, torch.logical_and(torch.isnan(a), torch.isnan(b)))
+
+                actual_error = torch.where(same, 0, torch.abs(a - b)).sum()
+                return actual_error
+
+            ref_distance = 0
+            for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(precise_result)[0]):
+                ref_distance = ref_distance + _distance(a, b)
+
+            torch_distance = 0
+            for a, b in zip(tree_flatten(torch_result)[0], tree_flatten(precise_result)[0]):
+                torch_distance = torch_distance + _distance(a, b)
+
+            # TODO: consider adding some tolerance to this comparison
+            msg = f"Reference result was farther ({ref_distance}) from the precise " \
+                  "computation than the torch result was ({torch_distance})!"
+            self.assertTrue(ref_distance <= torch_distance, msg=msg)
+
+        # Reports numerical accuracy discrepancies
+        if ex is not None:
+            msg = "Test passed because the reference was more accurate than the torch operator."
+            warnings.warn(msg)
+
+    # Tests that experimental Python References perform the same computation
+    # as the operators they reference, when operator calls in the torch
+    # namesapce are remapped to the refs namespace (torch.foo becomes refs.foo).
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @ops(python_ref_db)
+    def test_python_ref(self, device, dtype, op):
+        # In this test, primTorch refs call into the refs namespace
+        # For example, a ref with torch.foo in it will calls refs.foo instead
+        # Direct calls to refs and prims are not affected
+        self._ref_test_helper(lambda: TorchRefsMode.push(strict=True), device, dtype, op)
+
+    # Tests that experimental Python References perform the same computation
+    # as the operators they reference, when operator calls in the torch
+    # namespace are preserved (torch.foo remains torch.foo).
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @ops(python_ref_db)
+    def test_python_ref_torch_fallback(self, device, dtype, op):
+        # In this test, refs call into the torch namespace (after the initial invocation)
+        # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
+        # Direct calls to refs and prims are not translated
+        self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @skipMeta
     @onlyNativeDeviceTypes
-    @ops([op for op in ops_and_refs if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_errors(self, device, op):
         error_inputs = op.error_inputs(device)
         for ei in error_inputs:
             si = ei.sample_input
             with self.assertRaisesRegex(ei.error_type, ei.error_regex):
                 op(si.input, *si.args, **si.kwargs)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    def test_python_ref_errors(self, device, op):
+        def _to_tensormeta(x):
+            if isinstance(x, torch.Tensor):
+                return prims.utils.TensorMeta(x)
+            return x
+
+        error_inputs = op.error_inputs(device)
+        for ei in error_inputs:
+            si = ei.sample_input
+            meta_sample = si.transform(_to_tensormeta)
+            # TODO: match strings
+            with self.assertRaisesRegex(ei.error_type, ""):
+                op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
 
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
@@ -609,18 +743,9 @@ class TestCommon(TestCase):
     #   - Case 3: out has the correct shape and dtype, but is on a different device type
     #   - Case 4: out has the with correct shape and device, but a dtype that cannot
     #       "safely" cast to
-    @ops(_ops_and_refs, dtypes=OpDTypes.none)
-    def test_out(self, device, op):
+    @ops(_ops_and_refs, dtypes=OpDTypes.any_one)
+    def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
-        supported_dtypes = op.supported_dtypes(self.device_type)
-        if len(supported_dtypes) == 0:
-            self.skipTest("Skipped! Op has not supported dtypes on this device.")
-        dtype = (
-            torch.float32
-            if torch.float32 in supported_dtypes
-            else list(supported_dtypes)[0]
-        )
-
         samples = op.sample_inputs(device, dtype)
         for sample in samples:
             # calls it normally to get the expected result
@@ -982,6 +1107,16 @@ class TestCommon(TestCase):
                 *transformed_sample.args,
                 **transformed_sample.kwargs,
             )
+            # Since range of chalf is much less compared to cfloat,
+            # we get `inf`s easily (eg. with `pow`, `exp`),
+            # so we cast `cfloat` back to `chalf`.
+            expected = tree_map(lambda x: x.to(torch.complex32) if isinstance(
+                x, torch.Tensor) and x.dtype is torch.complex64 else x, expected)
+
+            # `exact_dtype` is False because for ops like real, imag
+            # we get different dtypes for `actual` and `expected`
+            # `chalf` input -> `half` output
+            # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
 
 
@@ -1221,9 +1356,44 @@ class TestMathBits(TestCase):
         )
 
 
+
+class TestRefsOpsInfo(TestCase):
+
+    import_paths = ["_refs", "_refs.special", "_refs.nn.functional"]
+    module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
+    ref_ops_names = itertools.chain.from_iterable(
+        [f"{path}.{op}" for op in module_all] for path, module_all in module_alls)
+    ref_db_names = set(ref_op.name for ref_op in python_ref_db)
+
+    # TODO: References that do not have an entry in python_ref_db
+    skip_ref_ops = {
+        '_refs.bitwise_right_shift',
+        '_refs.copy_to',
+        '_refs.empty_strided',
+        '_refs.equal',
+        '_refs.full',
+        '_refs.full_like',
+        '_refs.item',
+        '_refs.ones',
+        '_refs.ones_like',
+        '_refs.std_var',
+        '_refs.swap_axes',
+        '_refs.uniform',
+        '_refs.zeros',
+        '_refs.zeros_like'
+    }
+
+    @parametrize("op", ref_ops_names)
+    def test_refs_are_in_python_ref_db(self, op):
+        if op in self.skip_ref_ops:
+            raise unittest.SkipTest(f"{op} does not have an entry in python_ref_db")
+        self.assertIn(op, self.ref_db_names)
+
+
 instantiate_device_type_tests(TestCommon, globals())
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
+instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
