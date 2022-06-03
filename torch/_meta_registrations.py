@@ -135,3 +135,47 @@ def meta_adaptive_avg_pool2d(self, output_size):
 def meta_adaptive_avg_pool3d(self, output_size):
     check(self.ndim == 4 or self.ndim == 5, f"Expected 4D or 5D tensor, but got {self.shape}")
     return self.new_empty(self.shape[:-3] + tuple(output_size))
+
+@torch.library.impl(meta_lib, "repeat_interleave.Tensor")
+def meta_repeat_interleave_Tensor(repeats, output_size=None):
+    if output_size is None:
+        raise RuntimeError(
+            "cannot repeat_interleave a meta tensor without output_size"
+        )
+    return repeats.new_empty(output_size)
+
+@torch.library.impl(meta_lib, "_linalg_qr_helper")
+def meta_linalg_qr_helper(input, mode):
+    if mode == "reduced":
+        compute_q = True
+        reduced_mode = True
+    elif mode == "complete":
+        compute_q = True
+        reduced_mode = False
+    elif mode == "r":
+        compute_q = False
+        reduced_mode = True
+    else:
+        raise RuntimeError(f"qr received unrecognized mode {mode}")
+    check(input.ndim >= 2, lambda: f"expected matrix or batch of matrices, but got {input.ndim}-D tensor")
+    check(
+        utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
+        lambda: f"expected float or complex tensor, but got {input.dtype}"
+    )
+    m = input.size(-2)
+    n = input.size(-1)
+    mn = min(m, n)
+    if compute_q:
+        Qt_shape = list(input.size())
+        Qt_shape[-2] = mn if reduced_mode else m
+        Qt_shape[-1] = m
+        Q = input.new_empty(Qt_shape)
+        Q.transpose_(-2, -1)
+    else:
+        Q = input.new_empty(0)
+    Rt_shape = list(input.size())
+    Rt_shape[-2] = n
+    Rt_shape[-1] = mn if reduced_mode or not compute_q else m
+    R = input.new_empty(Rt_shape)
+    R.transpose_(-2, -1)
+    return (Q, R)
