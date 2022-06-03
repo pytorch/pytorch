@@ -1838,6 +1838,14 @@ class TestNN(NNTestCase):
         parameters += param_list[-2:]
         check()
 
+    def test_ParameterList_meta(self):
+        p = torch.nn.Parameter(torch.empty(1, device='meta'))
+        self.assertExpectedInline(str(p), """\
+Parameter containing:
+tensor(..., device='meta', size=(1,), requires_grad=True)""")
+        pl = torch.nn.ParameterList([p])
+        self.assertExpectedInline(str(pl), """ParameterList(  (0): Parameter containing: [torch.float64 of size 1])""")
+
     def test_ParameterList_replication(self):
         # The actual replication code from DP cannot be used on CPU so doing it manually here
         def make_param():
@@ -9545,6 +9553,28 @@ class TestNN(NNTestCase):
         with self.assertRaises(ValueError):
             nn.BCEWithLogitsLoss()(input, target)
 
+    def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss(self):
+        sigmoid = nn.Sigmoid()
+
+        target = torch.rand(64, 4)
+        output = torch.rand(64, 4) - 0.5
+
+        self.assertEqual(nn.BCEWithLogitsLoss()(output, target), nn.BCELoss()(sigmoid(output), target))
+
+        weight = torch.rand(4)
+        self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
+
+        target = torch.zeros(4, 1, dtype=torch.float)
+        output = torch.empty(4, 1, dtype=torch.float).fill_(-100)
+
+        self.assertEqual(nn.BCEWithLogitsLoss()(output, target), nn.BCELoss()(sigmoid(output), target))
+
+        self.assertEqual(nn.BCEWithLogitsLoss(reduction='none')(output, target),
+                         nn.BCELoss(reduction='none')(sigmoid(output), target))
+
+        weight = torch.rand(1, dtype=torch.float)
+        self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
+
     def test_bce_loss_input_range(self):
         bceloss = nn.BCELoss()
 
@@ -14040,7 +14070,10 @@ class TestNNDeviceType(NNTestCase):
             if mode == 'same':
                 actual = actual[:5, :5, :10]
 
-            self.assertEqual(actual, expected, rtol=2e-5, atol=5e-6)
+            if tf32_is_not_fp32() and (dtype == torch.float or dtype == torch.complex64):
+                self.assertEqual(actual, expected, atol=0.05, rtol=0.05)
+            else:
+                self.assertEqual(actual, expected, rtol=2e-5, atol=5e-6)
 
         # Global dtype for this test suite is torch.double
         # This leads to change in type-promotion
@@ -19475,7 +19508,10 @@ class TestNNDeviceType(NNTestCase):
             w = w.to(memory_format=memory_format)
             cudnn_out = torch.cudnn_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
-            self.assertEqual(conv2d_out.relu(), cudnn_out)
+            if tf32_is_not_fp32() and dtype == torch.float:
+                self.assertEqual(conv2d_out.relu(), cudnn_out, atol=2e-4, rtol=0.006)
+            else:
+                self.assertEqual(conv2d_out.relu(), cudnn_out)
 
     @onlyCUDA
     @skipCUDAIfRocm
@@ -19503,7 +19539,10 @@ class TestNNDeviceType(NNTestCase):
             cudnn_out = torch.cudnn_convolution_add_relu(inp, w, z, alpha, None, (1, 1), (0, 0), (1, 1), 1)
 
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
-            self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out)
+            if tf32_is_not_fp32() and dtype == torch.float:
+                self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out, atol=3e-4, rtol=0.006)
+            else:
+                self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out)
 
     @onlyCUDA
     @skipCUDAIfRocm
@@ -20629,28 +20668,6 @@ class TestNNDeviceType(NNTestCase):
                 cm = torch.no_grad()
             with cm:
                 _test(activation=activation, batch_first=batch_first, training=training)
-
-    def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss(self, device):
-        sigmoid = nn.Sigmoid()
-
-        target = torch.rand(64, 4, device=device)
-        output = torch.rand(64, 4, device=device) - 0.5
-
-        self.assertEqual(nn.BCEWithLogitsLoss()(output, target), nn.BCELoss()(sigmoid(output), target))
-
-        weight = torch.rand(4, device=device)
-        self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
-
-        target = torch.zeros(4, 1, device=device, dtype=torch.float)
-        output = torch.empty(4, 1, device=device, dtype=torch.float).fill_(-100)
-
-        self.assertEqual(nn.BCEWithLogitsLoss()(output, target), nn.BCELoss()(sigmoid(output), target))
-
-        self.assertEqual(nn.BCEWithLogitsLoss(reduction='none')(output, target),
-                         nn.BCELoss(reduction='none')(sigmoid(output), target))
-
-        weight = torch.rand(1, device=device, dtype=torch.float)
-        self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
 
 
 class TestModuleGlobalHooks(TestCase):
