@@ -92,7 +92,7 @@ def gen_build_workflows_tree():
         "workflows": {
             "binary_builds": {
                "when": r"<< pipeline.parameters.run_build >>",
-                "jobs": [f() for f in binary_build_functions],
+                "jobs": [f() for f in binary_build_functions]
             },
         }
     }
