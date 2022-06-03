@@ -7445,6 +7445,15 @@ class _TestONNXRuntime:
         model = Log10()
         self.run_test(model, x)
 
+    def test_log2(self):
+        class Log2(torch.nn.Module):
+            def forward(self, input):
+                return torch.log2(input)
+
+        x = torch.tensor(1.0)
+        model = Log2()
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_round(self):
         class Round(torch.nn.Module):
