@@ -125,6 +125,7 @@ void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
       iter.common_dtype(), "rsqrt_cuda",
       [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
           return rsqrt_wrapper(a);
         });
       });
