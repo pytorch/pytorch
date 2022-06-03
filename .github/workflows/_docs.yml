@@ -94,6 +94,7 @@ jobs:
             -e DOCS_TYPE \
             -e PR_LABELS \
             -e WITH_PUSH \
+            -e NUM_PROC_THREADS=$(nproc --ignore=2) \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
