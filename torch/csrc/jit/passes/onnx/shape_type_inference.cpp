@@ -1939,7 +1939,7 @@ void ONNXShapeTypeInference(
   std::unordered_map<std::string, std::string> torch_to_onnx_input_name;
   std::unordered_map<std::string, std::string> torch_to_onnx_output_name;
   auto& original_shape_data = ConstantValueMap::GetInferredShapeData();
-  auto inferred_shape_data = original_shape_data;
+  ShapeDataMap inferred_shape_data;
   auto& symbol_dim_map = ConstantValueMap::GetSymbolDimMap();
 
   SetGraphInputTypeReliable(n->owningGraph());
@@ -1956,7 +1956,7 @@ void ONNXShapeTypeInference(
     for (auto output : clone_node->outputs()) {
       n_graph->registerOutput(output);
     }
-    // Map original original PyTorch graph's i/o name to temporal ONNX graph's i/o name for shape inference
+    // Map original PyTorch graph's i/o name to temporal ONNX graph's i/o name for shape inference
     for (size_t i = 0; i < clone_node->inputs().size(); ++i) {
       torch_to_onnx_input_name[n->input(i)->debugName()] = clone_node->input(i)->debugName();
     }
@@ -1965,19 +1965,11 @@ void ONNXShapeTypeInference(
       torch_to_onnx_output_name[n->output(i)->debugName()] = clone_node->output(i)->debugName();
     }
     // Make inferred_shape_data use name from temporal ONNX graph instead of original PyTorch graph
-    // Use original_keys for removing original data which is duplicate
-    std::vector<string> original_keys;
-    for (const auto& gs_data: inferred_shape_data) {
+    for (const auto& gs_data: original_shape_data) {
       const auto onnx_output_name = torch_to_onnx_input_name.find(gs_data.first);
       if (onnx_output_name != torch_to_onnx_input_name.end()) {
         inferred_shape_data[onnx_output_name->second] = gs_data.second;
-        if (gs_data.first != onnx_output_name->second) {
-          original_keys.emplace_back(gs_data.first);
-        }
       }
-    }
-    for (const auto& key: original_keys) {
-      inferred_shape_data.erase(key);
     }
     // Use scalar_type_analysis without low precision cast
     ScalarTypeAnalysisForONNX(n_graph, false, opset_version);
@@ -2002,6 +1994,7 @@ void ONNXShapeTypeInference(
           case ::c10::onnx::Shape:
           case ::c10::onnx::Gather: {
             auto* schema_registry = onnx::OpSchemaRegistry::Instance();
+            // Only enable enable_data_propagation=true
             onnx::ShapeInferenceOptions options{false, false, true};
             onnx::shape_inference::InferShapes(*model_proto, schema_registry, options, &inferred_shape_data);
             break;
