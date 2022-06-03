@@ -555,7 +555,6 @@ meta_function_expected_failures = {
     torch.histogram: {f32, f64},  # aten::histogram.bin_ct, aten::histogram.bins_tensor
     torch.histogramdd: {f32, f64},  # aten::_histogramdd_bin_edges, aten::_histogramdd_from_bin_tensors
     torch.kthvalue: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::kthvalue.values
-    torch.linalg.qr: {f32, f64},  # aten::_linalg_qr_helper
     torch.logcumsumexp: {bf16, f32, f64},  # aten::_logcumsumexp, aten::_logcumsumexp.out
     torch.masked_select: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::masked_select, aten::masked_select.out
     torch.matrix_exp: {bf16, f32, f64},  # aten::linalg_matrix_exp
@@ -598,7 +597,6 @@ meta_function_expected_failures = {
     torch.take: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::take, aten::take.out
     torch.trace: {f32, f64, i16, i32, i64, i8, u8},  # aten::trace
     torch.vdot: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::vdot
-    torch.qr: {f32, f64},
     torch.ormqr: {f32, f64},
     torch.lu_solve: {f32, f64},
     torch.cholesky: {f32, f64},  # aten::cholesky, aten::cholesky.out
@@ -714,7 +712,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.nn.functional.relu: {f16},  # aten::relu
     torch.nn.functional.rrelu: {f16},  # aten::rrelu_with_noise
     torch.ormqr: {f32, f64},  # aten::ormqr, aten::ormqr.out
-    torch.qr: {f32, f64},  # aten::_linalg_qr_helper
     torch.trace: {b8, bf16, f16},  # aten::diag.out
     torch.vdot: {f16},  # aten::vdot
 }
@@ -883,7 +880,6 @@ meta_dispatch_expected_failures = {
     aten.linalg_householder_product.default: {f32, f64},  # aten::linalg_householder_product
     aten.linalg_householder_product.out: {f32, f64},  # aten::linalg_householder_product.out
     aten.linalg_lstsq.default: {f32, f64},  # aten::linalg_lstsq.out
-    aten.linalg_qr.default: {f32, f64},  # aten::_linalg_qr_helper
     aten.linalg_slogdet.default: {f32, f64},  # aten::linalg_slogdet
     aten.linalg_solve.default: {f32, f64},  # aten::linalg_solve
     aten.linalg_solve.out: {f32, f64},  # aten::linalg_solve.out
@@ -941,7 +937,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.linalg_householder_product.default: {f32, f64},  # aten::linalg_householder_product
     aten.linalg_householder_product.out: {f32, f64},  # aten::linalg_householder_product.out
     aten.linalg_matrix_exp.default: {f16},  # aten::linalg_matrix_exp
-    aten.linalg_qr.default: {f32, f64},  # aten::_linalg_qr_helper
     aten.linalg_solve_triangular.default: {f32, f64},  # aten::linalg_solve_triangular
     aten.linalg_solve_triangular.out: {f32, f64},  # aten::linalg_solve_triangular.out
     aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
