@@ -18,7 +18,7 @@ import pathlib
 import argparse
 import subprocess
 
-from typing import List
+from typing import List, Tuple
 
 TORCHBENCH_CONFIG_NAME = "config.yaml"
 TORCHBENCH_USERBENCHMARK_CONFIG_NAME = "ub-config.yaml"
@@ -55,7 +55,7 @@ def find_current_branch(repo_path: str) -> str:
     name: str = repo.active_branch.name
     return name
 
-def deploy_torchbench_config(output_dir: str, config: str, config_name: str=TORCHBENCH_CONFIG_NAME) -> None:
+def deploy_torchbench_config(output_dir: str, config: str, config_name: str = TORCHBENCH_CONFIG_NAME) -> None:
     # Create test dir if needed
     pathlib.Path(output_dir).mkdir(exist_ok=True)
     # TorchBench config file name
@@ -76,7 +76,7 @@ def get_valid_userbenchmarks(torchbench_path: str) -> List[str]:
     valid_ubs = list(map(lambda x: os.path.basename(x), ubs))
     return valid_ubs
 
-def extract_models_from_pr(torchbench_path: str, prbody_file: str) -> List[str]:
+def extract_models_from_pr(torchbench_path: str, prbody_file: str) -> Tuple[List[str], List[str]]:
     model_list = []
     userbenchmark_list = []
     pr_list = []
@@ -171,9 +171,11 @@ if __name__ == "__main__":
             run_torchbench(pytorch_path=args.pytorch_path, torchbench_path=args.torchbench_path, output_dir=output_dir)
         if userbenchmarks:
             assert len(userbenchmarks) == 1, \
-                f"We don't support running multiple userbenchmarks in single workflow yet. If you need, please submit a feature request."
+                "We don't support running multiple userbenchmarks in single workflow yet." \
+                "If you need, please submit a feature request."
             run_userbenchmarks(pytorch_path=args.pytorch_path, torchbench_path=args.torchbench_path,
-                               base_sha=args.pr_base_sha, head_sha=args.pr_head_sha, userbenchmark=userbenchmarks[0], output_dir=output_dir)
+                               base_sha=args.pr_base_sha, head_sha=args.pr_head_sha,
+                               userbenchmark=userbenchmarks[0], output_dir=output_dir)
         if not models and not userbenchmarks:
             print("Can't parse valid models or userbenchmarks from the pr body. Quit.")
             exit(-1)
