@@ -2,7 +2,6 @@
 # https://github.com/python/cpython/blob/master/Lib/typing.py
 
 import collections
-import contextlib
 import functools
 import inspect
 import numbers
@@ -464,26 +463,13 @@ def _set_datapipe_valid_iterator_id(datapipe):
     return datapipe._valid_iterator_id
 
 
-# Enable/disable profiler for `IterDataPipe`
-_USE_ITERDP_PROFILER = False
-
-
-def set_profiler_for_iterdatapipe(enable: bool) -> None:
-    global _USE_ITERDP_PROFILER
-    _USE_ITERDP_PROFILER = enable
-
-
 def hook_iterator(namespace, profile_name):
     r"""
     Hook that is applied to all `__iter__` of metaclass `_DataPipeMeta`. This is done for the purpose of
     profiling and checking if an iterator is still valid.
     """
-    def context():
-        global _USE_ITERDP_PROFILER
-        if _USE_ITERDP_PROFILER:
-            return torch.autograd.profiler.record_function(profile_name)
-        else:
-            return contextlib.nullcontext()
+    def profiler_record_fn_context():
+        return torch.autograd.profiler.record_function(profile_name)
 
     class IteratorDecorator:
         """Wrap the iterator and modifying its `__next__` method"""
@@ -491,6 +477,7 @@ def hook_iterator(namespace, profile_name):
             self.iterator = iterator
             self.source_dp = source_dp
             self.iterator_id = iterator_id
+            self._profiler_enabled = torch.autograd._profiler_enabled()
 
         def __iter__(self):
             return self
@@ -498,7 +485,11 @@ def hook_iterator(namespace, profile_name):
         def __next__(self):
             # TODO: Add try-except to in-place reduce traceback from the Exception
             # See: https://github.com/pytorch/data/issues/284
-            with context():
+            if self._profiler_enabled:
+                with profiler_record_fn_context():
+                    _check_iterator_valid(self.source_dp, self.iterator_id)
+                    return next(self.iterator)
+            else:  # Decided against using `contextlib.nullcontext` for performance reasons
                 _check_iterator_valid(self.source_dp, self.iterator_id)
                 return next(self.iterator)
 
@@ -514,12 +505,22 @@ def hook_iterator(namespace, profile_name):
             gen = func(*args, **kwargs)
             datapipe = args[0]
             iterator_id = _set_datapipe_valid_iterator_id(datapipe)  # This ID is tied to each created iterator
+            _profiler_enabled = torch.autograd._profiler_enabled()
             try:
-                with context():
+                if _profiler_enabled:
+                    with profiler_record_fn_context():
+                        response = gen.send(None)
+                else:
                     response = gen.send(None)
+
                 while True:
                     request = yield response
-                    with context():  # Pass through here every time `__next__` is called
+                    # Pass through here every time `__next__` is called
+                    if _profiler_enabled:
+                        with profiler_record_fn_context():
+                            _check_iterator_valid(datapipe, iterator_id)
+                            response = gen.send(request)
+                    else:  # Decided against using `contextlib.nullcontext` for performance reasons
                         _check_iterator_valid(datapipe, iterator_id)
                         response = gen.send(request)
             except StopIteration as e:
@@ -543,7 +544,9 @@ def hook_iterator(namespace, profile_name):
 
             @functools.wraps(next_func)
             def wrap_next(*args, **kwargs):
-                with context():
+                if torch.autograd._profiler_enabled():
+                    return next_func(*args, **kwargs)
+                else:
                     return next_func(*args, **kwargs)
 
             namespace['__next__'] = wrap_next

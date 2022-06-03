@@ -36,9 +36,6 @@ except ImportError:
 import pickle
 
 
-torch.utils.data.set_profiler_for_iterdatapipe(enable=True)
-
-
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
 @unittest.skipIf(TEST_WITH_ASAN, "Cannot test with ASAN")
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
