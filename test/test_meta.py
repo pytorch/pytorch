@@ -466,8 +466,6 @@ meta_function_expected_failures = {
     torch.cholesky_solve: {f32, f64},  # aten::_cholesky_solve_helper
     torch.eig: {f32, f64},  # aten::_local_scalar_dense
     torch.geqrf: {f32, f64},  # aten::geqrf
-    torch.linalg.cholesky: {f32, f64},  # aten::linalg_cholesky_ex, aten::linalg_cholesky_ex.L
-    torch.linalg.cholesky_ex: {f32, f64},  # aten::linalg_cholesky_ex
     torch.linalg.det: {f32, f64},  # aten::_det_lu_based_helper
     torch.linalg.eig: {f32, f64},  # aten::linalg_eig
     torch.linalg.eigh: {f32, f64},
@@ -545,8 +543,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.geqrf: {f32, f64},  # aten::geqrf
     torch.histc: {i16, i32, i64, i8},  # aten::histc, aten::histc.out
     torch.kthvalue: {f16},  # aten::kthvalue.values
-    torch.linalg.cholesky: {f32, f64},  # aten::linalg_cholesky_ex, aten::linalg_cholesky_ex.L
-    torch.linalg.cholesky_ex: {f32, f64},  # aten::linalg_cholesky_ex
     torch.linalg.householder_product: {f32, f64},  # aten::linalg_householder_product, aten::linalg_householder_product.out
     torch.linalg.solve_triangular: {f32, f64},  # aten::linalg_solve_triangular, aten::linalg_solve_triangular.out
     torch.logcumsumexp: {bf16, f16},  # aten::_logcumsumexp, aten::_logcumsumexp.out
@@ -734,8 +730,6 @@ meta_dispatch_expected_failures = {
     aten.cholesky_solve.out: {f32, f64},  # aten::_cholesky_solve_helper
     aten.eig.default: {f32, f64},  # aten::_local_scalar_dense
     aten.geqrf.default: {f32, f64},  # aten::geqrf
-    aten.linalg_cholesky_ex.L: {f32, f64},  # aten::linalg_cholesky_ex.L
-    aten.linalg_cholesky_ex.default: {f32, f64},  # aten::linalg_cholesky_ex
     aten.linalg_eig.default: {f32, f64},  # aten::linalg_eig
     aten.linalg_eigh.default: {f32, f64},
     aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
@@ -793,8 +787,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.histc.default: {i16, i32, i64, i8},  # aten::histc
     aten.histc.out: {i16, i32, i64, i8},  # aten::histc.out
     aten.kthvalue.default: {f16},  # aten::kthvalue.values
-    aten.linalg_cholesky_ex.L: {f32, f64},  # aten::linalg_cholesky_ex.L
-    aten.linalg_cholesky_ex.default: {f32, f64},  # aten::linalg_cholesky_ex
     aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
     aten.linalg_householder_product.default: {f32, f64},  # aten::linalg_householder_product
     aten.linalg_householder_product.out: {f32, f64},  # aten::linalg_householder_product.out
