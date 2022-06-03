@@ -441,6 +441,11 @@ class TestNestedTensorDeviceType(TestCase):
         for i in range(len(ub1)):
             self.assertNotEqual(ub1[i], ub2[i])
 
+        nt1.clone(memory_format=torch.preserve_format)
+        msg = "clone_nested only supports memory format Preserve, but got ChannelsLast instead."
+        with self.assertRaisesRegex(RuntimeError, msg):
+            nt1.clone(memory_format=torch.channels_last)
+
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 
 if __name__ == '__main__':

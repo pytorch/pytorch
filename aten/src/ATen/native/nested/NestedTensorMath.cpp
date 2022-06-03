@@ -560,10 +560,15 @@ Tensor& NestedTensor_mul__Tensor(Tensor& self, const Tensor& other) {
 Tensor clone_nested(
     const Tensor& self,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
   TORCH_CHECK(
-      !optional_memory_format.has_value(),
-      "unsupported memory format option ",
-      optional_memory_format.value());
+      memory_format == MemoryFormat::Preserve,
+      "clone_nested only supports memory format Preserve, but got ",
+      memory_format,
+      " instead.");
+  // TODO: The size doesn't necessarily need to be cloned, but it is more
+  // conservative. This is something we could revisit once we land a more
+  // efficient implementation of nested_size_tensor_.
   return wrap_buffer(
       get_buffer(self).clone(), get_nested_size_tensor(self).clone());
 }
