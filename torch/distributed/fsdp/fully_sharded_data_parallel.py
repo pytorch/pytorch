@@ -1455,6 +1455,7 @@ class FullyShardedDataParallel(nn.Module):
         self._streams: Dict[str, torch.cuda.Stream] = {}
         self._fsdp_graph_order: List[nn.Module] = []
         self._my_fsdp_idx_in_graph: Optional[int] = None
+        self._pre_backward_hook_full_params_prefetched: bool = False
         for p in self.params:
             if hasattr(p, "_local_shard"):
                 # reset attributes that are added in _init_param_attributes, as
@@ -2626,19 +2627,15 @@ class FullyShardedDataParallel(nn.Module):
             if self._is_root:
                 self._queue_wait_for_post_backward()
 
-            if self._need_prefetch_pre_backward_hook():
-                # Always wait for all_gather before rebuilding full params, just
-                # in case full params have already been prefetched in previous layer's
-                # pre-backward hook.
-                torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
-
             # Start of a backward pass for the first time in an backward pass.
             self._assert_state([TrainingState_.IDLE])
             self.training_state = TrainingState_.BACKWARD_PRE
 
-            # All-gather full parameters, moving them to compute device if
-            # necessary.
-            self._rebuild_full_params()
+            # Only rebuilding full params when the params are not prefetched in previous layers
+            if not self._pre_backward_hook_full_params_prefetched:
+                # All-gather full parameters, moving them to compute device if necessary.
+                self._rebuild_full_params()
+            self._pre_backward_hook_full_params_prefetched = False
             # Wait for all_gather to finish before computation
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
@@ -2646,6 +2643,7 @@ class FullyShardedDataParallel(nn.Module):
             # since it is prefetching, no need to wait for all_gather stream.
             if self._need_prefetch_pre_backward_hook():
                 self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
+                self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._pre_backward_hook_full_params_prefetched = True
 
             self._pre_backward_hook_has_run = True
             # Prepare p.grad so that it is in the right shape, device, accumulated values, etc.
