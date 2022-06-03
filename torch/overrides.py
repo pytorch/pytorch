@@ -1748,7 +1748,7 @@ def _wrap_torch_function(f):
     @functools.wraps(f)
     def wrapped(self, *args, **kwargs):
         if isinstance(f, classmethod):
-            raise RuntimeError("TorchDispatchMode's torch_function function " +
+            raise RuntimeError("TorchFunctionMode's torch_function function " +
                                "should be a normal method not a class method")
         inner = getattr(self, "inner", None)
 
