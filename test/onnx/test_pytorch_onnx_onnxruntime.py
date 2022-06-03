@@ -3117,17 +3117,53 @@ class _TestONNXRuntime:
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_listunpack(self):
-        class ListUnpack(torch.jit.ScriptModule):
+        class ListUnpack(torch.nn.Module):
             @torch.jit.script_method
             def forward(self, x):
                 a, b = x.shape
                 return x.new_zeros((a, b))
 
         x = torch.randn(2, 3)
-        self.run_test(ListUnpack(), x, input_names=["x"], dynamic_axes={"x": [0, 1]})
-        self.run_test(ListUnpack(), x, remained_onnx_input_idx=[])
+        self.run_test(
+            torch.jit.script(ListUnpack()),
+            x,
+            input_names=["x"],
+            dynamic_axes={"x": [0, 1]},
+        )
+        self.run_test(torch.jit.script(ListUnpack()), x, remained_onnx_input_idx=[])
 
-        class ListUnpackSlice(torch.jit.ScriptModule):
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_listunpack_runs_without_error_with_construct_list_as_input(self):
+        class PackUnpack(torch.nn.Module):
+            """Create and unpack a list of tensors.
+
+            It should produce a graph similar to
+
+            ```
+            graph(%self : __torch__.PackUnpack,
+                %a.1 : Tensor,
+                %b.1 : Tensor):
+            %packed.1 : Tensor[] = prim::ListConstruct(%a.1, %b.1)
+            %c.1 : Tensor, %8 : Tensor = prim::ListUnpack(%packed.1)
+            return (%c.1)
+            ```
+            """
+
+            def forward(self, a, b):
+                packed = [a, b]
+                c, _ = packed
+                return c
+
+        inputs = [torch.tensor(0), torch.tensor([42])]
+        self.run_test(
+            torch.jit.script(PackUnpack()),
+            inputs,
+            input_names=["a", "b"],
+        )
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_listunpack_slice(self):
+        class ListUnpackSlice(torch.nn.Module):
             @torch.jit.script_method
             def forward(self, x):
                 a, b = x.shape[2:]
@@ -3135,9 +3171,14 @@ class _TestONNXRuntime:
 
         x = torch.randn(2, 3, 4, 5)
         self.run_test(
-            ListUnpackSlice(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2, 3]}
+            torch.jit.script(ListUnpackSlice()),
+            x,
+            input_names=["x"],
+            dynamic_axes={"x": [0, 1, 2, 3]},
         )
-        self.run_test(ListUnpackSlice(), x, remained_onnx_input_idx=[])
+        self.run_test(
+            torch.jit.script(ListUnpackSlice()), x, remained_onnx_input_idx=[]
+        )
 
     def test_pow(self):
         class PowModule(torch.nn.Module):
@@ -12284,13 +12325,14 @@ class _TestONNXRuntime:
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_qat_avg_pool2d(self):
-        model = torch.nn.Sequential()
-        model.add_module("quant", torch.quantization.QuantStub())
-        model.add_module(
-            "avgpool", torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
+        layers = OrderedDict(
+            [
+                ("quant", torch.quantization.QuantStub()),
+                ("avgpool", torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1)),
+                ("dequant", torch.quantization.DeQuantStub()),
+            ]
         )
-        model.add_module("dequant", torch.quantization.DeQuantStub())
-
+        model = torch.nn.Sequential(layers)
         model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
         model = torch.quantization.prepare_qat(model.train())
         model = torch.quantization.convert(model)
@@ -12301,13 +12343,14 @@ class _TestONNXRuntime:
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_qat_upsample_nearest2d(self):
-        model = torch.nn.Sequential()
-        model.add_module("quant", torch.quantization.QuantStub())
-        model.add_module(
-            "upsample_nearest2d", torch.nn.UpsamplingNearest2d(scale_factor=1.5)
+        layers = OrderedDict(
+            [
+                ("quant", torch.quantization.QuantStub()),
+                ("upsample_nearest2d", torch.nn.UpsamplingNearest2d(scale_factor=1.5)),
+                ("dequant", torch.quantization.DeQuantStub()),
+            ]
         )
-        model.add_module("dequant", torch.quantization.DeQuantStub())
-
+        model = torch.nn.Sequential(layers)
         model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
         model = torch.quantization.prepare_qat(model.train())
         model = torch.quantization.convert(model)
