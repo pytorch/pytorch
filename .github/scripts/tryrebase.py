@@ -106,6 +106,10 @@ def main() -> None:
     pr = GitHubPR(org, project, args.pr_num)
     onto_branch = args.branch if args.branch else pr.default_branch()
 
+    msg = "@pytorchbot successfully started a rebase job."
+    msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
+    gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
+
     if pr.is_closed():
         gh_post_comment(org, project, args.pr_num, f"PR #{args.pr_num} is closed, won't rebase", dry_run=args.dry_run)
         return
