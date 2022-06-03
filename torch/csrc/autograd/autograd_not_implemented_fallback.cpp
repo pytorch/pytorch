@@ -353,7 +353,7 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(
           /* is_bw_differentiable=*/true,
           /* is_fw_differentiable=*/true,
           /* creation_meta=*/
-              InferenceMode::is_enabled()
+          InferenceMode::is_enabled()
               ? CreationMeta::INFERENCE_MODE
               : (at::GradMode::is_enabled() ? CreationMeta::MULTI_OUTPUT_NODE
                                             : CreationMeta::NO_GRAD_MODE));
@@ -382,7 +382,7 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(
             return at::Tensor();
           },
           /* creation_meta=*/
-              InferenceMode::is_enabled()
+          InferenceMode::is_enabled()
               ? CreationMeta::INFERENCE_MODE
               : (at::GradMode::is_enabled() ? CreationMeta::DEFAULT
                                             : CreationMeta::NO_GRAD_MODE));

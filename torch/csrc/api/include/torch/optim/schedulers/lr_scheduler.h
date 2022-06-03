@@ -10,8 +10,8 @@ namespace optim {
 class TORCH_API LRScheduler {
  public:
   // This class needs to take a reference of an optimizer from outside such that
-  // it can modify its learning rates; due to this the lifetime of said optimizer
-  // must be maintained
+  // it can modify its learning rates; due to this the lifetime of said
+  // optimizer must be maintained
   LRScheduler(torch::optim::Optimizer& optimizer);
 
   virtual ~LRScheduler() = default;

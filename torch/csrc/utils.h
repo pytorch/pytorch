@@ -174,8 +174,12 @@ typedef THPPointer<THPGenerator> THPGeneratorPtr;
 template <typename T>
 struct THPUtils_typeTraits {};
 
-#include <torch/csrc/THGenerateByteType.h>
+// Disabling clang-format because the order of these includes matters.
+// This is mega-sus.
+// clang-format off
 #include <torch/csrc/generic/utils.h>
+#include <torch/csrc/THGenerateByteType.h>
+// clang-format on
 
 std::vector<int64_t> THPUtils_unpackLongs(PyObject* arg);
 PyObject* THPUtils_dispatchStateless(

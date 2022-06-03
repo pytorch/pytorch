@@ -405,8 +405,7 @@ at::TensorBase VariableHooks::tensor_data(const at::TensorBase& self) const {
   auto self_impl_copy = self.unsafeGetTensorImpl()->shallow_copy_and_detach(
       /*version_counter=*/self.unsafeGetTensorImpl()->version_counter(),
       /*allow_tensor_metadata_change=*/
-      self.unsafeGetTensorImpl()
-          ->allow_tensor_metadata_change());
+      self.unsafeGetTensorImpl()->allow_tensor_metadata_change());
   return at::Tensor(self_impl_copy);
 }
 

@@ -15,7 +15,7 @@
     otherwise Clang 3.8 would complain:                               \
     ```                                                               \
     error: default initialization of an object of const type 'const   \
-    enumtype::Enum1' without a user-provided default constructor                          \
+    enumtype::Enum1' without a user-provided default constructor      \
     ```                                                               \
   */                                                                  \
   struct k##name {                                                    \
