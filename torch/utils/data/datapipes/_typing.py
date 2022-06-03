@@ -339,10 +339,44 @@ class _DataPipeMeta(GenericMeta):
 
 class _IterDataPipeMeta(_DataPipeMeta):
     r"""
-    Metaclass for `IterDataPipe` and inherits from `_DataPipeMeta`. Aad a hook function to `__iter__`.
+    Metaclass for `IterDataPipe` and inherits from `_DataPipeMeta`. Aad various functions for behaviors
+    specific to `IterDataPipe`.
     """
 
     def __new__(cls, name, bases, namespace, **kwargs):
+
+        if 'reset' in namespace:
+            reset_func = namespace['reset']
+
+            @functools.wraps(reset_func)
+            def conditional_reset(*args, **kwargs):
+                r"""
+                Only execute DataPipe's `reset()` method if `_restored` is False. This allows recently
+                restored DataPipe to preserve its restored state during the initial `__iter__` call.
+                """
+                datapipe = args[0]
+                if datapipe._restored is True:
+                    datapipe._restored = False
+                else:
+                    reset_func(*args, **kwargs)
+
+            namespace['reset'] = conditional_reset
+
+        if '__setstate__' in namespace:
+            setstate_func = namespace['__setstate__']
+
+            @functools.wraps(setstate_func)
+            def wrap_setstate(*args, **kwargs):
+                r"""
+                Set `_restored` to True during `__setstate__`, such that the next `reset()` call during
+                iterator creation will not actually reset the state of the DataPipe.
+                """
+                datapipe = args[0]
+                datapipe._restored = True
+                return setstate_func(*args, **kwargs)
+
+            namespace['__setstate__'] = wrap_setstate
+
         if '__iter__' in namespace:
             hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
@@ -377,34 +411,38 @@ def _generate_iterdatapipe_msg(datapipe):
     return f"{datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
 
 
+def _gen_invalid_iterdatapipe_msg(datapipe):
+    return ("This iterator has been invalidated because another iterator has been created"
+            f"from the same IterDataPipe: {_generate_iterdatapipe_msg(datapipe)}\n"
+            "This may be caused multiple references to the same IterDataPipe. We recommend "
+            "using `.fork()` if that is necessary.")
+
+
+_feedback_msg = ("\nFor feedback regarding this single iterator per IterDataPipe constraint, feel free "
+                 "to comment on this issue: https://github.com/pytorch/data/issues/45.")
+
 def _check_iterator_valid(datapipe, iterator_id, next_method_exists=False) -> None:
     r"""
     Given an instance of a DataPipe and an iterator ID, check if the IDs match, and if not, raises an exception.
     In the case of ChildDataPipe, the ID gets compared to the one stored in `main_datapipe` as well.
     """
-    msg = ("This iterator has been invalidated because another iterator has been created"
-           f"from the same IterDataPipe: {_generate_iterdatapipe_msg(datapipe)}\n"
-           "This may be caused multiple references to the same IterDataPipe. We recommend "
-           "using `.fork()` if that is necessary.")
-    feedback_msg = ("\nFor feedback regarding this single iterator per IterDataPipe constraint, feel free "
-                    "to comment on this issue: https://github.com/pytorch/data/issues/45.")
     if next_method_exists:
         # This is the case where `IterDataPipe` has both `__iter__` and `__next__`.
         # The `_valid_iterator_id` should either be never set (`None`), or set by at most one
         # iterator (`0`). Otherwise, it means there are multiple iterators.
         if datapipe._valid_iterator_id is not None and datapipe._valid_iterator_id != 0:
             extra_msg = "\nNote that this exception is raised inside your IterDataPipe's a `__next__` method"
-            raise RuntimeError(msg + extra_msg + feedback_msg)
+            raise RuntimeError(_gen_invalid_iterdatapipe_msg(datapipe) + extra_msg + _feedback_msg)
     elif hasattr(datapipe, "_is_child_datapipe") and datapipe._is_child_datapipe is True:
         if hasattr(datapipe, "_check_valid_iterator_id"):
             if not datapipe._check_valid_iterator_id(iterator_id):
                 raise RuntimeError("This iterator has been invalidated, because a new iterator has been created "
                                    f"from one of the ChildDataPipes of "
-                                   f"{_generate_iterdatapipe_msg(datapipe.main_datapipe)}." + feedback_msg)
+                                   f"{_generate_iterdatapipe_msg(datapipe.main_datapipe)}." + _feedback_msg)
         else:
             raise RuntimeError("ChildDataPipe must have method `_check_valid_iterator_id`.")
     elif datapipe._valid_iterator_id != iterator_id:
-        raise RuntimeError(msg + feedback_msg)
+        raise RuntimeError(_gen_invalid_iterdatapipe_msg(datapipe) + _feedback_msg)
 
 
 def _set_datapipe_valid_iterator_id(datapipe):
@@ -492,9 +530,6 @@ def hook_iterator(namespace, profile_name):
             @functools.wraps(next_func)
             def wrap_next(*args, **kwargs):
                 with context():
-                    # Commented out since we do not wish to invalidate `datapipe` for now
-                    # datapipe = args[0]
-                    # _check_iterator_valid(datapipe, None, next_method_exists=True)
                     return next_func(*args, **kwargs)
 
             namespace['__next__'] = wrap_next

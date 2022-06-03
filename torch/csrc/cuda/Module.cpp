@@ -150,6 +150,18 @@ PyObject * THCPModule_getCurrentStream_wrap(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_getCurrentStream_raw(
+    PyObject * /* unused */, PyObject *device_index) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(
+    THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
+  int64_t device = THPUtils_unpackLong(device_index);
+  return PyLong_FromVoidPtr(
+    at::cuda::getCurrentCUDAStream(device).stream());
+  END_HANDLE_TH_ERRORS
+}
+
+
 PyObject * THCPModule_getDefaultStream_wrap(
     PyObject * /* unused */, PyObject *device_index) {
   HANDLE_TH_ERRORS
@@ -248,29 +260,33 @@ PyObject * THCPModule_cudaJiteratorCompileAndLaunchKernel(PyObject *_unused, PyO
 
   PyObject* code_string_o = nullptr;
   PyObject* kernel_name_o = nullptr;
+  PyObject* return_by_ref_o = nullptr;
+  PyObject* num_outputs_o = nullptr;
   PyObject* tensors_o = nullptr;
   PyObject* kwargs_o = nullptr;
-  if(!PyArg_ParseTuple(args, "OOO|O", &code_string_o, &kernel_name_o, &tensors_o, &kwargs_o)) {
+  if(!PyArg_ParseTuple(args, "OOOOO|O",
+                       &code_string_o, &kernel_name_o, &return_by_ref_o, &num_outputs_o, &tensors_o, &kwargs_o)) {
     return nullptr;
   }
 
-  std::string code_string = THPUtils_unpackString(code_string_o);
-  std::string kernel_name = THPUtils_unpackString(kernel_name_o);
+  const std::string code_string = THPUtils_unpackString(code_string_o);
+  const std::string kernel_name = THPUtils_unpackString(kernel_name_o);
+  const bool return_by_ref = THPUtils_unpackBool(return_by_ref_o);
+  const int num_outputs = static_cast<int>(THPUtils_unpackLong(num_outputs_o));
 
   THPUtils_assert(PyTuple_Check(tensors_o), "tensors argument is expected to "
       "be a tuple, but got %s", THPUtils_typename(tensors_o));
   Py_ssize_t num_tensors = PyTuple_GET_SIZE(tensors_o);
 
-  std::vector<at::Tensor> tensors;
+  c10::SmallVector<at::Tensor> tensors;
   for(const auto i : c10::irange(num_tensors)) {
     PyObject *_tensor = PyTuple_GET_ITEM(tensors_o, i);
-    THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
-        "tuple is not a Tensor", i);
+    THPUtils_assert(THPVariable_Check(_tensor), "%d of input tensors tuple is not a Tensor", i);
 
     tensors.emplace_back(THPVariable_Unpack(_tensor));
   }
 
-  std::vector<at::Scalar> extra_args;
+  c10::SmallVector<at::Scalar> extra_args;
   PyObject *key = nullptr;
   PyObject *value  = nullptr;
   Py_ssize_t pos = 0;
@@ -278,9 +294,19 @@ PyObject * THCPModule_cudaJiteratorCompileAndLaunchKernel(PyObject *_unused, PyO
     extra_args.emplace_back(as_scalar(value));
   }
 
-  at::Tensor output = at::cuda::CompileAndLaunchKernel(code_string, kernel_name, tensors, extra_args);
+  c10::SmallVector<at::Tensor> outputs =
+      at::cuda::CompileAndLaunchKernel(code_string, kernel_name, num_outputs, tensors, extra_args, return_by_ref);
 
-  return THPVariable_Wrap(output);
+  if (num_outputs == 1) {
+    return THPVariable_Wrap(outputs[0]);
+  } else{
+    PyObject* output_tuple = PyTuple_New(num_outputs);
+    for (int i = 0; i < num_outputs; ++i) {
+      PyTuple_SetItem(output_tuple, i, THPVariable_Wrap(outputs[i]));
+    }
+    return output_tuple;
+  }
+
   END_HANDLE_TH_ERRORS
 }
 
@@ -591,9 +617,6 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   auto m = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
   if (!m) throw python_error();
 
-  // Register Storage Python objects with DynamicTypes.cpp
-  THCPByteStorage_postInit(m);
-
   bool has_half = true;
 
   auto set_module_attr = [&](const char* name, PyObject* v) {
@@ -671,6 +694,8 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_isInBadFork", THCPModule_isInBadFork, METH_NOARGS, nullptr},
   {"_cuda_getCurrentStream",
     THCPModule_getCurrentStream_wrap, METH_O, nullptr},
+  {"_cuda_getCurrentRawStream",
+    THCPModule_getCurrentStream_raw, METH_O, nullptr},
   {"_cuda_getDefaultStream",
     THCPModule_getDefaultStream_wrap, METH_O, nullptr},
   {"_cuda_getCurrentBlasHandle", THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, nullptr},

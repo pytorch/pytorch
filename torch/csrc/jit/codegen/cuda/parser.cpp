@@ -3468,7 +3468,7 @@ void profileReductionSize(ProfilingRecord* pr, Node* node, size_t offset) {
         if (profiled_ints.size() != size_vec.size() ||
             !std::equal(
                 profiled_ints.begin(), profiled_ints.end(), size_vec.begin())) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
@@ -3510,7 +3510,7 @@ void profileViewSize(ProfilingRecord* pr, Node* node, size_t offset) {
                 profiled_ints.begin(),
                 profiled_ints.end(),
                 input_ints.begin())) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
@@ -3553,7 +3553,7 @@ void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
                 profiled_ints.begin(),
                 profiled_ints.end(),
                 input_ints.begin())) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
@@ -3592,7 +3592,7 @@ void profileString(ProfilingRecord* pr, Node* node, size_t offset) {
         const auto& profiled_str = pn->s(strAttr);
         const auto& input_str = value.toStringRef();
         if (input_str != profiled_str) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
@@ -3631,7 +3631,7 @@ void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
         auto profiled_bool = pn->i(boolAttr);
         auto input_bool = value.toBool();
         if (input_bool != profiled_bool) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
@@ -3670,7 +3670,7 @@ void profileInt(ProfilingRecord* pr, Node* node, size_t offset) {
         auto profiled_int = pn->i(intAttr);
         auto input_int = value.toInt();
         if (input_int != profiled_int) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
@@ -3707,7 +3707,7 @@ void profileIval(ProfilingRecord* pr, Node* node, size_t offset) {
       } else {
         auto profiled_ival = pn->ival(ivalAttr);
         if (value != profiled_ival) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
@@ -3752,7 +3752,7 @@ void profileBoolList(ProfilingRecord* pr, Node* node, size_t offset) {
                 input_bools.begin(),
                 input_bools.end(),
                 profiled_ints.begin())) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");

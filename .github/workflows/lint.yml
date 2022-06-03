@@ -87,6 +87,10 @@ jobs:
           # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
           # does not support the '\u000a' syntax (which is relevant for local linters)
           (! git --no-pager grep -In "$(printf '\xC2\xA0')" -- . || (echo "The above lines have non-breaking spaces (U+00A0); please convert them to spaces (U+0020)"; false))
+      - name: Ensure cross-OS compatible file names
+        if: always()
+        run: |
+          (! git ls-files | grep -E '([<>:"|?*]|[ .]$)' || (echo "The above file names are not valid across all operating systems. Please ensure they don't contain the characters '<>:""|?*' and don't end with a white space or a '.' "; false))
       - name: Ensure no versionless Python shebangs
         if: always()
         run: |
@@ -100,7 +104,7 @@ jobs:
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
           set -eux
-          python torch/testing/_check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
+          python torch/testing/_internal/check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
 
   workflow-checks:
     name: workflow-checks

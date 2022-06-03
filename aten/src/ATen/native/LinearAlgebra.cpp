@@ -55,7 +55,7 @@ namespace meta {
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")"); \
  \
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self); \
-  set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
 
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   ADDMM_META();
@@ -73,7 +73,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
       self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   auto names = at::namedinference::compute_matmul_outnames(self, mat2);
-  set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output_raw_strided(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
 }
 
 TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
@@ -106,7 +106,7 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
   auto options = self.options()
                      .dtype(toRealValueType(opt_dtype.value_or(self.scalar_type())));
 
-  set_output(shape, options);
+  set_output_raw_strided(0, shape, {}, options);
 }
 
 template <typename Meta>
@@ -129,7 +129,7 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
 
   auto& result = meta.maybe_get_output(0);
   // 'set_output' does not resize for in-place calls
-  meta.set_output(output_size, batch2.options());
+  meta.set_output_raw_strided(0, output_size, {}, batch2.options());
   const auto result_sizes = result.sizes();
   // Error is raised if called from in-place overload with incorrect shape
   TORCH_CHECK(result_sizes == output_size,
@@ -2410,18 +2410,21 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   auto dim = opt_dim.value_or(IntArrayRef{});
   // No need to handle opt_dtype explicitly as it is already encoded in the dtype of result
 
-  // Issue arising from the difference between vectorized and non-vectorized implementation on CPU
+  // https://github.com/pytorch/pytorch/issues/52648
+  // Reductions always use `std::abs` to compute the absolute value. In the backward of this
+  // function, we need to locate the index that was selected as the largest value. To do so
+  // we do self.abs() == result to locate the index of the largest element.
+  // Now, self.abs() may dispatch to a vectorized implementation which gives sliiightly different
+  // results to the std::abs(std::complex<T>) implementation.
+  // As such, to be able to compute the correct index in the backward, we need to use self.abs()
+  // both in the forward and in the backward
   Tensor self_;
-  if (self.device().type() == c10::kCPU &&
-      isComplexType(self.scalar_type()) &&
-      std::abs(ord) == INFINITY) {
-    // TODO: This at::abs() call is used so that the at::abs() call in the
-    // backward function produces an identical result for complex inputs.
-    // However, it would be ideal if we could incorporate this into
-    // linalg_vector_norm_stub. See issue:
-    // https://github.com/pytorch/pytorch/issues/52648
-    auto in_dtype = opt_dtype.value_or(self.scalar_type());
-    self_ = self.to(in_dtype).abs();
+  if (self.is_cpu() && self.is_complex() && std::abs(ord) == INFINITY) {
+    if (opt_dtype.has_value()) {
+      self_ = self.to(*opt_dtype).abs();
+    } else {
+      self_ = self.abs();
+    }
   } else {
     self_ = self;
   }
@@ -2513,7 +2516,6 @@ Tensor linalg_matrix_norm(
   TORCH_CHECK(ord == "fro" || ord == "nuc", "linalg.matrix_norm: Order ", ord, " not supported.");
 
   auto A_ = opt_dtype.has_value() ? A.to(*opt_dtype) : A;
-  using Int = IntArrayRef::value_type;
 
   if (ord == "fro") {
     return at::linalg_vector_norm(A_, 2, dim, keepdim);

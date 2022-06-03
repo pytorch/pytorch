@@ -45,11 +45,16 @@
 
 #include <torch/csrc/lazy/core/shape_inference.h>
 
+#include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/TensorConversions.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Functions.h>
 #include <ATen/Dispatch.h>
+#include <ATen/InferSize.h>
 #include <ATen/WrapDimUtils.h>
+#include <aten/src/ATen/ExpandUtils.h>
 #include <aten/src/ATen/native/ReduceOpsUtils.h>
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/api/include/torch/enum.h>
@@ -81,10 +86,11 @@ std::vector<int64_t> expand_param_if_needed(
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 
-std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out) {
+TORCH_API std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out) {
   double size_d = 0;
   // shape inference code copied from RangeFactories.cpp arange_out function
   // Note: AT_DISPATCH_ALL_TYPES_AND is just a macro that defines the correct c++ scalar_t type depending on out tensor
+
   AT_DISPATCH_ALL_TYPES_AND(c10::kBFloat16, out.scalar_type(), "compute_shape_arange_out", [&]() {
     // Note: acc_type further defines an accumulataion type depending on the scalar_t and whether its on cuda vs cpu.
     using accscalar_t = at::acc_type<scalar_t, false>;
@@ -129,7 +135,6 @@ std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::
   // If any of start, end, or stop are floating-point, the dtype is inferred to be the default dtype, see get_default_dtype().
   // Otherwise, the dtype is inferred to be torch.int64.
 
-  // Since out tensor is specified, its dtype should always be used?
   return {Shape(out.scalar_type(), {size})};
 }
 
@@ -145,7 +150,7 @@ std::vector<Shape> compute_shape_bernoulli(const at::Tensor & self, c10::optiona
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_bernoulli_(at::Tensor & self, double p, c10::optional<at::Generator> generator) {
+std::vector<Shape> compute_shape_bernoulli(const at::Tensor & self, double p, c10::optional<at::Generator> generator) {
   return compute_shape_bernoulli(self, generator);
 }
 
@@ -224,11 +229,11 @@ std::vector<Shape> compute_shape_convolution(const at::Tensor & input, const at:
   }
 }
 
-std::vector<Shape> compute_shape_masked_fill_(at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
+std::vector<Shape> compute_shape_masked_fill(const at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_masked_fill_(at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
+std::vector<Shape> compute_shape_masked_fill(const at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -306,6 +311,10 @@ std::vector<Shape> compute_shape_index_select(const at::Tensor & self, int64_t d
   return {Shape(self.scalar_type(), output_sizes)};
 }
 
+std::vector<Shape> compute_shape_inverse(const at::Tensor & self) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_kl_div_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& target, int64_t reduction, bool log_target) {
   // Based on definition of aten/src/ATen/native/Loss.cpp::kl_div_backward_cpu.
   return {Shape(self.scalar_type(), self.sizes().vec())};
@@ -380,24 +389,20 @@ std::vector<Shape> compute_shape_native_dropout_backward(const at::Tensor & grad
   return {Shape(grad_output.scalar_type(), grad_output.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_random_(at::Tensor & self, c10::optional<at::Generator> generator) {
+std::vector<Shape> compute_shape_random_functional(const at::Tensor & self, c10::optional<at::Generator> generator) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_random_(at::Tensor & self, int64_t to, c10::optional<at::Generator> generator) {
-  return compute_shape_random_(self, generator);
+std::vector<Shape> compute_shape_random_functional(const at::Tensor & self, int64_t to, c10::optional<at::Generator> generator) {
+  return compute_shape_random_functional(self, generator);
 }
 
-std::vector<Shape> compute_shape_random_(at::Tensor & self, int64_t from, c10::optional<int64_t> to, c10::optional<at::Generator> generator) {
-  return compute_shape_random_(self, generator);
+std::vector<Shape> compute_shape_random_functional(const at::Tensor & self, int64_t from, c10::optional<int64_t> to, c10::optional<at::Generator> generator) {
+  return compute_shape_random_functional(self, generator);
 }
 
 std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
-}
-
-std::vector<Shape> compute_shape_relu_(at::Tensor& self) {
-  return compute_shape_relu(self);
 }
 
 std::vector<Shape> compute_shape_bitwise_and(const at::Tensor& self, const at::Scalar& other) {
@@ -417,7 +422,7 @@ std::vector<Shape> compute_shape_sum(
   return {Shape(self.scalar_type(), {})};;
 }
 
-std::vector<Shape> compute_shape_zero_(at::Tensor& self) {
+std::vector<Shape> compute_shape_zero_functional(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -441,6 +446,36 @@ std::vector<Shape> compute_shape_smooth_l1_loss(
     default:
       return {Shape(self.scalar_type(), {})};
   }
+}
+
+std::vector<Shape> compute_shape_slogdet(const at::Tensor & self) {
+  // assumes self.shape is {*, n, n} and returns shape *
+  TORCH_INTERNAL_ASSERT(self.dim() >= 2);
+  std::vector<int64_t> out_sizes(self.sizes().begin(), self.sizes().end() - 2);
+  // Doesn't check input dtype, but output dtype either matches it,
+  // or the actual slogdet operation will throw if it's an unsupported type.
+  // Sign and det outputs hold the same shape, dtype.
+  return {Shape(self.scalar_type(), out_sizes),
+          Shape(self.scalar_type(), out_sizes)};
+}
+
+std::vector<torch::lazy::Shape> compute_shape_logical_and(at::Tensor & self, const at::Tensor & other) {
+  TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
+  return {Shape(c10::ScalarType::Bool, at::infer_size(self.sizes(), other.sizes()))};
+}
+
+std::vector<torch::lazy::Shape> compute_shape_logical_not(at::Tensor & self) {
+  return {Shape(c10::ScalarType::Bool, self.sizes().vec())};
+}
+
+std::vector<torch::lazy::Shape> compute_shape_logical_or(at::Tensor & self, const at::Tensor & other) {
+  TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
+  return {Shape(c10::ScalarType::Bool, at::infer_size(self.sizes(), other.sizes()))};
+}
+
+std::vector<torch::lazy::Shape> compute_shape_logical_xor(at::Tensor & self, const at::Tensor & other) {
+  TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
+  return {Shape(c10::ScalarType::Bool, at::infer_size(self.sizes(), other.sizes()))};
 }
 
 std::vector<Shape> compute_shape_smooth_l1_loss_backward(
@@ -616,6 +651,67 @@ std::vector<Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef
 
 std::vector<Shape> compute_shape_narrow_copy(const at::Tensor & self, int64_t dim, int64_t start, c10::SymInt length) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+
+// Non-Native Ops
+std::vector<Shape> compute_shape_scalar(const at::Scalar& value, const at::ScalarType& type) {
+  return { Shape(type, {}) };
+}
+std::vector<Shape> compute_shape_expand(const Output& input, const std::vector<int64_t>& size, const bool& is_scalar_expand) {
+  return { Shape(input.shape().scalar_type(), size) };
+}
+std::vector<Shape> compute_shape_view(const Output& input, const std::vector<int64_t>& output_sizes) {
+  const Shape& input_shape = input.shape();
+  const auto complete_output_sizes =
+      at::infer_size(output_sizes, input_shape.numel());
+  return { Shape(input_shape.scalar_type(), complete_output_sizes) };
+}
+std::vector<Shape> compute_shape_cast(const Output& input, const at::ScalarType& dtype, const c10::optional<at::ScalarType>& stype) {
+  Shape shape = input.shape();
+  shape.set_scalar_type(dtype);
+  return { shape };
+}
+
+
+// View Ops
+std::vector<Shape> compute_shape_as_strided_view_update(const Output& target, const Output& input, const std::vector<int64_t>& size, const std::vector<int64_t>& stride, const int64_t& storage_offset) {
+  return { Shape(target.shape().scalar_type(), size) };
+}
+std::vector<Shape> compute_shape_as_strided(const Output& input, const std::vector<int64_t>& size, const std::vector<int64_t>& stride, const int64_t& storage_offset) {
+  return { Shape(input.shape().scalar_type(), size) };
+}
+std::vector<Shape> compute_shape_diagonal_view_update(const Output& target, const Output& input, const int64_t& offset, const int64_t& dim1, const int64_t& dim2) {
+  return { target.shape() };
+}
+std::vector<Shape> compute_shape_diagonal(const Output& input, const int64_t& offset, const int64_t& dim1, const int64_t& dim2) {
+  return { MakeDiagonalShape(input.shape(), offset, dim1, dim2) };
+}
+std::vector<Shape> compute_shape_narrow_view_update(const Output& input, const Output& source, const std::vector<int64_t>& base_indices) {
+  return { input.shape() };
+}
+std::vector<Shape> compute_shape_narrow(const Output& input, const std::vector<int64_t>& base_indices, const std::vector<int64_t>& sizes) {
+  return { Shape(input.shape().scalar_type(), sizes) };
+}
+std::vector<Shape> compute_shape_permute(const Output& input, const std::vector<int64_t>& dims) {
+  return { MakePermuteShape(input.shape(), dims) };
+}
+std::vector<Shape> compute_shape_resize(const Output& input, const std::vector<int64_t>& size) {
+  return { Shape(input.shape().scalar_type(), size) };
+}
+std::vector<Shape> compute_shape_select_view_update(const Output& target, const Output& source, const int64_t& dim, const int64_t& start, const int64_t& end, const int64_t& stride) {
+  return { target.shape() };
+}
+std::vector<Shape> compute_shape_select(const Output& input, const int64_t& dim, const int64_t& start, const int64_t& end, const int64_t& stride) {
+  return { MakeSelectShape(input.shape(), dim, start, end, stride) };
+}
+std::vector<Shape> compute_shape_squeeze(const Output& input, const int& dim) {
+  const auto& input_shape = input.shape();
+  return { torch::lazy::Shape(input_shape.scalar_type(), BuildSqueezedDimensions(input_shape.sizes(), dim)) };
+}
+std::vector<Shape> compute_shape_unsqueeze(const Output& input, const int& dim) {
+  const auto& input_shape = input.shape();
+  return { torch::lazy::Shape(input_shape.scalar_type(), BuildUnsqueezedDimensions(input_shape.sizes(), dim)) };
 }
 
 // Restore unused-parameters warnings

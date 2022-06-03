@@ -980,6 +980,14 @@ class TestNN(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
                 module(input)
 
+    def test_conv_invalid_groups(self):
+        with self.assertRaisesRegex(ValueError, 'groups must be a positive integer'):
+            torch.nn.Conv1d(1, 1, kernel_size=3, dilation=2, stride=2, groups=0)
+        with self.assertRaisesRegex(ValueError, 'groups must be a positive integer'):
+            torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2, groups=-1)
+        with self.assertRaisesRegex(ValueError, 'groups must be a positive integer'):
+            torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2, groups=-2)
+
     def test_Conv1d_module_same_padding(self):
         # Compare module against functional: without strides/dilation, asymmetric padding
         x = torch.rand(1, 1, 20)
@@ -1829,6 +1837,14 @@ class TestNN(NNTestCase):
         self.assertIsInstance(param_list[-1], Parameter)
         parameters += param_list[-2:]
         check()
+
+    def test_ParameterList_meta(self):
+        p = torch.nn.Parameter(torch.empty(1, device='meta'))
+        self.assertExpectedInline(str(p), """\
+Parameter containing:
+tensor(..., device='meta', size=(1,), requires_grad=True)""")
+        pl = torch.nn.ParameterList([p])
+        self.assertExpectedInline(str(pl), """ParameterList(  (0): Parameter containing: [torch.float64 of size 1])""")
 
     def test_ParameterList_replication(self):
         # The actual replication code from DP cannot be used on CPU so doing it manually here
@@ -6834,6 +6850,7 @@ class TestNN(NNTestCase):
 
     # For https://github.com/pytorch/pytorch/pull/1273
     # Almost identical to the above `test_Conv2d_naive_groups`
+    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_Conv2d_groups_nobias(self):
         dev_dtypes = [("cpu", torch.float)]
         if TEST_CUDA:
@@ -6871,6 +6888,7 @@ class TestNN(NNTestCase):
     # Covering special case when group > 1, input-channel / group < 16 and output-channel is multiple of 16
     # See also https://github.com/pytorch/pytorch/pull/18463#issuecomment-476563686
     # and https://github.com/pytorch/pytorch/pull/18463#issuecomment-477001024
+    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_Conv2d_groups_nobias_v2(self):
         torch.manual_seed(123)
         dev_dtypes = [("cpu", torch.float)]
@@ -7962,6 +7980,9 @@ class TestNN(NNTestCase):
             mask[0, 1] = 1
             mask[1, 3] = 1
             mask[1, 4] = 1
+            # If mask is not left aligned
+            # We disable nested tensor
+            model.enable_nested_tensor = False
             result = model(encoder_input, src_key_padding_mask=mask)
             ref_output = perm_fn(torch.tensor([[[2.429026, 0.020793, -0.601741, -0.085642],
                                                 [2.428811, 0.021445, -0.601912, -0.084252]],
@@ -7978,7 +7999,7 @@ class TestNN(NNTestCase):
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
             # test case 2, multiple layers no norm
-            model = nn.TransformerEncoder(encoder_layer, 2).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 2, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -7996,7 +8017,7 @@ class TestNN(NNTestCase):
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
-            model = nn.TransformerEncoder(encoder_layer, 6).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 6, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -8017,7 +8038,7 @@ class TestNN(NNTestCase):
             # test case 3, multiple layers with norm
             # d_model = 4
             norm = nn.LayerNorm(4)
-            model = nn.TransformerEncoder(encoder_layer, 2, norm=norm).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 2, norm=norm, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -8035,7 +8056,7 @@ class TestNN(NNTestCase):
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
-            model = nn.TransformerEncoder(encoder_layer, 6, norm=norm).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 6, norm=norm, enable_nested_tensor=False).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -13110,17 +13131,6 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
-    def _test_LayerNorm_cpu_mixed_dtype(self, device):
-        for elementwise_affine in [True, False]:
-            # layer norm input shape is normalized to m x n, cpu vectorized on n,
-            # so make sure n exceeds vector length
-            input = torch.empty(2, 3, 11, 3, device=device, dtype=torch.bfloat16).random_(1, 10)
-            m = nn.LayerNorm([11, 3], elementwise_affine=elementwise_affine).to(device, torch.bfloat16)
-            m2 = deepcopy(m).to(device, torch.float)
-            out = m(input)
-            out2 = m2(input)
-            self.assertEqual(out, out2)
-
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {
             (1, 2, 3, 4): 2,
@@ -13512,6 +13522,7 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float, torch.double, torch.half)
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
+    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_Conv2d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
             m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to(device, dtype)
@@ -13553,6 +13564,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypes(torch.float, torch.double, torch.half)
     @tf32_on_and_off(0.005)
+    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_Conv3d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
             m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to(device, dtype)
@@ -13710,6 +13722,7 @@ class TestNNDeviceType(NNTestCase):
                                                no_weight)
 
     @dtypes(torch.float, torch.cfloat)
+    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_conv1d_same_padding(self, device, dtype):
         # Test padding='same' outputs the correct shape
         test_args = [
@@ -14057,7 +14070,10 @@ class TestNNDeviceType(NNTestCase):
             if mode == 'same':
                 actual = actual[:5, :5, :10]
 
-            self.assertEqual(actual, expected, rtol=2e-5, atol=5e-6)
+            if tf32_is_not_fp32() and (dtype == torch.float or dtype == torch.complex64):
+                self.assertEqual(actual, expected, atol=0.05, rtol=0.05)
+            else:
+                self.assertEqual(actual, expected, rtol=2e-5, atol=5e-6)
 
         # Global dtype for this test suite is torch.double
         # This leads to change in type-promotion
@@ -14494,9 +14510,6 @@ class TestNNDeviceType(NNTestCase):
 
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
-
-        if self.device_type == 'cpu':
-            self._test_LayerNorm_cpu_mixed_dtype(device)
 
     @onlyNativeDeviceTypes
     def test_LayerNorm_numeric(self, device):
@@ -18336,6 +18349,7 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypesIfCUDA(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     @dtypes(torch.float)
+    @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_Conv2d_naive_groups(self, device, dtype):
         # Check that grouped convolutions matches two half convolutions
         m = nn.Conv2d(4, 4, kernel_size=3, groups=2).to(device, dtype)
@@ -19494,7 +19508,10 @@ class TestNNDeviceType(NNTestCase):
             w = w.to(memory_format=memory_format)
             cudnn_out = torch.cudnn_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
-            self.assertEqual(conv2d_out.relu(), cudnn_out)
+            if tf32_is_not_fp32() and dtype == torch.float:
+                self.assertEqual(conv2d_out.relu(), cudnn_out, atol=2e-4, rtol=0.006)
+            else:
+                self.assertEqual(conv2d_out.relu(), cudnn_out)
 
     @onlyCUDA
     @skipCUDAIfRocm
@@ -19522,7 +19539,10 @@ class TestNNDeviceType(NNTestCase):
             cudnn_out = torch.cudnn_convolution_add_relu(inp, w, z, alpha, None, (1, 1), (0, 0), (1, 1), 1)
 
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
-            self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out)
+            if tf32_is_not_fp32() and dtype == torch.float:
+                self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out, atol=3e-4, rtol=0.006)
+            else:
+                self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out)
 
     @onlyCUDA
     @skipCUDAIfRocm

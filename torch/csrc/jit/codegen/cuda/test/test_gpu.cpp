@@ -22976,6 +22976,53 @@ TEST_F(NVFuserTest, FusionContigPredicate_CUDA) {
   testValidate(fe.kernel(), cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
+// Repro of an issue of the reduction scheduler with a broadcast
+// domain concretized to multiple domains that are not proven to have
+// the same extent
+TEST_F(NVFuserTest, FusionRepro1713_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeSymbolicTensor(2);
+  auto tv2 = makeSymbolicTensor(1);
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+  fusion->addInput(tv2);
+  auto tv3 = broadcast(tv2, {false, true});
+
+  auto tv4 = add(tv3, tv0);
+
+  auto tv5 = add(tv3, tv1);
+  auto tv6 = sum(tv5, {0});
+  fusion->addOutput(tv4);
+  fusion->addOutput(tv6);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({1024, 204800}, options);
+  // Original repro had the same shape as t0, but this should work
+  // with a different extent at the second axis
+  at::Tensor t1 = at::randn({1024, 123}, options);
+  at::Tensor t2 = at::randn({1024}, options);
+  std::vector<IValue> aten_inputs({t0, t1, t2});
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+
+  auto t3 = t2.unsqueeze(-1);
+  auto t4 = t3 + t0;
+  auto t5 = t3 + t1;
+  auto t6 = sum(t5, {0});
+
+  testValidate(
+      executor_cache.fusion(),
+      cg_outputs,
+      {t0, t1, t2},
+      {t4, t6},
+      __LINE__,
+      __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
