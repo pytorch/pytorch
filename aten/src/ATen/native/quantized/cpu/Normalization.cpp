@@ -2,7 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <torch/library.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <c10/util/irange.h>
 
 #include <algorithm>
