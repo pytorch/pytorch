@@ -61,7 +61,7 @@ jobs:
 
   quick-checks:
     name: quick-checks
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -87,6 +87,10 @@ jobs:
           # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
           # does not support the '\u000a' syntax (which is relevant for local linters)
           (! git --no-pager grep -In "$(printf '\xC2\xA0')" -- . || (echo "The above lines have non-breaking spaces (U+00A0); please convert them to spaces (U+0020)"; false))
+      - name: Ensure cross-OS compatible file names
+        if: always()
+        run: |
+          (! git ls-files | grep -E '([<>:"|?*]|[ .]$)' || (echo "The above file names are not valid across all operating systems. Please ensure they don't contain the characters '<>:""|?*' and don't end with a white space or a '.' "; false))
       - name: Ensure no versionless Python shebangs
         if: always()
         run: |
@@ -100,11 +104,11 @@ jobs:
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
           set -eux
-          python torch/testing/_check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
+          python torch/testing/_internal/check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
 
   workflow-checks:
     name: workflow-checks
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -148,7 +152,7 @@ jobs:
 
   toc:
     name: toc
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
     env:
       NPM_CONFIG_PREFIX: ~/.npm-global
@@ -190,7 +194,7 @@ jobs:
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -223,7 +227,7 @@ jobs:
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     strategy:
       matrix:
         with_torch: [with_torch, without_torch]

@@ -526,6 +526,7 @@ class DeviceCachingAllocator {
     if (!block_found) {
       // Do garbage collection if the flag is set.
       if (C10_UNLIKELY(
+              set_fraction &&
               CachingAllocatorConfig::garbage_collection_threshold() > 0.0)) {
         garbage_collect_cached_blocks();
       }
@@ -1129,6 +1130,7 @@ class DeviceCachingAllocator {
     BlockPool& pool = *p.pool;
 
     if (C10_UNLIKELY(
+            set_fraction &&
             CachingAllocatorConfig::garbage_collection_threshold() > 0.0)) {
       // Track block reuse interval only when garbage collection is enabled.
       for (auto& b : pool.blocks) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/Tensor.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 
 #include <torch/csrc/lazy/core/tensor.h>
@@ -38,6 +39,8 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   int64_t numel_custom() const override;
   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
 
+  virtual c10::SymIntArrayRef sym_sizes_custom() const override;
+
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
   const at::Storage& storage() const override { return tensor_->Storage(); }
   bool has_storage() const override { return tensor_->Storage(); }
@@ -47,6 +50,7 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   void setup_size_properties();
 
   LazyTensorPtr tensor_;
+  std::vector<c10::SymInt> sym_sizes_;
   size_t generation_ {0};
 };
 

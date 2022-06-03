@@ -64,7 +64,7 @@ public:
     py::gil_scoped_acquire g;
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
     auto obj = py::reinterpret_steal<py::object>(PyObject_Call(func_.ptr(getPyInterpreter()), args_kwargs.first.ptr(), args_kwargs.second.ptr()));
-    if (obj == nullptr) { throw python_error(); }
+    if (!obj) { throw python_error(); }
     pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
   }
 };
@@ -149,9 +149,10 @@ void initDispatchBindings(PyObject* module) {
       );
       END_HANDLE_TH_ERRORS_PYBIND
     }, "", py::arg("name"), py::arg("dispatch"), py::arg("func"))
-    .def("define", [](py::object self, const char* schema) {
-      self.cast<torch::Library&>().def(torch::schema(schema, c10::AliasAnalysisKind::FROM_SCHEMA));
-    }, "", py::arg("schema"))
+    .def("define", [](py::object self, const char* schema, const char* alias_analysis) {
+      self.cast<torch::Library&>().def(torch::schema(schema, parseAliasAnalysisKind(alias_analysis)));
+      return torch::schema(schema, parseAliasAnalysisKind(alias_analysis)).name();
+    }, "", py::arg("schema"), py::arg("alias_analysis") = "")
     .def("fallback_fallthrough", [](py::object self, const char* dispatch) {
       self.cast<torch::Library&>().fallback(
         dispatch_str(dispatch, CppFunction::makeFallthrough())
@@ -166,7 +167,7 @@ void initDispatchBindings(PyObject* module) {
       parseKind(kind),
       std::move(name),
       std::string(dispatch) == "" ? c10::nullopt : c10::make_optional(c10::parseDispatchKey(dispatch)),
-      file,
+      "/dev/null", // temporary workaround
       linenum);
     END_HANDLE_TH_ERRORS_PYBIND
   }, "", py::arg("kind"), py::arg("name"), py::arg("dispatch"), py::arg("file")="/dev/null", py::arg("linenum")=0)
@@ -200,6 +201,17 @@ void initDispatchBindings(PyObject* module) {
 
   m.def("_dispatch_check_all_invariants", []() {
     c10::Dispatcher::singleton().checkInvariants();
+  });
+
+  m.def("_dispatch_has_kernel", [](const char* name) -> bool {
+    auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+    return static_cast<bool>(op);
+  });
+
+  m.def("_dispatch_has_kernel_for_dispatch_key", [](const char* name, const char* dispatch) -> bool {
+    auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+    TORCH_CHECK(op, "operator ", name, " does not exist");
+    return op->hasKernelForDispatchKey(c10::parseDispatchKey(dispatch));
   });
 
   m.def("_dispatch_find_dangling_impls", []() -> std::vector<std::string> {

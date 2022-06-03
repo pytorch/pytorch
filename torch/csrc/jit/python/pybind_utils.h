@@ -1215,7 +1215,8 @@ inline py::object _get_operation_for_overload_or_packet(
         total_arg_num,
         false /* throw_error */);
   }
-  if (overloaded_args.size() > 0) {
+  if (overloaded_args.size() > 0 ||
+      at::impl::PythonTorchFunctionTLS::get_mode()) {
     std::vector<py::object> overloaded_types;
     overloaded_types.reserve(overloaded_args.size());
     for (auto& oarg : overloaded_args) {

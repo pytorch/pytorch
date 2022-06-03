@@ -91,6 +91,7 @@ _SKIP_PYTHON_BINDINGS = [
     ".*_backward_(out|input|weight|bias)",
     ".*_forward",
     ".*_forward_out",
+    ".*_jvp",
     "_unsafe_view",
     "tensor",
     "_?sparse_(coo|compressed|csr|csc|bsr|bsc)_tensor.*",
@@ -153,6 +154,7 @@ _SKIP_PYTHON_BINDINGS = [
     "copy",  # only used by the functionalization pass
     "fill.Tensor",  # only used by the functionalization pass
     "fill.Scalar",  # only used by the functionalization pass
+    "lift",
 ]
 
 SKIP_PYTHON_BINDINGS = list(
@@ -175,6 +177,9 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
 
 @with_native_function
 def should_generate_py_binding(f: NativeFunction) -> bool:
+    # So far, all NativeFunctions that are entirely code-generated do not get python bindings.
+    if "generated" in f.tags:
+        return False
     name = cpp.name(f.func)
     for skip_regex in SKIP_PYTHON_BINDINGS:
         if skip_regex.match(name):

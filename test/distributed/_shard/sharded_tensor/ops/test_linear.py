@@ -192,6 +192,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
     def test_sharded_linear_errors(self):
         for spec in generate_chunk_sharding_specs_for_test(0):
             fc1 = torch.nn.Linear(10, 10).cuda(self.rank)
+            shard_parameter(fc1, "weight", spec)
             shard_parameter(fc1, "bias", spec)
             with self.assertRaisesRegex(TypeError, 'bias needs to be torch.Tensor'):
                 fc1(torch.rand(10, 10).cuda(self.rank))
@@ -244,7 +245,10 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             ])
 
             fc6.weight = empty(enumerable_spec, 10, 10)
-            with self.assertRaisesRegex(ValueError, 'Only ChunkShardingSpec supported for ShardedTensor ops!'):
+            # Sharded Tensor metadata has parenthesis imbalance issue when using re.compile
+            error_msg = r"torch function 'linear', with args: (?s).* "
+            r"and kwargs: None not supported for ShardedTensor!"
+            with self.assertRaisesRegex(RuntimeError, error_msg):
                 fc6(torch.rand(10, 10).cuda(self.rank))
 
             fc7 = torch.nn.Linear(10, 80).cuda(self.rank)
