@@ -356,6 +356,15 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt.is_cuda, is_cuda)
 
     # Helper functions for testing elementwise ops
+    def random_nt(self, device, dtype, num_tensors, max_dims):
+        ts1 = []
+        for _ in range(num_tensors):
+            tensor_dims = tuple([torch.randint(low=0, high=max_dim, size=(1,)).item() for max_dim in max_dims])
+            t1 = torch.randn(tensor_dims, device=device, dtype=dtype)
+            ts1.append(t1)
+        return torch.nested_tensor(ts1, device=device, dtype=dtype)
+
+    # Helper functions for testing elementwise ops
     def random_nt_pair(self, device, dtype, num_tensors, max_dims):
         ts1 = []
         ts2 = []
@@ -413,6 +422,12 @@ class TestNestedTensorDeviceType(TestCase):
         ref = torch.nested_tensor([t1 * t2 for (t1, t2) in zip(nt1.unbind(), nt2.unbind())])
         nt1 *= nt2
         self.nt_equal(ref, nt1)
+
+    @dtypes(torch.float, torch.float16)
+    @skipMeta
+    @torch.inference_mode()
+    def test_clone(self):
+        nt1 = self.random_nt(device, dtype, 4, 4)
 
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 

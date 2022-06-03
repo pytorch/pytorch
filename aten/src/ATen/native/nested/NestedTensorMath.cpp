@@ -557,5 +557,16 @@ Tensor& NestedTensor_mul__Tensor(Tensor& self, const Tensor& other) {
       });
 }
 
+SparseCsrTensor clone_nested(
+    const Tensor& self,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      !optional_memory_format.has_value(),
+      "unsupported memory format option ",
+      optional_memory_format.value());
+  return wrap_buffer(
+      get_buffer(self).clone(), get_nested_size_tensor(self).clone());
+}
+
 } // namespace native
 } // namespace at
