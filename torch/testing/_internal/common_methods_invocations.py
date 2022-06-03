@@ -19310,14 +19310,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         check_batched_grad=False,
         supports_forward_ad=True,
-        skips=(
-            # See https://github.com/pytorch/pytorch/issues/65466
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_gradgrad",
-            ),
-        ),
+        supports_fwgrad_bwgrad=True,
     ),
     OpInfo(
         "diagflat",
