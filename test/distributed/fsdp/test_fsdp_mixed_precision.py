@@ -560,7 +560,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         # in original resnet model.
         fsdp_bn = 0
         for module in fsdp.fsdp_modules(fsdp):
-            wrapped_module = module.module.module
+            wrapped_module = module.module
             if isinstance(wrapped_module, _BatchNorm):
                 fsdp_bn += 1
 

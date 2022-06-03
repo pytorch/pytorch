@@ -375,9 +375,9 @@ class TestAutoWrap(TestCase):
             auto_wrap_policy=my_auto_wrap_policy
         )
         self.assertTrue(isinstance(fsdp_model, FSDP))
-        for layer in fsdp_model.module.module.transformer.encoder.layers:
+        for layer in fsdp_model.module.transformer.encoder.layers:
             self.assertTrue(isinstance(layer, FSDP))
-        for layer in fsdp_model.module.module.transformer.decoder.layers:
+        for layer in fsdp_model.module.transformer.decoder.layers:
             self.assertTrue(isinstance(layer, FSDP))
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")
