@@ -497,6 +497,10 @@
   self: _det_lu_based_helper_backward(grad, det, self, lu, pivs)
   output_differentiability: [True, False, False]
 
+- name: block_diag(Tensor[] tensors) -> Tensor
+  tensors: block_diag_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors))
+  result: block_diag_jvp(tensors)
+
 - name: diag_embed(Tensor self, int offset=0, int dim1=-2, int dim2=-1) -> Tensor
   self: grad.diagonal(offset, dim1, dim2)
   result: auto_linear
@@ -605,7 +609,7 @@
   result: auto_linear
 
 - name: expand.SymInt(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
-  self: at::sum_to(grad, c10::expectIntArrayRef(self.sym_sizes()))
+  self: at::sum_to(grad, c10::asIntArrayRefSlow(self.sym_sizes()))
   result: auto_linear
 
 - name: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
@@ -1254,6 +1258,7 @@
   self: "accumulate ? grad : grad.put(index, zeros_like(source), false)"
   index: non_differentiable
   source: grad.take(index).reshape_as(source)
+  result: auto_linear  # It is affine, but sure
 
 - name: linalg_qr(Tensor A, str mode='reduced') -> (Tensor Q, Tensor R)
   A: linalg_qr_backward(grad_Q, grad_R, Q, R, mode)
@@ -1411,6 +1416,12 @@
   src: grad.diagonal(offset, dim1, dim2)
   result: auto_linear
 
+- name: as_strided_scatter(Tensor self, Tensor src, int[] size, int[] stride, int? storage_offset=None) -> Tensor
+  self: as_strided_scatter_backward(grad, TensorGeometry(self), TensorGeometry(src), size, stride, storage_offset)
+  # See Note [as_strided_scatter backward support]
+  src: grad.contiguous().as_strided(size, stride, storage_offset)
+  result: auto_linear
+
 - name: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   self: slogdet_backward(grad, self, sign, logabsdet)
   output_differentiability: [false, true]
@@ -1507,7 +1518,7 @@
   self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
 
 # We never call _linalg_svd with compute_uv=False in an autograd context, so we don't even consider it here
-- name: _linalg_svd(Tensor A, bool full_matrices=False, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor Vh)
+- name: _linalg_svd(Tensor A, bool full_matrices=False, bool compute_uv=True, *, str? driver=None) -> (Tensor U, Tensor S, Tensor Vh)
   A: "svd_backward(full_matrices && grad_U.defined() ? grad_U.narrow(-1, 0, S.size(-1)) : grad_U,
                    grad_S,
                    full_matrices && grad_Vh.defined() ? grad_Vh.narrow(-2, 0, S.size(-1)) : grad_Vh,
@@ -1653,6 +1664,9 @@
   self: grad.reshape(self.sizes())
   result: auto_linear
 
+- name: lift(Tensor self) -> Tensor
+  self: not_implemented("lift")
+
 - name: unsqueeze(Tensor(a) self, int dim) -> Tensor(a)
   self: grad.squeeze(dim)
   result: auto_linear
@@ -1726,6 +1740,9 @@
 # NN
 - name: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   i1, i2, i3: _trilinear_backward(grad, i1, i2, i3, expand1, expand2, expand3, sumdim, grad_input_mask)
+  result: "_trilinear(i1_t, i2_p, i3_p, expand1, expand2, expand3, sumdim, unroll_dim) +
+           _trilinear(i1_p, i2_t, i3_p, expand1, expand2, expand3, sumdim, unroll_dim) +
+           _trilinear(i1_p, i2_p, i3_t, expand1, expand2, expand3, sumdim, unroll_dim)"
 
 - name: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
   self: constant_pad_nd_backward(grad, pad)
@@ -1734,20 +1751,31 @@
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_backward(grad, self, target, weight, reduction)
   target: binary_cross_entropy_target_backward(grad, self, target, weight, reduction)
+  result: "apply_loss_reduction(
+               binary_cross_entropy_backward(self_t, self_p, target_p, weight, at::Reduction::None)
+             + binary_cross_entropy_target_backward(target_t, self_p, target_p, weight, at::Reduction::None),
+           reduction)"
 
 - name: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_double_backward(grad_output, grad, self, target, weight, reduction)
-  target: not_implemented("binary_cross_entropy_backward wrt `target`")
+  target: binary_cross_entropy_double_backward_target(grad, grad_output, self, target, weight, reduction)
   grad_output: binary_cross_entropy_double_backward_grad_output(grad, self, target, weight, reduction)
+  result: " binary_cross_entropy_double_backward(grad_output_p, self_t, self_p, target_p, weight, reduction)
+          + binary_cross_entropy_double_backward_target(target_t, grad_output_p, self_p, target_p, weight, reduction)
+          + binary_cross_entropy_double_backward_grad_output(grad_output_t, self_p, target_p, weight, reduction)"
 
 - name: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_with_logits_backward(grad, self, target, weight, pos_weight, reduction)
   target: binary_cross_entropy_with_logits_target_backward(grad, self, target, weight, pos_weight, reduction)
-  result: binary_cross_entropy_with_logits_jvp(self_t, target_t, self_p, target_p, weight, pos_weight, reduction)
+  result: "apply_loss_reduction(
+               binary_cross_entropy_with_logits_backward(self_t, self_p, target_p, weight, pos_weight, at::Reduction::None)
+             + binary_cross_entropy_with_logits_target_backward(target_t, self_p, target_p, weight, pos_weight, at::Reduction::None),
+           reduction)"
 
 - name: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   indices: non_differentiable
   weight: embedding_backward(grad, indices, weight.size(0), padding_idx, scale_grad_by_freq, sparse)
+  result: auto_linear
 
 - name: embedding_dense_backward(Tensor grad_output, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
   grad_output: embedding_dense_double_backward(grad, indices, padding_idx)
@@ -1852,6 +1880,8 @@
   result: gelu_backward(grad_output_t, self_p, approximate) + gelu_double_backward(self_t, grad_output_p, self_p, approximate)
 
 - name: glu(Tensor self, int dim=-1) -> Tensor
+  # TODO: glu_backward can benefit from forward result,
+  # and forward ad/forward over reverse ad for that matter
   self: glu_backward(grad, self, dim)
   result: glu_jvp(result, self_p, self_t, dim)
 
@@ -1878,6 +1908,7 @@
 
 - name: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   self: log_sigmoid_backward(grad, self, buffer)
+  output: auto_element_wise
 
 - name: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _log_softmax_backward_data(grad, result, dim, self.scalar_type())
@@ -1892,12 +1923,15 @@
 
 - name: prelu(Tensor self, Tensor weight) -> Tensor
   self, weight: "grad.defined() ? prelu_backward(grad, self, weight) : std::tuple<Tensor, Tensor>()"
+  result: prelu_jvp(self_p, self_t, weight_p, weight_t)
 
 - name: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   grad_output, self, weight: prelu_double_backward(grads[0], grads[1], grad_output, self, weight)
 
 - name: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   self: rrelu_with_noise_backward(grad, self, noise, lower, upper, training, false)
+  result: auto_element_wise
+
 
 - name: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   self: rrelu_with_noise_backward(grad, result, noise, lower, upper, training, true)
@@ -2045,6 +2079,14 @@
 
 - name: _upsample_nearest_exact3d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
   input: _upsample_nearest_exact3d_backward(grad, output_size, input.sizes(), scale_factors)
+  result: auto_linear
+
+- name: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
+  self: pixel_unshuffle(grad, upscale_factor)
+  result: auto_linear
+
+- name: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
+  self: pixel_shuffle(grad, downscale_factor)
   result: auto_linear
 
 - name: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
@@ -2231,6 +2273,7 @@
 - name: glu_backward(Tensor grad_output, Tensor self, int dim) -> Tensor
   grad_output: glu_double_backward_grad_output(grad, self, dim)
   self: glu_double_backward(grad, grad_output, self, dim)
+  result: glu_backward_jvp(result, grad_output_p, self_p, grad_output_t, self_t, dim)
 
 - name: hardtanh_backward(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val) -> Tensor
   grad_output: hardtanh_backward(grad, self, min_val, max_val)
@@ -2713,3 +2756,77 @@
 - name: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
+
+- name: special_bessel_j0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_bessel_j1(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_bessel_y0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_bessel_y1(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_chebyshev_polynomial_t.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_chebyshev_polynomial_t.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_chebyshev_polynomial_u(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_chebyshev_polynomial_u.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_chebyshev_polynomial_u.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_hermite_polynomial_h(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_hermite_polynomial_h.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_hermite_polynomial_h.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_hermite_polynomial_he(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_hermite_polynomial_he.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_hermite_polynomial_he.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_laguerre_polynomial_l(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_laguerre_polynomial_l.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_laguerre_polynomial_l.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_modified_bessel_i0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_modified_bessel_i1(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_modified_bessel_k0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_modified_bessel_k1(Tensor self) -> Tensor
+  self: non_differentiable

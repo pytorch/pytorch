@@ -13,9 +13,8 @@ namespace mps {
 
 typedef MPSGraphTensor* (^UnaryOpBlock)(MPSGraph*, MPSGraphTensor*);
 
-void unary_op(const Tensor& self_t, const Tensor& output, std::string op_name, UnaryOpBlock unaryBlock)
+void unary_op(const Tensor& self, const Tensor& output, std::string op_name, UnaryOpBlock unaryBlock)
 {
-  Tensor self = self_t.contiguous(at::MemoryFormat::Contiguous);
   if (!output.is_same_size(self)) {
     output.resize_(self.sizes());
   }
@@ -26,7 +25,7 @@ void unary_op(const Tensor& self_t, const Tensor& output, std::string op_name, U
   };
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self});
+    string key = op_name + getTensorsStringKey({self}, /*use_scalar_value*/ false);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
@@ -119,7 +118,6 @@ CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asinh_out_mps, asinh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
 
-CREATE_MPS_UNARY_TORCH_IMPL_FUNC(square_out_mps, square)
 CREATE_MPS_UNARY_TORCH_IMPL_FUNC(abs_out_mps, absolute)
 
 TORCH_IMPL_FUNC(log1p_out_mps) (const Tensor& self, const Tensor& output)

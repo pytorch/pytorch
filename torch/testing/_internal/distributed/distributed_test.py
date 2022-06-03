@@ -40,7 +40,7 @@ from torch.distributed.distributed_c10d import (
 )
 from torch.distributed.utils import (
     _verify_param_shape_across_processes,
-    _sync_params_and_buffers,
+    _sync_module_states,
 )
 
 from torch.nn.parallel import DistributedDataParallel
@@ -5883,8 +5883,8 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
         )
-        def test_ddp_sync_params_and_buffers(self):
-            # Test that after calling _sync_params_and_buffers, models across ranks
+        def test_ddp_sync_module_states(self):
+            # Test that after calling _sync_module_states, models across ranks
             # are the same and are equal to the model on the input rank.
             dim = 2
             rank = self.rank
@@ -5911,7 +5911,7 @@ class DistributedTest:
                         # tensor from another rank should be different.
                         self.assertNotEqual(t, tensor)
 
-            _sync_params_and_buffers(
+            _sync_module_states(
                 module=net.module,
                 process_group=net.process_group,
                 broadcast_bucket_size=net.broadcast_bucket_size,
