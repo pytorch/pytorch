@@ -1361,6 +1361,112 @@ const auto chebyshev_polynomial_u_string = jiterator_stringify(
     } // chebyshev_polynomial_u_forward(T x, T n)
 ); // chebyshev_polynomial_u_string
 
+const auto hermite_polynomial_h_string = jiterator_stringify(
+    template<typename T>
+    T hermite_polynomial_h_forward(T x, int64_t n) {
+        if (n < 0) {
+            return T(0.0);
+        }
+
+        if (n == 0) {
+            return T(1.0);
+        }
+
+        if (n == 1) {
+            return x + x;
+        }
+
+        T p = T(1.0);
+        T q = x + x;
+        T r;
+
+        for (int64_t k = 2; k < n + n; k += 2) {
+            r = (x + x) * q - k * p;
+            p = q;
+            q = r;
+        }
+
+        return r;
+    } // hermite_polynomial_h_forward(T x, int64_t n)
+
+    template<typename T>
+    T hermite_polynomial_h_forward(T x, T n) {
+        return hermite_polynomial_h_forward(x, static_cast<int64_t>(n));
+    } // hermite_polynomial_h_forward(T x, T n)
+); // hermite_polynomial_h_string
+
+const auto hermite_polynomial_he_string = jiterator_stringify(
+    template<typename T>
+    T hermite_polynomial_he_forward(T x, int64_t n) {
+        if (n < 0) {
+            return T(0.0);
+        }
+
+        if (n == 0) {
+            return T(1.0);
+        }
+
+        if (n == 1) {
+            return x;
+        }
+
+        T p = T(1.0);
+        T q = x;
+        T r;
+
+        for (int64_t k = 1; k < n; k++) {
+            r = x * q - k * p;
+            p = q;
+            q = r;
+        }
+
+        return r;
+    } // hermite_polynomial_he_forward(T x, int64_t n)
+
+    template<typename T>
+    T hermite_polynomial_he_forward(T x, T n) {
+        return hermite_polynomial_he_forward(x, static_cast<int64_t>(n));
+    } // hermite_polynomial_he_forward(T x, T n)
+); // hermite_polynomial_he_string
+
+const auto laguerre_polynomial_l_string = jiterator_stringify(
+    template<typename T>
+    T laguerre_polynomial_l_forward(T x, int64_t n) {
+        if (n < 0) {
+            return T(0.0);
+        }
+
+        if (abs(x) == T(0.0)) {
+            return T(1.0);
+        }
+
+        if (n == 0) {
+            return T(1.0);
+        }
+
+        if (n == 1) {
+            return T(1.0) - x;
+        }
+
+        T p = T(1.0);
+        T q = T(1.0) - x;
+        T r;
+
+        for (int64_t k = 1; k < n; k++) {
+            r = (((k + k) + (T(1.0) - x)) * q - k * p) / (k + 1);
+            p = q;
+            q = r;
+        }
+
+        return r;
+    } // laguerre_polynomial_l_forward(T x, int64_t n)
+
+    template<typename T>
+    T laguerre_polynomial_l_forward(T x, T n) {
+        return laguerre_polynomial_l_forward(x, static_cast<int64_t>(n));
+    } // laguerre_polynomial_l_forward(T x, T n)
+); // laguerre_polynomial_l_string
+
 #else // !AT_USE_JITERATOR() -- kernels must be precompiled
 
 template <typename scalar_t>
