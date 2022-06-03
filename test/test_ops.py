@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     noncontiguous_like,
     TEST_WITH_ASAN,
-    TEST_WITH_UBSAN,
     IS_WINDOWS,
     IS_FBCODE,
     first_sample,
@@ -49,6 +48,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     skipMeta,
 )
+from torch.utils._pytree import tree_map
 import torch._prims as prims
 from torch._prims.context import TorchRefsMode
 
@@ -1107,32 +1107,17 @@ class TestCommon(TestCase):
                 *transformed_sample.args,
                 **transformed_sample.kwargs,
             )
+            # Since range of chalf is much less compared to cfloat,
+            # we get `inf`s easily (eg. with `pow`, `exp`),
+            # so we cast `cfloat` back to `chalf`.
+            expected = tree_map(lambda x: x.to(torch.complex32) if isinstance(
+                x, torch.Tensor) and x.dtype is torch.complex64 else x, expected)
+
+            # `exact_dtype` is False because for ops like real, imag
+            # we get different dtypes for `actual` and `expected`
+            # `chalf` input -> `half` output
+            # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
-
-    @ops(op_db, allowed_dtypes=(torch.bool,))
-    @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
-    def test_non_standard_bool_values(self, device, dtype, op):
-        # Test boolean values other than 0x00 and 0x01 (gh-54789)
-        def convert_boolean_tensors(x):
-            if not isinstance(x, torch.Tensor) or x.dtype != torch.bool:
-                return x
-
-            # Map False -> 0 and True -> Random value in [2, 255]
-            true_vals = torch.randint(2, 255, x.shape, dtype=torch.uint8, device=x.device)
-            false_vals = torch.zeros((), dtype=torch.uint8, device=x.device)
-            x_int = torch.where(x, true_vals, false_vals)
-
-            ret = x_int.view(torch.bool)
-            self.assertEqual(ret, x)
-            return ret
-
-        for sample in op.sample_inputs(device, dtype):
-            expect = op(sample.input, *sample.args, **sample.kwargs)
-
-            transformed = sample.transform(convert_boolean_tensors)
-            actual = op(transformed.input, *transformed.args, **transformed.kwargs)
-
-            self.assertEqual(expect, actual)
 
 
 class TestCompositeCompliance(TestCase):
