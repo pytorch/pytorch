@@ -4379,13 +4379,17 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # Wait for all init to complete.
         dist.barrier()
 
+        # Use a different file name for the next initialization
+        new_backend_options = self.rpc_backend_options
+        new_backend_options.init_method += "init_2"
+
         # Ensure rpc initialization works again.
         rpc.init_rpc(
             name=worker_name(self.rank),
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
-            rpc_backend_options=self.rpc_backend_options,
+            rpc_backend_options=new_backend_options,
         )
 
         # Verify RPCs work after re-init.
