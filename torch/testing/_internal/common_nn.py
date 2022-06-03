@@ -4243,7 +4243,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='multilayer_coder',
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.02,
     ),
     dict(
         module_name='Linear',
