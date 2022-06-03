@@ -260,6 +260,25 @@ const char* FunctionalTensorWrapper::tensorimpl_type_name() const {
     return "FunctionalTensorWrapper";
 }
 
+at::IntArrayRef FunctionalTensorWrapper::sizes_custom() const {
+  return value_.unsafeGetTensorImpl()->sizes();
+}
+at::IntArrayRef FunctionalTensorWrapper::strides_custom() const {
+  return value_.unsafeGetTensorImpl()->strides();
+}
+int64_t FunctionalTensorWrapper::dim_custom() const {
+  return value_.unsafeGetTensorImpl()->dim();
+}
+int64_t FunctionalTensorWrapper::numel_custom() const {
+  return value_.unsafeGetTensorImpl()->numel();
+}
+bool FunctionalTensorWrapper::is_contiguous_custom(at::MemoryFormat memory_format) const {
+  return value_.unsafeGetTensorImpl()->is_contiguous();
+}
+c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
+  return value_.unsafeGetTensorImpl()->sym_sizes();
+}
+
 namespace functionalization {
 namespace impl {
 
