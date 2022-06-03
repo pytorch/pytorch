@@ -1343,7 +1343,7 @@ const auto airy_ai_string = jiterator_stringify(
 
         int domain_flag = 0;
 
-        T ai;
+        T ai = 0.0;
 
         if (x > T(103.892)) {
             return T(0.0);
@@ -1514,7 +1514,7 @@ const auto airy_bi_string = jiterator_stringify(
 
         int domain_flag = 0;
 
-        T bi;
+        T bi = 0.0;
 
         if (x > T(103.892)) {
             return INFINITY;
@@ -1689,7 +1689,7 @@ const auto airy_derivative_ai_string = jiterator_stringify(
 
         int domain_flag = 0;
 
-        T derivative_ai;
+        T derivative_ai = 0.0;
 
         if (x > T(103.892)) {
             return T(0.0);
@@ -1885,7 +1885,7 @@ const auto airy_derivative_bi_string = jiterator_stringify(
 
         int domain_flag = 0;
 
-        T derivative_bi;
+        T derivative_bi = 0.0;
 
         if (x > T(103.892)) {
             return INFINITY;
