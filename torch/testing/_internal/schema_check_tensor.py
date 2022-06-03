@@ -1,7 +1,11 @@
 import torch
 from torch.utils._pytree import tree_map
 
-ops = []
+schema_check_recorded_ops = []
+
+# This Tensor Subclass is used to verify op schemas
+# This Tensor currently:
+#  - Records the called ops and appends to schema_check_records_ops
 
 class SchemaCheckTensor(torch.Tensor):
     elem: torch.Tensor
@@ -39,14 +43,14 @@ class SchemaCheckTensor(torch.Tensor):
         def wrap(e):
             return cls(e) if isinstance(e, torch.Tensor) else e
 
-        global ops
-        ops.append(func.__name__)
+        global schema_check_recorded_ops
+        schema_check_recorded_ops.append(func.__name__)
         out = func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
         return tree_map(wrap, out)
 
-def start_recording():
-    global ops
-    ops.clear()
+def reset_cache():
+    global schema_check_recorded_ops
+    schema_check_recorded_ops.clear()
 
 def display_ops():
-    print(*ops, sep=",")
+    print(*schema_check_recorded_ops, sep=",")

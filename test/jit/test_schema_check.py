@@ -1,7 +1,7 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
-import unittest
-
 import torch
 
 from torch.testing._internal import schema_check_tensor
@@ -18,19 +18,19 @@ if __name__ == '__main__':
 # Tests various schema checking functionalities.
 class TestSchemaCheck(JitTestCase):
     def setUp(self):
-        schema_check_tensor.start_recording()
+        schema_check_tensor.reset_cache()
 
     # Tests that SchemaCheckTensor records operator order with grad
     def test_schema_check_tensor_operator_order_grad(self):
         x = torch.rand((3, 3), requires_grad=True)
         schema_check_tensor.SchemaCheckTensor(x).relu().sin()
-        self.assertEqual(["relu.default", "detach.default", "sin.default"], schema_check_tensor.ops)
+        self.assertEqual(["relu.default", "detach.default", "sin.default"], schema_check_tensor.schema_check_recorded_ops)
 
     # Tests that SchemaCheckTensor records operator order without grad
     def test_schema_check_tensor_operator_order_no_grad(self):
         x = torch.rand((3, 3), requires_grad=False)
         schema_check_tensor.SchemaCheckTensor(x).relu().sin()
-        self.assertEqual(["relu.default", "sin.default"], schema_check_tensor.ops)
+        self.assertEqual(["relu.default", "sin.default"], schema_check_tensor.schema_check_recorded_ops)
 
     # Tests that SchemaCheckTensor wraps torch.Tensor
     def test_schema_check_tensor_functionality(self):
