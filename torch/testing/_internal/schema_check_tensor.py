@@ -49,4 +49,4 @@ def start_recording():
     ops.clear()
 
 def display_ops():
-    print(*ops, sep = ",")
+    print(*ops, sep=",")
