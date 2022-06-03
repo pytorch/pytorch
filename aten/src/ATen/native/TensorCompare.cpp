@@ -8,6 +8,7 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
+#include <ATen/native/Fill.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/native/TypeProperties.h>
@@ -52,6 +53,8 @@ const OptionalScalarRef max) {
        "result type ", result_type, " can't be cast to the desired output type ",
        self.dtype());
   }
+  //make sure scalars weren't complex
+  TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
   build_unary_op(maybe_get_output(), self.to(result_type));
 }
 
@@ -89,6 +92,7 @@ TORCH_META_FUNC(clamp_max) (
   //do a faster but correct thing
   ScalarType result_type = self.scalar_type();
   TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
+  TORCH_CHECK(!max.isComplex(), "clamp is not supported for complex types");
   //Floating is the highest supported
   if (!isFloatingType(result_type)) {
     auto result_type = at::native::result_type(self, max);
@@ -116,6 +120,7 @@ TORCH_META_FUNC(clamp_min) (
 ) {
   ScalarType result_type = self.scalar_type();
   TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
+  TORCH_CHECK(!min.isComplex(), "clamp is not supported for complex types");
   //Floating is the highest supported
   if (!isFloatingType(result_type)) {
     auto result_type = at::native::result_type(self, min);
@@ -141,7 +146,7 @@ TORCH_META_FUNC2(isin, Tensor_Tensor) (
 ) {
   check_for_unsupported_isin_dtype(elements.scalar_type());
   check_for_unsupported_isin_dtype(test_elements.scalar_type());
-  set_output(elements.sizes(), TensorOptions(elements.device()).dtype(ScalarType::Bool));
+  set_output_raw_strided(0, elements.sizes(), {}, TensorOptions(elements.device()).dtype(ScalarType::Bool));
 }
 
 TORCH_META_FUNC2(isin, Tensor_Scalar) (
@@ -149,7 +154,7 @@ TORCH_META_FUNC2(isin, Tensor_Scalar) (
 ) {
   check_for_unsupported_isin_dtype(elements.scalar_type());
   check_for_unsupported_isin_dtype(test_elements.type());
-  set_output(elements.sizes(), TensorOptions(elements.device()).dtype(ScalarType::Bool));
+  set_output_raw_strided(0, elements.sizes(), {}, TensorOptions(elements.device()).dtype(ScalarType::Bool));
 }
 
 TORCH_META_FUNC2(isin, Scalar_Tensor) (
@@ -157,7 +162,7 @@ TORCH_META_FUNC2(isin, Scalar_Tensor) (
 ) {
   check_for_unsupported_isin_dtype(elements.type());
   check_for_unsupported_isin_dtype(test_elements.scalar_type());
-  set_output({0}, TensorOptions(test_elements.device()).dtype(ScalarType::Bool));
+  set_output_raw_strided(0, {0}, {}, TensorOptions(test_elements.device()).dtype(ScalarType::Bool));
 }
 
 TORCH_META_FUNC(isposinf) (const Tensor& self) {
@@ -555,10 +560,15 @@ TORCH_IMPL_FUNC(clamp_out)
  const Tensor& /*self*/,
  const OptionalScalarRef min,
  const OptionalScalarRef max,
- const Tensor& /*result*/) {
+ const Tensor& result) {
   using at::native::detail::ClampLimits;
   if (min && max) {
-    clamp_scalar_stub(device_type(), *this, min.get(), max.get());
+    if (min.get().toDouble() != min.get().toDouble() ||
+        max.get().toDouble() != max.get().toDouble()) {
+      at::fill_(const_cast<Tensor&>(result), std::numeric_limits<double>::quiet_NaN());
+    } else {
+      clamp_scalar_stub(device_type(), *this, min.get(), max.get());
+    }
   } else if (max) {
     clamp_max_scalar_stub(device_type(), *this, max.get());
   } else if (min) {
@@ -580,7 +590,14 @@ TORCH_IMPL_FUNC(clamp_Tensor_out)
 
 TORCH_IMPL_FUNC(clamp_max_out)
 (const Tensor& self, const Scalar& max, const Tensor& result) {
-  clamp_max_scalar_stub(device_type(), *this, max);
+  if (max.toDouble() != max.toDouble()) {
+//TODO this is not great, building TI again is expensive, but I can't use
+//fill_stub because fill is not structured
+//this is a corner case anyway
+    at::fill_(const_cast<Tensor&>(result), wrapped_scalar_tensor(max));
+  } else {
+    clamp_max_scalar_stub(device_type(), *this, max);
+  }
 }
 
 TORCH_IMPL_FUNC(clamp_max_Tensor_out)
@@ -590,7 +607,11 @@ TORCH_IMPL_FUNC(clamp_max_Tensor_out)
 
 TORCH_IMPL_FUNC(clamp_min_out)
 (const Tensor& self, const Scalar& min, const Tensor& result) {
-  clamp_min_scalar_stub(device_type(), *this, min);
+  if (min.toDouble() != min.toDouble()) {
+    at::fill_(const_cast<Tensor&>(result), min);
+  } else {
+    clamp_min_scalar_stub(device_type(), *this, min);
+  }
 }
 
 TORCH_IMPL_FUNC(clamp_min_Tensor_out)
