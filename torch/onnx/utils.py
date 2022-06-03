@@ -81,7 +81,6 @@ def select_model_mode_for_export(
             isinstance(model, torch.jit.ScriptFunction)
             or mode == _C_onnx.TrainingMode.PRESERVE
         ):
-            # Alter the model training state only if mode is not PRESERVE
             model.train(originally_training)
 
 
