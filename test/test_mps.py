@@ -3732,6 +3732,13 @@ class TestNLLLoss(TestCase):
             helper(5, 2, 10, dtype)
             helper(2, 2, 0, dtype)
 
+    # Test argange
+    def test_arange(self):
+        self.assertEqual(np.arange(10), torch.arange(10, device='mps'))
+        self.assertEqual(np.arange(7, 1, -1), torch.arange(7, 1, -1, device='mps'))
+        self.assertEqual(np.arange(1, 2, .3, dtype=np.float32), torch.arange(1, 2, .3, device='mps'))
+        self.assertEqual(np.arange(6.3, dtype=np.float32), torch.arange(6.3, device='mps'))
+
     # Test softmax
     def test_softmax(self):
         def helper(shape, dim, channels_last=False):
