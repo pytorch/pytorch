@@ -19146,6 +19146,28 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     BinaryUfuncInfo(
+        'special.chebyshev_polynomial_v',
+        dtypes=all_types_and(torch.bool),
+        promotes_int_to_float=True,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
+        ),
+        supports_one_python_scalar=True,
+        supports_autograd=False,
+    ),
+    BinaryUfuncInfo(
+        'special.chebyshev_polynomial_w',
+        dtypes=all_types_and(torch.bool),
+        promotes_int_to_float=True,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
+        ),
+        supports_one_python_scalar=True,
+        supports_autograd=False,
+    ),
+    BinaryUfuncInfo(
         'special.hermite_polynomial_h',
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
@@ -19169,6 +19191,17 @@ op_db: List[OpInfo] = [
     ),
     BinaryUfuncInfo(
         'special.laguerre_polynomial_l',
+        dtypes=all_types_and(torch.bool),
+        promotes_int_to_float=True,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
+        ),
+        supports_one_python_scalar=True,
+        supports_autograd=False,
+    ),
+    BinaryUfuncInfo(
+        'special.legendre_polynomial_p',
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
@@ -19232,6 +19265,50 @@ op_db: List[OpInfo] = [
         ),
         dtypes=all_types_and(torch.bool),
         ref=scipy.special.k1 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    BinaryUfuncInfo(
+        'special.shifted_chebyshev_polynomial_t',
+        dtypes=all_types_and(torch.bool),
+        promotes_int_to_float=True,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
+        ),
+        supports_one_python_scalar=True,
+        supports_autograd=False,
+    ),
+    BinaryUfuncInfo(
+        'special.shifted_chebyshev_polynomial_u',
+        dtypes=all_types_and(torch.bool),
+        promotes_int_to_float=True,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
+        ),
+        supports_one_python_scalar=True,
+        supports_autograd=False,
+    ),
+    BinaryUfuncInfo(
+        'special.shifted_chebyshev_polynomial_v',
+        dtypes=all_types_and(torch.bool),
+        promotes_int_to_float=True,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
+        ),
+        supports_one_python_scalar=True,
+        supports_autograd=False,
+    ),
+    BinaryUfuncInfo(
+        'special.shifted_chebyshev_polynomial_w',
+        dtypes=all_types_and(torch.bool),
+        promotes_int_to_float=True,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
+        ),
+        supports_one_python_scalar=True,
         supports_autograd=False,
     ),
 ]
