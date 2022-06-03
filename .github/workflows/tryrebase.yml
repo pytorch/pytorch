@@ -38,3 +38,4 @@ jobs:
           else
             python3 .github/scripts/tryrebase.py "${PR_NUM}"
           fi
+
