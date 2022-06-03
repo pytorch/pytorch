@@ -76,11 +76,14 @@ struct FrameArgs {
 };
 
 PyObject* nnModuleCode() {
-  static auto module_call_code = py::module::import("torch.nn")
-      .attr("Module")
-      .attr("__call__")
-      .attr("__code__")
-      .ptr();
+  static auto module_call_code = []() {
+    pybind11::gil_scoped_acquire gil;
+    return py::module::import("torch.nn")
+        .attr("Module")
+        .attr("__call__")
+        .attr("__code__")
+        .ptr();
+  }();
   return module_call_code;
 }
 
