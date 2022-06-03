@@ -35,7 +35,8 @@ class TestPythonRegistration(TestCase):
         # RuntimeError: impl("aten::neg", ...):
         # Explicitly provided namespace (aten) in operator name does not match ...
         with self.assertRaisesRegex(RuntimeError, "operator name does not match namespace"):
-            my_lib3 = Library("foo", "IMPL")
+            my_lib3 = Library("foo", "DEF")
+            my_lib3.define("neg(Tensor self) -> Tensor")
             my_lib3.impl(torch.ops.aten.neg.default, my_neg, "AutogradCPU")
             del my_lib3
 
@@ -64,6 +65,11 @@ class TestPythonRegistration(TestCase):
         # Validate that the old behavior is restored for neg and mul
         self.assertFalse(torch.neg(x).is_neg())
         self.assertTrue(torch.mul(x, y)._is_zerotensor())
+
+    def test_error_if_fn_not_callable(self):
+        with self.assertRaisesRegex(TypeError, "Input function is required to be a callable"):
+            my_lib = Library("aten", "IMPL")
+            my_lib.impl(torch.ops.aten.neg.default, [], "AutogradCPU")
 
     def test_override_cpu_sum(self) -> None:
         # Example 1
@@ -1439,6 +1445,39 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             e = ExampleTensor3(torch.randn(3, 3, device='cpu'), use_wrapper_subclass)
             self.assertEqual(e.device.type, 'meta')
             self.assertEqual(ten.type_as(e).device.type, 'meta')
+
+    def test_dim_slowpath(self):
+        data = torch.randn(3, 3)
+
+        for use_wrapper_subclass in [True, False]:
+            class DimNotImplementedTensor(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    return NotImplemented
+
+            class DimImplementedTensor(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.aten.dim:
+                        return data.dim()
+                    return NotImplemented
+
+
+            err_msg = "no implementation found for 'torch.ops.aten.dim'"
+            e = DimNotImplementedTensor(torch.randn(3, 3), use_wrapper_subclass)
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.dim()
+
+            t = DimImplementedTensor(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(t.dim(), 2)
 
 
 if __name__ == '__main__':
