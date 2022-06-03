@@ -486,6 +486,24 @@ class CUDATestBase(DeviceTypeTestBase):
         # Acquires the current device as the primary (test) device
         cls.primary_device = 'cuda:{0}'.format(torch.cuda.current_device())
 
+lazy_ts_backend_init = False
+class LazyTestBase(DeviceTypeTestBase):
+    device_type = 'lazy'
+
+    def _should_stop_test_suite(self):
+        return False
+
+    @classmethod
+    def setUpClass(cls):
+        import torch._lazy
+        import torch._lazy.metrics
+        import torch._lazy.ts_backend
+        global lazy_ts_backend_init
+        if not lazy_ts_backend_init:
+            # Nead to connect the TS backend to lazy key before running tests
+            torch._lazy.ts_backend.init()
+            lazy_ts_backend_init = True
+
 class MPSTestBase(DeviceTypeTestBase):
     device_type = 'mps'
 

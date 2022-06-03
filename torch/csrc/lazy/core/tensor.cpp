@@ -528,7 +528,6 @@ at::Tensor to_lazy_tensor(const at::Tensor & self,
                              at::Device device,
                              bool non_blocking,
                              bool functionalize_output) {
-  // This helper is only meant to be used for nonlazy -> lazy conversions.
   TORCH_INTERNAL_ASSERT(self.device().type() != c10::kLazy);
   TORCH_INTERNAL_ASSERT(device.type() == c10::kLazy);
 

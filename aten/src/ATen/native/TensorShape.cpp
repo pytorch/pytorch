@@ -1985,11 +1985,6 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
   }
 }
 
-Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
-  auto res = index_select_sparse_cpu(self.to(at::kCPU), dim, index.to(at::kCPU));
-  return res.to(self.device());
-}
-
 Tensor slice(
     const Tensor& self,
     int64_t dim,
@@ -2672,7 +2667,7 @@ inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(stride.has_value(), "view size is "
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
-  return self.as_strided(inferred_size, *stride);
+  return alias_with_sizes_and_strides(self, inferred_size, *stride);
 
 }
 

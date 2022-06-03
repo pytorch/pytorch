@@ -210,6 +210,7 @@ non_native:
     properties:
       - ShapeCompute
       - TreatScalarsAsConstants
+      - CanBeReusedDeclOnly
   - func: expand(Tensor input, int[] size, bool is_scalar_expand) -> Tensor
   - func: view(Tensor input, int[] output_size) -> Tensor
     properties:

@@ -20,7 +20,7 @@ def parse_args() -> Any:
 
 def rebase_onto(pr: GitHubPR, repo: GitRepo, dry_run: bool = False, stable: bool = False) -> None:
     branch = f"pull/{pr.pr_num}/head"
-    onto_branch = "viable/strict" if stable else pr.default_branch()
+    onto_branch = "refs/remotes/origin/viable/strict" if stable else pr.default_branch()
     remote_url = f"https://github.com/{pr.info['headRepository']['nameWithOwner']}.git"
     refspec = f"{branch}:{pr.head_ref()}"
 
@@ -44,10 +44,18 @@ def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, dry_run: bool = False, stab
     if subprocess.run([sys.executable, "-m", "ghstack", "--help"], capture_output=True).returncode != 0:
         subprocess.run([sys.executable, "-m", "pip", "install", "ghstack"])
     orig_ref = f"{re.sub(r'/head$', '/orig', pr.head_ref())}"
-    onto_branch = "viable/strict" if stable else pr.default_branch()
+    onto_branch = "refs/remotes/origin/viable/strict" if stable else pr.default_branch()
 
     repo.fetch(orig_ref, orig_ref)
     repo._run_git("rebase", onto_branch, orig_ref)
+
+    os.environ["OAUTH_TOKEN"] = os.environ["GITHUB_TOKEN"]
+    with open('.ghstackrc', 'w+') as f:
+        f.write('[ghstack]\n' +
+                "github_url=github.com\n" +
+                "github_username=pytorchmergebot\n" +
+                "remote_name=origin")
+
     if dry_run:
         print("Don't know how to dry-run ghstack")
     else:

@@ -469,7 +469,7 @@ class GenLazyNativeFuncDefinition:
         # but also on composite operators that are implemented in terms of structured kernels.
         # We don't currently have a way of knowing at codegen time which ops are implemented that way.
         # This is the case for all view and view_copy operators however, so we're going to
-        # use them specifically for al of the view_copy ops (instead of manually writing shape rules for all of them).
+        # use them specifically for all of the view_copy ops (instead of manually writing shape rules for all of them).
         is_view_copy_op = "view_copy" in func.tags
         is_structured = func.structured or func.structured_delegate is not None
         if is_structured or is_view_copy_op:
@@ -651,7 +651,7 @@ def generate_non_native_lazy_ir_nodes(
     nodes = []
     for op in non_native:
         # Set default properties for Non-Native IRs
-        properties = LazyIrProperties("ShapeCache")
+        properties = LazyIrProperties("ShapeCache", "CanBeReused", "LowerDeclOnly")
         for p in op.get("properties", []):
             setattr(properties, p, True)
 
