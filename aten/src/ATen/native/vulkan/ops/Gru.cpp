@@ -1,4 +1,6 @@
 #include <ATen/native/vulkan/ops/Gru.h>
+#include <ATen/native/vulkan/ops/Mm.h>
+#include <ATen/native/vulkan/ops/VulkanOpContext.h>
 #include <vector>
 
 namespace at {
@@ -97,12 +99,12 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 
 } // namespace
 
-std::vector<LinearOpContext> pack_linear_op_contexts(
+std::vector<c10::intrusive_ptr<VulkanOpContext>> pack_linear_op_contexts(
     const std::vector<Tensor>& params_cpu,
     int64_t num_layers) {
   TORCH_CHECK(static_cast<int64_t>(params_cpu.size()) == 4 * num_layers,
               "Vulkan gru expects 'params_cpu' size to be 4 * 'num_layers'.");
-  std::vector<LinearOpContext> linear_op_contexts;
+  std::vector<c10::intrusive_ptr<VulkanOpContext>> linear_op_contexts;
   for (int64_t i = 0; i < num_layers; ++i) {
     const auto& w_ih = params_cpu.at(i * 4);
     const auto& w_hh = params_cpu.at(i * 4 + 1);
@@ -128,12 +130,12 @@ std::vector<LinearOpContext> pack_linear_op_contexts(
     const auto&  b_hz = b_h_rzn[1];
     const auto&  b_hn = b_h_rzn[2];
 
-    linear_op_contexts.emplace_back(LinearOpContext::create(w_ir.t(), b_ir));
-    linear_op_contexts.emplace_back(LinearOpContext::create(w_hr.t(), b_hr));
-    linear_op_contexts.emplace_back(LinearOpContext::create(w_iz.t(), b_iz));
-    linear_op_contexts.emplace_back(LinearOpContext::create(w_hz.t(), b_hz));
-    linear_op_contexts.emplace_back(LinearOpContext::create(w_in.t(), b_in));
-    linear_op_contexts.emplace_back(LinearOpContext::create(w_hn.t(), b_hn));
+    linear_op_contexts.emplace_back(create_linear_context(w_ir.t(), b_ir));
+    linear_op_contexts.emplace_back(create_linear_context(w_hr.t(), b_hr));
+    linear_op_contexts.emplace_back(create_linear_context(w_iz.t(), b_iz));
+    linear_op_contexts.emplace_back(create_linear_context(w_hz.t(), b_hz));
+    linear_op_contexts.emplace_back(create_linear_context(w_in.t(), b_in));
+    linear_op_contexts.emplace_back(create_linear_context(w_hn.t(), b_hn));
   }
   return linear_op_contexts;
 }
@@ -198,9 +200,15 @@ std::tuple<Tensor, Tensor> GruOpContext::run(
     const auto&  cxt_in = packed_.linear_op_contexts[i * linear_op_contexts_per_layer + 4];
     const auto&  cxt_hn = packed_.linear_op_contexts[i * linear_op_contexts_per_layer + 5];
 
-    const auto&  r = at::sigmoid(cxt_ir.run(x, 1.0f, 1.0f, "aten::addmm") + cxt_hr.run(h, 1.0f, 1.0f, "aten::addmm"));
-    const auto&  z = at::sigmoid(cxt_iz.run(x, 1.0f, 1.0f, "aten::addmm") + cxt_hz.run(h, 1.0f, 1.0f, "aten::addmm"));
-    const auto&  n = at::tanh(cxt_in.run(x, 1.0f, 1.0f, "aten::addmm") + r * (cxt_hn.run(h, 1.0f, 1.0f, "aten::addmm")));
+    const auto&  r = at::sigmoid(
+      linear_context_run(x, cxt_ir->get_packed(), cxt_ir->get_unpacked(), 1.0f, 1.0f, "aten::addmm")
+       + linear_context_run(h, cxt_hr->get_packed(), cxt_hr->get_unpacked(), 1.0f, 1.0f, "aten::addmm"));
+    const auto&  z = at::sigmoid(
+      linear_context_run(x, cxt_iz->get_packed(), cxt_iz->get_unpacked(), 1.0f, 1.0f, "aten::addmm")
+       + linear_context_run(h, cxt_hz->get_packed(), cxt_hz->get_unpacked(), 1.0f, 1.0f, "aten::addmm"));
+    const auto&  n = at::tanh(
+      linear_context_run(x, cxt_in->get_packed(), cxt_in->get_unpacked(), 1.0f, 1.0f, "aten::addmm")
+       + r * (linear_context_run(h, cxt_hn->get_packed(), cxt_hn->get_unpacked(), 1.0f, 1.0f, "aten::addmm")));
     h = (z * (-1) + 1) * n + z * h;
     x = h;  // next input
     h_n_list.emplace_back(h.reshape({1, 1, h.size(0), h.size(1)}));  // 2D to 4D for cat op
