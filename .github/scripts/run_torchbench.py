@@ -128,7 +128,7 @@ def run_userbenchmarks(pytorch_path: str, torchbench_path: str, base_sha: str, h
     # Copy system environment so that we will not override
     env = dict(os.environ)
     command = ["python", "./.github/scripts/abtest.py",
-               "--pytorch-src", pytorch_path,
+               "--pytorch-repo", pytorch_path,
                "--base", base_sha,
                "--head", head_sha,
                "--userbenchmark", userbenchmark,
