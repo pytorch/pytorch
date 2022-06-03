@@ -721,6 +721,8 @@ class GitHubPR:
 class MandatoryChecksMissingError(Exception):
     pass
 
+class MandatoryChecksNotRunError(Exception):
+    pass
 
 @dataclass
 class MergeRule:
@@ -766,6 +768,7 @@ def find_matching_merge_rule(pr: GitHubPR,
     # Score 0 to 10K - how many files rule matched
     # Score 10K - matched all files, but no overlapping approvers
     # Score 20K - matched all files and approvers, but mandatory checks are pending
+    # Score 25k - matched all files and approvers, but mandatory checks are not running
     # Score 30k - Matched all files and approvers, but mandatory checks failed
     reject_reason_score = 0
     for rule in rules:
@@ -805,13 +808,14 @@ def find_matching_merge_rule(pr: GitHubPR,
                                  f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}")
             continue
         if rule.mandatory_checks_name is not None:
+            not_run_checks: List[Tuple[str, Optional[str]]] = []
             pending_checks: List[Tuple[str, Optional[str]]] = []
             failed_checks: List[Tuple[str, Optional[str]]] = []
             checks = pr.get_checkrun_conclusions()
             # HACK: We don't want to skip CLA check, even when forced
             for checkname in filter(lambda x: force is False or "CLA Check" in x, rule.mandatory_checks_name):
                 if checkname not in checks:
-                    pending_checks.append((checkname, None))
+                    not_run_checks.append((checkname, None))
                 elif checks[checkname][0] is None:
                     pending_checks.append((checkname, checks[checkname][1]))
                 elif checks[checkname][0] != 'SUCCESS':
@@ -826,6 +830,12 @@ def find_matching_merge_rule(pr: GitHubPR,
                 reject_reason = ("Refusing to merge as mandatory check(s) " +
                                  checks_to_str(failed_checks) + f" failed for rule {rule_name}")
             continue
+        elif len(not_run_checks) > 0:
+            if reject_reason_score < 25000:
+                reject_reason_score = 25000
+                reject_reason = ("Refusing to merge as mandatory check(s)" +
+                                 f"{checks_to_str(not_run_checks)} are not running for rule {rule_name}.")
+                continue
         elif len(pending_checks) > 0:
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
@@ -837,6 +847,8 @@ def find_matching_merge_rule(pr: GitHubPR,
         return rule
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason)
+    if reject_reason_score == 25000:
+        raise MandatoryChecksNotRunError(reject_reason)
     raise RuntimeError(reject_reason)
 
 
@@ -909,6 +921,12 @@ def merge(pr_num: int, repo: GitRepo,
             last_exception = str(ex)
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 60 seconds.")
             time.sleep(60)
+        except MandatoryChecksNotRunError as ex:
+            print(f"Merged failed due to: {ex}. Retrying in 60 seconds.")
+            # Wait for 10 minutes for jobs to kick off before assuming they aren't run
+            if elapsed_time > 10 * 60:
+                raise ex
+
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
