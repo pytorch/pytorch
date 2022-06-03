@@ -2955,6 +2955,10 @@
     "softmax"
   ],
   "torch.special": [
+    "bessel_j0",
+    "bessel_j1",
+    "bessel_y0",
+    "bessel_y1",
     "chebyshev_polynomial_t",
     "chebyshev_polynomial_u",
     "digamma",
@@ -2981,6 +2985,10 @@
     "log_softmax",
     "logit",
     "logsumexp",
+    "modified_bessel_i0",
+    "modified_bessel_i1",
+    "modified_bessel_k0",
+    "modified_bessel_k1",
     "multigammaln",
     "ndtr",
     "ndtri",
