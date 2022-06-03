@@ -10,6 +10,8 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/onnx_log.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/passes/onnx/autograd_function_process.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
@@ -365,6 +367,20 @@ void NodeToONNX(
     }
   };
 
+  // Inline the prim::PythonOp node and add it to the new graph
+  auto inlineAutograd = [&](Node* PythonOpNode) {
+    auto subgraph = PythonOpNode->g(attr::Subgraph);
+    for (const auto i : c10::irange(PythonOpNode->inputs().size())) {
+      env[subgraph->inputs()[i]] = env[PythonOpNode->inputs()[i]];
+    }
+    for (auto* node : subgraph->nodes()) {
+      NodeToONNX(node, new_block, operator_export_type, env);
+    }
+    for (const auto i : c10::irange(PythonOpNode->outputs().size())) {
+      env[PythonOpNode->outputs()[i]] = env[subgraph->outputs()[i]];
+    }
+  };
+
   // Cast output of symbolic() python implementation
   auto processSymbolicOutput = [&](const std::string& op_name,
                                    Node* n,
@@ -445,7 +461,7 @@ void NodeToONNX(
       // 1. The torch.autograd.Function class of this node object has `symbolic`
       // method defined.
       // 2. Custom export symbolic is registered for prim::PythonOp.
-      cloneNode(op);
+      inlineAutograd(op);
       return;
     }
 
