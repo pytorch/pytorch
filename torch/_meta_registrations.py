@@ -1,8 +1,9 @@
 import torch
+from torch import Tensor
 from torch._prims import utils
 from torch._prims.utils import check
 
-from typing import List
+from typing import List, Optional
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
@@ -136,9 +137,8 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
 @torch.library.impl(meta_lib, "index.Tensor")
 def meta_index_Tensor(self, indices):
     # aten::index is the internal advanced indexing implementation
-    check(len(indices) <= self.ndim, lambda: f"too many indices for tensor of dimension {self.ndim} (got {len(indices)})")
-    # checkIndexTensorTypes
-    result = []
+    # checkIndexTensorTypes and expandTensors
+    result: List[Optional[Tensor]] = []
     for i, index in enumerate(indices):
         if index is not None:
             check(
@@ -147,13 +147,26 @@ def meta_index_Tensor(self, indices):
             )
             if index.dtype in [torch.int8, torch.bool]:
                 nonzero = index.nonzero()
+                k = len(result)
+                check(
+                    k + index.ndim <= self.ndim,
+                    lambda: f"too many indices for tensor of dimension {self.ndim}",
+                    IndexError
+                )
                 for j in range(index.ndim):
+                    check(
+                        index[j] <= self.shape[k + j],
+                        lambda: f"The shape of the mask {index.shape} at index {i} "
+                                f"does not match the shape of the indexed tensor {self.shape} at index {k + j}",
+                        IndexError
+                    )
                     result.append(nonzero.select(1, j))
             else:
                 result.append(index)
         else:
             result.append(index)
     indices = result
+    check(len(indices) <= self.ndim, lambda: f"too many indices for tensor of dimension {self.ndim} (got {len(indices)})")
     # expand_outplace
     import torch._refs as refs  # avoid import cycle in mypy
     indices = list(refs._maybe_broadcast(*indices))
@@ -164,6 +177,7 @@ def meta_index_Tensor(self, indices):
     # hasContiguousSubspace
     #   true if all non-null tensors are adjacent
     # See:
+    # https://numpy.org/doc/stable/user/basics.indexing.html#combining-advanced-and-basic-indexing
     # https://stackoverflow.com/questions/53841497/why-does-numpy-mixed-basic-advanced-indexing-depend-on-slice-adjacency
     state = 0
     has_contiguous_subspace = False
