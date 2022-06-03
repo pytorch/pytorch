@@ -62,27 +62,9 @@ inline int64_t getTimeUs() {
 } // namespace
 
 namespace python_tracer {
-namespace {
-CallFn call_fn;
-TraceEventsFn get_events_fn;
-} // namespace
-
-void registerFunctions(CallFn call, TraceEventsFn get_events) {
-  call_fn = call;
-  get_events_fn = get_events;
-}
-
-void call(Command c) {
-  if (call_fn != nullptr) {
-    call_fn(c);
-  }
-}
-
-std::vector<std::unique_ptr<PyTraceEvent>> get_events() {
-  return get_events_fn != nullptr
-      ? get_events_fn()
-      : std::vector<std::unique_ptr<PyTraceEvent>>();
-}
+using torch::profiler::impl::python_tracer::CallType;
+using torch::profiler::impl::python_tracer::PyTraceEvent;
+using torch::profiler::impl::python_tracer::PythonTracerBase;
 
 // We do not want `getTimeUs` to be directly visible, but we need a way for
 // the python tracer to use the same timing convention as the profiler.
@@ -321,37 +303,35 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
     auto converter = clock_converter_.makeConverter();
 
     for (auto& e : record_queue_.getRecords(converter)) {
-      // `take_data` handles time conversion.
-      int64_t start_us = e->start_time_ns_ / 1000;
-      int64_t end_us = e->endTimeNS() / 1000;
-
-      if (end_us < start_us) {
-        // We initialize end_us_ to the smallest int64_t, so this means that
-        // the op did not finish before we stopped profiling.
-        continue;
+      if (e->parent_.expired()) {
+        event_tree_.push_back(e);
       }
 
-      kineto_events_.emplace_back();
-      kineto_events_.back()
-          .name(e->name())
-          .startUs(start_us)
-          .durationUs(end_us - start_us)
-          .correlationId(e->correlationID())
-          .deviceType(e->deviceType())
-          .startThreadId(e->start_tid_);
+      if (e->finished_) {
+        int64_t start_us = e->start_time_ns_ / 1000;
+        int64_t end_us = e->endTimeNS() / 1000;
+        kineto_events_.emplace_back();
+        kineto_events_.back()
+            .name(e->name())
+            .startUs(start_us)
+            .durationUs(end_us - start_us)
+            .correlationId(e->correlationID())
+            .deviceType(e->deviceType())
+            .startThreadId(e->start_tid_);
 
-      // NB: also sets fields on `kineto_events_.back()`.
-      auto visitor = EventFieldsVisitor(
+        // NB: also sets fields on `kineto_events_.back()`.
+        auto visitor = EventFieldsVisitor(
           e, kineto_events_.back(), getEventPostProcessingCallback());
 
-      cpu_trace_.addCPUActivity(
-          e->name(),
-          e->kinetoType(),
-          e->kineto_info_,
-          e->correlationID(),
-          start_us,
-          end_us,
-          visitor.annotations_);
+        cpu_trace_.addCPUActivity(
+            e->name(),
+            e->kinetoType(),
+            e->kineto_info_,
+            e->correlationID(),
+            start_us,
+            end_us,
+            visitor.annotations_);
+      }
     }
   }
 
@@ -396,7 +376,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       return;
     }
 
-    auto py_events = python_tracer::get_events();
+    auto py_events = python_tracer::PythonTracerBase::get().getEvents();
     for (const auto& e : py_events) {
       TORCH_INTERNAL_ASSERT(
           !e->thread_id_,
@@ -510,7 +490,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       // associated with it that we need to respect.
       if (!kineto_events_[idx].hasStack()) {
         std::vector<std::string> py_names;
-        _push_reverse_order(python_caller, py_names);
+        python_tracer::_push_reverse_order(python_caller, py_names);
         kineto_events_[idx].stack(py_names);
         activity.addMetadata("Call stack", torch::profiler::impl::stacksToStr(py_names, ";"));
       }
@@ -602,6 +582,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
   torch::profiler::impl::RecordQueue record_queue_;
   torch::profiler::impl::kineto::TraceWrapper cpu_trace_;
   std::vector<KinetoEvent> kineto_events_;
+  std::vector<experimental_event_t> event_tree_;
   // Optional, if event post-processing is enabled.
   post_process_t event_post_process_cb_;
 };
@@ -801,7 +782,7 @@ void enableProfiler(
     c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
     if (state->tracePython()) {
-      python_tracer::call(python_tracer::Command::kStartOne);
+      python_tracer::PythonTracerBase::get().start();
     }
 
     if (activities.count(ActivityType::CPU)) {
@@ -854,18 +835,19 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
       config.state == ProfilerState::KINETO_GPU_FALLBACK) {
     auto kineto_state_ptr = std::static_pointer_cast<KinetoThreadLocalState>(state_ptr);
     if (kineto_state_ptr->tracePython()) {
-      python_tracer::call(python_tracer::Command::kStop);
+      python_tracer::PythonTracerBase::get().stop();
     }
 
     auto trace = kineto_state_ptr->finalizeTrace();
     if (kineto_state_ptr->tracePython()) {
-      python_tracer::call(python_tracer::Command::kClear);
+      python_tracer::PythonTracerBase::get().clear();
     }
 
     result = std::make_unique<ProfilerResult>(
         kineto_state_ptr->start_time_,
         std::move(kineto_state_ptr->kineto_events_),
-        std::move(trace));
+        std::move(trace),
+        std::move(kineto_state_ptr->event_tree_));
   }
 
   return result;
@@ -887,10 +869,12 @@ int64_t KinetoEvent::cudaElapsedUs() const {
 ProfilerResult::ProfilerResult(
     uint64_t start_time,
     std::vector<KinetoEvent> events,
-    torch::profiler::impl::kineto::ActivityTraceWrapper trace)
+    torch::profiler::impl::kineto::ActivityTraceWrapper trace,
+    std::vector<experimental_event_t>&& event_tree)
     : trace_start_us_(start_time),
       events_(std::move(events)),
-      trace_(std::move(trace)) {}
+      trace_(std::move(trace)),
+      event_tree_(std::move(event_tree)) {}
 ProfilerResult::ProfilerResult() = default;
 ProfilerResult::~ProfilerResult() = default;
 

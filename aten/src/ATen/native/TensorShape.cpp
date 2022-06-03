@@ -843,7 +843,7 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
 }
 
 Tensor expand_symint(const Tensor& self, c10::SymIntArrayRef packed_size, bool implicit) {
-  auto size = expectIntArrayRef(packed_size);
+  auto size = asIntArrayRefSlow(packed_size);
   return expand(self, size, implicit);
 }
 
@@ -1983,11 +1983,6 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     return _sparse_coo_tensor_with_dims_and_tensors(
         sparse_dim, dense_dim, res_sizes, indices, res_values, self.options());
   }
-}
-
-Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
-  auto res = index_select_sparse_cpu(self.to(at::kCPU), dim, index.to(at::kCPU));
-  return res.to(self.device());
 }
 
 Tensor slice(

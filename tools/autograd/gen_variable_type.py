@@ -154,6 +154,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "view_as",
     "roll",
     "clone",
+    "block_diag",
     "diag_embed",
     "repeat",
     "expand",
@@ -372,10 +373,11 @@ c10::optional<Storage> ${tensor_name}_storage_saved =
 """
 )
 
+
 # If tensor_name == out_tensor_name, used to enforce (1), otherwise used for (2)
 ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate(
     """\
-if (${tensor_name}_storage_saved.has_value())
+if (${tensor_name}_storage_saved.has_value() && !torch_dispatch_set())
   AT_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${out_tensor_name}.storage()));
 """
 )
@@ -392,7 +394,7 @@ for (const Tensor& tensor : ${tensorlist_name})
 ENFORCE_SAME_TENSORLIST_STORAGE = CodeTemplate(
     """\
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}_storage_saved[i].has_value())
+  if (${tensorlist_name}_storage_saved[i].has_value() && !torch_dispatch_set())
     AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(${tensorlist_name}[i].storage()));
 }
 """
@@ -409,7 +411,7 @@ for (const c10::optional<Tensor>& tensor : ${tensorlist_name})
 
 ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+for (size_t i=0; i<${tensorlist_name}.size() && !torch_dispatch_set(); i++) {
   if (${tensorlist_name}_storage_saved[i].has_value())
     AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(
         static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->storage()));
@@ -426,19 +428,21 @@ if (${tensor_name}.defined()) ${tensor_name}_impl_saved = ${tensor_name}.getIntr
 
 ENFORCE_SAME_TENSOR_IMPL = CodeTemplate(
     """\
-if (${tensor_name}_impl_saved) AT_ASSERT(${tensor_name}_impl_saved == ${tensor_name}.getIntrusivePtr());
+if (${tensor_name}_impl_saved && !torch_dispatch_set()) AT_ASSERT(${tensor_name}_impl_saved == ${tensor_name}.getIntrusivePtr());
 """
 )
 
 ENFORCE_TENSOR_IMPL_USE_COUNT_LT_OR_EQ_ONE = CodeTemplate(
     """\
-AT_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
+if (!torch_dispatch_set()) AT_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
 """
 )
 
 ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE = CodeTemplate(
     """\
-if (${tensor_name}.has_storage()) AT_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
+if (${tensor_name}.has_storage() && !torch_dispatch_set()) {
+  AT_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
+}
 """
 )
 
@@ -452,7 +456,7 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++)
 
 ENFORCE_SAME_TENSORLIST_IMPL = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+for (size_t i=0; i<${tensorlist_name}.size() && !torch_dispatch_set(); i++) {
   if (${tensorlist_name}_impl_saved[i])
     AT_ASSERT(${tensorlist_name}_impl_saved[i] == ${tensorlist_name}[i].getIntrusivePtr());
 }
@@ -471,7 +475,7 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 
 ENFORCE_SAME_OPTIONALTENSORLIST_IMPL = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+for (size_t i=0; i<${tensorlist_name}.size() && !torch_dispatch_set(); i++) {
   if (${tensorlist_name}_impl_saved[i])
     AT_ASSERT(${tensorlist_name}_impl_saved[i] == static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->getIntrusivePtr());
 }
