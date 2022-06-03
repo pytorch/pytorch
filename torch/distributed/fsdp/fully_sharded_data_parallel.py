@@ -2627,14 +2627,19 @@ class FullyShardedDataParallel(nn.Module):
             if self._is_root:
                 self._queue_wait_for_post_backward()
 
+            if not self._pre_backward_hook_full_params_prefetched:
+                # Always wait for all_gather before rebuilding full params, just
+                # in case full params have already been prefetched in previous layer's
+                # pre-backward hook.
+                torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
             # Start of a backward pass for the first time in an backward pass.
             self._assert_state([TrainingState_.IDLE])
             self.training_state = TrainingState_.BACKWARD_PRE
 
-            # Only rebuilding full params when the params are not prefetched in previous layers
-            if not self._pre_backward_hook_full_params_prefetched:
-                # All-gather full parameters, moving them to compute device if necessary.
-                self._rebuild_full_params()
+            # All-gather full parameters, moving them to compute device if
+            # necessary.
+            self._rebuild_full_params()
             self._pre_backward_hook_full_params_prefetched = False
             # Wait for all_gather to finish before computation
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
