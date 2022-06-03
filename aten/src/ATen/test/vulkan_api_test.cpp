@@ -6,6 +6,7 @@
 #include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/api/OpProfiler.h>
 #include <c10/util/irange.h>
+#include <ATen/native/vulkan/ops/VulkanOpContext.h>
 
 // TODO: These functions should move to a common place.
 
@@ -2104,6 +2105,39 @@ TEST_F(VulkanAPITest, upsample_nearest2d) {
   }
 
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, vulkan_op_context) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  double a = 5.2;
+  at::Tensor b = at::ones({2, 2});
+
+  c10::impl::GenericList packed{c10::AnyType::get()};
+  packed.reserve(2);
+  packed.emplace_back(a);
+  packed.emplace_back(b);
+
+  double s = 6.2;
+  at::Tensor t = at::ones({3, 3});
+
+  c10::impl::GenericList unpacked{c10::AnyType::get()};
+  unpacked.reserve(2);
+  unpacked.emplace_back(s);
+  unpacked.emplace_back(t);
+
+  at::native::vulkan::ops::VulkanOpContext vulkan_context =
+    at::native::vulkan::ops::VulkanOpContext::create(packed, unpacked);
+
+  at::native::vulkan::ops::VulkanOpContext::State state = vulkan_context.get_state();
+
+  c10::impl::GenericList packed_context = std::get<0>(state);
+  c10::impl::GenericList unpacked_context = std::get<1>(state);
+
+  ASSERT_EQ(packed, packed_context);
+  ASSERT_EQ(unpacked, unpacked_context);
 }
 
 #if !defined(__APPLE__)
