@@ -20,6 +20,11 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           quiet-checkout: true
 
+      - name: Clean checkout
+        shell: arch -arch arm64 bash {0}
+        run: |
+          git clean -fxd
+
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
         with:
@@ -36,6 +41,8 @@ jobs:
           . ~/miniconda3/etc/profile.d/conda.sh
           set -ex
           conda create -yp "${ENV_NAME}" "python=${PY_VERS}" numpy expecttest
+          # As wheels are cross-compiled they are reported as x86_64 ones
+          ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv ${ORIG_WHLNAME} ${ARM_WHLNAME}
           conda run -p "${ENV_NAME}" python3 -mpip install dist/*.whl
 
       - name: Run MPS tests
