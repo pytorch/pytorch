@@ -85,13 +85,13 @@ def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: 
                 if pr_num != pr.pr_num:
                     gh_post_comment(pr.org, pr.project, pr_num,
                                     f"Rebased `{orig_ref}` onto `{onto_branch}` because #{pr.pr_num} was rebased, "
-                                    "please pull locally before adding more changes (for example, via `git checkout "
-                                    f"{orig_ref} && git pull --rebase`)", dry_run=dry_run)
+                                    "please pull locally before adding more changes (for example, via `ghstack " +
+                                    f"checkout https://github.com/{org}/{project}/pull/{pr_num}`)", dry_run=dry_run)
                 else:
                     gh_post_comment(pr.org, pr.project, pr_num,
                                     f"Successfully rebased `{orig_ref}` onto `{onto_branch}`, please pull locally " +
-                                    f"before adding more changes (for example, via `git checkout {orig_ref} && " +
-                                    "git pull --rebase`)", dry_run=dry_run)
+                                    "before adding more changes (for example, via `ghstack " +
+                                    f"checkout https://github.com/{org}/{project}/pull/{pr.pr_num}`)", dry_run=dry_run)
 
         if f"Skipped https://github.com/{org}/{project}/pull/{pr.pr_num}" in push_result:
             gh_post_comment(pr.org, pr.project, pr.pr_num,
