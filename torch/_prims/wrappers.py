@@ -1,4 +1,5 @@
 import torch
+import torch._prims as prims
 from torch._prims.utils import (
     Number,
     NumberType,
@@ -264,7 +265,3 @@ def elementwise_unary_scalar_wrapper(fn: Callable) -> Callable:
 
     _fn.__signature__ = sig  # type: ignore[attr-defined]
     return _fn
-
-
-# avoid mypy import cycle
-import torch._prims as prims
