@@ -3136,7 +3136,7 @@ class _TestONNXRuntime:
         class PackUnpack(torch.nn.Module):
             """Create and unpack a list of tensors.
 
-            It should produce a graph similar to
+            When scripted, it should produce a graph similar to
 
             ```
             graph(%self : __torch__.PackUnpack,
@@ -3153,11 +3153,11 @@ class _TestONNXRuntime:
                 c, _ = packed
                 return c
 
-        inputs = [torch.tensor(0), torch.tensor([42])]
         self.run_test(
             torch.jit.script(PackUnpack()),
-            inputs,
+            (torch.tensor(0), torch.tensor([42])),
             input_names=["a", "b"],
+            remained_onnx_input_idx=[0],
         )
 
     @skipIfUnsupportedMinOpsetVersion(9)
