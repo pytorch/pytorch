@@ -4640,8 +4640,6 @@ def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
     for args in test_args:
         yield SampleInput(make_arg((S, S, S)), args=args)
 
-    yield SampleInput(make_arg((S, S, S, S)), args=([slice(None), [0, 1], slice(None), [0, 1]],))
-
 def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -13305,9 +13303,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_fwgrad_bwgrad", dtypes=(torch.float64,)),
         ),
     ),
-    UnaryUfuncInfo('nn.functional.relu',
+    OpInfo('nn.functional.relu',
            aten_name="relu",
-           ref=lambda x: np.where(a <= 0, 0, a),
            supports_autograd=True,
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
@@ -19654,14 +19651,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",
-        decorators=(
-            # Need FakeTensor support for meta coverage
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
-        ),
-    ),
-    ElementwiseUnaryPythonRefInfo(
-        "_refs.nn.functional.relu",
-        torch_opinfo_name="nn.functional.relu",
         decorators=(
             # Need FakeTensor support for meta coverage
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),

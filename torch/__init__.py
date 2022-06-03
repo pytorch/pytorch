@@ -927,5 +927,4 @@ def _register_device_module(device_type, module):
 from . import return_types
 if sys.executable != 'torch_deploy':
     from . import library
-    if not TYPE_CHECKING:
-        from . import _meta_registrations
+    from . import _meta_registrations
