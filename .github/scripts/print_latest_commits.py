@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Dict
 from datetime import datetime, timedelta
 from gitutils import _check_output
 
@@ -7,8 +7,8 @@ import os
 
 rs = Client(api_key=os.getenv("ROCKSET_API_KEY", None))
 qlambda = rs.QueryLambda.retrieve(
-    'commit_jobs_query',
-    version='c2a4dbce081d0144',
+    'commit_jobs_batch_query',
+    version='15aba20837ae9d75',
     workspace='commons')
 
 def parse_args() -> Any:
@@ -31,16 +31,18 @@ def print_latest_commits(minutes: int = 30) -> None:
         encoding="ascii",
     ).splitlines()
 
-    for commit in commits:
-        print(commit)
-        print_commit_status(commit)
-
-def print_commit_status(sha: str) -> None:
     params = ParamDict()
-    params['sha'] = sha
+    params['shas'] = ",".join(commits)
     results = qlambda.execute(parameters=params)
+
+    for commit in commits:
+        print_commit_status(commit, results)
+
+def print_commit_status(commit: str, results: Dict[str, Any]) -> None:
+    print(commit)
     for check in results['results']:
-        print(f"\t{check['conclusion']:>10}: {check['name']}")
+        if check['sha'] == commit:
+            print(f"\t{check['conclusion']:>10}: {check['name']}")
 
 def main() -> None:
     args = parse_args()

@@ -14070,7 +14070,10 @@ class TestNNDeviceType(NNTestCase):
             if mode == 'same':
                 actual = actual[:5, :5, :10]
 
-            self.assertEqual(actual, expected, rtol=2e-5, atol=5e-6)
+            if tf32_is_not_fp32() and (dtype == torch.float or dtype == torch.complex64):
+                self.assertEqual(actual, expected, atol=0.05, rtol=0.05)
+            else:
+                self.assertEqual(actual, expected, rtol=2e-5, atol=5e-6)
 
         # Global dtype for this test suite is torch.double
         # This leads to change in type-promotion
@@ -16471,6 +16474,40 @@ class TestNNDeviceType(NNTestCase):
     @dtypesIfCUDA(*((torch.float, torch.double, torch.bfloat16, torch.half)
                     if TEST_WITH_ROCM else (torch.float, torch.double, torch.half)))
     @dtypes(torch.float32)
+    def test_embedding_max_norm_backward(self, device, dtype):
+        # can't use gradcheck since in place renorm makes analytical gradients different from produced ones
+        weight = torch.randn((4, 4), device=device, dtype=dtype) * 2
+        weight.requires_grad_()
+        inp_list = [0, 1, 2, 2]
+        inp = torch.tensor(inp_list, device=device)
+        out = nn.functional.embedding(inp, weight, max_norm=1.).sum()
+        out.backward()
+
+        expected_grad = torch.tensor([[1., 1., 2., 0.]], device=device, dtype=dtype).transpose(0, 1).expand(4, 4)
+        self.assertEqual(weight.grad, expected_grad)
+
+    @dtypesIfCUDA(*((torch.float, torch.double, torch.bfloat16, torch.half)
+                    if TEST_WITH_ROCM else (torch.float, torch.double, torch.half)))
+    @dtypes(torch.float32)
+    def test_embedding_max_norm_fwd_AD(self, device, dtype):
+        if torch.device(device).type == 'xla':
+            self.skipTest("forward AD doesn't work on xla")
+
+        # can't use gradcheck since in place renorm makes analytical gradients different from produced ones
+        weight = torch.randn((4, 4), device=device, dtype=dtype) * 2
+        tangent = torch.ones((4, 4), device=device, dtype=dtype)
+        inp = torch.tensor([[0, 1], [2, 2]], device=device)
+        with torch.autograd.forward_ad.dual_level():
+            dual_weight = torch.autograd.forward_ad.make_dual(weight, tangent)
+            out = nn.functional.embedding(inp, dual_weight, max_norm=1.)
+            jvp = torch.autograd.forward_ad.unpack_dual(out).tangent
+
+        expected_grad = torch.ones((2, 2, 4), device=device, dtype=dtype)
+        self.assertEqual(jvp, expected_grad)
+
+    @dtypesIfCUDA(*((torch.float, torch.double, torch.bfloat16, torch.half)
+                    if TEST_WITH_ROCM else (torch.float, torch.double, torch.half)))
+    @dtypes(torch.float32)
     def test_embedding_padding_idx(self, device, dtype):
         embedding = nn.Embedding(10, 20, padding_idx=0).to(device, dtype)
         input = torch.tensor([[0, 2, 4, 5], [4, 3, 0, 9]], dtype=torch.long).to(device)
@@ -17191,10 +17228,17 @@ class TestNNDeviceType(NNTestCase):
         maxdiff1 = (ret.narrow(0, 1024, 1024) - conv(input_large.narrow(0, 1024, 1024))).abs_().max().item()
         maxdiff2 = (ret.narrow(0, 2048, 1024) - conv(input_large.narrow(0, 2048, 1024))).abs_().max().item()
         maxdiff3 = (ret.narrow(0, 3072, 1024) - conv(input_large.narrow(0, 3072, 1024))).abs_().max().item()
-        self.assertEqual(maxdiff0, 0)
-        self.assertEqual(maxdiff1, 0)
-        self.assertEqual(maxdiff2, 0)
-        self.assertEqual(maxdiff3, 0)
+        if self.device_type == 'cuda':
+            # cuDNN may use algorithms such as FFT that don't guarantee a diff of 0
+            self.assertEqual(maxdiff0, 0, atol=2e-3, rtol=1e-5)
+            self.assertEqual(maxdiff1, 0, atol=2e-3, rtol=1e-5)
+            self.assertEqual(maxdiff2, 0, atol=2e-3, rtol=1e-5)
+            self.assertEqual(maxdiff3, 0, atol=2e-3, rtol=1e-5)
+        else:
+            self.assertEqual(maxdiff0, 0)
+            self.assertEqual(maxdiff1, 0)
+            self.assertEqual(maxdiff2, 0)
+            self.assertEqual(maxdiff3, 0)
 
     @onlyCUDA
     @skipCUDAIfRocm
@@ -19505,7 +19549,10 @@ class TestNNDeviceType(NNTestCase):
             w = w.to(memory_format=memory_format)
             cudnn_out = torch.cudnn_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
-            self.assertEqual(conv2d_out.relu(), cudnn_out)
+            if tf32_is_not_fp32() and dtype == torch.float:
+                self.assertEqual(conv2d_out.relu(), cudnn_out, atol=2e-4, rtol=0.006)
+            else:
+                self.assertEqual(conv2d_out.relu(), cudnn_out)
 
     @onlyCUDA
     @skipCUDAIfRocm
@@ -19533,7 +19580,10 @@ class TestNNDeviceType(NNTestCase):
             cudnn_out = torch.cudnn_convolution_add_relu(inp, w, z, alpha, None, (1, 1), (0, 0), (1, 1), 1)
 
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
-            self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out)
+            if tf32_is_not_fp32() and dtype == torch.float:
+                self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out, atol=3e-4, rtol=0.006)
+            else:
+                self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out)
 
     @onlyCUDA
     @skipCUDAIfRocm

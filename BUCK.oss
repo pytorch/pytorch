@@ -276,15 +276,6 @@ cxx_library(
     ],
 )
 
-python_library(
-    name = "aten_code_template",
-    srcs = subdir_glob([
-        ("aten", "src/ATen/code_template.py"),
-    ]),
-    base_module = "",
-    visibility = ["PUBLIC"],
-)
-
 fb_xplat_genrule(
     name = "generate-version-header",
     srcs = [
