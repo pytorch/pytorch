@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      random_symmetric_pd_matrix, make_symmetric_matrices,
      make_symmetric_pd_matrices, random_square_matrix_of_rank,
-     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
+     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, IS_X86, TEST_SCIPY,
      torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
      GRADCHECK_NONDET_TOL, slowTest, noncontiguous_like,
      freeze_rng_state)
@@ -12643,8 +12643,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
            skips=(
-               DecorateInfo(unittest.skip("fails on some platforms"),
-                            'TestCommon', 'test_non_standard_bool_values'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
+                            active_if=not (IS_MACOS and IS_X86)),
            ),
            supports_forward_ad=True),
     OpInfo('max',
