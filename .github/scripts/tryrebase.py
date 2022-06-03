@@ -105,7 +105,7 @@ def main() -> None:
 
     pr = GitHubPR(org, project, args.pr_num)
 
-    msg = f"@pytorchbot successfully started a rebase job."
+    msg = "@pytorchbot successfully started a rebase job."
     msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
     gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
 
