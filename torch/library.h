@@ -65,8 +65,6 @@
 
 // Just for inferFunctionSchemaFromFunctor
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/core/enum_tag.h>
-#include <c10/util/Optional.h>
 
 namespace torch {
 
@@ -596,12 +594,12 @@ class TORCH_API Library final {
   ///   m.def("add(Tensor self, Tensor other) -> Tensor");
   /// }
   /// ```
-
   template <typename Schema>
-  Library& def(Schema&& raw_schema, const std::vector<at::Tag>& tags = {}) & {
+  Library& def(Schema&& raw_schema) & {
     c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema));
-    return _def(std::move(s), nullptr, std::move(tags));
+    return _def(std::move(s));
   }
+
   /// Define an operator for a schema and then register an implementation for
   /// it.  This is typically what you would use if you aren't planning
   /// on making use of the dispatcher to structure your operator
@@ -815,8 +813,7 @@ class TORCH_API Library final {
   // public because we only implement & qualifier and not && qualifier
   Library& _def(
       c10::FunctionSchema&& schema,
-      c10::OperatorName* out_name = nullptr,
-      const std::vector<at::Tag>& tags = {}) &;
+      c10::OperatorName* out_name = nullptr) &;
   Library& _def(
       c10::either<c10::OperatorName, c10::FunctionSchema>&&,
       CppFunction&& f) &;
