@@ -1,11 +1,8 @@
 import torch
 from torch._prims import utils
+from torch._prims.utils import check
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
-
-def check(b, s):
-    if not b:
-        raise RuntimeError(s)
 
 def toRealValueType(dtype):
     from_complex = {
@@ -138,3 +135,11 @@ def meta_adaptive_avg_pool2d(self, output_size):
 def meta_adaptive_avg_pool3d(self, output_size):
     check(self.ndim == 4 or self.ndim == 5, f"Expected 4D or 5D tensor, but got {self.shape}")
     return self.new_empty(self.shape[:-3] + tuple(output_size))
+
+@torch.library.impl(meta_lib, "repeat_interleave.Tensor")
+def meta_repeat_interleave_Tensor(repeats, output_size=None):
+    if output_size is None:
+        raise RuntimeError(
+            "cannot repeat_interleave a meta tensor without output_size"
+        )
+    return repeats.new_empty(output_size)
