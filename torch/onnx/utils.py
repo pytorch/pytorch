@@ -46,33 +46,18 @@ _params_dict = {}  # type: ignore[var-annotated]
 
 
 @contextlib.contextmanager
-def select_model_mode_for_export(model, mode: Optional[_C_onnx.TrainingMode]):
+def select_model_mode_for_export(
+    model, mode: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL
+):
     """Adjusts the model training mode to the specified mode for export."""
-    if mode is None:
-        export_mode = _C_onnx.TrainingMode.EVAL
-    else:
-        export_mode = mode
-
     originally_training: bool = False
     if not isinstance(model, torch.jit.ScriptFunction):
         originally_training = model.training
 
-        if mode is None:
-            # if the model is in training mode but the user did not specify
-            # to export the model in training mode, export the model in inference
-            # mode (default) and warn them
-            if originally_training:
-                warnings.warn(
-                    "You are exporting the model to ONNX while in training mode with "
-                    "'train' parameter not specified. The model will default to inference mode export. "
-                    "If you wish to export a training amenable ONNX model, specify training=TrainingMode.TRAINING or "
-                    "training=TrainingMode.PRESERVE (to preserve the original model state) in torch.onnx.export()."
-                )
-
         # ONNX opset 12 has better support for training amenable models, with updated
         # versions of the dropout and batch_norm operators
-        if export_mode == _C_onnx.TrainingMode.TRAINING or (
-            export_mode == _C_onnx.TrainingMode.PRESERVE and originally_training
+        if mode == _C_onnx.TrainingMode.TRAINING or (
+            mode == _C_onnx.TrainingMode.PRESERVE and originally_training
         ):
             if GLOBALS.export_onnx_opset_version < 12:
                 warnings.warn(
@@ -82,10 +67,10 @@ def select_model_mode_for_export(model, mode: Optional[_C_onnx.TrainingMode]):
                     "nodes such as Dropout and BatchNorm correctly."
                 )
 
-        GLOBALS.training_mode = export_mode
-        if export_mode == _C_onnx.TrainingMode.TRAINING:
+        GLOBALS.training_mode = mode
+        if mode == _C_onnx.TrainingMode.TRAINING:
             model.train(True)
-        elif export_mode == _C_onnx.TrainingMode.EVAL:
+        elif mode == _C_onnx.TrainingMode.EVAL:
             model.train(False)
         # else mode == _C_onnx.TrainingMode.PRESERVE, do nothing
 
@@ -94,9 +79,9 @@ def select_model_mode_for_export(model, mode: Optional[_C_onnx.TrainingMode]):
     finally:
         if not (
             isinstance(model, torch.jit.ScriptFunction)
-            or export_mode == _C_onnx.TrainingMode.PRESERVE
+            or mode == _C_onnx.TrainingMode.PRESERVE
         ):
-            # Alter the model training state only if export_mode is not PRESERVE
+            # Alter the model training state only if mode is not PRESERVE
             model.train(originally_training)
 
 
@@ -157,7 +142,7 @@ def export(
     f,
     export_params=True,
     verbose=False,
-    training=None,
+    training=_C_onnx.TrainingMode.EVAL,
     input_names=None,
     output_names=None,
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
@@ -708,7 +693,7 @@ def _model_to_graph(
     do_constant_folding=True,
     _disable_torch_constant_prop=False,
     fixed_batch_size=False,
-    training=None,
+    training=_C_onnx.TrainingMode.EVAL,
     dynamic_axes=None,
 ) -> Tuple[
     _C.Graph,
@@ -823,7 +808,7 @@ def export_to_pretty_string(
     args,
     export_params=True,
     verbose=False,
-    training=None,
+    training=_C_onnx.TrainingMode.EVAL,
     input_names=None,
     output_names=None,
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
@@ -998,7 +983,7 @@ def _export(
     f,
     export_params=True,
     verbose=False,
-    training=None,
+    training=_C_onnx.TrainingMode.EVAL,
     input_names=None,
     output_names=None,
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
@@ -1049,7 +1034,7 @@ def _export(
             else:
                 operator_export_type = _C_onnx.OperatorExportTypes.ONNX
 
-        # By default, training=None, (which defaults to TrainingMode.EVAL),
+        # By default, training=TrainingMode.EVAL,
         # which is good because running a model in training mode could result in
         # internal buffers getting updated, dropout getting applied, etc.
         # If you really know what you're doing, you can turn

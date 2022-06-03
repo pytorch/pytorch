@@ -24,7 +24,7 @@ class _InternalGlobals:
 
     def __init__(self):
         self._export_onnx_opset_version = _constants.onnx_default_opset
-        self._training_mode: Optional[_C_onnx.TrainingMode] = None
+        self._training_mode: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL
         self.operator_export_type: Optional[_C_onnx.OperatorExportTypes] = None
         self.onnx_shape_inference: bool = False
 
