@@ -1306,6 +1306,17 @@ class TestTorchFunctionMode(TestCase):
                 with x:
                     pass
 
+    def test_error_using_class_method_on_mode(self):
+        class A(TorchFunctionMode):
+            @classmethod
+            def __torch_function__(cls, func, _, args=(), kwargs=None):
+                return func(args, kwargs)
+
+        x = torch.tensor(5.)
+        with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
+            with A():
+                x + x
+
     def test_reentrant_mode_idiom(self):
         log = []
 

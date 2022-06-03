@@ -1747,6 +1747,9 @@ def is_tensor_like(inp):
 def _wrap_torch_function(f):
     @functools.wraps(f)
     def wrapped(self, *args, **kwargs):
+        if isinstance(f, classmethod):
+            raise RuntimeError("TorchDispatchMode's torch_function function " +
+                               "should be a normal method not a class method")
         inner = getattr(self, "inner", None)
 
         with enable_torch_function_mode(inner):
