@@ -143,12 +143,12 @@ inline int columnDimension(Layout layout, IntArrayRef size) {
   return size.size() - (isCompressedColumn(layout) ? 2 : 1);
 }
 
-inline int compressedDimension(Layout layout, IntArrayRef size) {
-  return size.size() - (isCompressedRow(layout) ? 2 : 1);
+inline int compressedDimension(Layout layout, IntArrayRef size, size_t dense_ndim=0) {
+  return size.size() - dense_ndim - (isCompressedRow(layout) ? 2 : 1);
 }
 
-inline int plainDimension(Layout layout, IntArrayRef size) {
-  return size.size() - (isCompressedRow(layout) ? 1 : 2);
+inline int plainDimension(Layout layout, IntArrayRef size, size_t dense_ndim=0) {
+  return size.size() - dense_ndim - (isCompressedRow(layout) ? 1 : 2);
 }
 
 } // namespace sparse_csr
