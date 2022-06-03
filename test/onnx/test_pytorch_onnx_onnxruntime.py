@@ -3118,7 +3118,6 @@ class _TestONNXRuntime:
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_listunpack(self):
         class ListUnpack(torch.nn.Module):
-            @torch.jit.script_method
             def forward(self, x):
                 a, b = x.shape
                 return x.new_zeros((a, b))
@@ -3164,7 +3163,6 @@ class _TestONNXRuntime:
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_listunpack_slice(self):
         class ListUnpackSlice(torch.nn.Module):
-            @torch.jit.script_method
             def forward(self, x):
                 a, b = x.shape[2:]
                 return x.new_zeros((a, b))
