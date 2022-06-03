@@ -84,7 +84,7 @@ class TestCustomAutogradFunction(unittest.TestCase):
 
         x = torch.randn(2, 3, 4, requires_grad=True)
         model = MyModule()
-        run_model_test(self, model, input=(x,))
+        run_model_test(self, model, input_args=(x,))
 
     def test_register_custom_op(self):
         class MyClip(torch.autograd.Function):
@@ -126,7 +126,7 @@ class TestCustomAutogradFunction(unittest.TestCase):
 
         x = torch.randn(2, 3, 4, requires_grad=True)
         model = MyModule()
-        run_model_test(self, model, input=(x,))
+        run_model_test(self, model, input_args=(x,))
 
 
 class TestExportAsContribOps(unittest.TestCase):
@@ -160,7 +160,7 @@ class TestExportAsContribOps(unittest.TestCase):
 
         x = torch.randn(3, 3, 4, requires_grad=True)
         model = torch.jit.script(M())
-        run_model_test(self, model, input=(x,))
+        run_model_test(self, model, input_args=(x,))
 
 
 if __name__ == "__main__":
