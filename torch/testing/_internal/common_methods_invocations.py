@@ -12643,7 +12643,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
+               DecorateInfo(unittest.skip("fails on some platforms"),
+                            'TestCommon', 'test_non_standard_bool_values'),
            ),
            supports_forward_ad=True),
     OpInfo('max',
