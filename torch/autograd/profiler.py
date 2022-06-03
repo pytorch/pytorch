@@ -14,7 +14,6 @@ import torch.cuda
 from torch.futures import Future
 from typing import Any, Dict, List, Optional
 from warnings import warn
-from contextlib import nullcontext
 
 
 try:
@@ -441,19 +440,15 @@ class record_function(ContextDecorator):
         self.run_callbacks_on_exit: bool = True
         # Stores underlying RecordFunction as a tensor. TODO: move to custom
         # class (https://github.com/pytorch/pytorch/issues/35026).
-        self.handle: torch.Tensor = torch.zeros(1)
+        self.handle: torch.Tensor = torch.zeros(())
 
     def __enter__(self):
-        if torch.autograd._profiler_enabled:
+        if torch.autograd._profiler_enabled():
             self.handle = torch.ops.profiler._record_function_enter(self.name, self.args)
-            return self
-        else:
-            return nullcontext.__enter__()
+        return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
-        if not torch.autograd._profiler_enabled:
-            return nullcontext.__exit__()
-        elif self.run_callbacks_on_exit:
+        if self.run_callbacks_on_exit and torch.autograd._profiler_enabled():
             torch.ops.profiler._record_function_exit(self.handle)
 
     def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
