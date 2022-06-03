@@ -203,8 +203,8 @@ jobs:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
-  macos-10-15-py3-arm64-test:
-    name: macos-10-15-py3-arm64-test
+  macos-12-3-py38-arm64-test:
+    name: macos-12.3-py3.8-arm64-test
     uses: ./.github/workflows/_mac-test-arm64.yml
     needs: macos-10-15-py3-arm64
     with:
