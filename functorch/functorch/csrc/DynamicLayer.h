@@ -85,6 +85,8 @@ Tensor unwrapIfDead(const Tensor& tensor);
 std::ostream& operator<<(std::ostream& os, const DynamicLayer& layer);
 std::ostream& operator<<(std::ostream& os, const std::vector<DynamicLayer>& dynamicLayerStack);
 
+void setInplaceRequiresGradAllowed(bool allowed);
+
 
 }
 } // namespace at
