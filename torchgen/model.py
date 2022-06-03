@@ -2333,6 +2333,15 @@ class Precompute:
         assert r.to_list() == src, "r.to_list() != src"
         return r
 
+    def __post_init__(self) -> None:
+        # the template parameters are upper so if these are the
+        # same then it is ambiguous
+        for a in self.add:
+            assert a.name.upper() != a.name
+        for args in self.replace.values():
+            for a in args:
+                assert a.name.upper() != a.name
+
     def to_list(self) -> List[str]:
         replace_list = []
         for kernel_param, replacement_params in self.replace.items():
