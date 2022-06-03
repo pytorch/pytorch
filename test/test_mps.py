@@ -3711,6 +3711,19 @@ class TestNLLLoss(TestCase):
             for diag in [0, 1, 2, 3, 4, -1, -2, -3, -4]:
                 helper(shape, diag=diag)
 
+    # Test linspace
+    def test_linspace(self):
+        def helper(start, end, steps, dtype=torch.float32):
+            cpu_result = torch.tensor(np.linspace(start, end, steps), dtype=dtype)
+            result = torch.linspace(start, end, steps, dtype=dtype, device='mps')
+            self.assertEqual(cpu_result, result)
+
+        for dtype in [torch.float32, torch.int32, torch.uint8, torch.int64]:
+            helper(2, 5, 10, dtype)
+            helper(2, 2, 10, dtype)
+            helper(5, 2, 10, dtype)
+            helper(2, 2, 0, dtype)
+
     # Test softmax
     def test_softmax(self):
         def helper(shape, dim, channels_last=False):
