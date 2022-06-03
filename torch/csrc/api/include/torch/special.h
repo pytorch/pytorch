@@ -637,4 +637,112 @@ inline Tensor& chebyshev_polynomial_u_out(Tensor& output, const Tensor& x, const
   return torch::special_chebyshev_polynomial_u_out(output, x, n);
 }
 
+/// Physicist’s Hermite polynomial.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.hermite_polynomial_h.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto n = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::hermite_polynomial_h(x, n);
+/// ```
+inline Tensor hermite_polynomial_h(const Tensor& x, const Tensor& n) {
+  return torch::special_hermite_polynomial_h(x, n);
+}
+
+inline Tensor hermite_polynomial_h(const Scalar& x, const Tensor& n) {
+  return torch::special_hermite_polynomial_h(x, n);
+}
+
+inline Tensor hermite_polynomial_h(const Tensor& x, const Scalar& n) {
+  return torch::special_hermite_polynomial_h(x, n);
+}
+
+inline Tensor& hermite_polynomial_h_out(Tensor& output, const Tensor& x, const Tensor& n) {
+  return torch::special_hermite_polynomial_h_out(output, x, n);
+}
+
+inline Tensor& hermite_polynomial_h_out(Tensor& output, const Scalar& x, const Tensor& n) {
+  return torch::special_hermite_polynomial_h_out(output, x, n);
+}
+
+inline Tensor& hermite_polynomial_h_out(Tensor& output, const Tensor& x, const Scalar& n) {
+  return torch::special_hermite_polynomial_h_out(output, x, n);
+}
+
+/// Probabilist’s Hermite polynomial.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.hermite_polynomial_he.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto n = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::hermite_polynomial_he(x, n);
+/// ```
+inline Tensor hermite_polynomial_he(const Tensor& x, const Tensor& n) {
+  return torch::special_hermite_polynomial_he(x, n);
+}
+
+inline Tensor hermite_polynomial_he(const Scalar& x, const Tensor& n) {
+  return torch::special_hermite_polynomial_he(x, n);
+}
+
+inline Tensor hermite_polynomial_he(const Tensor& x, const Scalar& n) {
+  return torch::special_hermite_polynomial_he(x, n);
+}
+
+inline Tensor& hermite_polynomial_he_out(Tensor& output, const Tensor& x, const Tensor& n) {
+  return torch::special_hermite_polynomial_he_out(output, x, n);
+}
+
+inline Tensor& hermite_polynomial_he_out(Tensor& output, const Scalar& x, const Tensor& n) {
+  return torch::special_hermite_polynomial_he_out(output, x, n);
+}
+
+inline Tensor& hermite_polynomial_he_out(Tensor& output, const Tensor& x, const Scalar& n) {
+  return torch::special_hermite_polynomial_he_out(output, x, n);
+}
+
+/// Laguerre polynomial.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.laguerre_polynomial_l.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto n = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::laguerre_polynomial_l(x, n);
+/// ```
+inline Tensor laguerre_polynomial_l(const Tensor& x, const Tensor& n) {
+  return torch::special_laguerre_polynomial_l(x, n);
+}
+
+inline Tensor laguerre_polynomial_l(const Scalar& x, const Tensor& n) {
+  return torch::special_laguerre_polynomial_l(x, n);
+}
+
+inline Tensor laguerre_polynomial_l(const Tensor& x, const Scalar& n) {
+  return torch::special_laguerre_polynomial_l(x, n);
+}
+
+inline Tensor& laguerre_polynomial_l_out(Tensor& output, const Tensor& x, const Tensor& n) {
+  return torch::special_laguerre_polynomial_l_out(output, x, n);
+}
+
+inline Tensor& laguerre_polynomial_l_out(Tensor& output, const Scalar& x, const Tensor& n) {
+  return torch::special_laguerre_polynomial_l_out(output, x, n);
+}
+
+inline Tensor& laguerre_polynomial_l_out(Tensor& output, const Tensor& x, const Scalar& n) {
+  return torch::special_laguerre_polynomial_l_out(output, x, n);
+}
+
 }} // torch::special

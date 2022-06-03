@@ -17,13 +17,16 @@ __all__ = [
     'gammainc',
     'gammaincc',
     'gammaln',
+    'hermite_polynomial_h',
+    'hermite_polynomial_he',
     'i0',
     'i0e',
     'i1',
     'i1e',
-    'log1p',
+    'laguerre_polynomial_l',
     'log_ndtr',
     'log_softmax',
+    'log1p',
     'logit',
     'logsumexp',
     'multigammaln',
@@ -903,6 +906,73 @@ is evaluated.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+hermite_polynomial_h = _add_docstr(_special.special_hermite_polynomial_h,
+                                   r"""
+hermite_polynomial_h(input, n, *, out=None) -> Tensor
+
+Physicist’s Hermite polynomial :math:`H_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    H_{n + 1}(\text{input}) = 2 \times \text{input} \times H_{n}(\text{input}) - H_{n - 1}(\text{input})
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+hermite_polynomial_he = _add_docstr(_special.special_hermite_polynomial_he,
+                                    r"""
+hermite_polynomial_he(input, n, *, out=None) -> Tensor
+
+Probabilist’s Hermite polynomial :math:`He_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    He_{n + 1}(\text{input}) = 2 \times \text{input} \times He_{n}(\text{input}) - He_{n - 1}(\text{input})
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+laguerre_polynomial_l = _add_docstr(_special.special_laguerre_polynomial_l,
+                                    r"""
+laguerre_polynomial_l(input, n, *, out=None) -> Tensor
+
+Laguerre polynomial :math:`L_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    L_{n + 1}(\text{input}) = 2 \times \text{input} \times L_{n}(\text{input}) - L_{n - 1}(\text{input})
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+
 Keyword args:
     {out}
 """.format(**common_args))
