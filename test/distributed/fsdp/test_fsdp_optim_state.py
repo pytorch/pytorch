@@ -637,7 +637,7 @@ class TestFSDPOptimState(FSDPTest):
             **new_model_kwargs,  # specify `wrap_alt` to change wrapping
         )
         self._step_model(model2, optim2, num_iters=NUM_ITERS)
-        full_osd2 = FSDP.full_optim_state_dict(model2, optim2, optim_input2)
+        full_osd2 = FSDP.full_optim_state_dict(model2, optim2, optim_input2, group=new_group)
         # Compute two sharded optim state dicts: (1) for the first model
         # according to the second model and (2) for the second model according
         # to the second model

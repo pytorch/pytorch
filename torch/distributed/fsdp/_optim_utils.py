@@ -71,8 +71,8 @@ class _OptimStateKey(NamedTuple):
 def _unflatten_optim_state(
     flat_param: FlatParameter,
     flat_param_state: Dict[str, Any],
+    fsdp_module,
     to_save: bool,
-    process_group,
 ) -> List[Dict[str, Any]]:
     """
     Unflattens the optimizer state, consisting of the "state" part and the
@@ -85,6 +85,8 @@ def _unflatten_optim_state(
         flat_param (FlatParameter): The flattened parameter.
         flat_param_state (Dict[str, Any]): Entry for the flattened parameter
             in the "state" part of the optimizer state dict.
+        fsdp_module (FullyShardedDataParallel): FSDP module that owns
+            ``flat_param``, i.e. holds it in ``self.params``.
         to_save (bool): Whether to save the state on this rank.
 
     Returns:
@@ -96,7 +98,7 @@ def _unflatten_optim_state(
         entries using the proper unflattened parameter IDs.
     """
     consolidated_state = _communicate_optim_state(
-        flat_param, flat_param_state, to_save, process_group,
+        flat_param, flat_param_state, fsdp_module, to_save,
     )
     unflat_param_state = _unflatten_communicated_optim_state(
         flat_param,
@@ -108,8 +110,8 @@ def _unflatten_optim_state(
 def _communicate_optim_state(
     flat_param: FlatParameter,
     flat_param_state: Dict[str, Any],
+    fsdp_module,
     to_save: bool,
-    process_group,
 ) -> _ConsolidatedOptimState:
     """
     Communicates the optimizer state for a flattened parameter ``flat_param``
@@ -124,6 +126,8 @@ def _communicate_optim_state(
         flat_param (FlatParameter): The flattened parameter.
         flat_param_state (Dict[str, Any]): The entry in the "state" part of the
             optimizer state dict corresponding to the flattened parameter.
+        fsdp_module (FullyShardedDataParallel): FSDP module that owns
+            ``flat_param``, i.e. holds it in ``self.params``.
         to_save (bool): Whether to save the state on this rank.
 
     Returns:
@@ -133,6 +137,7 @@ def _communicate_optim_state(
     state = _ConsolidatedOptimState()
     tensor_state, zero_dim_tensor_state, non_tensor_state = \
         state.tensor_state, state.zero_dim_tensor_state, state.non_tensor_state
+    group = fsdp_module.process_group
 
     tensor_buffer = None  # initialize lazily in case it is not needed
     for state_name, value in flat_param_state.items():
@@ -149,7 +154,7 @@ def _communicate_optim_state(
                 # has the same shape as the sharded flattened parameter
                 buffer_size = flat_param._full_param_padded.size()  # type: ignore[attr-defined]
                 tensor_buffer = value.new_zeros(*buffer_size)
-            dist._all_gather_base(tensor_buffer, value, group=process_group)
+            dist._all_gather_base(tensor_buffer, value, group=group)
             if to_save:
                 assert hasattr(flat_param, "_orig_size"), \
                     "Sharded flattened parameter should have `_orig_size` set"

@@ -49,6 +49,7 @@ from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
     _broadcast_processed_optim_state_dict,
     _flatten_full_optim_state_dict,
+    _get_flat_param_to_fsdp_module,
     _get_param_id_to_param,
     _get_param_to_param_id,
     _OptimStateKey,
@@ -3451,6 +3452,7 @@ class FullyShardedDataParallel(nn.Module):
             List[Dict[str, Any]], Iterable[torch.nn.Parameter],
         ]] = None,
         rank0_only: bool = True,
+        group=None,
     ) -> Dict[str, Any]:
         """
         Consolidates the full optimizer state on rank 0 and returns it
@@ -3491,35 +3493,25 @@ class FullyShardedDataParallel(nn.Module):
             rank0_only (bool): If ``True``, saves the populated :class:`dict`
                 only on rank 0; if ``False``, saves it on all ranks. (Default:
                 ``True``)
+            group (dist.ProcessGroup): Model's process group or ``None`` if using
+                the default process group. (Default: ``None``)
 
         Returns:
             Dict[str, Any]: A :class:`dict` containing the optimizer state for
             ``model`` 's original unflattened parameters and including keys
             "state" and "param_groups" following the convention of
-            :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=False``,
+            :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=True``,
             then nonzero ranks return an empty :class:`dict`.
         """
         osd = optim.state_dict()
         osd_state, osd_param_groups = osd["state"], osd["param_groups"]
-        process_groups = set(
-            module.process_group for module in model.modules()
-            if hasattr(module, "process_group")
-        )  # see if any modules have a process group attribute
-        if len(process_groups) == 0:
-            group = None  # use default group
-        else:
-            if len(process_groups) > 1:
-                warnings.warn(
-                    "Multiple process groups were found in the module "
-                    "hierarchy. An arbitrary one will be used for collectives "
-                    "in `full_optim_state_dict()`."
-                )
-            group = next(iter(process_groups))
         rank = dist.get_rank(group)
         to_save = not rank0_only or rank == 0
         full_osd: Dict = {"state": {}, "param_groups": []} if to_save else {}
         full_osd_state = full_osd["state"] if to_save else None
 
+        # Construct the local mapping between unflattened parameter names
+        # (`_OptimStateKey`s) and parameter IDs and broadcast rank 0's mapping
         param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = \
             _get_param_to_unflat_param_names(model)
         flat_param_id_to_param: List[torch.nn.Parameter] = \
@@ -3558,7 +3550,7 @@ class FullyShardedDataParallel(nn.Module):
         num_missing = torch.tensor([len(missing_keys)], dtype=torch.int32, device=device)
         dist.all_reduce(num_missing, group=group)
         if num_missing.item() > 0:
-            obj_list = [None for _ in range(group.size())]
+            obj_list = [None for _ in range(dist.get_world_size(group))]
             dist.all_gather_object(obj_list, missing_keys, group=group)
             error_msg = (
                 "FSDP currently requires each rank to have at least the "
@@ -3573,17 +3565,22 @@ class FullyShardedDataParallel(nn.Module):
                     )
             raise RuntimeError(error_msg)
 
-
         # Iterate in rank 0's flattened parameter ID order to ensure aligned
         # all-gathers across ranks
+        flat_param_to_fsdp_module = _get_flat_param_to_fsdp_module(model)
         for r0_optim_state_key in r0_flat_param_id_to_optim_state_key.values():
             flat_param_id = optim_state_key_to_flat_param_id[r0_optim_state_key]
             param = flat_param_id_to_param[flat_param_id]
             if r0_optim_state_key.is_flat_param:
-                unflat_state = _unflatten_optim_state(param, osd_state[flat_param_id], to_save, group)
+                fsdp_module = flat_param_to_fsdp_module[param]
+                unflat_state = _unflatten_optim_state(
+                    param, osd_state[flat_param_id], fsdp_module, to_save,
+                )
                 if to_save:
                     assert len(unflat_state) == len(r0_optim_state_key.unflat_param_names)
-                    for unflat_param_name, unflat_param_state in zip(r0_optim_state_key.unflat_param_names, unflat_state):
+                    for unflat_param_name, unflat_param_state in zip(
+                        r0_optim_state_key.unflat_param_names, unflat_state,
+                    ):
                         full_osd_state[unflat_param_name] = unflat_param_state
             elif to_save:
                 assert len(r0_optim_state_key.unflat_param_names) == 1
@@ -3733,8 +3730,8 @@ class FullyShardedDataParallel(nn.Module):
                 :class:`list` of parameter groups or an iterable of parameters;
                 if ``None``, then this method assumes the input was
                 ``model.parameters()``. (Default: ``None``)
-            group (Optional[Any]): Model's process group or ``None`` if using
-                the default process group. (Default: ``None``)
+            group (dist.ProcessGroup): Model's process group or ``None`` if
+                using the default process group. (Default: ``None``)
 
         Returns:
             Dict[str, Any]: The full optimizer state dict now remapped to
