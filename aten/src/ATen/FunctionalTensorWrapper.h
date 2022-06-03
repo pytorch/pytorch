@@ -133,8 +133,8 @@ TORCH_API c10::List<c10::optional<Tensor>> to_functional_tensor(const c10::List<
 TORCH_API std::vector<Tensor> to_functional_tensor(const std::vector<Tensor>& t_list);
 TORCH_API std::vector<Tensor> to_functional_tensor(const TensorList& t_list);
 
-TORCH_API Tensor from_functional_tensor(const Tensor& tensor);
-TORCH_API c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t);
+TORCH_API Tensor from_functional_tensor(const Tensor& tensor, bool assert_functional=true);
+TORCH_API c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t, bool assert_functional=true);
 TORCH_API c10::List<Tensor> from_functional_tensor(const c10::List<Tensor>& t_list);
 TORCH_API c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list);
 TORCH_API std::vector<Tensor> from_functional_tensor(const TensorList& tensors);
