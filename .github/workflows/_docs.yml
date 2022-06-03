@@ -30,7 +30,7 @@ jobs:
   build-docs:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: [self-hosted, linux.4xlarge]
     strategy:
       matrix:
         docs_type: [cpp, python]
