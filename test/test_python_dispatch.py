@@ -1085,6 +1085,17 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 with x:
                     pass
 
+    def test_error_using_class_method_on_mode(self):
+        class A(TorchDispatchMode):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                return func(args, kwargs)
+
+        x = torch.tensor(5.)
+        with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
+            with A():
+                x + x
+
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
         with self.assertRaisesRegex(RuntimeError, "is not supported for tensor subclasses."):
