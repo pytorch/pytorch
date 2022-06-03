@@ -294,6 +294,7 @@ def get_native_backend_config_dict():
     linear_dtype_configs = [
         weighted_op_int8_dtype_config,
         default_dynamic_int8_dtype_config,
+        default_dynamic_float16_dtype_config,
     ]
     binary_op_dtype_configs = [
         weighted_op_int8_dtype_config,
