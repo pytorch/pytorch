@@ -3116,7 +3116,7 @@ class _TestONNXRuntime:
         self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    def test_listunpack(self):
+    def test_list_unpack_scripted(self):
         class ListUnpack(torch.nn.Module):
             def forward(self, x):
                 a, b = x.shape
@@ -3132,7 +3132,9 @@ class _TestONNXRuntime:
         self.run_test(torch.jit.script(ListUnpack()), x, remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    def test_listunpack_runs_without_error_with_constructed_list_as_input(self):
+    def test_list_unpack_scripted_runs_without_error_with_constructed_list_as_input(
+        self,
+    ):
         class PackUnpack(torch.nn.Module):
             """Create and unpack a list of tensors.
 
@@ -3156,12 +3158,11 @@ class _TestONNXRuntime:
         self.run_test(
             torch.jit.script(PackUnpack()),
             (torch.tensor(0), torch.tensor([42])),
-            input_names=["a", "b"],
             remained_onnx_input_idx=[0],
         )
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    def test_listunpack_slice(self):
+    def test_list_unpack_slice_scripted(self):
         class ListUnpackSlice(torch.nn.Module):
             def forward(self, x):
                 a, b = x.shape[2:]
@@ -12323,37 +12324,27 @@ class _TestONNXRuntime:
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_qat_avg_pool2d(self):
-        layers = OrderedDict(
-            [
-                ("quant", torch.quantization.QuantStub()),
-                ("avgpool", torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1)),
-                ("dequant", torch.quantization.DeQuantStub()),
-            ]
+        model = torch.nn.Sequential(
+            torch.quantization.QuantStub(),
+            torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1),
+            torch.quantization.DeQuantStub(),
         )
-        model = torch.nn.Sequential(layers)
         model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
         model = torch.quantization.prepare_qat(model.train())
         model = torch.quantization.convert(model)
-
-        # Set fixed input to avoid flaky test.
         input = _construct_tensor_for_quantization_test((4, 4, 3, 2))
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_qat_upsample_nearest2d(self):
-        layers = OrderedDict(
-            [
-                ("quant", torch.quantization.QuantStub()),
-                ("upsample_nearest2d", torch.nn.UpsamplingNearest2d(scale_factor=1.5)),
-                ("dequant", torch.quantization.DeQuantStub()),
-            ]
+        model = torch.nn.Sequential(
+            torch.quantization.QuantStub(),
+            torch.nn.UpsamplingNearest2d(scale_factor=1.5),
+            torch.quantization.DeQuantStub(),
         )
-        model = torch.nn.Sequential(layers)
         model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
         model = torch.quantization.prepare_qat(model.train())
         model = torch.quantization.convert(model)
-
-        # Set fixed input to avoid flaky test.
         input = _construct_tensor_for_quantization_test((4, 3, 2, 2))
         self.run_test(model, input)
 
