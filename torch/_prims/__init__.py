@@ -5,7 +5,6 @@ import torch._prims.utils as utils
 from torch._prims.utils import (
     TensorLike,
     TensorLikeType,
-    TensorMeta,
     ShapeType,
     getnvFuserDtype,
     DimsType,
@@ -17,7 +16,9 @@ from torch._prims.utils import (
 from torch.overrides import has_torch_function, handle_torch_function
 import torch.library
 from torch.utils._pytree import tree_map
+from torch._subclasses.fake_tensor import FakeTensor
 
+import contextlib
 from typing import Sequence, Optional, Union, Callable, List, Tuple, Any, Type
 from functools import reduce, partial
 from enum import Enum
@@ -26,6 +27,7 @@ import math
 
 prim = torch.library.Library("prims", "DEF")
 prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
+prim_autograd_impl = torch.library.Library("prims", "IMPL", "Autograd")
 prim_meta_impl = torch.library.Library("prims", "IMPL", "Meta")
 
 # Experimental module containing prototype "primitive" operations.
@@ -283,28 +285,73 @@ class RETURN_TYPE(Enum):
     INPLACE = (2,)
 
 
+def TensorMeta(
+    tensorlike: Optional[Union[NumberType, torch.Tensor]] = None,
+    *,
+    shape: Optional[ShapeType] = None,
+    strides: Optional[StrideType] = None,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[Union[torch.device, str]] = None,
+):
+    if isinstance(tensorlike, Number):
+        assert not shape and (shape is None or isinstance(shape, Sequence))
+        assert not strides and (strides is None or isinstance(strides, Sequence))
+        inferred_shape: Tuple[int, ...] = ()
+        inferred_strides: Tuple[int, ...] = ()
+        inferred_dtype = type_to_dtype(type(tensorlike))
+        inferred_device = torch.device("cpu")
+        # TODO: This looks wrong, a number that is wrapped into a tensor
+        # needs to behave differently than a scalar tensor for type
+        # promotion purposes
+    elif tensorlike is not None:
+        assert isinstance(tensorlike, torch.Tensor)
+        inferred_shape = tuple(tensorlike.shape)
+        inferred_strides = tuple(tensorlike.stride())
+        inferred_dtype = tensorlike.dtype
+        inferred_device = tensorlike.device
+    else:
+        # If no tensorlike "example" is given then all metadata
+        # must be provided explicitly
+        assert shape is not None
+        assert strides is not None
+        assert dtype is not None
+        assert device is not None
+
+    shape = inferred_shape if shape is None else tuple(shape)
+    strides = inferred_strides if strides is None else tuple(strides)
+    dtype = inferred_dtype if dtype is None else dtype
+    device = inferred_device if device is None else device
+
+    if isinstance(device, str):
+        device = torch.device(device)
+
+    return FakeTensor(torch.empty_strided(shape, strides, dtype=dtype, device='meta'), device)
+
+
 def _wrap_tensor_meta(f):
     def wrap(t):
         if isinstance(t, torch.Tensor):
-            return TensorMeta(t)
-        else:
-            return t
-
-    def unwrap(t):
-        # TODO: doesn't setup aliasing relation on views correctly
-        if isinstance(t, TensorMeta):
-            return torch.empty_strided(
-                t.shape, t.stride(), dtype=t.dtype, device="meta"
-            )
+            return FakeTensor.from_tensor(t)
         else:
             return t
 
     def wrapper(*args, **kwargs):
         wrapped_args = tree_map(wrap, args)
         wrapped_kwargs = tree_map(wrap, kwargs)
-        return tree_map(unwrap, f(*wrapped_args, **wrapped_kwargs))
+        return f(*wrapped_args, **wrapped_kwargs)
 
     return wrapper
+
+
+@contextlib.contextmanager
+def _DispatchBelowAutograd():
+    # TODO: AutogradOther
+    old = torch._C._dispatch_tls_is_dispatch_key_excluded("AutogradFunctionality")
+    torch._C._dispatch_tls_set_dispatch_key_excluded("AutogradFunctionality", True)
+    try:
+        yield
+    finally:
+        torch._C._dispatch_tls_set_dispatch_key_excluded("AutogradFunctionality", old)
 
 
 def _make_prim(
@@ -330,14 +377,27 @@ def _make_prim(
         meta(*args, **kwargs)
         return impl_aten(*args, **kwargs)
 
+    class F(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, *args, **kwargs):
+            with _DispatchBelowAutograd():
+                return _prim(*args, **kwargs)
+
+        @staticmethod
+        def backward(ctx, *args):
+            raise RuntimeError("backwards not supported on prim")
+
+    def _autograd_impl(*args, **kwargs):
+        return F.apply(*args, **kwargs)
+
     name = schema.split("(")[0]
     prim_impl.impl(name, _prim_impl)
+    prim_autograd_impl.impl(name, _autograd_impl)
     prim_meta_impl.impl(name, _wrap_tensor_meta(meta))
 
     _prim = getattr(torch.ops.prims, name).default
 
     _prim.__doc__ = doc
-    _prim.meta = meta  # type: ignore[attr-defined]
     _prim.impl_nvfuser = impl_nvfuser  # type: ignore[attr-defined]
     _prim.return_type = return_type  # type: ignore[attr-defined]
 
@@ -355,7 +415,7 @@ def _elementwise_meta(
     *args,
     type_promotion: ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND,
     args_with_fixed_dtypes: Tuple[TensorLikeType, ...] = None,
-) -> TensorMeta:
+) -> FakeTensor:
     """
     Meta function for elementwise operations that produce outputs in the same dtype
     as their inputs.
@@ -1926,7 +1986,7 @@ device_put = _make_prim(
 
 # NOTE: need to model meta scalars
 # See https://github.com/pytorch/pytorch/issues/78070
-def _item_meta(a: TensorLikeType) -> TensorMeta:
+def _item_meta(a: TensorLikeType) -> FakeTensor:
     number_type = utils.dtype_to_type(a.dtype)
     return TensorMeta(number_type(-1))
 
@@ -1948,7 +2008,7 @@ item = _make_prim(
 
 # NOTE: need to model meta scalars
 # See https://github.com/pytorch/pytorch/issues/78070
-def _maximum_value_meta(dtype: torch.dtype) -> TensorMeta:
+def _maximum_value_meta(dtype: torch.dtype) -> FakeTensor:
     number_type = utils.dtype_to_type(dtype)
     return TensorMeta(number_type(-1))
 
@@ -1980,7 +2040,7 @@ maximum_value = _make_prim(
 
 # NOTE: need to model meta scalars
 # See https://github.com/pytorch/pytorch/issues/78070
-def _minimum_value_meta(dtype: torch.dtype) -> TensorMeta:
+def _minimum_value_meta(dtype: torch.dtype) -> FakeTensor:
     number_type = utils.dtype_to_type(dtype)
     return TensorMeta(number_type(-1))
 

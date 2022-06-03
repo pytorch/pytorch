@@ -7,8 +7,9 @@ import functools
 import torch
 from torch.fx.graph import Graph, Node
 import torch.overrides
+from torch._subclasses.fake_tensor import FakeTensor
 
-from torch._prims.utils import TensorMeta, torch_function_passthrough
+from torch._prims.utils import torch_function_passthrough
 import torch._refs as refs
 
 import torch._refs
@@ -90,7 +91,7 @@ class PrimContext(torch.overrides.TorchFunctionMode):
 
         return self._create_name(idx, self._lowercase)
 
-    def _add_user(self, tm: TensorMeta, node: Node) -> None:
+    def _add_user(self, tm: FakeTensor, node: Node) -> None:
         assert tm.node is not None
         tm.node.users[node] = None
 
@@ -98,17 +99,17 @@ class PrimContext(torch.overrides.TorchFunctionMode):
         name = self._tensor_name()
         node = self.graph.placeholder(name)
 
-        if isinstance(a, TensorMeta):
+        if isinstance(a, FakeTensor):
             if a.node is not None:
-                raise ValueError("Attempting to reuse a TensorMeta in a new trace!")
+                raise ValueError("Attempting to reuse a FakeTensor in a new trace!")
             a.tname = name
             a.node = node
 
         return a
 
-    def output(self, tm: TensorMeta):
+    def output(self, tm: FakeTensor):
         # TODO: allow other output types
-        assert isinstance(tm, TensorMeta)
+        assert isinstance(tm, FakeTensor)
 
         node = self.graph.output(tm)
         self._add_user(tm, node)
@@ -141,7 +142,7 @@ class PrimContext(torch.overrides.TorchFunctionMode):
             # Updates graph
             # TODO: handle outputs with multiple tensors
             # TODO: handle non-tensor outputs
-            assert isinstance(output, TensorMeta)
+            assert isinstance(output, FakeTensor)
             output_name = self._tensor_name()
             node = self.graph.create_node(
                 "call_function", func, name=output_name, args=args, kwargs=kwargs
@@ -151,7 +152,7 @@ class PrimContext(torch.overrides.TorchFunctionMode):
 
             # Marks uses
             for x in (
-                x for x in chain(args, kwargs.values()) if isinstance(x, TensorMeta)
+                x for x in chain(args, kwargs.values()) if isinstance(x, FakeTensor)
             ):
                 self._add_user(x, node)
 
