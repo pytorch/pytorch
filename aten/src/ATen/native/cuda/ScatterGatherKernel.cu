@@ -136,6 +136,12 @@ struct _cuda_scatter_gather_internal_kernel {
     char* src_ptr = (char*)iter.data_ptr(1);
     char* index_ptr = (char*)iter.data_ptr(2);
 
+    auto src_strides = iter.strides(1);
+    auto src_sizes = iter.shape()[1];
+    auto index_strides = iter.strides(2);
+    auto index_sizes = iter.shape()[2];
+    auto ndim = iter.ndim();
+
     auto offset_calc = make_offset_calculator<3>(iter);
     auto loop = [=]C10_DEVICE(int i) {
       auto offsets = offset_calc.get(i);
@@ -144,11 +150,30 @@ struct _cuda_scatter_gather_internal_kernel {
       CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
         && "index out of bounds");
 
+      int64_t src_offset;
+      if (is_scatter_like) {
+        src_offset = 0;
+
+        auto original_index_offset = offsets[2];
+        int64_t index_idx;
+
+        for (auto d = ndim - 1; d >= 0; d--) {
+          index_idx = (original_index_offset / index_strides[d]) % index_sizes[d];
+          original_index_offset -= index_idx * index_strides[d];
+
+          index_idx %= src_sizes[d];
+          src_offset += src_strides[d] * index_idx;
+        }
+      }
+      else {
+        src_offset = offsets[1];
+      }
+
       f(
         (scalar_t*)(self_ptr + offsets[0]),
         is_scatter_like ? idx_dim * index_stride : 0,
         numel,
-        (scalar_t*)(src_ptr + offsets[1]) + (is_scatter_like ? 0 : idx_dim * index_stride)
+        (scalar_t*)(src_ptr + src_offset) + (is_scatter_like ? 0 : idx_dim * index_stride)
       );
     };
 
