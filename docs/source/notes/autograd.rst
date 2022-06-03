@@ -94,8 +94,6 @@ Gradients for non-differentiable functions
 
 The gradient computation using Automatic Differentiation is only valid when each elementary function being used is differentiable.
 Unfortunately many of the functions we use in practice do not have this property (``relu`` or ``sqrt`` at ``0``, for example).
-And even though we cannot always guarantee that the returned gradient will be correct. For example ``f(x) = x = relu(x) - relu(-x)`` will have as gradient at zero twice that of ``relu``. So if we choose the gradient of ``relu`` to be ``1/2`` at zero to "fix" this example, then ``g(x) = exp(x) = relu(exp(x))`` would have a gradient of ``1/2`` at zero. In other words, there is no way to consistently choose a gradient for these functions that works as expected with respect to composition of functions.
-
 To try and reduce the impact of functions that are non-differentiable, we define the gradients of the elementary operations by applying the following rules in order:
 
 #. If the function is differentiable and thus a gradient exists at the current point, use it.
