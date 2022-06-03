@@ -113,8 +113,13 @@ def _compare_ort_pytorch_outputs(ort_outs, pt_outs, rtol, atol):
 
     assert len(pt_outs) == len(ort_outs), "number of outputs differ"
 
-    for ort_out, pt_out in zip(ort_outs, pt_outs):
+    for i, (ort_out, pt_out) in enumerate(zip(ort_outs, pt_outs)):
         np.testing.assert_allclose(ort_out, pt_out, rtol=rtol, atol=atol)
+        assert (
+            ort_out.shape == pt_out.shape
+        ), "{}-th tensor's shape differ, ort: {}, pt: {}".format(
+            i, ort_out.shape, pt_out.shape
+        )
 
 
 def _prepare_input_for_pytorch(args, kwargs):
