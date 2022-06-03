@@ -2157,6 +2157,93 @@ class TestComposability(TestCase):
         new_cotangent = torch.randn(())
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
 
+    def test_requires_grad_inside_transform(self, device):
+        def f(x):
+            x.requires_grad_()
+            return x.sin().sum()
+
+        x = torch.randn(3)
+
+        with self.assertRaisesRegex(RuntimeError, "Tensor.requires_grad_()"):
+            vmap(f)(x)
+        with self.assertRaisesRegex(RuntimeError, "Tensor.requires_grad_()"):
+            grad(f)(x)
+        with self.assertRaisesRegex(RuntimeError, "Tensor.requires_grad_()"):
+            vmap(grad(f))(x)
+
+        x = torch.randn([])
+        with self.assertRaisesRegex(RuntimeError, "Tensor.requires_grad_()"):
+            grad(grad(f))(x)
+
+    def test_retain_grad_inside_transform(self, device):
+        def f(x):
+            y = x.sin()
+            y.retain_grad()
+            return y.sum()
+
+        x = torch.randn(3)
+
+        with self.assertRaisesRegex(RuntimeError, "Tensor.retain_grad()"):
+            grad(f)(x)
+
+    def test_autograd_functional_jacrev_inside_transform(self, device):
+        def f(x):
+            y = torch.autograd.functional.jacobian(lambda x: x.sin().sum(), x)
+            return y
+
+        B = 5
+        x = torch.randn(B, 3)
+        with self.assertRaisesRegex(RuntimeError, "torch.autograd.functional"):
+            vmap(f)(x)
+
+        x = torch.randn([])
+        with self.assertRaisesRegex(RuntimeError, "torch.autograd.functional"):
+            grad(f)(x)
+
+    def test_autograd_functional_vjp_inside_transform(self, device):
+        def f(x):
+            y = torch.autograd.functional.vjp(lambda x: x.sin().sum(), x)
+            return y
+
+        B = 5
+        x = torch.randn(B, 3)
+        with self.assertRaisesRegex(RuntimeError, "torch.autograd.functional"):
+            vmap(f)(x)
+
+        x = torch.randn([])
+        with self.assertRaisesRegex(RuntimeError, "torch.autograd.functional"):
+            grad(f)(x)
+
+    def test_autograd_functional_jvp_inside_transform(self, device):
+        def f(x):
+            t = torch.ones_like(x)
+            y = torch.autograd.functional.jvp(lambda x: x.sin().sum(), (x,), (t,))
+            return y
+
+        B = 5
+        x = torch.randn(B, 3)
+        with self.assertRaisesRegex(RuntimeError, "torch.autograd.functional"):
+            vmap(f)(x)
+
+        x = torch.randn([])
+        with self.assertRaisesRegex(RuntimeError, "torch.autograd.functional"):
+            grad(f)(x)
+
+    def test_autograd_functional_jacfwd_inside_transform(self, device):
+        def f(x):
+            y = torch.autograd.functional.jacobian(
+                lambda x: x.sin().sum(), x, strategy='forward-mode', vectorize=True)
+            return y
+
+        B = 5
+        x = torch.randn(B, 3)
+        with self.assertRaises(RuntimeError):
+            vmap(f)(x)
+
+        x = torch.randn([])
+        with self.assertRaises(RuntimeError):
+            grad(f)(x)
+
 
 class TestMakeFunctional(TestCase):
     @parametrize('disable_autograd_tracking', [True, False])
