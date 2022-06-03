@@ -25,6 +25,7 @@ __all__ = [
     "celu",
     "dropout",
     "elu",
+    "relu",
     "hinge_embedding_loss",
     "margin_ranking_loss",
     "mish",
@@ -125,6 +126,22 @@ def elu(
         rhs = refs.expm1(a)
 
     return refs.where(refs.gt(a, 0), a, rhs)
+
+
+@register_decomposition(torch.ops.aten.relu)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def relu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.relu
+    """
+
+    if inplace:
+        raise NotImplementedError
+
+    return torch.where(torch.le(a, 0), 0, a)
 
 
 @register_decomposition(torch.ops.aten.leaky_relu)
