@@ -194,7 +194,9 @@ class ForwardPrefetch:
     prefetch_full_params: Initialize all-gather to rebuild full parameters of
                           the layer right before the forward pass computation
                           of the previous layer. This approach enables communication
-                          and computation overlap in the forward pass.
+                          and computation overlap in the forward pass. It might increase
+                          the peak memory usage as the prefetched full parameters will be
+                          kept in the GPU memory until next layer's forward computation is done.
     """
     prefetch_full_params: bool = False
 
@@ -1679,47 +1681,39 @@ class FullyShardedDataParallel(nn.Module):
 
         self._streams["all_gather"].wait_stream(torch.cuda.current_stream())
 
-    def _need_prefetch_forward_full_params(self) -> bool:
-        if (
-            self.forward_prefetch.prefetch_full_params is True
-            and self._fsdp_graph_order is not None
+    def _need_prefetch_full_params(self, state: TrainingState_) -> bool:
+        assert state in (TrainingState_.FORWARD, TrainingState_.BACKWARD_PRE, TrainingState_.BACKWARD_POST)
+        valid_fsdp_graph_and_index = (
+            self._fsdp_graph_order is not None
             and self._my_fsdp_idx_in_graph is not None
-            and self._my_fsdp_idx_in_graph < len(self._fsdp_graph_order) - 1
-            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph + 1].training_state
-            != TrainingState_.FORWARD
-        ):
-            return True
+        )
+        if state == TrainingState_.FORWARD:
+            return (
+                self.forward_prefetch.prefetch_full_params
+                and valid_fsdp_graph_and_index
+                and self._my_fsdp_idx_in_graph < len(self._fsdp_graph_order) - 1
+                and self._fsdp_graph_order[self._my_fsdp_idx_in_graph + 1].training_state
+                != TrainingState_.FORWARD
+            )
+        elif state == TrainingState_.BACKWARD_PRE:
+            return (
+                self.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
+                and valid_fsdp_graph_and_index
+                and self._my_fsdp_idx_in_graph > 0
+                and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state
+                != TrainingState_.BACKWARD_POST
+            )
         else:
-            return False
-
-    def _need_prefetch_pre_backward_hook(self) -> bool:
-        if (
-            self.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
-            and self._fsdp_graph_order is not None
-            and self._my_fsdp_idx_in_graph is not None
-            and self._my_fsdp_idx_in_graph > 0
-            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state
-            != TrainingState_.BACKWARD_POST
-        ):
-            return True
-        else:
-            return False
-
-    def _need_prefetch_post_backward_hook(self) -> bool:
-        if (
-            self.backward_prefetch == BackwardPrefetch.BACKWARD_POST
-            and self._fsdp_graph_order is not None
-            and self._my_fsdp_idx_in_graph is not None
-            and self._my_fsdp_idx_in_graph > 0
-            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state
-            != TrainingState_.BACKWARD_POST
-            and self._fsdp_graph_order[
-                self._my_fsdp_idx_in_graph - 1
-            ]._need_rebuild_full_params
-        ):
-            return True
-        else:
-            return False
+            return (
+                self.backward_prefetch == BackwardPrefetch.BACKWARD_POST
+                and valid_fsdp_graph_and_index
+                and self._my_fsdp_idx_in_graph > 0
+                and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state
+                != TrainingState_.BACKWARD_POST
+                and self._fsdp_graph_order[
+                    self._my_fsdp_idx_in_graph - 1
+                ]._need_rebuild_full_params
+            )
 
     @staticmethod
     @contextlib.contextmanager
@@ -2315,11 +2309,12 @@ class FullyShardedDataParallel(nn.Module):
             # Only rebuilding full params when the params are not prefetched in previous layers
             if not self._forward_full_params_prefetched:
                 self._rebuild_full_params()
+            self._forward_full_params_prefetched = False
             # Wait for all_gather full parameters to finish before computation
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
             # Prefetch next layer's full params in forward pass
-            if self._need_prefetch_forward_full_params():
+            if self._need_prefetch_full_params(self.training_state):
                 self._fsdp_graph_order[self._my_fsdp_idx_in_graph + 1]._rebuild_full_params()
                 self._fsdp_graph_order[self._my_fsdp_idx_in_graph + 1]._forward_full_params_prefetched = True
 
@@ -2653,15 +2648,15 @@ class FullyShardedDataParallel(nn.Module):
             if self._is_root:
                 self._queue_wait_for_post_backward()
 
-            if self._need_prefetch_pre_backward_hook():
+            # Start of a backward pass for the first time in an backward pass.
+            self._assert_state([TrainingState_.IDLE])
+            self.training_state = TrainingState_.BACKWARD_PRE
+
+            if self._need_prefetch_full_params(self.training_state):
                 # Always wait for all_gather before rebuilding full params, just
                 # in case full params have already been prefetched in previous layer's
                 # pre-backward hook.
                 torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
-
-            # Start of a backward pass for the first time in an backward pass.
-            self._assert_state([TrainingState_.IDLE])
-            self.training_state = TrainingState_.BACKWARD_PRE
 
             # All-gather full parameters, moving them to compute device if
             # necessary.
@@ -2671,7 +2666,7 @@ class FullyShardedDataParallel(nn.Module):
 
             # Prefetch next layer's full params in backward pass,
             # since it is prefetching, no need to wait for all_gather stream.
-            if self._need_prefetch_pre_backward_hook():
+            if self._need_prefetch_full_params(self.training_state):
                 self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
 
             self._pre_backward_hook_has_run = True
@@ -2794,7 +2789,7 @@ class FullyShardedDataParallel(nn.Module):
         # If next layer's backward computation is done and full params are freed,
         # no need to prefetch the full params again.
         # Only prefetch full params if any of the next layer's outputs requires grad
-        if self._need_prefetch_post_backward_hook():
+        if self._need_prefetch_full_params(self.training_state):
             self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
             # Next layer's computation will start right after this all_gather,
             # Wait for all_gather to finish before computation.
