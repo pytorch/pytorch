@@ -135,8 +135,45 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
         )
     return repeats.new_empty(output_size)
 
+@torch.library.impl(meta_lib, "_linalg_qr_helper")
+def meta_linalg_qr_helper(input, mode):
+    if mode == "reduced":
+        compute_q = True
+        reduced_mode = True
+    elif mode == "complete":
+        compute_q = True
+        reduced_mode = False
+    elif mode == "r":
+        compute_q = False
+        reduced_mode = True
+    else:
+        raise RuntimeError(f"qr received unrecognized mode {mode}")
+    check(input.ndim >= 2, lambda: f"expected matrix or batch of matrices, but got {input.ndim}-D tensor")
+    check(
+        utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
+        lambda: f"expected float or complex tensor, but got {input.dtype}"
+    )
+    m = input.size(-2)
+    n = input.size(-1)
+    mn = min(m, n)
+    if compute_q:
+        Qt_shape = list(input.size())
+        Qt_shape[-2] = mn if reduced_mode else m
+        Qt_shape[-1] = m
+        Q = input.new_empty(Qt_shape)
+        Q.transpose_(-2, -1)
+    else:
+        Q = input.new_empty(0)
+    Rt_shape = list(input.size())
+    Rt_shape[-2] = n
+    Rt_shape[-1] = mn if reduced_mode or not compute_q else m
+    R = input.new_empty(Rt_shape)
+    R.transpose_(-2, -1)
+    return (Q, R)
+
 @torch.library.impl(meta_lib, "index.Tensor")
 def meta_index_Tensor(self, indices):
+    check(indices, lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
     # checkIndexTensorTypes and expandTensors
     result: List[Optional[Tensor]] = []
@@ -156,7 +193,7 @@ def meta_index_Tensor(self, indices):
                 )
                 for j in range(index.ndim):
                     check(
-                        index[j] <= self.shape[k + j],
+                        index[j] == self.shape[k + j],
                         lambda: f"The shape of the mask {index.shape} at index {i} "
                                 f"does not match the shape of the indexed tensor {self.shape} at index {k + j}",
                         IndexError
@@ -230,42 +267,6 @@ def meta_index_Tensor(self, indices):
         else:
             replacement_shape = list(index.shape)
     return self.new_empty(before_shape + replacement_shape + after_shape)
-
-@torch.library.impl(meta_lib, "_linalg_qr_helper")
-def meta_linalg_qr_helper(input, mode):
-    if mode == "reduced":
-        compute_q = True
-        reduced_mode = True
-    elif mode == "complete":
-        compute_q = True
-        reduced_mode = False
-    elif mode == "r":
-        compute_q = False
-        reduced_mode = True
-    else:
-        raise RuntimeError(f"qr received unrecognized mode {mode}")
-    check(input.ndim >= 2, lambda: f"expected matrix or batch of matrices, but got {input.ndim}-D tensor")
-    check(
-        utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
-        lambda: f"expected float or complex tensor, but got {input.dtype}"
-    )
-    m = input.size(-2)
-    n = input.size(-1)
-    mn = min(m, n)
-    if compute_q:
-        Qt_shape = list(input.size())
-        Qt_shape[-2] = mn if reduced_mode else m
-        Qt_shape[-1] = m
-        Q = input.new_empty(Qt_shape)
-        Q.transpose_(-2, -1)
-    else:
-        Q = input.new_empty(0)
-    Rt_shape = list(input.size())
-    Rt_shape[-2] = n
-    Rt_shape[-1] = mn if reduced_mode or not compute_q else m
-    R = input.new_empty(Rt_shape)
-    R.transpose_(-2, -1)
-    return (Q, R)
 
 @out_wrapper_multi("L", "info")
 def meta_linalg_cholesky_ex(input, upper=False, check_errors=False):
