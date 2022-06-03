@@ -7,7 +7,6 @@ python_library(
     base_module = "tools.jit",
     visibility = ["PUBLIC"],
     deps = [
-        "//:aten_code_template",
         "//torchgen:torchgen",
     ],
 )
