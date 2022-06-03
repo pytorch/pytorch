@@ -53,8 +53,57 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
     }
     bool is_contiguous = result.is_contiguous();
     Tensor r = !is_contiguous ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
+    using namespace mps;
+    struct CachedGraph : public MPSCachedGraph {
+      CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+      MPSGraphTensor *startTensor = nil;
+      MPSGraphTensor *multiplyTensor = nil;
+      MPSGraphTensor *outputTensor = nil;
+    };
+    auto cache_ = MPSGraphCache::getInstance();
+    auto stream = getCurrentMPSStream();
+    auto mpsDataType = getMPSDataType(result.scalar_type());
+    @autoreleasepool {
+      string key = "arange_mps_out:" + getTensorsStringKey({result}) + ":" + to_string(size);
+      auto cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+      if (!cachedGraph) {
+        auto *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph *() {
+          CachedGraph *newCachedGraph = nil;
+          @autoreleasepool {
+            auto mpsGraph = make_mps_graph();
+            newCachedGraph = new CachedGraph(mpsGraph);
+            auto shapeTensor = [mpsGraph constantWithData:[NSData dataWithBytes:&size length:sizeof(size)]
+                                                    shape: @[@1]
+                                                 dataType:MPSDataTypeInt64];
+            auto coordsTensor = [mpsGraph coordinateAlongAxis:0
+                                              withShapeTensor:shapeTensor
+                                                         name:nil];
+            coordsTensor = [mpsGraph castTensor:coordsTensor toType:mpsDataType name:@"coords"];
 
-    //TODO: Add arange Metal kernel.
+            newCachedGraph->startTensor = mpsGraphRankedPlaceHolder(mpsGraph, mpsDataType, @[@1]);
+            newCachedGraph->multiplyTensor = mpsGraphRankedPlaceHolder(mpsGraph, mpsDataType, @[@1]);
+            auto scaledCoords = [mpsGraph multiplicationWithPrimaryTensor:coordsTensor
+                                                          secondaryTensor:newCachedGraph->multiplyTensor
+                                                                     name:nil];
+            newCachedGraph->outputTensor = [mpsGraph additionWithPrimaryTensor:scaledCoords
+                                                               secondaryTensor:newCachedGraph->startTensor
+                                                                          name:nil];
+          }
+
+          return newCachedGraph;
+        });
+        cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+      }
+      Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, r);
+      NSMutableDictionary *feeds   = [[NSMutableDictionary new] autorelease];
+      feeds[cachedGraph->startTensor] = getMPSGraphTensorFromScalar(stream, start, mpsDataType);
+      feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, Scalar(step), mpsDataType);
+
+      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+        outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
+      };
+      runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    }
 
     if(!is_contiguous) {
       result.copy_(r);
