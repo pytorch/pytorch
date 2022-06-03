@@ -222,14 +222,13 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
             import numpy as np
             np.random.seed(np_seed)
 
-        shared_rng = torch.Generator()
-        shared_rng.manual_seed(shared_seed)
-
-
         from torch.utils.data import IterDataPipe
         from torch.utils.data.graph_settings import apply_shuffle_seed
 
+        shared_rng = torch.Generator()
         if isinstance(dataset, IterDataPipe):
+            assert shared_seed is not None
+            shared_rng.manual_seed(shared_seed)
             dataset = apply_shuffle_seed(dataset, shared_rng)
 
         global _worker_info
