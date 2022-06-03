@@ -48,6 +48,10 @@ _params_dict = {}  # type: ignore[var-annotated]
 @contextlib.contextmanager
 def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
     """Adjusts the model training mode to the specified mode for export."""
+    if not isinstance(mode, _C_onnx.TrainingMode):
+        raise TypeError(
+            f"'mode' should be a torch.onnx.TrainingMode enum, but got '{type(mode)}'."
+        )
     originally_training: bool = False
     if not isinstance(model, torch.jit.ScriptFunction):
         originally_training = model.training
