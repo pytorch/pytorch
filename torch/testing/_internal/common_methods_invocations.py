@@ -13295,7 +13295,7 @@ op_db: List[OpInfo] = [
     ),
     UnaryUfuncInfo('nn.functional.relu',
            aten_name="relu",
-           ref=lambda x: np.where(a <= 0, 0, a),
+           ref=lambda a: np.where(a <= 0, 0, a),
            supports_autograd=True,
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
