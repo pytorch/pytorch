@@ -2782,6 +2782,7 @@
   dispatch:
     CPU, Meta: linspace_out
     CUDA: linspace_cuda_out
+    MPS: linspace_out_mps
 
 - func: log(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
