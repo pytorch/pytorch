@@ -4640,6 +4640,8 @@ def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
     for args in test_args:
         yield SampleInput(make_arg((S, S, S)), args=args)
 
+    yield SampleInput(make_arg((S, S, S, S)), args=([slice(None), [0, 1], slice(None), [0, 1]],))
+
 def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
