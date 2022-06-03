@@ -31,11 +31,11 @@ class TestRebase(TestCase):
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
         rebase_onto(pr, repo, False, True)
         calls = [mock.call('fetch', 'origin', 'pull/31093/head:pull/31093/head'),
-                 mock.call('rebase', 'viable/strict', 'pull/31093/head'),
+                 mock.call('rebase', 'refs/remotes/origin/viable/strict', 'pull/31093/head'),
                  mock.call('push', '-f', 'https://github.com/mingxiaoh/pytorch.git', 'pull/31093/head:master')]
         mocked_run_git.assert_has_calls(calls)
         self.assertTrue(
-            "Successfully rebased `master` onto `viable/strict`" in mocked_post_comment.call_args[0][3])
+            "Successfully rebased `master` onto `refs/remotes/origin/viable/strict`" in mocked_post_comment.call_args[0][3])
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('gitutils.GitRepo._run_git', return_value="Everything up-to-date")

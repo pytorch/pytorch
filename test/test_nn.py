@@ -1838,6 +1838,14 @@ class TestNN(NNTestCase):
         parameters += param_list[-2:]
         check()
 
+    def test_ParameterList_meta(self):
+        p = torch.nn.Parameter(torch.empty(1, device='meta'))
+        self.assertExpectedInline(str(p), """\
+Parameter containing:
+tensor(..., device='meta', size=(1,), requires_grad=True)""")
+        pl = torch.nn.ParameterList([p])
+        self.assertExpectedInline(str(pl), """ParameterList(  (0): Parameter containing: [torch.float64 of size 1])""")
+
     def test_ParameterList_replication(self):
         # The actual replication code from DP cannot be used on CPU so doing it manually here
         def make_param():
@@ -13123,17 +13131,6 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
-    def _test_LayerNorm_cpu_mixed_dtype(self, device):
-        for elementwise_affine in [True, False]:
-            # layer norm input shape is normalized to m x n, cpu vectorized on n,
-            # so make sure n exceeds vector length
-            input = torch.empty(2, 3, 11, 3, device=device, dtype=torch.bfloat16).random_(1, 10)
-            m = nn.LayerNorm([11, 3], elementwise_affine=elementwise_affine).to(device, torch.bfloat16)
-            m2 = deepcopy(m).to(device, torch.float)
-            out = m(input)
-            out2 = m2(input)
-            self.assertEqual(out, out2)
-
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {
             (1, 2, 3, 4): 2,
@@ -14073,7 +14070,10 @@ class TestNNDeviceType(NNTestCase):
             if mode == 'same':
                 actual = actual[:5, :5, :10]
 
-            self.assertEqual(actual, expected, rtol=2e-5, atol=5e-6)
+            if tf32_is_not_fp32() and (dtype == torch.float or dtype == torch.complex64):
+                self.assertEqual(actual, expected, atol=0.05, rtol=0.05)
+            else:
+                self.assertEqual(actual, expected, rtol=2e-5, atol=5e-6)
 
         # Global dtype for this test suite is torch.double
         # This leads to change in type-promotion
@@ -14510,9 +14510,6 @@ class TestNNDeviceType(NNTestCase):
 
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
-
-        if self.device_type == 'cpu':
-            self._test_LayerNorm_cpu_mixed_dtype(device)
 
     @onlyNativeDeviceTypes
     def test_LayerNorm_numeric(self, device):
@@ -19511,7 +19508,10 @@ class TestNNDeviceType(NNTestCase):
             w = w.to(memory_format=memory_format)
             cudnn_out = torch.cudnn_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
-            self.assertEqual(conv2d_out.relu(), cudnn_out)
+            if tf32_is_not_fp32() and dtype == torch.float:
+                self.assertEqual(conv2d_out.relu(), cudnn_out, atol=2e-4, rtol=0.006)
+            else:
+                self.assertEqual(conv2d_out.relu(), cudnn_out)
 
     @onlyCUDA
     @skipCUDAIfRocm
@@ -19539,7 +19539,10 @@ class TestNNDeviceType(NNTestCase):
             cudnn_out = torch.cudnn_convolution_add_relu(inp, w, z, alpha, None, (1, 1), (0, 0), (1, 1), 1)
 
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
-            self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out)
+            if tf32_is_not_fp32() and dtype == torch.float:
+                self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out, atol=3e-4, rtol=0.006)
+            else:
+                self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out)
 
     @onlyCUDA
     @skipCUDAIfRocm
