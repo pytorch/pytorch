@@ -226,7 +226,7 @@ class SummaryWriter(object):
 
         """
         torch._C._log_api_usage_once("tensorboard.create.summarywriter")
-        if not log_dir:
+        if log_dir is None:
             import socket
             from datetime import datetime
 
@@ -313,7 +313,7 @@ class SummaryWriter(object):
             hparam_domain_discrete: (Optional[Dict[str, List[Any]]]) A dictionary that
               contains names of the hyperparameters and all discrete values they can hold
             run_name (str): Name of the run, to be included as part of the logdir.
-              If unspecified, will use current timestamp.
+              If unspecified, will use current timestamp. Use empty string to log in the logdir directly.
 
         Examples::
 
@@ -334,7 +334,7 @@ class SummaryWriter(object):
             raise TypeError("hparam_dict and metric_dict should be dictionary.")
         exp, ssi, sei = hparams(hparam_dict, metric_dict, hparam_domain_discrete)
 
-        if not run_name:
+        if run_name is None:
             run_name = str(time.time())
         logdir = os.path.join(self._get_file_writer().get_logdir(), run_name)
         with SummaryWriter(log_dir=logdir) as w_hp:
