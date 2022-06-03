@@ -1244,6 +1244,32 @@ else:
         backward_func(self, device)
 
     @skipIfMps
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_MaxUnpool2d(self, device):
+        module = torch.nn.MaxUnpool2d(2, stride=2)
+        input = torch.rand(1, 1, 2, 2, dtype=torch.float32, device=device)
+        indices = torch.randint(0, 8, [1, 1, 2, 2], dtype=torch.int64, device=device)
+
+        @expectedAlertNondeterministic('max_unpooling2d_forward_out_cpu', ['cpu'])
+        def func(slf, device):
+            module(input, indices)
+
+        func(self, device)
+
+    @skipIfMps
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_MaxUnpool3d(self, device):
+        module = torch.nn.MaxUnpool3d(2, stride=2)
+        input = torch.rand(1, 1, 2, 2, dtype=torch.float32, device=device)
+        indices = torch.randint(0, 8, [1, 1, 2, 2], dtype=torch.int64, device=device)
+
+        @expectedAlertNondeterministic('max_unpooling3d_forward_out_cpu', ['cpu'])
+        def func(slf, device):
+            module(input, indices)
+
+        func(self, device)
+
+    @skipIfMps
     def test_nondeterministic_alert_interpolate_linear(self, device):
         input = torch.randn(1, 2, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(

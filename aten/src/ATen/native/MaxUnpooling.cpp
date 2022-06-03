@@ -11,6 +11,10 @@ Tensor& max_unpooling2d_forward_out_cpu(
     const Tensor& indices_,
     IntArrayRef output_size,
     Tensor& output) {
+  // See note [Writing Nondeterministic Operations]
+  // Nondeterministic when run on multiple CPU threads.
+  // See https://github.com/pytorch/pytorch/issues/78249
+  at::globalContext().alertNotDeterministic("max_unpooling2d_forward_out_cpu");
   auto oheight = output_size[0];
   auto owidth = output_size[1];
   TORCH_CHECK(
@@ -149,6 +153,10 @@ Tensor& max_unpooling3d_forward_out_cpu(const Tensor& self_,
     IntArrayRef stride,
     IntArrayRef padding,
     Tensor& output) {
+  // See note [Writing Nondeterministic Operations]
+  // Nondeterministic when run on multiple CPU threads.
+  // See https://github.com/pytorch/pytorch/issues/78249
+  at::globalContext().alertNotDeterministic("max_unpooling3d_forward_out_cpu");
   TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];
