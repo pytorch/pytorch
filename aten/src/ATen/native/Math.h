@@ -2254,7 +2254,7 @@ static inline C10_HOST_DEVICE T airy_ai_forward(T x) {
 
     int domain_flag = 0;
 
-    T ai;
+    T ai = 0.0;
 
     if (std::isinf(x)) {
         return std::numeric_limits<T>::quiet_NaN();
@@ -2427,7 +2427,7 @@ static inline C10_HOST_DEVICE T airy_bi_forward(T x) {
 
     int domain_flag = 0;
 
-    T bi;
+    T bi = 0.0;
 
     if (x > T(103.892)) {
         return std::numeric_limits<T>::infinity();
@@ -2600,7 +2600,7 @@ static inline C10_HOST_DEVICE T airy_derivative_ai_forward(T x) {
 
     int domain_flag = 0;
 
-    T derivative_ai;
+    T derivative_ai = 0.0;
 
     if (x > T(103.892)) {
         return T(0.0);
@@ -2794,7 +2794,7 @@ static inline C10_HOST_DEVICE T airy_derivative_bi_forward(T x) {
 
     int domain_flag = 0;
 
-    T derivative_bi;
+    T derivative_bi = 0.0;
 
     if (x > T(103.892)) {
         return std::numeric_limits<T>::infinity();
