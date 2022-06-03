@@ -158,7 +158,7 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
         else:
             self.inner = old
             if old is None:
-                self.ancestors: Set[TorchDispatchMode] = set()
+                self.ancestors = set()
             else:
                 self.ancestors = self.inner.ancestors.union({self.inner})
         self.prev = old
