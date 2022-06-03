@@ -356,10 +356,13 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt.is_cuda, is_cuda)
 
     # Helper functions for testing elementwise ops
-    def random_nt(self, device, dtype, num_tensors, max_dims):
+    def random_nt(self, device, dtype, num_tensors, max_dims, min_dims=None):
+        if min_dims is None:
+            min_dims = tuple([0] * len(max_dims))
         ts1 = []
         for _ in range(num_tensors):
-            tensor_dims = tuple([torch.randint(low=0, high=max_dim, size=(1,)).item() for max_dim in max_dims])
+            tensor_dims = tuple([torch.randint(low=min_dim, high=max_dim, size=(1,)).item()
+                                for (min_dim, max_dim) in zip(min_dims, max_dims)])
             t1 = torch.randn(tensor_dims, device=device, dtype=dtype)
             ts1.append(t1)
         return torch.nested_tensor(ts1, device=device, dtype=dtype)
@@ -426,8 +429,17 @@ class TestNestedTensorDeviceType(TestCase):
     @dtypes(torch.float, torch.float16)
     @skipMeta
     @torch.inference_mode()
-    def test_clone(self):
-        nt1 = self.random_nt(device, dtype, 4, 4)
+    def test_clone(self, device, dtype):
+        nt1 = self.random_nt(device, dtype, 4, (4, 4), (1, 1))
+        nt2 = nt1.clone()
+        # Verify the values match
+        self.nt_equal(nt1, nt2)
+        # Verify modifying nt2 doesn't affect nt1
+        nt2.mul_(nt1)
+        ub1 = nt1.unbind()
+        ub2 = nt2.unbind()
+        for i in range(len(ub1)):
+            self.assertNotEqual(ub1[i], ub2[i])
 
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 

@@ -557,7 +557,7 @@ Tensor& NestedTensor_mul__Tensor(Tensor& self, const Tensor& other) {
       });
 }
 
-SparseCsrTensor clone_nested(
+Tensor clone_nested(
     const Tensor& self,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
