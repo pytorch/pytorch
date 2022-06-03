@@ -393,7 +393,7 @@ class TORCH_CUDA_CU_API TransposeOp : public Expr {
       IrBuilderPasskey,
       TensorView* out,
       TensorView* in,
-      std::vector<int> new2old);
+      std::vector<int64_t> new2old);
 
   TransposeOp(const TransposeOp* src, IrCloner* ir_cloner);
 
@@ -405,14 +405,16 @@ class TORCH_CUDA_CU_API TransposeOp : public Expr {
     return in_;
   }
 
-  const std::vector<int>& new2old() const {
+  const std::vector<int64_t>& new2old() const {
     return new2old_;
   }
+
+  std::vector<int64_t> old2new() const;
 
  private:
   TensorView* const out_ = nullptr;
   TensorView* const in_ = nullptr;
-  const std::vector<int> new2old_;
+  const std::vector<int64_t> new2old_;
 };
 
 class TORCH_CUDA_CU_API ExpandOp : public Expr {

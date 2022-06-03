@@ -13017,7 +13017,7 @@ TEST_F(NVFuserTest, FusionTranspose1_CUDA) {
   constexpr int N = 20;
 
   auto tv0 = makeSymbolicTensor(2);
-  auto tv1 = transpose(tv0, {{0, 1}});
+  auto tv1 = transpose(tv0);
   fusion.addInput(tv0);
   fusion.addOutput(tv1);
 
@@ -13047,7 +13047,7 @@ TEST_F(NVFuserTest, FusionTranspose2_CUDA) {
   constexpr int N = 20;
 
   auto tv0 = makeSymbolicTensor(2);
-  auto tv1 = transpose(tv0, {{0, 1}});
+  auto tv1 = transpose(tv0);
   fusion.addInput(tv0);
   fusion.addOutput(tv1);
 
@@ -13083,8 +13083,8 @@ TEST_F(NVFuserTest, FusionSimpleGemmTransposed_CUDA) {
   fusion.addInput(tv0);
   fusion.addInput(tv1);
 
-  TensorView* tv0_t = transpose(tv0, {{0, 1}});
-  TensorView* tv1_t = transpose(tv1, {{0, 1}});
+  TensorView* tv0_t = transpose(tv0);
+  TensorView* tv1_t = transpose(tv1);
 
   TensorView* tv2 = broadcast(tv0_t, {false, false, true});
   // tv2[I0, I1, B] = tv0[I0, I1]
@@ -13170,7 +13170,7 @@ TEST_F(NVFuserTest, FusionSoftmax3DTransposed_CUDA) {
   TensorView* input_tv0 = makeSymbolicTensor(3);
   fusion.addInput(input_tv0);
 
-  TensorView* input_t = transpose(input_tv0, {{1, 2}});
+  TensorView* input_t = transpose(input_tv0, 1, 2);
 
   TensorView* exp_tv1 = unaryOp(UnaryOpType::Exp, input_t);
   TensorView* sum_exp_tv2 = sum(exp_tv1, {-1});
@@ -13178,7 +13178,7 @@ TEST_F(NVFuserTest, FusionSoftmax3DTransposed_CUDA) {
 
   // Replicate exp_tv4 as exp_tv4_copy because exp_tv4 is going to be
   // computed at sum_exp_rf_tv8.
-  TensorView* input_t_copy = transpose(input_tv0, {{1, 2}});
+  TensorView* input_t_copy = transpose(input_tv0, 1, 2);
   TensorView* exp_tv1_copy = unaryOp(UnaryOpType::Exp, input_t_copy);
 
   TensorView* output_tv4 = div(exp_tv1_copy, bcast_sum_tv3);
@@ -13235,7 +13235,7 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed1_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  tv0 = transpose(tv0, {{0, 1}});
+  tv0 = transpose(tv0);
 
   TensorView* tv1 = mul(tv0, IrBuilder::create<Double>(0.5));
   TensorView* tv2 = mul(tv1, IrBuilder::create<Double>(-1.0));
@@ -13317,7 +13317,7 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed2_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  tv0 = transpose(tv0, {{0, 1}});
+  tv0 = transpose(tv0);
 
   TensorView* tv1 = mul(tv0, IrBuilder::create<Double>(-1.0));
   TensorView* tv2 = add(tv0, IrBuilder::create<Double>(3.0));
@@ -13379,12 +13379,12 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed3_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(4);
   fusion.addInput(tv0);
 
-  tv0 = transpose(tv0, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv0 = permute(tv0, {3, 0, 1, 2});
 
   TensorView* tv1 = makeSymbolicTensor(4);
   fusion.addInput(tv1);
 
-  tv1 = transpose(tv1, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv1 = permute(tv1, {3, 0, 1, 2});
 
   TensorView* tv2 = mul(tv1, IrBuilder::create<Double>(.979361));
   TensorView* tv3 = mul(tv2, tv0);
@@ -13442,22 +13442,22 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed4_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(4);
   fusion.addInput(tv0);
 
-  tv0 = transpose(tv0, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv0 = permute(tv0, {3, 0, 1, 2});
 
   TensorView* tv1 = makeSymbolicTensor(4);
   fusion.addInput(tv1);
 
-  tv1 = transpose(tv1, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv1 = permute(tv1, {3, 0, 1, 2});
 
   TensorView* tv2 = makeSymbolicTensor(4);
   fusion.addInput(tv2);
 
-  tv2 = transpose(tv2, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv2 = permute(tv2, {3, 0, 1, 2});
 
   TensorView* tv3 = makeSymbolicTensor(4);
   fusion.addInput(tv3);
 
-  tv3 = transpose(tv3, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv3 = permute(tv3, {3, 0, 1, 2});
 
   TensorView* tv4 = sub(tv2, tv3);
   TensorView* tv5 = add(tv1, tv4);
@@ -13522,10 +13522,10 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed5_CUDA) {
   // Set up your input tensor views
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  tv0 = transpose(tv0, {{0, 1}});
+  tv0 = transpose(tv0);
   TensorView* tv1 = makeSymbolicTensor(2);
   fusion.addInput(tv1);
-  tv1 = transpose(tv1, {{0, 1}});
+  tv1 = transpose(tv1);
   TensorView* tv2 = add(tv0, IrBuilder::create<Double>(2.0));
   TensorView* tv3 = mul(tv1, tv2);
   fusion.addOutput(tv3);
@@ -13561,10 +13561,10 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed6_CUDA) {
 
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  tv0 = transpose(tv0, {{0, 1}});
+  tv0 = transpose(tv0);
   TensorView* tv1 = makeSymbolicTensor(2);
   fusion.addInput(tv1);
-  tv1 = transpose(tv1, {{0, 1}});
+  tv1 = transpose(tv1);
   TensorView* tv2 = add(tv0, IrBuilder::create<Double>(2.0));
   TensorView* tv3 = mul(tv1, tv2);
   fusion.addOutput(tv3);
@@ -13955,7 +13955,7 @@ TEST_F(NVFuserTest, FusionTransposeWithSwizzle_CUDA) {
 
   auto tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  auto tv1 = transpose(tv0, {{0, 1}});
+  auto tv1 = transpose(tv0);
   fusion.addOutput(tv1);
 
   // tv0: [I0, I1]
@@ -14017,7 +14017,7 @@ TEST_F(NVFuserTest, FusionTransposeWithSwizzle1DThreadBlock_CUDA) {
 
   auto tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  auto tv1 = transpose(tv0, {{0, 1}});
+  auto tv1 = transpose(tv0);
   fusion.addOutput(tv1);
 
   // tv0: [I0, I1]
@@ -22877,7 +22877,7 @@ TEST_F(NVFuserTest, FusionExactRootDomainMap_CUDA) {
   fusion.addInput(tv1);
 
   auto tv2 = broadcast(tv0, {false, true});
-  auto tv3 = transpose(tv2, {{0, 1}});
+  auto tv3 = transpose(tv2);
   auto tv4 = add(tv2, tv1);
   auto tv5 = add(tv2, tv3);
   auto tv6 = add(tv3, tv1);

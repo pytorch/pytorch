@@ -682,7 +682,7 @@ TransposeOp::TransposeOp(
     IrBuilderPasskey passkey,
     TensorView* out,
     TensorView* in,
-    std::vector<int> new2old)
+    std::vector<int64_t> new2old)
     : Expr(passkey, ExprType::TransposeOp),
       out_(out),
       in_(in),
@@ -691,17 +691,14 @@ TransposeOp::TransposeOp(
   // should be checked at function transpose.
 
   TORCH_INTERNAL_ASSERT(
-      !in->hasRFactor(), "Transposing rFactor tensors is not supported.");
+      TensorDomain::noReductions(in->getMaybeRFactorDomain()).size() ==
+      out->getMaybeRFactorDomain().size());
 
-  TORCH_INTERNAL_ASSERT(
-      TensorDomain::noReductions(in->getRootDomain()).size() ==
-      out->getRootDomain().size());
-
-  TORCH_INTERNAL_ASSERT(new2old_.size() == out->getRootDomain().size());
+  TORCH_INTERNAL_ASSERT(new2old_.size() == out->getMaybeRFactorDomain().size());
 
   // Make sure the entries of new2old are unique and range from 0 to
   // N-1, where N == new2old.size().
-  std::set<int> old_positions(new2old_.begin(), new2old_.end());
+  std::set<int64_t> old_positions(new2old_.begin(), new2old_.end());
   TORCH_INTERNAL_ASSERT(old_positions.size() == new2old_.size());
   // old_positions is sorted, so the first entry must be 0.
   TORCH_INTERNAL_ASSERT(
@@ -724,6 +721,15 @@ TransposeOp::TransposeOp(const TransposeOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
       new2old_(src->new2old_) {}
+
+std::vector<int64_t> TransposeOp::old2new() const {
+  std::vector<int64_t> old2new(new2old_.size());
+  for (auto new_axis : c10::irange(new2old_.size())) {
+    auto old_axis = new2old_.at(new_axis);
+    old2new[old_axis] = new_axis;
+  }
+  return old2new;
+}
 
 ExpandOp::ExpandOp(
     IrBuilderPasskey passkey,

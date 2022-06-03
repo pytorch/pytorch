@@ -272,18 +272,6 @@ TORCH_CUDA_CU_API TensorView* expand(
 // non broadcasted iter domain, inp will be expanded to other's size.
 TORCH_CUDA_CU_API TensorView* expand_as(TensorView* inp, TensorView* other);
 
-//! Transpose a tensor as specified by axis mappings.
-//!
-//! The transposition mapping is specified with a list of pairs from
-//! old to new positions. Positions are relative to the noReduction
-//! domain.
-//!
-//! \param inp Tensor to transpose
-//! \param old2new Pairs of mapping from old to new positions.
-TORCH_CUDA_CU_API TensorView* transpose(
-    TensorView* inp,
-    const std::unordered_map<int, int>& old2new);
-
 // BINARY OPERATIONS
 // add
 TORCH_CUDA_CU_API Val* add(Val* v1, Val* v2);

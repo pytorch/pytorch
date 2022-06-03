@@ -1172,27 +1172,6 @@ WelfordResult WelfordResult::rFactor(const std::vector<int>& axes) {
   return WelfordResult{rf_tvs.at(0), rf_tvs.at(1), rf_tvs.at(2)};
 }
 
-TensorView* transpose(
-    TensorView* inp,
-    const std::unordered_map<int, int>& old2new) {
-  auto inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
-  std::vector<IterDomain*> out_domain(inp_domain.size());
-
-  auto new2old = ir_utils::normalizeOld2New(old2new, inp_domain.size());
-
-  for (const auto i : c10::irange(out_domain.size())) {
-    auto in_id = inp_domain[new2old[i]];
-    out_domain[i] = in_id->cloneWithoutRFactor();
-  }
-
-  TensorView* out_tensor = IrBuilder::create<TensorView>(
-      IrBuilder::create<TensorDomain>(
-          out_domain, std::vector<bool>(out_domain.size(), true)),
-      inp->getDataType().value());
-  IrBuilder::create<TransposeOp>(out_tensor, inp, new2old);
-  return out_tensor;
-}
-
 // COMPOUND OPERATIONS
 
 // add_alpha
