@@ -437,7 +437,6 @@ class TestCommon(TestCase):
 
                     ex = e
 
-
             # Goes to next sample if these results are close
             if not ex:
                 continue
