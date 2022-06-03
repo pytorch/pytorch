@@ -2513,7 +2513,8 @@ def _svd_meta(
     shape_Vh = batch + (n if full_matrices else k, n)
     # The CPU backend returns V, but the cuSolver backend returns V^H
     # TODO The MAGMA backend returns V, so this is wrong if used with the MAGMA backend
-    strides_Vh = contig_strides(shape_Vh, row_major=utils.is_cuda(A.device))
+    is_cuda = (A.device.type == "cuda")
+    strides_Vh = contig_strides(shape_Vh, row_major=is_cuda)
     Vh = TensorMeta(shape=shape_Vh, strides=strides_Vh, dtype=A.dtype, device=A.device)
     return U, S, Vh
 
