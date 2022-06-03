@@ -286,9 +286,11 @@ def verify(
             model with external data.
         additional_test_inputs (list, optional): List of tuples. Each tuple is a set of
             input arguments to test. Currently only *args are supported.
-        remained_onnx_input_idx (list, optional): If set, only the specified inputs will
-            be passed to ONNX model. This is used when there are unused inputs in original
-            PyTorch model. ONNX model will remove unused inputs automatically.
+        remained_onnx_input_idx (list, optional): If provided, only the specified inputs
+            will be passed to the ONNX model. Supply a list when there are unused inputs
+            in the model. Since unused inputs will be removed in the exported ONNX
+            model, supplying all inputs will cause an error on unexpected inputs.
+            This parameter tells the verifier which inputs to pass into the ONNX model.
         flatten (bool, optional): Default True. If True, unpack nested list/tuple/dict
             inputs into a flattened list of Tensors for ONNX. Set this to False if nested
             structures are to be preserved for ONNX, which is usually the case with

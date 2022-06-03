@@ -258,6 +258,7 @@ upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 upsample_bicubic2d = _interpolate("upsample_bicubic2d", 4, "cubic")
 
 
+@symbolic_helper.quantized_args(True, False, False, False, False, False, False)
 def __interpolate(
     g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias
 ):
@@ -415,6 +416,7 @@ def _unique2(g, self, sorted, return_inverse, return_counts):
 
 
 def _avg_pool(name, tuple_fn):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
