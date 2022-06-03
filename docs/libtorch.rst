@@ -41,7 +41,7 @@ Building libtorch using CMake
 You can build C++ libtorch.so directly with cmake.  For example, to build a Release version from the master branch and install it in the directory specified by CMAKE_INSTALL_PREFIX below, you can use
 ::
    git clone -b master --recurse-submodule https://github.com/pytorch/pytorch.git
-   cmake -B pytorch-build -DBUILD_SHARED_LIBS:BOOL=ON -DCMAKE_BUILD_TYPE:STRING=Release -DPYTHON_EXECUTABLE:PATH=`which python3` -DCMAKE_INSTALL_PREFIX:PATH=./pytorch-install
+   cmake -B pytorch-build -G Ninja -DBUILD_SHARED_LIBS:BOOL=ON -DCMAKE_BUILD_TYPE:STRING=Release -DPYTHON_EXECUTABLE:PATH=`which python3` -DCMAKE_INSTALL_PREFIX:PATH=./pytorch-install
    cmake --build pytorch-build --target install
 
 To use release branch v1.6.0, for example, replace ``master`` with ``v1.6.0``.  You will get errors if you do not have needed dependencies such as Python3's PyYAML package.
