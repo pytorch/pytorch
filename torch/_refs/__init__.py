@@ -29,6 +29,7 @@ from torch._prims.wrappers import (
     _safe_copy_out,
 )
 
+from collections.abc import Iterable
 from functools import reduce, partial
 from typing import Sequence, Optional, Union, Callable, List, Tuple
 import operator
@@ -170,7 +171,11 @@ __all__ = [
     #
     # View & Shape Ops
     #
+    "atleast_1d",
+    "atleast_2d",
+    "atleast_3d",
     "as_strided",
+    "broadcast_shapes",
     "broadcast_tensors",
     "broadcast_to",
     "cat",
@@ -183,9 +188,12 @@ __all__ = [
     "narrow",
     "permute",
     "reshape",
+    "roll",
+    "rot90",
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
+    "t",
     "tensor_split",
     "transpose",
     "unsqueeze",
@@ -216,7 +224,10 @@ Tensor = torch.Tensor
 
 
 def _broadcast_shapes(*_shapes):
-    shapes = tuple(filter(lambda x: x is not None, _shapes))
+    shapes = tuple(
+        (x,) if isinstance(x, int) else x
+        for x in filter(lambda x: x is not None, _shapes)
+    )
 
     # Short-circuits on no input
     if len(shapes) == 0:
@@ -1562,10 +1573,53 @@ def addr(
             return beta * self + alpha * torch.outer(vec1, vec2)
 
 
+def atleast_1d(
+    *args: TensorLikeType,
+) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
+    """Reference implementation of :func:`torch.atleast_1d`."""
+    args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
+    res = tuple(a if a.ndim >= 1 else unsqueeze(a, 0) for a in args_)
+    return res if len(res) > 1 else res[0]
+
+
+# Helper function with assert to avoid MyPy error
+# of incompatible type passed to unsqueeze
+def _unsqueeze_atleast(
+    at_least_fn: Callable, dim: int, arg: TensorLikeType
+) -> TensorLikeType:
+    arg_ = at_least_fn(arg)
+    assert isinstance(arg_, TensorLike)
+    return unsqueeze(arg_, dim)
+
+
+def atleast_2d(
+    *args: TensorLikeType,
+) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
+    """Reference implementation of :func:`torch.atleast_2d`."""
+    args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
+    unsqueeze_atleast_1d = partial(_unsqueeze_atleast, atleast_1d, 0)
+    res = tuple(a if a.ndim >= 2 else unsqueeze_atleast_1d(a) for a in args_)
+    return res if len(res) > 1 else res[0]
+
+
+def atleast_3d(
+    *args: TensorLikeType,
+) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
+    """Reference implementation of :func:`torch.atleast_3d`."""
+    args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
+    unsqueeze_atleast_2d = partial(_unsqueeze_atleast, atleast_2d, -1)
+    res = tuple(a if a.ndim >= 3 else unsqueeze_atleast_2d(a) for a in args_)
+    return res if len(res) > 1 else res[0]
+
+
 def as_strided(
     a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int = 0
 ) -> TensorLikeType:
     return prims.as_strided(a, size, stride, storage_offset)
+
+
+def broadcast_shapes(*shapes) -> ShapeType:
+    return torch.Size(_broadcast_shapes(*shapes))
 
 
 def broadcast_tensors(*tensors) -> List[TensorLikeType]:
@@ -1840,6 +1894,79 @@ def reshape(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=True)
 
 
+def roll(
+    a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
+) -> TensorLikeType:
+    """Reference implementation of :func:`torch.roll`."""
+    dims = utils.canonicalize_dims(a.ndim, dims)
+    # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
+    if not isinstance(shifts, Iterable):
+        shifts = (shifts,)
+    if not isinstance(dims, Iterable):
+        dims = (dims,)
+
+    # Avoid modulo by zero
+    if a.numel() == 0:
+        return clone(a)
+
+    len_shifts = len(shifts)
+    len_dims = len(dims)
+    if len_shifts != 1 or len_dims != 1:
+        if len_shifts == 0:
+            raise RuntimeError("`shifts` required")
+        # Takes care of the case when dims is not specified (default)
+        # By default, the tensor is flattened before shifting, after which the original shape is restored
+        if len_dims == 0 and len_shifts == 1:
+            return view(roll(flatten(a), shifts, 0), a.shape)
+        if len_shifts != len_dims:
+            raise RuntimeError(
+                f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}"
+            )
+        assert len_dims > 1
+        tail_shifts = shifts[1:]
+        tail_dims = dims[1:]
+        first_dim_rolled = roll(a, shifts[0], dims[0])
+        return roll(first_dim_rolled, tail_shifts, tail_dims)
+
+    # This path is taken when only one dimension is rolled
+    # For example to get `first_dim_rolled` above
+    dim = dims[0]
+    size = a.shape[dim]
+    start = (size - shifts[0]) % size
+    t0 = narrow(a, dim, start, size - start)
+    t1 = narrow(a, dim, 0, start)
+    return cat((t0, t1), dim)
+
+
+def rot90(
+    a: TensorLikeType, k: int = 1, dims: DimsSequenceType = (0, 1)
+) -> TensorLikeType:
+    """Reference implementation of :func:`torch.rot90`."""
+    dims_ = utils.canonicalize_dims(a.ndim, dims)
+    # Required to silence MyPy errors
+    assert isinstance(dims_, (tuple, list))
+    dims = dims_
+    if len(dims) != 2:
+        raise RuntimeError(
+            f"expected total rotation dims == 2, but got dims = {len(dims)}"
+        )
+    if a.ndim < 2:
+        raise RuntimeError(f"expected total dims >= 2, but got total dims = {a.ndim}")
+    if dims[0] == dims[1]:
+        raise RuntimeError(
+            f"expected rotation dims to be different, but got dim0 = {dims[0]} and dim1 = {dims[1]}"
+        )
+    k = k % 4  # Rotation direction is from the second towards the first axis for k < 0
+    if k == 1:
+        return transpose(flip(a, (dims[1],)), dims[0], dims[1])
+    elif k == 2:
+        return flip(a, dims)
+    elif k == 3:
+        return transpose(flip(a, (dims[0],)), dims[0], dims[1])
+    else:
+        return clone(a)
+
+
 # update to cat then view instead of unsqueezing each tensor
 @out_wrapper
 def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
@@ -1942,10 +2069,28 @@ def tensor_split(
         return tuple(splits)
 
 
+@register_decomposition(torch.ops.aten.t.default)
+def t(a: TensorLikeType):
+    # TODO: Add sparse support
+    # if a.is_sparse:
+    #     sparse_dim = a.sparse_dim()
+    #     dense_dim = a.dense_dim()
+    #     if not (sparse_dim <= 2 and dense_dim == 0):
+    #         raise RuntimeError(
+    #             f"t() expects a tensor with <= 2 sparse and 0 dense dimensions, but got {sparse_dim} sparse and"
+    #             f"{dense_dim} dense dimensions"
+    #         )
+    if a.ndim > 2:
+        raise RuntimeError(
+            f"t() expects a tensor with <= 2 dimensions, but self is {a.ndim}D"
+        )
+    return torch.transpose(a, 0, 0 if a.ndim < 2 else 1)
+
+
 def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
 
-    if a.ndim <= 1:
+    if a.ndim <= 1 or dim0 == dim1:
         return prims.view_of(a)
 
     _permutation = list(range(0, a.ndim))
