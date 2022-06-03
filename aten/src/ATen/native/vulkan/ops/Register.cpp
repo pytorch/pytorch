@@ -78,6 +78,7 @@ TORCH_LIBRARY(vulkan, m) {
             return linear_prepack(
                 std::move(std::get<0>(state)), std::move(std::get<1>(state)));
           });
+  // To maintain backwards compatibility.
   m.class_<GruOpContext>("GruOpContext")
       .def_pickle(
           // __getstate__
@@ -127,6 +128,15 @@ TORCH_LIBRARY(vulkan_prepack, m) {
       "vulkan_prepack::linear_run(Tensor X, "
       "__torch__.torch.classes.vulkan.LinearOpContext BW_prepack) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
+      "vulkan_prepack::create_gru_context(Tensor[] params_cpu, "
+      "bool has_biases, "
+      "int num_layers, "
+      "float dropout, "
+      "bool train, "
+      "bool bidirectional, "
+      "bool batch_first) "
+      "-> __torch__.torch.classes.vulkan.VulkanOpContext"));
+  m.def(TORCH_SELECTIVE_SCHEMA( // Backwards compatibility
       "vulkan_prepack::gru_prepack(Tensor[] params_cpu, "
       "bool has_biases, "
       "int num_layers, "
@@ -136,6 +146,10 @@ TORCH_LIBRARY(vulkan_prepack, m) {
       "bool batch_first) "
       "-> __torch__.torch.classes.vulkan.GruOpContext"));
   m.def(TORCH_SELECTIVE_SCHEMA(
+      "vulkan_prepack::run_gru_context(Tensor input_vk, "
+      "Tensor hx_vk, "
+      "__torch__.torch.classes.vulkan.VulkanOpContext G_prepack) -> (Tensor next_input, Tensor hidden_layer)"));
+  m.def(TORCH_SELECTIVE_SCHEMA( // Backwards compatibility
       "vulkan_prepack::gru_run(Tensor input_vk, "
       "Tensor hx_vk, "
       "__torch__.torch.classes.vulkan.GruOpContext G_prepack) -> (Tensor next_input, Tensor hidden_layer)"));
@@ -146,7 +160,8 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_transpose_clamp_prepack"), TORCH_FN(conv2d_transpose_clamp_prepack));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::create_linear_context"), TORCH_FN(create_linear_context));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::linear_prepack"), TORCH_FN(linear_prepack)); // Backwards compatibility
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::gru_prepack"), TORCH_FN(gru_prepack));
+  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::create_gru_context"), TORCH_FN(create_gru_context));
+  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::gru_prepack"), TORCH_FN(gru_prepack)); // Backwards compatibility
 }
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
@@ -154,7 +169,8 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_transpose_clamp_run"), TORCH_FN(conv2d_transpose_clamp_run));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::run_linear_context"), TORCH_FN(run_linear_context));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::linear_run"), TORCH_FN(linear_run)); // Backwards compatibility
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::gru_run"), TORCH_FN(gru_run));
+  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::run_gru_context"), TORCH_FN(run_gru_context));
+  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::gru_run"), TORCH_FN(gru_run)); // Backwards compatibility
 }
 
 Tensor convolution(
