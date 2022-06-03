@@ -72,7 +72,8 @@ void* alloc_cpu(size_t nbytes) {
       " bytes.");
 #else
   int err = posix_memalign(&data, gAlignment, nbytes);
-  CAFFE_ENFORCE(err == 0,
+  CAFFE_ENFORCE(
+      err == 0,
       "DefaultCPUAllocator: can't allocate memory: you tried to allocate ",
       nbytes,
       " bytes. Error code ",
