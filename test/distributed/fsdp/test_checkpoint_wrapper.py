@@ -100,6 +100,15 @@ class CheckpointWrapperTest(TestCase):
         wrapper_reentrant = test(use_checkpointing=False, use_wrapper=True, use_reentrant=True)
         self.assertEqual(functional_no_reentrant, wrapper_no_reentrant)
 
+    def test_forward_missing_attributes(self):
+        lin = nn.Linear(1, 1)
+        m = nn.Sequential(lin, lin)
+        wrapped = CheckpointWrapper(m)
+        # Test indexing is forwarded
+        self.assertEqual(wrapped[0], lin)
+        # Test missing attributes are forwarded.
+        m._foo = 'bar'
+        self.assertEqual(wrapped._foo, 'bar')
 
     def test_apply_activation_checkpointing_wrapper(self):
         """

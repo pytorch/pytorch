@@ -10,7 +10,6 @@ from typing import Dict, Any
 
 _CHECKPOINT_PREFIX = "mod"
 
-
 class CheckpointImpl(Enum):
     REENTRANT = auto()
     NO_REENTRANT = auto()
@@ -38,6 +37,17 @@ class CheckpointWrapper(torch.nn.Module):
         self._register_load_state_dict_pre_hook(
             self._pre_load_state_dict_hook, with_module=True
         )
+
+    def __getattr__(self, name: str) -> Any:
+        """Forward missing attributes to wrapped module."""
+        try:
+            return super().__getattr__(name)  # defer to nn.Module's logic
+        except AttributeError:
+            return getattr(self.mod, name)
+
+    def __getitem__(self, key: int) -> Any:
+        """Forward indexing calls in case the module is a nn.Sequential."""
+        return self.mod.__getitem__(key)  # type: ignore[operator]
 
     def forward(self, *args, **kwargs):
         offload_mgr = save_on_cpu(pin_memory=True) if self.offload_to_cpu else suppress()
