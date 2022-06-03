@@ -46,9 +46,7 @@ _params_dict = {}  # type: ignore[var-annotated]
 
 
 @contextlib.contextmanager
-def select_model_mode_for_export(
-    model, mode: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL
-):
+def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
     """Adjusts the model training mode to the specified mode for export."""
     originally_training: bool = False
     if not isinstance(model, torch.jit.ScriptFunction):
