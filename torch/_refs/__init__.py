@@ -193,6 +193,7 @@ __all__ = [
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
+    "t",
     "tensor_split",
     "transpose",
     "unsqueeze",
@@ -2068,10 +2069,28 @@ def tensor_split(
         return tuple(splits)
 
 
+@register_decomposition(torch.ops.aten.t.default)
+def t(a: TensorLikeType):
+    # TODO: Add sparse support
+    # if a.is_sparse:
+    #     sparse_dim = a.sparse_dim()
+    #     dense_dim = a.dense_dim()
+    #     if not (sparse_dim <= 2 and dense_dim == 0):
+    #         raise RuntimeError(
+    #             f"t() expects a tensor with <= 2 sparse and 0 dense dimensions, but got {sparse_dim} sparse and"
+    #             f"{dense_dim} dense dimensions"
+    #         )
+    if a.ndim > 2:
+        raise RuntimeError(
+            f"t() expects a tensor with <= 2 dimensions, but self is {a.ndim}D"
+        )
+    return torch.transpose(a, 0, 0 if a.ndim < 2 else 1)
+
+
 def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
 
-    if a.ndim <= 1:
+    if a.ndim <= 1 or dim0 == dim1:
         return prims.view_of(a)
 
     _permutation = list(range(0, a.ndim))
