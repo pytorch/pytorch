@@ -86,18 +86,6 @@ static C10_UNUSED void scatter_shape_check(
     }
   }
 
-  //  Check: index.size(d) <= src.size(d) for all d if src is Tensor
-  if (!is_wrong_shape && src_opt.has_value()) {
-    auto src = src_opt.value();
-    for (const auto d : c10::irange(self_dims)) {
-      int64_t index_d_size = ensure_nonempty_size(index, d);
-      if (index_d_size > ensure_nonempty_size(src, d)) {
-        is_wrong_shape = true;
-        break;
-      }
-    }
-  }
-
   if (src_opt.has_value()) {
     auto src = src_opt.value();
 
