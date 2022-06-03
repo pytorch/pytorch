@@ -4487,6 +4487,31 @@ for shape in [(1,), ()]:
         self.assertTrue(mem_reentrant_checkpoint < mem_no_checkpoint)
         self.assertTrue(mem_no_reentrant_checkpoint <= mem_reentrant_checkpoint)
 
+    def test_checkpointing_without_reentrant_custom_function(self):
+        """
+        Ensures that we can access saved tensors twice in custom functions
+        when using non-reentrant checkpoint.
+        """
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y, z):
+                w = x * y * z
+                out = w + w
+                ctx.save_for_backward(x, y, z, w, out)
+                return out
+
+            def backward(ctx, grad_out):
+                print("in backward")
+                x, y, z, w, out = ctx.saved_tensors
+                x, y, z, w, out = ctx.saved_tensors
+                return x, x, x
+
+        x = torch.tensor(1., requires_grad=True)
+        y = torch.tensor(2., requires_grad=True)
+        z = torch.tensor(3., requires_grad=True)
+        out = checkpoint(MyFunc.apply, x, y, z, use_reentrant=False)
+        out.sum().backward()
+
     @slowTest
     @parametrize("input_requires_grad", [True, False])
     def test_checkpointing_without_reentrant(self, input_requires_grad):
