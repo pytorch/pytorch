@@ -13581,9 +13581,9 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_hardswish,
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           supports_gradgrad=False,
+           supports_gradgrad=True,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,  # Need: hardswish_backward
+           supports_fwgrad_bwgrad=True,
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::hardswish"]),
     OpInfo('nn.functional.unfold',
@@ -14101,6 +14101,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16),
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_autograd=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
@@ -17486,6 +17487,7 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=floating_types_and(torch.float16),
            supports_out=False,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            skips=(
                # RuntimeError: input->type()->kind() == TypeKind::OptionalTypeINTERNAL ASSERT FAILED
                # at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270, please report a bug to PyTorch.
@@ -17499,6 +17501,7 @@ op_db: List[OpInfo] = [
         backward_dtypes=all_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         skips=(
             # RuntimeError: input->type()->kind() == TypeKind::OptionalTypeINTERNAL ASSERT FAILED
             # at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270, please report a bug to PyTorch.
@@ -18024,6 +18027,7 @@ op_db: List[OpInfo] = [
         sample_kwargs=lambda device, dtype, input: ({'beta': 3, 'threshold': .2}, {'beta': 3, 'threshold': .2}),
         sample_inputs_func=partial(sample_inputs_elementwise_unary, op_kwargs={'beta': 3, 'threshold': .2}),
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         decorators=(
@@ -18061,6 +18065,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_loss,
         supports_out=False,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         dtypes=floating_types_and(torch.float16),
         backward_dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
