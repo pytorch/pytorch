@@ -3133,7 +3133,7 @@ class _TestONNXRuntime:
         self.run_test(torch.jit.script(ListUnpack()), x, remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    def test_listunpack_runs_without_error_with_construct_list_as_input(self):
+    def test_listunpack_runs_without_error_with_constructed_list_as_input(self):
         class PackUnpack(torch.nn.Module):
             """Create and unpack a list of tensors.
 
