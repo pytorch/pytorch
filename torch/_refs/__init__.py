@@ -466,8 +466,9 @@ isfinite = _make_elementwise_unary_reference(
 
 def _isinf(a: TensorLikeType) -> TensorLikeType:
     if utils.is_complex_dtype(a.dtype):
-        return bitwise_or(_isinf(real(a)), _isinf(imag(a)))
-    return bitwise_and(bitwise_not(isfinite(a)), bitwise_not(_isnan(a)))
+        return logical_or(_isinf(real(a)), _isinf(imag(a)))
+    # TODO: use logical_not instead of bitwise_not
+    return logical_and(bitwise_not(isfinite(a)), bitwise_not(_isnan(a)))
 
 
 isinf = _make_elementwise_unary_reference(
@@ -478,7 +479,7 @@ isinf = _make_elementwise_unary_reference(
 
 
 def _isposinf(a: TensorLikeType) -> TensorLikeType:
-    return bitwise_and(_isinf(a), gt(a, zeros_like(a)))
+    return logical_and(_isinf(a), gt(a, 0))
 
 
 isposinf = _make_elementwise_unary_reference(
@@ -489,7 +490,7 @@ isposinf = _make_elementwise_unary_reference(
 
 
 def _isneginf(a: TensorLikeType) -> TensorLikeType:
-    return bitwise_and(_isinf(a), lt(a, zeros_like(a)))
+    return logical_and(_isinf(a), lt(a, 0))
 
 
 isneginf = _make_elementwise_unary_reference(
@@ -601,7 +602,9 @@ def positive(a: TensorLikeType) -> TensorLikeType:
 # real does not use _make_elementwise_unary_reference because it does not support out
 def real(a: TensorLikeType) -> TensorLikeType:
     assert isinstance(a, TensorLike)
-    return prims.real(a)
+    if utils.is_complex_dtype(a.dtype):
+        return prims.real(a)
+    return a
 
 
 reciprocal = _make_elementwise_unary_reference(
