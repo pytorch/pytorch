@@ -18,7 +18,8 @@ import numpy as np
 import torch
 import torch._C._onnx as _C_onnx
 from torch import _C
-from torch.onnx import _constants, _experimental, _globals, utils
+from torch.onnx import _constants, _experimental, utils
+from torch.onnx._globals import GLOBALS
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
@@ -423,8 +424,8 @@ def _onnx_graph_from_model(
         else:
             operator_export_type = _C_onnx.OperatorExportTypes.ONNX
 
-    _globals.GLOBALS.export_onnx_opset_version = opset_version
-    _globals.GLOBALS.operator_export_type = operator_export_type
+    GLOBALS.export_onnx_opset_version = opset_version
+    GLOBALS.operator_export_type = operator_export_type
 
     with utils.exporter_context(model, training, verbose):
         do_constant_folding = utils._decide_constant_folding(
