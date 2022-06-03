@@ -8,9 +8,6 @@ on:
         type: string
         description: Top-level label for what's being built/tested.
 
-defaults:
-  run:
-    shell: arch -arch arm64 bash -e -l {0}
 
 jobs:
   run_mps_test:
@@ -30,6 +27,7 @@ jobs:
         env:
           ENV_NAME: conda-test-env-${{ github.run_id }}
           PY_VERS: 3.8
+        shell: arch -arch arm64 bash {0}
         run: |
           # shellcheck disable=SC1090
           . ~/miniconda3/etc/profile.d/conda.sh
@@ -40,6 +38,7 @@ jobs:
       - name: Run MPS tests
         env:
           ENV_NAME: conda-test-env-${{ github.run_id }}
+        shell: arch -arch arm64 bash {0}
         run: |
           # shellcheck disable=SC1090
           . ~/miniconda3/etc/profile.d/conda.sh
