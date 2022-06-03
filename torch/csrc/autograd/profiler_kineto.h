@@ -124,7 +124,8 @@ struct TORCH_API KinetoEvent {
     return *module_hierarchy_;
   }
 
-  KinetoEvent& moduleHierarchy(const std::vector<std::string>& module_hierarchy) {
+  KinetoEvent& moduleHierarchy(
+      const std::vector<std::string>& module_hierarchy) {
     module_hierarchy_ = module_hierarchy;
     return *this;
   }
@@ -205,7 +206,7 @@ struct TORCH_API KinetoEvent {
     return correlation_id_;
   }
 
-  KinetoEvent& correlationId(uint64_t correlation_id)  {
+  KinetoEvent& correlationId(uint64_t correlation_id) {
     correlation_id_ = correlation_id;
     return *this;
   }
@@ -344,13 +345,15 @@ TORCH_API void enableProfiler(
  * Additionally, it takes a functor that does in-place post processing of
  * events, e.g. populate stack trace or module hierarchy information lazily
  * using debug_handle.
- * Example usage is with lite interpreter that has recording scope of LITE_INTERPRETER.
- * In this case lite interpreter runtime, records debug handles in RecordFunction, along
- * with other information. Debug handles are eventually passed down to KinetoEvent and
- * recorded as part of the event. KinetoEdgeCPUProfiler,
- * in torch/csrc/jit/mobile/profiler_edge.cpp, enables profiler using post-processing
- * callback, via enableProfilerWithEventPostProcess, that takes these debug handles
- * and generates stack trace and module hierarchy information, once profiling is done.
+ * Example usage is with lite interpreter that has recording scope of
+ * LITE_INTERPRETER. In this case lite interpreter runtime, records debug
+ * handles in RecordFunction, along with other information. Debug handles are
+ * eventually passed down to KinetoEvent and recorded as part of the event.
+ * KinetoEdgeCPUProfiler, in torch/csrc/jit/mobile/profiler_edge.cpp, enables
+ * profiler using post-processing callback, via
+ * enableProfilerWithEventPostProcess, that takes these debug handles and
+ * generates stack trace and module hierarchy information, once profiling is
+ * done.
  */
 using post_process_t = std::function<void(
     /*debug_handle */ int64_t,
@@ -372,7 +375,8 @@ namespace python_tracer {
 // Because we are interleaving events, the Python tracer should use the same
 // timer as the profiler.
 TORCH_API int64_t now();
-}  // namespace python_tracer
+} // namespace python_tracer
 
 } // namespace profiler
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

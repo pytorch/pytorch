@@ -1,7 +1,4 @@
 #include <onnx/onnx_pb.h>
-#include <torch/csrc/onnx/init.h>
-#include <torch/csrc/onnx/onnx.h>
-#include <torch/version.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
@@ -23,6 +20,9 @@
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/onnx/init.h>
+#include <torch/csrc/onnx/onnx.h>
+#include <torch/version.h>
 
 namespace torch {
 namespace onnx {
@@ -117,7 +117,9 @@ void initONNXBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
       .def("_jit_pass_onnx_lint", ONNXLintGraph)
-      .def("_jit_pass_onnx_function_extraction", torch::jit::onnx::ONNXFunctionExtraction)
+      .def(
+          "_jit_pass_onnx_function_extraction",
+          torch::jit::onnx::ONNXFunctionExtraction)
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
@@ -171,9 +173,11 @@ void initONNXBindings(PyObject* module) {
           [](std::string stream_name = "stdout") -> void {
             std::shared_ptr<std::ostream> out;
             if (stream_name == "stdout") {
-              out = std::shared_ptr<std::ostream>(&std::cout, [](std::ostream*){});
+              out = std::shared_ptr<std::ostream>(
+                  &std::cout, [](std::ostream*) {});
             } else if (stream_name == "stderr") {
-              out = std::shared_ptr<std::ostream>(&std::cerr, [](std::ostream*){});
+              out = std::shared_ptr<std::ostream>(
+                  &std::cerr, [](std::ostream*) {});
             } else {
               std::cerr << "ERROR: only `stdout` and `stderr`"
                         << "are supported as `stream_name`" << std::endl;

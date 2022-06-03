@@ -15,13 +15,15 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
 #include <torch/csrc/profiler/collection.h>
-#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_strings.h>
 
 namespace py = pybind11;
 
-
-namespace torch { namespace autograd { namespace profiler { namespace python_tracer {
+namespace torch {
+namespace autograd {
+namespace profiler {
+namespace python_tracer {
 using torch::profiler::impl::python_tracer::CallType;
 using torch::profiler::impl::python_tracer::PythonTracerBase;
 using torch::profiler::impl::python_tracer::PyTraceEvent;
@@ -38,10 +40,10 @@ namespace {
 struct TraceContext {
   PyObject_HEAD
 
-  // It is wasteful to store an entire PyThreadState* in RawEvent. So
-  // instead, we map thread ids down to a compact space that we can store in
-  // a single byte.
-  uint8_t thread_id_;
+      // It is wasteful to store an entire PyThreadState* in RawEvent. So
+      // instead, we map thread ids down to a compact space that we can store in
+      // a single byte.
+      uint8_t thread_id_;
   PyThreadState* thread_state_;
 
   // Likewise, int64_t is more precision than we need. By tracking when the
@@ -60,45 +62,45 @@ struct TraceContext {
 
 // CPython boilerplate to define `TraceContext` as a proper python object.
 static PyTypeObject TraceContextType = {
-  PyVarObject_HEAD_INIT(nullptr, 0)
-  "TraceContext",             /* tp_name */
-  sizeof(TraceContext),       /* tp_basicsize */
-  0,                          /* tp_itemsize */
-  nullptr,                    /* tp_dealloc */
-  0,                          /* tp_vectorcall_offset */  // NOLINT: modernize-use-nullptr
-  nullptr,                    /* tp_getattr */
-  nullptr,                    /* tp_setattr */
-  nullptr,                    /* tp_reserved */
-  nullptr,                    /* tp_repr */
-  nullptr,                    /* tp_as_number */
-  nullptr,                    /* tp_as_sequence */
-  nullptr,                    /* tp_as_mapping */
-  nullptr,                    /* tp_hash  */
-  nullptr,                    /* tp_call */
-  nullptr,                    /* tp_str */
-  nullptr,                    /* tp_getattro */
-  nullptr,                    /* tp_setattro */
-  nullptr,                    /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT,         /* tp_flags */
-  "Python tracer TLS",        /* tp_doc */
-  nullptr,                    /* tp_traverse */
-  nullptr,                    /* tp_clear */
-  nullptr,                    /* tp_richcompare */
-  0,                          /* tp_weaklistoffset */
-  nullptr,                    /* tp_iter */
-  nullptr,                    /* tp_iternext */
-  nullptr,                    /* tp_methods */
-  nullptr,                    /* tp_members */
-  nullptr,                    /* tp_getset */
-  nullptr,                    /* tp_base */
-  nullptr,                    /* tp_dict */
-  nullptr,                    /* tp_descr_get */
-  nullptr,                    /* tp_descr_set */
-  0,                          /* tp_dictoffset */
-  nullptr,                    /* tp_init */
-  nullptr,                    /* tp_alloc */
-  PyType_GenericNew,          /* tp_new */
-  nullptr                     /* tp_free */
+    PyVarObject_HEAD_INIT(nullptr, 0) "TraceContext", /* tp_name */
+    sizeof(TraceContext), /* tp_basicsize */
+    0, /* tp_itemsize */
+    nullptr, /* tp_dealloc */
+    0,
+    /* tp_vectorcall_offset */ // NOLINT: modernize-use-nullptr
+    nullptr, /* tp_getattr */
+    nullptr, /* tp_setattr */
+    nullptr, /* tp_reserved */
+    nullptr, /* tp_repr */
+    nullptr, /* tp_as_number */
+    nullptr, /* tp_as_sequence */
+    nullptr, /* tp_as_mapping */
+    nullptr, /* tp_hash  */
+    nullptr, /* tp_call */
+    nullptr, /* tp_str */
+    nullptr, /* tp_getattro */
+    nullptr, /* tp_setattro */
+    nullptr, /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT, /* tp_flags */
+    "Python tracer TLS", /* tp_doc */
+    nullptr, /* tp_traverse */
+    nullptr, /* tp_clear */
+    nullptr, /* tp_richcompare */
+    0, /* tp_weaklistoffset */
+    nullptr, /* tp_iter */
+    nullptr, /* tp_iternext */
+    nullptr, /* tp_methods */
+    nullptr, /* tp_members */
+    nullptr, /* tp_getset */
+    nullptr, /* tp_base */
+    nullptr, /* tp_dict */
+    nullptr, /* tp_descr_get */
+    nullptr, /* tp_descr_set */
+    0, /* tp_dictoffset */
+    nullptr, /* tp_init */
+    nullptr, /* tp_alloc */
+    PyType_GenericNew, /* tp_new */
+    nullptr /* tp_free */
 };
 
 // CPython has a more expressive set of events for tracing / profiling:
@@ -311,13 +313,14 @@ PythonTracer& PythonTracer::singleton() {
 
 PythonTracer::PythonTracer() : active_(false) {
   path_prefixes_ = py::module::import("torch.profiler.python_tracer")
-    .attr("_prefix_regex")().cast<std::vector<std::string>>();
+                       .attr("_prefix_regex")()
+                       .cast<std::vector<std::string>>();
 
   module_call_code_ = py::module::import("torch.nn")
-    .attr("Module")
-    .attr("__call__")
-    .attr("__code__")
-    .ptr();
+                          .attr("Module")
+                          .attr("__call__")
+                          .attr("__code__")
+                          .ptr();
 }
 
 void PythonTracer::start() {
@@ -697,4 +700,7 @@ void init() {
   TORCH_CHECK(PyType_Ready(&TraceContextType) == 0);
   torch::profiler::impl::python_tracer::registerTracer(&getTracer);
 }
-}}}} // namespace torch::autograd::profiler::python_tracer
+} // namespace python_tracer
+} // namespace profiler
+} // namespace autograd
+} // namespace torch

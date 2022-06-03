@@ -14,11 +14,13 @@
 
 #include <cstdint>
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 /**
- * Records TensorOptions, shape of the tensor, whether or not the Python dispatch key is set (tensor subclass),
- * and, where applicable, the stream the corresponding operation took place on.
+ * Records TensorOptions, shape of the tensor, whether or not the Python
+ * dispatch key is set (tensor subclass), and, where applicable, the stream the
+ * corresponding operation took place on.
  *
  * If is_valid() is false, then the corresponding input is not used and may be
  * an undefined tensor.
@@ -26,14 +28,22 @@ namespace torch { namespace autograd {
 struct InputMetadata {
   InputMetadata() = default;
 
-  InputMetadata(const at::TensorOptions options, at::IntArrayRef shape, bool is_tensor_subclass)
-  : options_{options}, shape_{shape}, is_tensor_subclass_{is_tensor_subclass} {
+  InputMetadata(
+      const at::TensorOptions options,
+      at::IntArrayRef shape,
+      bool is_tensor_subclass)
+      : options_{options},
+        shape_{shape},
+        is_tensor_subclass_{is_tensor_subclass} {
     auto device_ = options.device();
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
   }
 
   InputMetadata(const at::Tensor& t)
-  : InputMetadata(t.options(), t.sizes(), t.unsafeGetTensorImpl()->is_python_dispatch()) { }
+      : InputMetadata(
+            t.options(),
+            t.sizes(),
+            t.unsafeGetTensorImpl()->is_python_dispatch()) {}
 
   const at::TensorOptions options() const {
     return options_;
@@ -67,11 +77,12 @@ struct InputMetadata {
     return at::zeros(shape_, options_);
   }
 
-private:
+ private:
   const at::TensorOptions options_;
   at::DimVector shape_;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device());
   bool is_tensor_subclass_ = false;
 };
 
-}} // torch::autograd
+} // namespace autograd
+} // namespace torch

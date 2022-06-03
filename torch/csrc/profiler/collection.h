@@ -19,11 +19,7 @@ namespace torch {
 namespace profiler {
 namespace impl {
 
-enum class EventType : uint8_t {
-  TorchOp = 0,
-  Backend,
-  Allocation
-};
+enum class EventType : uint8_t { TorchOp = 0, Backend, Allocation };
 
 template <EventType>
 struct ExtraFields;
@@ -197,7 +193,8 @@ class InputOutputEncoder final {
   void push(const at::Tensor& t);
 
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
-  AppendOnlyList<TensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_metadata_;
+  AppendOnlyList<TensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
+      tensor_metadata_;
   AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_;
 };
 
@@ -223,7 +220,7 @@ struct TORCH_API PyTraceEvent {
   uint64_t thread_id_;
   PyTraceEvent* parent_;
   CallType call_type_;
-  size_t module_id_;  // Only set call_type_ == kPyModuleCall
+  size_t module_id_; // Only set call_type_ == kPyModuleCall
 
   // Index in the list of raw call and return events. This allows one to
   // convert a vector of PyTraceEvents back into the constituent call and
@@ -250,7 +247,9 @@ class TORCH_API ThreadLocalSubqueue {
  public:
   ThreadLocalSubqueue(const uint64_t tid, const ProfilerConfig& config);
 
-  std::unique_ptr<KinetoObserverContext> begin_op(const at::RecordFunction& fn, uint64_t correlation_id);
+  std::unique_ptr<KinetoObserverContext> begin_op(
+      const at::RecordFunction& fn,
+      uint64_t correlation_id);
 
   template <class... Args>
   void emplace_backend_event(Args&&... args) {
@@ -315,7 +314,8 @@ class TORCH_API RecordQueue {
  private:
   uint32_t id_;
   ProfilerConfig config_;
-  ska::flat_hash_map<uint64_t, std::unique_ptr<ThreadLocalSubqueue>> sub_queues_;
+  ska::flat_hash_map<uint64_t, std::unique_ptr<ThreadLocalSubqueue>>
+      sub_queues_;
   std::mutex sub_queue_mutex_;
 };
 
