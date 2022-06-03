@@ -76,7 +76,6 @@ class TestScatterGather(TestCase):
     @dtypes(torch.float32, torch.float64)
     def test_gather_backward_with_empty_index_tensor(self, device, dtype, sparse_grad):
         dim = -1
-        sparse_grad = False
         input = torch.rand([10, 5], dtype=dtype, device=device, requires_grad=True)
         index = torch.randint(0, 2, [3, 0], dtype=torch.int64, device=device)
         res = torch.gather(input, dim, index, sparse_grad=sparse_grad)
