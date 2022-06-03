@@ -17194,10 +17194,17 @@ class TestNNDeviceType(NNTestCase):
         maxdiff1 = (ret.narrow(0, 1024, 1024) - conv(input_large.narrow(0, 1024, 1024))).abs_().max().item()
         maxdiff2 = (ret.narrow(0, 2048, 1024) - conv(input_large.narrow(0, 2048, 1024))).abs_().max().item()
         maxdiff3 = (ret.narrow(0, 3072, 1024) - conv(input_large.narrow(0, 3072, 1024))).abs_().max().item()
-        self.assertEqual(maxdiff0, 0)
-        self.assertEqual(maxdiff1, 0)
-        self.assertEqual(maxdiff2, 0)
-        self.assertEqual(maxdiff3, 0)
+        if self.device_type == 'cuda':
+            # cuDNN may use algorithms such as FFT that don't guarantee a diff of 0
+            self.assertEqual(maxdiff0, 0, atol=2e-3, rtol=1e-5)
+            self.assertEqual(maxdiff1, 0, atol=2e-3, rtol=1e-5)
+            self.assertEqual(maxdiff2, 0, atol=2e-3, rtol=1e-5)
+            self.assertEqual(maxdiff3, 0, atol=2e-3, rtol=1e-5)
+        else:
+            self.assertEqual(maxdiff0, 0)
+            self.assertEqual(maxdiff1, 0)
+            self.assertEqual(maxdiff2, 0)
+            self.assertEqual(maxdiff3, 0)
 
     @onlyCUDA
     @skipCUDAIfRocm
