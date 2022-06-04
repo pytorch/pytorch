@@ -2277,7 +2277,7 @@ class DistributedTest:
             if expect_event and dist.get_backend() in PROFILING_SUPPORTED_BACKENDS:
                 # We are only interested in the backend's implementation not the dispatcher wrapper.
                 events = get_profiling_event(
-                   f"{dist.get_backend()}:{profiling_title_postfix}", autograd_profiler_ctx
+                    f"{dist.get_backend()}:{profiling_title_postfix}", autograd_profiler_ctx
                 )
                 # DETAIL debug mode can use a pg wrapper that issues more collectives
                 # under the hood
