@@ -1092,14 +1092,6 @@ Tensor bitwise_right_shift(const Scalar& self, const Tensor& other) {
 
 template <typename Stub>
 Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& other, Stub& stub) {
-  // Validate that is possible to convert zero-dim tensor's dtype to other dtype without overflow
-  // if (self.scalar_type() != other.scalar_type()) {
-  //   if (self.dim() != 0 && other.dim() == 0) {
-  //     check_convert(other.item(), self.scalar_type());
-  //   } else if (self.dim() == 0 && other.dim() != 0) {
-  //     check_convert(self.item(), other.scalar_type());
-  //   }
-  // }
   auto iter = TensorIterator::comparison_op(result, self, other);
   stub(iter.device_type(), iter);
   return result;
