@@ -218,16 +218,22 @@ static inline Tensor applySelect(
     int64_t index,
     int64_t real_dim,
     const at::Device& /*self_device*/,
-    const IntArrayRef& self_sizes) {
-  TORCH_CHECK_INDEX(
-    !(index == 0 && dim == 0 && self_sizes.size() == 0),
-    "invalid index of a 0-dim tensor. ",
-    "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
+    const c10::optional<IntArrayRef> & self_sizes) {
+  // TODO: nested tensor does not have a size (yet) so for now we represent its size as null
+  //       may need to be changed after we reach a better solution for nested tensor size
+  //       current logic is: for nested tensor, `self_sizes` is null
+  //                         for other tensors, `self_sizes` have normal value
+  if (self_sizes.has_value()) {
+    TORCH_CHECK_INDEX(
+      !(index == 0 && dim == 0 && (*self_sizes).size() == 0),
+      "invalid index of a 0-dim tensor. ",
+      "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
 
-  int64_t size = self_sizes[dim];
-  TORCH_CHECK_INDEX(
-    index >= -size && index < size,
-    "index ", index, " is out of bounds for dimension ", real_dim, " with size ", size);
+    int64_t size = (*self_sizes)[dim];
+    TORCH_CHECK_INDEX(
+      index >= -size && index < size,
+      "index ", index, " is out of bounds for dimension ", real_dim, " with size ", size);
+    }
 
   // if the index is negative, do not normalize it because that would fix the index
   // on the current tensor size in the tracer.
@@ -495,13 +501,16 @@ static inline Tensor dispatch_index_put_(Tensor& self, std::vector<Tensor>&& ind
 // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
 static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& indices, bool disable_slice_optimization = false) {
   at::Device self_device = self.device();
-  IntArrayRef self_sizes = self.sizes();
+  // TODO: nested tensor does not have a size (yet) so for now we represent its size as null
+  //       may need to be changed after we reach a better solution for nested tensor size
+  c10::optional<IntArrayRef> self_sizes = c10::nullopt;
+  if (! self.is_nested()) self_sizes = self.sizes();
 
   // handle simple types: integers, slices, none, ellipsis, bool
   if (indices.size() == 1) {
     const TensorIndex& index = indices[0];
     if (index.is_integer()) {
-      return impl::applySelect(self, 0, index.integer(), 0, self_device, self_sizes);
+      return impl::applySelect(self, 0, index.integer(), 0, self_device, *self_sizes);
     } else if (index.is_slice()) {
       return impl::applySlice(
         self,
@@ -511,7 +520,7 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
         index.slice().step(),
         /*disable_slice_optimization=*/true,
         self_device,
-        self_sizes);
+        *self_sizes);
     } else if (index.is_none()) {
       return self.unsqueeze(0);
     } else if (index.is_ellipsis()) {
@@ -526,7 +535,7 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
   }
 
   std::vector<Tensor> tensorIndices;
-  Tensor sliced = impl::applySlicing(self, indices, tensorIndices, disable_slice_optimization, self_device, self_sizes);
+  Tensor sliced = impl::applySlicing(self, indices, tensorIndices, disable_slice_optimization, self_device, *self_sizes);
   if (tensorIndices.empty()) {
     if (sliced.is_same(self)) {
       // ensure we return a shallow copy for things like x[...]
