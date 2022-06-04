@@ -278,6 +278,9 @@
       ]
    },
    {
+     "name": "Distributed",
+   },
+   {
       "name": "superuser",
       "patterns": ["*"],
       "approved_by": ["pytorch/metamates"],
