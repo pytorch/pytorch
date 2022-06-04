@@ -225,17 +225,14 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
             size = split_size * _outputs
         else:
             raise RuntimeError("Unknown dimension size not supported")
-    if size % split_size == 0:
-        return g.op("Split", self, split_size, axis_i=dim, outputs=_outputs)
 
     min_split_size = size // split_size
     num_splits_one_extra = size % split_size
 
     splits = num_splits_one_extra * [min_split_size + 1]
     leftover = (split_size - num_splits_one_extra) * [min_split_size]
-    if leftover:
-        splits.append(leftover)
-    splits = g.op("Constant", value_t=torch.tensor(splits))
+
+    splits = g.op("Constant", value_t=torch.tensor(splits + leftover, dtype=torch.long))
     return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
 
 

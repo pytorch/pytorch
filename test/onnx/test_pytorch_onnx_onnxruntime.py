@@ -6137,7 +6137,7 @@ class _TestONNXRuntime:
                     input.tensor_split([1, 3, 4], dim=-2),
                     # test split on specific dim and output indexing.
                     input.tensor_split([0, 2], dim=-2)[-1],
-                    # test wiht out of bound end index (5).
+                    # test with out of bound end index (5).
                     input.tensor_split([2, 3, 5]),
                 )
 
