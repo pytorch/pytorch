@@ -3,7 +3,17 @@ from torch import Tensor
 
 from typing import Iterator, Iterable, Optional, Sequence, List, TypeVar, Generic, Sized, Union
 
+__all__ = [
+    "BatchSampler",
+    "RandomSampler",
+    "Sampler",
+    "SequentialSampler",
+    "SubsetRandomSampler",
+    "WeightedRandomSampler",
+]
+
 T_co = TypeVar('T_co', covariant=True)
+
 
 class Sampler(Generic[T_co]):
     r"""Base class for all Samplers.
@@ -222,14 +232,27 @@ class BatchSampler(Sampler[List[int]]):
         self.drop_last = drop_last
 
     def __iter__(self) -> Iterator[List[int]]:
-        batch = []
-        for idx in self.sampler:
-            batch.append(idx)
-            if len(batch) == self.batch_size:
-                yield batch
-                batch = []
-        if len(batch) > 0 and not self.drop_last:
-            yield batch
+        # Implemented based on the benchmarking in https://github.com/pytorch/pytorch/pull/76951
+        if self.drop_last:
+            sampler_iter = iter(self.sampler)
+            while True:
+                try:
+                    batch = [next(sampler_iter) for _ in range(self.batch_size)]
+                    yield batch
+                except StopIteration:
+                    break
+        else:
+            batch = [0] * self.batch_size
+            idx_in_batch = 0
+            for idx in self.sampler:
+                batch[idx_in_batch] = idx
+                idx_in_batch += 1
+                if idx_in_batch == self.batch_size:
+                    yield batch
+                    idx_in_batch = 0
+                    batch = [0] * self.batch_size
+            if idx_in_batch > 0:
+                yield batch[:idx_in_batch]
 
     def __len__(self) -> int:
         # Can only be called if self.sampler has __len__ implemented

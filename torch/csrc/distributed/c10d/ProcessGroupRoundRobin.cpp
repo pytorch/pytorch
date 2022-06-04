@@ -17,7 +17,7 @@ ProcessGroupRoundRobin::ProcessGroupRoundRobin(
 
 ProcessGroupRoundRobin::~ProcessGroupRoundRobin() {}
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::broadcast_impl(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
   return next()->broadcast(tensors, opts);

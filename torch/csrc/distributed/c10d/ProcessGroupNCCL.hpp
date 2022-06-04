@@ -275,7 +275,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
       return std::string(NCCL_BACKEND_NAME);
   }
 
-  c10::intrusive_ptr<ProcessGroup::Work> broadcast_impl(
+  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
@@ -369,6 +369,9 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // in sync. If the returned number is not consistent across the group, it
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
+
+  // Tests if the UCC fallback path is available
+  bool isUCCAvailable() const;
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
@@ -627,8 +630,9 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   uint64_t seq_{0};
 
 #ifdef USE_NCCL_WITH_UCC
-  // ProcessGroupUCC shared library handle
+  // ProcessGroupUCC shared library handle and ProcessGroup pointer
   static std::shared_ptr<at::DynamicLibrary> uccLib_;
+  c10::intrusive_ptr<ProcessGroup> uccPG_;
 #endif
 };
 

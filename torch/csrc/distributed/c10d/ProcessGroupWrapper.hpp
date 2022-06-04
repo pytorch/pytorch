@@ -17,7 +17,7 @@ class TORCH_API ProcessGroupWrapper : public ProcessGroup {
 
   const std::string getBackendName() const override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> broadcast_impl(
+  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& data,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 

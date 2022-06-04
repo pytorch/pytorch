@@ -185,7 +185,7 @@ const std::string ProcessGroupWrapper::getBackendName() const {
   return pg_->getBackendName();
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::broadcast_impl(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::broadcast(
     std::vector<at::Tensor>& data,
     const BroadcastOptions& opts) {
   runCollectiveChecks(OpType::BROADCAST, data);

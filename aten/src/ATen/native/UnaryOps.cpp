@@ -291,7 +291,7 @@ template <typename OutImpl>
 static inline Tensor unary_op_impl_with_complex_to_float(const Tensor& self, OutImpl& out_impl) {
   if (self.is_complex()) {
     const auto float_type = c10::toRealValueType(self.scalar_type());
-    Tensor result = at::empty({0}, self.options().dtype(float_type));
+    Tensor result = at::empty_like(self, self.options().dtype(float_type));
     return out_impl(result, self);
   }
 
@@ -808,8 +808,6 @@ Tensor& special_gammaln_out(const Tensor& self, Tensor& result) { return at::lga
 
 DEFINE_DISPATCH(abs_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(angle_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(real_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(imag_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(conj_physical_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(acos_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(acosh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)

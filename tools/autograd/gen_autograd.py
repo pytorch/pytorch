@@ -5,6 +5,7 @@ repository, run:
 python -m tools.autograd.gen_autograd \
        build/aten/src/ATen/Declarations.yaml \
        aten/src/ATen/native/native_functions.yaml \
+       aten/src/ATen/native/tags.yaml \
        $OUTPUT_DIR \
        tools/autograd
 
@@ -24,13 +25,13 @@ torch/csrc/autograd/generated/
 
 import argparse
 import os
-from tools.codegen.api import cpp
-from tools.codegen.api.autograd import (
+from torchgen.api import cpp
+from torchgen.api.autograd import (
     match_differentiability_info,
     NativeFunctionWithDifferentiabilityInfo,
 )
-from tools.codegen.gen import parse_native_yaml
-from tools.codegen.selective_build.selector import SelectiveBuilder
+from torchgen.gen import parse_native_yaml
+from torchgen.selective_build.selector import SelectiveBuilder
 from typing import List
 from . import gen_python_functions
 from .gen_autograd_functions import (
@@ -46,6 +47,7 @@ from .load_derivatives import load_derivatives
 
 def gen_autograd(
     native_functions_path: str,
+    tags_path: str,
     out: str,
     autograd_dir: str,
     operator_selector: SelectiveBuilder,
@@ -53,12 +55,12 @@ def gen_autograd(
 ) -> None:
     # Parse and load derivatives.yaml
     differentiability_infos = load_derivatives(
-        os.path.join(autograd_dir, "derivatives.yaml"), native_functions_path
+        os.path.join(autograd_dir, "derivatives.yaml"), native_functions_path, tags_path
     )
 
     template_path = os.path.join(autograd_dir, "templates")
 
-    native_funcs = parse_native_yaml(native_functions_path).native_functions
+    native_funcs = parse_native_yaml(native_functions_path, tags_path).native_functions
     fns = list(
         sorted(
             filter(
@@ -74,11 +76,11 @@ def gen_autograd(
     # Generate VariableType.h/cpp
     if not disable_autograd:
         gen_variable_type(
-            out, native_functions_path, fns_with_diff_infos, template_path
+            out, native_functions_path, tags_path, fns_with_diff_infos, template_path
         )
 
         gen_inplace_or_view_type(
-            out, native_functions_path, fns_with_diff_infos, template_path
+            out, native_functions_path, tags_path, fns_with_diff_infos, template_path
         )
 
         # operator filter not applied as tracing sources are excluded in selective build
@@ -87,16 +89,17 @@ def gen_autograd(
     gen_autograd_functions_lib(out, differentiability_infos, template_path)
 
     # Generate variable_factories.h
-    gen_variable_factories(out, native_functions_path, template_path)
+    gen_variable_factories(out, native_functions_path, tags_path, template_path)
 
 
 def gen_autograd_python(
     native_functions_path: str,
+    tags_path: str,
     out: str,
     autograd_dir: str,
 ) -> None:
     differentiability_infos = load_derivatives(
-        os.path.join(autograd_dir, "derivatives.yaml"), native_functions_path
+        os.path.join(autograd_dir, "derivatives.yaml"), native_functions_path, tags_path
     )
 
     template_path = os.path.join(autograd_dir, "templates")
@@ -106,7 +109,9 @@ def gen_autograd_python(
 
     # Generate Python bindings
     deprecated_path = os.path.join(autograd_dir, "deprecated.yaml")
-    gen_python_functions.gen(out, native_functions_path, deprecated_path, template_path)
+    gen_python_functions.gen(
+        out, native_functions_path, tags_path, deprecated_path, template_path
+    )
 
 
 def main() -> None:
@@ -114,6 +119,7 @@ def main() -> None:
     parser.add_argument(
         "native_functions", metavar="NATIVE", help="path to native_functions.yaml"
     )
+    parser.add_argument("tags", metavar="NATIVE", help="path to tags.yaml")
     parser.add_argument("out", metavar="OUT", help="path to output directory")
     parser.add_argument(
         "autograd", metavar="AUTOGRAD", help="path to autograd directory"
@@ -121,6 +127,7 @@ def main() -> None:
     args = parser.parse_args()
     gen_autograd(
         args.native_functions,
+        args.tags,
         args.out,
         args.autograd,
         SelectiveBuilder.get_nop_selector(),

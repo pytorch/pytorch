@@ -1450,9 +1450,9 @@ class TripletMarginLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, D)` or :math`(D)` where :math:`D` is the vector dimension.
+        - Input: :math:`(N, D)` or :math:`(D)` where :math:`D` is the vector dimension.
         - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'`` and
-          input shape is :math`(N, D)`; a scalar otherwise.
+          input shape is :math:`(N, D)`; a scalar otherwise.
 
     Examples::
 

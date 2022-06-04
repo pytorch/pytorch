@@ -73,6 +73,8 @@ class Adapter final {
   // Metadata
   uint32_t num_compute_queues_;
   bool has_unified_memory_;
+  bool timestamp_compute_and_graphics_;
+  float timestamp_period_;
 
  public:
   inline VkPhysicalDevice physical_handle() const {
@@ -89,6 +91,14 @@ class Adapter final {
 
   inline uint32_t num_compute_queues() const {
     return num_compute_queues_;
+  }
+
+  inline bool timestamp_compute_and_graphics() const {
+    return timestamp_compute_and_graphics_;
+  }
+
+  inline float timestamp_period() const {
+    return timestamp_period_;
   }
 
   void init_device();

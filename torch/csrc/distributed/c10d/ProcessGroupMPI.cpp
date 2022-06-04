@@ -380,7 +380,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::enqueue(
   return work;
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast_impl(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
   checkSingleTensor(tensors);

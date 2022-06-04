@@ -5,28 +5,6 @@
 #include <fmt/format.h>
 
 namespace c10d {
-namespace {
-
-c10::intrusive_ptr<ProcessGroup::Work> broadcast(const c10::intrusive_ptr<ProcessGroup>& process_group,
-    at::TensorList tensors, int64_t root_rank, int64_t root_tensor, int64_t timeout) {
-  auto tensor_vec = tensors.vec();
-  return process_group->broadcast_impl(tensor_vec,
-      BroadcastOptions {root_rank, root_tensor, std::chrono::milliseconds(timeout)});
-}
-
-TORCH_LIBRARY(c10d, m) {
-  // The following ProcessGroup and Work definations are more like declarations.
-  // They don't expose the details of the two classes into TorchScript.
-  m.class_<ProcessGroup>("ProcessGroup")
-    .def(torch::init<int64_t, int64_t>());
-  m.class_<ProcessGroup::Work>("Work")
-    .def(torch::init<>());
-  // It's important to register the op to the CompositeExplicitAutograd key to enable
-  // __torch_dispatch__.
-  m.def("broadcast", dispatch(c10::DispatchKey::CompositeExplicitAutograd, broadcast));
-}
-
-}  // namespace
 
 std::string opTypeToString(OpType opType) {
   switch (opType) {
@@ -100,7 +78,7 @@ ProcessGroup::Work::Work(
           inputs.emplace_back(tensor);
         }
       }
-      recordingFunction->before(profilingTitle, inputs);
+      recordingFunction->before(profilingTitle, c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
       std::function<void()> end_handler = [recordingFunction]() {
         recordingFunction->end();
       };
@@ -206,17 +184,6 @@ ProcessGroup::~ProcessGroup() {}
 
 void ProcessGroup::init() {
   C10_LOG_API_USAGE_ONCE(fmt::format("c10d.process_group_{}", getBackendName()));
-}
-
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::broadcast(
-    std::vector<at::Tensor>& tensors, const BroadcastOptions& opts) {
-  static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("c10d::broadcast", "")
-      .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
-          const c10::intrusive_ptr<::c10d::ProcessGroup>&, at::TensorList, int64_t, int64_t, int64_t)>();
-  // It's awakward to unbox the opts here and box them again in the custom C++ op.
-  // But it's also complicated to make opts as a CustomClassHolder. Leave it as it is now.
-  return op.call(c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
-      tensors, opts.rootRank, opts.rootTensor, opts.timeout.count());
 }
 
 } // namespace c10d

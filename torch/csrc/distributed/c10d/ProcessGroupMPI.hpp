@@ -151,7 +151,7 @@ class TORCH_API ProcessGroupMPI : public ProcessGroup {
     return std::string(MPI_BACKEND_NAME);
   }
 
-  c10::intrusive_ptr<ProcessGroup::Work> broadcast_impl(
+  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& data,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 

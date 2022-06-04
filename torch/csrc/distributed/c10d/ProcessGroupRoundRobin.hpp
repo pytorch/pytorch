@@ -31,7 +31,7 @@ class TORCH_API ProcessGroupRoundRobin final : public ProcessGroup {
       return std::string(ROUND_ROBIN_BACKEND_NAME);
   }
 
-  c10::intrusive_ptr<ProcessGroup::Work> broadcast_impl(
+  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 

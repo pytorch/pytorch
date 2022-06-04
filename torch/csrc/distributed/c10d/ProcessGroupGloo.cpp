@@ -490,7 +490,7 @@ inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
           inputs.emplace_back(tensor);
         }
       }
-      recordingFunction->before(profilingTitle, inputs);
+      recordingFunction->before(profilingTitle, c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
     };
     recordFunctionBeforeCallback_ = at::wrapPropagateTLSState(before_handler);
     std::function<void()> end_handler = [recordingFunction]() {
@@ -929,7 +929,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 
 } // namespace
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast_impl(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     std::vector<at::Tensor>& inputs,
     const BroadcastOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {

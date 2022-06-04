@@ -19,6 +19,7 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
+#include <torch/csrc/distributed/c10d/Ops.hpp>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
@@ -143,8 +144,7 @@ Reducer::Reducer(
   // This can be reinitialized later after capturing runtime information.
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    initialize_buckets(
-        std::move(bucket_indices), std::move(per_bucket_size_limits));
+    initialize_buckets(std::move(bucket_indices));
   }
 
   // All variables are expected to have their `grad_fn` set to the gradient
@@ -928,9 +928,7 @@ void Reducer::install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>>
   }
 }
 
-void Reducer::initialize_buckets(
-    std::vector<std::vector<size_t>> bucket_indices,
-    std::vector<size_t> per_bucket_sizes) {
+void Reducer::initialize_buckets(std::vector<std::vector<size_t>> bucket_indices) {
   // If initialize_buckets is called inside DDP constructor, then
   // it does not matter rpc context ptr is nullptr or not, as grad
   // will not be mutated.
@@ -960,10 +958,8 @@ void Reducer::initialize_buckets(
   // Iterate over buckets.
   const auto bucket_count = bucket_indices.size();
   buckets_.reserve(bucket_count);
-  TORCH_INTERNAL_ASSERT(bucket_count == per_bucket_sizes.size());
   for (const auto bucket_index : c10::irange(bucket_count)) {
     Bucket bucket;
-    bucket.bucket_size_limit = per_bucket_sizes[bucket_index];
 
     // TODO(@pietern): Validate indices.
     // Must be non-empty, unique, and unique across buckets.
@@ -1581,7 +1577,7 @@ void Reducer::sync_bucket_indices(
   auto indices_tensor_device = at::empty({total_size + 1}, options);
   indices_tensor_device.copy_(indices_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> indices_tensor_list = {indices_tensor_device};
-  process_group_->broadcast(indices_tensor_list)->wait();
+  ops::broadcast(process_group_, indices_tensor_list)->wait();
   indices_tensor.copy_(indices_tensor_list.front(), /*non_blocking=*/false);
 
   // Update num_buckets after receiving it from rank 0
@@ -1600,7 +1596,7 @@ void Reducer::sync_bucket_indices(
   bucket_sizes_tensor_device.copy_(bucket_sizes_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> bucket_sizes_tensor_list = {
       bucket_sizes_tensor_device};
-  process_group_->broadcast(bucket_sizes_tensor_list)->wait();
+  ops::broadcast(process_group_, bucket_sizes_tensor_list)->wait();
   bucket_sizes_tensor.copy_(
       bucket_sizes_tensor_list.front(), /*non_blocking=*/false);
 
@@ -1697,8 +1693,7 @@ bool Reducer::rebuild_buckets() {
   rebuilt_params_.clear();
   rebuilt_param_indices_.clear();
 
-  initialize_buckets(
-      std::move(rebuilt_bucket_indices), std::move(per_bucket_size_limits));
+  initialize_buckets(std::move(rebuilt_bucket_indices));
 
   return true;
 }
@@ -2116,7 +2111,7 @@ void verify_params_across_processes(
 
   auto metadata_dev = metadata.clone().to(params[0].device());
   std::vector<at::Tensor> vec{metadata_dev};
-  process_group->broadcast(vec)->wait();
+  ops::broadcast(process_group, vec)->wait();
 
   // Technically, process 0 doesn't need to double-check metadata, because it
   // was the source.  But no harm keeping work aligned.

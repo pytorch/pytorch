@@ -1,19 +1,19 @@
 # Parses derivatives.yaml into autograd functions
 #
 # Each autograd function is represented by `DifferentiabilityInfo` containing
-# a list of `Derivative`. See `tools.codegen.api.autograd` for the data models.
+# a list of `Derivative`. See `torchgen.api.autograd` for the data models.
 from collections import defaultdict
 import re
 from typing import Counter, Sequence, Any, Tuple, List, Set, Dict, Match, Optional
 import yaml
 
-from tools.codegen.api.autograd import (
+from torchgen.api.autograd import (
     Derivative,
     DifferentiabilityInfo,
     SavedAttribute,
     ForwardDerivative,
 )
-from tools.codegen.api.types import (
+from torchgen.api.types import (
     Binding,
     CppSignatureGroup,
     NamedCType,
@@ -31,10 +31,13 @@ from tools.codegen.api.types import (
     OptionalCType,
     stringT,
 )
-from tools.codegen.api import cpp
-from tools.codegen.gen import parse_native_yaml, get_grouped_by_view_native_functions
-from tools.codegen.context import with_native_function
-from tools.codegen.model import (
+from torchgen.api import cpp
+from torchgen.gen import (
+    parse_native_yaml,
+    get_grouped_by_view_native_functions,
+)
+from torchgen.context import with_native_function
+from torchgen.model import (
     FunctionSchema,
     NativeFunction,
     Variant,
@@ -42,7 +45,7 @@ from tools.codegen.model import (
     NativeFunctionsViewGroup,
     OperatorName,
 )
-from tools.codegen.utils import IDENT_REGEX, split_name_params, YamlLoader, concatMap
+from torchgen.utils import IDENT_REGEX, split_name_params, YamlLoader, concatMap
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
 
@@ -72,7 +75,7 @@ def add_view_copy_derivatives(
 
 
 def load_derivatives(
-    derivatives_yaml_path: str, native_yaml_path: str
+    derivatives_yaml_path: str, native_yaml_path: str, tags_yaml_path: str
 ) -> Sequence[DifferentiabilityInfo]:
     # Do some caching as this is a deterministic function
     global _GLOBAL_LOAD_DERIVATIVE_CACHE
@@ -82,7 +85,7 @@ def load_derivatives(
         with open(derivatives_yaml_path, "r") as f:
             definitions = yaml.load(f, Loader=YamlLoader)
 
-        funcs = parse_native_yaml(native_yaml_path).native_functions
+        funcs = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
         # From the parsed native functions, separate out the (generated) view_copy functions,
         # so we can generate derivatives for them separately.
         native_functions_with_view_groups = get_grouped_by_view_native_functions(funcs)
