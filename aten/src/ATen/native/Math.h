@@ -3969,10 +3969,10 @@ static inline C10_HOST_DEVICE T scaled_modified_bessel_i0_forward(T x) {
     if (x <= T(8.0)) {
         T a = A[0];
 
-        for (uint8_t index1 = 1; index1 < 30; ++index1) {
+        for (uint8_t index = 1; index < 30; index++) {
             p = q;
             q = a;
-            a = ((x / T(2.0)) - T(2.0)) * q - p + A[index1];
+            a = ((x / T(2.0)) - T(2.0)) * q - p + A[index];
         }
 
         return ((T(0.5) * (a - p)));
@@ -3980,7 +3980,7 @@ static inline C10_HOST_DEVICE T scaled_modified_bessel_i0_forward(T x) {
 
     T b = B[0];
 
-    for (uint8_t index = 1; index < 25; ++index) {
+    for (uint8_t index = 1; index < 25; index++) {
         p = q;
         q = b;
         b = (T(32.0) / x - T(2.0)) * q - p + B[index];
@@ -4058,7 +4058,7 @@ static inline C10_HOST_DEVICE T scaled_modified_bessel_i1_forward(T x) {
     if (std::abs(x) <= T(8.0)) {
         T a = A[0];
 
-        for (uint8_t index = 1; index < 29; ++index) {
+        for (uint8_t index = 1; index < 29; index++) {
             p = q;
             q = a;
             a = ((std::abs(x) / T(2.0)) - T(2.0)) * q - p + A[index];
