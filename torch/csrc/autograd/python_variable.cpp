@@ -30,6 +30,7 @@
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
@@ -216,6 +217,7 @@ void concrete_dispatch_fn(
     const std::shared_ptr<SafePyObject>& type);
 bool concrete_is_contiguous_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
 c10::Device concrete_device_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
+int64_t concrete_dim_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
 
 class PyInterpreterHolder {
  public:
@@ -226,7 +228,8 @@ class PyInterpreterHolder {
             &concrete_detach_fn,
             &concrete_dispatch_fn,
             &concrete_is_contiguous_fn,
-            &concrete_device_fn)) {}
+            &concrete_device_fn,
+            &concrete_dim_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -480,7 +483,37 @@ static int THPVariable_clear(THPVariable* self) {
     //        because Tensor asked us to (it's already destructing).
 
     if (!self->cdata.unsafeIsBorrowed()) {
-      TORCH_INTERNAL_ASSERT(!tensor.unsafeGetTensorImpl()->owns_pyobj());
+      // TODO: empirically, on OS X this assert appears to be untrue
+      // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
+      // distributed/rpc/test_process_group_agent.py
+      //
+      //  libc++abi.dylib: terminating with uncaught exception of type
+      //  c10::Error: !tensor.unsafeGetTensorImpl()->owns_pyobj()INTERNAL ASSERT
+      //  FAILED at "../torch/csrc/autograd/python_variable.cpp":171, please
+      //  report a bug to PyTorch. Exception raised from THPVariable_clear at
+      //  ../torch/csrc/autograd/python_variable.cpp:171 (most recent call
+      //  first): frame #0: c10::Error::Error(c10::SourceLocation,
+      //  std::__1::basic_string<char, std::__1::char_traits<char>,
+      //  std::__1::allocator<char> >) + 98 (0x1158a0442 in libc10.dylib) frame
+      //  #1: c10::detail::torchCheckFail(char const*, char const*, unsigned
+      //  int, char const*) + 205 (0x11589ed3d in libc10.dylib) frame #2:
+      //  c10::detail::torchInternalAssertFail(char const*, char const*,
+      //  unsigned int, char const*, c10::detail::CompileTimeEmptyString) + 9
+      //  (0x1141e3f89 in libtorch_python.dylib) frame #3:
+      //  THPVariable_clear(THPVariable*) + 412 (0x1148a547c in
+      //  libtorch_python.dylib) frame #4:
+      //  THPVariable_subclass_dealloc(_object*) + 453 (0x1148a5035 in
+      //  libtorch_python.dylib) frame #5: (anonymous
+      //  namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
+      //  _object*) + 53 (0x1148a5ea5 in libtorch_python.dylib) frame #6:
+      //  c10::TensorImpl::release_resources() + 182 (0x11588c4a6 in
+      //  libc10.dylib) frame #7:
+      //  c10::MaybeOwned<at::Tensor>::operator=(c10::MaybeOwned<at::Tensor>&&)
+      //  + 91 (0x11488c11b in libtorch_python.dylib) frame #8:
+      //  THPVariable_subclass_dealloc(_object*) + 607 (0x1148a50cf in
+      //  libtorch_python.dylib) <omitting python frames> frame #47: start + 1
+      //  (0x7fff6ffc7cc9 in libdyld.dylib) frame #48: 0x0 + 4 (0x4 in ???)
+      // TORCH_INTERNAL_ASSERT(!tensor.unsafeGetTensorImpl()->owns_pyobj());
       if (auto grad_acc =
               torch::autograd::impl::try_get_grad_accumulator(tensor)) {
         grad_acc->pre_hooks().clear();
@@ -2009,6 +2042,32 @@ bool concrete_is_contiguous_fn(const c10::impl::PyInterpreter*, const c10::Tenso
   TORCH_CHECK(PyBool_Check(out.ptr()), "is_contiguous returned invalid type ", py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())), ", expected bool");
 
   return PyObject_IsTrue(out.ptr());
+}
+
+int64_t concrete_dim_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "dim",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("dim")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  TORCH_CHECK(
+      PyLong_Check(out.ptr()),
+      "dim returned invalid type ",
+      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
+      ", expected int");
+
+  return THPUtils_unpackLong(out.ptr());
 }
 
 c10::Device concrete_device_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {

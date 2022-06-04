@@ -2560,6 +2560,126 @@ const auto chebyshev_polynomial_u_string = jiterator_stringify(
     } // chebyshev_polynomial_u_forward(T x, T n)
 ); // chebyshev_polynomial_u_string
 
+const auto chebyshev_polynomial_v_string = jiterator_stringify(
+    template<typename T>
+    T chebyshev_polynomial_v_forward(T x, int64_t n) {
+        if (n < 0) {
+            return T(0.0);
+        }
+
+        if (abs(x) == T(1.0)) {
+            if (x > T(0.0)) {
+                return T(1.0);
+            }
+
+            if (n % 2 == 0) {
+                return n + n + 1;
+            }
+
+            return -(n + n + 1);
+        }
+
+        if ((n > 8) && (abs(x) < T(1.0))) {
+            if (sin(acos(x) / T(2.0)) != T(1.0)) {
+                return cos((n + T(0.5)) * acos(x)) / cos(acos(x) / T(2.0));
+            }
+
+            if (n % 2 == 0) {
+                return n + n + 1;
+            }
+
+            return -(n + n + 1);
+        }
+
+        if (n == 0) {
+            return T(1.0);
+        }
+
+        if (n == 1) {
+            return x + x - T(1.0);
+        }
+
+        T p = T(1.0);
+        T q = x + x - T(1.0);
+        T r;
+
+        for (int64_t k = 2; k <= n; k++) {
+            r = (x + x) * q - p;
+            p = q;
+            q = r;
+        }
+
+        return r;
+    } // chebyshev_polynomial_v_forward(T x, int64_t n)
+
+    template<typename T>
+    T chebyshev_polynomial_v_forward(T x, T n) {
+        return chebyshev_polynomial_v_forward(x, static_cast<int64_t>(n));
+    } // chebyshev_polynomial_v_forward(T x, T n)
+); // chebyshev_polynomial_v_string
+
+const auto chebyshev_polynomial_w_string = jiterator_stringify(
+    template<typename T>
+    T chebyshev_polynomial_w_forward(T x, int64_t n) {
+        if (n < 0) {
+            return T(0.0);
+        }
+
+        if (abs(x) == T(1.0)) {
+            if (x > T(0.0)) {
+                return n + n + 1;
+            }
+
+            if (n % 2 == 0) {
+                return T(1.0);
+            }
+
+            return T(-1.0);
+        }
+
+        if ((n > 8) && (abs(x) < T(1.0))) {
+            if (cos(acos(x) / T(2.0)) != T(1.0)) {
+                return sin((n + T(0.5)) * acos(x)) / sin(acos(x) / T(2.0));
+            }
+
+            if (x > T(0.0)) {
+                return n + n + 1;
+            }
+
+            if (n % 2 == 0) {
+                return T(1.0);
+            }
+
+            return T(-1.0);
+        }
+
+        if (n == 0) {
+            return T(1.0);
+        }
+
+        if (n == 1) {
+            return x + x + T(1.0);
+        }
+
+        T p = T(1.0);
+        T q = x + x + T(1.0);
+        T r;
+
+        for (int64_t k = 2; k <= n; k++) {
+            r = (x + x) * q - p;
+            p = q;
+            q = r;
+        }
+
+        return r;
+    } // chebyshev_polynomial_w_forward(T x, int64_t n)
+
+    template<typename T>
+    T chebyshev_polynomial_w_forward(T x, T n) {
+        return chebyshev_polynomial_w_forward(x, static_cast<int64_t>(n));
+    } // chebyshev_polynomial_w_forward(T x, T n)
+); // chebyshev_polynomial_w_string
+
 const auto hermite_polynomial_h_string = jiterator_stringify(
     template<typename T>
     T hermite_polynomial_h_forward(T x, int64_t n) {
@@ -2665,6 +2785,48 @@ const auto laguerre_polynomial_l_string = jiterator_stringify(
         return laguerre_polynomial_l_forward(x, static_cast<int64_t>(n));
     } // laguerre_polynomial_l_forward(T x, T n)
 ); // laguerre_polynomial_l_string
+
+const auto legendre_polynomial_p_string = jiterator_stringify(
+    template<typename T>
+    T legendre_polynomial_p_forward(T x, int64_t n) {
+        if (n < 0) {
+            return T(0.0);
+        }
+
+        if (abs(x) == T(1.0)) {
+            if (x > T(0.0) || n % 2 == 0) {
+                return T(1.0);
+            }
+
+            return T(-1.0);
+        }
+
+        if (n == 0) {
+            return T(1.0);
+        }
+
+        if (n == 1) {
+            return x;
+        }
+
+        T p = T(1.0);
+        T q = x;
+        T r;
+
+        for (int64_t k = 1; k < n; k++) {
+            r = ((k + k + 1) * x * q - k * p) / (k + 1);
+            p = q;
+            q = r;
+        }
+
+        return r;
+    } // legendre_polynomial_p_forward(T x, int64_t n)
+
+    template<typename T>
+    T legendre_polynomial_p_forward(T x, T n) {
+        return legendre_polynomial_p_forward(x, static_cast<int64_t>(n));
+    } // legendre_polynomial_p_forward(T x, T n)
+); // legendre_polynomial_p_string
 
 const auto modified_bessel_i0_string = jiterator_stringify(
     template<typename T>
@@ -3273,6 +3435,226 @@ const auto spherical_bessel_y1_string = jiterator_stringify(
         return x;
     } // T spherical_bessel_y1_forward(T x)
 ); // spherical_bessel_y1_string
+
+const auto shifted_chebyshev_polynomial_t_string = jiterator_stringify(
+    template<typename T>
+    T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) {
+        if (n < 0) {
+            return T(0.0);
+        }
+
+        if (x == T(1.0)) {
+            return T(1.0);
+        }
+
+        if (x == T(0.0)) {
+            if (n % 2 == 0) {
+                return T(1.0);
+            }
+
+            return T(-1.0);
+        }
+
+        if ((n > 6) && (abs(x + x - T(1.0)) < T(1.0))) {
+            return cos(n * acos(x + x - T(1.0)));
+        }
+
+        if (n == 0) {
+            return T(1.0);
+        }
+
+        if (n == 1) {
+            return x + x - T(1.0);
+        }
+
+        T p = T(1.0);
+        T q = x + x - T(1.0);
+        T r;
+
+        for (int64_t k = 2; k <= n; k++) {
+            r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
+            p = q;
+            q = r;
+        }
+
+        return r;
+    } // shifted_chebyshev_polynomial_t_forward(T x, int64_t n)
+
+    template<typename T>
+    T shifted_chebyshev_polynomial_t_forward(T x, T n) {
+        return shifted_chebyshev_polynomial_t_forward(x, static_cast<int64_t>(n));
+    } // shifted_chebyshev_polynomial_t_forward(T x, T n)
+); // shifted_chebyshev_polynomial_t_string
+
+const auto shifted_chebyshev_polynomial_u_string = jiterator_stringify(
+    template<typename T>
+    T shifted_chebyshev_polynomial_u_forward(T x, int64_t n) {
+        if (n < 0) {
+            return T(0.0);
+        }
+
+        if (x == T(1.0)) {
+            return n + 1;
+        }
+
+        if (x == T(0.0)) {
+            if (n % 2 == 0) {
+                return n + 1;
+            }
+
+            return -(n + 1);
+        }
+
+        if ((n > 6) && (abs(x + x - T(1.0)) < T(1.0))) {
+            if (sin(acos(x + x - T(1.0))) != T(0.0)) {
+                return sin((n + 1) * acos(x + x - T(1.0))) / sin(acos(x + x - T(1.0)));
+            }
+
+            return (n + 1) * cos((n + 1) * acos(x + x - T(1.0))) / (x + x - T(1.0));
+        }
+
+        if (n == 0) {
+            return T(1.0);
+        }
+
+        if (n == 1) {
+            return x + x - T(1.0) + (x + x - T(1.0));
+        }
+
+        T p = T(1.0);
+        T q = x + x - T(1.0) + (x + x - T(1.0));
+        T r;
+
+        for (int64_t k = 2; k <= n; k++) {
+            r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
+            p = q;
+            q = r;
+        }
+
+        return r;
+    } // shifted_chebyshev_polynomial_u_forward(T x, int64_t n)
+
+    template<typename T>
+    T shifted_chebyshev_polynomial_u_forward(T x, T n) {
+        return shifted_chebyshev_polynomial_u_forward(x, static_cast<int64_t>(n));
+    } // shifted_chebyshev_polynomial_u_forward(T x, T n)
+); // shifted_chebyshev_polynomial_u_string
+
+const auto shifted_chebyshev_polynomial_v_string = jiterator_stringify(
+    template<typename T>
+    T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) {
+        if (n < 0) {
+            return T(0.0);
+        }
+
+        if (x == T(1.0)) {
+            return T(1.0);
+        }
+
+        if (x == T(0.0)) {
+            if (n % 2 == 0) {
+                return (n + n + 1);
+            }
+
+            return -(n + n + 1);
+        }
+
+        if ((n > 6) && (abs(x + x - T(1.0)) < T(1.0))) {
+            if (sin(acos(x + x - T(1.0)) / T(2.0)) != T(1.0)) {
+                return cos(((n) + T(0.5)) * acos(x + x - T(1.0))) / cos(acos(x + x - T(1.0)) / T(2.0));
+            }
+
+            if (n % 2 == 0) {
+                return n + n + 1;
+            }
+
+            return -(n + n + 1);
+        }
+
+        if (n == 0) {
+            return T(1.0);
+        }
+
+        if (n == 1) {
+            return x + x - T(1.0) + (x + x - T(1.0)) - T(1.0);
+        }
+
+        T p = T(1.0);
+        T q = x + x - T(1.0) + (x + x - T(1.0)) - T(1.0);
+        T r;
+
+        for (int64_t k = 2; k <= n; k++) {
+            r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
+            p = q;
+            q = r;
+        }
+
+        return r;
+    } // shifted_chebyshev_polynomial_v_forward(T x, int64_t n)
+
+    template<typename T>
+    T shifted_chebyshev_polynomial_v_forward(T x, T n) {
+        return shifted_chebyshev_polynomial_v_forward(x, static_cast<int64_t>(n));
+    } // shifted_chebyshev_polynomial_v_forward(T x, T n)
+); // shifted_chebyshev_polynomial_v_string
+
+const auto shifted_chebyshev_polynomial_w_string = jiterator_stringify(
+    template<typename T>
+    T shifted_chebyshev_polynomial_w_forward(T x, int64_t n) {
+        if (n < 0) {
+            return T(0.0);
+        }
+
+        if (x == T(1.0)) {
+            return n + n + 1;
+        }
+
+        if (x == T(0.0)) {
+            if (n % 2 == 0) {
+                return T(1.0);
+            }
+
+            return T(-1.0);
+        }
+
+        if ((n > 4) && (abs(x + x - T(1.0)) < T(1.0))) {
+            if (cos(acos(x + x - T(1.0)) / T(2.0)) != T(1.0)) {
+                return sin((n + T(0.5)) * acos(x + x - T(1.0))) / sin(acos(x + x - T(1.0)) / T(2.0));
+            }
+
+            if (n % 2 == 0) {
+                return T(1.0);
+            }
+
+            return T(-1.0);
+        }
+
+        if (n == 0) {
+            return T(1.0);
+        }
+
+        if (n == 1) {
+            return x + x - T(1.0) + (x + x - T(1.0)) + T(1.0);
+        }
+
+        T p = T(1.0);
+        T q = x + x - T(1.0) + (x + x - T(1.0)) + T(1.0);
+        T r;
+
+        for (int64_t k = 2; k <= n; k++) {
+            r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
+            p = q;
+            q = r;
+        }
+
+        return r;
+    } // shifted_chebyshev_polynomial_w_forward(T x, int64_t n)
+
+    template<typename T>
+    T shifted_chebyshev_polynomial_w_forward(T x, T n) {
+        return shifted_chebyshev_polynomial_w_forward(x, static_cast<int64_t>(n));
+    } // shifted_chebyshev_polynomial_w_forward(T x, T n)
+); // shifted_chebyshev_polynomial_w_string
 
 #else // !AT_USE_JITERATOR() -- kernels must be precompiled
 

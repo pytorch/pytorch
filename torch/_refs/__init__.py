@@ -181,6 +181,8 @@ __all__ = [
     "cat",
     "chunk",
     "column_stack",
+    "dsplit",
+    "dstack",
     "flatten",
     "flip",
     "fliplr",
@@ -193,6 +195,7 @@ __all__ = [
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
+    "t",
     "tensor_split",
     "transpose",
     "unsqueeze",
@@ -1674,6 +1677,12 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 1)
 
 
+@out_wrapper
+def dstack(tensors: TensorSequenceType) -> TensorLikeType:
+    aligned_tensors = tuple(x if x.ndim > 2 else atleast_3d(x) for x in tensors)
+    return cat(aligned_tensors, 2)
+
+
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
     if chunks <= 0:
         msg = "Expected at least one chunk, but got {0}!".format(chunks)
@@ -2068,10 +2077,41 @@ def tensor_split(
         return tuple(splits)
 
 
+def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
+    if a.ndim < 3:
+        raise RuntimeError(
+            f"torch.dsplit requires a tensor with at least 3 dimension, but got a tensor with {a.ndim} dimensions!"
+        )
+    if isinstance(sections, int) and (sections == 0 or a.shape[2] % sections != 0):
+        raise RuntimeError(
+            "torch._refs.dsplit attempted to split along dimension 2, "
+            + f"but the size of the dimension {a.shape[2]} is not divisible by the split_size {sections}!"
+        )
+    return tensor_split(a, sections, 2)
+
+
+@register_decomposition(torch.ops.aten.t.default)
+def t(a: TensorLikeType):
+    # TODO: Add sparse support
+    # if a.is_sparse:
+    #     sparse_dim = a.sparse_dim()
+    #     dense_dim = a.dense_dim()
+    #     if not (sparse_dim <= 2 and dense_dim == 0):
+    #         raise RuntimeError(
+    #             f"t() expects a tensor with <= 2 sparse and 0 dense dimensions, but got {sparse_dim} sparse and"
+    #             f"{dense_dim} dense dimensions"
+    #         )
+    if a.ndim > 2:
+        raise RuntimeError(
+            f"t() expects a tensor with <= 2 dimensions, but self is {a.ndim}D"
+        )
+    return torch.transpose(a, 0, 0 if a.ndim < 2 else 1)
+
+
 def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
 
-    if a.ndim <= 1:
+    if a.ndim <= 1 or dim0 == dim1:
         return prims.view_of(a)
 
     _permutation = list(range(0, a.ndim))

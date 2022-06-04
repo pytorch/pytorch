@@ -3457,6 +3457,122 @@ static inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, T n) {
 } // T chebyshev_polynomial_u_forward(T x, T n)
 
 template<typename T>
+static inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (std::abs(x) == T(1.0)) {
+        if (x > T(0.0)) {
+            return T(1.0);
+        }
+
+        if (n % 2 == 0) {
+            return n + n + 1;
+        }
+
+        return -(n + n + 1);
+    }
+
+    if ((n > 8) && (std::abs(x) < T(1.0))) {
+        if (std::sin(std::acos(x) / T(2.0)) != T(1.0)) {
+            return std::cos((n + T(0.5)) * std::acos(x)) / std::cos(std::acos(x) / T(2.0));
+        }
+
+        if (n % 2 == 0) {
+            return n + n + 1;
+        }
+
+        return -(n + n + 1);
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x + x - T(1.0);
+    }
+
+    T p = T(1.0);
+    T q = x + x - T(1.0);
+    T r;
+
+    for (int64_t k = 2; k <= n; k++) {
+        r = (x + x) * q - p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // chebyshev_polynomial_v_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, T n) {
+    return chebyshev_polynomial_v_forward(x, static_cast<int64_t>(n));
+} // chebyshev_polynomial_v_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (std::abs(x) == T(1.0)) {
+        if (x > T(0.0)) {
+            return n + n + 1;
+        }
+
+        if (n % 2 == 0) {
+            return T(1.0);
+        }
+
+        return T(-1.0);
+    }
+
+    if ((n > 8) && (std::abs(x) < T(1.0))) {
+        if (std::cos(std::acos(x) / T(2.0)) != T(1.0)) {
+            return std::sin((n + T(0.5)) * std::acos(x)) / std::sin(std::acos(x) / T(2.0));
+        }
+
+        if (x > T(0.0)) {
+            return n + n + 1;
+        }
+
+        if (n % 2 == 0) {
+            return T(1.0);
+        }
+
+        return T(-1.0);
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x + x + T(1.0);
+    }
+
+    T p = T(1.0);
+    T q = x + x + T(1.0);
+    T r;
+
+    for (int64_t k = 2; k <= n; k++) {
+        r = (x + x) * q - p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // chebyshev_polynomial_w_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, T n) {
+    return chebyshev_polynomial_w_forward(x, static_cast<int64_t>(n));
+} // chebyshev_polynomial_w_forward(T x, T n)
+
+template<typename T>
 static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
@@ -3555,6 +3671,46 @@ template<typename T, bool is_cuda=false>
 static inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, T n) {
     return laguerre_polynomial_l_forward(x, static_cast<int64_t>(n));
 } // T laguerre_polynomial_l_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (std::abs(x) == T(1.0)) {
+        if (x > T(0.0) || n % 2 == 0) {
+            return T(1.0);
+        }
+
+        return T(-1.0);
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x;
+    }
+
+    T p = T(1.0);
+    T q = x;
+    T r;
+
+    for (int64_t k = 1; k < n; k++) {
+        r = ((k + k + 1) * x * q - k * p) / (k + 1);
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // legendre_polynomial_p_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, T n) {
+    return legendre_polynomial_p_forward(x, static_cast<int64_t>(n));
+} // legendre_polynomial_p_forward(T x, T n)
 
 template<typename T>
 static inline C10_HOST_DEVICE T modified_bessel_i0_forward(T x) {
@@ -4139,5 +4295,217 @@ template<typename T>
 static inline C10_HOST_DEVICE T spherical_bessel_y1_forward(T x) {
     return x;
 } // T spherical_bessel_y1_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (x == T(1.0)) {
+        return T(1.0);
+    }
+
+    if (x == T(0.0)) {
+        if (n % 2 == 0) {
+            return T(1.0);
+        }
+
+        return T(-1.0);
+    }
+
+    if ((n > 6) && (std::abs(x + x - T(1.0)) < T(1.0))) {
+        return std::cos(n * std::acos(x + x - T(1.0)));
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x + x - T(1.0);
+    }
+
+    T p = T(1.0);
+    T q = x + x - T(1.0);
+    T r;
+
+    for (int64_t k = 2; k <= n; k++) {
+        r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // shifted_chebyshev_polynomial_t_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, T n) {
+    return shifted_chebyshev_polynomial_t_forward(x, static_cast<int64_t>(n));
+} // shifted_chebyshev_polynomial_t_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (x == T(1.0)) {
+        return n + 1;
+    }
+
+    if (x == T(0.0)) {
+        if (n % 2 == 0) {
+            return n + 1;
+        }
+
+        return -(n + 1);
+    }
+
+    if ((n > 6) && (std::abs(x + x - T(1.0)) < T(1.0))) {
+        if (std::sin(std::acos(x + x - T(1.0))) != T(0.0)) {
+            return std::sin((n + 1) * std::acos(x + x - T(1.0))) / std::sin(std::acos(x + x - T(1.0)));
+        }
+
+        return (n + 1) * std::cos((n + 1) * std::acos(x + x - T(1.0))) / (x + x - T(1.0));
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x + x - T(1.0) + (x + x - T(1.0));
+    }
+
+    T p = T(1.0);
+    T q = x + x - T(1.0) + (x + x - T(1.0));
+    T r;
+
+    for (int64_t k = 2; k <= n; k++) {
+        r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // shifted_chebyshev_polynomial_u_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, T n) {
+    return shifted_chebyshev_polynomial_u_forward(x, static_cast<int64_t>(n));
+} // shifted_chebyshev_polynomial_u_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (x == T(1.0)) {
+        return T(1.0);
+    }
+
+    if (x == T(0.0)) {
+        if (n % 2 == 0) {
+            return (n + n + 1);
+        }
+
+        return -(n + n + 1);
+    }
+
+    if ((n > 6) && (std::abs(x + x - T(1.0)) < T(1.0))) {
+        if (std::sin(std::acos(x + x - T(1.0)) / T(2.0)) != T(1.0)) {
+            return std::cos(((n) + T(0.5)) * std::acos(x + x - T(1.0))) / std::cos(std::acos(x + x - T(1.0)) / T(2.0));
+        }
+
+        if (n % 2 == 0) {
+            return n + n + 1;
+        }
+
+        return -(n + n + 1);
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x + x - T(1.0) + (x + x - T(1.0)) - T(1.0);
+    }
+
+    T p = T(1.0);
+    T q = x + x - T(1.0) + (x + x - T(1.0)) - T(1.0);
+    T r;
+
+    for (int64_t k = 2; k <= n; k++) {
+        r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // shifted_chebyshev_polynomial_v_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, T n) {
+    return shifted_chebyshev_polynomial_v_forward(x, static_cast<int64_t>(n));
+} // shifted_chebyshev_polynomial_v_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (x == T(1.0)) {
+        return n + n + 1;
+    }
+
+    if (x == T(0.0)) {
+        if (n % 2 == 0) {
+            return T(1.0);
+        }
+
+        return T(-1.0);
+    }
+
+    if ((n > 4) && (std::abs(x + x - T(1.0)) < T(1.0))) {
+        if (std::cos(std::acos(x + x - T(1.0)) / T(2.0)) != T(1.0)) {
+            return std::sin((n + T(0.5)) * std::acos(x + x - T(1.0))) / std::sin(std::acos(x + x - T(1.0)) / T(2.0));
+        }
+
+        if (n % 2 == 0) {
+            return T(1.0);
+        }
+
+        return T(-1.0);
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x + x - T(1.0) + (x + x - T(1.0)) + T(1.0);
+    }
+
+    T p = T(1.0);
+    T q = x + x - T(1.0) + (x + x - T(1.0)) + T(1.0);
+    T r;
+
+    for (int64_t k = 2; k <= n; k++) {
+        r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // shifted_chebyshev_polynomial_w_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, T n) {
+    return shifted_chebyshev_polynomial_w_forward(x, static_cast<int64_t>(n));
+} // shifted_chebyshev_polynomial_w_forward(T x, T n)
 
 C10_CLANG_DIAGNOSTIC_POP()
