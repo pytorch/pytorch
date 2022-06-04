@@ -12,10 +12,11 @@ from torch._prims.utils import (
     StrideType,
     Number,
     NumberType,
+    TensorMeta,
 )
 from torch.overrides import has_torch_function, handle_torch_function
 import torch.library
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch._subclasses.fake_tensor import FakeTensor
 
 import contextlib
@@ -285,49 +286,6 @@ class RETURN_TYPE(Enum):
     INPLACE = (2,)
 
 
-def TensorMeta(
-    tensorlike: Optional[Union[NumberType, torch.Tensor]] = None,
-    *,
-    shape: Optional[ShapeType] = None,
-    strides: Optional[StrideType] = None,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[Union[torch.device, str]] = None,
-):
-    if isinstance(tensorlike, Number):
-        assert not shape and (shape is None or isinstance(shape, Sequence))
-        assert not strides and (strides is None or isinstance(strides, Sequence))
-        inferred_shape: Tuple[int, ...] = ()
-        inferred_strides: Tuple[int, ...] = ()
-        inferred_dtype = type_to_dtype(type(tensorlike))
-        inferred_device = torch.device("cpu")
-        # TODO: This looks wrong, a number that is wrapped into a tensor
-        # needs to behave differently than a scalar tensor for type
-        # promotion purposes
-    elif tensorlike is not None:
-        assert isinstance(tensorlike, torch.Tensor)
-        inferred_shape = tuple(tensorlike.shape)
-        inferred_strides = tuple(tensorlike.stride())
-        inferred_dtype = tensorlike.dtype
-        inferred_device = tensorlike.device
-    else:
-        # If no tensorlike "example" is given then all metadata
-        # must be provided explicitly
-        assert shape is not None
-        assert strides is not None
-        assert dtype is not None
-        assert device is not None
-
-    shape = inferred_shape if shape is None else tuple(shape)
-    strides = inferred_strides if strides is None else tuple(strides)
-    dtype = inferred_dtype if dtype is None else dtype
-    device = inferred_device if device is None else device
-
-    if isinstance(device, str):
-        device = torch.device(device)
-
-    return FakeTensor(torch.empty_strided(shape, strides, dtype=dtype, device='meta'), device)
-
-
 def _wrap_tensor_meta(f):
     def wrap(t):
         if isinstance(t, torch.Tensor):
@@ -377,9 +335,10 @@ def _make_prim(
         meta(*args, **kwargs)
         return impl_aten(*args, **kwargs)
 
-    class F(torch.autograd.Function):
+    class BackwardsNotSupported(torch.autograd.Function):
         @staticmethod
-        def forward(ctx, *args, **kwargs):
+        def forward(ctx, args_spec, *flat_args):
+            args, kwargs = tree_unflatten(flat_args, args_spec)  # type: ignore[arg-type]
             with _DispatchBelowAutograd():
                 return _prim(*args, **kwargs)
 
@@ -388,7 +347,8 @@ def _make_prim(
             raise RuntimeError("backwards not supported on prim")
 
     def _autograd_impl(*args, **kwargs):
-        return F.apply(*args, **kwargs)
+        flat_args, args_spec = tree_flatten((args, kwargs))
+        return BackwardsNotSupported.apply(args_spec, *flat_args)
 
     name = schema.split("(")[0]
     prim_impl.impl(name, _prim_impl)

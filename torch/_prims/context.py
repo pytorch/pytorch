@@ -92,18 +92,18 @@ class PrimContext(torch.overrides.TorchFunctionMode):
         return self._create_name(idx, self._lowercase)
 
     def _add_user(self, tm: FakeTensor, node: Node) -> None:
-        assert tm.node is not None
-        tm.node.users[node] = None
+        assert tm.node is not None  # type: ignore[attr-defined]
+        tm.node.users[node] = None  # type: ignore[attr-defined]
 
     def placeholder(self, a: Any):
         name = self._tensor_name()
         node = self.graph.placeholder(name)
 
         if isinstance(a, FakeTensor):
-            if a.node is not None:
+            if hasattr(a, "node"):
                 raise ValueError("Attempting to reuse a FakeTensor in a new trace!")
-            a.tname = name
-            a.node = node
+            a.tname = name  # type: ignore[attr-defined]
+            a.node = node  # type: ignore[attr-defined]
 
         return a
 
@@ -147,8 +147,8 @@ class PrimContext(torch.overrides.TorchFunctionMode):
             node = self.graph.create_node(
                 "call_function", func, name=output_name, args=args, kwargs=kwargs
             )
-            output.tname = output_name
-            output.node = node
+            output.tname = output_name  # type: ignore[attr-defined]
+            output.node = node  # type: ignore[attr-defined]
 
             # Marks uses
             for x in (
@@ -181,7 +181,7 @@ def torch_to_refs_map():
     ]
     r = {}
     for mod_torch, mod_refs in modules:
-        for s in mod_refs.__all__:
+        for s in mod_refs.__all__:  # type: ignore[attr-defined]
             r[mod_torch.__dict__.get(s)] = mod_refs.__dict__.get(s)
     return r
 
