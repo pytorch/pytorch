@@ -123,45 +123,30 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
       CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
       MPSGraphTensor* inputTensor_ = nil;
       MPSGraphTensor* outputTensor_ = nil;
-      IntArrayRef size_;
-      IntArrayRef stride_;
-      int64_t storage_offset_;
     };
 
     MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
     @autoreleasepool {
-      string lookup_key = mps::getStridedKey(self, size, stride, storage_offset);
-      CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(lookup_key));
+      string key = mps::getStridedKey(self, size, stride, storage_offset);
+      CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+      if (!cachedGraph) {
+        cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+          CachedGraph *newCachedGraph = nil;
+          @autoreleasepool {
+              MPSGraph* mpsGraph = make_mps_graph();
+              newCachedGraph = new CachedGraph(mpsGraph);
 
-      if(!cachedGraph) {
-        string insert_key = mps::getStridedKey(self,size, stride, storage_offset);
-        CachedGraph* insertCachedGraph = static_cast<CachedGraph *>(cache_->LookUp(insert_key));
-        if (!insertCachedGraph) {
-          MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(insert_key, ^ MPSCachedGraph * () {
-            CachedGraph *newCachedGraph = nil;
-            @autoreleasepool {
-                MPSGraph* mpsGraph = make_mps_graph();
-                newCachedGraph = new CachedGraph(mpsGraph);
-
-                // Self is the input tensor we are creating view of
-                MPSGraphTensor* inputTensor = [mpsGraph placeholderWithShape : getMPSShape(self)
-                                                                    dataType : getMPSDataType(self.scalar_type())
-                                                                    name : nil];
-                newCachedGraph->inputTensor_ = inputTensor;
-                newCachedGraph->outputTensor_ = chainViewOperation(mpsGraph, size,
-                                                                   stride,
-                                                                   storage_offset,
-                                                                   inputTensor,
-                                                                   self);
-                newCachedGraph->size_ = size;
-                newCachedGraph->stride_ = stride;
-                newCachedGraph->storage_offset_ = storage_offset;
-            }
-            return newCachedGraph;
-          });
-          cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
-        }
+              // Self is the input tensor we are creating view of
+              MPSGraphTensor* inputTensor = [mpsGraph placeholderWithShape : getMPSShape(self)
+                                                                  dataType : getMPSDataType(self.scalar_type())
+                                                                      name : nil];
+              newCachedGraph->inputTensor_ = inputTensor;
+              newCachedGraph->outputTensor_ = chainViewOperation(mpsGraph, size, stride,
+                                                                 storage_offset, inputTensor, self);
+          }
+          return newCachedGraph;
+        }, self.storage().data());
       }
     }
   }
@@ -267,7 +252,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_,
 
   auto storage_byte_offset = src_.storage_offset() * src_.itemsize();
   id<MTLBuffer> sourceBuffer = __builtin_bit_cast(id<MTLBuffer>, src_.storage().data());
-  if (!src_.is_contiguous()) {
+  if (src_.is_view()) {
     id<MTLBuffer> gatherTensor = gatherViewTensor(src_, sourceBuffer);
     if (gatherTensor) {
       sourceBuffer = gatherTensor;

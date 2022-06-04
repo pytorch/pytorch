@@ -106,7 +106,7 @@ MPSGraphTensor* mpsGraphConstantPlaceHolder(MPSGraph *mpsGraph, const double val
 
 string get_mem_format_string(c10::MemoryFormat memory_format);
 
-using MPSCacheKey = int64_t;
+using MPSCacheKey = uint64_t;
 
 // derive this class to cache a graph and its inputs/ouputs
 // can be used to store any NSObject
@@ -126,7 +126,6 @@ private:
 // TODO: Improve the overall design of MPSGraphCache.
 // https://github.com/pytorch/pytorch/issues/77176
 // Cache holding various keys mapped to graphs
-
 struct MPSGraphCache
 {
   typedef MPSCachedGraph * (^CreateCachedGraphBlock)();
@@ -158,7 +157,7 @@ struct MPSGraphCache
   MPSGraphCache(const MPSGraphCache&) = delete;
   void operator=(const MPSGraphCache&) = delete;
 
-  MPSCachedGraph* CreateCachedGraph(const std::string& key, CreateCachedGraphBlock createCacheBlock) {
+  MPSCachedGraph* CreateCachedGraph(const std::string& key, CreateCachedGraphBlock createCacheBlock, void* view_ptr = nullptr) {
 
     __block MPSCachedGraph * result = nil;
 
@@ -176,6 +175,9 @@ struct MPSGraphCache
         result = createCacheBlock();
         CacheEntry entry(key, result);
         cache_.emplace(hash, entry);
+        if (view_ptr) {
+          views_list.insert(std::make_pair(view_ptr, hash));
+        }
       }
     });
     return result;
@@ -197,6 +199,29 @@ struct MPSGraphCache
     });
     return result;
   }
+
+  bool FindAndRemoveViewEntry(void* ptr) {
+    bool removed_entry = false;
+
+    // this may find multiple view entries with the same buffer pointers
+    auto views_range = views_list.equal_range(ptr);
+    if (views_range.first != views_range.second) {
+      for (auto view_it = views_range.first; view_it != views_range.second; ++view_it) {
+        MPSCacheKey hash = view_it->second;
+        // find the cache entry associated with the hash
+        auto cache_it = cache_.find(hash);
+        if (cache_it != cache_.end()) {
+          cache_.erase(cache_it);
+          delete cache_it->second.cachedGraph_;
+          removed_entry = true;
+        }
+      }
+      // this erase-by-key will remove all pairs in the list with the same key
+      views_list.erase(ptr);
+    }
+    return removed_entry;
+  }
+
  private:
   MPSGraphCache() {
     serialQueue_ = dispatch_queue_create("cache queue", DISPATCH_QUEUE_SERIAL);
@@ -204,6 +229,9 @@ struct MPSGraphCache
 
   static MPSGraphCache* _instance_cache;
   std::unordered_map<MPSCacheKey, CacheEntry> cache_;
+  // list of buffers associated with view entries in the cache
+  // note that multiple view cache entries could use the same buffer pointer
+  std::multimap<void*, MPSCacheKey> views_list;
   dispatch_queue_t serialQueue_ = nullptr;
 
 };
