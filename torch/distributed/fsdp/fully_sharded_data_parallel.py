@@ -2619,37 +2619,39 @@ class FullyShardedDataParallel(nn.Module):
             # Run ``_pre_backward_hook`` only once per backward pass
             if self._pre_backward_hook_has_run:
                 return
-            # try to queue final backward callback only once for root, so
-            # that final backward callback is attached to the outer most
-            # backward graph task and called after all the backward
-            # calls are completed.
-            if self._is_root:
-                self._queue_wait_for_post_backward()
 
-            if self._need_prefetch_pre_backward_hook():
-                # Always wait for all_gather before rebuilding full params, just
-                # in case full params have already been prefetched in previous layer's
-                # pre-backward hook.
+            with torch.autograd.profiler.record_function("FullyShardedDataParallel._pre_backward_hook"):
+                # try to queue final backward callback only once for root, so
+                # that final backward callback is attached to the outer most
+                # backward graph task and called after all the backward
+                # calls are completed.
+                if self._is_root:
+                    self._queue_wait_for_post_backward()
+
+                if self._need_prefetch_pre_backward_hook():
+                    # Always wait for all_gather before rebuilding full params, just
+                    # in case full params have already been prefetched in previous layer's
+                    # pre-backward hook.
+                    torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
+                # Start of a backward pass for the first time in an backward pass.
+                self._assert_state([TrainingState_.IDLE])
+                self.training_state = TrainingState_.BACKWARD_PRE
+
+                # All-gather full parameters, moving them to compute device if
+                # necessary.
+                self._rebuild_full_params()
+                # Wait for all_gather to finish before computation
                 torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
-            # Start of a backward pass for the first time in an backward pass.
-            self._assert_state([TrainingState_.IDLE])
-            self.training_state = TrainingState_.BACKWARD_PRE
+                # Prefetch next layer's full params in backward pass,
+                # since it is prefetching, no need to wait for all_gather stream.
+                if self._need_prefetch_pre_backward_hook():
+                    self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
 
-            # All-gather full parameters, moving them to compute device if
-            # necessary.
-            self._rebuild_full_params()
-            # Wait for all_gather to finish before computation
-            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
-
-            # Prefetch next layer's full params in backward pass,
-            # since it is prefetching, no need to wait for all_gather stream.
-            if self._need_prefetch_pre_backward_hook():
-                self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
-
-            self._pre_backward_hook_has_run = True
-            # Prepare p.grad so that it is in the right shape, device, accumulated values, etc.
-            self._prep_grads_for_backward()
+                self._pre_backward_hook_has_run = True
+                # Prepare p.grad so that it is in the right shape, device, accumulated values, etc.
+                self._prep_grads_for_backward()
 
         def _register_hook(t: torch.Tensor) -> torch.Tensor:
             if t.requires_grad:
@@ -2731,181 +2733,182 @@ class FullyShardedDataParallel(nn.Module):
         alignment is created by :func:`_shard_parameters`, which ensures that
         the local optimizer only sees the relevant parameter shard.
         """
-        # First hook callback will see PRE state. If we have multiple params,
-        # then subsequent hook callbacks will see POST state.
-        self._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.BACKWARD_POST])
-        self.training_state = TrainingState_.BACKWARD_POST
-        if param.grad is None:
-            return
+        with torch.autograd.profiler.record_function("FullyShardedDataParallel._post_backward_hook"):
+            # First hook callback will see PRE state. If we have multiple params,
+            # then subsequent hook callbacks will see POST state.
+            self._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.BACKWARD_POST])
+            self.training_state = TrainingState_.BACKWARD_POST
+            if param.grad is None:
+                return
 
-        if param.grad.requires_grad:
-            raise RuntimeError(
-                "FSDP only works with gradients that don't require gradients"
-            )
-
-        if self._require_backward_grad_sync or \
-                self.sharding_strategy == ShardingStrategy.FULL_SHARD:
-            # We free full parameters unless we are in `no_sync()` (i.e. when
-            # `_require_backward_grad_sync=False`) and not using the
-            # `FULL_SHARD` strategy. If we are not using the `FULL_SHARD`
-            # strategy (e.g. instead using `SHARD_GRAD_OP`), then we keep the
-            # full parameters in memory and save network overhead.
-            self._free_full_params(cast(List[FlatParameter], [param]))
-
-        if self._mixed_precision_enabled_for_params():
-            # Noop if reshard_after_forward=True because we'd free the param
-            # shard when rebuilding the full params in the pre_beckward_hook.
-            self._free_mp_shard(cast(List[FlatParameter], [param]))
-
-        # Switch to local shard after backward. Note that
-        # when CPU offload is enabled, _use_param_local_shard implicitly
-        # offloads the local shard to CPU by making p.data point to
-        # p._local_shard, which would reside on CPU.
-        self._use_param_local_shard(cast(List[FlatParameter], [param]))
-
-        # Prefetch previous layer's full params in backward pass post backward hook,
-        # If next layer's backward computation is done and full params are freed,
-        # no need to prefetch the full params again.
-        # Only prefetch full params if any of the next layer's outputs requires grad
-        if self._need_prefetch_post_backward_hook():
-            self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
-            # Next layer's computation will start right after this all_gather,
-            # Wait for all_gather to finish before computation.
-            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
-
-        if not self._require_backward_grad_sync:
-            return
-
-        # Wait for all work in the current stream to finish, then start the
-        # reductions in post_backward stream.
-        self._streams["post_backward"].wait_stream(torch.cuda.current_stream())
-
-        with torch.cuda.stream(self._streams["post_backward"]):
-            orig_grad_data = param.grad.data
-            if (
-                self._mixed_precision_enabled_for_reduce()
-            ):
-                # Cast gradient to precision in which it should be communicated.
-                # TODO: Make this a communication hook when communication hooks
-                # are implemented for FSDP. Note that this is a noop if the
-                # reduce_dtype matches the param dtype.
-                param.grad.data = param.grad.data.to(self.mixed_precision.reduce_dtype)
-
-            if self.gradient_predivide_factor > 1:
-                # Average grad by world_size for consistency with PyTorch DDP.
-                param.grad.div_(self.gradient_predivide_factor)
-
-            grad = param.grad.data
-            if param._is_sharded:  # type: ignore[attr-defined]
-                # We clear `param.grad` to permit repeated gradient
-                # computations when this FSDP module is called multiple times.
-                # This is to avoid a race among multiple re-entrant backward
-                # passes. For example, the second backward pass computation
-                # precedes ahead of the first backward pass reduction, which is
-                # possible since the reduction is in a different stream and is
-                # async. Then, the first backward pass may be incorrectly
-                # reducing the second backward pass's `param.grad`.
-                # The reduced gradients are accumulated in
-                # `param._saved_grad_shard`, and the gradient reductions can
-                # happen in arbitrary order, though we tolerate this due to the
-                # (approximate) commutativity of floating-point addition.
-                param.grad = None
-                grad_flatten = torch.flatten(grad)
-                chunks = list(grad_flatten.chunk(self.world_size))
-                num_pad = self.world_size * chunks[0].numel() - grad.numel()
-                input_flattened = F.pad(grad_flatten, [0, num_pad])
-                output = torch.zeros_like(chunks[0])
-                dist._reduce_scatter_base(
-                    output, input_flattened, group=self.process_group
+            if param.grad.requires_grad:
+                raise RuntimeError(
+                    "FSDP only works with gradients that don't require gradients"
                 )
-                if self.gradient_postdivide_factor > 1:
-                    # Average grad by world_size for consistency with PyTorch DDP.
-                    output.div_(self.gradient_postdivide_factor)
 
-                # Note that we need to cast grads back to the full precision if
-                # 1) parameters were in reduced precision during fwd, as grads
-                # would thus be in this reduced precision, or
-                # 2) parameters did not have precision reduced, but grads
-                # had reduced precision for communication.
+            if self._require_backward_grad_sync or \
+                    self.sharding_strategy == ShardingStrategy.FULL_SHARD:
+                # We free full parameters unless we are in `no_sync()` (i.e. when
+                # `_require_backward_grad_sync=False`) and not using the
+                # `FULL_SHARD` strategy. If we are not using the `FULL_SHARD`
+                # strategy (e.g. instead using `SHARD_GRAD_OP`), then we keep the
+                # full parameters in memory and save network overhead.
+                self._free_full_params(cast(List[FlatParameter], [param]))
+
+            if self._mixed_precision_enabled_for_params():
+                # Noop if reshard_after_forward=True because we'd free the param
+                # shard when rebuilding the full params in the pre_beckward_hook.
+                self._free_mp_shard(cast(List[FlatParameter], [param]))
+
+            # Switch to local shard after backward. Note that
+            # when CPU offload is enabled, _use_param_local_shard implicitly
+            # offloads the local shard to CPU by making p.data point to
+            # p._local_shard, which would reside on CPU.
+            self._use_param_local_shard(cast(List[FlatParameter], [param]))
+
+            # Prefetch previous layer's full params in backward pass post backward hook,
+            # If next layer's backward computation is done and full params are freed,
+            # no need to prefetch the full params again.
+            # Only prefetch full params if any of the next layer's outputs requires grad
+            if self._need_prefetch_post_backward_hook():
+                self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
+                # Next layer's computation will start right after this all_gather,
+                # Wait for all_gather to finish before computation.
+                torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
+            if not self._require_backward_grad_sync:
+                return
+
+            # Wait for all work in the current stream to finish, then start the
+            # reductions in post_backward stream.
+            self._streams["post_backward"].wait_stream(torch.cuda.current_stream())
+
+            with torch.cuda.stream(self._streams["post_backward"]):
+                orig_grad_data = param.grad.data
                 if (
-                    self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
+                    self._mixed_precision_enabled_for_reduce()
                 ):
-                    # Cast gradients back to the full parameter precision so that
-                    # optimizer.step() happens in full precision.
-                    orig_param_grad_data = output
-                    output.data = output.data.to(dtype=param.data.dtype)
-                    # Don't let this memory get reused until after the transfer.
-                    orig_param_grad_data.record_stream(torch.cuda.current_stream())
+                    # Cast gradient to precision in which it should be communicated.
+                    # TODO: Make this a communication hook when communication hooks
+                    # are implemented for FSDP. Note that this is a noop if the
+                    # reduce_dtype matches the param dtype.
+                    param.grad.data = param.grad.data.to(self.mixed_precision.reduce_dtype)
 
-                # To support gradient accumulation outside `no_sync()`, we save
-                # the gradient data to `param._saved_grad_shard` before the
-                # backward pass, accumulate gradients into it here, and set
-                # `param.grad` with the accumulated value at the end of the
-                # backward pass in preparation for the optimizer step.
-                accumulate_grad = hasattr(param, "_saved_grad_shard")
-                if accumulate_grad:
-                    p_assert(
-                        param._saved_grad_shard.shape == output.shape,  # type: ignore[attr-defined]
-                        "Shape mismatch when accumulating gradients: "  # type: ignore[attr-defined]
-                        f"existing grad shape={param._saved_grad_shard.shape} "
-                        f"new grad shape={output.shape}"  # type: ignore[attr-defined]
+                if self.gradient_predivide_factor > 1:
+                    # Average grad by world_size for consistency with PyTorch DDP.
+                    param.grad.div_(self.gradient_predivide_factor)
+
+                grad = param.grad.data
+                if param._is_sharded:  # type: ignore[attr-defined]
+                    # We clear `param.grad` to permit repeated gradient
+                    # computations when this FSDP module is called multiple times.
+                    # This is to avoid a race among multiple re-entrant backward
+                    # passes. For example, the second backward pass computation
+                    # precedes ahead of the first backward pass reduction, which is
+                    # possible since the reduction is in a different stream and is
+                    # async. Then, the first backward pass may be incorrectly
+                    # reducing the second backward pass's `param.grad`.
+                    # The reduced gradients are accumulated in
+                    # `param._saved_grad_shard`, and the gradient reductions can
+                    # happen in arbitrary order, though we tolerate this due to the
+                    # (approximate) commutativity of floating-point addition.
+                    param.grad = None
+                    grad_flatten = torch.flatten(grad)
+                    chunks = list(grad_flatten.chunk(self.world_size))
+                    num_pad = self.world_size * chunks[0].numel() - grad.numel()
+                    input_flattened = F.pad(grad_flatten, [0, num_pad])
+                    output = torch.zeros_like(chunks[0])
+                    dist._reduce_scatter_base(
+                        output, input_flattened, group=self.process_group
                     )
-                    p_assert(
-                        param._saved_grad_shard.device == output.device,  # type: ignore[attr-defined]
-                        "Device mismatch when accumulating gradients: "  # type: ignore[attr-defined]
-                        f"existing grad device={param._saved_grad_shard.device} "
-                        f"new grad device={output.device}"  # type: ignore[attr-defined]
-                    )
-                    param._saved_grad_shard += output  # type: ignore[attr-defined]
-                else:
-                    param._saved_grad_shard = output  # type: ignore[attr-defined]
-                grad = param._saved_grad_shard  # type: ignore[attr-defined]
-            else:
-                # Currently the way for _is_sharded to be False is if
-                # world_size == 1 or sharding_strategy is NO_SHARD.
-                assert (
-                    self.world_size == 1 or self.sharding_strategy == ShardingStrategy.NO_SHARD
-                ), "Currently the way for _is_sharded to be False is \
-                    world_size == 1 or sharding_stratagy is set to be NO_SHARD"
-                if self.sharding_strategy == ShardingStrategy.NO_SHARD:
-                    dist.all_reduce(param.grad, group=self.process_group)
                     if self.gradient_postdivide_factor > 1:
                         # Average grad by world_size for consistency with PyTorch DDP.
-                        param.grad.div_(self.gradient_postdivide_factor)
-                # Note that we need to cast grads back to the full precision if
-                # 1) parameters were in reduced precision during fwd, as grads
-                # would thus be in this reduced precision, or
-                # 2) parameters did not have precision reduced, but grads
-                # had reduced precision for communication.
-                if (
-                    self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
-                ):
-                    # Cast gradients back to the full parameter precision so that
-                    # optimizer.step() happens in full precision.
-                    orig_param_grad_data = param.grad.data
-                    param.grad.data = param.grad.data.to(dtype=param.data.dtype)
+                        output.div_(self.gradient_postdivide_factor)
+
+                    # Note that we need to cast grads back to the full precision if
+                    # 1) parameters were in reduced precision during fwd, as grads
+                    # would thus be in this reduced precision, or
+                    # 2) parameters did not have precision reduced, but grads
+                    # had reduced precision for communication.
+                    if (
+                        self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
+                    ):
+                        # Cast gradients back to the full parameter precision so that
+                        # optimizer.step() happens in full precision.
+                        orig_param_grad_data = output
+                        output.data = output.data.to(dtype=param.data.dtype)
+                        # Don't let this memory get reused until after the transfer.
+                        orig_param_grad_data.record_stream(torch.cuda.current_stream())
+
+                    # To support gradient accumulation outside `no_sync()`, we save
+                    # the gradient data to `param._saved_grad_shard` before the
+                    # backward pass, accumulate gradients into it here, and set
+                    # `param.grad` with the accumulated value at the end of the
+                    # backward pass in preparation for the optimizer step.
+                    accumulate_grad = hasattr(param, "_saved_grad_shard")
+                    if accumulate_grad:
+                        p_assert(
+                            param._saved_grad_shard.shape == output.shape,  # type: ignore[attr-defined]
+                            "Shape mismatch when accumulating gradients: "  # type: ignore[attr-defined]
+                            f"existing grad shape={param._saved_grad_shard.shape} "
+                            f"new grad shape={output.shape}"  # type: ignore[attr-defined]
+                        )
+                        p_assert(
+                            param._saved_grad_shard.device == output.device,  # type: ignore[attr-defined]
+                            "Device mismatch when accumulating gradients: "  # type: ignore[attr-defined]
+                            f"existing grad device={param._saved_grad_shard.device} "
+                            f"new grad device={output.device}"  # type: ignore[attr-defined]
+                        )
+                        param._saved_grad_shard += output  # type: ignore[attr-defined]
+                    else:
+                        param._saved_grad_shard = output  # type: ignore[attr-defined]
+                    grad = param._saved_grad_shard  # type: ignore[attr-defined]
+                else:
+                    # Currently the way for _is_sharded to be False is if
+                    # world_size == 1 or sharding_strategy is NO_SHARD.
+                    assert (
+                        self.world_size == 1 or self.sharding_strategy == ShardingStrategy.NO_SHARD
+                    ), "Currently the way for _is_sharded to be False is \
+                        world_size == 1 or sharding_stratagy is set to be NO_SHARD"
+                    if self.sharding_strategy == ShardingStrategy.NO_SHARD:
+                        dist.all_reduce(param.grad, group=self.process_group)
+                        if self.gradient_postdivide_factor > 1:
+                            # Average grad by world_size for consistency with PyTorch DDP.
+                            param.grad.div_(self.gradient_postdivide_factor)
+                    # Note that we need to cast grads back to the full precision if
+                    # 1) parameters were in reduced precision during fwd, as grads
+                    # would thus be in this reduced precision, or
+                    # 2) parameters did not have precision reduced, but grads
+                    # had reduced precision for communication.
+                    if (
+                        self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
+                    ):
+                        # Cast gradients back to the full parameter precision so that
+                        # optimizer.step() happens in full precision.
+                        orig_param_grad_data = param.grad.data
+                        param.grad.data = param.grad.data.to(dtype=param.data.dtype)
+                        # Don't let this memory get reused until after the transfer.
+                        orig_param_grad_data.record_stream(torch.cuda.current_stream())
+
+                # Regardless of sharding or not, offload the grad to CPU if we are
+                # offloading params. This is so param and grad reside on same device
+                # which is needed for the optimizer step.
+                if self.cpu_offload.offload_params:
+                    # We specify non_blocking=True
+                    # and ensure the appropriate synchronization is done by waiting
+                    # streams in _wait_for_post_backward.
+                    param._cpu_grad.copy_(  # type: ignore[attr-defined]
+                        grad.detach(), non_blocking=True
+                    )
                     # Don't let this memory get reused until after the transfer.
-                    orig_param_grad_data.record_stream(torch.cuda.current_stream())
+                    grad.data.record_stream(torch.cuda.current_stream())
 
-            # Regardless of sharding or not, offload the grad to CPU if we are
-            # offloading params. This is so param and grad reside on same device
-            # which is needed for the optimizer step.
-            if self.cpu_offload.offload_params:
-                # We specify non_blocking=True
-                # and ensure the appropriate synchronization is done by waiting
-                # streams in _wait_for_post_backward.
-                param._cpu_grad.copy_(  # type: ignore[attr-defined]
-                    grad.detach(), non_blocking=True
-                )
-                # Don't let this memory get reused until after the transfer.
-                grad.data.record_stream(torch.cuda.current_stream())
-
-            # After _post_backward_hook returns, orig_grad_data will eventually
-            # go out of scope, at which point it could otherwise be freed for
-            # further reuse by the main stream while the div/reduce_scatter/copy
-            # are underway in the post_backward stream. See:
-            # github.com/NVIDIA/apex/blob/master/apex/parallel/distributed.py
-            orig_grad_data.record_stream(self._streams["post_backward"])
+                # After _post_backward_hook returns, orig_grad_data will eventually
+                # go out of scope, at which point it could otherwise be freed for
+                # further reuse by the main stream while the div/reduce_scatter/copy
+                # are underway in the post_backward stream. See:
+                # github.com/NVIDIA/apex/blob/master/apex/parallel/distributed.py
+                orig_grad_data.record_stream(self._streams["post_backward"])
 
     def _queue_wait_for_post_backward(self) -> None:
         """Try to queue a `wait_for_post_backward` callback.
