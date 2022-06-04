@@ -13106,3 +13106,5 @@
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
+  variants: function
+
