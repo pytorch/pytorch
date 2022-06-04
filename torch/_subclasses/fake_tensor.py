@@ -4,6 +4,7 @@ from torch.utils._pytree import tree_map
 from functools import partial
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._mode_utils import no_dispatch
+from torch._subclasses.meta_utils import MetaConverter
 from typing import Union
 from torch._ops import OpOverload
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -26,7 +27,6 @@ _device_not_kwarg_ops = (
 # this op is never actually used
 _non_kwarg_device_constructors = (torch.ops.aten._list_to_tensor,)
 
-
 def contains_tensor_types(type):
     tensor_type = torch._C.TensorType.get()
     return type.isSubtypeOf(tensor_type) or any(
@@ -46,6 +46,37 @@ def _is_tensor_constructor(func: OpOverload):
     )
 
 
+# Similar to `MetaConverter`, this is a class for converting
+# multiple tensors into fake tensors which share the same view/storage
+# structure. Like `MetaConverter`, it will keep alive all
+# tensors that are converted to FakeTensors.
+class FakeTensorConverter(MetaConverter):
+    def __init__(self):
+        self.tensor_memo = {}
+        self.meta_converter = MetaConverter()
+
+    def from_real_tensor(self, t):
+        existing_device = t.device
+        self.tensor_memo[t] = FakeTensor(self.meta_converter(t), existing_device)
+        return self.tensor_memo[t]
+
+    def from_meta_and_device(self, t, device):
+        if t in self.tensor_memo:
+            return self.tensor_memo[t]
+        self.tensor_memo[t] = FakeTensor(t, device)
+        return self.tensor_memo[t]
+
+    def __call__(self, t, device=None):
+        assert t.device.type != 'meta' or device is not None
+        if t in self.tensor_memo:
+            return self.tensor_memo[t]
+        elif t.device.type != 'meta':
+            return self.from_real_tensor(t)
+        else:
+            return self.from_meta_and_device(t, device)
+
+
+
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
 # Because the device is `meta`, meta tensors do not model device propagation.
@@ -54,6 +85,8 @@ def _is_tensor_constructor(func: OpOverload):
 
 def torch_dispatch_impl(cls_or_mode_instance, func, types, args, kwargs, run_function):
     kwargs = kwargs if kwargs else {}
+    in_fake_mode = isinstance(cls_or_mode_instance, FakeTensorMode)
+    converter = cls_or_mode_instance.fake_tensor_converter if in_fake_mode else FakeTensorConverter()
 
     # This classes virtualizes .device() calls, need to short-circuit
     # it instead of calling device again or we would keep on recurring
@@ -63,10 +96,7 @@ def torch_dispatch_impl(cls_or_mode_instance, func, types, args, kwargs, run_fun
 
     def wrap(e, device=None):
         if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
-            if device:
-                return FakeTensor(e, device)
-            else:
-                return FakeTensor.from_tensor(e)
+            return converter(e, device)
         else:
             return e
 
@@ -142,7 +172,9 @@ class FakeTensor(torch.Tensor):
 
     @staticmethod
     def __new__(cls, elem, device):
-        return torch.Tensor._make_subclass(cls, elem, elem.requires_grad, dispatch_device=True)
+        return torch.Tensor._make_subclass(
+            cls, elem, elem.requires_grad, dispatch_device=True
+        )
 
     def __init__(self, elem, device: Union[torch.device, str]):
         # elem does not need to be recorded, because FakeTensor *is a* elem
@@ -219,7 +251,19 @@ class FakeTensor(torch.Tensor):
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
+
+# We keep one instantiation of `fake_tensor_converter` active
+# for the duration of `with torch_enable_mode(FakeTensorMode)`.
+# This allows accurate storage aliasing across invocation of
+# different operators. While this will keep all freshly allocated
+# tensors alive during `FakeTensorMode`, there will no be no
+# new allocations of Tensors which have non-meta storage so
+# memory should not significantly incraese.
+
 class FakeTensorMode(TorchDispatchMode):
+    def __init__(self):
+        self.fake_tensor_converter = FakeTensorConverter()
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         def run_fn(func, types, args, kwargs):
             return func(*args, **kwargs)

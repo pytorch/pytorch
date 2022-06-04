@@ -1129,7 +1129,7 @@ def check_in_bounds_for_storage(
         raise ValueError(msg)
 
 
-def check(b, s):
+def check(b, s, exc_type=RuntimeError):
     """
     Helper function for raising a RuntimeError if a boolean condition fails.
     Error message is a callable producing a string (to avoid wasting time
@@ -1137,4 +1137,4 @@ def check(b, s):
     to trace.)
     """
     if not b:
-        raise RuntimeError(s())
+        raise exc_type(s())

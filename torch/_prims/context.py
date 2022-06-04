@@ -107,12 +107,15 @@ class PrimContext(torch.overrides.TorchFunctionMode):
 
         return a
 
-    def output(self, tm: FakeTensor):
+    def output(self, tms: Sequence[FakeTensor]):
         # TODO: allow other output types
-        assert isinstance(tm, FakeTensor)
+        flat_tms, _ = torch.utils._pytree.tree_flatten(tms)
+        for tm in flat_tms:
+            assert isinstance(tm, FakeTensor), f"Got non-TensorMeta output!, {type(tm)}"
 
-        node = self.graph.output(tm)
-        self._add_user(tm, node)
+        node = self.graph.output(tms)
+        for tm in flat_tms:
+            self._add_user(tm, node)
 
     def __torch_function__(
         self,
