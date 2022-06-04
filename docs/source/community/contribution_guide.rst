@@ -147,7 +147,7 @@ Participating in online discussions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You can find active discussions happening on the PyTorch Discussion
-`forum <https://discuss.pytorch.org/>`__.
+`forum <https://discuss.pytorch.org/>`__ for users.
 
 Submitting pull requests to fix open issues
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
