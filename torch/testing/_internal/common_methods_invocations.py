@@ -19984,6 +19984,14 @@ python_ref_db = [
         torch_opinfo_name="column_stack",
     ),
     PythonRefInfo(
+        "_refs.dsplit",
+        torch_opinfo_name="dsplit",
+    ),
+    PythonRefInfo(
+        "_refs.dstack",
+        torch_opinfo_name="dstack",
+    ),
+    PythonRefInfo(
         "_refs.flatten",
         torch_opinfo_name="flatten",
     ),
