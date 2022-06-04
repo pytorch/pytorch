@@ -113,39 +113,28 @@ def unsafe_split_with_sizes(g, self, split_sizes, dim, _outputs=None):
 def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
     axis = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
     axis = opset11.unsqueeze(g, axis, 0)
-
-    def static_tensor_split(self, indices):
-        start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
-        res = []
-        for i in range(_outputs - 1):
-            end = g.op("Gather", indices_or_sections, i, axis)
-            res.append(g.op("Slice", self, start, end, axis))
-            start = end
-
-        end = symbolic_helper._size_helper(g, self, axis)
-        res.append(g.op("Slice", self, start, end, axis))
-        return res
+    const_1 = g.op("Constant", value_t=torch.tensor(1, dtype=torch.long))
 
     if not symbolic_helper._is_split_static(indices_or_sections, _outputs):
-        is_scalar = symbolic_helper._get_tensor_rank(indices_or_sections) == 0
-
         if (
-            symbolic_helper._is_tensor(indices_or_sections) and not is_scalar
-        ):  # 1-d tensor
-            # loop conditions
-            const_1 = g.op("Constant", value_t=torch.tensor(1, dtype=torch.long))
+            symbolic_helper._is_tensor(indices_or_sections)
+            and symbolic_helper._get_tensor_rank(indices_or_sections) == 1
+        ):
             loop_len = symbolic_helper._size_helper(
                 g, indices_or_sections, g.op("Constant", value_t=torch.tensor(0))
             )
             loop_len = opset11.unsqueeze(g, loop_len, 0)
-            loop_condition = g.op("Cast", const_1, to_i=9)
+            loop_condition = g.op(
+                "Cast", const_1, to_i=_C_onnx.TensorProtoDataType.BOOL
+            )
 
+            # To make the first slice in the below loop work,
+            # we pad a zero to the first position so that it will be the initial start of slice.
             padding_0 = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
             indices_or_sections = g.op(
                 "Concat", padding_0, indices_or_sections, axis_i=0
             )
 
-            # Create an empty sequence to store final expansions
             final_splits = g.op("SequenceEmpty")
             loop = g.op("Loop", loop_len, loop_condition, final_splits)
 
@@ -169,7 +158,7 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
             final_splits = loop_block.op("SequenceInsert", final_splits, slice)
 
             # Loop outputs
-            cond_out = loop_block.op("Cast", loop_condition, to_i=9)
+            cond_out = loop_block.op("Identity", loop_condition)
             utils._add_output_to_block(loop_block, cond_out)
             utils._add_output_to_block(loop_block, final_splits)
 
@@ -193,7 +182,7 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
             min_split_size_plus_1 = g.op(
                 "Add",
                 min_split_size,
-                g.op("Constant", value_t=torch.tensor(1, dtype=torch.long)),
+                const_1,
             )
             num_splits_one_extra = g.op("Mod", dim_size, indices_or_sections)
             splits = g.op("Tile", min_split_size_plus_1, num_splits_one_extra)
@@ -213,8 +202,19 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
             return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
 
     split_val = indices_or_sections.node()["value"]
+
     if split_val.dim() > 0:
-        return static_tensor_split(self, indices_or_sections)
+        start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+        res = []
+        for i in range(_outputs - 1):
+            end = g.op("Gather", indices_or_sections, i, axis)
+            res.append(g.op("Slice", self, start, end, axis))
+            start = end
+
+        end = symbolic_helper._size_helper(g, self, axis)
+        res.append(g.op("Slice", self, start, end, axis))
+        return res
+
     split_size = symbolic_helper._get_const(
         indices_or_sections, "i", "indices_or_sections"
     )

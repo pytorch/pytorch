@@ -6129,27 +6129,19 @@ class _TestONNXRuntime:
     def test_tensor_split(self):
         class TensorSplitModel(torch.nn.Module):
             def forward(self, input):
-                return input.tensor_split([1, 3]), input.tensor_split([2, 4])[0]
-
-        x = torch.randn(5, 4, 3)
-        self.run_test(TensorSplitModel(), x)
-
-        class TensorSplitModel2(torch.nn.Module):
-            def forward(self, input):
                 return (
-                    input.tensor_split([1, 3, 4], -2),
-                    input.tensor_split([0, 2], -2)[-1],
+                    input.tensor_split([1, 3]),
+                    # test with output indexing.
+                    input.tensor_split([2, 4])[0],
+                    # test split on specific dim.
+                    input.tensor_split([1, 3, 4], dim=-2),
+                    # test split on specific dim and output indexing.
+                    input.tensor_split([0, 2], dim=-2)[-1],
+                    # test wiht out of bound end index (5).
+                    input.tensor_split([2, 3, 5]),
                 )
 
-        x = torch.randn(5, 4, 3)
-        self.run_test(TensorSplitModel2(), x)
-
-        class TensorSplitModel3(torch.nn.Module):
-            def forward(self, input):
-                return input.tensor_split([2, 3, 5])
-
-        x = torch.randn(5, 4, 3)
-        self.run_test(TensorSplitModel3(), x)
+        self.run_test(TensorSplitModel(), torch.randn(5, 4, 3))
 
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_tensor_split_scalar(self):
