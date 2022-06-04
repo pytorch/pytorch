@@ -2627,7 +2627,7 @@ class FullyShardedDataParallel(nn.Module):
             if self._is_root:
                 self._queue_wait_for_post_backward()
 
-            if not self._pre_backward_hook_full_params_prefetched:
+            if self._pre_backward_hook_full_params_prefetched:
                 # Always wait for all_gather before rebuilding full params, just
                 # in case full params have already been prefetched in previous layer's
                 # pre-backward hook.
