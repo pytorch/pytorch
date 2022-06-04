@@ -135,7 +135,7 @@ public:
   c10::optional<OperatorHandle> findOp(const OperatorName& operator_name);
 
   // Returns a list of all operator names present in the operatorLookupTable_
-  const std::vector<OperatorName> getAllOpNames();
+  std::vector<OperatorName> getAllOpNames();
 
   // ------------------------------------------------------------------------
   //

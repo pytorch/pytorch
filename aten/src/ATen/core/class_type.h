@@ -142,7 +142,7 @@ struct TORCH_API ClassType : public NamedType {
     return attributes_.at(slot).getType();
   }
 
-  const std::string getAttributeName(size_t slot) const {
+  std::string getAttributeName(size_t slot) const {
     AT_ASSERT(slot < attributes_.size());
     return attributes_[slot].getName();
   }

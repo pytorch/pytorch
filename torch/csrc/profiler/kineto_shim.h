@@ -45,7 +45,7 @@ struct DeviceAndResource {
   int32_t resource;
 #endif // USE_KINETO
 };
-const DeviceAndResource kineto_ids();
+DeviceAndResource kineto_ids();
 
 #ifdef USE_KINETO
 using trace_t = libkineto::CpuTraceBuffer;

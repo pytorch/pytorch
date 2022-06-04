@@ -35,7 +35,7 @@ struct InputMetadata {
   InputMetadata(const at::Tensor& t)
   : InputMetadata(t.options(), t.sizes(), t.unsafeGetTensorImpl()->is_python_dispatch()) { }
 
-  const at::TensorOptions options() const {
+  at::TensorOptions options() const {
     return options_;
   }
 

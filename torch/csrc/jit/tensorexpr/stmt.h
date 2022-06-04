@@ -369,7 +369,7 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
     return buf_->dtype();
   }
 
-  const std::vector<ExprPtr> dims() const {
+  std::vector<ExprPtr> dims() const {
     return buf_->dims();
   }
 
@@ -730,7 +730,7 @@ class TORCH_API For : public StmtNode<For> {
     return alloc<For>(
         var.node(), start.node(), stop.node(), body, loop_options);
   }
-  const LoopOptions loop_options() const {
+  LoopOptions loop_options() const {
     return loop_options_;
   }
 

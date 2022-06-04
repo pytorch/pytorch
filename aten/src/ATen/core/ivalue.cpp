@@ -67,11 +67,11 @@ bool operator==(const ivalue::EnumHolder& lhs, const ivalue::EnumHolder& rhs) {
   return lhs.name() == rhs.name() && *rhs.type() == *lhs.type();
 }
 
-const std::string ivalue::EnumHolder::qualifiedClassName() const {
+std::string ivalue::EnumHolder::qualifiedClassName() const {
   return type_->qualifiedClassName().qualifiedName();
 }
 
-const std::string ivalue::EnumHolder::unqualifiedClassName() const {
+std::string ivalue::EnumHolder::unqualifiedClassName() const {
   return type_->qualifiedClassName().name();
 }
 

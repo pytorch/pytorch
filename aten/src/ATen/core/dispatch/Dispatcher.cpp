@@ -87,7 +87,7 @@ OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overl
   return it.value();
 }
 
-const std::vector<OperatorName> Dispatcher::getAllOpNames() {
+std::vector<OperatorName> Dispatcher::getAllOpNames() {
   return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorName> {
     std::vector<OperatorName> allOpNames;
     for (const auto& op : operatorLookupTable) {

@@ -74,7 +74,7 @@ at::ClassTypePtr getCustomClass(const std::string& class_name) {
   return ret;
 }
 
-const std::unordered_set<std::string> getAllCustomClassesNames() {
+std::unordered_set<std::string> getAllCustomClassesNames() {
   std::unordered_set<std::string> ret;
   for (const auto& kv: customClasses()) {
     ret.insert(kv.first);

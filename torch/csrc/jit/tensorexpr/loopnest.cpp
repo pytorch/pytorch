@@ -78,7 +78,7 @@ std::vector<BufPtr> LoopNest::getIntermediateBufs() const {
   return result;
 }
 
-const std::unordered_set<BufPtr> LoopNest::getInputBufs() const {
+std::unordered_set<BufPtr> LoopNest::getInputBufs() const {
   std::unordered_set<BufPtr> result;
   auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
   for (auto& kv : buf_load_store_uses) {

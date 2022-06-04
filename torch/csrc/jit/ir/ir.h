@@ -368,7 +368,7 @@ struct TORCH_API Node {
     return wrap_;
   }
 
-  const c10::optional<std::string> getHistoricSchemaName() {
+  c10::optional<std::string> getHistoricSchemaName() {
     return historic_schema_name_;
   }
 

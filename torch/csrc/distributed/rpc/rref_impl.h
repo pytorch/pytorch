@@ -221,7 +221,7 @@ class TORCH_API RRef : public RRefInterface {
   inline bool isPyObj() const {
     return type_ == PyObjectType::get();
   }
-  inline const TypePtr type() const override {
+  inline TypePtr type() const override {
     return type_;
   }
 

@@ -140,7 +140,7 @@ struct ShapeArguments {
     return (int64_t)maybe_shape_symbols_.size();
   }
 
-  const ShapeArg at(size_t i) const {
+  ShapeArg at(size_t i) const {
     TORCH_INTERNAL_ASSERT(has_dim_, "ShapeArguments has no known dim")
     return maybe_shape_symbols_.at(i);
   }

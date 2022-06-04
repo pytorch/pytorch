@@ -34,7 +34,7 @@ class C10_EXPORT RRefInterface : public c10::intrusive_ptr_target {
   // confirmed by its owner.
   virtual bool confirmedByOwner() const = 0;
 
-  virtual const TypePtr type() const = 0;
+  virtual TypePtr type() const = 0;
 };
 
 }

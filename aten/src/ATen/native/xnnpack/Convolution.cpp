@@ -123,7 +123,7 @@ Tensor create_and_run(
 // This function takes in a contiguous NHWC pytorch tensor (e.g. MemoryFormat == ChannelsLast) and rearranges the weights in preparation for use with xnnpack.
 // By default, for pytorch, transpose conv2d weights are {input_channels, output_Channels_per_group, kernel_height, kernel_width}.
 // In addition, it condenses the tensor from 5 to 4 dimensions as expected by the rest of the pytorch framework by combining the groups and input_channels dimension.
-const Tensor reorder_weights_for_transpose_conv(const Tensor& weight_nhwc,
+Tensor reorder_weights_for_transpose_conv(const Tensor& weight_nhwc,
     int num_groups) {
 
   TORCH_CHECK(weight_nhwc.size(0) % num_groups == 0, "The number of groups cannot be satisfied by the provided weight tensor.");

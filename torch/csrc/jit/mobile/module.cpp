@@ -116,7 +116,7 @@ std::string getTopModuleTypeName(const Module& m) {
 }
 } // namespace
 
-const std::vector<at::Tensor> Module::parameters() const {
+std::vector<at::Tensor> Module::parameters() const {
   std::vector<at::Tensor> params;
   slot_params_recurse(object_, &params);
   return params;
@@ -126,7 +126,7 @@ const std::vector<at::Tensor> Module::parameters() const {
 // This behavior differs from full torch script modules. This is a bug,
 // but currently there is no way to correctly label parameters in the
 // loading of a mobile module. TODO
-const std::map<std::string, at::Tensor> Module::named_parameters() const {
+std::map<std::string, at::Tensor> Module::named_parameters() const {
   std::map<std::string, at::Tensor> params;
   const std::string name = "";
   slot_named_params_recurse(object_, &params, name);

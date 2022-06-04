@@ -182,7 +182,7 @@ struct OperatorRegistry {
     return ret;
   }
 
-  const std::vector<std::shared_ptr<Operator>> getAllOperators() {
+  std::vector<std::shared_ptr<Operator>> getAllOperators() {
     std::lock_guard<std::mutex> guard(lock);
     registerPendingOperators();
     std::vector<std::shared_ptr<Operator>> values;
@@ -383,7 +383,7 @@ void deregisterOperator(const FunctionSchema& schema) {
   getRegistry().deregisterOperator(schema);
 }
 
-const std::vector<std::shared_ptr<Operator>> getAllOperators() {
+std::vector<std::shared_ptr<Operator>> getAllOperators() {
   return getRegistry().getAllOperators();
 }
 

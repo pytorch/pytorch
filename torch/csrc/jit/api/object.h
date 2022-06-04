@@ -123,7 +123,7 @@ struct TORCH_API Object {
     return false;
   }
 
-  const Property get_property(const std::string& name) const {
+  Property get_property(const std::string& name) const {
     for (const auto& prop : type()->properties()) {
       if (prop.name == name) {
         c10::optional<Method> setter = c10::nullopt;

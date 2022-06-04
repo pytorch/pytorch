@@ -1260,7 +1260,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Returns the TypeMeta of a tensor, which describes what data type
    * it is (e.g., int, float, ...)
    */
-  const caffe2::TypeMeta dtype() const {
+  caffe2::TypeMeta dtype() const {
     return data_type_;
   }
 

@@ -71,17 +71,17 @@ class TORCH_API Module {
     return get_method("forward")(std::move(inputs));
   }
   c10::optional<Method> find_method(const std::string& basename) const;
-  const std::string name() const {
+  std::string name() const {
     return object_->name();
   }
   const std::vector<at::IValue>& slots() const {
     return object_->slots();
   }
-  const c10::intrusive_ptr<c10::ivalue::Object> _ivalue() const {
+  c10::intrusive_ptr<c10::ivalue::Object> _ivalue() const {
     return object_;
   }
-  const std::vector<at::Tensor> parameters() const;
-  const std::map<std::string, at::Tensor> named_parameters() const;
+  std::vector<at::Tensor> parameters() const;
+  std::map<std::string, at::Tensor> named_parameters() const;
   std::string get_forward_method_debug_info(int64_t debug_handle) const;
   std::string getModuleHierarchy(const int64_t debug_handle) const;
   std::string getCallStack(const int64_t debug_handle) const;
@@ -93,7 +93,7 @@ class TORCH_API Module {
   }
   /// True if the module is in training mode.
   bool is_training() const;
-  const std::unordered_map<std::string, std::string> getMetadata() const {
+  std::unordered_map<std::string, std::string> getMetadata() const {
     return metadata_;
   }
   void setMetadata(

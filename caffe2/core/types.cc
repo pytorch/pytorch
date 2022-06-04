@@ -46,7 +46,7 @@ TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta) {
   }
 }
 
-const TypeMeta DataTypeToTypeMeta(const TensorProto_DataType& dt) {
+TypeMeta DataTypeToTypeMeta(const TensorProto_DataType& dt) {
   switch (dt) {
     case TensorProto_DataType_FLOAT:
       return TypeMeta::Make<float>();

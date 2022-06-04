@@ -51,7 +51,7 @@ class TORCH_API Blob final : public c10::intrusive_ptr_target {
   /**
    * Returns the meta info of the blob.
    */
-  const TypeMeta meta() const noexcept {
+  TypeMeta meta() const noexcept {
     return meta_;
   }
 

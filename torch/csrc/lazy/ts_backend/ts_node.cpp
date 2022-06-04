@@ -59,7 +59,7 @@ hash_t TsNode::hash() const { return dag_hash_; }
 
 hash_t TsNode::shapeHash() const { return shape_hash_; }
 
-const std::string TsNode::getPythonStacktrace() const {
+std::string TsNode::getPythonStacktrace() const {
   return GetFirstUserFrameInPythonIfEnabled();
 }
 

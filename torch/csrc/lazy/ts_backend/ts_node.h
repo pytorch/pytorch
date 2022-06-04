@@ -31,7 +31,7 @@ class TORCH_API TsNode : public lazy::Node {
 
   hash_t shapeHash() const override;
 
-  const std::string getPythonStacktrace() const;
+  std::string getPythonStacktrace() const;
 
   // Lower is a backend-specific method since it returns a backend specific
   // type. hence, it is convenient to define it differently per-backend rather

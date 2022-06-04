@@ -50,7 +50,7 @@ inline constexpr char NameScopeSeparator() { return '/'; }
 TORCH_API TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta);
 
 // From caffe2::DataType protobuffer enum to TypeMeta
-TORCH_API const TypeMeta DataTypeToTypeMeta(const TensorProto::DataType& dt);
+TORCH_API TypeMeta DataTypeToTypeMeta(const TensorProto::DataType& dt);
 
 }  // namespace caffe2
 

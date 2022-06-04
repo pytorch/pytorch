@@ -52,7 +52,7 @@ void Alias::add_update(const at::Tensor& updated_val, const std::vector<ViewMeta
 // t = view2_inverse(a, t, 0)
 // t = view1_inverse(base, t, 0)  # t now represents the updated alias.
 // alias.base_ = t
-const Tensor apply_update(const Alias::Update& update, const Tensor& base) {
+Tensor apply_update(const Alias::Update& update, const Tensor& base) {
   at::Tensor t = update.new_val;
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
   if (update.view_metas.size() == 0) return t;

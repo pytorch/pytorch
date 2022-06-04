@@ -38,7 +38,7 @@ static_assert(
     std::is_pod<DeviceAndResource>::value,
     "Kineto specific details should be in `kineto_ids`.");
 
-const DeviceAndResource kineto_ids() {
+DeviceAndResource kineto_ids() {
 #ifdef USE_KINETO
   return {
       /*device=*/libkineto::processId(),

@@ -35,7 +35,7 @@ struct TensorGroup {
     return ::torch::utils::type_id(tensors[0]);
   }
 
-  const at::TensorOptions options() {
+  at::TensorOptions options() {
     AT_ASSERT(!tensors.empty());
     return tensors[0].options();
   }
