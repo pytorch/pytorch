@@ -786,6 +786,7 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode, align_c
 
 
 def _interpolate_helper(name, dim, interpolate_mode):
+    @quantized_args(True, False, False)
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = _get_interpolate_attributes(g, interpolate_mode, args)
         align_corners = _maybe_get_scalar(align_corners)

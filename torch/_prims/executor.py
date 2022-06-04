@@ -58,11 +58,16 @@ def execute(ctx: PrimContext, *args, executor: str = "aten", **kwargs):
 
             gm = GraphModule({}, ctx.graph)
             out = gm.forward(*nv_args)
-            fd.add_output(out)
+            flat_out, unflatten_spec = torch.utils._pytree.tree_flatten(out)
+            for o in flat_out:
+                fd.add_output(o)
 
-            return fusion.execute(
-                tuple(arg for arg in args if isinstance(arg, torch.Tensor))
-            )[0]
+            return torch.utils._pytree.tree_unflatten(
+                fusion.execute(
+                    tuple(arg for arg in args if isinstance(arg, torch.Tensor))
+                ),
+                unflatten_spec,
+            )
 
     msg = "Received unexpected value for 'executor': {0}. Allowed values are: aten, nvfuser.".format(
         executor
@@ -79,8 +84,8 @@ def make_traced(fn: Callable):
 
     Only supports the torch operations defined in _torch_to_reference_map
     in context.py and operations with positional args. All args must
-    be tensors and the function must return a single tensor. In the
-    near future all these restrictions will be lifted.
+    be tensors.
+    In the near future all these restrictions will be lifted.
 
     Example usage:
 
