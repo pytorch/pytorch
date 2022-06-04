@@ -11332,11 +11332,7 @@ op_db: List[OpInfo] = [
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
                     always_returns_bool=True,
                     supports_autograd=False,
-                    sample_inputs_func=sample_inputs_comparison_ops,
-                    skips=(
-                        # https://github.com/pytorch/pytorch/issues/76805
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-                    )),
+                    sample_inputs_func=sample_inputs_comparison_ops),
     BinaryUfuncInfo('fmax',
                     op=torch.fmax,
                     dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -14760,11 +14756,7 @@ op_db: List[OpInfo] = [
                     aliases=('not_equal',),
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
                     always_returns_bool=True,
-                    supports_autograd=False,
-                    skips=(
-                        # https://github.com/pytorch/pytorch/issues/76805
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-                    )),
+                    supports_autograd=False),
     OpInfo('narrow',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            supports_out=False,
