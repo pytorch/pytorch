@@ -4,6 +4,7 @@ from numbers import Number
 from typing import Union
 
 import torch
+from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import lazy_property
@@ -178,6 +179,13 @@ class Wishart(ExponentialFamily):
     @property
     def mean(self):
         return self.df.view(self._batch_shape + (1, 1)) * self.covariance_matrix
+
+    @property
+    def mode(self):
+        factor = self.df - self.covariance_matrix.shape[-1] - 1
+        factor[factor <= 0] = nan
+        return factor.view(self._batch_shape + (1, 1)) * self.covariance_matrix
+
 
     @property
     def variance(self):

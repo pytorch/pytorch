@@ -38,7 +38,7 @@ import json
 import __main__  # type: ignore[import]
 import errno
 import ctypes
-from typing import Any, Dict, Iterable, Iterator, Optional, Union, List, Tuple, Type, TypeVar
+from typing import Any, Dict, Iterable, Iterator, Optional, Union, List, Tuple, Type, TypeVar, Callable
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -71,7 +71,8 @@ from .composite_compliance import no_dispatch
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.nn import ModuleList, ModuleDict, Sequential, ParameterList, ParameterDict
 from torch._C import ScriptList, ScriptDict  # type: ignore[attr-defined]
-
+from torch.onnx import (register_custom_op_symbolic,
+                        unregister_custom_op_symbolic)
 torch.backends.disable_global_flags()
 
 FILE_SCHEMA = "file://"
@@ -190,6 +191,14 @@ def instantiate_parametrized_tests(generic_cls):
     decorator subclass of _TestParametrizer. The generic test will be replaced on the test class by
     parametrized tests with specialized names.
 
+    You can also use it as a class decorator. E.g.
+
+    ```
+    @instantiate_parametrized_tests
+    class TestFoo(TestCase):
+        ...
+    ```
+
     Args:
         generic_cls (class): Generic test class object containing tests (e.g. TestFoo)
     """
@@ -214,6 +223,7 @@ def instantiate_parametrized_tests(generic_cls):
                 class_attr, generic_cls=generic_cls, device_cls=None):
             full_name = '{}_{}'.format(test.__name__, test_suffix)
             instantiate_test_helper(cls=generic_cls, name=full_name, test=test, param_kwargs=param_kwargs)
+    return generic_cls
 
 
 class subtest(object):
@@ -288,7 +298,7 @@ class parametrize(_TestParametrizer):
         name_fn (callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
-        self.arg_names = arg_str.split(',')
+        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',')]
         self.arg_values = arg_values
         self.name_fn = name_fn
 
@@ -442,8 +452,8 @@ def _get_test_report_path():
     test_source = override if override is not None else 'python-unittest'
     return os.path.join('test-reports', test_source)
 
-
-parser = argparse.ArgumentParser()
+is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
+parser = argparse.ArgumentParser(add_help=not is_running_via_run_test)
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
@@ -766,7 +776,7 @@ TEST_DILL = _check_module_exists('dill')
 
 TEST_LIBROSA = _check_module_exists('librosa')
 
-BUILD_WITH_CAFFE2 = _check_module_exists("caffe2.python.caffe2_pybind11_state")
+BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 
 # Python 2.7 doesn't have spawn
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
@@ -779,7 +789,6 @@ TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
-
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -870,12 +879,25 @@ if IS_WINDOWS:
 
 # Dict of torch dtype -> NumPy dtype
 torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
+torch_to_numpy_dtype_dict.update({
+    torch.bfloat16: np.float32,
+    torch.complex32: np.complex64
+})
 
 def skipIfRocm(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if TEST_WITH_ROCM:
             raise unittest.SkipTest("test doesn't currently work on the ROCm stack")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+def skipIfMps(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if torch.backends.mps.is_available():
+            raise unittest.SkipTest("test doesn't currently work with MPS")
         else:
             fn(*args, **kwargs)
     return wrapper
@@ -1065,6 +1087,7 @@ def skipIfNotRegistered(op_name, message):
 
 def _decide_skip_caffe2(expect_caffe2, reason):
     def skip_dec(func):
+        @wraps(func)
         def wrapper(self):
             if torch.onnx._CAFFE2_ATEN_FALLBACK != expect_caffe2:
                 raise unittest.SkipTest(reason)
@@ -1803,11 +1826,13 @@ class TestCase(expecttest.TestCase):
     # When report_only is True, flaky tests are only reported, but the signal remains the same (the test will still
     # show up red).
     # Otherwise, the flaky test will show up green while its stats are captured by test reports.
-    def _run_with_retry(self, result=None, num_runs_left=0, report_only=True):
-        if num_runs_left == 0:
-            return
-
+    def _run_with_retry(self, result=None, num_runs_left=0, report_only=True, num_red=0, num_green=0):
         using_unittest = isinstance(result, unittest.TestResult)
+        if num_runs_left == 0:
+            if num_green > 0 and num_red > 0 and using_unittest:
+                result.addSkip(self, f'{{"flaky": {True}, "num_red": {num_red}, "num_green": {num_green},' +
+                                     f'"max_num_retries": {MAX_NUM_RETRIES}}}')
+            return
 
         if using_unittest:
             failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
@@ -1840,19 +1865,29 @@ class TestCase(expecttest.TestCase):
         if failures_before < len(result.failures):
             print(f"    {self._testMethodName} failed - num_retries_left: {num_retries_left}")
             if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
-                result.failures.pop(-1)
+                _, traceback_str = result.failures.pop(-1)
+                print(traceback_str)
                 result.addExpectedFailure(self, err)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
+                                 num_red=num_red + 1, num_green=num_green)
         elif errors_before < len(result.errors):
             print(f"    {self._testMethodName} errored - num_retries_left: {num_retries_left}")
             if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
-                result.errors.pop(-1)
+                _, traceback_str = result.errors.pop(-1)
+                print(traceback_str)
                 result.addExpectedFailure(self, err)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
+                                 num_red=num_red + 1, num_green=num_green)
         elif report_only and num_retries_left < MAX_NUM_RETRIES:
             print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
             result.addUnexpectedSuccess(self)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
+                                 num_red=num_red, num_green=num_green + 1)
+        elif not report_only and num_retries_left < MAX_NUM_RETRIES:
+            # in this case, our test was rerun (as a retry has been used) and it just passed.
+            # we incur one more recursive call with num_runs_left = 0 to allow for accurate flaky reporting
+            self._run_with_retry(result=result, num_runs_left=0, report_only=report_only,
+                                 num_red=num_red, num_green=num_green + 1)
 
 
     def run(self, result=None):
@@ -1860,7 +1895,12 @@ class TestCase(expecttest.TestCase):
             if TEST_WITH_CROSSREF:
                 stack.enter_context(torch.overrides.push_torch_function_mode(CrossRefMode))
             num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
-            self._run_with_retry(result=result, num_runs_left=num_runs, report_only=not OVERRIDE_FLAKY_SIGNAL)
+            self._run_with_retry(
+                result=result,
+                num_runs_left=num_runs,
+                report_only=not OVERRIDE_FLAKY_SIGNAL,
+                num_red=0,
+                num_green=0)
 
     def setUp(self):
         check_if_enable(self)
@@ -1920,7 +1960,7 @@ class TestCase(expecttest.TestCase):
         final correction, while the external part of the window is
         filled with counts to meet the nnz contraint exactly.
         """
-        assert 0 <= nnz <= n_rows * n_cols
+        assert 0 <= nnz <= n_rows * n_cols, (nnz, n_rows, n_cols)
 
         def sawteeth(n, m):
             # return the total number of counts in the sequence of
@@ -2016,37 +2056,67 @@ class TestCase(expecttest.TestCase):
         crow_indices.cumsum_(dim=0)
         return crow_indices.to(device=device)
 
-    def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
+    def genSparseCompressedTensor(self, size, nnz, *, layout, device, dtype, index_dtype, blocksize=()):
         from operator import mul
         from functools import reduce
         sparse_dim = 2
         assert all(size[d] > 0 for d in range(len(size))) or nnz == 0, 'invalid arguments'
         assert len(size) >= sparse_dim
+        if blocksize:
+            assert len(blocksize) == 2, (size, blocksize)
+            assert size[-2] % blocksize[0] == 0, (size, blocksize)
+            assert size[-1] % blocksize[1] == 0, (size, blocksize)
+            blocksize0, blocksize1 = blocksize
+        else:
+            blocksize0 = blocksize1 = 1
 
-        def random_sparse_csr(n_rows, n_cols, nnz):
-            crow_indices = self._make_crow_indices(n_rows, n_cols, nnz, device=device, dtype=index_dtype)
-            col_indices = torch.zeros(nnz, dtype=index_dtype, device=device)
-            for i in range(n_rows):
-                count = crow_indices[i + 1] - crow_indices[i]
-                col_indices[crow_indices[i]:crow_indices[i + 1]], _ = torch.sort(
-                    torch.randperm(n_cols, dtype=index_dtype, device=device)[:count])
+        def random_sparse_compressed(n_compressed_dims, n_plain_dims, nnz):
+            compressed_indices = self._make_crow_indices(n_compressed_dims, n_plain_dims, nnz, device=device, dtype=index_dtype)
+            plain_indices = torch.zeros(nnz, dtype=index_dtype, device=device)
+            for i in range(n_compressed_dims):
+                count = compressed_indices[i + 1] - compressed_indices[i]
+                plain_indices[compressed_indices[i]:compressed_indices[i + 1]], _ = torch.sort(
+                    torch.randperm(n_plain_dims, dtype=index_dtype, device=device)[:count])
             low = -1 if dtype != torch.uint8 else 0
             high = 1 if dtype != torch.uint8 else 2
-            values = make_tensor([nnz], device=device, dtype=dtype, low=low, high=high)
-            return values, crow_indices, col_indices
+            values = make_tensor((nnz,) + blocksize, device=device, dtype=dtype, low=low, high=high)
+            return values, compressed_indices, plain_indices
 
         batch_shape = size[:-2]
         n_batch = reduce(mul, batch_shape, 1)
 
-        sparse_tensors = [random_sparse_csr(size[-2], size[-1], nnz) for _ in range(n_batch)]
+        if layout in {torch.sparse_csr, torch.sparse_bsr}:
+            n_compressed_dims, n_plain_dims = size[-2] // blocksize0, size[-1] // blocksize1
+        else:
+            n_compressed_dims, n_plain_dims = size[-1] // blocksize1, size[-2] // blocksize0
+        blocknnz = nnz // (blocksize0 * blocksize1)
+        sparse_tensors = [random_sparse_compressed(n_compressed_dims, n_plain_dims, blocknnz) for _ in range(n_batch)]
         sparse_tensors_it = map(list, zip(*sparse_tensors))
-        values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
-        crow_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
-        col_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
 
-        return torch.sparse_csr_tensor(crow_indices,
-                                       col_indices,
-                                       values, size=size, dtype=dtype, device=device)
+        values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, blocknnz, *blocksize)
+        compressed_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
+        plain_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
+
+        return torch.sparse_compressed_tensor(compressed_indices, plain_indices,
+                                              values, size=size, dtype=dtype, layout=layout, device=device)
+
+    def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
+        return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_csr, device=device,
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=())
+
+    def genSparseCSCTensor(self, size, nnz, *, device, dtype, index_dtype):
+        return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_csc, device=device,
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=())
+
+    def genSparseBSRTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype):
+        assert len(blocksize) == 2
+        return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_bsr, device=device,
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize)
+
+    def genSparseBSCTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype):
+        assert len(blocksize) == 2
+        return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_bsc, device=device,
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize)
 
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device, dtype):
         # Assert not given impossible combination, where the sparse dims have
@@ -2059,8 +2129,9 @@ class TestCase(expecttest.TestCase):
         i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
         i = i.to(torch.long)
         if is_uncoalesced:
-            v = torch.cat([v, torch.randn_like(v)], 0)
-            i = torch.cat([i, i], 1)
+            i1 = i[:, :(nnz // 2), ...]
+            i2 = i[:, :((nnz + 1) // 2), ...]
+            i = torch.cat([i1, i2], 1)
         x = torch.sparse_coo_tensor(i, v, torch.Size(size), dtype=dtype, device=device)
 
         if not is_uncoalesced:
@@ -2084,7 +2155,8 @@ class TestCase(expecttest.TestCase):
     # Compares a torch function with a reference function for a given sample input (object of SampleInput)
     # Note: only values are compared, type comparison is not done here
     def compare_with_reference(self, torch_fn, ref_fn, sample_input, **kwargs):
-        n_inp, n_args, n_kwargs = sample_input.numpy()
+        numpy_sample = sample_input.numpy()
+        n_inp, n_args, n_kwargs = numpy_sample.input, numpy_sample.args, numpy_sample.kwargs
         t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
 
         actual = torch_fn(t_inp, *t_args, **t_kwargs)
@@ -2140,7 +2212,7 @@ class TestCase(expecttest.TestCase):
             self,
             x,
             y,
-            msg: Optional[str] = None,
+            msg: Optional[Union[str, Callable[[str], str]]] = None,
             *,
             atol: Optional[float] = None,
             rtol: Optional[float] = None,
@@ -2208,7 +2280,10 @@ class TestCase(expecttest.TestCase):
             check_layout=exact_layout,
             check_stride=exact_stride,
             check_is_coalesced=exact_is_coalesced,
-            msg=msg,
+            # This emulates unittest.TestCase's behavior if a custom message passed and
+            # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
+            # is True (default)
+            msg=(lambda generated_msg: f"{generated_msg} : {msg}") if isinstance(msg, str) and self.longMessage else msg,
         )
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
@@ -2423,6 +2498,19 @@ class TestCase(expecttest.TestCase):
 
         msg = self._formatMessage(msg, standardMsg)
         raise self.failureException(msg)
+
+    def assertAtenOp(self, onnx_model, operator, overload_name=""):
+        all_aten_nodes = [p for p in onnx_model.graph.node
+                          if p.op_type == "ATen" and p.domain == "org.pytorch.aten"]
+        self.assertTrue(all_aten_nodes)
+
+        for op in all_aten_nodes:
+            attrs = {attr.name: attr.s.decode() for attr in op.attribute}
+            if attrs.get("operator") == operator:
+                break
+
+        self.assertEqual(attrs["operator"], operator)
+        self.assertEqual(attrs.get("overload_name", ""), overload_name)
 
     # run code in subprocess and capture exceptions.
     @staticmethod
@@ -3118,21 +3206,6 @@ def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.devi
     return torch.tensor(res, device=device, dtype=dtype)
 
 
-def has_breakpad():
-    # We always build with breakpad in CI
-    if IS_IN_CI:
-        return True
-
-    # If not on a special build, check that the library was actually linked in
-    try:
-        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
-        return True
-    except RuntimeError as e:
-        if "Minidump handler is uninintialized" in str(e):
-            return True
-        return False
-
-
 def sandcastle_skip_if(condition, reason):
     """
     Similar to unittest.skipIf, however in the sandcastle environment it just
@@ -3232,3 +3305,12 @@ def clone_input_helper(input):
         return tuple(map(clone_input_helper, input))
 
     return input
+
+@contextmanager
+def custom_op(opname, symbolic_fn, opset_version):
+    """Context manager/decorator to test ONNX export with custom oeprator"""
+    try:
+        register_custom_op_symbolic(opname, symbolic_fn, opset_version)
+        yield
+    finally:
+        unregister_custom_op_symbolic(opname, opset_version)

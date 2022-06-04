@@ -30,7 +30,7 @@ TORCH_META_FUNC(_softmax)
       dim_ >= 0 && dim_ < input_dim,
       "dim must be non-negative and less than input dimensions");
 
-  set_output(input.sizes(), output_options);
+  set_output_raw_strided(0, input.sizes(), {}, output_options);
 }
 
 TORCH_META_FUNC(_log_softmax) (
@@ -51,7 +51,7 @@ TORCH_META_FUNC(_log_softmax) (
       dim_ >= 0 && dim_ < input_dim,
       "dim must be non-negative and less than input dimensions");
 
-  set_output(input.sizes(), output_options);
+  set_output_raw_strided(0, input.sizes(), {}, output_options);
 }
 
 TORCH_META_FUNC(_softmax_backward_data)
@@ -87,7 +87,7 @@ TORCH_META_FUNC(_softmax_backward_data)
       dim_ >= 0 && dim_ < grad_dim,
       "dim must be non-negative and less than input dimensions");
 
-  set_output(grad.sizes(), grad_input_options);
+  set_output_raw_strided(0, grad.sizes(), {}, grad_input_options);
 }
 
 TORCH_META_FUNC(_log_softmax_backward_data)
@@ -119,7 +119,7 @@ TORCH_META_FUNC(_log_softmax_backward_data)
       dim_ >= 0 && dim_ < grad_dim,
       "dim must be non-negative and less than input dimensions");
 
-  set_output(grad.sizes(), grad_input_options);
+  set_output_raw_strided(0, grad.sizes(), {}, grad_input_options);
 }
 }
 
@@ -438,6 +438,43 @@ Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarTyp
   return result;
 }
 
+Tensor& softmax_out(
+    const Tensor& input_,
+    const int64_t dim_,
+    c10::optional<ScalarType> dtype,
+    Tensor& output_) {
+  Tensor output_temp;
+  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half &&
+      dtype == ScalarType::Float) {
+    if (!output_.is_contiguous()) {
+      auto options =
+          TensorOptions().dtype(output_.dtype()).device(output_.device());
+      output_temp = at::empty(output_.sizes(), options);
+      at::_softmax_out(output_temp, input_, dim_, true);
+    } else {
+      at::_softmax_out(output_, input_, dim_, true);
+    }
+  } else {
+    Tensor converted =
+        dtype.has_value() ? input_.toType(dtype.value()) : input_;
+    if (!output_.is_contiguous()) {
+      auto options =
+          TensorOptions().dtype(output_.dtype()).device(output_.device());
+      output_temp = at::empty(output_.sizes(), options);
+      at::_softmax_out(output_temp, converted, dim_, false);
+    } else {
+      at::_softmax_out(output_, converted, dim_, false);
+    }
+  }
+
+  if (!output_.is_contiguous()) {
+    output_.resize_(output_temp.sizes());
+    output_.copy_(output_temp);
+  }
+
+  return output_;
+}
+
 // special_softmax, alias for softmax
 Tensor special_softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
   return at::softmax(input_, dim_, dtype);
@@ -464,6 +501,43 @@ Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<Scala
   }();
   namedinference::propagate_names(result, input_);
   return result;
+}
+
+Tensor& log_softmax_out(
+    const Tensor& input_,
+    const int64_t dim_,
+    c10::optional<ScalarType> dtype,
+    Tensor& output_) {
+  Tensor output_temp;
+  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half &&
+      dtype == ScalarType::Float) {
+    if (!output_.is_contiguous()) {
+      auto options =
+          TensorOptions().dtype(output_.dtype()).device(output_.device());
+      output_temp = at::empty(output_.sizes(), options);
+      at::_log_softmax_out(output_temp, input_, dim_, true);
+    } else {
+      at::_log_softmax_out(output_, input_, dim_, true);
+    }
+  } else {
+    Tensor converted =
+        dtype.has_value() ? input_.toType(dtype.value()) : input_;
+    if (!output_.is_contiguous()) {
+      auto options =
+          TensorOptions().dtype(output_.dtype()).device(output_.device());
+      output_temp = at::empty(output_.sizes(), options);
+      at::_log_softmax_out(output_temp, converted, dim_, false);
+    } else {
+      at::_log_softmax_out(output_, converted, dim_, false);
+    }
+  }
+
+  if (!output_.is_contiguous()) {
+    output_.resize_(output_temp.sizes());
+    output_.copy_(output_temp);
+  }
+
+  return output_;
 }
 
 Tensor special_log_softmax(const Tensor& input, const int64_t dim, c10::optional<ScalarType> dtype) {

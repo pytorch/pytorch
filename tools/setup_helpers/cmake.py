@@ -135,14 +135,14 @@ class CMake:
         cmake3_version = CMake._get_version(which("cmake3"))
         cmake_version = CMake._get_version(which("cmake"))
 
-        _cmake_min_version = LooseVersion("3.10.0")
+        _cmake_min_version = LooseVersion("3.13.0")
         if all(
             (
                 ver is None or ver < _cmake_min_version
                 for ver in [cmake_version, cmake3_version]
             )
         ):
-            raise RuntimeError("no cmake or cmake3 with version >= 3.10.0 found")
+            raise RuntimeError("no cmake or cmake3 with version >= 3.13.0 found")
 
         if cmake3_version is None:
             cmake_command = "cmake"
@@ -282,6 +282,7 @@ class CMake:
                 var: var
                 for var in (
                     "BLAS",
+                    "WITH_BLAS",
                     "BUILDING_WITH_TORCH_LIBS",
                     "CUDA_HOST_COMILER",
                     "CUDA_NVCC_EXECUTABLE",
@@ -342,7 +343,7 @@ class CMake:
         cmake_prefix_path = build_options.get("CMAKE_PREFIX_PATH", None)
         if cmake_prefix_path:
             build_options["CMAKE_PREFIX_PATH"] = (
-                cast(str, py_lib_path) + ";" + cast(str, cmake_prefix_path)
+                py_lib_path + ";" + cast(str, cmake_prefix_path)
             )
         else:
             build_options["CMAKE_PREFIX_PATH"] = py_lib_path

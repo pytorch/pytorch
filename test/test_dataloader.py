@@ -36,7 +36,8 @@ from torch.utils.data.datapipes.map import SequenceWrapper
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
-                                                  load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE)
+                                                  load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
+                                                  IS_MACOS)
 
 
 try:
@@ -658,8 +659,6 @@ class TestProperExitIterableDataset(IterableDataset):
         if self.remaining < 0:
             raise StopIteration
         return torch.tensor(-1000)
-
-    next = __next__  # py2 compatibility
 
 
 # See TestDataLoader.test_proper_exit for usage
@@ -1375,6 +1374,7 @@ except RuntimeError as e:
         with self.assertRaisesRegex(AssertionError, "ChainDataset only supports IterableDataset"):
             list(iter(ChainDataset([dataset1, self.dataset])))
 
+    @unittest.skipIf(IS_MACOS, "Not working on macos")
     def test_multiprocessing_contexts(self):
         reference = [
             torch.arange(3),
@@ -2349,6 +2349,19 @@ class TestDictDataLoader(TestCase):
             self.assertTrue(sample['a_tensor'].is_pinned())
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_pin_memory_device(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True, pin_memory_device='cuda')
+        for sample in loader:
+            self.assertTrue(sample['a_tensor'].is_pinned(device='cuda'))
+            self.assertTrue(sample['another_dict']['a_number'].is_pinned(device='cuda'))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_pin_memory_with_only_device(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory_device='cuda')
+        for sample in loader:
+            self.assertFalse(sample['a_tensor'].is_pinned(device='cuda'))
+            self.assertFalse(sample['another_dict']['a_number'].is_pinned(device='cuda'))
 
 class DummyDataset(torch.utils.data.Dataset):
     def __init__(self):

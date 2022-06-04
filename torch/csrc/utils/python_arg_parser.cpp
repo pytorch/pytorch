@@ -7,6 +7,7 @@
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
+#include <torch/csrc/utils/torch_dispatch_mode.h>
 
 #include <ATen/ATen.h>
 #include <ATen/PythonTorchFunctionTLS.h>
@@ -248,33 +249,38 @@ auto handle_torch_function_no_python_arg_parser(
   py::tuple py_types = py::cast(overloaded_types);
   py::object ret;
   PyObject* mode_obj = nullptr;
-  if (torch_function_name == TorchFunctionName::TorchFunction) {
-    const auto& maybe_mode = at::impl::PythonTorchFunctionTLS::get_mode();
-    if (maybe_mode) {
-      mode_obj = maybe_mode->ptr(getPyInterpreter());
-      TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
-      TORCH_INTERNAL_ASSERT(args != nullptr);
-      // Disable mode on the inside; this makes for a more user-friendly
-      // experience if you try to, e.g., print your tensors.
-      torch::overrides::no_torch_function_mode g;
-      // Blegh.  This accidentally works in PyObject_CallFunctionObjArgs below
-      // because the nullptr terminates the argument list ick ick ick.
-      if (kwargs == nullptr) {
-        ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
-            mode_obj, torch_function_mode_name, "OOO", torch_api_function, py_types.ptr(), args));
-      } else {
-        ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
-            mode_obj,
-            torch_function_mode_name,
-            "OOOO",
-            torch_api_function,
-            py_types.ptr(),
-            args,
-            kwargs));
-      }
-      if (ret.ptr() == nullptr) {
-        throw python_error();
-      }
+  const bool is_torch_function = torch_function_name == TorchFunctionName::TorchFunction;
+  const auto& maybe_mode = is_torch_function ? at::impl::PythonTorchFunctionTLS::get_mode() : at::impl::TorchDispatchModeTLS::get_state();
+  if (maybe_mode) {
+    mode_obj = maybe_mode->ptr(getPyInterpreter());
+    TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
+    TORCH_INTERNAL_ASSERT(args != nullptr);
+    // Disable mode on the inside; this makes for a more user-friendly
+    // experience if you try to, e.g., print your tensors.
+    at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
+    at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
+    if (is_torch_function) {
+      tf_g.emplace();
+    } else{
+      td_g.emplace();
+    }
+    // Blegh.  This accidentally works in PyObject_CallFunctionObjArgs below
+    // because the nullptr terminates the argument list ick ick ick.
+    if (kwargs == nullptr) {
+      ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
+          mode_obj, torch_function_name_str, "OOO", torch_api_function, py_types.ptr(), args));
+    } else {
+      ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
+          mode_obj,
+          torch_function_name_str,
+          "OOOO",
+          torch_api_function,
+          py_types.ptr(),
+          args,
+          kwargs));
+    }
+    if (ret.ptr() == nullptr) {
+      throw python_error();
     }
   }
   if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
@@ -286,8 +292,8 @@ auto handle_torch_function_no_python_arg_parser(
       // See https://github.com/pytorch/pytorch/issues/63767
       if (PyObject_FastGetAttrString(torch_function.ptr(), "__self__").is(arg) &&
           torch_function.ptr() != torch::disabled_torch_function_impl()) {
-        TORCH_WARN("Defining your `__torch_function__` as a plain method is deprecated and ",
-                   "will be an error in future, please define it as a classmethod.");
+        TORCH_WARN("Defining your `", torch_function_name_str, "` as a plain method is deprecated ",
+                   "and will be an error in future, please define it as a classmethod.");
       }
 
       ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(

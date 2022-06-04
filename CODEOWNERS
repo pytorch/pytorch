@@ -14,6 +14,7 @@
 /test/allowlist_for_publicAPI.json @albanD @anjali411
 /docs/source/conf.py @albanD
 /aten/src/ATen/native/native_functions.yaml @bdhirsh
+/aten/src/ATen/native/tags.yaml @anjali411
 
 # Tensorpipe RPC Agent.
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
@@ -45,7 +46,7 @@
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
 # related to Github Actions
-/.github/ @seemethere @janeyx99 @atalman
+/.github/ @pytorch/pytorch-dev-infra
 
 # Custom Test Infrastructure
 /test/run_test.py @pytorch/pytorch-dev-infra

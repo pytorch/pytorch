@@ -10,8 +10,8 @@ import torch.nn.intrinsic.qat as nniqat
 import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
 from ..observer import (
-    default_affine_fixed_qparams_observer,
-    default_symmetric_fixed_qparams_observer,
+    default_fixed_qparams_range_0to1_observer,
+    default_fixed_qparams_range_neg1to1_observer,
 )
 from ..fake_quantize import FixedQParamsFakeQuantize
 from ..fuser_method_mappings import (
@@ -145,18 +145,11 @@ _DEFAULT_OP_INT8_CONFIGS = [
         torch.nn.functional.layer_norm,
     ]]
 
-def _get_linear_configs():
+def _get_linear_configs(dtype_configs):
     """
     Return all configs related to linear modules and ops.
     """
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-    dtype_configs = [
-        weighted_op_int8_dtype_config,
-        default_dynamic_int8_dtype_config,
-        default_dynamic_float16_dtype_config,
-        # TODO: maybe remove this since fbgemm/qnnpack doesn't have kernels for it
-        default_op_fp16_dtype_config,
-    ]
     linear_configs = []
 
     # (1) Single linear modules/functions
@@ -269,13 +262,12 @@ def _get_linear_configs():
     })
     return linear_configs
 
-def _get_conv_configs():
+def _get_conv_configs(dtype_configs):
     """
     Return all configs related to conv modules and ops.
     """
     conv_configs = []
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-    dtype_configs = [weighted_op_int8_dtype_config]
     for convs in [_Conv1dMetadata, _Conv2dMetadata, _Conv3dMetadata]:
 
         # (1) Single conv modules/functions
@@ -446,7 +438,7 @@ def _get_conv_configs():
 
     return conv_configs
 
-def _get_binary_op_configs():
+def _get_binary_op_configs(dtype_configs):
     binary_op_configs: List[Dict[str, Any]] = []
     num_tensor_args_to_observation_type_mapping = {
         # TODO: this is not used right now since we have extra check in prepare
@@ -456,10 +448,6 @@ def _get_binary_op_configs():
         1: ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
         2: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
     }
-    dtype_configs = [
-        weighted_op_int8_dtype_config,
-        default_op_fp16_dtype_config,
-    ]
     for op_with_quantized_bop_scalar_variant in [
             operator.add, torch.add, operator.mul, torch.mul]:
         binary_op_configs.append({
@@ -488,19 +476,19 @@ def _get_binary_op_configs():
 def _get_fixed_qparams_op_configs():
     fixed_qparams_op_configs = []
     for fixed_qparam_op, output_observer in [
-            (torch.nn.Hardsigmoid, default_affine_fixed_qparams_observer),
-            (torch.nn.functional.hardsigmoid, default_affine_fixed_qparams_observer),
-            ("hardsigmoid", default_affine_fixed_qparams_observer),
-            ("hardsigmoid_", default_affine_fixed_qparams_observer),
-            (torch.nn.Sigmoid, default_affine_fixed_qparams_observer),
-            (torch.sigmoid, default_affine_fixed_qparams_observer),
-            ("sigmoid", default_affine_fixed_qparams_observer),
-            ("sigmoid_", default_affine_fixed_qparams_observer),
-            (torch.nn.Tanh, default_symmetric_fixed_qparams_observer),
-            (torch.tanh, default_symmetric_fixed_qparams_observer),
-            ("tanh", default_symmetric_fixed_qparams_observer),
-            ("tanh_", default_symmetric_fixed_qparams_observer),
-            (torch.nn.Softmax, default_affine_fixed_qparams_observer),
+            (torch.nn.Hardsigmoid, default_fixed_qparams_range_0to1_observer),
+            (torch.nn.functional.hardsigmoid, default_fixed_qparams_range_0to1_observer),
+            ("hardsigmoid", default_fixed_qparams_range_0to1_observer),
+            ("hardsigmoid_", default_fixed_qparams_range_0to1_observer),
+            (torch.nn.Sigmoid, default_fixed_qparams_range_0to1_observer),
+            (torch.sigmoid, default_fixed_qparams_range_0to1_observer),
+            ("sigmoid", default_fixed_qparams_range_0to1_observer),
+            ("sigmoid_", default_fixed_qparams_range_0to1_observer),
+            (torch.nn.Tanh, default_fixed_qparams_range_neg1to1_observer),
+            (torch.tanh, default_fixed_qparams_range_neg1to1_observer),
+            ("tanh", default_fixed_qparams_range_neg1to1_observer),
+            ("tanh_", default_fixed_qparams_range_neg1to1_observer),
+            (torch.nn.Softmax, default_fixed_qparams_range_0to1_observer),
     ]:
         fixed_qparams_op_configs.append({
             "pattern": fixed_qparam_op,
@@ -567,7 +555,7 @@ def _get_bn_configs():
         })
     return bn_configs
 
-def _get_share_qparams_op_configs():
+def _get_share_qparams_op_configs(dtype_configs):
     """ Get the operator config for the operators that works for both float and quantized input
     if input is quantized, the output Tensor shares the same quantization parameter
     with input.
@@ -580,7 +568,7 @@ def _get_share_qparams_op_configs():
         return {
             "pattern": op,
             "observation_type": ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
-            "dtype_configs": [default_op_quint8_dtype_config, default_op_fp16_dtype_config],
+            "dtype_configs": dtype_configs,
         }
 
     share_qparams_ops = [
@@ -696,18 +684,34 @@ def _get_embedding_op_configs():
 
 def get_native_backend_config_dict():
     """ Get backend_config_dict for PyTorch Native backend (fbgemm/qnnpack). """
+    conv_dtype_configs = [weighted_op_int8_dtype_config]
+    linear_dtype_configs = [
+        weighted_op_int8_dtype_config,
+        default_dynamic_int8_dtype_config,
+        default_dynamic_float16_dtype_config,
+        # TODO: maybe remove this since fbgemm/qnnpack doesn't have kernels for it
+        default_op_fp16_dtype_config,
+    ]
+    binary_op_dtype_configs = [
+        weighted_op_int8_dtype_config,
+        default_op_fp16_dtype_config,
+    ]
+    share_qparams_op_dtype_configs = [
+        default_op_quint8_dtype_config,
+        default_op_fp16_dtype_config
+    ]
     return {
         # optional
         "name": "native",
         "configs": [
             *_DEFAULT_OP_INT8_CONFIGS,
-            *_get_linear_configs(),
-            *_get_conv_configs(),
-            *_get_binary_op_configs(),
+            *_get_linear_configs(linear_dtype_configs),
+            *_get_conv_configs(conv_dtype_configs),
+            *_get_binary_op_configs(binary_op_dtype_configs),
             *_get_fixed_qparams_op_configs(),
             _CAT_CONFIG,
             *_get_bn_configs(),
-            *_get_share_qparams_op_configs(),
+            *_get_share_qparams_op_configs(share_qparams_op_dtype_configs),
             *_get_rnn_op_configs(),
             *_get_embedding_op_configs(),
         ],

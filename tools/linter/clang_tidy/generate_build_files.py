@@ -43,7 +43,7 @@ def run_autogen() -> None:
         [
             sys.executable,
             "-m",
-            "tools.codegen.gen",
+            "torchgen.gen",
             "-s",
             "aten/src/ATen",
             "-d",
@@ -58,6 +58,8 @@ def run_autogen() -> None:
             "tools/setup_helpers/generate_code.py",
             "--native-functions-path",
             "aten/src/ATen/native/native_functions.yaml",
+            "--tags-path",
+            "aten/src/ATen/native/tags.yaml",
             "--gen_lazy_ts_backend",
         ]
     )

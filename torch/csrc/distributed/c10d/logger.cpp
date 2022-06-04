@@ -138,14 +138,6 @@ std::vector<int64_t> Logger::get_bucket_sizes() {
   return bucket_sizes;
 }
 
-std::vector<int> Logger::get_bucket_size_limits() {
-  std::vector<int> bucket_size_limits;
-  for (const auto& bucket : reducer_->buckets_) {
-    bucket_size_limits.push_back(bucket.bucket_size_limit);
-  }
-  return bucket_size_limits;
-}
-
 // Communication hook. Empty string if not set, in which case it will not be
 // logged.
 void Logger::set_comm_hook(const std::string& hook) {
@@ -190,9 +182,6 @@ void Logger::set_construction_data_and_log(
   // A list of bucket sizes (Bytes) calculated during construction time
   ddp_logging_data_->strs_map["bucket_sizes"] =
       c10::Join(", ", get_bucket_sizes());
-  // A list of bucket size limits (bytes) specified during construction time
-  ddp_logging_data_->strs_map["initial_bucket_size_limits"] =
-      c10::Join(", ", get_bucket_size_limits());
   set_env_variables();
 
   // DistributedDataParallel constructor input parameters
@@ -299,8 +288,6 @@ void Logger::set_runtime_stats_and_log() {
         reducer_->has_rebuilt_bucket_;
     ddp_logging_data_->strs_map["rebuilt_bucket_sizes"] =
         c10::Join(", ", get_bucket_sizes());
-    ddp_logging_data_->strs_map["rebuilt_bucket_size_limits"] =
-        c10::Join(", ", get_bucket_size_limits());
     // Log per-bucket variable indices
     std::vector<std::string> per_bucket_variable_indices;
     auto indices = get_per_bucket_variable_indices();

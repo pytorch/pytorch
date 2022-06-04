@@ -15,7 +15,9 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
+#include <ATen/OpMathType.h>
 
+#include <c10/util/math_compat.h>
 #include <c10/util/MathConstants.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/irange.h>
@@ -174,12 +176,19 @@ void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
 }
 
 static void abs_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "abs_cpu", [&]() {
-    cpu_kernel_vec(
-        iter,
-        [=](scalar_t a) -> scalar_t { return abs_impl(a); },
-        [=](Vectorized<scalar_t> a) { return a.abs(); });
-  });
+  auto dtype = iter.dtype();
+  if (dtype == kComplexHalf) {
+    using scalar_t = c10::complex<Half>;
+    using opmath_t = at::opmath_type<scalar_t>;
+    cpu_kernel(iter, [=](scalar_t a) -> scalar_t { return abs_impl(opmath_t{a}); });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "abs_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t { return abs_impl(a); },
+          [=](Vectorized<scalar_t> a) { return a.abs(); });
+    });
+  }
 }
 
 static void angle_kernel(TensorIteratorBase& iter) {
@@ -191,28 +200,10 @@ static void angle_kernel(TensorIteratorBase& iter) {
   });
 }
 
-static void real_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "real_cpu", [&]() {
-    cpu_kernel_vec(
-        iter,
-        [=](scalar_t a) -> scalar_t { return real_impl(a); },
-        [=](Vectorized<scalar_t> a) { return a.real(); });
-  });
-}
-
-static void imag_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "imag_cpu", [&]() {
-    cpu_kernel_vec(
-        iter,
-        [=](scalar_t a) -> scalar_t { return imag_impl(a); },
-        [=](Vectorized<scalar_t> a) { return a.imag(); });
-  });
-}
-
 // NB: Ignores the negative bit on tensors
 void conj_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kBool, kBFloat16, kHalf, kComplexHalf, iter.common_dtype(), "conj_cpu", [&]() {
         cpu_kernel_vec(
             iter,
             [=](scalar_t a) -> scalar_t { return conj_impl(a); },
@@ -275,7 +266,7 @@ void reciprocal_kernel(TensorIteratorBase& iter) {
 
 // NB: Ignores the negative bit on tensors
 void neg_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "neg_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kComplexHalf, kBFloat16, kHalf, iter.dtype(), "neg_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return -a; },
@@ -307,18 +298,32 @@ void sign_kernel(TensorIteratorBase& iter){
 }
 
 static void signbit_kernel(TensorIteratorBase& iter){
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
-    cpu_kernel(iter, [](scalar_t a) -> bool { return a < 0; });
-  });
+  // NOTE: signbit does not always support integral arguments.
+  if (at::isIntegralType(iter.input_dtype(), /*includeBool=*/false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.input_dtype(), "signbit_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a) -> bool { return a < 0; }); });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
+      using opmath_t = at::opmath_type<scalar_t>;
+     cpu_kernel(iter, [](scalar_t a) -> bool { return std::signbit(opmath_t{a}); }); });
+  }
 }
 
-static void sgn_kernel(TensorIteratorBase& iter){
-  AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sgn_cpu", [&]() {
-    cpu_kernel_vec(
-      iter,
-      [=](scalar_t a) -> scalar_t { return sgn_impl(a); },
-      [=](Vectorized<scalar_t> a) { return a.sgn(); });
-  });
+static void sgn_kernel(TensorIteratorBase& iter) {
+  auto dtype = iter.dtype();
+  if (dtype == kComplexHalf) {
+    using scalar_t = c10::complex<Half>;
+    using opmath_t = at::opmath_type<scalar_t>;
+    cpu_kernel(
+        iter, [=](scalar_t a) -> scalar_t { return sgn_impl(opmath_t{a}); });
+  } else {
+    AT_DISPATCH_COMPLEX_TYPES(dtype, "sgn_cpu", [&]() {
+      cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return sgn_impl(a); },
+        [=](Vectorized<scalar_t> a) { return a.sgn(); });
+    });
+  }
 }
 
 static void sinc_kernel(TensorIteratorBase& iter) {
@@ -621,8 +626,6 @@ REGISTER_DISPATCH(sigmoid_stub, &CPU_CAPABILITY::sigmoid_kernel);
 REGISTER_DISPATCH(logit_stub, &CPU_CAPABILITY::logit_kernel);
 REGISTER_DISPATCH(abs_stub, &CPU_CAPABILITY::abs_kernel);
 REGISTER_DISPATCH(angle_stub, &CPU_CAPABILITY::angle_kernel);
-REGISTER_DISPATCH(real_stub, &CPU_CAPABILITY::real_kernel);
-REGISTER_DISPATCH(imag_stub, &CPU_CAPABILITY::imag_kernel);
 REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel);
 REGISTER_DISPATCH(exp2_stub, &CPU_CAPABILITY::exp2_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel);
