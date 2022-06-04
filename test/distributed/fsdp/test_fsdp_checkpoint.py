@@ -30,6 +30,7 @@ from torch.utils.checkpoint import checkpoint
 _save_on_cpu_called = False
 def get_patched_save_on_cpu():
     orig_save_on_cpu = torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu
+
     def patched_save_on_cpu(*args, **kwargs):
         global _save_on_cpu_called
         _save_on_cpu_called = True
