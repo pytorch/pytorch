@@ -101,12 +101,12 @@ class IcicleNode:
 
     @staticmethod
     def annotate_test(f):
-      """Provide a marker so the Python stack can filter the test runner code."""
+        """Provide a marker so the Python stack can filter the test runner code."""
 
-      @functools.wraps(f)
-      def begin_unit_test_marker(*args, **kwds):
-        return f(*args, **kwds)
-      return begin_unit_test_marker
+        @functools.wraps(f)
+        def begin_unit_test_marker(*args, **kwds):
+            return f(*args, **kwds)
+        return begin_unit_test_marker
 
     @classmethod
     def format(cls, profiler, indent: int = 0):
