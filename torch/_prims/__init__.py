@@ -27,7 +27,7 @@ import operator
 import math
 
 prim = torch.library.Library("prims", "DEF")
-prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
+prim_impl = torch.library.Library("prims", "IMPL", "CompositeImplicitAutograd")
 prim_autograd_impl = torch.library.Library("prims", "IMPL", "Autograd")
 prim_meta_impl = torch.library.Library("prims", "IMPL", "Meta")
 
