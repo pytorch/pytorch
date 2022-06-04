@@ -95,8 +95,8 @@ at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
 template <int kSpatialDim>
 template <bool kReluFused>
 void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& quantized_output, const at::Tensor& input, double output_scale) {
-  auto act_scale = input.q_scale();
-  auto weight_scale = maybe_padded_weight_.q_scale();
+  auto act_scale = at::native::q_scale_quant(input);
+  auto weight_scale = at::native::q_scale_quant(maybe_padded_weight_);
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
   at::Tensor requantize_multiplier_tensor = cudnn_utils::getRequantMultiplierTensor(requantize_multiplier, kSpatialDim + 2);
 
@@ -122,35 +122,6 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     std::cout << "requant_alloc_elapsed_time: " << requant_alloc_elapsed_time / 1000000.0 << "ms" <<std::endl;
   }
 
-  static double input_qscale_elapsed_time = 0.0;
-  static double weight_qscale_elapsed_time = 0.0;
-  auto start_input_qscale = std::chrono::high_resolution_clock::now();
-  // auto act_scale = input.q_scale();
-  auto act_scale = at::native::q_scale_quant(input);
-  auto stop_input_qscale = std::chrono::high_resolution_clock::now();
-
-  // auto weight_scale = maybe_padded_weight_.q_scale();
-  auto weight_scale = at::native::q_scale_quant(maybe_padded_weight_);
-  auto stop_weight_qscale = std::chrono::high_resolution_clock::now();
-
-  auto requantize_multiplier = act_scale * weight_scale / output_scale;
-  if (iter >= 20) {
-    input_qscale_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(stop_input_qscale - start_input_qscale).count();
-    weight_qscale_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(stop_weight_qscale - stop_input_qscale).count();
-  }
-  if (iter == 2019) {
-    std::cout << "input_qscale_elapsed_time: " << input_qscale_elapsed_time / 1000000.0 << "ms" << std::endl;
-    std::cout << "weight_qscale_elapsed_time: " << weight_qscale_elapsed_time / 1000000.0 << "ms" << std::endl;
-  }
-
-  static double fill_elapsed_time = 0.0;
-  auto stop_fill = std::chrono::high_resolution_clock::now();
-  if (iter >= 20) {
-    fill_elapsed_time += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(stop_fill - stop_weight_qscale).count();
-  }
-  if (iter == 2019) {
-    std::cout << "fill_elapsed_time: " << fill_elapsed_time / 1000000.0 << "ms" << std::endl;
-  }
   c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> broadcasted_bias;
 
