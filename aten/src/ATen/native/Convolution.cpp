@@ -800,6 +800,9 @@ at::Tensor conv2d(
     const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
+  static int64_t iter = 0;
+  static double conv2d_elapsed_time = 0.0;
+  auto start_conv2d = std::chrono::high_resolution_clock::now();
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
@@ -812,6 +815,14 @@ at::Tensor conv2d(
   } else {
     output = at::convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0}}, groups);
   }
+  auto stop_conv2d = std::chrono::high_resolution_clock::now();
+  if (iter >= 20) {
+    conv2d_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(stop_conv2d - start_conv2d).count();
+  }
+  if (iter == 2019) {
+    std::cout << "conv2d_elapsed_time: " << conv2d_elapsed_time / 1000000.0 << "ms" <<std::endl;
+  }
+  ++iter;
   return is_batched ? output : output.squeeze(0);
 }
 

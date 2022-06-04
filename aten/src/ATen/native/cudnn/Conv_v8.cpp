@@ -171,17 +171,43 @@ void setCacheKeyFused(CacheKeyFused& key, const Tensor& y, const Tensor& x, cons
 }
 
 void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const cudnn_frontend::ExecutionPlan& plan) {
+  static int64_t iter = 0;
+  static double run1_elapsed_time = 0.0;
+  static double run2_elapsed_time = 0.0;
+  static double run3_elapsed_time = 0.0;
+  static double run4_elapsed_time = 0.0;
+  static double run_tot_elapsed_time = 0.0;
+  auto start_run1 = std::chrono::high_resolution_clock::now();
   c10::DeviceGuard g(x.options().device());
   auto workspace_size = plan.getWorkspaceSize();
   auto workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
+  auto start_run2 = std::chrono::high_resolution_clock::now();
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
+  auto start_run3 = std::chrono::high_resolution_clock::now();
   auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setWorkspacePointer(workspace_size ? workspace_ptr.get() : nullptr)
       .setDataPointers(3, data_ptrs)
       .setUids(3, uids)
       .build();
+  auto start_run4 = std::chrono::high_resolution_clock::now();
   AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
+  auto run_end = std::chrono::high_resolution_clock::now();
+  if (iter >= 20) {
+      run1_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(start_run2 - start_run1).count();
+      run2_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(start_run3 - start_run2).count();
+      run3_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(start_run4 - start_run3).count();
+      run4_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(run_end - start_run4).count();
+      run_tot_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(run_end - start_run1).count();
+  }
+  if (iter == 2019) {
+      std::cout << "run workspace and device construction time: " << run1_elapsed_time / 1000000.0 << "ms" << std::endl;
+      std::cout << "run data ptrs and uids construction time: " << run2_elapsed_time / 1000000.0 << "ms" << std::endl;
+      std::cout << "run variantPack construction time: " << run3_elapsed_time / 1000000.0 << "ms" << std::endl;
+      std::cout << "run AT_CUDNN_CHECK time: " << run4_elapsed_time / 1000000.0 << "ms" << std::endl;
+      std::cout << "run total time: " << run_tot_elapsed_time / 1000000.0 << "ms" << std::endl;
+    }
+  ++iter;
 }
 
 void run_conv_plan_fused(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b, const cudnn_frontend::ExecutionPlan& plan) {

@@ -113,9 +113,23 @@ std::vector<Tensor> dequantize_tensors_quantized_cpu(TensorList tensors) {
 }
 
 double q_scale_quant(const Tensor& self) {
+  static int iter = 0;
+  static double elapsed_time = 0.0;
+  auto start = std::chrono::high_resolution_clock::now();
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerTensorAffine);
-  return static_cast<PerTensorAffineQuantizer*>(quantizer.get())->scale();
+  auto res = static_cast<PerTensorAffineQuantizer*>(quantizer.get())->scale();
+  auto stop = std::chrono::high_resolution_clock::now();
+
+  if (iter >= 40) {
+    elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start).count();
+  }
+  if (iter == 4018) {
+    std::cout << "inside q scale quant time " << elapsed_time / 1000000.0 << "ms" <<std::endl;
+  }
+
+  ++iter;
+  return res;
 }
 
 int64_t q_zero_point_quant(const Tensor& self) {

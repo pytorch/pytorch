@@ -5,6 +5,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
+#include <iostream>
 
 namespace at { namespace native {
 
@@ -245,6 +246,9 @@ static inline std::vector<int64_t> conv_output_size(
     IntArrayRef input_size, IntArrayRef weight_size,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
 ) {
+  static int iter = 0;
+  static double elapsed_time_conv_shape = 0;
+  auto start_conv_output = std::chrono::high_resolution_clock::now();
   // ASSERT(input_size.size() > 2)
   // ASSERT(input_size.size() == weight_size.size())
   bool has_dilation = dilation.size() > 0;
@@ -257,6 +261,14 @@ static inline std::vector<int64_t> conv_output_size(
     auto kernel = dilation_ * (weight_size[d] - 1) + 1;
     output_size[d] = (input_size[d] + (2 * padding[d - 2]) - kernel) / stride[d - 2] + 1;
   }
+  auto end_conv_output = std::chrono::high_resolution_clock::now();
+  if (iter >= 20) {
+    elapsed_time_conv_shape += std::chrono::duration_cast<std::chrono::nanoseconds>(end_conv_output - start_conv_output).count();
+  }
+  if (iter == 2019) {
+    std::cout << "conv output shape " << elapsed_time_conv_shape << std::endl;
+  }
+  ++iter;
   return output_size;
 }
 

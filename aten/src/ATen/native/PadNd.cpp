@@ -1,11 +1,14 @@
+#include "c10/core/MemoryFormat.h"
 #include <ATen/ATen.h>
 #include <ATen/native/PadNd.h>
 
 #include <c10/util/irange.h>
+#include <iostream>
 
 namespace at { namespace native {
 
 Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value) {
+  std::cout << "constant_pad_nd : " << self.is_quantized() << " " << self.is_contiguous() << " " << self.is_contiguous(at::MemoryFormat::ChannelsLast) << std::endl;
     TORCH_CHECK(pad.size() % 2 == 0, "Length of pad must be even but instead it equals ",
              pad.size());
 
@@ -69,9 +72,17 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value)
     } else {
         output = at::empty(new_shape, self.options().memory_format(memory_format));
     }
+    std::cout << "before fill" << std::endl;
+    std::cout << output.is_contiguous() << std::endl;
+    std::cout << output.is_contiguous(at::MemoryFormat::ChannelsLast) << std::endl;
     output.fill_(value);
+    std::cout << "after fill" << std::endl;
+
+
 
     auto c_output = output;
+  std::cout << "c output" << c_output.is_contiguous()  << std::endl;
+
     for (const auto i : c10::irange(l_diff, l_inp)) {
         auto pad_idx = 2 * (l_inp - i - 1);
         if (pad[pad_idx] > 0) {
@@ -81,6 +92,8 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value)
             c_output = c_output.narrow(i, 0, c_output.size(i) - pad[pad_idx + 1]);
         }
     }
+  std::cout << c_output.is_contiguous() << " " << c_input.is_contiguous() << std::endl;
+  std::cout << c_output.is_contiguous(at::MemoryFormat::ChannelsLast) << " " << c_input.is_contiguous(at::MemoryFormat::ChannelsLast) << std::endl;
     c_output.copy_(c_input);
     return output;
 }

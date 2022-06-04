@@ -98,7 +98,8 @@ struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
         groups_(groups),
         transpose_(transpose),
         q_scheme_(q_scheme),
-        num_unpadded_output_channels_(output_channels) {} // output channels needs to be stored when we have to pad this dimension
+        num_unpadded_output_channels_(output_channels),
+        handle{nullptr} {} // output channels needs to be stored when we have to pad this dimension
 
   at::Tensor apply(
       const at::Tensor& input,
@@ -175,6 +176,7 @@ struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
   bool transpose_;
   c10::QScheme q_scheme_;
   int64_t num_unpadded_output_channels_;
+  cudnnHandle_t handle;
 
   template <bool ReluFused>
   at::Tensor apply_impl(
@@ -207,7 +209,10 @@ uint8_t getAlignment(const at::Tensor &t) {
   // alignment are in bytes
   uint8_t alignment = 1;
   uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
+  // std::cout << "address: " << address << std::endl;
   while (address % alignment == 0 && alignment < 16) alignment *= 2;
+
+  // std::cout << (int)alignment << std::endl;
   return alignment;
 }
 

@@ -1,5 +1,6 @@
 #include <ATen/native/quantized/affine_quantizer.h>
 #include <cfenv>
+#include <iostream>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>
@@ -110,7 +111,7 @@ Tensor& quantize_tensor_per_tensor_affine(
     double scale,
     int64_t zero_point) {
   static constexpr auto fn_name = "quantize_tensor_per_tensor_affine";
-
+  std::cout << "quantize_tensor_per_tensor_affine" << std::endl;
   checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);

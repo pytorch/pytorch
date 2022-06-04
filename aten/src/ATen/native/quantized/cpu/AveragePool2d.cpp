@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <limits>
 #include <vector>
 
@@ -280,6 +281,8 @@ Tensor qnnpack_avg_pool2d(
   int64_t inW = input.size(3);
   auto output_shape =
       get_output_shape(input, kW, kH, dW, dH, padW, padH, ceil_mode);
+  std::cout << "output shape " << output_shape << std::endl;
+
   const int64_t oH = output_shape[output_shape.size() - 2];
   const int64_t oW = output_shape[output_shape.size() - 1];
   const auto outC = inC;
@@ -302,6 +305,12 @@ Tensor qnnpack_avg_pool2d(
       c10::MemoryFormat::ChannelsLast);
 
   pytorch_qnnp_operator_t qnnpack_operator{nullptr};
+  std::cout << padH << " " << padW << " " << std::endl;
+  std::cout << kH << " " << kW << " " << std::endl;
+  std::cout << dH << " " << dW << " " << std::endl;
+  std::cout << inC << " " << scale << " " << std::endl;
+  std::cout << &qnnpack_operator << std::endl;
+  std::cout << "before" << std::endl;
   const pytorch_qnnp_status createStatus =
       pytorch_qnnp_create_average_pooling2d_nhwc_q8(
           padH /* input_padding_height */,
@@ -319,6 +328,7 @@ Tensor qnnpack_avg_pool2d(
           std::numeric_limits<uint8_t>::max() /* output max */,
           0 /* flags */,
           &qnnpack_operator);
+std::cout << "here" << std::endl;
   CAFFE_ENFORCE(
       createStatus == pytorch_qnnp_status_success,
       "failed to create QNNPACK Average Pooling operator");
@@ -359,6 +369,9 @@ Tensor avg_pool2d_quantized_cpu(
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
   Tensor output;
+  std::cout << input.sizes() << std::endl;
+  std::cout << stride << std::endl;
+  std::cout << padding << std::endl;
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       input.scalar_type() == kQUInt8) {

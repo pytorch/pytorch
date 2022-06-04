@@ -5953,6 +5953,8 @@
     QuantizedCPU: dequantize_tensors_quantized_cpu
 
 - func: q_scale(Tensor self) -> float
+  device_check: NoCheck
+  device_guard: False
   variants: function, method
   dispatch:
     QuantizedCPU, QuantizedCUDA: q_scale_quant

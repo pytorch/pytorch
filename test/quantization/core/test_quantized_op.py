@@ -8,6 +8,7 @@ import numpy as np
 import unittest
 import operator
 import random
+import time
 
 import torch
 from torch import _VF
@@ -4502,11 +4503,11 @@ class TestQuantizedConv(TestCase):
            use_relu=st.booleans(),
            # TODO: enable channelwise
            use_channelwise=st.sampled_from([False]))
-    @skipIfNoFBGEMM
-    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
-                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
-                   "after it is built by default")
+    # @skipIfNoFBGEMM
+    # @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    # @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+    #                "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+    #                "after it is built by default")
     def test_qconv2d_cudnn(
             self,
             batch_size,
@@ -4561,14 +4562,16 @@ class TestQuantizedConv(TestCase):
             device=torch.device("cuda"),
             input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
 
-    @unittest.skip("used for local benchmarking, comment when we want to run it")
+    # @unittest.skip("used for local benchmarking, comment when we want to run it")
     def test_benchmark(self):
-        batch_size = 16
-        in_channel = 64
+        batch_size = 1
+        in_channel = 4
         out_channel = 64
-        kernel_size = 3
-        height = 256
-        width = 256
+        kernel_size = 7
+        height = 224
+        width = 224
+        bias=False
+        groups=1
         print(
             "parameters:",
             "batch_size:", batch_size,
@@ -4578,69 +4581,92 @@ class TestQuantizedConv(TestCase):
             "height:", height,
             "widht:", width
         )
-        conv = torch.nn.Conv2d(in_channel, out_channel, kernel_size).cuda()
+        conv = torch.nn.Conv2d(in_channel, out_channel, kernel_size, stride=2, padding=3, bias=bias).cuda()
         input = torch.randn((batch_size, in_channel, height, width), device='cuda')
         weight = conv.weight.detach()
-        stride = (1, 1)
-        padding = (0, 0)
+        stride = (2, 2)
+        padding = (3, 3)
         dilation = (1, 1)
         groups = 1
         conv_op = torch.nn.functional.conv2d
         # profile
         from torch.profiler import profile, ProfilerActivity
 
+        run_fp16 = True
+        run_int8 = False
+        use_pytorch_profiler = False
+        use_python_time = True
+
         def trace_handler(p):
-            output = p.key_averages().table(sort_by="self_cpu_time_total", row_limit=10)
+            output = p.key_averages().table(sort_by="self_cpu_time_total", row_limit=100)
             p.export_chrome_trace("/tmp/trace_" + str(p.step_num) + ".json")
 
+        num_active_iter = 2000
+        num_wait_iter = 10
+        num_warmup_iter = 10
         my_schedule = torch.profiler.schedule(
-            wait=5,
-            warmup=5,
-            active=20)
-
-        # fp32 benchmark
-        with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                schedule=my_schedule,
-                on_trace_ready=trace_handler) as prof:
-            for i in range(30):
-                conv_op(input, weight, None, stride, padding, dilation, groups)
-                prof.step()
-
-        print("fp32 benchmark result:")
-        print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
+            wait=num_wait_iter,
+            warmup=num_warmup_iter,
+            active=num_active_iter)
 
         # fp16 benchmark
-        input_fp16 = input.to(torch.float16)
-        weight_fp16 = input.to(torch.float16)
+        if run_fp16:
+            input_fp16 = input.to(torch.float16).to(memory_format=torch.channels_last)
+            weight_fp16 = weight.to(torch.float16).to(memory_format=torch.channels_last)
+            if use_pytorch_profiler:
+                with profile(
+                        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                        schedule=my_schedule,
+                        on_trace_ready=trace_handler) as prof:
+                    for i in range(num_active_iter + 20):
+                        conv_op(input_fp16, weight_fp16, None, stride, padding, dilation, groups)
+                        prof.step()
+                print("fp16 benchmark result:", flush=True)
+                print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=100, max_src_column_width=1000), flush=True)
 
-        with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                schedule=my_schedule,
-                on_trace_ready=trace_handler) as prof:
-            for i in range(30):
-                conv_op(input_fp16, weight_fp16, None, stride, padding, dilation, groups)
-                prof.step()
+            if use_python_time:
+                torch.cuda.synchronize()
+                for i in range(num_wait_iter + num_warmup_iter):
+                    conv_op(input_fp16, weight_fp16, None, stride, padding, dilation, groups)
+                torch.cuda.synchronize()
+                start = time.time()
+                for i in range(num_active_iter):
+                    conv_op(input_fp16, weight_fp16, None, stride, padding, dilation, groups)
+                torch.cuda.synchronize()
+                end = time.time()
+                print("Runtime for fp16 cuda: ", (end - start) * 1000, "ms", flush=True)
 
-        print("fp16 benchmark result:")
-        print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
+        print('_' * 100)
 
-        input_int8 = torch.quantize_per_tensor(input, 1, 0, torch.qint8).contiguous(memory_format=torch.channels_last)
-        weight_int8 = torch.quantize_per_tensor(weight, 1, 0, torch.qint8).contiguous(memory_format=torch.channels_last)
-        scale = 1.0
-        zero_point = 0
-        conv_op = torch.ops.quantized.conv2d
-        weight_prepacked = torch.ops.quantized.conv2d_prepack(weight_int8, None, stride, padding, dilation, groups)
-        with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                schedule=my_schedule,
-                on_trace_ready=trace_handler) as prof:
-            for i in range(30):
-                conv_op(input_int8, weight_prepacked, scale, zero_point)
-                prof.step()
-
-        print("int8 benchmark result:")
-        print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
+        if run_int8:
+            input_int8 = torch.quantize_per_tensor(input, 1, 0, torch.qint8).to(memory_format=torch.channels_last)
+            weight_int8 = torch.quantize_per_tensor(weight, 1, 0, torch.qint8).to(memory_format=torch.channels_last)
+            scale = 1.0
+            zero_point = 0
+            conv_op = torch.ops.quantized.conv2d
+            weight_prepacked = torch.ops.quantized.conv2d_prepack(weight_int8, None, stride, padding, dilation, groups)
+            if use_pytorch_profiler:
+                with profile(
+                        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                        schedule=my_schedule,
+                        record_shapes=False,
+                        on_trace_ready=trace_handler) as prof:
+                    for i in range(num_active_iter + 20):
+                        conv_op(input_int8, weight_prepacked, scale, zero_point)
+                        prof.step()
+                print("quantized cuda benchmark result:", flush=True)
+                print(prof.key_averages(group_by_input_shape=True).table(sort_by="self_cpu_time_total", row_limit=100), flush=True)
+            if use_python_time:
+                torch.cuda.synchronize()
+                for i in range(num_wait_iter + num_warmup_iter):
+                    conv_op(input_int8, weight_prepacked, scale, zero_point)
+                torch.cuda.synchronize()
+                start = time.time()
+                for i in range(num_active_iter):
+                    conv_op(input_int8, weight_prepacked, scale, zero_point)
+                torch.cuda.synchronize()
+                end = time.time()
+                print("Runtime for quantized cuda: ", (end - start) * 1000, "ms", flush=True)
 
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),

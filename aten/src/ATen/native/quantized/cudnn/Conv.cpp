@@ -1,3 +1,6 @@
+#include "c10/core/ScalarType.h"
+#include "c10/core/TensorOptions.h"
+#include <chrono>
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 
@@ -9,6 +12,7 @@
 #if HAS_CUDNN_V8()
 
 #include <ATen/ATen.h>
+#include <ATen/cuda/EmptyTensor.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Handle.h>
 #include <ATen/native/ConvUtils.h>
@@ -20,6 +24,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <cudnn_frontend.h>
 #include <torch/library.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <iostream>
 #include <unordered_map>
@@ -86,7 +91,6 @@ at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
   return {N, M, Y_H, Y_W};
 }
 
-
 // the parameter quantized_output is a quantized tensor
 template <int kSpatialDim>
 template <bool kReluFused>
@@ -96,8 +100,68 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
   at::Tensor requantize_multiplier_tensor = cudnn_utils::getRequantMultiplierTensor(requantize_multiplier, kSpatialDim + 2);
 
+  // std::cout << "Note that these sizes printed may include explicit padding: " << std::endl;
+  // std::cout << "input sizes " << input.sizes() << std::endl;
+  // std::cout << "weight sizes " << maybe_padded_weight_.sizes() << std::endl;
+  // std::cout << "padding sizes " << padding_.vec() << std::endl;
+  // std::cout << "stride sizes " << stride_.vec() << std::endl;
+  // std::cout << "dilation_ sizes " << dilation_.vec() << std::endl;
+  // std::cout << "bias: " << bias_.has_value() << std::endl;
+  // std::cout << "kReluFused: " << kReluFused << std::endl;
+  std::cout << "apply_impl_helper" << std::endl;
+  static int64_t iter = 0;
+  static double requant_alloc_elapsed_time = 0.0;
+  auto start_requant_alloc = std::chrono::high_resolution_clock::now();
+  // We will employ broadcasting scalar multiplication in cudnn in the requant_op below. For this to work, cudNN requires
+  // the scalar to be a scalar tensor (i.e., all dimensions of size 1) with the same number of dimensions as the tensor we're multiplying to
+  std::array<int64_t, kSpatialDim + 2> requantize_multiplier_tensor_size = kSpatialDim == 2 ?
+                                                                           std::array<int64_t, kSpatialDim + 2>{1, 1, 1, 1}
+                                                                           : std::array<int64_t, kSpatialDim + 2>{1, 1, 1};
+  // at::Tensor requantize_multiplier_tensor = at::empty(requantize_multiplier_tensor_size, at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+
+  at::Tensor requantize_multiplier_tensor = at::detail::empty_cuda(requantize_multiplier_tensor_size, quantized_output.options().dtype(at::kFloat).memory_format(at::MemoryFormat::ChannelsLast));
+  auto stop_requant_alloc = std::chrono::high_resolution_clock::now();
+  if (iter >= 20) {
+    requant_alloc_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(stop_requant_alloc - start_requant_alloc).count();
+  }
+  if (iter == 2019) {
+    std::cout << "requant_alloc_elapsed_time: " << requant_alloc_elapsed_time / 1000000.0 << "ms" <<std::endl;
+  }
+
+  static double input_qscale_elapsed_time = 0.0;
+  static double weight_qscale_elapsed_time = 0.0;
+  auto start_input_qscale = std::chrono::high_resolution_clock::now();
+  // auto act_scale = input.q_scale();
+  auto act_scale = at::native::q_scale_quant(input);
+  auto stop_input_qscale = std::chrono::high_resolution_clock::now();
+
+  // auto weight_scale = maybe_padded_weight_.q_scale();
+  auto weight_scale = at::native::q_scale_quant(maybe_padded_weight_);
+  auto stop_weight_qscale = std::chrono::high_resolution_clock::now();
+
+  auto requantize_multiplier = act_scale * weight_scale / output_scale;
+  if (iter >= 20) {
+    input_qscale_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(stop_input_qscale - start_input_qscale).count();
+    weight_qscale_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(stop_weight_qscale - stop_input_qscale).count();
+  }
+  if (iter == 2019) {
+    std::cout << "input_qscale_elapsed_time: " << input_qscale_elapsed_time / 1000000.0 << "ms" << std::endl;
+    std::cout << "weight_qscale_elapsed_time: " << weight_qscale_elapsed_time / 1000000.0 << "ms" << std::endl;
+  }
+  // TODO: this op is expensive! we should find a way to get rid of it. pending NVIDIA's response
+  requantize_multiplier_tensor.fill_(requantize_multiplier);
+
+  static double fill_elapsed_time = 0.0;
+  auto stop_fill = std::chrono::high_resolution_clock::now();
+  if (iter >= 20) {
+    fill_elapsed_time += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(stop_fill - stop_weight_qscale).count();
+  }
+  if (iter == 2019) {
+    std::cout << "fill_elapsed_time: " << fill_elapsed_time / 1000000.0 << "ms" << std::endl;
+  }
   c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> broadcasted_bias;
+
   if (bias_.has_value()) {
     // the input bias is a 1-D tensor whose size is the same as the size of the second dimension of quantized_output.
     // we need to add trailing dimensions in order to properly broadcast bias, otherwise broadcast_to will fail.
@@ -113,7 +177,25 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     bias_multiplier_tensor.value().fill_(bias_multiplier);
   }
 
-  cudnnHandle_t handle = at::native::getCudnnHandle();
+  static double handle_elapsed_time = 0.0;
+  auto start_handle = std::chrono::high_resolution_clock::now();
+  // auto handle = at::native::getCudnnHandle();
+  // TODO: I'm not totally sure that this works for all use cases?
+  if (handle == nullptr) {
+    handle = at::native::getCudnnHandle();
+  }
+  auto stop_handle = std::chrono::high_resolution_clock::now();
+  if (iter >= 20) {
+    handle_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(stop_handle - start_handle).count();
+  }
+  if (iter == 2019) {
+    std::cout << "handle_elapsed_time: " << handle_elapsed_time / 1000000.0 << "ms" << std::endl;
+  }
+
+
+
+  static double cache_initialize_elapsed_time = 0.0;
+  auto start_cache= std::chrono::high_resolution_clock::now();
   CacheKey key;
   // memset is needed here because there is implicit packing added for CacheKey, and this can result in uninitialized padded values that are
   // used for hashing (see how at::native::ParamsHash is defined). without memset, we can potentially come across a situation where two
@@ -140,9 +222,26 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   }
   key.kReluFused = kReluFused;
 
+  auto end_cache= std::chrono::high_resolution_clock::now();
+  if (iter >= 20) {
+    cache_initialize_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end_cache - start_cache).count();
+  }
+  if (iter == 2019) {
+    std::cout << "cache_initialize_elapsed_time: " << cache_initialize_elapsed_time / 1000000.0 << "ms" << std::endl;
+  }
+
   auto run = [&](const cudnn_frontend::ExecutionPlan& plan_desc) {
     auto workspace_size = plan_desc.getWorkspaceSize();
+    static double run1_elapsed_time = 0.0;
+    static double run2_elapsed_time = 0.0;
+    static double run3_elapsed_time = 0.0;
+    static double run4_elapsed_time = 0.0;
+    static double run_tot_elapsed_time = 0.0;
+    auto start_run1 = std::chrono::high_resolution_clock::now();
     auto workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
+
+    auto start_run2 = std::chrono::high_resolution_clock::now();
+
     at::SmallVector<void *, 7> data_ptrs;
     at::SmallVector<int64_t, 7> uids;
     data_ptrs = {input.data_ptr<int8_t>(), maybe_padded_weight_.data_ptr<int8_t>(),
@@ -153,21 +252,54 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
                                          broadcasted_bias.value().data_ptr()});
       uids.insert(uids.end(), {'b', 'c', 'd'});
     }
+
+    auto start_run3 = std::chrono::high_resolution_clock::now();
     auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setWorkspacePointer(workspace_size ? workspace_ptr.get() : nullptr)
-      .setDataPointers(uids.size(), data_ptrs.data())
+      .setDataPointers(data_ptrs.size(), data_ptrs.data())
       .setUids(uids.size(), uids.data())
       .build();
     auto variant_pack_desc = variantPack.get_raw_desc();
     AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan_desc.get_raw_desc(), variant_pack_desc));
+    auto start_run4 = std::chrono::high_resolution_clock::now();
+    auto run_end = std::chrono::high_resolution_clock::now();
+    if (iter >= 20) {
+      run1_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(start_run2 - start_run1).count();
+      run2_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(start_run3 - start_run2).count();
+      run3_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(start_run4 - start_run3).count();
+      run4_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(run_end - start_run4).count();
+      run_tot_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(run_end - start_run1).count();
+    }
+    if (iter == 2019) {
+      std::cout << "run workspace construction time: " << run1_elapsed_time / 1000000.0 << "ms" << std::endl;
+      std::cout <<  "run data ptrs and uids construction time: " << run2_elapsed_time / 1000000.0 << "ms" <<std::endl;
+      std::cout << "run variantPack construction time: " << run3_elapsed_time / 1000000.0 << "ms" <<std::endl;
+      std::cout << "run AT_CUDNN_CHECK time: " << run4_elapsed_time / 1000000.0 << "ms" <<std::endl;
+      std::cout << "run total time: " << run_tot_elapsed_time / 1000000.0 << "ms" << std::endl;
+    }
   };
 
+  static double last_elapsed_time = 0.0;
+  auto start_last = std::chrono::high_resolution_clock::now();
   auto search = execution_plan_cache.find(key);
   if (search != execution_plan_cache.end()) {
     cudnn_frontend::ExecutionPlan plan_desc = search->second;
     run(plan_desc);
+    auto end_last = std::chrono::high_resolution_clock::now();
+    if (iter >= 20) {
+      last_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end_last - start_last).count();
+    }
+    if (iter == 2019) {
+      std::cout << "last_elapsed_time: " << last_elapsed_time / 1000000.0 << "ms" <<std::endl;
+    }
+    ++iter;
     return;
   }
+  // if (iter > 0) {
+  //   TORCH_CHECK(false, "Expected cached plan, but could not find");
+  // }
+
+  ++iter;
   // conv_op computes act_fp32 * w_fp32 (matrix multiplication)
   // where act_fp32 and w_fp32 are the input and weight variables, resp.
   // output is a fp32 tensor
@@ -308,20 +440,50 @@ at::Tensor PackedConvWeightCudnn<kSpatialDim>::apply_impl(
     const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point) {
+  std::cout << "apply_impl" << std::endl;
+  static int64_t iter = 0;
+  static double elapsed_time = 0.0;
+  static double elapsed_time_sub = 0.0;
+  auto start = std::chrono::high_resolution_clock::now();
   const auto batch_size = kSpatialDim == 2 ? act.size(0) : 1;
   const auto num_input_channels = act.size(kSpatialDim - 1);
   const auto H = act.size(kSpatialDim);
   const auto W = act.size(kSpatialDim + 1);
   const auto num_output_channels = maybe_padded_weight_.size(0); // output channels
   std::vector<int64_t> kernel_size = {maybe_padded_weight_.size(2), maybe_padded_weight_.size(3)};
+  static double elapsed_time_conv_shape = 0.0;
+  auto start_conv_output = std::chrono::high_resolution_clock::now();
   at::SmallVector<int64_t, kSpatialDim + 2> output_shape = MakeConvOutputShape<kSpatialDim>(batch_size, num_output_channels, {H, W},
   kernel_size, stride_, padding_, dilation_);
-  at::Tensor quantized_output = at::_empty_affine_quantized(
+  auto end_conv_output = std::chrono::high_resolution_clock::now();
+  if (iter >= 20) {
+    elapsed_time_conv_shape += std::chrono::duration_cast<std::chrono::nanoseconds>(end_conv_output - start_conv_output).count();
+  }
+  if (iter == 2019) {
+    std::cout << "conv output shape time: " << elapsed_time_conv_shape / 1000000.0 << "ms" <<std::endl;
+  }
+  static double empty_affine_quantized_time = 0.0;
+  auto start_empty_affine_quantized = std::chrono::high_resolution_clock::now();
+
+  // at::Tensor quantized_output = at::_empty_affine_quantized(
+  //     output_shape,
+  //     at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
+  //     output_scale,
+  //     output_zero_point,
+  //     at::MemoryFormat::ChannelsLast);
+
+  at::Tensor quantized_output = at::native::empty_affine_quantized(
       output_shape,
-      at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
+      at::ScalarType::QInt8,
+      c10::nullopt /* layout */,
+      at::kCUDA,
+      c10::nullopt /* pin_memory */,
       output_scale,
       output_zero_point,
       at::MemoryFormat::ChannelsLast);
+  auto stop_empty_affine_quantized = std::chrono::high_resolution_clock::now();
+  if (iter >= 20) empty_affine_quantized_time += std::chrono::duration_cast<std::chrono::nanoseconds>(stop_empty_affine_quantized - start_empty_affine_quantized).count();
+  if (iter == 2019)   std::cout << "empty_affine_quantized_time " << empty_affine_quantized_time / 1000000.0 << "ms" <<std::endl;
 
   // cudnn v8.4.0 expects conv2d's int8 activation tensor's input channels to be a multiple of 4. if it is not
   // we need to explicitly pad it to a multiple of 4 ourselves as cudnn does not currently support padding.
@@ -331,15 +493,27 @@ at::Tensor PackedConvWeightCudnn<kSpatialDim>::apply_impl(
   auto act_maybe_padded = act;
   if (num_input_channels % 4 != 0) {
     int8_t num_slices = 4 - num_input_channels % 4; // number of slices we need to pad
+    std::cout << "before pad " << act.is_contiguous() << " " << act.is_contiguous(at::MemoryFormat::ChannelsLast) << std::endl;
     act_maybe_padded = at::pad(act, {0, 0, 0, 0, 0, num_slices, 0, 0}, "constant", 0);
+    std::cout << "after pad" << std::endl;
   }
+  auto sub_start = std::chrono::high_resolution_clock::now();
+
   apply_impl_helper<kReluFused>(
       quantized_output, act_maybe_padded.to(c10::MemoryFormat::ChannelsLast), output_scale);
+  auto sub_end = std::chrono::high_resolution_clock::now();
+  if (iter >= 20) elapsed_time_sub += std::chrono::duration_cast<std::chrono::nanoseconds>(sub_end - sub_start).count();
+  if (iter == 2019) std::cout << "apply_impl_helper time: " << elapsed_time_sub / 1000000.0 << "ms" <<std::endl;
 
   // need to return sliced tensor if output_channels was padded
   if (num_unpadded_output_channels_ != maybe_padded_weight_.size(0)) {
     return quantized_output.slice(1, 0, num_unpadded_output_channels_);
   }
+  auto end = std::chrono::high_resolution_clock::now();
+  if (iter >= 20) elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+  if (iter == 2019)   std::cout << "apply_impl time: " << elapsed_time / 1000000.0 << "ms" <<std::endl;
+  ++iter;
+
   return quantized_output;
 }
 

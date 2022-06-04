@@ -168,11 +168,21 @@ Tensor cudnn_convolution_forward(
   checkAllSameGPU(c, {input, weight});
 
   auto memory_format = cudnn_conv_suggest_memory_format(*input, *weight);
+  static int64_t iter = 0;
+  static double empty_cuda_elapsed_time = 0.0;
+  auto start = std::chrono::high_resolution_clock::now();
   Tensor output_t = at::detail::empty_cuda(
       conv_output_size(input->sizes(), weight->sizes(),
                        padding, stride, dilation),
       input->options().memory_format(memory_format));
-
+  auto stop = std::chrono::high_resolution_clock::now();
+  if (iter >= 20) {
+      empty_cuda_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start).count();
+  }
+  if (iter == 2019) {
+      std::cout << "empty_cuda_elapsed_time " << empty_cuda_elapsed_time << std::endl;
+    }
+  ++iter;
   if (output_t.numel() == 0) {
     return output_t;
   }

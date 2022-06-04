@@ -84,7 +84,7 @@ namespace at { namespace native {
 
 template <typename func_t>
 void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {
-
+  std::cout << "gpu_kernel" << std::endl;
   for (int arg = 0; arg < iter.ntensors(); arg++) {
     TORCH_INTERNAL_ASSERT(
       iter.device(arg).is_cuda(),

@@ -4,6 +4,7 @@
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/safe_numerics.h>
 
+#include <iostream>
 #include <limits>
 
 namespace at {
@@ -108,13 +109,22 @@ TensorBase empty_generic(
   at::detail::raise_warning_for_complex_half(scalar_type);
   caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
   size_t size_bytes = computeStorageNbytesContiguous(size, dtype.itemsize());
+// std::cout << size_bytes << std::endl;
+
+  // auto start = std::chrono::high_resolution_clock::now();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size_bytes,
       allocator->allocate(size_bytes),
       allocator,
       /*resizeable=*/true);
+  // auto end_storage = std::chrono::high_resolution_clock::now();
+  // static double elapsed_time_storage = 0.0;
+  // static int iter = 0;
+  // if (iter >= 20) elapsed_time_storage += std::chrono::duration_cast<std::chrono::nanoseconds>(end_storage - start).count();
+  // if (iter == 2019)   std::cout << "new qtensor storage time " << elapsed_time_storage << std::endl;
 
+  // ++iter;
   auto tensor = detail::make_tensor_base<TensorImpl>(
       std::move(storage_impl), ks, dtype);
   // Default TensorImpl has size [0]

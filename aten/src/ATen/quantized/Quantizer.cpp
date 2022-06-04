@@ -14,6 +14,7 @@
 #include <c10/util/accumulate.h>
 
 #include <cmath>
+#include <iostream>
 #include <typeinfo>
 
 namespace at {
@@ -132,16 +133,29 @@ inline Tensor new_qtensor(
   auto scalar_type = typeMetaToScalarType(dtype);
   int64_t size_bytes = get_sub_byte_tensor_size(sizes, dtype.itemsize(), scalar_type);
 
+  auto start = std::chrono::high_resolution_clock::now();
   auto storage = c10::make_intrusive<StorageImpl>(
       StorageImpl::use_byte_size_t(),
       size_bytes,
       allocator->allocate(size_bytes),
       allocator,
       /*resizable=*/true);
+  auto end_storage = std::chrono::high_resolution_clock::now();
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage, at::DispatchKeySet(tensorDispatchKey), dtype, quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   get_qtensorimpl(tensor)->empty_tensor_restride(memory_format);
+
+  auto end = std::chrono::high_resolution_clock::now();
+  static double elapsed_time_storage = 0.0;
+  static double elapsed_time_make_tensor = 0.0;
+  static int iter = 0;
+  if (iter >= 20) elapsed_time_storage += std::chrono::duration_cast<std::chrono::nanoseconds>(end_storage - start).count();
+  if (iter >= 20) elapsed_time_make_tensor += std::chrono::duration_cast<std::chrono::nanoseconds>(end - end_storage).count();
+  if (iter == 2019)   std::cout << "new qtensor storage time " << elapsed_time_storage / 1000000.0 << "ms" <<std::endl;
+  if (iter == 2019)   std::cout << "new qtensor make tensor time " << elapsed_time_make_tensor / 1000000.0 << "ms" <<std::endl;
+  ++iter;
+
   return tensor;
 }
 

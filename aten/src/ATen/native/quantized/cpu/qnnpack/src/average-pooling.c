@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include <pytorch_qnnpack.h>
 #include <qnnpack/common.h>
@@ -21,6 +22,7 @@
 #include <qnnpack/math.h>
 #include <qnnpack/operator.h>
 #include <qnnpack/params.h>
+
 
 static inline size_t compute_output_dimension(
     size_t padded_input_dimension,
@@ -211,16 +213,20 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
     uint8_t* output,
     size_t output_pixel_stride,
     pthreadpool_t threadpool) {
+
+printf("pytorch_qnnp_setup_average_pooling2d_nhwc_q8");
   if (!pytorch_qnnp_params.initialized) {
     pytorch_qnnp_log_error(
         "pytorch_qnnp_setup_average_pooling2d_nhwc_q8 failed because QNNPACK is not properly initialized");
     return pytorch_qnnp_status_uninitialized;
   }
+printf("here1");
 
   if (batch_size == 0) {
     average_pooling->batch_size = 0;
     return pytorch_qnnp_status_success;
   }
+printf("here2");
 
   if (input_width == 0 || input_height == 0) {
     pytorch_qnnp_log_error(
@@ -229,6 +235,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
         input_height);
     return pytorch_qnnp_status_invalid_parameter;
   }
+printf("here3");
 
   average_pooling->batch_size = batch_size;
   average_pooling->input_depth = 1;
@@ -236,6 +243,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
   average_pooling->input_width = input_width;
   average_pooling->input = input;
   average_pooling->input_pixel_stride = input_pixel_stride;
+printf("here4");
 
   average_pooling->output_height = compute_output_dimension(
       input_height + average_pooling->input_padding_height * 2,
@@ -248,6 +256,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
   average_pooling->output_depth = 1;
   average_pooling->output = output;
   average_pooling->output_pixel_stride = output_pixel_stride;
+printf("here5");
 
   size_t valid_batch_size = 0;
   if (input == average_pooling->last_input &&
