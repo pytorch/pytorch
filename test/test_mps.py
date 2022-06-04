@@ -15,7 +15,6 @@ import itertools
 from torch._six import inf
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, TestCase, download_file, TEST_WITH_UBSAN
-from torch.testing._internal.common_device_type import dtypes
 import torch.backends.mps
 from torch.distributions import Uniform
 
