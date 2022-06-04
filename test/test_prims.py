@@ -103,6 +103,24 @@ class TestPrims(TestCase):
         ), (f"The following prims do not have 'impl_nvfuser' defined: {ops_without_nvfuser_impl} ",
             "while there exists nvfuser implementations for them.")
 
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32)
+    def test_pytree_output(self, device, dtype):
+        @make_traced
+        def fn(a, b):
+            d = {}
+            d["c"] = torch.add(a, b)
+            return (d, torch.add(a, d["c"]))
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        a = make_arg((5, 5))
+        b = make_arg((1, 5))
+
+        result_aten = fn(a, b, executor="aten")
+        result_nvfuser = fn(a, b, executor="nvfuser")
+        self.assertEqual(result_aten, result_nvfuser)
+
 
 class TestPrimsBasic(TestCase):
     def test_torch_ops(self):
