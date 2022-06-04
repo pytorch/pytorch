@@ -31,13 +31,6 @@ static void check_convert(const Scalar& scalar, ScalarType scalarType) {
       [&] { scalar.to<scalar_t>(); });
 }
 
-static Tensor wrapped_scalar_tensor_and_check_convert(
-    const Scalar& scalar,
-    Tensor tensor) {
-  check_convert(scalar, tensor.scalar_type());
-  return at::native::wrapped_scalar_tensor(scalar);
-}
-
 } // namespace native
 
 namespace meta {
@@ -216,28 +209,15 @@ TORCH_META_FUNC(fmin) (const Tensor& self, const Tensor& other) {
     build_binary_op(maybe_get_output(), self, other);
 }
 
-void comparison_op_check(const Tensor& self, const Tensor& other, const Tensor& result) {
-  // Validate that is possible to convert zero-dim tensor's dtype to other dtype
-  // without overflow
-  if (self.scalar_type() != other.scalar_type()) {
-    if (self.dim() != 0 && other.dim() == 0) {
-      native::check_convert(other.item(), self.scalar_type());
-    } else if (self.dim() == 0 && other.dim() != 0) {
-      native::check_convert(self.item(), other.scalar_type());
-    }
-  }
-}
-
 #define CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(func)                     \
   TORCH_META_FUNC2(func, Tensor)(const Tensor& self, const Tensor& other) { \
     const Tensor& result = maybe_get_output();                              \
-    comparison_op_check(self, other, result);                               \
     build_borrowing_comparison_op(result, self, other);                     \
   }                                                                         \
                                                                             \
   TORCH_META_FUNC2(func, Scalar)(const Tensor& self, const Scalar& other) { \
     auto other_tensor =                                                     \
-        native::wrapped_scalar_tensor_and_check_convert(other, self);       \
+        native::wrapped_scalar_tensor(other);                               \
     build_borrowing_except_last_argument_comparison_op(maybe_get_output(), self, other_tensor);  \
   }
 
@@ -1113,13 +1093,13 @@ Tensor bitwise_right_shift(const Scalar& self, const Tensor& other) {
 template <typename Stub>
 Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& other, Stub& stub) {
   // Validate that is possible to convert zero-dim tensor's dtype to other dtype without overflow
-  if (self.scalar_type() != other.scalar_type()) {
-    if (self.dim() != 0 && other.dim() == 0) {
-      check_convert(other.item(), self.scalar_type());
-    } else if (self.dim() == 0 && other.dim() != 0) {
-      check_convert(self.item(), other.scalar_type());
-    }
-  }
+  // if (self.scalar_type() != other.scalar_type()) {
+  //   if (self.dim() != 0 && other.dim() == 0) {
+  //     check_convert(other.item(), self.scalar_type());
+  //   } else if (self.dim() == 0 && other.dim() != 0) {
+  //     check_convert(self.item(), other.scalar_type());
+  //   }
+  // }
   auto iter = TensorIterator::comparison_op(result, self, other);
   stub(iter.device_type(), iter);
   return result;
@@ -1131,28 +1111,24 @@ Tensor comparison_op(const Tensor& self, const Tensor& other, OutImpl& out_impl)
   return out_impl(result, self, other);
 }
 
-// To avoid overflow during type promotion we will check that both dtypes of self and other are same
 template <typename OutImpl>
 Tensor& comparison_op_(Tensor& self, const Tensor& other, OutImpl& out_impl) {
   return out_impl(self, self, other);
 }
 
-// validates that is possible to convert Scalar other to self's dtype without overflow.
-// This behavior is unique to comparison ops; arithmetic operations don't do this.
-// In the future, we should reconsider this inconsistency and decide if we want to add the same check to arithmetic ops.
 template <typename OutImpl>
 Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Scalar& other, OutImpl& out_impl) {
-  return out_impl(result, self, wrapped_scalar_tensor_and_check_convert(other, self));
+  return out_impl(result, self, wrapped_scalar_tensor(other));
 }
 
 template <typename OutImpl>
 Tensor comparison_op(const Tensor& self, const Scalar& other, OutImpl& out_impl) {
-  return comparison_op(self, wrapped_scalar_tensor_and_check_convert(other, self), out_impl);
+  return comparison_op(self, wrapped_scalar_tensor(other), out_impl);
 }
 
 template <typename OutImpl>
 Tensor& comparison_op_(Tensor& self, const Scalar& other, OutImpl& out_impl) {
-  return out_impl(self, self, wrapped_scalar_tensor_and_check_convert(other, self));
+  return out_impl(self, self, wrapped_scalar_tensor(other));
 }
 
 // We need explicit cast to OutFunc because each *_out func is overloaded twice. Without An explicit cast, merely

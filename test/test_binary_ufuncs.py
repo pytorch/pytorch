@@ -64,6 +64,7 @@ from torch.testing._internal.common_methods_invocations import (
     generate_elementwise_binary_extremal_value_tensors,
     generate_elementwise_binary_broadcasting_tensors,
     generate_elementwise_binary_with_scalar_samples,
+    generate_elementwise_binary_with_scalar_and_type_promotion_samples,
 )
 
 if TEST_SCIPY:
@@ -269,6 +270,11 @@ class TestBinaryUfuncs(TestCase):
             op, device=device, dtype=dtype
         )
         self._test_reference_numerics(dtype, op, gen, equal_nan=True)
+        gen = generate_elementwise_binary_with_scalar_and_type_promotion_samples(
+            op, device=device, dtype=dtype
+        )
+        self._test_reference_numerics(dtype, op, gen, equal_nan=True)
+
 
     @ops(binary_ufuncs)
     def test_contig_vs_every_other(self, device, dtype, op):
