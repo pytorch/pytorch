@@ -310,7 +310,7 @@ def random_split(dataset: Dataset[T], lengths_or_frac: Sequence[Union[int, float
 
     Args:
         dataset (Dataset): Dataset to be split
-        lengths_or_frac (sequence): lengths of splits to be produced
+        lengths_or_frac (sequence): lengths or fractions of splits to be produced
         generator (Generator): Generator used for the random permutation.
     """
     if 0 <= sum(lengths_or_frac) <= 1.0:
