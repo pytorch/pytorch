@@ -211,7 +211,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   # first build torch, the Python module, and tests for CPU-only
   tools/bazel build --config=no-tty :torch :_C.so :all_tests
   # then build everything with CUDA
-  tools/bazel build --config=no-tty --config=gpu :all
+  tools/bazel build --config=no-tty --config=gpu //...
 else
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
