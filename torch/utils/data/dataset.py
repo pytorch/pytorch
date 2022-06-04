@@ -9,6 +9,7 @@ from typing import (
     Sequence,
     Tuple,
     TypeVar,
+    Union
 )
 
 # No 'default_generator' in torch/__init__.pyi
@@ -293,22 +294,33 @@ class Subset(Dataset[T_co]):
         return len(self.indices)
 
 
-def random_split(dataset: Dataset[T], lengths: Sequence[int],
+def random_split(dataset: Dataset[T], lengths_or_frac: Sequence[Union[int, float]],
                  generator: Optional[Generator] = default_generator) -> List[Subset[T]]:
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.
+    If a list of fractions is given, the lengths will be computed automatically.
+    If the sum of the list of the fractions is not equal to 1 or the split leaves a remainder, a new entry will be appended
+    to the end of the list with the remaining fraction
+
     Optionally fix the generator for reproducible results, e.g.:
 
     >>> random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(42))
+    >>> random_split(range(30), [0.3, 0.3, 0.4], generator=torch.Generator().manual_seed(42))
 
     Args:
         dataset (Dataset): Dataset to be split
-        lengths (sequence): lengths of splits to be produced
+        lengths_or_frac (sequence): lengths of splits to be produced
         generator (Generator): Generator used for the random permutation.
     """
+    if 0 <= sum(lengths_or_frac) <= 1.0:
+        # if lengths is a float, it is a percentage. We convert it to a sequence of ints
+        lengths_or_frac = [int(round(len(dataset) * pct)) for pct in lengths_or_frac]  # type: ignore[arg-type]
+        remainder = len(dataset) - sum(lengths_or_frac)
+        if remainder > 0:
+            lengths_or_frac.append(remainder)
     # Cannot verify that dataset is Sized
-    if sum(lengths) != len(dataset):    # type: ignore[arg-type]
+    if sum(lengths_or_frac) != len(dataset):    # type: ignore[arg-type]
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
-    indices = randperm(sum(lengths), generator=generator).tolist()
-    return [Subset(dataset, indices[offset - length : offset]) for offset, length in zip(_accumulate(lengths), lengths)]
+    indices = randperm(sum(lengths_or_frac), generator=generator).tolist()
+    return [Subset(dataset, indices[offset - length : offset]) for offset, length in zip(_accumulate(lengths_or_frac), lengths_or_frac)]
