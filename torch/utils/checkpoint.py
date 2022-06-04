@@ -372,7 +372,11 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
                         _unused = function(*args)
 
         if x not in storage:
-            raise RuntimeError("Attempted to unpack tensor that has not been packed, please report a bug to PyTorch")
+            raise RuntimeError(
+                "Retrieving a Tensor saved by autograd multiple times while "
+                "checkpointing is not currently supported. Please open an issue "
+                "with details on your use case so that we can prioritize adding this"
+            )
         return storage.pop(x)
 
     with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
