@@ -175,9 +175,14 @@ __all__ = [
     "atleast_2d",
     "atleast_3d",
     "as_strided",
+    "broadcast_shapes",
     "broadcast_tensors",
+    "broadcast_to",
     "cat",
     "chunk",
+    "column_stack",
+    "dsplit",
+    "dstack",
     "flatten",
     "flip",
     "fliplr",
@@ -190,6 +195,7 @@ __all__ = [
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
+    "t",
     "tensor_split",
     "transpose",
     "unsqueeze",
@@ -220,7 +226,10 @@ Tensor = torch.Tensor
 
 
 def _broadcast_shapes(*_shapes):
-    shapes = tuple(filter(lambda x: x is not None, _shapes))
+    shapes = tuple(
+        (x,) if isinstance(x, int) else x
+        for x in filter(lambda x: x is not None, _shapes)
+    )
 
     # Short-circuits on no input
     if len(shapes) == 0:
@@ -626,8 +635,13 @@ sqrt = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
+
+def _square(a: TensorLikeType) -> TensorLikeType:
+    return mul(a, a)
+
+
 square = _make_elementwise_unary_reference(
-    prims.square,
+    _square,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
     aten_op=None,  # CompositeImplicitAutograd,
 )
@@ -1606,8 +1620,18 @@ def as_strided(
     return prims.as_strided(a, size, stride, storage_offset)
 
 
+def broadcast_shapes(*shapes) -> ShapeType:
+    return torch.Size(_broadcast_shapes(*shapes))
+
+
 def broadcast_tensors(*tensors) -> List[TensorLikeType]:
     return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
+
+
+def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
+    start = len(size) - len(a.shape)
+    dims = tuple(range(start, len(a.shape) + start))
+    return prims.broadcast_in_dim(a, size, dims)
 
 
 @out_wrapper
@@ -1642,6 +1666,21 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
         return empty((0,), dtype=t.dtype, device=t.device, requires_grad=requires_grad)
 
     return prims.cat(filtered, dim)
+
+
+@out_wrapper
+def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
+    aligned_tensors = tuple(
+        x if x.ndim > 1 else prims.expand_dims(x, list(range(x.ndim, 2)))
+        for x in tensors
+    )
+    return cat(aligned_tensors, 1)
+
+
+@out_wrapper
+def dstack(tensors: TensorSequenceType) -> TensorLikeType:
+    aligned_tensors = tuple(x if x.ndim > 2 else atleast_3d(x) for x in tensors)
+    return cat(aligned_tensors, 2)
 
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
@@ -2038,10 +2077,41 @@ def tensor_split(
         return tuple(splits)
 
 
+def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
+    if a.ndim < 3:
+        raise RuntimeError(
+            f"torch.dsplit requires a tensor with at least 3 dimension, but got a tensor with {a.ndim} dimensions!"
+        )
+    if isinstance(sections, int) and (sections == 0 or a.shape[2] % sections != 0):
+        raise RuntimeError(
+            "torch._refs.dsplit attempted to split along dimension 2, "
+            + f"but the size of the dimension {a.shape[2]} is not divisible by the split_size {sections}!"
+        )
+    return tensor_split(a, sections, 2)
+
+
+@register_decomposition(torch.ops.aten.t.default)
+def t(a: TensorLikeType):
+    # TODO: Add sparse support
+    # if a.is_sparse:
+    #     sparse_dim = a.sparse_dim()
+    #     dense_dim = a.dense_dim()
+    #     if not (sparse_dim <= 2 and dense_dim == 0):
+    #         raise RuntimeError(
+    #             f"t() expects a tensor with <= 2 sparse and 0 dense dimensions, but got {sparse_dim} sparse and"
+    #             f"{dense_dim} dense dimensions"
+    #         )
+    if a.ndim > 2:
+        raise RuntimeError(
+            f"t() expects a tensor with <= 2 dimensions, but self is {a.ndim}D"
+        )
+    return torch.transpose(a, 0, 0 if a.ndim < 2 else 1)
+
+
 def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
 
-    if a.ndim <= 1:
+    if a.ndim <= 1 or dim0 == dim1:
         return prims.view_of(a)
 
     _permutation = list(range(0, a.ndim))
