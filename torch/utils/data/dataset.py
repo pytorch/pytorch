@@ -316,13 +316,18 @@ def random_split(dataset: Dataset[T], lengths_or_frac: Sequence[Union[int, float
     if 0 <= sum(lengths_or_frac) <= 1.0:
         import math
         # if lengths is a float, it is a percentage. We convert it to a sequence of ints
-        lengths_or_frac = [int(math.floor(len(dataset) * pct)) for pct in lengths_or_frac]  # type: ignore[arg-type]
-        remainder = len(dataset) - sum(lengths_or_frac)
+        lengths = []
+        for frac in lengths_or_frac:
+            n_items_in_split = int(math.floor(len(dataset) * frac))
+            lengths.append(n_items_in_split)
+        remainder = len(dataset) - sum(lengths)
         if remainder > 0:
-            lengths_or_frac.append(remainder)
+            lengths.append(remainder)
+    else:
+        lengths = lengths_or_frac
     # Cannot verify that dataset is Sized
-    if sum(lengths_or_frac) != len(dataset):    # type: ignore[arg-type]
+    if sum(lengths) != len(dataset):    # type: ignore[arg-type]
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
-    indices = randperm(sum(lengths_or_frac), generator=generator).tolist()
-    return [Subset(dataset, indices[offset - length : offset]) for offset, length in zip(_accumulate(lengths_or_frac), lengths_or_frac)]
+    indices = randperm(sum(lengths), generator=generator).tolist()
+    return [Subset(dataset, indices[offset - length : offset]) for offset, length in zip(_accumulate(lengths), lengths)]
