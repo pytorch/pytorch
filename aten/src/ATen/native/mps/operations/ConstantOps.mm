@@ -67,7 +67,7 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
             }
             outputTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeBool name:@"castToBool"];
           } else {
-            // TODO: constantWithScalar output is incorrect for large integers because 
+            // TODO: constantWithScalar output is incorrect for large integers because
             //       it only accepts double scalars and furthermore MPS only supports single precision...
             //       therefore bottlenecked by float32 precision even for ints, test:
             //       >>> torch.tensor(16777217, dtype=torch.float32, device="mps")
