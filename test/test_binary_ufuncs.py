@@ -868,40 +868,6 @@ class TestBinaryUfuncs(TestCase):
         x = torch.tensor(2.0, requires_grad=True)
         self.assertRaises(Exception, lambda: y.addcmul(y, y, value=x))
 
-    @onlyCUDA
-    def test_comparison_ops_device_computation(self, device):
-        operands = (
-            torch.tensor(0),
-            torch.tensor(2, device="cuda"),
-            torch.tensor([0, 2], device="cuda"),
-        )
-        # Checks that comparison operators compute the correct
-        # output device, given a combination of devices
-        # TODO: test all comparison ops after porting them to structured kernel
-        # logical_and, logical_or, and logical_xor
-        for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne]:
-            for lhs in operands:
-                for rhs in operands:
-                    self.assertEqual(op(lhs, rhs), op(lhs.cpu(), rhs.cpu()))
-
-    # TODO: update to work on CUDA, too
-    @onlyCPU
-    def test_comparison_ops_must_take_bool_output(self, device):
-        for op in [
-            torch.lt,
-            torch.le,
-            torch.gt,
-            torch.ge,
-            torch.eq,
-            torch.ne,
-            torch.logical_and,
-            torch.logical_or,
-            torch.logical_xor,
-        ]:
-            self.assertEqual(
-                op(torch.tensor([True]), torch.tensor([False])).dtype, torch.bool
-            )
-
     # Tests that the binary operators and, or, and xor (as well as their reflected and inplace versions)
     # work properly (AKA &, ||, ^ and &=, |=, ^=)
     @dtypes(*integral_types_and(torch.bool))
