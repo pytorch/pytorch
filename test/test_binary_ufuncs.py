@@ -868,36 +868,6 @@ class TestBinaryUfuncs(TestCase):
         x = torch.tensor(2.0, requires_grad=True)
         self.assertRaises(Exception, lambda: y.addcmul(y, y, value=x))
 
-    # TODO: update to work on CUDA, too
-    @onlyCPU
-    def test_comparison_ops(self, device):
-        x = torch.randn(5, 5)
-        y = torch.randn(5, 5)
-
-        eq = x == y
-        for idx in iter_indices(x):
-            self.assertEqual(x[idx] == y[idx], eq[idx] == 1)
-
-        ne = x != y
-        for idx in iter_indices(x):
-            self.assertEqual(x[idx] != y[idx], ne[idx] == 1)
-
-        lt = x < y
-        for idx in iter_indices(x):
-            self.assertEqual(x[idx] < y[idx], lt[idx] == 1)
-
-        le = x <= y
-        for idx in iter_indices(x):
-            self.assertEqual(x[idx] <= y[idx], le[idx] == 1)
-
-        gt = x > y
-        for idx in iter_indices(x):
-            self.assertEqual(x[idx] > y[idx], gt[idx] == 1)
-
-        ge = x >= y
-        for idx in iter_indices(x):
-            self.assertEqual(x[idx] >= y[idx], ge[idx] == 1)
-
     @onlyCUDA
     def test_comparison_ops_device_computation(self, device):
         operands = (
@@ -931,68 +901,6 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(
                 op(torch.tensor([True]), torch.tensor([False])).dtype, torch.bool
             )
-
-    # TODO: update to work on CUDA, too
-    @onlyCPU
-    def test_comparison_ops_check_for_scalar_overflow(self, device):
-        s = 1 << 20
-        t = torch.tensor([1 << 5], dtype=torch.uint8)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(t < s)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(s < t)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(t <= s)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(s <= t)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(t > s)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(s > t)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(t >= s)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(s >= t)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(t == s)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(s == t)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(t != s)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(s != t)
-
-    # TODO: update to work on CUDA, too
-    @onlyCPU
-    def test_comparison_ops_check_for_zerodim_tensor_overflow(self, device):
-        t1 = torch.tensor([1 << 5], dtype=torch.uint8)
-        t2 = torch.tensor([1 << 30], dtype=torch.int32)
-        ts1 = torch.tensor(1 << 20, dtype=torch.int32)
-        ts2 = torch.tensor(1 << 40, dtype=torch.int64)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(t1 < ts1)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(ts2 < t2)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(t1 <= ts1)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(ts2 <= t2)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(t1 > ts1)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(ts2 > t2)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(t1 >= ts1)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(ts2 >= t2)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(t1 == ts1)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(ts2 == t2)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(t1 != ts1)
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-            self.assertTrue(ts2 != t2)
 
     # Tests that the binary operators and, or, and xor (as well as their reflected and inplace versions)
     # work properly (AKA &, ||, ^ and &=, |=, ^=)
