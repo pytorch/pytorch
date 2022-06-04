@@ -4450,6 +4450,12 @@ for shape in [(1,), ()]:
                         nn.Linear(256, 256), nn.Linear(256, 256), nn.Linear(256, 256)
                     )
                     self.layers.append(layer)
+                # pre-allocate the grad so that increased memory usage is mainly
+                # due to activations.
+                for layer in self.layers:
+                    for lin in layer:
+                        lin.weight.grad = torch.ones_like(lin.weight)
+                        lin.bias.grad = torch.ones_like(lin.bias)
 
             def forward(self, x):
                 for i in range(self.n):
@@ -4464,9 +4470,7 @@ for shape in [(1,), ()]:
         model_reentrant_checkpoint = MyModel(8, use_checkpoint=True, use_reentrant=True).cuda()
         model_no_reentrant_checkpoint = MyModel(8, use_checkpoint=True, use_reentrant=False).cuda()
 
-        # Large batch size to ensure activation sizes >> gradient sizes, so activation checkpointing
-        # results in memory savings.
-        x = torch.randn(10000, 256, requires_grad=True, device='cuda')
+        x = torch.randn(100, 256, requires_grad=True, device='cuda')
 
         torch.cuda.reset_peak_memory_stats()
         loss = model_no_checkpoint(x.clone()).sum()
@@ -4500,8 +4504,8 @@ for shape in [(1,), ()]:
                 ctx.save_for_backward(x, y, z, w, out)
                 return out
 
+            @staticmethod
             def backward(ctx, grad_out):
-                print("in backward")
                 x, y, z, w, out = ctx.saved_tensors
                 x, y, z, w, out = ctx.saved_tensors
                 return x, x, x
