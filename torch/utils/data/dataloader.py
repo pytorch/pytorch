@@ -552,13 +552,13 @@ class DataLoader(Generic[T_co]):
                 if rank == 0:
                     ws = dist.get_world_size()
                     reqs = []
-                    for rank_idx in range(1, ws):
-                        req = dist.isend(tensor=_shared_tensor_seed, dst=rank_idx)
+                    for rank_id in range(1, ws):
+                        req = dist.isend(tensor=_shared_tensor_seed, dst=rank_id, tag=rank_id)
                         reqs.append(req)
                     for req in reqs:
                         req.wait()
                 else:
-                    dist.recv(tensor=_shared_tensor_seed, src=0)
+                    dist.recv(tensor=_shared_tensor_seed, src=0, tag=rank)
             _shared_seed = _shared_tensor_seed.item()
             del _shared_tensor_seed
             return _shared_seed
