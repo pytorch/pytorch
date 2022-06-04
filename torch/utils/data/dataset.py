@@ -298,8 +298,9 @@ def random_split(dataset: Dataset[T], lengths_or_frac: Sequence[Union[int, float
                  generator: Optional[Generator] = default_generator) -> List[Subset[T]]:
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.
-    If a list of fractions is given, the lengths will be computed automatically.
-    If the sum of the list of the fractions is not equal to 1 or the split leaves a remainder, a new entry will be appended
+    If a list of fractions is given, the lengths will be computed automatically as floor(frac * len(dataset)).
+    If the sum of the list of the fractions is not equal to 1 or the split leaves a remainder,
+    a new entry will be appended
     to the end of the list with the remaining fraction
 
     Optionally fix the generator for reproducible results, e.g.:
@@ -313,8 +314,9 @@ def random_split(dataset: Dataset[T], lengths_or_frac: Sequence[Union[int, float
         generator (Generator): Generator used for the random permutation.
     """
     if 0 <= sum(lengths_or_frac) <= 1.0:
+        import math
         # if lengths is a float, it is a percentage. We convert it to a sequence of ints
-        lengths_or_frac = [int(round(len(dataset) * pct)) for pct in lengths_or_frac]  # type: ignore[arg-type]
+        lengths_or_frac = [int(math.floor(len(dataset) * pct)) for pct in lengths_or_frac]  # type: ignore[arg-type]
         remainder = len(dataset) - sum(lengths_or_frac)
         if remainder > 0:
             lengths_or_frac.append(remainder)
