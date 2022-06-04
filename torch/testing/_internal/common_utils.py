@@ -628,17 +628,23 @@ def run_tests(argv=UNITTEST_ARGS):
                 other_args.append('--import-slow-tests')
             cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
             string_cmd = " ".join(cmd)
-            exitcode = shell(cmd)
-            if exitcode != 0:
-                # This is sort of hacky, but add on relevant env variables for distributed tests.
-                if 'TestDistBackendWithSpawn' in test_case_full_name:
-                    backend = os.environ.get("BACKEND", "")
-                    world_size = os.environ.get("WORLD_SIZE", "")
-                    env_prefix = f"BACKEND={backend} WORLD_SIZE={world_size}"
-                    string_cmd = env_prefix + " " + string_cmd
-                # Log the command to reproduce the failure.
-                print(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
-                failed_tests.append(test_case_full_name)
+            num_runs = 1
+            if 'test_ddp_uneven_input_join_disable' in string_cmd or 'test_ddp_buffer_hook_allreduce' in string_cmd:
+                num_runs = 500
+                print(f" -- running {string_cmd} {num_runs} times")
+
+            for i in range(num_runs):
+                exitcode = shell(cmd)
+                if exitcode != 0:
+                    # This is sort of hacky, but add on relevant env variables for distributed tests.
+                    if 'TestDistBackendWithSpawn' in test_case_full_name:
+                        backend = os.environ.get("BACKEND", "")
+                        world_size = os.environ.get("WORLD_SIZE", "")
+                        env_prefix = f"BACKEND={backend} WORLD_SIZE={world_size}"
+                        string_cmd = env_prefix + " " + string_cmd
+                    # Log the command to reproduce the failure.
+                    print(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
+                    failed_tests.append(test_case_full_name)
 
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
