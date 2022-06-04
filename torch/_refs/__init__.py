@@ -181,6 +181,8 @@ __all__ = [
     "cat",
     "chunk",
     "column_stack",
+    "dsplit",
+    "dstack",
     "flatten",
     "flip",
     "fliplr",
@@ -1675,6 +1677,12 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 1)
 
 
+@out_wrapper
+def dstack(tensors: TensorSequenceType) -> TensorLikeType:
+    aligned_tensors = tuple(x if x.ndim > 2 else atleast_3d(x) for x in tensors)
+    return cat(aligned_tensors, 2)
+
+
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
     if chunks <= 0:
         msg = "Expected at least one chunk, but got {0}!".format(chunks)
@@ -2067,6 +2075,19 @@ def tensor_split(
             start_idx = x
         splits.append(prims.slice_in_dim(a, start_idx, a.shape[_dim], axis=_dim))
         return tuple(splits)
+
+
+def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
+    if a.ndim < 3:
+        raise RuntimeError(
+            f"torch.dsplit requires a tensor with at least 3 dimension, but got a tensor with {a.ndim} dimensions!"
+        )
+    if isinstance(sections, int) and (sections == 0 or a.shape[2] % sections != 0):
+        raise RuntimeError(
+            "torch._refs.dsplit attempted to split along dimension 2, "
+            + f"but the size of the dimension {a.shape[2]} is not divisible by the split_size {sections}!"
+        )
+    return tensor_split(a, sections, 2)
 
 
 @register_decomposition(torch.ops.aten.t.default)
