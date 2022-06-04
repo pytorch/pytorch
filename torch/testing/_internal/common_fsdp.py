@@ -12,13 +12,16 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel
-from torch.distributed.fsdp.fully_sharded_data_parallel import TrainingState_
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    TrainingState_,
+    _ExecOrderPolicy,
+)
+from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
+from torch.distributed.fsdp.wrap import wrap
 from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
     MultiProcessTestCase,
 )
-from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from torch.distributed.fsdp.wrap import wrap
 from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
 
 
@@ -638,7 +641,12 @@ class FSDPTest(MultiProcessTestCase):
             )
 
     def _get_wrapped_model(
-        self, group, cuda_first=False, ignore_modules=False, config=None,
+        self,
+        group,
+        cuda_first=False,
+        ignore_modules=False,
+        use_exec_order_policy=False,
+        config=None,
         **model_kwargs,
     ) -> FullyShardedDataParallel:
         if config is None:
@@ -653,7 +661,10 @@ class FSDPTest(MultiProcessTestCase):
             assert "ignored_modules" not in config, \
                 "Do not pass in `ignored_modules` via `config`"
             config["ignored_modules"] = transformer.get_ignored_modules()
-        model = FullyShardedDataParallel(transformer, group, **config)
+        auto_wrap_policy = _ExecOrderPolicy(4e3) if use_exec_order_policy else None
+        model = FullyShardedDataParallel(
+            transformer, group, auto_wrap_policy=auto_wrap_policy, **config,
+        )
         if not cuda_first and move_to_cuda:
             model = model.cuda()
         return model
