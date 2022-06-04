@@ -6149,8 +6149,7 @@ class _TestONNXRuntime:
             def forward(self, x):
                 return torch.tensor_split(x, x.size(1))
 
-        x = torch.randn(1, 2, 3, requires_grad=True)
-        self.run_test(TensorSplitModel(), x)
+        self.run_test(TensorSplitModel(), torch.randn(1, 2, 3, requires_grad=True))
 
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_tensor_split_dynamic_axes(self):
