@@ -114,12 +114,6 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   auto start_requant_alloc = std::chrono::high_resolution_clock::now();
   // We will employ broadcasting scalar multiplication in cudnn in the requant_op below. For this to work, cudNN requires
   // the scalar to be a scalar tensor (i.e., all dimensions of size 1) with the same number of dimensions as the tensor we're multiplying to
-  std::array<int64_t, kSpatialDim + 2> requantize_multiplier_tensor_size = kSpatialDim == 2 ?
-                                                                           std::array<int64_t, kSpatialDim + 2>{1, 1, 1, 1}
-                                                                           : std::array<int64_t, kSpatialDim + 2>{1, 1, 1};
-  // at::Tensor requantize_multiplier_tensor = at::empty(requantize_multiplier_tensor_size, at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
-
-  at::Tensor requantize_multiplier_tensor = at::detail::empty_cuda(requantize_multiplier_tensor_size, quantized_output.options().dtype(at::kFloat).memory_format(at::MemoryFormat::ChannelsLast));
   auto stop_requant_alloc = std::chrono::high_resolution_clock::now();
   if (iter >= 20) {
     requant_alloc_elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(stop_requant_alloc - start_requant_alloc).count();
@@ -148,8 +142,6 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     std::cout << "input_qscale_elapsed_time: " << input_qscale_elapsed_time / 1000000.0 << "ms" << std::endl;
     std::cout << "weight_qscale_elapsed_time: " << weight_qscale_elapsed_time / 1000000.0 << "ms" << std::endl;
   }
-  // TODO: this op is expensive! we should find a way to get rid of it. pending NVIDIA's response
-  requantize_multiplier_tensor.fill_(requantize_multiplier);
 
   static double fill_elapsed_time = 0.0;
   auto stop_fill = std::chrono::high_resolution_clock::now();
