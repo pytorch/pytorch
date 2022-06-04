@@ -1490,20 +1490,6 @@ class TestMPS(TestCase):
                 #           (torch.full(full_sh, val2, dtype=dtype2, device='cpu')))
                 '''
 
-    @dtypes(torch.int32, torch.float32, torch.int64, device_type="mps")
-    def test_setitem_scalar(self, device, dtype) -> None:
-        for i in range(3, 6):
-            for j in range(3, 6):
-                t = torch.zeros(i, j, dtype=dtype, device=device)
-                self.assertEqual(t.sum(), 0)
-                t[1, 1] = 1
-                t[2, 1] = j
-                t[2, 1] = i
-                assertEqual(t[1, 1], 1)
-                assertEqual(t[1, 2], i)
-                assertEqual(t[2, 1], j)
-                self.assertEqual(t.sum(), 1 + i + j)
-
     def test_setitem_scalar(self) -> None:
         device = 'mps'
         for dtype in [torch.int32, torch.float32, torch.int64]:
