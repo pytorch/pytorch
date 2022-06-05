@@ -193,7 +193,7 @@ def meta_index_Tensor(self, indices):
                 )
                 for j in range(index.ndim):
                     check(
-                        index[j] <= self.shape[k + j],
+                        index.shape[j] == self.shape[k + j],
                         lambda: f"The shape of the mask {index.shape} at index {i} "
                                 f"does not match the shape of the indexed tensor {self.shape} at index {k + j}",
                         IndexError
