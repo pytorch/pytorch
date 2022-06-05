@@ -120,13 +120,15 @@ struct _cuda_scatter_gather_internal_kernel {
     TensorIterator& iter,
     int64_t index_size,
     int64_t index_stride,
+    c10::IntArrayRef index_sizes,
+    c10::IntArrayRef src_sizes,
     int64_t numel,  // Do not use `const` qualifier here as it may cause issue in cuda 11.6.x. See #75434, #75545
     const func_t& f
   ) {
     if (!iter.can_use_32bit_indexing()) {
       for (auto& sub_iter : iter.with_32bit_indexing()) {
         _cuda_scatter_gather_internal_kernel<is_scatter_like, scalar_t>()(
-          sub_iter, index_size, index_stride, numel, f
+          sub_iter, index_size, index_stride, index_sizes, src_sizes, numel, f
         );
       }
       return;
@@ -137,9 +139,7 @@ struct _cuda_scatter_gather_internal_kernel {
     char* index_ptr = (char*)iter.data_ptr(2);
 
     auto src_strides = iter.strides(1);
-    auto src_sizes = iter.shape()[1];
     auto index_strides = iter.strides(2);
-    auto index_sizes = iter.shape()[2];
     auto ndim = iter.ndim();
 
     auto offset_calc = make_offset_calculator<3>(iter);
@@ -235,7 +235,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, self.numel(), f
+          iter, index_size, index_stride, index.sizes(), src.sizes(), self.numel(), f
         );
       }
     );
@@ -293,7 +293,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, self.numel(), f
+          iter, index_size, index_stride, index.sizes(), src.sizes(), self.numel(), f
         );
       }
     );
@@ -352,7 +352,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, self.numel(), f
+          iter, index_size, index_stride, index.sizes(), src.sizes(), self.numel(), f
         );
       }
     );
