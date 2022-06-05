@@ -4757,6 +4757,34 @@ def mv(g, self, vec):
 def dot(g, self, other):
     return matmul(g, self, other)
 
+@symbolic_helper.parse_args("v", "t", "t")
+def movedim(g, self, source, destination):
+    source = source.view(-1)
+    destination = destination.view(-1)
+    assert source.size() == destination.size()
+    
+    self_rank = symbolic_helper._get_tensor_rank(self)
+
+    perm = list(range(self_rank))
+
+    src_dims = perm.copy()
+    dst_dims = perm.copy()
+
+    for src, dst in zip(source.tolist(), destination.tolist()):
+        perm[dst] = src
+        src_dims[src] = -1
+        dst_dims[dst] = -1
+
+    src_dims = [dim for dim in  src_dims if dim != -1]
+    dst_dims = [dim for dim in  dst_dims if dim != -1]
+
+    for i in range(self_rank - len(source)):
+        perm[dst_dims[i]] = src_dims[i]
+
+    return g.op("Transpose", self, perm_i=perm)
+
+def moveaxis(g, self, source, destination):
+    movedim(g, self, source, destination)
 
 @symbolic_helper.parse_args("v", "v")
 def fill(g, self, value):
@@ -4888,6 +4916,7 @@ def cdist(g, x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     return pairwise_distance(
         g, broadcasted_x1, broadcasted_x2, p, eps=1e-06, keepdim=False
     )
+
 
 
 def broadcast_tensors(g, self):
