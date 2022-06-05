@@ -17,6 +17,7 @@ from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
+    skip_if_lt_x_gpu
 )
 
 class CheckpointWrapperTest(TestCase):
@@ -24,7 +25,6 @@ class CheckpointWrapperTest(TestCase):
         super().setUp()
 
     def test_load_activation_checkpointed_module(self):
-        raise ValueError("intentional")
         lin = nn.Linear(10, 10, bias=False)
         lin = checkpoint_wrapper(lin)
         state_dict = deepcopy(lin.state_dict())
@@ -47,6 +47,7 @@ class CheckpointWrapperTest(TestCase):
         for p1, p2 in zip(lin.parameters(), lin_new.parameters()):
             self.assertEqual(p1, p2)
 
+    @skip_if_lt_x_gpu(1)
     def test_checkpoint_wrapper_parity(self):
         """
         Tests that using checkpoint_wrapper or the functional
