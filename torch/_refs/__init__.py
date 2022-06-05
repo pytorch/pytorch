@@ -36,6 +36,7 @@ import operator
 import warnings
 import math
 from enum import Enum
+import collections
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -1576,10 +1577,14 @@ def addr(
 
 
 def atleast_1d(
-    *args: TensorLikeType,
+    arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_1d`."""
-    args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
+    if not args and isinstance(arg, collections.Sequence):
+        args_ = arg
+    else:
+        assert not isinstance(arg, collections.Sequence)
+        args_ = (arg,) + args
     res = tuple(a if a.ndim >= 1 else unsqueeze(a, 0) for a in args_)
     return res if len(res) > 1 else res[0]
 
@@ -1595,20 +1600,28 @@ def _unsqueeze_atleast(
 
 
 def atleast_2d(
-    *args: TensorLikeType,
+    arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_2d`."""
-    args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
+    if not args and isinstance(arg, collections.Sequence):
+        args_ = arg
+    else:
+        assert not isinstance(arg, collections.Sequence)
+        args_ = (arg,) + args
     unsqueeze_atleast_1d = partial(_unsqueeze_atleast, atleast_1d, 0)
     res = tuple(a if a.ndim >= 2 else unsqueeze_atleast_1d(a) for a in args_)
     return res if len(res) > 1 else res[0]
 
 
 def atleast_3d(
-    *args: TensorLikeType,
+    arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_3d`."""
-    args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
+    if not args and isinstance(arg, collections.Sequence):
+        args_ = arg
+    else:
+        assert not isinstance(arg, collections.Sequence)
+        args_ = (arg,) + args
     unsqueeze_atleast_2d = partial(_unsqueeze_atleast, atleast_2d, -1)
     res = tuple(a if a.ndim >= 3 else unsqueeze_atleast_2d(a) for a in args_)
     return res if len(res) > 1 else res[0]
