@@ -7134,20 +7134,6 @@ def sample_inputs_softshrink_hardshrink_hardtanh(op_info, device, dtype, require
                requires_grad=requires_grad)) for _ in range(1, N)]
     return tensors
 
-
-def reference_inputs_hardtanh(op, device, dtype, requires_grad, **kwargs):
-    yield from sample_inputs_softshrink_hardshrink_hardtanh(op, device, dtype, requires_grad, **kwargs)
-    inp = make_tensor((), dtype=dtype, device=device, requires_grad=requires_grad)
-    kwarg_dtypes = [True, 1, 2.0]
-    for a, b in product(kwarg_dtypes, kwarg_dtypes):
-        yield SampleInput(inp, kwargs={"min_val": a, "max_val": b})
-
-
-def error_inputs_hardtanh(op, device, **kwargs):
-    yield ErrorInput(SampleInput(make_tensor((1,), dtype=torch.uint8, device=device), kwargs={"min_val": -1}),
-                     error_regex="unsigned type with negative limits")
-
-
 def sample_inputs_eig(op_info, device, dtype, requires_grad=False, **kwargs):
     eigvecs = make_tensor((S, S), device=device, dtype=dtype,
                           low=None, high=None)
@@ -14680,11 +14666,9 @@ op_db: List[OpInfo] = [
            backward_dtypes=all_types(),
            dtypesIfCUDA=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.float16, torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.float16),
-           error_inputs_func=error_inputs_hardtanh,
            supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_softshrink_hardshrink_hardtanh,
-           reference_inputs_func=reference_inputs_hardtanh,
            supports_gradgrad=True,
            supports_out=False,
            supports_forward_ad=True,
@@ -19749,14 +19733,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.elu",
         torch_opinfo_name="nn.functional.elu",
-    ),
-    PythonRefInfo(
-        "_refs.nn.functional.hardtanh",
-        torch_opinfo_name="nn.functional.hardtanh",
-        decorators=(
-            # Need FakeTensor support for meta coverage
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
-        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
