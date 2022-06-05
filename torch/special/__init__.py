@@ -20,6 +20,7 @@ __all__ = [
     'exp2',
     'expit',
     'expm1',
+    'gamma',
     'gammainc',
     'gammaincc',
     'gammaln',
@@ -1009,6 +1010,20 @@ Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
 Args:
     {input}
     n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+gamma = _add_docstr(_special.special_gamma,
+                    r"""
+gamma(input, *, out=None) -> Tensor
+
+Gamma function :math:`\Gamma\left(\text{input}\right)`.
+
+""" + r"""
+Args:
+    {input}
 
 Keyword args:
     {out}
