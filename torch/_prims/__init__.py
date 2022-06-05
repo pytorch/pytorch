@@ -27,7 +27,7 @@ import operator
 import math
 
 prim = torch.library.Library("prims", "DEF")
-prim_impl = torch.library.Library("prims", "IMPL", "CompositeImplicitAutograd")
+prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
 prim_autograd_impl = torch.library.Library("prims", "IMPL", "Autograd")
 prim_meta_impl = torch.library.Library("prims", "IMPL", "Meta")
 
@@ -355,11 +355,13 @@ def _make_prim(
     prim_autograd_impl.impl(name, _autograd_impl)
     prim_meta_impl.impl(name, _wrap_tensor_meta(meta))
 
-    _prim = getattr(torch.ops.prims, name).default
+    _prim_packet = getattr(torch.ops.prims, name)
+    _prim = _prim_packet.default
 
-    _prim.__doc__ = doc
-    _prim.impl_nvfuser = impl_nvfuser  # type: ignore[attr-defined]
-    _prim.return_type = return_type  # type: ignore[attr-defined]
+    for p in (_prim_packet, _prim):
+        p.__doc__ = doc
+        p.impl_nvfuser = impl_nvfuser  # type: ignore[attr-defined]
+        p.return_type = return_type  # type: ignore[attr-defined]
 
     return _prim
 
