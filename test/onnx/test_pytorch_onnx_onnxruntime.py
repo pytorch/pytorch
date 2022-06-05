@@ -12470,6 +12470,22 @@ class _TestONNXRuntime:
             dynamic_axes={"a": {0: "a0"}},
         )
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_lerp(self):
+        class LerpModel(torch.nn.Module):
+            def forward(self, x):
+                return (
+                    x.lerp(torch.full_like(x, 10), 0.4),
+                    x.lerp(torch.full_like(x, 20), 0.7),
+                    x.lerp(torch.full_like(x, 30), torch.tensor(0.4)),
+                    x.lerp(torch.full_like(x, 40), x / 10.0),
+                    x.lerp(torch.tensor(10.0), x / 10.0),
+                    x.lerp(torch.tensor(10.0), 0.4),
+                    x.lerp(torch.tensor(10.0), torch.tensor(0.4)),
+                )
+
+        self.run_test(LerpModel(), torch.rand(5, 4, 3))
+
 
 def make_test(
     name,

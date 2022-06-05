@@ -4890,6 +4890,26 @@ def cdist(g, x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     )
 
 
+def lerp(g, self, end, weight):
+    # Conditional for better numeric. This has been discussed in
+    # https://github.com/pytorch/pytorch/pull/18871
+    diff = g.op("Sub", end, self)
+    return where(
+        g,
+        g.op("Less", weight, g.op("Constant", value_t=torch.tensor(0.5))),
+        g.op("Add", self, g.op("Mul", weight, diff)),
+        g.op(
+            "Sub",
+            end,
+            g.op(
+                "Mul",
+                diff,
+                g.op("Sub", g.op("Constant", value_t=torch.tensor(1)), weight),
+            ),
+        ),
+    )
+
+
 def broadcast_tensors(g, self):
     all_tensors = symbolic_helper._unpack_list(self)
     t_with_final_shape = zeros_like(g, all_tensors[0])
