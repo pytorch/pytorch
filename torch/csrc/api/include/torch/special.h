@@ -1149,4 +1149,23 @@ inline Tensor& shifted_chebyshev_polynomial_w_out(Tensor& output, const Tensor& 
   return torch::special_shifted_chebyshev_polynomial_w_out(output, x, n);
 }
 
+/// Spherical Bessel function of the first kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.spherical_bessel_j1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::spherical_bessel_j1(x);
+/// ```
+inline Tensor spherical_bessel_j1(const Tensor& x) {
+  return torch::special_spherical_bessel_j1(x);
+}
+
+inline Tensor& spherical_bessel_j1_out(Tensor& y, const Tensor& x) {
+  return torch::special_spherical_bessel_j1_out(y, x);
+}
+
 }} // torch::special

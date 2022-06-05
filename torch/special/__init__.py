@@ -52,6 +52,7 @@ __all__ = [
     'shifted_chebyshev_polynomial_w',
     'sinc',
     'softmax',
+    'spherical_bessel_j1',
     'xlog1py',
     'xlogy',
     'zeta',
@@ -1217,6 +1218,20 @@ Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
 Args:
     {input}
     n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+spherical_bessel_j1 = _add_docstr(_special.special_spherical_bessel_j1,
+                                  r"""
+spherical_bessel_j1(input, *, out=None) -> Tensor
+
+Spherical Bessel function of the first kind of order :math:`1`.
+
+""" + r"""
+Args:
+    {input}
 
 Keyword args:
     {out}

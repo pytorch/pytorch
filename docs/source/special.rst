@@ -44,3 +44,4 @@ Functions
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta
+.. autofunction:: spherical_bessel_j1
