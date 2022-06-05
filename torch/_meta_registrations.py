@@ -66,7 +66,7 @@ def meta_pad2d(self, padding):
     check(
         (self.ndim == 3 and valid_dims)
         or (self.ndim == 4 and valid_dims and self.size(3) != 0),
-        f"3D or 4D (batch mode) tensor expected for input, but got: {self}"
+        lambda: f"3D or 4D (batch mode) tensor expected for input, but got: {self}"
     )
     if self.ndim == 4:
         nbatch, nplane, input_h, input_w = self.shape
@@ -88,7 +88,7 @@ def meta_pad2d(self, padding):
 def meta_dot(self, tensor):
     check(
         self.dim() == 1 and tensor.dim() == 1,
-        f"1D tensors expected, but got {self.dim()}D and {tensor.dim()}D tensors"
+        lambda: f"1D tensors expected, but got {self.dim()}D and {tensor.dim()}D tensors"
     )
     return self.new_empty(())
 
@@ -119,12 +119,12 @@ def meta_bernoulli(self, *, generator=None, out):
 
 @torch.library.impl(meta_lib, "_adaptive_avg_pool2d")
 def meta_adaptive_avg_pool2d(self, output_size):
-    check(self.ndim == 3 or self.ndim == 4, f"Expected 3D or 4D tensor, but got {self.shape}")
+    check(self.ndim == 3 or self.ndim == 4, lambda: f"Expected 3D or 4D tensor, but got {self.shape}")
     return self.new_empty(self.shape[:-2] + tuple(output_size))
 
 @torch.library.impl(meta_lib, "_adaptive_avg_pool3d")
 def meta_adaptive_avg_pool3d(self, output_size):
-    check(self.ndim == 4 or self.ndim == 5, f"Expected 4D or 5D tensor, but got {self.shape}")
+    check(self.ndim == 4 or self.ndim == 5, lambda: f"Expected 4D or 5D tensor, but got {self.shape}")
     return self.new_empty(self.shape[:-3] + tuple(output_size))
 
 @torch.library.impl(meta_lib, "repeat_interleave.Tensor")

@@ -1547,11 +1547,11 @@ def addr(
         # Integers are accepted for booleans
         check(
             is_weakly_lesser_type(type(beta), int),
-            f"expected bool/int beta but got {type(beta)}",
+            lambda: f"expected bool/int beta but got {type(beta)}",
         )
         check(
             is_weakly_lesser_type(type(alpha), int),
-            f"expected bool/int alpha but got {type(beta)}",
+            lambda: f"expected bool/int alpha but got {type(beta)}",
         )
         if not beta:
             return torch.outer(vec1, vec2) if alpha else torch.full_like(self, False)
@@ -1563,11 +1563,11 @@ def addr(
     else:
         check(
             is_weakly_lesser_type(type(beta), dtype_to_type(self.dtype)),
-            f"cannot safely convert {type(beta)} to {self.dtype}",
+            lambda: f"cannot safely convert {type(beta)} to {self.dtype}",
         )
         check(
             is_weakly_lesser_type(type(alpha), dtype_to_type(self.dtype)),
-            f"cannot safely convert {type(alpha)} to {self.dtype}",
+            lambda: f"cannot safely convert {type(alpha)} to {self.dtype}",
         )
         if beta == 0:
             # This means NaNs from self are dropped if beta is zero
