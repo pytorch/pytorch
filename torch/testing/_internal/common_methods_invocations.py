@@ -19112,6 +19112,9 @@ op_db: List[OpInfo] = [
         decorators=(
             precisionOverride(
                 {
+                    torch.int16: 1e-04,
+                    torch.int32: 1e-04,
+                    torch.int64: 1e-04,
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
                 },
