@@ -4437,6 +4437,7 @@ for shape in [(1,), ()]:
         mean_combined.backward()
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    @slowTest
     def test_checkpointing_without_reentrant_memory_savings(self):
         class MyModel(nn.Module):
             def __init__(self, n, use_checkpoint, use_reentrant):
@@ -4507,7 +4508,14 @@ for shape in [(1,), ()]:
             @staticmethod
             def backward(ctx, grad_out):
                 x, y, z, w, out = ctx.saved_tensors
-                x, y, z, w, out = ctx.saved_tensors
+                x_2, y_2, z_2, w_2, out_2 = ctx.saved_tensors
+                self.assertEqual(x, x_2)
+                self.assertEqual(y, y_2)
+                self.assertEqual(z, z_2)
+                self.assertEqual(w, w_2)
+                self.assertEqual(out, out_2)
+                # Ensure same tensors were returned on
+                # second access.
                 return x, x, x
 
         x = torch.tensor(1., requires_grad=True)
