@@ -19481,6 +19481,7 @@ op_db: List[OpInfo] = [
         ),
         dtypes=all_types_and(torch.bool),
         ref=lambda x: scipy.special.spherical_yn(1, x) if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
     ),
 ]
 
