@@ -52,54 +52,34 @@ Orthogonal polynomials are families of polynomials such that any two different p
 Hermite Polynomials
 ^^^^^^^^^^^^^^^^^^^
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    hermite_polynomial_h
-    hermite_polynomial_he
+.. autofunction:: hermite_polynomial_h
+.. autofunction:: hermite_polynomial_he
 
 Laguerre Polynomials
 ^^^^^^^^^^^^^^^^^^^^
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    laguerre_polynomial_l
+.. autofunction:: laguerre_polynomial_l
 
 Chebyshev Polynomials
 ^^^^^^^^^^^^^^^^^^^^^
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    chebyshev_polynomial_t
-    chebyshev_polynomial_u
-    chebyshev_polynomial_v
-    chebyshev_polynomial_w
+.. autofunction:: chebyshev_polynomial_t
+.. autofunction:: chebyshev_polynomial_u
+.. autofunction:: chebyshev_polynomial_v
+.. autofunction:: chebyshev_polynomial_w
 
 Shifted Chebyshev Polynomials
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    shifted_chebyshev_polynomial_t
-    shifted_chebyshev_polynomial_u
-    shifted_chebyshev_polynomial_v
-    shifted_chebyshev_polynomial_w
+.. autofunction:: shifted_chebyshev_polynomial_t
+.. autofunction:: shifted_chebyshev_polynomial_u
+.. autofunction:: shifted_chebyshev_polynomial_v
+.. autofunction:: shifted_chebyshev_polynomial_w
 
 Legendre Polynomials
 ^^^^^^^^^^^^^^^^^^^^
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    legendre_polynomial_p
+.. autofunction:: legendre_polynomial_p
 
 Bessel and Related Functions
 ----------------------------
@@ -107,57 +87,37 @@ Bessel and Related Functions
 Bessel Functions
 ^^^^^^^^^^^^^^^^
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    bessel_j0
-    bessel_j1
-    bessel_y0
-    bessel_y1
+.. autofunction:: bessel_j0
+.. autofunction:: bessel_j1
+.. autofunction:: bessel_y0
+.. autofunction:: bessel_y1
 
 Modified Bessel Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    modified_bessel_i0
-    modified_bessel_i1
-    modified_bessel_k0
-    modified_bessel_k1
+.. autofunction:: modified_bessel_i0
+.. autofunction:: modified_bessel_i1
+.. autofunction:: modified_bessel_k0
+.. autofunction:: modified_bessel_k1
 
 Scaled Modified Bessel Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    scaled_modified_bessel_i0
-    scaled_modified_bessel_i1
-    scaled_modified_bessel_k0
-    scaled_modified_bessel_k1
+.. autofunction:: scaled_modified_bessel_i0
+.. autofunction:: scaled_modified_bessel_i1
+.. autofunction:: scaled_modified_bessel_k0
+.. autofunction:: scaled_modified_bessel_k1
 
 Airy Functions
 ^^^^^^^^^^^^^^
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    airy_ai
-    airy_bi
+.. autofunction:: airy_ai
+.. autofunction:: airy_bi
 
 Spherical Bessel Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    spherical_bessel_j0
-    spherical_bessel_j1
-    spherical_bessel_y0
-    spherical_bessel_y1
+.. autofunction:: spherical_bessel_j0
+.. autofunction:: spherical_bessel_j1
+.. autofunction:: spherical_bessel_y0
+.. autofunction:: spherical_bessel_y1
