@@ -305,6 +305,16 @@ def run_meta_crossref(
         elif func is torch.ops.aten.repeat_interleave.Tensor:
             if kwargs.get("output_size", None) is None:
                 meta_args = args
+        elif func is torch.ops.aten.index.Tensor:
+            # Don't convert boolean tensors to meta as they will have nonzero
+            # called on them
+            indices = []
+            for meta_index, real_index in zip(meta_args[1], args[1]):
+                if meta_index is not None and meta_index.dtype in [torch.int8, torch.bool]:
+                    indices.append(real_index)
+                else:
+                    indices.append(meta_index)
+            meta_args = (meta_args[0], indices)
         try:
             # Suppress warnings, this doesn't matter for test_meta.py
             # but it does matter if you want to use this decorator
@@ -437,7 +447,6 @@ meta_function_expected_failures = {
     torch.nn.functional.one_hot: {i64},  # aten::_local_scalar_dense
     torch.nn.functional.pdist: {f32, f64},  # aten::_pdist_forward
     torch.nn.functional.prelu: {bf16, f32, f64},  # aten::prelu
-    torch.nn.functional.relu: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::relu
     torch.nn.functional.rrelu: {bf16, f32, f64},  # aten::rrelu_with_noise
     torch.nn.functional.unfold: {bf16, f16, f32, f64},  # aten::im2col
     torch.nonzero: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero, aten::nonzero.out
@@ -456,8 +465,6 @@ meta_function_expected_failures = {
     torch.cholesky_solve: {f32, f64},  # aten::_cholesky_solve_helper
     torch.eig: {f32, f64},  # aten::_local_scalar_dense
     torch.geqrf: {f32, f64},  # aten::geqrf
-    torch.linalg.cholesky: {f32, f64},  # aten::linalg_cholesky_ex, aten::linalg_cholesky_ex.L
-    torch.linalg.cholesky_ex: {f32, f64},  # aten::linalg_cholesky_ex
     torch.linalg.det: {f32, f64},  # aten::_det_lu_based_helper
     torch.linalg.eig: {f32, f64},  # aten::linalg_eig
     torch.linalg.eigh: {f32, f64},
@@ -484,7 +491,6 @@ sys.exit()
 """
 
 meta_function_skips = {
-    torch.Tensor.__getitem__: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8, c32},
     torch.aminmax: {b8, f32, f64, i16, i32, i64, i8, u8},
     torch.conj_physical: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.cummax: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},
@@ -536,8 +542,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.geqrf: {f32, f64},  # aten::geqrf
     torch.histc: {i16, i32, i64, i8},  # aten::histc, aten::histc.out
     torch.kthvalue: {f16},  # aten::kthvalue.values
-    torch.linalg.cholesky: {f32, f64},  # aten::linalg_cholesky_ex, aten::linalg_cholesky_ex.L
-    torch.linalg.cholesky_ex: {f32, f64},  # aten::linalg_cholesky_ex
     torch.linalg.householder_product: {f32, f64},  # aten::linalg_householder_product, aten::linalg_householder_product.out
     torch.linalg.solve_triangular: {f32, f64},  # aten::linalg_solve_triangular, aten::linalg_solve_triangular.out
     torch.logcumsumexp: {bf16, f16},  # aten::_logcumsumexp, aten::_logcumsumexp.out
@@ -562,7 +566,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.nn.functional.multi_margin_loss: {bf16, f16},  # aten::multi_margin_loss
     torch.nn.functional.multilabel_margin_loss: {bf16, f16},  # aten::multilabel_margin_loss_forward
     torch.nn.functional.prelu: {f16},  # aten::prelu
-    torch.nn.functional.relu: {f16},  # aten::relu
     torch.nn.functional.rrelu: {f16},  # aten::rrelu_with_noise
     torch.ormqr: {f32, f64},  # aten::ormqr, aten::ormqr.out
     torch.trace: {b8, bf16, f16},  # aten::diag.out
@@ -670,7 +673,6 @@ meta_dispatch_expected_failures = {
     aten.histogram.bin_ct: {f64, f32},
     aten.histogram.bins_tensor: {f64, f32},
     aten.im2col.default: {bf16, f16, f64, f32},
-    aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32},
     aten.kthvalue.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.linalg_matrix_exp.default: {bf16, f64, f32},
     aten.log_sigmoid_forward.output: {bf16, f64, f32},
@@ -701,7 +703,6 @@ meta_dispatch_expected_failures = {
     aten.nonzero.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.polar.default: {f64, f32},
     aten.prelu.default: {bf16, f64, f32},
-    aten.relu.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.roll.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.rrelu_with_noise.default: {bf16, f64, f32},
     aten.searchsorted.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
@@ -726,8 +727,6 @@ meta_dispatch_expected_failures = {
     aten.cholesky_solve.out: {f32, f64},  # aten::_cholesky_solve_helper
     aten.eig.default: {f32, f64},  # aten::_local_scalar_dense
     aten.geqrf.default: {f32, f64},  # aten::geqrf
-    aten.linalg_cholesky_ex.L: {f32, f64},  # aten::linalg_cholesky_ex.L
-    aten.linalg_cholesky_ex.default: {f32, f64},  # aten::linalg_cholesky_ex
     aten.linalg_eig.default: {f32, f64},  # aten::linalg_eig
     aten.linalg_eigh.default: {f32, f64},
     aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
@@ -784,10 +783,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.grid_sampler_3d.default: {f16},  # aten::grid_sampler_3d
     aten.histc.default: {i16, i32, i64, i8},  # aten::histc
     aten.histc.out: {i16, i32, i64, i8},  # aten::histc.out
-    aten.index.Tensor: {c32},  # aten::index.Tensor
     aten.kthvalue.default: {f16},  # aten::kthvalue.values
-    aten.linalg_cholesky_ex.L: {f32, f64},  # aten::linalg_cholesky_ex.L
-    aten.linalg_cholesky_ex.default: {f32, f64},  # aten::linalg_cholesky_ex
     aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
     aten.linalg_householder_product.default: {f32, f64},  # aten::linalg_householder_product
     aten.linalg_householder_product.out: {f32, f64},  # aten::linalg_householder_product.out
@@ -816,7 +812,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
     aten.prelu.default: {f16},  # aten::prelu
-    aten.relu.default: {f16},  # aten::relu
     aten.rrelu_with_noise.default: {f16},  # aten::rrelu_with_noise
     aten.tensordot.out: {f16},  # aten::tensordot.out
     aten.trace.default: {b8, bf16, f16},  # aten::diag.out
