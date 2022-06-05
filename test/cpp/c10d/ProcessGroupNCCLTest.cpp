@@ -104,7 +104,7 @@ class NCCLTest : public NCCLTestBase {
 
     // Copy inputs to outputs
     for (const auto i : c10::irange(numDevices_)) {
-      cudaStreamSynchronize(streams_[i].stream());
+      C10_CUDA_CHECK(cudaStreamSynchronize(streams_[i].stream()));
       outputs[i] = tensors_[i].cpu();
     }
 
@@ -135,7 +135,7 @@ class NCCLTest : public NCCLTestBase {
 
     // Copy inputs to outputs
     for (const auto i : c10::irange(numDevices_)) {
-      cudaStreamSynchronize(streams_[i].stream());
+      C10_CUDA_CHECK(cudaStreamSynchronize(streams_[i].stream()));
       for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
         outputs[i][j] = tensor_lists[i][j].cpu();
       }
