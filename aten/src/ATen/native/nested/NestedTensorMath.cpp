@@ -576,8 +576,7 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
   TORCH_CHECK_INDEX(
     index >= -ntensors && index < ntensors,
     "index ", index, " is out of bounds for nested tensor dimension 0 with size ", ntensors);
-  int64_t positive_index = index;
-  if (positive_index < 0) positive_index += ntensors;
+  int64_t positive_index = index < 0 ? index + ntensors : index;
   // buffer contains the underlying data in a contiguous vector
   Tensor buffer = get_buffer(self);
   // determine the memory section of the i-th original tensor
