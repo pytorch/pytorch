@@ -1577,8 +1577,7 @@ def addr(
 
 
 def atleast_1d(
-    arg: Union[TensorLikeType, Sequence[TensorLikeType]],
-    *args: TensorLikeType
+    arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_1d`."""
     if not args and isinstance(arg, collections.Sequence):
@@ -1601,8 +1600,7 @@ def _unsqueeze_atleast(
 
 
 def atleast_2d(
-    arg: Union[TensorLikeType, Sequence[TensorLikeType]],
-    *args: TensorLikeType
+    arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_2d`."""
     if not args and isinstance(arg, collections.Sequence):
@@ -1616,8 +1614,7 @@ def atleast_2d(
 
 
 def atleast_3d(
-    arg: Union[TensorLikeType, Sequence[TensorLikeType]],
-    *args: TensorLikeType
+    arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_3d`."""
     if not args and isinstance(arg, collections.Sequence):

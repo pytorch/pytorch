@@ -2,9 +2,9 @@ from typing import Callable
 
 import torch
 
-from torch.fx import GraphModule, Graph
+from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch._prims.utils import TensorMeta, getnvFuserDtype
+from torch._prims.utils import getnvFuserDtype
 from torch._prims.context import TorchRefsMode
 import torch.overrides
 from torch.utils._pytree import tree_map

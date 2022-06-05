@@ -20034,11 +20034,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.stack",
         torch_opinfo_name="stack",
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/77046
-            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
-            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-        ),
     ),
     PythonRefInfo(
         "_refs.squeeze",
