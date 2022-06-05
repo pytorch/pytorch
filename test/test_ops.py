@@ -14,6 +14,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     all_types_and_complex_and,
 )
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.testing._internal.common_utils import (
     TestCase,
     is_iterable_of_tensors,
@@ -48,6 +49,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     skipMeta,
 )
+from torch.utils._pytree import tree_map
 import torch._prims as prims
 from torch._prims.context import TorchRefsMode
 
@@ -355,7 +357,7 @@ class TestCommon(TestCase):
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
-                return prims.utils.TensorMeta(x)
+                return FakeTensor.from_tensor(x)
             return x
 
         # TODO: iterate over requires_grad true/false
@@ -505,7 +507,7 @@ class TestCommon(TestCase):
     def test_python_ref_errors(self, device, op):
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
-                return prims.utils.TensorMeta(x)
+                return FakeTensor.from_tensor(x)
             return x
 
         error_inputs = op.error_inputs(device)
@@ -1106,6 +1108,16 @@ class TestCommon(TestCase):
                 *transformed_sample.args,
                 **transformed_sample.kwargs,
             )
+            # Since range of chalf is much less compared to cfloat,
+            # we get `inf`s easily (eg. with `pow`, `exp`),
+            # so we cast `cfloat` back to `chalf`.
+            expected = tree_map(lambda x: x.to(torch.complex32) if isinstance(
+                x, torch.Tensor) and x.dtype is torch.complex64 else x, expected)
+
+            # `exact_dtype` is False because for ops like real, imag
+            # we get different dtypes for `actual` and `expected`
+            # `chalf` input -> `half` output
+            # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
 
 
