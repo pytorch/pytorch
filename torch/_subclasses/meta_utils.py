@@ -1,5 +1,4 @@
 import torch
-from torch._prims.utils import is_complex_dtype, corresponding_real_dtype
 from torch.utils._mode_utils import no_dispatch
 
 def safe_is_leaf(t):
@@ -50,8 +49,8 @@ class MetaConverter:
                     base = self.meta_tensor(t._base)
 
                     def is_c_of_r(complex_dtype, real_dtype):
-                        return is_complex_dtype(complex_dtype) and \
-                            corresponding_real_dtype(complex_dtype) == real_dtype
+                        return utils.is_complex_dtype(complex_dtype) and \
+                            utils.corresponding_real_dtype(complex_dtype) == real_dtype
 
                     if base.dtype == t.dtype:
                         pass
@@ -138,3 +137,5 @@ class MetaConverter:
         else:
             # non-Tensor types don't count as hit or miss
             return t
+
+import torch._prims.utils as utils
