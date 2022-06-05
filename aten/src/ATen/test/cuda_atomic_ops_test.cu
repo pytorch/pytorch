@@ -61,23 +61,23 @@ void test_atomic_add() {
     answer[i] = factor;
   }
 
-  cudaMalloc((void**)&ad, arraysize * sizeof(T));
-  cudaMalloc((void**)&sumd, arraysize * sizeof(T));
+  C10_CUDA_CHECK(cudaMalloc((void**)&ad, arraysize * sizeof(T)));
+  C10_CUDA_CHECK(cudaMalloc((void**)&sumd, arraysize * sizeof(T)));
 
-  cudaMemcpy(ad, a.data(), arraysize * sizeof(T), cudaMemcpyHostToDevice);
-  cudaMemcpy(sumd, sum.data(), arraysize * sizeof(T), cudaMemcpyHostToDevice);
+  C10_CUDA_CHECK(cudaMemcpy(ad, a.data(), arraysize * sizeof(T), cudaMemcpyHostToDevice);
+  C10_CUDA_CHECK(cudaMemcpy(sumd, sum.data(), arraysize * sizeof(T), cudaMemcpyHostToDevice);
 
   addition_test_kernel<<<dimGrid, dimBlock>>>(ad, sumd);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  cudaMemcpy(sum.data(), sumd, arraysize * sizeof(T), cudaMemcpyDeviceToHost);
+  C10_CUDA_CHECK(cudaMemcpy(sum.data(), sumd, arraysize * sizeof(T), cudaMemcpyDeviceToHost);
 
   for (int i = 0; i < arraysize; ++i) {
     ASSERT_EQ(sum[i], answer[i]) << typeid(T).name();
   }
 
-  cudaFree(ad);
-  cudaFree(sumd);
+  C10_CUDA_CHECK(cudaFree(ad));
+  C10_CUDA_CHECK(cudaFree(sumd));
 }
 
 template <typename T>
@@ -97,23 +97,23 @@ void test_atomic_mul() {
     answer[i] = pow(sum[i], static_cast<T>(factor + 1));
   }
 
-  cudaMalloc((void**)&ad, arraysize * sizeof(T));
-  cudaMalloc((void**)&sumd, arraysize * sizeof(T));
+  C10_CUDA_CHECK(cudaMalloc((void**)&ad, arraysize * sizeof(T)));
+  C10_CUDA_CHECK(cudaMalloc((void**)&sumd, arraysize * sizeof(T)));
 
-  cudaMemcpy(ad, a.data(), arraysize * sizeof(T), cudaMemcpyHostToDevice);
-  cudaMemcpy(sumd, sum.data(), arraysize * sizeof(T), cudaMemcpyHostToDevice);
+  C10_CUDA_CHECK(cudaMemcpy(ad, a.data(), arraysize * sizeof(T), cudaMemcpyHostToDevice);
+  C10_CUDA_CHECK(cudaMemcpy(sumd, sum.data(), arraysize * sizeof(T), cudaMemcpyHostToDevice);
 
   mul_test_kernel<<<dimGrid, dimBlock>>>(ad, sumd);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  cudaMemcpy(sum.data(), sumd, arraysize * sizeof(T), cudaMemcpyDeviceToHost);
+  C10_CUDA_CHECK(cudaMemcpy(sum.data(), sumd, arraysize * sizeof(T), cudaMemcpyDeviceToHost);
 
   for (int i = 0; i < arraysize; ++i) {
     ASSERT_EQ(sum[i], answer[i]) << typeid(T).name();
   }
 
-  cudaFree(ad);
-  cudaFree(sumd);
+  C10_CUDA_CHECK(cudaFree(ad));
+  C10_CUDA_CHECK(cudaFree(sumd));
 }
 
 template <typename T>

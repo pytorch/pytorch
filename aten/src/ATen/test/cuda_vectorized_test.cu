@@ -106,12 +106,12 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
 
   // vec4 copy
   reset_buffers();
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   constexpr int total_work_size = buffer_size * 4;
   vectorized_copy<double, 4><<<total_work_size / block_work_size() , num_threads()>>>(b2, b1);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (int i = 0; i < 1024; i++) {
     ASSERT_EQ(buffer1[i].x, buffer2[i].x);
     ASSERT_EQ(buffer1[i].y, buffer2[i].y);
@@ -121,11 +121,11 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
 
   // vec2 copy
   reset_buffers();
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   vectorized_copy<double, 2><<<total_work_size / block_work_size() , num_threads()>>>(b2, b1);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (int i = 0; i < 1024; i++) {
     ASSERT_EQ(buffer1[i].x, buffer2[i].x);
     ASSERT_EQ(buffer1[i].y, buffer2[i].y);
@@ -135,11 +135,11 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
 
   // vec1 copy
   reset_buffers();
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   vectorized_copy<double, 1><<<total_work_size / block_work_size() , num_threads()>>>(b2, b1);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (int i = 0; i < 1024; i++) {
     ASSERT_EQ(buffer1[i].x, buffer2[i].x);
     ASSERT_EQ(buffer1[i].y, buffer2[i].y);
@@ -155,9 +155,9 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
       b1 = reinterpret_cast<double *>(reinterpret_cast<char *>(buffer1) + i);
       b2 = reinterpret_cast<double *>(reinterpret_cast<char *>(buffer2) + j);
       cudaGetLastError();
-      cudaDeviceSynchronize();
+      C10_CUDA_CHECK(cudaDeviceSynchronize());
       vectorized_copy<double, 4><<<1, num_threads()>>>(b2, b1);
-      cudaDeviceSynchronize();
+      C10_CUDA_CHECK(cudaDeviceSynchronize());
       auto err = cudaGetLastError();
       if (i % 16 == 0 && j % 16 == 0) {
         ASSERT_EQ(err, cudaSuccess);

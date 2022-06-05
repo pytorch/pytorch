@@ -39,7 +39,7 @@ TEST(PackedtensoraccessorTest, PackedtensoraccessorTestCUDA) {
   test_tensor_packed_accessor_kernel<<<1, 1, 0, stream>>>(resa, t1a, t2a);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  ASSERT_TRUE(cudaSuccess == cudaDeviceSynchronize());
+  ASSERT_TRUE(cudaSuccess == C10_CUDA_CHECK(cudaDeviceSynchronize()));
 
   auto expected = mv(t1, t2);
 
