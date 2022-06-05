@@ -332,7 +332,7 @@ def _make_prim(
         @staticmethod
         def forward(ctx, args_spec, *flat_args):
             args, kwargs = tree_unflatten(flat_args, args_spec)  # type: ignore[arg-type]
-            g = torch._C._DispatchBelowAutograd()
+            g = torch._C._AutoDispatchBelowAutograd()
             try:
                 return _prim(*args, **kwargs)
             finally:
