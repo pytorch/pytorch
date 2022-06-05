@@ -50,6 +50,7 @@ __all__ = [
     'shifted_chebyshev_polynomial_u',
     'shifted_chebyshev_polynomial_v',
     'shifted_chebyshev_polynomial_w',
+    'scaled_modified_bessel_i0',
     'sinc',
     'softmax',
     'xlog1py',
@@ -1153,6 +1154,20 @@ modified_bessel_k1 = _add_docstr(_special.special_modified_bessel_k1,
 modified_bessel_k1(input, *, out=None) -> Tensor
 
 Modified Bessel function of the second kind of order :math:`1`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+scaled_modified_bessel_i0 = _add_docstr(_special.special_scaled_modified_bessel_i0,
+                                        r"""
+scaled_modified_bessel_i0(input, *, out=None) -> Tensor
+
+Scaled modified Bessel function of the first kind of order :math:`0`.
 
 """ + r"""
 Args:

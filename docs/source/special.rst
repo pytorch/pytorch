@@ -44,3 +44,4 @@ Functions
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta
+.. autofunction:: scaled_modified_bessel_i0
