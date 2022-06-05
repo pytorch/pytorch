@@ -132,6 +132,7 @@ class TestFSDPCheckpoint(FSDPTest):
         # flag set.
         inp = torch.randn(10, 3, device=torch.cuda.current_device(), requires_grad=True)
 
+        global _save_on_cpu_called
         models = [ckpt_sequential_wrapped_fsdp, inner_ckpt, baseline]
         with patch_save_on_cpu(get_patched_save_on_cpu()):
             for i in range(2):
@@ -139,10 +140,12 @@ class TestFSDPCheckpoint(FSDPTest):
                 outputs = []
                 for m in models:
                     check_offload = m != baseline and i == 0 and offload_activations
+                    if check_offload:
+                        self.assertFalse(_save_on_cpu_called)
                     out = m(inp)
                     if check_offload:
-                        global _save_on_cpu_called
                         self.assertTrue(_save_on_cpu_called)
+                        _save_on_cpu_called = False
                     loss = out.sum()
                     loss.backward()
                     losses.append(loss)
@@ -157,6 +160,7 @@ class TestFSDPCheckpoint(FSDPTest):
     )
     @parametrize("offload_activations", [True, False])
     def test_basic_checkpoint_end_to_end(self, cpu_offload, offload_activations):
+        global _save_on_cpu_called
         with patch_save_on_cpu(get_patched_save_on_cpu()):
             seq = TestFSDPCheckpoint.SequentialModule().to(torch.cuda.current_device())
             # Runs FSDP with no checkpointing
@@ -184,13 +188,16 @@ class TestFSDPCheckpoint(FSDPTest):
                 fsdp_wrapped_checkpoint,
                 fsdp_call_checkpoint,
             ]
-
+            # Ensure _save_on_cpu is not yet called
+            self.assertFalse(_save_on_cpu_called)
             for i in range(6):
                 losses = []
                 outputs = []
                 for m in models:
                     check_offload = m != fsdp_only_seq and i == 0 and offload_activations
                     if m == fsdp_call_checkpoint:
+                        # _save_on_cpu should not be called yet
+                        self.assertFalse(_save_on_cpu_called)
                         offload_ctx = (
                             get_patched_save_on_cpu()(pin_memory=True)
                             if offload_activations
@@ -199,16 +206,17 @@ class TestFSDPCheckpoint(FSDPTest):
                         with offload_ctx:
                             out = checkpoint(m, inp)
                     else:
+                        # _save_on_cpu should not be called yet
+                        self.assertFalse(_save_on_cpu_called)
                         out = m(inp)
 
                     if check_offload:
-                        global _save_on_cpu_called
                         self.assertTrue(_save_on_cpu_called)
-                        _save_on_cpu_called = False
                     loss = out.sum()
                     loss.backward()
                     losses.append(loss)
                     outputs.append(out)
+                    _save_on_cpu_called = False
 
                 self._verify_parity(losses, outputs, models)
 
