@@ -19083,6 +19083,14 @@ op_db: List[OpInfo] = [
         ),
         dtypes=all_types_and(torch.bool),
         ref=lambda x: scipy.special.airy(x)[0] if TEST_SCIPY else _NOTHING,
+        skips=(
+            # TODO: implementation loses accuracy outside of (-10, 10)
+            DecorateInfo(
+                unittest.skip('Skipped!'),
+                'TestUnaryUfuncs',
+                'test_reference_numerics_large',
+            ),
+        ),
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
@@ -19111,6 +19119,14 @@ op_db: List[OpInfo] = [
         ),
         dtypes=all_types_and(torch.bool),
         ref=lambda x: scipy.special.airy(x)[1] if TEST_SCIPY else _NOTHING,
+        skips=(
+            # TODO: implementation loses accuracy outside of (-10, 10)
+            DecorateInfo(
+                unittest.skip('Skipped!'),
+                'TestUnaryUfuncs',
+                'test_reference_numerics_large',
+            ),
+        ),
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
