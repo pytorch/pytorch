@@ -371,6 +371,8 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::ORT;
       case c10::DeviceType::HPU:
         return c10::DispatchKey::HPU;
+      case c10::DeviceType::PrivateUse1:
+        return c10::DispatchKey::PrivateUse1;
       default:
         TORCH_CHECK(
             false,
@@ -555,7 +557,7 @@ class TORCH_API Library final {
   Library& operator=(const Library&) = delete;
   Library(Library&&) = default;
   Library& operator=(Library&&) = default;
-  // TODO: add gen_python_error boolean flag
+
   // Some notes about the API design here.  We had the following constraints:
   //
   //  - We need to support multiple "types" of arguments for schema and
@@ -800,7 +802,7 @@ class TORCH_API Library final {
   Kind kind_;
   c10::optional<std::string> ns_;
   c10::optional<c10::DispatchKey> dispatch_key_;
-  std::string file_;
+  const char* file_;
   uint32_t line_;
 
   std::vector<c10::RegistrationHandleRAII> registrars_;

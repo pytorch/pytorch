@@ -8,14 +8,17 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
+    skipCUDAIfRocm,
     dtypes,
 )
+from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, log_input
 import torch._prims as prims
 from torch._prims.executor import make_traced
 
 
 class TestPrims(TestCase):
     @onlyCUDA
+    @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_broadcast_in_dim(self, device, dtype):
         # nvfuser is not currently capable of realizing a broadcasted tensor
@@ -80,6 +83,60 @@ class TestPrims(TestCase):
             a.unsqueeze_(0)
             self.assertEqual(a.expand_as(result), result)
             """
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_nvfuser_impl_is_used(self, device):
+        # This test is to ensure that when the nvfuser implementation exists it is used
+        # Assuming one-to-one mapping between prims and nvfuser implementations
+        # This test is not intended to test the correctness of the nvfuser implementation
+        from torch._C._nvfuser import FusionDefinition as fd
+
+        prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.Ops))
+        ops_without_nvfuser_impl = {
+            name
+            for name in prim_nvfuser_ops
+            if getattr(torch.ops.prims, name).default.impl_nvfuser is None
+        }
+        assert (
+            len(ops_without_nvfuser_impl) == 0
+        ), (f"The following prims do not have 'impl_nvfuser' defined: {ops_without_nvfuser_impl} ",
+            "while there exists nvfuser implementations for them.")
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32)
+    def test_pytree_output(self, device, dtype):
+        @make_traced
+        def fn(a, b):
+            d = {}
+            d["c"] = torch.add(a, b)
+            return (d, torch.add(a, d["c"]))
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        a = make_arg((5, 5))
+        b = make_arg((1, 5))
+
+        result_aten = fn(a, b, executor="aten")
+        result_nvfuser = fn(a, b, executor="nvfuser")
+        self.assertEqual(result_aten, result_nvfuser)
+
+
+class TestPrimsBasic(TestCase):
+    def test_torch_ops(self):
+        r = make_tensor((2,), device='cpu', dtype=torch.float)
+        self.assertEqual(torch.ops.prims.sin(r), torch.sin(r))
+
+        r = LoggingTensor(r)
+        with capture_logs() as logs:
+            log_input("input", r)
+            prims.sin(r)
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.prims.sin.default($0)""")
+
+    def test_mul_complex(self):
+        prims.mul(torch.randn(2), 1 + 1j)
 
 
 instantiate_device_type_tests(TestPrims, globals())

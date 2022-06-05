@@ -4,7 +4,7 @@
 #include <torch/library.h>
 #include <c10/util/accumulate.h>
 
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
