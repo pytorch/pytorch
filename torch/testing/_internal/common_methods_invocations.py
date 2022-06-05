@@ -19400,6 +19400,9 @@ def _inherit_constructor_args(name, op, inherited, overrides):
     kwargs.update(common_kwargs)
     kwargs.update(overrides)
 
+    # At the moment no prims support autograd, so we must not run autograd
+    # tests e.g. when testing dtype support.  Once we start writing autograd
+    # formulas for prims this can be removed.
     kwargs['supports_autograd'] = False
     kwargs['supports_gradgrad'] = False
     kwargs['supports_fwgrad_bwgrad'] = False
