@@ -1,16 +1,17 @@
 import inspect
 from typing import Dict, List, Union
 
-import torch._C
-from torch.onnx import symbolic_helper, symbolic_registry
+from torch import _C
+from torch.onnx import _constants, symbolic_registry
 
-for v in symbolic_helper._onnx_stable_opsets + [symbolic_helper._onnx_main_opset]:
+for v in _constants.onnx_stable_opsets:
     symbolic_registry.register_version("", v)
+symbolic_registry.register_version("", _constants.onnx_main_opset)
 
 
 class _TorchSchema:
-    def __init__(self, schema: Union[torch._C.FunctionSchema, str]) -> None:
-        if isinstance(schema, torch._C.FunctionSchema):
+    def __init__(self, schema: Union[_C.FunctionSchema, str]) -> None:
+        if isinstance(schema, _C.FunctionSchema):
             self.name: str = schema.name
             self.overload_name: str = schema.overload_name
             self.arguments: List[str] = [arg.name for arg in schema.arguments]
@@ -37,7 +38,7 @@ class _TorchSchema:
 
     def __hash__(self):
         # TODO(thiagocrepaldi): handle overload_name?
-        return hash((self.name))
+        return hash(self.name)
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, _TorchSchema):
@@ -54,7 +55,7 @@ class _TorchSchema:
 
 def _all_aten_forward_schemas():
     """Creates a list of _TorchSchema for all aten schemas."""
-    torch_schemas = [_TorchSchema(s) for s in torch._C._jit_get_all_schemas()]
+    torch_schemas = [_TorchSchema(s) for s in _C._jit_get_all_schemas()]
     torch_schemas = sorted(torch_schemas, key=lambda x: x.name)
     aten_schemas = [s for s in torch_schemas if s.is_aten() and not s.is_backward()]
     return aten_schemas

@@ -21,7 +21,7 @@ class TrieCacheNode : public Node {
       : Node(ClassOpKind(), /* num_outputs */ 1), id_(id), hash_(Hash(id_)) {}
   ~TrieCacheNode() override = default;
 
-  bool Equal(size_t id) const {
+  bool CanBeReused(size_t id) const {
     return (id_ == id);
   }
 
