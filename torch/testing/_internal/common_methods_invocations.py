@@ -19378,6 +19378,12 @@ def _inherit_constructor_args(name, op, inherited, overrides):
     kwargs.update(common_kwargs)
     kwargs.update(overrides)
 
+    kwargs['supports_autograd'] = False
+    kwargs['supports_gradgrad'] = False
+    kwargs['supports_fwgrad_bwgrad'] = False
+    kwargs['supports_inplace_autograd'] = False
+    kwargs['supports_forward_ad'] = False
+
     return kwargs
 
 class PythonRefInfo(OpInfo):
@@ -19400,11 +19406,6 @@ class PythonRefInfo(OpInfo):
 
         inherited = self.torch_opinfo._original_opinfo_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
-        ukwargs['supports_autograd'] = False
-        ukwargs['supports_gradgrad'] = False
-        ukwargs['supports_fwgrad_bwgrad'] = False
-        ukwargs['supports_inplace_autograd'] = False
-        ukwargs['supports_forward_ad'] = False
         super(PythonRefInfo, self).__init__(**ukwargs)
 
 class ReductionPythonRefInfo(ReductionOpInfo):
