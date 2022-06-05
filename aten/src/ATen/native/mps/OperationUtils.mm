@@ -71,7 +71,8 @@ std::string getStridedKey(const Tensor& self, const IntArrayRef sz,
   return std::to_string((uintptr_t)self.storage().data()) +
               ":" + mps::getArrayRefString(sz) +
               ":" + mps::getArrayRefString(strides) +
-              ":" + std::to_string(offset);
+              ":" + std::to_string(offset) +
+              ":" + getMPSTypeString(self.scalar_type());
 }
 
 void runMPSGraph(
@@ -79,7 +80,9 @@ void runMPSGraph(
     MPSGraph* mpsGraph,
     NSDictionary* feeds,
     NSDictionary* results) {
-
+#ifdef DEBUG
+  [mpsGraph dump];
+#endif
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
       mpsStream->commit(true);
@@ -399,15 +402,18 @@ MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph,
 }
 
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, const Scalar& scalar, MPSDataType dataType) {
-  union v_t {
+  union {
     float f; // MPS doesn't support 'double'
+    at::Half h;
     int64_t i;
     bool b;
   } v;
   switch (dataType) {
     case MPSDataTypeFloat32:
-    case MPSDataTypeFloat16:
       v.f = scalar.to<float>();
+      break;
+    case MPSDataTypeFloat16:
+      v.h = scalar.to<at::Half>();
       break;
     case MPSDataTypeInt64:
       v.i = scalar.to<int64_t>();
