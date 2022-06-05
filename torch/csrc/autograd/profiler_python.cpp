@@ -125,7 +125,7 @@ class CallTypeHelper final {
     f(std::get<C>(t), args...);
     c10::guts::if_constexpr<C + 1 < End>(
         [&](auto _) { map<C + 1>(_(t), f, std::forward<Args>(args)...); },
-        [&](auto _) {});
+        [&](auto) {});
   }
 
  public:
@@ -227,10 +227,10 @@ class Callsite {
 class ValueCache {
  public:
   template <CallType C>
-  void store(const typename Config<C>::key_t);
+  void store(const typename Config<C>::key_t&);
 
   template <CallType C>
-  auto load(Callsite<C> callsite) {
+  auto load(const Callsite<C>& callsite) {
     // NB: For now caller is dropped. It will be used in the next PR.
     return load<C>(callsite.value_);
   }
@@ -239,7 +239,7 @@ class ValueCache {
 
  private:
   template <CallType C>
-  FrameArgs load(const typename Config<C>::key_t) const;
+  FrameArgs load(const typename Config<C>::key_t&) const;
 
   template <CallType C>
   using State = typename Config<C>::cache_t;
@@ -255,7 +255,7 @@ using PyModuleCallKey = Config<CallType::PyModuleCall>::key_t;
 using PyCCallKey = Config<CallType::PyCCall>::key_t;
 
 template <>
-void ValueCache::store<CallType::PyCall>(const PyCallKey key) {
+void ValueCache::store<CallType::PyCall>(const PyCallKey& key) {
   auto& locations = std::get<CallType::PyCall>(state_);
   if (C10_UNLIKELY(locations.find(key) == locations.end())) {
     TORCH_INTERNAL_ASSERT(key.code_ != nullptr);
@@ -267,7 +267,7 @@ void ValueCache::store<CallType::PyCall>(const PyCallKey key) {
 }
 
 template <>
-FrameArgs ValueCache::load<CallType::PyCall>(const PyCallKey key) const {
+FrameArgs ValueCache::load<CallType::PyCall>(const PyCallKey& key) const {
   auto frame_state = std::get<CallType::PyCall>(state_).at(key);
   return {
       fmt::format(
@@ -275,11 +275,12 @@ FrameArgs ValueCache::load<CallType::PyCall>(const PyCallKey key) const {
           frame_state.filename_.str(),
           frame_state.line_no_,
           frame_state.funcname_.str()),
-      CallType::PyCall};
+      CallType::PyCall,
+      /*module_=*/c10::nullopt};
 }
 
 template <>
-void ValueCache::store<CallType::PyModuleCall>(const PyModuleCallKey key) {
+void ValueCache::store<CallType::PyModuleCall>(const PyModuleCallKey& key) {
   auto& cache = std::get<CallType::PyModuleCall>(state_);
   if (C10_UNLIKELY(cache.modules_.find(key) == cache.modules_.end())) {
     if (C10_UNLIKELY(!cache.module_forward_.has_value())) {
@@ -301,7 +302,7 @@ void ValueCache::store<CallType::PyModuleCall>(const PyModuleCallKey key) {
 
 template <>
 FrameArgs ValueCache::load<CallType::PyModuleCall>(
-    const PyModuleCallKey key) const {
+    const PyModuleCallKey& key) const {
   auto& cache = std::get<CallType::PyModuleCall>(state_);
   auto cls = cache.modules_.at(key);
 
@@ -312,11 +313,12 @@ FrameArgs ValueCache::load<CallType::PyModuleCall>(
   return {
       fmt::format("nn.Module: {}", cache.module_cls_names_.at(cls).str()),
       CallType::PyModuleCall,
-      std::make_pair(key, cls)};
+      std::make_pair(key, cls),
+      /*module_id_=*/c10::nullopt};
 }
 
 template <>
-void ValueCache::store<CallType::PyCCall>(PyCCallKey key) {
+void ValueCache::store<CallType::PyCCall>(const PyCCallKey& key) {
   auto& names = std::get<CallType::PyCCall>(state_);
   if (C10_UNLIKELY(names.find(key) == names.end())) {
     names[key] = at::StringView(py::repr((PyObject*)key));
@@ -324,8 +326,11 @@ void ValueCache::store<CallType::PyCCall>(PyCCallKey key) {
 }
 
 template <>
-FrameArgs ValueCache::load<CallType::PyCCall>(const PyCCallKey key) const {
-  return {std::get<CallType::PyCCall>(state_).at(key).str(), CallType::PyCCall};
+FrameArgs ValueCache::load<CallType::PyCCall>(const PyCCallKey& key) const {
+  return {
+      std::get<CallType::PyCCall>(state_).at(key).str(),
+      CallType::PyCCall,
+      /*module_=*/c10::nullopt};
 }
 
 // TODO: Use re2.
@@ -454,6 +459,7 @@ struct ThreadLocalResults {
   ThreadLocalResults(const ThreadLocalResults&) = delete;
   ThreadLocalResults(ThreadLocalResults&&) = delete;
   ThreadLocalResults& operator=(const ThreadLocalResults&) = delete;
+  ThreadLocalResults& operator=(const ThreadLocalResults&&) = delete;
 
   ~ThreadLocalResults() {
     Py_DECREF((PyObject*)ctx_);
@@ -528,7 +534,8 @@ void PythonTracer::start() {
   // Loop over all threads within the current interpreter. We will need to
   // register a trace function with each thread. We set the current thread to
   // position zero to ensure that it is traced, and so we can restore the
-  // thread state after registration.
+  // thread state after registration. The profiler cannot post process multiple
+  // python threads yet, so this section is temporarily disabled.
   std::vector<PyThreadState*> thread_states{PyThreadState_Get()};
   /*
   if (all_threads) {
@@ -650,7 +657,7 @@ class PyTraceReplay {
     int64_t t_;
     size_t thread_id_;
     TraceKey key_;
-    int what_;
+    int what_;  // cPython uses integers to tag event types.
   };
 
   struct ReplayFrame {
@@ -675,12 +682,12 @@ PyTraceReplay::PyTraceReplay() {
       for (const auto& it : cache.state_) {
         auto frame = tracer.value_cache_.load(it.first);
         if (frame.module_.has_value()) {
-          auto it = self_to_id.find(frame.module_->first);
-          if (it == self_to_id.end()) {
+          auto id_it = self_to_id.find(frame.module_->first);
+          if (id_it == self_to_id.end()) {
             auto id = cls_id_counter[frame.module_->second]++;
-            it = self_to_id.insert({frame.module_->first, id}).first;
+            id_it = self_to_id.insert({frame.module_->first, id}).first;
           }
-          frame.module_id_ = it->second;
+          frame.module_id_ = id_it->second;
         }
         auto inserted = frame_args_.insert({it.second, frame});
         TORCH_INTERNAL_ASSERT(inserted.second);
