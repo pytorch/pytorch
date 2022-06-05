@@ -200,10 +200,10 @@ class Callsite {
 class ValueCache {
  public:
   template <CallType C>
-  void store(const typename Config<C>::key_t);
+  void store(const typename Config<C>::key_t&);
 
   template <CallType C>
-  auto load(Callsite<C> callsite, size_t python_tid) const {
+  auto load(const Callsite<C>& callsite, size_t python_tid) const {
     auto caller = load<CallType::PyCall>(callsite.caller_);
     TORCH_INTERNAL_ASSERT(!caller.second.has_value());
     return ExtraFields<Config<C>::event_type>{
@@ -218,7 +218,7 @@ class ValueCache {
  private:
   template <CallType C>
   typename ExtraFields<Config<C>::event_type>::args_t load(
-      const typename Config<C>::key_t) const;
+      const typename Config<C>::key_t&) const;
 
   template <CallType C>
   using State = typename Config<C>::cache_t;
@@ -234,7 +234,7 @@ using PyModuleCallKey = Config<CallType::PyModuleCall>::key_t;
 using PyCCallKey = Config<CallType::PyCCall>::key_t;
 
 template <>
-void ValueCache::store<CallType::PyCall>(const PyCallKey key) {
+void ValueCache::store<CallType::PyCall>(const PyCallKey& key) {
   auto& locations = std::get<CallType::PyCall>(state_);
   if (C10_UNLIKELY(locations.find(key) == locations.end())) {
     TORCH_INTERNAL_ASSERT(key.code_ != nullptr);
@@ -247,12 +247,12 @@ void ValueCache::store<CallType::PyCall>(const PyCallKey key) {
 
 template <>
 ExtraFields<EventType::PyCall>::args_t ValueCache::load<CallType::PyCall>(
-    const PyCallKey key) const {
+    const PyCallKey& key) const {
   return {std::get<CallType::PyCall>(state_).at(key), c10::nullopt};
 }
 
 template <>
-void ValueCache::store<CallType::PyModuleCall>(const PyModuleCallKey key) {
+void ValueCache::store<CallType::PyModuleCall>(const PyModuleCallKey& key) {
   auto& cache = std::get<CallType::PyModuleCall>(state_);
   if (C10_UNLIKELY(cache.modules_.find(key) == cache.modules_.end())) {
     if (C10_UNLIKELY(!cache.module_forward_.has_value())) {
@@ -274,7 +274,7 @@ void ValueCache::store<CallType::PyModuleCall>(const PyModuleCallKey key) {
 
 template <>
 ExtraFields<EventType::PyCall>::args_t ValueCache::load<CallType::PyModuleCall>(
-    const PyModuleCallKey key) const {
+    const PyModuleCallKey& key) const {
   auto& cache = std::get<CallType::PyModuleCall>(state_);
   TORCH_INTERNAL_ASSERT(cache.module_forward_.has_value());
   auto cls = cache.modules_.at(key);
@@ -283,7 +283,7 @@ ExtraFields<EventType::PyCall>::args_t ValueCache::load<CallType::PyModuleCall>(
 }
 
 template <>
-void ValueCache::store<CallType::PyCCall>(PyCCallKey key) {
+void ValueCache::store<CallType::PyCCall>(const PyCCallKey& key) {
   auto& names = std::get<CallType::PyCCall>(state_);
   if (C10_UNLIKELY(names.find(key) == names.end())) {
     names[key] = at::StringView(py::repr((PyObject*)key));
@@ -292,7 +292,7 @@ void ValueCache::store<CallType::PyCCall>(PyCCallKey key) {
 
 template <>
 ExtraFields<EventType::PyCCall>::args_t ValueCache::load<CallType::PyCCall>(
-    const PyCCallKey key) const {
+    const PyCCallKey& key) const {
   return std::get<CallType::PyCCall>(state_).at(key);
 }
 
@@ -420,6 +420,7 @@ struct ThreadLocalResults {
   ThreadLocalResults(const ThreadLocalResults&) = delete;
   ThreadLocalResults(ThreadLocalResults&&) = delete;
   ThreadLocalResults& operator=(const ThreadLocalResults&) = delete;
+  ThreadLocalResults& operator=(const ThreadLocalResults&&) = delete;
 
   ~ThreadLocalResults() {
     Py_DECREF((PyObject*)ctx_);
@@ -496,7 +497,8 @@ void PythonTracer::start(torch::profiler::impl::RecordQueue* queue) {
   // Loop over all threads within the current interpreter. We will need to
   // register a trace function with each thread. We set the current thread to
   // position zero to ensure that it is traced, and so we can restore the
-  // thread state after registration.
+  // thread state after registration. The profiler cannot post process multiple
+  // python threads yet, so this section is temporarily disabled.
   std::vector<PyThreadState*> thread_states{PyThreadState_Get()};
   /*
   if (all_threads) {
