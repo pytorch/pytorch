@@ -150,12 +150,12 @@ struct _cuda_scatter_gather_internal_kernel {
       CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
         && "index out of bounds");
 
-      int64_t src_offset;
+      uint32_t src_offset;
       if (is_scatter_like) {
         src_offset = 0;
 
         auto original_index_offset = offsets[2];
-        int64_t index_idx;
+        uint32_t index_idx;
 
         for (auto d = ndim - 1; d >= 0; d--) {
           index_idx = (original_index_offset / index_strides[d]) % index_sizes[d];
