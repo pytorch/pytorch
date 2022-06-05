@@ -565,6 +565,25 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
   return torch::special_softmax(self, dim, dtype);
 }
 
+/// Airy function Ai.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.airy_ai.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::airy_ai(x);
+/// ```
+inline Tensor airy_ai(const Tensor& x) {
+  return torch::special_airy_ai(x);
+}
+
+inline Tensor& airy_ai_out(Tensor& y, const Tensor& x) {
+  return torch::special_airy_ai_out(y, x);
+}
+
 /// Bessel function of the first kind of order 0.
 ///
 /// See https://pytorch.org/docs/master/special.html#torch.special.bessel_j0.
