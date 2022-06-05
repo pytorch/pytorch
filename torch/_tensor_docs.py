@@ -5062,6 +5062,11 @@ add_docstr_all('is_cuda',
 Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
 """)
 
+add_docstr_all('is_cpu',
+               r"""
+Is ``True`` if the Tensor is stored on the CPU, ``False`` otherwise.
+""")
+
 add_docstr_all('is_ipu',
                r"""
 Is ``True`` if the Tensor is stored on the IPU, ``False`` otherwise.
