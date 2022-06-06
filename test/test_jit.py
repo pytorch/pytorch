@@ -16394,9 +16394,3 @@ for test in criterion_tests:
 
 if __name__ == '__main__':
     run_tests()
-    import test_jit_py3
-    import jit.test_module_interface
-    suite = unittest.findTestCases(test_jit_py3)
-    unittest.TextTestRunner().run(suite)
-    suite = unittest.findTestCases(jit.test_module_interface)
-    unittest.TextTestRunner().run(suite)
