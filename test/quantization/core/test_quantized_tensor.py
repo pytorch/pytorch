@@ -937,7 +937,7 @@ class TestQuantizedTensor(TestCase):
         qtypes = [torch.qint8, torch.quint8, torch.qint32]
         vals2fill = [-1, 1, 2**32]  # positive, negative, overflow
 
-        devices = ["cpu", "cuda"] if TEST_CUDA else ["cpu"]
+        devices = get_supported_device_types()
         for qtype, val2fill, device in itertools.product(qtypes, vals2fill, devices):
             ones = ones.to(device)
             q_filled = torch._empty_affine_quantized(
@@ -966,7 +966,7 @@ class TestQuantizedTensor(TestCase):
         qtypes = [torch.qint8, torch.quint8, torch.qint32]
         vals2fill = [-1, 1, 2**32]  # positive, negative, overflow
 
-        devices = ["cpu", "cuda"] if TEST_CUDA else ["cpu"]
+        devices = get_supported_device_types()
         for qtype, val2fill, device in itertools.product(qtypes, vals2fill, devices):
             scales = scales.to(device)
             zero_points = zero_points.to(device)
