@@ -123,7 +123,8 @@ struct _cuda_scatter_gather_internal_kernel {
     c10::IntArrayRef index_sizes,
     c10::IntArrayRef src_sizes,
     int64_t numel,  // Do not use `const` qualifier here as it may cause issue in cuda 11.6.x. See #75434, #75545
-    const func_t& f
+    const func_t& f,
+    bool index_larger_than_src = false
   ) {
     if (!iter.can_use_32bit_indexing()) {
       for (auto& sub_iter : iter.with_32bit_indexing()) {
@@ -151,7 +152,7 @@ struct _cuda_scatter_gather_internal_kernel {
         && "index out of bounds");
 
       uint32_t src_offset;
-      if (is_scatter_like) {
+      if (is_scatter_like && !index_larger_than_src) {
         src_offset = 0;
 
         auto original_index_offset = offsets[2];
@@ -193,8 +194,20 @@ struct cuda_scatter_gather_base_kernel {
 
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
+    auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
+    auto src_sizes = src.sizes();
     auto src_strides_vec = ensure_nonempty_vec(src.strides().vec());
+
+    bool index_larger_than_src = false;
+    if (is_scatter_like) {
+      for (int i = 0; i < ndim; i++) {
+        if (index_sizes[i] > src_sizes[i]) {
+          index_larger_than_src = true;
+          break;
+        }
+      }
+    }
 
     // restride self and src such that
     // self.shape = src.shape = index.shape
@@ -236,7 +249,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, index_sizes, src.sizes(), self.numel(), f
+          iter, index_size, index_stride, index_sizes, src.sizes(), self.numel(), f, index_larger_than_src
         );
       }
     );
@@ -252,8 +265,20 @@ struct cuda_scatter_gather_base_kernel {
 
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
+    auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
+    auto src_sizes = src.sizes();
     auto src_strides_vec = ensure_nonempty_vec(src.strides().vec());
+
+    bool index_larger_than_src = false;
+    if (is_scatter_like) {
+      for (int i = 0; i < ndim; i++) {
+        if (index_sizes[i] > src_sizes[i]) {
+          index_larger_than_src = true;
+          break;
+        }
+      }
+    }
 
     // restride self and src such that
     // self.shape = src.shape = index.shape
@@ -295,7 +320,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, index_sizes, src.sizes(), self.numel(), f
+          iter, index_size, index_stride, index_sizes, src.sizes(), self.numel(), f, index_larger_than_src
         );
       }
     );
@@ -312,8 +337,20 @@ struct cuda_scatter_gather_base_kernel {
 
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
+    auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
+    auto src_sizes = src.sizes();
     auto src_strides_vec = ensure_nonempty_vec(src.strides().vec());
+
+    bool index_larger_than_src = false;
+    if (is_scatter_like) {
+      for (int i = 0; i < ndim; i++) {
+        if (index_sizes[i] > src_sizes[i]) {
+          index_larger_than_src = true;
+          break;
+        }
+      }
+    }
 
     // restride self and src such that
     // self.shape = src.shape = index.shape
@@ -355,7 +392,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, index_sizes, src.sizes(), self.numel(), f
+          iter, index_size, index_stride, index_sizes, src.sizes(), self.numel(), f, index_larger_than_src
         );
       }
     );
