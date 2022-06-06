@@ -67,7 +67,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
 
     def state_dict(self):
         r"""
-        This is same as :class:`torch.optim.Optimizer` :meth:`state_dict`,
+        This is the same as :class:`torch.optim.Optimizer` :meth:`state_dict`,
         but adds an extra entry to record model averager's step to the checkpoint
         to ensure reload does not cause unnecessary warm up again.
         """
