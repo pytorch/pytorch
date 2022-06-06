@@ -13,6 +13,7 @@ from test_pytorch_common import (
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
 )
+from unittest import skip
 from verify import verify
 
 import torch
@@ -1005,6 +1006,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "aten::erfc")
 
+    @skip("Test is flaky on trunk, see https://github.com/pytorch/pytorch/issues/78844")
     def test_custom_op_fallthrough(self):
         # Test custom op
         op_source = """
