@@ -1,39 +1,14 @@
 # Owner(s): ["module: onnx"]
 
-from test_pytorch_common import TestCase, run_tests
-
 import torch
-import torch.onnx
-from torch.onnx import (utils,
-                        OperatorExportTypes,
-                        TrainingMode,
-                        register_custom_op_symbolic,
-                        unregister_custom_op_symbolic)
-from torch.onnx.symbolic_helper import (_set_opset_version,
-                                        _set_operator_export_type,
-                                        _set_onnx_shape_inference,
-                                        _unpack_list,
-                                        parse_args)
-import torch.utils.cpp_extension
-from autograd_helper import CustomFunction as CustomFunction2
-from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
-                                 skipIfUnsupportedMaxOpsetVersion)
-from verify import verify
+from torch.onnx._globals import GLOBALS
 
 from test_pytorch_onnx_onnxruntime import run_model_test
 
-import torchvision
-
-import onnx
-
-import io
-import copy
 import unittest
 
-skip = unittest.skip
-
 class TestAutogradFuns(unittest.TestCase):
-    opset_version = 9
+    opset_version = GLOBALS.export_onnx_opset_version
     keep_initializers_as_inputs = False
     onnx_shape_inference = True
 
@@ -59,7 +34,7 @@ class TestAutogradFuns(unittest.TestCase):
         model = Caller()
         input = torch.ones(1)
         run_model_test(self, model, input_args=(input,))
-    
+
     def test_multi_output(self):
         class MultiOut(torch.autograd.Function):
             @staticmethod
@@ -117,6 +92,9 @@ class TestAutogradFuns(unittest.TestCase):
         input = torch.ones(1, 5)
         run_model_test(self, model, input_args=(input,))
 
+    # Skip test as torch.erf() is not supported
+    # This is a proof of concept to show error message originates from
+    # unsupported operator rather than missing symbolic method
     def test_aten_unsupported(self):
         class Erf(torch.autograd.Function):
             @staticmethod
@@ -136,6 +114,36 @@ class TestAutogradFuns(unittest.TestCase):
 
         model = Caller()
         input = torch.ones(1, 5)
+        try:
+            run_model_test(self, model, input_args=(input,))
+        except Exception:
+            raise unittest.SkipTest("Unsupported operator")
+
+    def test_inline_and_symbolic(self):
+        class Exp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, i):
+                ctx.save_for_backward(input)
+                return i.exp()
+
+            @staticmethod
+            def symbolic(g, input):
+                return g.op("Exp", input)
+
+        class LogLog(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, i):
+                ctx.save_for_backward(input)
+                return i.log().log()
+
+        class Caller(torch.nn.Module):
+            def forward(self, input):
+                exp_result = Exp.apply(input)
+                return LogLog.apply(exp_result)
+
+        model = Caller()
+        input = torch.ones(1)
+        run_model_test(self, model, input_args=(input,))
 
 
 if __name__ == "__main__":

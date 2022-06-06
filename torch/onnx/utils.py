@@ -4,7 +4,6 @@ These models can be loaded with the ONNX library and then
 converted to models which run on other deep learning frameworks.
 """
 from __future__ import annotations
-from ast import increment_lineno
 
 import contextlib
 import copy
