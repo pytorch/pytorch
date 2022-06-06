@@ -2740,7 +2740,6 @@ void qmean_inner_dim_kernel(
   size_t num_dims_to_squeeze = dim.empty() ? self.dim() : dim.size();
   int64_t M = 1; // Num of groups
   int64_t N = 1; // Num of elements to take average of in each group
-  bool output_is_zero_dim = false;
   for (size_t i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
     M *= in_dims[i];
   }
