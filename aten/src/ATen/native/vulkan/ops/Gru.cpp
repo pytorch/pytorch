@@ -30,7 +30,8 @@ std::tuple<Tensor, Tensor> gru_input(
   bool train,
   bool bidirectional,
   bool batch_first) {
-  TORCH_CHECK(params_cpu.size() == 4 * num_layers, "Vulkan gru expects 'params_cpu' size to be 4 * 'num_layers'.");
+  TORCH_CHECK(static_cast<int64_t>(params_cpu.size()) == 4 * num_layers,
+              "Vulkan gru expects 'params_cpu' size to be 4 * 'num_layers'.");
   TORCH_INTERNAL_ASSERT(input_vk.sizes().size() == 3, "Vulkan gru expects 'input_vk' dims to be 3.");
   TORCH_INTERNAL_ASSERT(hx_vk.sizes().size() == 3, "Vulkan gru expects 'hx_vk' dims to be 3.");
   TORCH_INTERNAL_ASSERT(has_biases, "Vulkan gru expects 'has_biases' to be true.");
@@ -99,7 +100,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 std::vector<LinearOpContext> pack_linear_op_contexts(
     const std::vector<Tensor>& params_cpu,
     int64_t num_layers) {
-  TORCH_CHECK(params_cpu.size() == 4 * num_layers, "Vulkan gru expects 'params_cpu' size to be 4 * 'num_layers'.");
+  TORCH_CHECK(static_cast<int64_t>(params_cpu.size()) == 4 * num_layers,
+              "Vulkan gru expects 'params_cpu' size to be 4 * 'num_layers'.");
   std::vector<LinearOpContext> linear_op_contexts;
   for (int64_t i = 0; i < num_layers; ++i) {
     const auto& w_ih = params_cpu.at(i * 4);
@@ -196,9 +198,9 @@ std::tuple<Tensor, Tensor> GruOpContext::run(
     const auto&  cxt_in = packed_.linear_op_contexts[i * linear_op_contexts_per_layer + 4];
     const auto&  cxt_hn = packed_.linear_op_contexts[i * linear_op_contexts_per_layer + 5];
 
-    const auto&  r = at::sigmoid(cxt_ir.run(x, 1.0f, 1.0f) + cxt_hr.run(h, 1.0f, 1.0f));
-    const auto&  z = at::sigmoid(cxt_iz.run(x, 1.0f, 1.0f) + cxt_hz.run(h, 1.0f, 1.0f));
-    const auto&  n = at::tanh(cxt_in.run(x, 1.0f, 1.0f) + r * (cxt_hn.run(h, 1.0f, 1.0f)));
+    const auto&  r = at::sigmoid(cxt_ir.run(x, 1.0f, 1.0f, "aten::addmm") + cxt_hr.run(h, 1.0f, 1.0f, "aten::addmm"));
+    const auto&  z = at::sigmoid(cxt_iz.run(x, 1.0f, 1.0f, "aten::addmm") + cxt_hz.run(h, 1.0f, 1.0f, "aten::addmm"));
+    const auto&  n = at::tanh(cxt_in.run(x, 1.0f, 1.0f, "aten::addmm") + r * (cxt_hn.run(h, 1.0f, 1.0f, "aten::addmm")));
     h = (z * (-1) + 1) * n + z * h;
     x = h;  // next input
     h_n_list.emplace_back(h.reshape({1, 1, h.size(0), h.size(1)}));  // 2D to 4D for cat op

@@ -27,7 +27,6 @@ class SchedulerRuntimeInfo;
 struct ExecutorLog {
   c10::optional<ReductionParams> reduction_params = c10::nullopt;
   c10::optional<PointwiseParams> pointwise_params = c10::nullopt;
-  c10::optional<LaunchParams> launch_constraints = c10::nullopt;
   FusionExecutor* fusion_executor = nullptr;
 };
 
@@ -127,9 +126,8 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
 
  private:
   //! Interface to run a single kernel, either one kernel for single-kernel
-  //! fusions,
-  //!  or a kernel for a segmentedGrouup in a segmented fusion. Returns the
-  //!  kernel outputs.
+  //! fusions, or a kernel for a segmentedGrouup in a segmented fusion. Returns
+  //! the kernel outputs.
   std::vector<at::Tensor> runKernelWithInput(
       const at::ArrayRef<IValue>& inputs,
       size_t input_id,
@@ -410,6 +408,11 @@ class TORCH_CUDA_CU_API FusionExecutorCache {
   //! TODO: this can be largely expanded to look at complete
   //!   caching profiles. Currently it just makes it easier to test
   FusionKernelRuntime* most_recent_runtime_ = nullptr;
+
+  //! indices of fusion outputs that are aliased to inputs. These are used only
+  //! to support in-place update and should have been dropped before pushing
+  //! outputs to stack.
+  std::set<int> aliased_output_indices_;
 };
 
 class GraphCache {
@@ -426,15 +429,15 @@ class GraphCache {
       const at::ArrayRef<IValue>& inputs);
 
  private:
-  //! Computation graph;
-  std::shared_ptr<Graph> graph_;
-
   //! construct FusionExecutorCache
   void createFusion(const std::shared_ptr<Graph>& graph);
 
  private:
   //! FusionExecutorCache that performs schedule and kernel execution;
   std::unique_ptr<FusionExecutorCache> fusion_executor_cache_;
+
+  //! num of outputs
+  size_t num_of_outputs_ = 0;
 };
 
 } // namespace cuda

@@ -20,7 +20,7 @@ echo "cpp_doc_push_script.sh: Invoked with $*"
 #       but since DOCS_INSTALL_PATH can be derived from DOCS_VERSION it's probably better to
 #       try and gather it first, just so we don't potentially break people who rely on this script
 # Argument 2: What version of the Python API docs we are building.
-version="${2:-${DOCS_VERSION:-main}}"
+version="${2:-${DOCS_VERSION:-master}}"
 if [ -z "$version" ]; then
 echo "error: cpp_doc_push_script.sh: version (arg2) not specified"
   exit 1
@@ -35,7 +35,7 @@ echo "error: cpp_doc_push_script.sh: install_path (arg1) not specified"
 fi
 
 is_main_doc=false
-if [ "$version" == "main" ]; then
+if [ "$version" == "master" ]; then
   is_main_doc=true
 fi
 
@@ -51,12 +51,10 @@ git clone https://github.com/pytorch/cppdocs
 
 set -ex
 
-sudo apt-get -y install doxygen
-
 # Generate ATen files
 pushd "${pt_checkout}"
 pip install -r requirements.txt
-time python -m tools.codegen.gen \
+time python -m torchgen.gen \
   -s aten/src/ATen \
   -d build/aten/src/ATen
 
@@ -66,7 +64,7 @@ cp torch/_utils_internal.py tools/shared
 # Generate PyTorch files
 time python tools/setup_helpers/generate_code.py \
   --native-functions-path aten/src/ATen/native/native_functions.yaml \
-  --nn-path aten/src/
+  --tags-path aten/src/ATen/native/tags.yaml
 
 # Build the docs
 pushd docs/cpp

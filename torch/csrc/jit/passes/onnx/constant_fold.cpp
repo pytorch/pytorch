@@ -448,6 +448,26 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     updated_val = at::norm(
         inputTensorValues[0], p, node->is(attr::axes), node->i(attr::keepdims));
     return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::ReduceProd) {
+    int64_t rank = inputTensorValues[0].sizes().size();
+    std::vector<int64_t> axes;
+    if (!node->hasAttributeS("axes")) {
+      axes = std::vector<int64_t>(rank);
+      std::iota(axes.rbegin(), axes.rend(), 0);
+    } else {
+      for (const auto& axis : node->is(attr::axes)) {
+        axes.emplace_back(axis < 0 ? axis + rank : axis);
+      }
+      std::sort(axes.begin(), axes.end(), std::greater<>());
+    }
+
+    bool keepdims =
+        node->hasAttributeS("keepdims") ? node->i(attr::keepdims) : true;
+    updated_val = inputTensorValues[0];
+    for (const auto& axis : axes) {
+      updated_val = at::prod(updated_val, axis, keepdims);
+    }
+    return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Gather) {
     assert(inputTensorValues.size() == 2);
     // default axis = 0

@@ -52,14 +52,17 @@ class TensorIndex;
 
 // Expressions
 class Allocate;
-class Sync;
+class BlockSync;
+class GridSync;
 class InitMagicZero;
 class UpdateMagicZero;
 class ForLoop;
 class IfThenElse;
 class GridReduction;
+class GroupedGridReduction;
 class GridBroadcast;
 class GridWelford;
+class AllocateFusedReduction;
 
 // Expr container
 class Scope;
@@ -143,7 +146,7 @@ class TORCH_CUDA_CU_API TensorIndex final : public Val {
  public:
   TensorIndex(
       IrBuilderPasskey,
-      const fuser::cuda::TensorView* view,
+      const TensorView* view,
       std::vector<Val*> indices);
 
   std::vector<Val*>::size_type nDims() const {
@@ -240,9 +243,9 @@ class TORCH_CUDA_CU_API Allocate final : public Expr {
 //
 // TODO(kir): change name to SyncThreads as we could have other barriers.
 //
-class TORCH_CUDA_CU_API Sync final : public Expr {
+class TORCH_CUDA_CU_API BlockSync final : public Expr {
  public:
-  explicit Sync(IrBuilderPasskey passkey, bool war_sync = false);
+  explicit BlockSync(IrBuilderPasskey passkey, bool war_sync = false);
 
   bool isWarHazardSync() const {
     return war_sync_;
@@ -251,6 +254,28 @@ class TORCH_CUDA_CU_API Sync final : public Expr {
  private:
   // TODO: war_sync_ is only used for testing/validation purposes.
   bool war_sync_ = false;
+};
+
+// Synchronize all blocks in device, implies cooperative group launch is
+// required.
+class TORCH_CUDA_CU_API GridSync final : public Expr {
+ public:
+  explicit GridSync(
+      IrBuilderPasskey passkey,
+      ParallelTypeBitmap sync_dims,
+      Val* sync_buffer);
+
+  ParallelTypeBitmap syncDims() const {
+    return sync_dims_;
+  }
+
+  Val* syncBuffer() const {
+    return sync_buffer_;
+  }
+
+ private:
+  ParallelTypeBitmap sync_dims_;
+  Val* sync_buffer_ = nullptr;
 };
 
 // Simply prints "DEFINE_MAGIC_ZERO" in the code in accordance with magic_zero
@@ -408,6 +433,9 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
     unroll_required_ = true;
   }
 
+  //! True if no actual for-loop is materialized
+  bool isTrivial() const;
+
  private:
   //! Returns if a loop could be unrolled.
   bool isUnrollable() const;
@@ -475,20 +503,75 @@ class TORCH_CUDA_CU_API IfThenElse final : public Expr {
 //!
 //! This node provides FusionExecutor the information it needs to allocate the
 //! reduction and sync buffers.
-class TORCH_CUDA_CU_API GridReduction final : public Expr {
+class TORCH_CUDA_CU_API GridReduction final : public ReductionOp {
  public:
   GridReduction(
       IrBuilderPasskey passkey,
-      ReductionOp* reduction_op,
+      BinaryOpType reduction_op_type,
+      Val* init,
+      Val* out,
+      Val* in,
       Allocate* reduction_buffer,
-      Allocate* sync_buffer);
-
-  ReductionOp* reduction_op() const {
-    return reduction_op_;
-  }
+      Allocate* sync_buffer,
+      Val* entrance_index,
+      Val* entrances,
+      bool is_fused = false);
 
   Allocate* reduction_buffer() const {
     return reduction_buffer_;
+  }
+
+  Allocate* sync_buffer() const {
+    return sync_buffer_;
+  }
+
+  // Which instance of entering this grid reduction is this iteration?
+  Val* entrance_index() const {
+    return entrance_index_;
+  }
+
+  // How many times will this grid reduction be entered
+  Val* entrances() const {
+    return entrances_;
+  }
+
+  const ParallelTypeBitmap& threadPredicate() const {
+    return thread_predicate_;
+  }
+
+  void setThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
+    thread_predicate_ = thread_predicate;
+  }
+
+ private:
+  Allocate* reduction_buffer_ = nullptr;
+  Allocate* sync_buffer_ = nullptr;
+  // gridReduce has template flags for thread predicates. In order to
+  // use them, the thread predicate is held here separately from
+  // Expr::predicate_.
+  ParallelTypeBitmap thread_predicate_;
+  Val* entrance_index_ = nullptr;
+  Val* entrances_ = nullptr;
+};
+
+class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
+ public:
+  GroupedGridReduction(
+      IrBuilderPasskey passkey,
+      std::vector<BinaryOpType> reduction_op_type,
+      std::vector<Val*> init,
+      std::vector<Val*> out,
+      std::vector<Val*> in,
+      std::vector<Allocate*> reduction_buffers,
+      Allocate* sync_buffer,
+      bool is_allreduce = false);
+
+  const std::vector<Allocate*>& reduction_buffers() const {
+    return reduction_buffers_;
+  }
+
+  Allocate* reduction_buffer(size_t i) const {
+    return reduction_buffers_.at(i);
   }
 
   Allocate* sync_buffer() const {
@@ -504,8 +587,7 @@ class TORCH_CUDA_CU_API GridReduction final : public Expr {
   }
 
  private:
-  ReductionOp* reduction_op_ = nullptr;
-  Allocate* reduction_buffer_ = nullptr;
+  std::vector<Allocate*> reduction_buffers_;
   Allocate* sync_buffer_ = nullptr;
   // gridReduce has template flags for thread predicates. In order to
   // use them, the thread predicate is held here separately from
@@ -561,7 +643,9 @@ class TORCH_CUDA_CU_API GridWelford final : public Expr {
       Allocate* var_buffer,
       Allocate* avg_buffer,
       Allocate* n_buffer,
-      Allocate* sync_buffer);
+      Allocate* sync_buffer,
+      Val* entrance_index,
+      Val* entrances);
 
   WelfordOp* welford_op() const {
     return welford_op_;
@@ -583,6 +667,16 @@ class TORCH_CUDA_CU_API GridWelford final : public Expr {
     return sync_buffer_;
   }
 
+  // Which instance of entering this grid reduction is this iteration?
+  Val* entrance_index() const {
+    return entrance_index_;
+  }
+
+  // How many times will this grid reduction be entered
+  Val* entrances() const {
+    return entrances_;
+  }
+
   const ParallelTypeBitmap& threadPredicate() const {
     return thread_predicate_;
   }
@@ -597,10 +691,40 @@ class TORCH_CUDA_CU_API GridWelford final : public Expr {
   Allocate* avg_buffer_ = nullptr;
   Allocate* n_buffer_ = nullptr;
   Allocate* sync_buffer_ = nullptr;
+  Val* entrance_index_ = nullptr;
+  Val* entrances_ = nullptr;
   // gridReduce has template flags for thread predicates. In order to
   // use them, the thread predicate is held here separately from
   // Expr::predicate_.
   ParallelTypeBitmap thread_predicate_;
+};
+
+// Allocate an instance of the fused reduction class.
+class TORCH_CUDA_CU_API AllocateFusedReduction final : public Expr {
+ public:
+  explicit AllocateFusedReduction(
+      IrBuilderPasskey passkey,
+      GridReduction* grid_reduction);
+
+  explicit AllocateFusedReduction(
+      IrBuilderPasskey passkey,
+      GridWelford* grid_welford);
+
+  explicit AllocateFusedReduction(
+      IrBuilderPasskey passkey,
+      GroupedGridReduction* grouped_grid_reduction);
+
+  Expr* gridExpr() const {
+    return grid_expr_;
+  }
+
+  TensorIndex* out() const;
+
+  const ParallelTypeBitmap& threadPredicate() const;
+
+ private:
+  //! GridReduction, GridWelford or GroupedGridReduction
+  Expr* grid_expr_ = nullptr;
 };
 
 } // namespace kir
