@@ -1,9 +1,15 @@
-from typing import Any, Dict
+from typing import Any, Dict, List, NamedTuple
 from datetime import datetime, timedelta
 from gitutils import _check_output
 
 from rockset import Client, ParamDict  # type: ignore[import]
 import os
+
+class workflowCheck(NamedTuple):
+    workflowName: str
+    name: str
+    jobName: str
+    conclusion: str
 
 rs = Client(api_key=os.getenv("ROCKSET_API_KEY", None))
 qlambda = rs.QueryLambda.retrieve(
@@ -43,6 +49,21 @@ def print_commit_status(commit: str, results: Dict[str, Any]) -> None:
     for check in results['results']:
         if check['sha'] == commit:
             print(f"\t{check['conclusion']:>10}: {check['name']}")
+
+def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, Any]]:
+    workflow_checks = []
+    for check in results['results']:
+        if check['sha'] == commit:
+            workflow_checks.append(workflowCheck(
+                workflowName=check['workflowName'],
+                name=check['name'],
+                jobName=check['jobName'],
+                conclusion=check['conclusion'],
+            )._asdict())
+    return workflow_checks
+
+def isGreen(results: List[workflowCheck]) -> bool:
+    return True
 
 def main() -> None:
     args = parse_args()
