@@ -1,6 +1,7 @@
 # Owner(s): ["module: scatter & gather ops"]
 
 from itertools import product
+from functools import partial
 
 import numpy as np
 import torch
@@ -52,6 +53,8 @@ class TestSegmentReductions(TestCase):
         lengths_dtype=torch.int,
     ):
         lengths = torch.tensor(lengths_arr, device=device, dtype=lengths_dtype)
+        # FIXME: conversion from lengths to offsets
+        # FIXME: conversion from lengths to indices
         data = torch.tensor(
             data_arr,
             device=device,
@@ -384,8 +387,18 @@ class TestSegmentReductions(TestCase):
             )
             self.assertEqual(actual_result, expected)
 
+            # test offsets
+            actual_result = torch.segment_reduce(
+                data=data,
+                reduce=reduce,
+                offsets=indptr,
+                axis=dim,
+                unsafe=True,
+            )
+            self.assertEqual(actual_result, expected)
+
             if val_dtype == torch.float64:
-                def fn(x):
+                def fn(x, mode='lengths'):
                     initial = 1
                     # supply initial values to prevent gradcheck from failing for 0 length segments
                     # where nan/inf are reduction identities that produce nans when calculating the numerical jacobian
@@ -393,8 +406,16 @@ class TestSegmentReductions(TestCase):
                         initial = 1000
                     elif reduce == 'max':
                         initial = -1000
-                    return torch.segment_reduce(x, reduce, lengths=lengths, axis=dim, unsafe=True, initial=initial)
-                self.assertTrue(gradcheck(fn, (data.clone().detach().requires_grad_(True))))
+                    segment_reduce_args = {x, reduce}
+                    segment_reduce_kwargs = dict(axis=dim, unsafe=True, initial=initial)
+                    if mode == 'lengths':
+                        segment_reduce_kwargs[mode] = lengths
+                    elif mode == 'offsets':
+                        segment_reduce_kwargs[mode] = indptr
+                    return torch.segment_reduce(*segment_reduce_args, **segment_reduce_kwargs)
+                self.assertTrue(gradcheck(partial(fn, mode='lengths'), (data.clone().detach().requires_grad_(True))))
+                self.assertTrue(gradcheck(partial(fn, mode='offsets'), (data.clone().detach().requires_grad_(True))))
+
 
     @dtypes(
         *product(

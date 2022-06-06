@@ -945,7 +945,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.scatter_add: lambda input, dim, index, src: -1,
         torch.scatter_reduce: lambda input, dim, index, src, reduce, include_self=True: -1,
         torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
-        torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, axis=0, unsafe=False: -1,
+        torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, offsets=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
         torch.select_scatter: lambda input, src, dim, index: -1,
         torch.slice_scatter: lambda input, src, dim=0, start=None, end=None, step=1: -1,
