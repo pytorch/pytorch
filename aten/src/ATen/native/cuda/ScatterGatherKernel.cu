@@ -172,6 +172,8 @@ struct _cuda_scatter_gather_internal_kernel {
         src_offset = offsets[1];
       }
 
+      CUDA_KERNEL_ASSERT(false && src_offset);
+
       f(
         (scalar_t*)(self_ptr + offsets[0]),
         is_scatter_like ? idx_dim * index_stride : 0,
