@@ -11,7 +11,7 @@ class WorkflowCheck(NamedTuple):
     jobName: str
     conclusion: str
 
-rs = Client(api_key=os.getenv("ROCKSET_API_KEY", None))
+rs = Client(api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"])
 qlambda = rs.QueryLambda.retrieve(
     'commit_jobs_batch_query',
     version='15aba20837ae9d75',
