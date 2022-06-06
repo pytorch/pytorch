@@ -934,28 +934,26 @@ class TestQuantizedTensor(TestCase):
 
         ones = torch.ones(numel).to(torch.float)
 
-        types = [torch.qint8, torch.quint8, torch.qint32]
-        fills = [-1, 1, 2**32]  # positive, negative, overflow
+        qtypes = [torch.qint8, torch.quint8, torch.qint32]
+        vals2fill = [-1, 1, 2**32]  # positive, negative, overflow
 
         # `fill_` uses `copy_(float)`, which doesn't support CUDA
         device = 'cpu'
-        ones = ones.to(device)
-        for qtype, fill_with in itertools.product(types, fills):
+        for qtype, val2fill in itertools.product(qtypes, vals2fill):
             q_filled = torch._empty_affine_quantized(
                 [numel], scale=scale, zero_point=zero_point, device=device,
                 dtype=qtype)
-            q_filled.fill_(fill_with)
-            int_repr = torch.quantize_per_tensor(ones * fill_with, scale,
+            q_filled.fill_(val2fill)
+            # reference tensor for comparing q_filled
+            q_ref = torch.quantize_per_tensor(ones * val2fill, scale,
                                                  zero_point, qtype)
-            fill_with = int_repr.dequantize()
-            int_repr = int_repr.int_repr()
-
-            self.assertEqual(q_filled.int_repr(), int_repr)
-            self.assertEqual(q_filled.dequantize(), fill_with)
+            self.assertEqual(q_filled.int_repr(), q_ref.int_repr())
+            self.assertEqual(q_filled.dequantize(), q_ref.dequantize())
             # Make sure the scale and zero_point don't change
             self.assertEqual(q_filled.q_scale(), scale)
             self.assertEqual(q_filled.q_zero_point(), zero_point)
 
+    # adapted from test_qtensor_fill_per_tensor
     def test_qtensor_fill_per_channel(self):
         dims = [4, 5]
         axis = 0
@@ -965,25 +963,23 @@ class TestQuantizedTensor(TestCase):
 
         ones = torch.ones(dims).to(torch.float)
 
-        types = [torch.qint8, torch.quint8, torch.qint32]
-        fills = [-1, 1, 2**32]  # positive, negative, overflow
+        qtypes = [torch.qint8, torch.quint8, torch.qint32]
+        vals2fill = [-1, 1, 2**32]  # positive, negative, overflow
 
         devices = ["cpu", "cuda"] if TEST_CUDA else ["cpu"]
-        for qtype, fill_with, device in itertools.product(types, fills, devices):
+        for qtype, val2fill, device in itertools.product(qtypes, vals2fill, devices):
             scales = scales.to(device)
             zero_points = zero_points.to(device)
             ones = ones.to(device)
             q_filled = torch._empty_per_channel_affine_quantized(
                 dims, scales=scales, zero_points=zero_points, device=device,
                 axis=axis, dtype=qtype)
-            q_filled.fill_(fill_with)
-            int_repr = torch.quantize_per_channel(ones * fill_with, scales=scales,
+            q_filled.fill_(val2fill)
+            # reference tensor for comparing q_filled
+            q_ref = torch.quantize_per_channel(ones * val2fill, scales=scales,
                                                   zero_points=zero_points, axis=axis, dtype=qtype)
-            fill_with = int_repr.dequantize()
-            int_repr = int_repr.int_repr()
-
-            self.assertEqual(q_filled.int_repr(), int_repr)
-            self.assertEqual(q_filled.dequantize(), fill_with)
+            self.assertEqual(q_filled.int_repr(), q_ref.int_repr())
+            self.assertEqual(q_filled.dequantize(), q_ref.dequantize())
             # Make sure the scale and zero_point don't change
             self.assertEqual(q_filled.q_per_channel_scales(), scales)
             self.assertEqual(q_filled.q_per_channel_zero_points(), zero_points)
