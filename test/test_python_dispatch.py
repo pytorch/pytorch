@@ -1085,6 +1085,17 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 with x:
                     pass
 
+    def test_error_using_class_method_on_mode(self):
+        class A(TorchDispatchMode):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                return func(args, kwargs)
+
+        x = torch.tensor(5.)
+        with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
+            with A():
+                x + x
+
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
         with self.assertRaisesRegex(RuntimeError, "is not supported for tensor subclasses."):
@@ -1446,6 +1457,47 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             self.assertEqual(e.device.type, 'meta')
             self.assertEqual(ten.type_as(e).device.type, 'meta')
 
+    def test_dim_slowpath(self):
+        data = torch.randn(3, 3)
+
+        for use_wrapper_subclass in [True, False]:
+            class DimNotImplementedTensor(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    return NotImplemented
+
+            class DimImplementedTensor(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.aten.dim:
+                        return data.dim()
+                    return NotImplemented
+
+
+            err_msg = "no implementation found for 'torch.ops.aten.dim'"
+            e = DimNotImplementedTensor(torch.randn(3, 3), use_wrapper_subclass)
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.dim()
+
+            t = DimImplementedTensor(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(t.dim(), 2)
+
+    def test_maybe_tuple_bug(self):
+        class T(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, *args, **kwargs):
+                pass
+        a = torch.rand(3)
+
+        a[[T(), T()]]
 
 if __name__ == '__main__':
     run_tests()
