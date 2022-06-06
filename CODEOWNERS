@@ -73,3 +73,8 @@ test/test_unary_ufuncs.py @mruberry @ngimel
 test/test_binary_ufuncs.py @mruberry @ngimel
 test/test_reductions.py @mruberry @ngimel
 test/test_type_promotion.py @mruberry @ngimel
+
+# torch MPS
+test/test_mps.py @kulinseth
+aten/src/ATen/mps/ @kulinseth
+aten/src/ATen/native/mps/ @kulinseth
