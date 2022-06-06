@@ -900,7 +900,7 @@ def merge(pr_num: int, repo: GitRepo, dry_run: bool = False, timeout_minutes: in
         elapsed_time = current_time - start_time
 
 
-        print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time * 60} minutes elapsed)")
+        print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
         try:
             return pr.merge_into(repo, dry_run=dry_run)
