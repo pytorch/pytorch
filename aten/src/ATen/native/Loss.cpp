@@ -141,9 +141,10 @@ Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double mar
   auto zeros = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto margin_diff = (margin - self);
   // For Composite Compliance,
-  // In Forward AD, if `self` is a CCT but its tangent isn't,
+  // In Forward AD, if `margin_diff` is a CCT but its tangent isn't,
   // using inplace clamp_min doesn't work.
-  auto margin_clamp = self._fw_grad(/*level*/ 0).defined()
+  auto margin_clamp = (margin_diff._fw_grad(/*level*/ 0).defined() &&
+                       isTensorSubclassLike(margin_diff))
       ? margin_diff.clamp_min(0)
       : margin_diff.clamp_min_(0);
   auto output_margin = at::where(target != 1, margin_clamp, zeros);
@@ -177,7 +178,14 @@ Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const T
 }
 
 Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
-  auto output =  (-target * (input1 - input2) + margin).clamp_min_(0);
+  auto unclamped_output = (-target * (input1 - input2) + margin);
+  // For Composite Compliance,
+  // In Forward AD, if `margin_diff` is a CCT but its tangent isn't,
+  // using inplace clamp_min doesn't work.
+  auto output = (unclamped_output._fw_grad(/*level*/ 0).defined() &&
+                 isTensorSubclassLike(unclamped_output))
+      ? unclamped_output.clamp_min(0)
+      : unclamped_output.clamp_min_(0);
   return apply_loss_reduction(output, reduction);
 }
 
