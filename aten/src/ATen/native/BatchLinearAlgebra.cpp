@@ -21,12 +21,6 @@
 // linear algebra function uses that routine
 #if AT_BUILD_WITH_LAPACK()
 
-// gesv
-extern "C" void zgesv_(int *n, int *nrhs, std::complex<double> *a, int *lda, int *ipiv, std::complex<double> *b, int *ldb, int *info);
-extern "C" void cgesv_(int *n, int *nrhs, std::complex<float> *a, int *lda, int *ipiv, std::complex<float> *b, int *ldb, int *info);
-extern "C" void dgesv_(int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
-extern "C" void sgesv_(int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
-
 // getrf
 extern "C" void zgetrf_(int *m, int *n, std::complex<double> *a, int *lda, int *ipiv, int *info);
 extern "C" void cgetrf_(int *m, int *n, std::complex<float> *a, int *lda, int *ipiv, int *info);
@@ -337,18 +331,18 @@ TORCH_META_FUNC(linalg_ldl_factor_ex)
   auto ndim = self.dim();
 
   // prefer column major strides
-  auto ld_strides = at::native::contiguous_strides(self.sizes(), /*column_major=*/true);
-  set_output(0, self.sizes(), ld_strides, self.options(), {}); // LD
+  auto ld_strides = at::native::batched_matrix_contiguous_strides(self.sizes(), /*f-contig=*/true);
+  set_output_strided(0, self.sizes(), ld_strides, self.options(), {}); // LD
 
   auto pivots_shape =
       IntArrayRef(self.sizes().data(), ndim - 1); // self.shape[:-1]
-  set_output(
-      1, pivots_shape, {}, self.options().dtype(ScalarType::Int), {}); // pivots
+  set_output_contiguous(
+      1, pivots_shape, self.options().dtype(ScalarType::Int)); // pivots
 
   auto info_shape =
       IntArrayRef(self.sizes().data(), ndim - 2); // self.shape[:-2]
-  set_output(
-      2, info_shape, {}, self.options().dtype(ScalarType::Int), {}); // info
+  set_output_contiguous(
+      2, info_shape, self.options().dtype(ScalarType::Int)); // info
 }
 
 TORCH_META_FUNC(linalg_ldl_solve)
@@ -389,8 +383,8 @@ TORCH_META_FUNC(linalg_ldl_solve)
     std::tie(B_broadcast_size, std::ignore) = at::native::_linalg_broadcast_batch_dims(B, LD);
 
   // prefer column major strides
-  auto result_strides = at::native::contiguous_strides(B_broadcast_size, /*column_major=*/true);
-  set_output(0, B_broadcast_size, result_strides, B.options(), {});
+  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/true);
+  set_output_strided(0, B_broadcast_size, result_strides, B.options(), {});
 }
 
 TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
@@ -406,16 +400,16 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
     std::tie(self_broadcast_size, A_broadcast_size) = at::native::_linalg_broadcast_batch_dims(self, A);
 
     // make column major strides for BLAS
-    const auto solution_strides = at::native::contiguous_strides(self_broadcast_size, /*f-contig=*/true);
-    set_output(0, self_broadcast_size, solution_strides, self.options(), {});
+    const auto solution_strides = at::native::batched_matrix_contiguous_strides(self_broadcast_size, /*f-contig=*/true);
+    set_output_raw_strided(0, self_broadcast_size, solution_strides, self.options(), {});
 
     // make column major strides for BLAS
-    auto clone_A_strides = at::native::contiguous_strides(A_broadcast_size, /*f_contig=*/true);
-    set_output(1, A_broadcast_size, clone_A_strides, A.options(), {});
-  } else if (A.layout() == Layout::SparseCsr) {
+    auto clone_A_strides = at::native::batched_matrix_contiguous_strides(A_broadcast_size, /*f_contig=*/true);
+    set_output_raw_strided(1, A_broadcast_size, clone_A_strides, A.options(), {});
+  } else if (A.layout() == Layout::SparseCsr || A.layout() == Layout::SparseBsr) {
     // no broadcasting for non-strided layout
-    set_output(0, self.sizes(), {}, self.options(), {}); // make row major strides for Sparse BLAS
-    set_output(1, {0}, {}, self.options(), {}); // return 0-sized tensor
+    set_output_raw_strided(0, self.sizes(), {}, self.options(), {}); // make row major strides for Sparse BLAS
+    set_output_raw_strided(1, {0}, {}, self.options(), {}); // return 0-sized tensor
   } else {
     TORCH_INTERNAL_ASSERT(false, "triangular_solve: Got an unexpected layout.");
   }
@@ -429,22 +423,23 @@ TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_err
   const auto n = sizes.cend()[-1];
 
   // make column major strides for BLAS
-  auto LU_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/true);
-  set_output(0, sizes, LU_strides, A.options(), {});
+  auto LU_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/true);
+  set_output_strided(0, sizes, LU_strides, A.options(), {});
 
   // Set sizes to the size of pivots
   sizes.pop_back();
   sizes.back() = std::min(m, n);
-  set_output(1, sizes, {}, A.options().dtype(kInt), {});
+  set_output_contiguous(1, sizes, A.options().dtype(kInt), {});
 
   // Set sizes to the size of info
   sizes.pop_back();
-  set_output(2, sizes, {}, A.options().dtype(kInt), {});
+  set_output_contiguous(2, sizes, A.options().dtype(kInt), {});
 }
 
 TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
                              bool full_matrices,
-                             bool compute_uv) {
+                             bool compute_uv,
+                             c10::optional<c10::string_view> driver) {
   TORCH_CHECK(A.dim() >= 2, "linalg.svd: input should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
 
   auto sizes = A.sizes().vec();
@@ -455,8 +450,8 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
   // Prepare sizes for U
   if (compute_uv) {
     sizes.back() = full_matrices ? m : k;
-    auto U_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/true);
-    set_output(0, sizes, U_strides, A.options(), {});
+    auto U_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/true);
+    set_output_strided(0, sizes, U_strides, A.options(), {});
 
     // Prepare sizes for Vh
     sizes.end()[-2] = full_matrices ? n : k;
@@ -465,17 +460,17 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
     // We need to distinguish the cuSOLVER case, as the cuSOLVER algorithms we use
     // expect F-contig matrices, but they compute V rather than Vh
     const bool use_cusolver = at::native::svd_uses_cusolver(A);
-    auto Vh_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/!use_cusolver);
-    set_output(2, sizes, Vh_strides, A.options(), {});
+    auto Vh_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/!use_cusolver);
+    set_output_strided(2, sizes, Vh_strides, A.options(), {});
   } else {
-    set_output(0, {0}, {}, A.options(), {});
-    set_output(2, {0}, {}, A.options(), {});
+    set_output_raw_strided(0, {0}, {}, A.options(), {});
+    set_output_raw_strided(2, {0}, {}, A.options(), {});
   }
 
   // Prepare sizes for S. S is always real, even when A is complex.
   sizes.pop_back();
   sizes.end()[-1] = k;
-  set_output(1, sizes, {}, A.options().dtype(c10::toRealValueType(A.scalar_type())), {});
+  set_output_contiguous(1, sizes, A.options().dtype(c10::toRealValueType(A.scalar_type())), {});
 }
 
 TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_data, bool unpack_pivots) {
@@ -494,23 +489,23 @@ TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_d
   // P.shape[-2:] == (m, m) (or size zero if pivot == False)
   sizes.end()[-1] = m;
   if (unpack_pivots) {
-    set_output(0, sizes, LU.options());
+    set_output_raw_strided(0, sizes, {}, LU.options(), {});
   } else {
-    set_output(0, {0}, LU.options());
+    set_output_raw_strided(0, {0}, {}, LU.options(), {});
   }
 
   if (unpack_data) {
     // L.shape[-2:] == (m, k)
     sizes.end()[-1] = k;
-    set_output(1, sizes, LU.options());
+    set_output_raw_strided(1, sizes, {}, LU.options(), {});
 
     // U.shape[-2:] == (k, n)
     sizes.end()[-2] = k;
     sizes.end()[-1] = n;
-    set_output(2, sizes, LU.options());
+    set_output_raw_strided(2, sizes, {}, LU.options(), {});
   } else {
-    set_output(1, {0}, LU.options());
-    set_output(2, {0}, LU.options());
+    set_output_raw_strided(1, {0}, {}, LU.options(), {});
+    set_output_raw_strided(2, {0}, {}, LU.options(), {});
   }
 }
 
@@ -525,19 +520,19 @@ TORCH_META_FUNC(linalg_lu)(const Tensor& A, bool pivot) {
   // P.shape[-2:] == (m, m) (or size zero if pivot == False)
   sizes.end()[-1] = m;
   if (pivot) {
-    set_output(0, sizes, A.options());
+    set_output_raw_strided(0, sizes, {}, A.options(), {});
   } else {
-    set_output(0, {0}, A.options());
+    set_output_raw_strided(0, {0}, {}, A.options(), {});
   }
 
   // L.shape[-2:] == (m, k)
   sizes.end()[-1] = k;
-  set_output(1, sizes, A.options());
+  set_output_raw_strided(1, sizes, {}, A.options(), {});
 
   // U.shape[-2:] == (k, n)
   sizes.end()[-2] = k;
   sizes.end()[-1] = n;
-  set_output(2, sizes, A.options());
+  set_output_raw_strided(2, sizes, {}, A.options(), {});
 }
 
 } // namespace meta
@@ -547,8 +542,6 @@ namespace native {
 #if AT_BUILD_WITH_LAPACK()
 // Define the per-batch functions to be used in the main implementation of the batched
 // linear algebra operations
-template<class scalar_t>
-void lapackSolve(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
 
 template<class scalar_t>
 void lapackGetri(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, int lwork, int *info);
@@ -558,22 +551,6 @@ void lapackCholeskySolve(char uplo, int n, int nrhs, scalar_t *a, int lda, scala
 
 template<class scalar_t, class value_t=scalar_t>
 void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, value_t *w, scalar_t *work, int lwork, value_t *rwork, int *info);
-
-template<> void lapackSolve<c10::complex<double>>(int n, int nrhs, c10::complex<double> *a, int lda, int *ipiv, c10::complex<double> *b, int ldb, int *info) {
-  zgesv_(&n, &nrhs, reinterpret_cast<std::complex<double>*>(a), &lda, ipiv, reinterpret_cast<std::complex<double>*>(b), &ldb, info);
-}
-
-template<> void lapackSolve<c10::complex<float>>(int n, int nrhs, c10::complex<float> *a, int lda, int *ipiv, c10::complex<float> *b, int ldb, int *info) {
-  cgesv_(&n, &nrhs, reinterpret_cast<std::complex<float>*>(a), &lda, ipiv, reinterpret_cast<std::complex<float>*>(b), &ldb, info);
-}
-
-template<> void lapackSolve<double>(int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
-  dgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
-}
-
-template<> void lapackSolve<float>(int n, int nrhs, float *a, int lda, int *ipiv, float *b, int ldb, int *info) {
-  sgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
-}
 
 template<> void lapackGetri<c10::complex<double>>(int n, c10::complex<double> *a, int lda, int *ipiv, c10::complex<double> *work, int lwork, int *info) {
   zgetri_(&n, reinterpret_cast<std::complex<double>*>(a), &lda, ipiv, reinterpret_cast<std::complex<double>*>(work), &lwork, info);
@@ -1318,6 +1295,9 @@ void _linalg_check_errors(
     const Tensor& info,
     const c10::string_view api_name,
     bool is_matrix) {
+  if (info.is_meta()) {
+    return;
+  }
   if (is_matrix) {
     singleCheckErrors(info.item<int64_t>(), api_name);
   } else {
@@ -1334,100 +1314,6 @@ bool _requires_fw_or_bw_grad(const Tensor& input) {
 // in the main helper functions for the linear algebra operations
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-/*
-Computes the solution to a system of linear equations
-  A X = B,
-where A is an n-by-n matrix and X and B are n-by-nrhs matrices.
-Note that B is required to be a matrix, the usual, vector case, is obtained with nrhs = 1.
-Above description is for non-batched input, the batched input is also supported.
-This is an in-place routine, content of both A and b are overwritten.
-'infos' is an int Tensor containing error codes for each matrix in the batched input.
-For more information see LAPACK's documentation for GESV routine.
-*/
-template<typename scalar_t>
-static void apply_solve(Tensor& b, Tensor& A, Tensor& infos) {
-#if !AT_BUILD_WITH_LAPACK()
-  AT_ERROR("solve: LAPACK library not found in compilation");
-#else
-  auto A_data = A.data_ptr<scalar_t>();
-  auto b_data = b.data_ptr<scalar_t>();
-  auto A_mat_stride = matrixStride(A);
-  auto b_mat_stride = matrixStride(b);
-  auto batch_size = batchCount(A);
-  auto n = A.size(-2);
-  auto nrhs = b.size(-1);
-  auto lda = std::max<int64_t>(1, n);
-
-  auto ipiv = at::empty({lda}, b.options().dtype(kInt));
-  auto ipiv_data = ipiv.data_ptr<int>();
-  auto infos_data = infos.data_ptr<int>();
-
-  for (const auto i : c10::irange(batch_size)) {
-    scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
-    scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-    int* info_working_ptr = &infos_data[i];
-    lapackSolve<scalar_t>(n, nrhs, A_working_ptr, lda, ipiv_data, b_working_ptr, lda, info_working_ptr);
-  }
-#endif
-}
-
-std::tuple<Tensor, Tensor> _solve_helper_cpu(const Tensor& self, const Tensor& A) {
-  auto self_working_copy = cloneBatchedColumnMajor(self);
-  auto A_working_copy = cloneBatchedColumnMajor(A);
-  // infos might not get filled for empty inputs therefore at::zeros is used instead of at::empty
-  auto infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "solve_cpu", [&]{
-    apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
-  });
-  at::_linalg_check_errors(infos, "solve_cpu", self.dim() == 2);
-  return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
-}
-
-// Supports arbitrary batch dimensions for self and A
-std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
-  TORCH_WARN_ONCE(
-    "torch.solve is deprecated in favor of torch.linalg.solve",
-    "and will be removed in a future PyTorch release.\n",
-    "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
-    "To get the LU factorization see torch.lu, which can be used with torch.lu_solve or torch.lu_unpack.\n",
-    "X = torch.solve(B, A).solution\n",
-    "should be replaced with\n",
-    "X = torch.linalg.solve(A, B)"
-  );
-  TORCH_CHECK(self.dim() >= 2,
-           "B should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  TORCH_CHECK(A.dim() >= 2,
-           "A should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
-  Tensor self_broadcasted, A_broadcasted;
-  std::tie(self_broadcasted, A_broadcasted) = _linalg_broadcast_batch_dims(self, A, "solve");
-  return at::_solve_helper(self_broadcasted, A_broadcasted);
-}
-
-std::tuple<Tensor&,Tensor&> solve_out(const Tensor& self, const Tensor& A, Tensor& solution, Tensor& lu) {
-  TORCH_WARN_ONCE(
-    "torch.solve is deprecated in favor of torch.linalg.solve",
-    "and will be removed in a future PyTorch release.\n",
-    "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
-    "To get the LU factorization see torch.lu, which can be used with torch.lu_solve or torch.lu_unpack.\n",
-    "X = torch.solve(B, A).solution\n",
-    "should be replaced with\n",
-    "X = torch.linalg.solve(A, B)"
-  );
-  checkSameDevice("solve", solution, self, "solution");
-  checkSameDevice("solve", lu, self, "lu");
-  checkLinalgCompatibleDtype("solve", solution, self, "solution");
-  checkLinalgCompatibleDtype("solve", lu, self, "lu");
-
-  Tensor solution_tmp, lu_tmp;
-  std::tie(solution_tmp, lu_tmp) = at::_solve_helper(self, A);
-
-  at::native::resize_output(solution, solution_tmp.sizes());
-  at::native::resize_output(lu, lu_tmp.sizes());
-  solution.copy_(solution_tmp);
-  lu.copy_(lu_tmp);
-  return std::tuple<Tensor&, Tensor&>(solution, lu);
-}
 
 // Solves a system of linear equations matmul(input, x) = other in-place
 // LAPACK/MAGMA error codes are saved in 'infos' tensor, they are not checked here
@@ -2129,30 +2015,11 @@ TORCH_IMPL_FUNC(linalg_lu_factor_ex_out)(const Tensor& A,
                                          const Tensor& LU,
                                          const Tensor& pivots,
                                          const Tensor& info) {
-  const auto LU_f_contig = LU.transpose(-2, -1).is_contiguous() ;
-
-  if (LU_f_contig && !LU.is_same(A)) {
+  if (!LU.is_same(A)) {
     LU.copy_(A);
   }
-  const auto LU_ = borrow_else_clone(LU_f_contig, LU, A, /*C-contig*/false);
 
-  const auto pivots_contig = pivots.is_contiguous();
-  const auto pivots_ = borrow_else_clone(pivots_contig, pivots, pivots, /*C-contig*/true);
-
-  const auto info_contig = info.is_contiguous();
-  const auto info_ = borrow_else_clone(info_contig, info, info, /*C-contig*/true);
-
-  lu_factor_stub(A.device().type(), *LU_, *pivots_, *info_, pivot);
-
-  if (!LU_f_contig) {
-    LU.copy_(*LU_);
-  }
-  if (!pivots_contig) {
-    pivots.copy_(*pivots_);
-  }
-  if (!info_contig) {
-    info.copy_(*info_);
-  }
+  lu_factor_stub(A.device().type(), LU, pivots, info, pivot);
 
   if (check_errors) {
     at::_linalg_check_errors(info, "torch.linalg.lu_factor_ex", A.dim() == 2);
@@ -3601,6 +3468,7 @@ DEFINE_DISPATCH(svd_stub);
 TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
                                  const bool full_matrices,
                                  const bool compute_uv,
+                                 c10::optional<c10::string_view> driver,
                                  const Tensor & U,
                                  const Tensor & S,
                                  const Tensor & Vh) {
@@ -3621,42 +3489,24 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
     }
     return;
   }
+
   // We need to distinguish the cuSOLVER case, as cuSOLVER expects F-contig matrices, but
   // it computes V rather than Vh
   const bool use_cusolver = at::native::svd_uses_cusolver(A);
+  TORCH_CHECK(use_cusolver || !driver.has_value(),
+    "torch.linalg.svd: keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend.");
 
   // A always needs to be copied as its contents will be destroyed during the computaton of the SVD
   // Now, MAGMA needs the copy to be on CPU, while cuSOLVER needs it to be on CUDA, so we'll defer
   // the copy as a column major matrix to the backends.
   const auto info = at::zeros(IntArrayRef(A.sizes().begin(), A.sizes().end() - 2), A.options().dtype(kInt));
 
-  // Prepare S
-  const auto S_ = S.expect_contiguous();
-
-  // Prepare U / Vh
-  // U_ and Vh_ are just going to be accessed whenever compute_uv == true
-  const auto U_ready = !compute_uv || U.mT().is_contiguous();
-  const auto U_ = borrow_else_clone(U_ready, U, U, /*C-contig*/false);
-  const auto Vh_ready = !compute_uv
-                            || (!use_cusolver && Vh.mT().is_contiguous())
-                            || (use_cusolver && Vh.is_contiguous());
-  const auto Vh_ = borrow_else_clone(Vh_ready, Vh, Vh, /*C-contig*/use_cusolver);
-
   svd_stub(A.device().type(),
            A,
            full_matrices,
            compute_uv,
-           *U_, *S_, *Vh_, info);
-
-  if (!U_ready) {
-    U.copy_(*U_);
-  }
-  if (!S.is_same(*S_)) {
-    S.copy_(*S_);
-  }
-  if (!Vh_ready) {
-    Vh.copy_(*Vh_);
-  }
+           driver,
+           U, S, Vh, info);
 
   // TODO This should be removed, and the code checking for convergence should be lifted
   // from svd_cusolver to this function. We should then make sure that this function
@@ -3667,6 +3517,7 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
 std::tuple<Tensor&, Tensor&, Tensor&>
 linalg_svd_out(const Tensor& A,
                bool full_matrices,
+               c10::optional<c10::string_view> driver,
                Tensor & U,
                Tensor & S,
                Tensor & Vh) {
@@ -3681,31 +3532,34 @@ linalg_svd_out(const Tensor& A,
   //   2. We would like to make use of the `compute_uv=False` optimisation within svdvals
   // The only way to achieve these two things and still abide by the compositionality rules
   // is by dispatching to another function.
-  return at::_linalg_svd_out(U, S, Vh, A, full_matrices, /*compute_uv=*/true);
+  return at::_linalg_svd_out(U, S, Vh, A, full_matrices, /*compute_uv=*/true, driver);
 }
 
-std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& A, bool full_matrices) {
-  return at::_linalg_svd(A, full_matrices, /*compute_uv=*/true);
+std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& A, bool full_matrices,
+    c10::optional<c10::string_view> driver) {
+  return at::_linalg_svd(A, full_matrices, /*compute_uv=*/true, driver);
 }
 
 // See note in linalg_svd for why this function does not have an _ex variant
-Tensor& linalg_svdvals_out(const Tensor& A, Tensor & S) {
+Tensor& linalg_svdvals_out(const Tensor& A, c10::optional<c10::string_view> driver, Tensor & S) {
   // Dummies
   auto U = at::empty({0}, A.options());
   auto Vh = at::empty({0}, A.options());
-  at::_linalg_svd_out(U, S, Vh, A, /*full_matrices=*/false, /*comptue_uv=*/false);
+  at::_linalg_svd_out(U, S, Vh, A, /*full_matrices=*/false, /*comptue_uv=*/false, /*driver=*/driver);
   return S;
 }
 
-Tensor linalg_svdvals(const Tensor& A) {
+Tensor linalg_svdvals(const Tensor& A, c10::optional<c10::string_view> driver) {
   // NB: Why do we need isTensorSubclassLike check for linalg_svdvals but not linalg_eigvals?
   //     svdvals is decomposed at the vmap level in functorch so A can be a BatchedTensor wrapping
   //     a TensorWrapper requiring fw or bw grad.
   return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false,
-                     /*comptue_uv=*/_requires_fw_or_bw_grad(A) || isTensorSubclassLike(A)));
+                     /*comptue_uv=*/_requires_fw_or_bw_grad(A) || isTensorSubclassLike(A),
+                     /*driver=*/driver));
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, bool compute_uv, Tensor& U, Tensor& S, Tensor& V) {
+std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, bool compute_uv,
+    Tensor& U, Tensor& S, Tensor& V) {
 
   if (compute_uv) {
     if (V.dim() >= 2) {
@@ -4430,14 +4284,7 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
     return;
   }
 
-  auto pivots_ = pivots.expect_contiguous();
-  auto info_ = info.expect_contiguous();
-
-  auto LD_ = at::native::borrow_else_clone(
-      LD.mT().is_contiguous(), LD, self, /*row_major=*/false);
-  if (LD.mT().is_contiguous()) {
-    LD_->copy_(self);
-  }
+  LD.copy_(self);
 
   // We decided not to include upper flag in the API.
   // https://github.com/pytorch/pytorch/pull/69828#issuecomment-1015143819
@@ -4445,24 +4292,14 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
   // also from low level functions or add it to the public API.
   bool upper = false;
   if (upper) {
-    LD_->triu_();
+    LD.triu_();
   } else {
-    LD_->tril_();
+    LD.tril_();
   }
 
   // call ldl_factor_stub that fills the result tensors
   ldl_factor_stub(
-      self.device().type(), *LD_, *pivots_, *info_, upper, hermitian);
-
-  if (!LD.is_same(*LD_)) {
-    LD.copy_(*LD_);
-  }
-  if (!info.is_same(*info_)) {
-    info.copy_(*info_);
-  }
-  if (!pivots.is_same(*pivots_)) {
-    pivots.copy_(*pivots_);
-  }
+      self.device().type(), LD, pivots, info, upper, hermitian);
 
   if (check_errors) {
     at::_linalg_check_errors(
@@ -4511,16 +4348,10 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
   auto LD_ = at::native::borrow_else_clone(
       LD.mT().is_contiguous(), LD, LD, /*row_major=*/false);
   result.copy_(B);
-  auto result_ = at::native::borrow_else_clone(
-      result.mT().is_contiguous(), result, result, /*row_major=*/false);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(result) == batchCount(*result_));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(result) == batchCount(result));
 
   ldl_solve_stub(
-      B.device().type(), *LD_, *pivots_, *result_, false, hermitian);
-
-  if (!result.is_same(*result_)) {
-    result.copy_(*result_);
-  }
+      B.device().type(), *LD_, *pivots_, result, false, hermitian);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve_triangular ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -4779,4 +4610,28 @@ Tensor linalg_solve_triangular(
   return out;
 }
 
+Tensor linalg_vander(
+    const Tensor& x,
+    c10::optional<int64_t> N) {
+  auto t = x.scalar_type();
+  TORCH_CHECK(t == ScalarType::Float ||
+              t == ScalarType::Double ||
+              t == ScalarType::ComplexFloat ||
+              t == ScalarType::ComplexDouble ||
+              isIntegralType(t),
+              "linalg.vander supports floating point, complex, and integer tensors, but got ", t);
+  const auto x_ = x.dim() == 0 ? x.unsqueeze(-1) : x;
+
+  auto shape = x_.sizes().vec();
+  const auto n = N.value_or(shape.back());
+  TORCH_CHECK(n > 1, "N must be greater than 1.");
+
+  // Append cumprod of the oher 0...n-1 powers
+  shape.push_back(n - 1);
+  auto result = at::cumprod(x_.unsqueeze(-1).expand(shape), -1);
+  // The row of ones
+  shape.back() = 1LL;
+  auto ones =  result.new_ones(shape);
+  return at::cat({ones, result}, /*dim=*/ -1);
+}
 }}  // namespace at::native
