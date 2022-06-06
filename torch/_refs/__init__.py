@@ -2127,7 +2127,7 @@ def hsplit(
             "Expected indices_or_sections to be of type int, list of ints or tuple of ints "
             f"but got type {type(indices_or_sections)}"
         ),
-        error_type=TypeError,
+        exc_type=TypeError,
     )
 
     split_sizes = indices_or_sections
@@ -2167,7 +2167,7 @@ def vsplit(
             "Expected indices_or_sections to be of type int, list of ints or tuple of ints "
             f"but got type {type(indices_or_sections)}"
         ),
-        error_type=TypeError,
+        exc_type=TypeError,
     )
 
     split_sizes = indices_or_sections
