@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
 
@@ -29,7 +30,7 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
       : TensorImpl(key_set, data_type, device),
         opaque_handle_(std::move(opaque_handle)) {
     set_storage_access_should_throw();
-    set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
+    set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
     sizes_and_strides_.set_sizes(sizes);
     refresh_numel();
     is_non_overlapping_and_dense_ = is_non_overlapping_and_dense;
@@ -40,14 +41,6 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
   void release_resources() override {
     TensorImpl::release_resources();
     opaque_handle_ = {};
-  }
-
-  IntArrayRef strides() const override {
-    AT_ERROR("opaque tensors do not have strides");
-  }
-
-  int64_t stride(int64_t d) const override {
-    AT_ERROR("opaque tensors do not have strides");
   }
 
   void set_size(int64_t dim, int64_t new_size) override {
@@ -79,7 +72,11 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
-        key_set(), dtype(), device(), opaque_handle_, sizes_and_strides_.sizes_arrayref());
+        key_set(),
+        dtype(),
+        device(),
+        opaque_handle_,
+        asIntArrayRefSlow(sizes_and_strides_.sizes_arrayref()));
     copy_tensor_metadata(
         /*src_opaque_impl=*/this,
         /*dest_opaque_impl=*/impl.get(),
@@ -99,7 +96,11 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
       c10::VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
-        key_set(), dtype(), device(), opaque_handle_, sizes_and_strides_.sizes_arrayref());
+        key_set(),
+        dtype(),
+        device(),
+        opaque_handle_,
+        asIntArrayRefSlow(sizes_and_strides_.sizes_arrayref()));
     copy_tensor_metadata(
         /*src_opaque_impl=*/this,
         /*dest_opaque_impl=*/impl.get(),

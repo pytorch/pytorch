@@ -36,7 +36,8 @@ from torch.utils.data.datapipes.map import SequenceWrapper
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
-                                                  load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE)
+                                                  load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
+                                                  IS_MACOS)
 
 
 try:
@@ -658,8 +659,6 @@ class TestProperExitIterableDataset(IterableDataset):
         if self.remaining < 0:
             raise StopIteration
         return torch.tensor(-1000)
-
-    next = __next__  # py2 compatibility
 
 
 # See TestDataLoader.test_proper_exit for usage
@@ -1375,6 +1374,7 @@ except RuntimeError as e:
         with self.assertRaisesRegex(AssertionError, "ChainDataset only supports IterableDataset"):
             list(iter(ChainDataset([dataset1, self.dataset])))
 
+    @unittest.skipIf(IS_MACOS, "Not working on macos")
     def test_multiprocessing_contexts(self):
         reference = [
             torch.arange(3),
@@ -2166,7 +2166,7 @@ class TestDataLoader2(TestCase):
     def test_basics(self):
         # TODO(VitalyFedyunin): This test will start breaking if we remove guaranteed order
         # of traversing workers
-        dp = IterableWrapper(list(range(1000)))
+        dp = IterableWrapper(list(range(1000))).sharding_filter()
         dl = DataLoader(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
         dl2 = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
         dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2, parallelism_mode='thread')
@@ -2187,24 +2187,18 @@ class TestDataLoader2(TestCase):
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False)
         self.assertEqual(items, list(dl))
 
-        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False,
-                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
-        self.assertEqual(items, list(dl))
-
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
         self.assertNotEqual(items, list(dl))
         self.assertEqual(items, sorted(list(dl)))
 
-        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True,
-                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
         self.assertNotEqual(items, list(dl))
         self.assertEqual(items, sorted(list(dl)))
 
         dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
         self.assertEqual(list(dl), items)
 
-        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True,
-                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
         self.assertEqual(list(dl), items)
 
 
