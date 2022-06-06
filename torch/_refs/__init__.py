@@ -883,15 +883,21 @@ def isclose(
     atol: float = 1e-08,
     equal_nan: bool = False,
 ) -> TensorLikeType:
-    if a.dtype != b.dtype:
-        msg = "Attempting to compare tensors of different dtypes {0} and {1}!".format(
+    check(
+        a.dtype == b.dtype,
+        lambda: "torch.isclose: Attempting to compare tensors of different dtypes {0} and {1}!".format(
             a.dtype, b.dtype
-        )
-        raise ValueError(a, b)
-    if rtol < 0:
-        msg = "rtol must be greater than or equal to zero, but got {0}!".format(rtol)
-    if atol < 0:
-        msg = "atol must be greater than or equal to zero, but got {0}!".format(atol)
+        ),
+        ValueError,
+    )
+    check(
+        rtol >= 0,
+        lambda: "torch.isclose: rtol must be greater than or equal to zero, but got {0}!".format(rtol),
+    )
+    check(
+        atol >= 0,
+        lambda: "torch.isclose: atol must be greater than or equal to zero, but got {0}!".format(atol),
+    )
 
     close = eq(a, b)
     if equal_nan and (utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype)):
