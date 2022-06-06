@@ -19534,6 +19534,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.bitwise_not",
         torch_opinfo_name="bitwise_not",
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.ceil",
@@ -19870,18 +19871,22 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.bitwise_and",
         torch_opinfo_name="bitwise_and",
+        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.bitwise_left_shift",
         torch_opinfo_name="bitwise_left_shift",
+        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.bitwise_or",
         torch_opinfo_name="bitwise_or",
+        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.bitwise_xor",
         torch_opinfo_name="bitwise_xor",
+        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.eq",
@@ -19895,6 +19900,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.float_power",
         torch_opinfo_name="float_power",
+        supports_nvfuser=False,
         skips=(
             # Test doesn't account for float -> double type promotion
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
@@ -19951,6 +19957,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.igammac",
         torch_opinfo_name="igammac",
+        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.isclose",
@@ -20021,6 +20028,7 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
+        supports_nvfuser=False,
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', dtypes=(torch.complex64, torch.complex128,)),
@@ -20043,6 +20051,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.pow",
         torch_opinfo_name="pow",
+        supports_nvfuser=False,
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', dtypes=(torch.complex64, torch.complex128,)),
@@ -20065,6 +20074,7 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
+        supports_nvfuser=False,
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', dtypes=(torch.complex64, torch.complex128,)),
@@ -20077,6 +20087,7 @@ python_ref_db = [
         "_refs.special.zeta",
         torch_opinfo_name="special.zeta",
         supports_one_python_scalar=True,
+        supports_nvfuser=False,
     ),
     #
     # Elementwise Ternary Reference OpInfos
@@ -20193,6 +20204,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.column_stack",
         torch_opinfo_name="column_stack",
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.dsplit",
@@ -20202,6 +20214,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.dstack",
         torch_opinfo_name="dstack",
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.flatten",
@@ -20304,10 +20317,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.unsqueeze",
         torch_opinfo_name="unsqueeze",
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.view",
         torch_opinfo_name="view",
+        supports_nvfuser=False,
     ),
     #
     # Reduction Reference OpInfos
