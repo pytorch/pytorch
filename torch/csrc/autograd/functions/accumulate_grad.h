@@ -104,7 +104,7 @@ struct TORCH_API AccumulateGrad : public Node {
       size_t num_expected_refs,
       const T& update_grad) {
     if (!variable_grad.defined()) {
-      if (!GradMode::is_enabled() &&
+      if (!GradMode::is_enabled() && !new_grad.is_nested() &&
           !new_grad.is_sparse() && !new_grad.is_sparse_csr() &&
           !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided) &&
           new_grad.use_count() <= num_expected_refs &&

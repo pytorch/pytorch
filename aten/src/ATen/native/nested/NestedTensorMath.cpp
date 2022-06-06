@@ -8,7 +8,6 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
-#include <ATen/native/nested/NestedTensorMath.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
 
@@ -239,6 +238,11 @@ Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask)
     return at::_nested_from_padded(t, sizes, false);
 }
 
+Tensor NestedTensor_nested_tensor_from_mask_backward(const Tensor& grad, const Tensor& input){
+  TORCH_CHECK(grad.is_nested());
+  return NestedTensor_to_padded_tensor_generic(grad, 0, input.sizes());
+}
+
 Tensor nested_tensor(
     TensorList list,
     c10::optional<ScalarType> dtype,
@@ -344,7 +348,7 @@ Tensor NestedTensor_layer_norm(
 Tensor NestedTensor_from_padded_and_nested_example(
     const Tensor& padded,
     const Tensor& nt_example) {
-  return _nested_from_padded(padded, get_nested_tensor_impl(nt_example)->get_nested_size_tensor());
+  return at::_nested_from_padded(padded, get_nested_tensor_impl(nt_example)->get_nested_size_tensor());
 }
 
 Tensor nested_from_padded_generic(
@@ -386,6 +390,12 @@ Tensor nested_from_padded_generic(
   at::Tensor new_buffer = padded_transformed.masked_select(final_mask).to(padded.device());
   return at::detail::make_tensor<NestedTensorImpl>(
       std::move(new_buffer), sizes);
+}
+
+Tensor nested_from_padded_generic_backward(const Tensor& grad, const Tensor& input, const bool do_transform_0213){
+  // Need to accound for the permute transform
+  TORCH_CHECK(grad.is_nested());
+  return NestedTensor_to_padded_tensor_generic(grad, 0, input.sizes());
 }
 
 Tensor NestedTensor_to_padded_tensor_generic(
@@ -460,6 +470,14 @@ Tensor NestedTensor_to_padded_tensor_generic(
     return pad_tensor_to_shape(ret_val, output_size_, padding);
   }
   return ret_val;
+}
+
+// TODO  This isn't generic enough to the optional output size
+Tensor NestedTensor_to_padded_tensor_generic_backward(
+    const Tensor& grad,
+    const Tensor& input) {
+  TORCH_CHECK(!grad.is_nested());
+  return nested_from_padded_generic(grad, input.nested_size_tensor());
 }
 
 Tensor NestedTensor_embedding(

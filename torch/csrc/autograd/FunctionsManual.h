@@ -182,6 +182,26 @@ at::Tensor index_backward(at::Tensor zeros_like_self, const torch::List<c10::opt
 at::Tensor _cudnn_ctc_loss_backward(const at::Tensor& grad_out, const at::Tensor& loss, const at::Tensor& raw_grad, bool zero_infinity);
 at::Tensor elu_double_backward(const Tensor& grad, const Tensor& grad_output, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, bool is_result, const Tensor& self_or_result);
 
+// Nested Tensor Derivatives
+Tensor _nested_tensor_from_mask_backward(const Tensor& grad, const Tensor& input);
+Tensor _nested_from_padded_backward(
+    const Tensor& grad,
+    const Tensor& input,
+    const bool do_transform_0213);
+Tensor to_padded_tensor_backward(const Tensor& grad, const Tensor& input);
+Tensor NestedTensor_to_buffer_backward(
+    const Tensor& grad,
+    const Tensor& input);
+Tensor NestedTensor_from_buffer_backward(
+    const Tensor& grad,
+    const Tensor& buffer,
+    const Tensor& shape);
+std::tuple<Tensor, Tensor, Tensor> NestedTensor_linear_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt);
+
 Tensor svd_backward(const Tensor& gU,
                     const Tensor& gS,
                     const Tensor& gVh,

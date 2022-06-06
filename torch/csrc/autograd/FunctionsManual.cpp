@@ -25,6 +25,7 @@
 #include <c10/util/irange.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <c10/util/SmallBuffer.h>
+#include <ATen/NestedTensorImpl.h>
 
 
 #include <ciso646>
@@ -303,6 +304,92 @@ Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar
   // No need to handle the dtype arg as it's handled via broadcasting in the function
   auto dim = opt_dim.value_or(IntArrayRef({}));
   return norm_backward(grad, self, scalar_ord, norm, dim, keepdim);
+}
+
+// NestedTensor Backward Formulas
+Tensor _nested_tensor_from_mask_backward(
+    const Tensor& grad,
+    const Tensor& input) {
+  TORCH_CHECK(grad.is_nested());
+  return grad.to_padded_tensor(0, input.sizes());
+}
+Tensor _nested_from_padded_backward(
+    const Tensor& grad,
+    const Tensor& input,
+    const bool do_transform_0213) {
+  // Need to account for the permute transform
+  TORCH_CHECK(grad.is_nested());
+  return grad.to_padded_tensor(0, input.sizes());
+}
+
+Tensor to_padded_tensor_backward(const Tensor& grad, const Tensor& input) {
+  TORCH_CHECK(!grad.is_nested());
+  return at::_nested_from_padded(grad, input.nested_size_tensor());
+}
+
+Tensor NestedTensor_to_buffer_backward(
+    const Tensor& grad,
+    const Tensor& input) {
+  TORCH_CHECK(!grad.is_nested());
+  auto* nt_input = at::native::get_nested_tensor_impl(input);
+  Tensor new_sizes = nt_input->get_nested_size_tensor().clone();
+  Tensor grad_buffer = grad.clone();
+  return at::detail::make_tensor<at::native::NestedTensorImpl>(
+      std::move(grad_buffer), std::move(new_sizes));
+}
+
+Tensor NestedTensor_from_buffer_backward(
+    const Tensor& grad,
+    const Tensor& buffer,
+    const Tensor& shape) {
+  TORCH_CHECK(grad.is_nested());
+  auto* nt_grad = at::native::get_nested_tensor_impl(grad);
+  Tensor grad_buffer = nt_grad->get_buffer();
+  return grad_buffer.clone();
+}
+
+std::tuple<Tensor, Tensor, Tensor> NestedTensor_linear_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt) {
+  TORCH_CHECK(
+      grad.is_nested(), "The incoming gradient should be a nested tensor")
+  TORCH_CHECK(self.is_nested(), "Self should be a nested tensor")
+  TORCH_CHECK(!weight.is_nested(), "Weight should be a regular tensor")
+  auto* nt_grad = at::native::get_nested_tensor_impl_or_null(grad);
+  auto* nt_self = at::native::get_nested_tensor_impl_or_null(self);
+  TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_grad));
+  auto grad_buffer = nt_grad->get_buffer();
+  auto self_buffer = nt_self->get_buffer();
+  // Weight is a regular tensor also is there more efficient transpose
+  // calculation?
+  auto d_weight = at::mm(
+      grad_buffer.reshape({-1, weight.size(0)}).t(),
+      self_buffer.reshape({-1, weight.size(1)}));
+
+  // d_self is a nested tensor so have to do calculation then re-flatten
+  auto d_self_buffer =
+      at::mm(grad_buffer.reshape({-1, weight.size(0)}), weight);
+  d_self_buffer = d_self_buffer.reshape({-1});
+
+  auto d_self_nt_size = nt_self->get_nested_size_tensor().clone();
+  auto d_self = at::detail::make_tensor<at::native::NestedTensorImpl>(
+      std::move(d_self_buffer), std::move(d_self_nt_size));
+
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+  Tensor d_bias = at::Tensor();
+  // CLONES KILL PERFORMANCE
+  // t.storage().use_count() == 1 INTERNAL ASSERT FAILED
+  // You would never(hopefully) add a full bias though since shape would change per batch
+  if (bias.defined()) {
+    d_bias = grad_buffer.reshape({-1, weight.size(0)});
+    d_bias = bias.dim() == 1 ? d_bias.sum(0) : d_bias.clone();
+  }
+
+  return std::tie(d_self, d_weight, d_bias);
 }
 
 Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent) {

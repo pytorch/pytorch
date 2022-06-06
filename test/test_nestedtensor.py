@@ -447,11 +447,11 @@ class TestNestedTensorDeviceType(TestCase):
             nt1.clone(memory_format=torch.channels_last)
 
 class TestNestedTensorAutograd(TestCase):
-    def _create_nested_tensor_from_mask(self, requires_grad=False):
+    def _create_nested_tensor_from_list(self, requires_grad=False):
         return torch.nested_tensor([torch.randn(1, 2, requires_grad=requires_grad),
                                     torch.randn(7, 8, requires_grad=requires_grad)])
 
-    def _create_nested_tensor_from_list(self, requires_grad=False):
+    def _create_nested_tensor_from_mask(self, requires_grad=False):
         data = torch.randn(2, 3, 4, requires_grad=requires_grad)
         mask = torch.ones_like(data[:, :, 0]).bool()
         return torch._nested_tensor_from_mask(data, mask)
@@ -466,15 +466,9 @@ class TestNestedTensorAutograd(TestCase):
         nt.requires_grad_()
         assert nt.requires_grad
 
-    def test_requires_grad_not_pass_through(self):
-        # I don't know if this is behavior is intended
-        nt = self._create_nested_tensor_from_list(True)
-        assert not nt.requires_grad
-
-    def test_requires_grad_not_pass_through_from_mask(self):
-        # I don't know if this is behavior is intended
+    def test_requires_grad_pass_through_from_mask(self):
         nt = self._create_nested_tensor_from_mask(True)
-        assert not nt.requires_grad
+        assert nt.requires_grad
 
     def test_backward_for_add_op(self):
         nt_1 = self._create_nested_tensor_from_mask()
@@ -495,6 +489,18 @@ class TestNestedTensorAutograd(TestCase):
         for chunk_1, chunk_2 in zip(nt_1.grad.unbind(), upward_grad.unbind()):
             assert torch.allclose(chunk_1, chunk_2)
 
+    def test_backward_linear_op(self):
+        nt = torch.nested_tensor([torch.randn(1, 2), torch.randn(2, 2), torch.randn(3, 2)]).requires_grad_()
+        embed_dim = 4
+        weight = torch.randn(embed_dim, 2, requires_grad=True)
+
+        c = torch._C._nn.NestedTensor_linear(nt, weight)
+
+        upward_grad = torch.nested_tensor([torch.randn(1, embed_dim), torch.randn(2, embed_dim), torch.randn(3, embed_dim)])
+        c.backward(upward_grad)
+
+        assert nt.grad is not None
+        assert weight.grad is not None
 
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 

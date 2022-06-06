@@ -2714,6 +2714,23 @@
 
 - func: linear.out(Tensor input, Tensor weight, Tensor? bias=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+# Nested Tensor linear ops
+
+- func: NestedTensor_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+  python_module: nn
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_linear
+
+- func: NestedTensor_linear_composite(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+  python_module: nn
+
+- func: NestedTensor_to_buffer(Tensor self) -> Tensor
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_to_buffer
+
+- func: NestedTensor_from_buffer(Tensor self, Tensor shape) -> Tensor
+  dispatch:
+    CPU, CUDA: NestedTensor_from_buffer
 
 # TODO: Add this function to MPS dispatch key so that we avoid declaring it in
 # native_functions.yaml
@@ -4300,7 +4317,7 @@
   variants: method
 
 - func: nested_size_tensor(Tensor self) -> Tensor
-  variants: method
+  variants: function, method
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_nested_size_tensor
 
