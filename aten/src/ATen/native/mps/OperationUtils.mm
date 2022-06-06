@@ -81,9 +81,6 @@ void runMPSGraph(
     MPSGraph* mpsGraph,
     NSDictionary* feeds,
     NSDictionary* results) {
-#ifdef DEBUG
-  [mpsGraph dump];
-#endif
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
       mpsStream->commit(true);
