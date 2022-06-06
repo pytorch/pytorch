@@ -66,7 +66,9 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
 
     def state_dict(self):
         optim_state_dict = self.optim.state_dict()
-        optim_state_dict["step"] = self.averager.step
+        #print(optim_state_dict)
+        if 'step' not in optim_state_dict['param_groups'][-1].keys():
+            optim_state_dict['param_groups'][-1]['step']= self.averager.step
         return optim_state_dict
 
     def load_state_dict(self, state_dict):
