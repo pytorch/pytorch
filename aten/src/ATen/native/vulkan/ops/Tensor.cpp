@@ -2,6 +2,8 @@
 #include <ATen/native/vulkan/ops/Tensor.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <c10/util/accumulate.h>
+#include "c10/core/ScalarType.h"
+#include "c10/util/quint8.h"
 
 namespace at {
 namespace native {
@@ -23,6 +25,9 @@ VkFormat vk_format(const caffe2::TypeMeta dtype) {
     #else
       return VK_FORMAT_R32G32B32A32_SFLOAT;
     #endif /* USE_VULKAN_FP16_INFERENCE */
+    break;
+    case c10::kQUInt8:
+      return VK_FORMAT_R8G8B8A8_UINT;
 
     default:
       TORCH_CHECK(
@@ -761,6 +766,8 @@ void vTensor::View::CMD::copy_buffer_to_image(
   if (state.is_clean(Component::Image)) {
     return;
   }
+
+
 
   api::OpProfiler profiler(command_buffer_, view_.context_->querypool(), "copy_buffer_to_image");
 
