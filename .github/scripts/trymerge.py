@@ -911,10 +911,7 @@ def merge(pr_num: int, repo: GitRepo,
           dry_run: bool = False,
           force: bool = False,
           comment_id: Optional[int] = None,
-<<<<<<< HEAD
           mandatory_only: bool = False,
-=======
->>>>>>> 2d37087a614 (add options)
           timeout_minutes: int = 400) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
@@ -924,11 +921,9 @@ def merge(pr_num: int, repo: GitRepo,
     while elapsed_time < timeout_minutes * 60:
         current_time = time.time()
         elapsed_time = current_time - start_time
-
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
         try:
-<<<<<<< HEAD
             find_matching_merge_rule(pr, repo)
             pending = pr_get_pending_checks(pr)
             failing = pr_get_failed_checks(pr)
@@ -939,9 +934,6 @@ def merge(pr_num: int, repo: GitRepo,
                 raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
                                                   f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
             return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
-=======
-            return pr.merge_into(repo, force=force, dry_run=dry_run, comment_id=comment_id)
->>>>>>> 2d37087a614 (add options)
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min")
