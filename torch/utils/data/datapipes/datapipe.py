@@ -3,6 +3,7 @@ import pickle
 from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta
+from torch.utils.data.datapipes.utils.common import _deprecated_functional_names, _deprecation_warning
 from torch.utils.data.dataset import Dataset, IterableDataset
 
 try:
@@ -109,6 +110,9 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
 
     def __getattr__(self, attribute_name):
         if attribute_name in IterDataPipe.functions:
+            if attribute_name in _deprecated_functional_names:
+                kwargs = _deprecated_functional_names[attribute_name]
+                _deprecation_warning(**kwargs)
             function = functools.partial(IterDataPipe.functions[attribute_name], self)
             return function
         else:
