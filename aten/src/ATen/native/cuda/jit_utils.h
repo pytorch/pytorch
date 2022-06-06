@@ -8,6 +8,7 @@
 #include <c10/util/irange.h>
 #include <ATen/jit_macros.h>
 #include <ATen/cuda/detail/LazyNVRTC.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 namespace at { namespace cuda { namespace jit {
 
@@ -19,7 +20,8 @@ struct NvrtcFunction {
 };
 
 std::string generate_code(
-    int nTensors,
+    int nInputs,
+    int nOutputs,
     const std::string& func,
     const std::string& name,
     const std::string& f_input_type,
@@ -30,7 +32,21 @@ std::string generate_code(
     BinaryFuncVariant scalar_pos,
     c10::SmallVector<std::string>& extra_args_typenames,
     bool vectorized=false,
-    int vec_size=0);
+    int vec_size=0,
+    bool return_by_ref=false);
+
+std::string generate_reduction_code(
+    int nOutputs,
+    const std::string& func,
+    const std::string& name,
+    const int vt0,
+    const std::string& f_inputs_type,
+    const std::string& reduction_accum_type,
+    const std::string& result_type,
+    bool contiguous,
+    bool vectorized,
+    int vec_size,
+    int max_threads_codegen);
 
 NvrtcFunction jit_pwise_function(
     const std::string& code,
@@ -39,8 +55,9 @@ NvrtcFunction jit_pwise_function(
 void launch_jitted_pwise_function(
     NvrtcFunction function,
     void* args[],
-    const int nBlocks,
-    const int kBlockSize);
+    const dim3 nBlocks,
+    const dim3 kBlockSize,
+    const int smem=0);
 
 template <typename T>
 struct delayed_false : std::false_type {
@@ -71,6 +88,12 @@ AT_FORALL_SCALAR_TYPES(TYPE_NAME_FN)
 // JIT uses std::complex directly, because nvRTC compile programs
 // with -default-device, so there is no such issue like:
 //   "std::sin(complex) is __host__ only"
+template <> inline std::string typeName<bool>(){
+    return "bool";
+}
+template <> inline std::string typeName<c10::complex<at::Half>>(){
+    return "std::complex<at::Half>";
+}
 template <> inline std::string typeName<c10::complex<float>>(){
     return "std::complex<float>";
 }
@@ -83,5 +106,21 @@ template <> inline std::string typeName<at::Half>(){
 template <> inline std::string typeName<at::BFloat16>(){
     return "at::BFloat16";
 }
+
+#define TYPE_NAME_CASE(ctype, scalartype)                    \
+  case ScalarType::scalartype:  return std::string(#ctype);
+inline std::string typeName(ScalarType t) {
+    switch (t) {
+        AT_FORALL_SCALAR_TYPES(TYPE_NAME_CASE)
+        case ScalarType::Bool : return "bool";
+        case ScalarType::Half : return "at::Half";
+        case ScalarType::BFloat16 : return "at::BFloat16";
+        case ScalarType::ComplexFloat : return "std::complex<float>";
+        case ScalarType::ComplexDouble : return "std::complex<double>";
+        default:
+            TORCH_CHECK(false, "invalid type for jiterator");
+    }
+}
+#undef TYPE_NAME_CASE
 
 }}}  // namespace at::cuda::jit

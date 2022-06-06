@@ -8,20 +8,25 @@ set -ex
 # Save the SCRIPT_DIR absolute path in case later we chdir (as occurs in the gpu perf test)
 SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
 
+if [[ "${BUILD_ENVIRONMENT}" == *linux* ]]; then
+  # TODO: Remove this once nvidia package repos are back online
+  # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
+  # shellcheck disable=SC2046
+  sudo sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
+fi
+
 # Required environment variables:
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
 
 # Figure out which Python to use for ROCm
-if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
   # HIP_PLATFORM is auto-detected by hipcc; unset to avoid build errors
   unset HIP_PLATFORM
-  PYTHON=$(which "python${BASH_REMATCH[1]}")
-  # non-interactive bashs do not expand aliases by default
-  shopt -s expand_aliases
   export PYTORCH_TEST_WITH_ROCM=1
-  alias python='$PYTHON'
   # temporary to locate some kernel issues on the CI nodes
   export HSAKMT_DEBUG_LEVEL=4
+  # improve rccl performance for distributed tests
+  export HSA_FORCE_FINE_GRAIN_PCIE=1
 fi
 
 # This token is used by a parser on Jenkins logs for determining
@@ -130,12 +135,8 @@ if [ -z "$COMPACT_JOB_NAME" ]; then
 fi
 
 # TODO: Renable libtorch testing for MacOS, see https://github.com/pytorch/pytorch/issues/62598
-if [[ "$BUILD_ENVIRONMENT" == *linux-trusty-py3.6-gcc7* ]]; then
-  BUILD_TEST_LIBTORCH=1
-else
-  # shellcheck disable=SC2034
-  BUILD_TEST_LIBTORCH=0
-fi
+# shellcheck disable=SC2034
+BUILD_TEST_LIBTORCH=0
 
 # Use conda cmake in some CI build. Conda cmake will be newer than our supported
 # min version (3.5 for xenial and 3.10 for bionic),
@@ -145,7 +146,8 @@ fi
 # export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 if [[ "${TEST_CONFIG:-}" == *xla* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *centos* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *linux-bionic* ]]; then
+   [[ "$BUILD_ENVIRONMENT" == *linux-bionic* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *linux-focal* ]]; then
   if ! which conda; then
     echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
     exit 1

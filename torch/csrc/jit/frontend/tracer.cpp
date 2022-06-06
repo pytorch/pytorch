@@ -66,6 +66,12 @@ void badArgType(const T& v) {
 thread_local std::shared_ptr<TracingState> tracing_state;
 } // namespace detail
 
+static std::atomic<bool> tracer_state_warn_mode{true};
+
+std::atomic<bool>& getTracerStateWarnMode() {
+  return tracer_state_warn_mode;
+}
+
 std::function<void()> pauseTracing() {
   // NOLINTNEXTLINE
   std::shared_ptr<tracer::TracingState> state = getTracingState();
@@ -599,6 +605,16 @@ void addInputs(Node* n, const char* name, int64_t value) {
   }
 }
 
+void addInputs(Node* n, const char* name, c10::SymInt value) {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasValue(name)) {
+    Value* v = ArgumentStash::popValue(name);
+    n->addInput(v);
+  } else {
+    detail::genericAddInput(n, value);
+  }
+}
+
 void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {
@@ -790,6 +806,10 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
       g->insertNode(g->createList(jit::IntType::get(), info))->output());
 }
 
+void addInputs(Node* n, const char* name, c10::SymIntArrayRef value) {
+  TORCH_CHECK(false, "Tracing operations taking symbolic ints isn't supported");
+}
+
 void addInputs(
     Node* n,
     const char* name,
@@ -905,6 +925,27 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
       graph->insertNode(graph->createNumToTensor(node->output()))->output();
   setValueTrace(size_var, ten);
   return size_var;
+}
+
+autograd::Variable getNumelOf(const autograd::Variable& var) {
+  auto& tracing_state = getTracingState();
+  auto& graph = tracing_state->graph;
+
+  Variable numel_var;
+  {
+    // Make sure this scalar to tensor isn't traced!
+    at::AutoDispatchBelowADInplaceOrView guard;
+    numel_var = scalar_to_tensor(at::Scalar(var.numel()));
+  }
+  auto* value = getValueTrace(var);
+  auto* node = graph->insertNode(graph->create(Symbol::aten("numel"), {value}));
+  recordSourceLocation(node);
+  node->output()->setType(jit::IntType::get());
+
+  auto ten =
+      graph->insertNode(graph->createNumToTensor(node->output()))->output();
+  setValueTrace(numel_var, ten);
+  return numel_var;
 }
 
 void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {

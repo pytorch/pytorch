@@ -283,7 +283,9 @@ void general_trace_function(
         AT_ASSERT(iter->isObject());
         tracer::addOutput(node, iter->toObject());
       } else {
-        throw std::runtime_error("unsupported output type: " + type->str());
+        throw std::runtime_error(
+            "unsupported output type: " + type->str() +
+            ", from operator: " + toString(op.operator_name()));
       }
     }
   }

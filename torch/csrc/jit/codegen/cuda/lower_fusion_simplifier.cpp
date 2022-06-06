@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
 #include <torch/csrc/jit/codegen/cuda/lower_fusion_simplifier.h>
 
@@ -27,8 +28,8 @@ class TrivialReductionReplacement : private OptOutMutator {
  private:
   using OptOutMutator::mutate;
   void mutate(ReductionOp* rop) final {
-    if (rop->out()->isA<TensorView>()) {
-      auto out_tv = rop->out()->as<TensorView>();
+    if (ir_utils::isTvOp(rop)) {
+      auto out_tv = ir_utils::getTvOutput(rop);
       if (std::all_of(
               out_tv->domain()->domain().begin(),
               out_tv->domain()->domain().end(),
@@ -45,6 +46,35 @@ class TrivialReductionReplacement : private OptOutMutator {
         auto container = out->container();
         removeExpr(container, rop);
         IrBuilder::create<UnaryOp>(container, UnaryOpType::Set, out, in);
+      }
+    }
+  }
+
+  void mutate(GroupedReductionOp* grouped_rop) final {
+    if (ir_utils::isTvOp(grouped_rop)) {
+      // The inputs and outputs are all uniform in grouped reductions,
+      // so just checking one of the input and output pair should be
+      // sufficient.
+      auto out_tv = ir_utils::getTvOutput(grouped_rop);
+      if (std::all_of(
+              out_tv->domain()->domain().begin(),
+              out_tv->domain()->domain().end(),
+              [&](IterDomain* id) {
+                // If id is a reduction axis, is it a trivial reduction?
+                if (id->isReduction()) {
+                  return trivial_reduction_info_.isDerived(id);
+                } else {
+                  return true;
+                }
+              })) {
+        auto outputs = grouped_rop->outputs();
+        auto inputs = grouped_rop->inputs();
+        auto container = out_tv->container();
+        removeExpr(container, grouped_rop);
+        for (const auto i : c10::irange(outputs.size())) {
+          IrBuilder::create<UnaryOp>(
+              container, UnaryOpType::Set, outputs.at(i), inputs.at(i));
+        }
       }
     }
   }
