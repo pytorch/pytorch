@@ -197,7 +197,8 @@ struct cuda_scatter_gather_base_kernel {
     auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
-    auto src_strides_vec = ensure_nonempty_vec(src.strides().vec());
+    auto src_strides = src.strides();
+    auto src_strides_vec = ensure_nonempty_vec(src_strides.vec());
 
     bool index_larger_than_src = false;
     if (is_scatter_like) {
@@ -268,7 +269,8 @@ struct cuda_scatter_gather_base_kernel {
     auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
-    auto src_strides_vec = ensure_nonempty_vec(src.strides().vec());
+    auto src_strides = src.strides();
+    auto src_strides_vec = ensure_nonempty_vec(src_strides.vec());
 
     bool index_larger_than_src = false;
     if (is_scatter_like) {
@@ -340,7 +342,8 @@ struct cuda_scatter_gather_base_kernel {
     auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
-    auto src_strides_vec = ensure_nonempty_vec(src.strides().vec());
+    auto src_strides = src.strides();
+    auto src_strides_vec = ensure_nonempty_vec(src_strides.vec());
 
     bool index_larger_than_src = false;
     if (is_scatter_like) {
