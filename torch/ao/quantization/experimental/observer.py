@@ -4,6 +4,7 @@ the values observed during calibration (PTQ) or training (QAT).
 """
 
 import torch
+import itertools
 from torch.ao.quantization.observer import ObserverBase
 from typing import Tuple
 from torch.ao.quantization.utils import check_min_max_valid, calculate_qmin_qmax
@@ -92,14 +93,29 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         quantization_levels = torch.tensor([])
 
         # calculate cartesian product
-        if len(p_all) >= 2:
-            quantization_levels = torch.cartesian_prod(p_all[0], p_all[1])
+        cartesian_product = list(itertools.product(p_all))
 
-            count = 2
+        quantization_levels = []
 
-            while count < len(p_all):
-                print(p_all[count])
-                quantization_levels = torch.cartesian_prod(quantization_levels, p_all[count])
+        # calculate sum of each row
+        for row in cartesian_product:
+            sum = 0
+            for ele in row:
+                sum += ele
+            quantization_levels.append(sum)
+
+        quantization_levels = [self.gamma * ele for ele in quantization_levels]
+
+        print(quantization_levels)
+
+        # if len(p_all) >= 2:
+        #     quantization_levels = torch.cartesian_prod(p_all[0], p_all[1])
+
+        #     count = 2
+
+        #     while count < len(p_all):
+        #         print(p_all[count])
+        #         quantization_levels = torch.cartesian_prod(quantization_levels, p_all[count])
 
         # calculate quantization levels
         quantization_levels.apply_(lambda x: (x))
