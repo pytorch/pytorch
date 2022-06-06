@@ -20107,16 +20107,16 @@ python_ref_db = [
         torch_opinfo_name="permute",
     ),
     PythonRefInfo(
-        "_refs.reshape",
-        torch_opinfo_name="reshape",
-    ),
-    PythonRefInfo(
         "_refs.ravel",
         torch_opinfo_name="ravel",
         skips=(
             # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='cuda'),
         )
+    ),
+    PythonRefInfo(
+        "_refs.reshape",
+        torch_opinfo_name="reshape",
     ),
     PythonRefInfo(
         "_refs.roll",
