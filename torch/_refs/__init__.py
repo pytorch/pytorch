@@ -36,6 +36,7 @@ import operator
 import warnings
 import math
 from enum import Enum
+import collections
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -181,6 +182,8 @@ __all__ = [
     "cat",
     "chunk",
     "column_stack",
+    "dsplit",
+    "dstack",
     "flatten",
     "flip",
     "fliplr",
@@ -1546,11 +1549,11 @@ def addr(
         # Integers are accepted for booleans
         check(
             is_weakly_lesser_type(type(beta), int),
-            f"expected bool/int beta but got {type(beta)}",
+            lambda: f"expected bool/int beta but got {type(beta)}",
         )
         check(
             is_weakly_lesser_type(type(alpha), int),
-            f"expected bool/int alpha but got {type(beta)}",
+            lambda: f"expected bool/int alpha but got {type(beta)}",
         )
         if not beta:
             return torch.outer(vec1, vec2) if alpha else torch.full_like(self, False)
@@ -1562,11 +1565,11 @@ def addr(
     else:
         check(
             is_weakly_lesser_type(type(beta), dtype_to_type(self.dtype)),
-            f"cannot safely convert {type(beta)} to {self.dtype}",
+            lambda: f"cannot safely convert {type(beta)} to {self.dtype}",
         )
         check(
             is_weakly_lesser_type(type(alpha), dtype_to_type(self.dtype)),
-            f"cannot safely convert {type(alpha)} to {self.dtype}",
+            lambda: f"cannot safely convert {type(alpha)} to {self.dtype}",
         )
         if beta == 0:
             # This means NaNs from self are dropped if beta is zero
@@ -1576,10 +1579,14 @@ def addr(
 
 
 def atleast_1d(
-    *args: TensorLikeType,
+    arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_1d`."""
-    args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
+    if not args and isinstance(arg, collections.Sequence):
+        args_ = arg
+    else:
+        assert not isinstance(arg, collections.Sequence)
+        args_ = (arg,) + args
     res = tuple(a if a.ndim >= 1 else unsqueeze(a, 0) for a in args_)
     return res if len(res) > 1 else res[0]
 
@@ -1595,20 +1602,28 @@ def _unsqueeze_atleast(
 
 
 def atleast_2d(
-    *args: TensorLikeType,
+    arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_2d`."""
-    args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
+    if not args and isinstance(arg, collections.Sequence):
+        args_ = arg
+    else:
+        assert not isinstance(arg, collections.Sequence)
+        args_ = (arg,) + args
     unsqueeze_atleast_1d = partial(_unsqueeze_atleast, atleast_1d, 0)
     res = tuple(a if a.ndim >= 2 else unsqueeze_atleast_1d(a) for a in args_)
     return res if len(res) > 1 else res[0]
 
 
 def atleast_3d(
-    *args: TensorLikeType,
+    arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_3d`."""
-    args_ = args[0] if len(args) == 1 and not torch.is_tensor(args[0]) else args
+    if not args and isinstance(arg, collections.Sequence):
+        args_ = arg
+    else:
+        assert not isinstance(arg, collections.Sequence)
+        args_ = (arg,) + args
     unsqueeze_atleast_2d = partial(_unsqueeze_atleast, atleast_2d, -1)
     res = tuple(a if a.ndim >= 3 else unsqueeze_atleast_2d(a) for a in args_)
     return res if len(res) > 1 else res[0]
@@ -1675,6 +1690,12 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
         for x in tensors
     )
     return cat(aligned_tensors, 1)
+
+
+@out_wrapper
+def dstack(tensors: TensorSequenceType) -> TensorLikeType:
+    aligned_tensors = tuple(x if x.ndim > 2 else atleast_3d(x) for x in tensors)
+    return cat(aligned_tensors, 2)
 
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
@@ -2151,6 +2172,19 @@ def vsplit(
 
     split_sizes = indices_or_sections
     return tensor_split(a, split_sizes, 0)
+
+
+def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
+    if a.ndim < 3:
+        raise RuntimeError(
+            f"torch.dsplit requires a tensor with at least 3 dimension, but got a tensor with {a.ndim} dimensions!"
+        )
+    if isinstance(sections, int) and (sections == 0 or a.shape[2] % sections != 0):
+        raise RuntimeError(
+            "torch._refs.dsplit attempted to split along dimension 2, "
+            + f"but the size of the dimension {a.shape[2]} is not divisible by the split_size {sections}!"
+        )
+    return tensor_split(a, sections, 2)
 
 
 @register_decomposition(torch.ops.aten.t.default)
