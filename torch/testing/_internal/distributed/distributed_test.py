@@ -2277,7 +2277,7 @@ class DistributedTest:
             if expect_event and dist.get_backend() in PROFILING_SUPPORTED_BACKENDS:
                 # We are only interested in the backend's implementation not the dispatcher wrapper.
                 events = get_profiling_event(
-                    f"{dist.get_backend()}:{profiling_title_postfix}", autograd_profiler_ctx
+                    dist.get_backend()+profiling_title_postfix, autograd_profiler_ctx
                 )
                 # DETAIL debug mode can use a pg wrapper that issues more collectives
                 # under the hood
@@ -3680,7 +3680,7 @@ class DistributedTest:
                     for i in rank_to_GPU[rank]
                 ]
                 self.call_dist_op(
-                    "reduce",
+                    ":reduce",
                     False,
                     dist.reduce_multigpu,
                     tensors,
@@ -3745,7 +3745,7 @@ class DistributedTest:
                         [t.cuda(device=gpu) for t in expected_per_gpu]
                     )
                 self.call_dist_op(
-                    "all_gather",
+                    ":all_gather",
                     False,
                     dist.all_gather_multigpu,
                     output_tensors,

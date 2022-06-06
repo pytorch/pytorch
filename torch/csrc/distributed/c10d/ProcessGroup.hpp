@@ -207,7 +207,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_INTERNAL_ASSERT(false, "getBackendName is not implemented.");
   };
 
-  // Consider using ops in Ops.h instead of the below, which route things
+  // Consider using ops in Ops.hpp instead of the below, which route things
   // to the dispatcher.
   // TODO: Find a way to force the above rule programmatically.
   virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(
