@@ -3,6 +3,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <c10/util/Exception.h>
+#include <c10/util/strides.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
@@ -33,44 +34,21 @@ static inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor)
   }
 }
 
-template<class Vec>
-static inline Vec contiguous_strides_template(const IntArrayRef sizes, const bool f_contig=false) {
-  static_assert(std::is_same<IntArrayRef::value_type, typename Vec::value_type>::value,
-                "Incompatible integral type of sizes and strides");
-  // f_contig chooses between the strides of a batch of Fortran (F-contiguous) and C-contiguous matrices
-  using Int = IntArrayRef::value_type;
-  constexpr auto one = Int{1};
-  const auto n = sizes.size();
-  if (n == 0) {
-    return Vec{};
-  } else if (n == 1) {
-    // Use initializer-list to initialize the vector
-    return Vec{one};
-  }
-  // Now we have a matrix or batch of matrices
-  auto strides = Vec(n);
-  const auto last_idx = n - 1;
-  const auto snd_last_idx = n - 2;
-  // We'll fill the first two strides afterwards, otherwise the first step
-  // in the for loop is wrong
-  strides[snd_last_idx] = std::max<int64_t>(sizes[last_idx], one);
-  for (int i = snd_last_idx - 1; i >= 0; --i) {
-    strides[i] = strides[i + 1] * std::max(sizes[i + 1], one);
-  }
-  strides[last_idx] = f_contig ? std::max(sizes[snd_last_idx], one) : one;
-  if (f_contig) {
-    // We filled the wrong stride before so we correct it
-    strides[snd_last_idx] = one;
+static inline DimVector batched_matrix_contiguous_strides(
+    const IntArrayRef sizes,
+    const bool f_contig = false) {
+  // f_contig chooses between the strides of a batch of Fortran (F-contiguous)
+  // and C-contiguous matrices
+  auto strides = c10::contiguous_strides(sizes);
+  auto dim = strides.size();
+
+  if (f_contig && dim >= 2) {
+    // Fix the strides of the last two dimensions, so that we return
+    // C-contiguous batches of F-contiguous matrices.
+    strides[dim - 1] = std::max(sizes[dim - 2], static_cast<int64_t>(1));
+    strides[dim - 2] = 1;
   }
   return strides;
-}
-
-static inline DimVector contiguous_strides(const IntArrayRef sizes, const bool f_contig=false) {
-  return contiguous_strides_template<DimVector>(sizes, f_contig);
-}
-
-static inline std::vector<int64_t> contiguous_strides_vec(const IntArrayRef sizes, const bool f_contig=false) {
-  return contiguous_strides_template<std::vector<int64_t>>(sizes, f_contig);
 }
 
 /*
@@ -120,7 +98,7 @@ static inline Tensor copyBatchedColumnMajor(const Tensor& src, int64_t nrows = -
     ? desired_batch_sizes.value().vec()
     : IntArrayRef(src.sizes().data(), src.dim() - 2).vec();
   copy_sizes.insert(copy_sizes.end(), {nrows, src.size(-1)});
-  const auto copy_strides = contiguous_strides(copy_sizes, /*f-contig*/true);
+  const auto copy_strides = batched_matrix_contiguous_strides(copy_sizes, /*f-contig*/true);
   auto copy = at::empty_strided(copy_sizes, copy_strides, src.options());
   copy.narrow(-2, 0, src.size(-2)).copy_(src);
   return copy;
@@ -450,14 +428,14 @@ static inline std::tuple<bool, bool> _parse_qr_mode(c10::string_view mode) {
 }
 
 // Function to compute sizes, strides and the extra columns for the Q matrix in the QR Decomposition
-static inline std::tuple<std::vector<int64_t>,
-                         std::vector<int64_t>,
-                         int64_t> _compute_geometry_for_Q(const Tensor& input, bool reduced) {
+static inline std::tuple<DimVector, DimVector, int64_t> _compute_geometry_for_Q(
+    const Tensor& input,
+    bool reduced) {
   int64_t m = input.size(-2), n = input.size(-1);
   int64_t n_columns_q;
 
   // We need to compute the required size of Q based on the `reduced` option
-  auto q_sizes = input.sizes().vec();
+  DimVector q_sizes(input.sizes());
   if (!reduced && m > n) {
     q_sizes[input.dim() - 1] = m;
     n_columns_q = m;
@@ -465,7 +443,7 @@ static inline std::tuple<std::vector<int64_t>,
     q_sizes[input.dim() - 1] = n;
     n_columns_q = std::min(m, n);
   }
-  auto q_strides = contiguous_strides_vec(q_sizes, /*f-contig*/true);
+  auto q_strides = batched_matrix_contiguous_strides(q_sizes, /*f-contig*/true);
   return std::make_tuple(q_sizes, q_strides, n_columns_q);
 }
 
@@ -645,7 +623,10 @@ static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim >= 2);
+  if (ndim > 3) {
+    return input.transpose(-2, -1).is_contiguous();
+  }
   auto leading_dimension = input_strides[ndim - 1];
   auto rows = input_sizes[ndim - 2];
   bool batch_stride_compatible = true;
@@ -663,7 +644,10 @@ static inline bool is_blas_compatible_row_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim >= 2);
+  if (ndim > 3) {
+    return input.is_contiguous();
+  }
   auto leading_dimension = input_strides[ndim - 2];
   auto cols = input_sizes[ndim - 1];
   bool batch_stride_compatible = true;

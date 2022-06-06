@@ -12,8 +12,12 @@ namespace lazy {
 // the aten/eager fallback necessitating directly implementing the right to(device) behavior
 class ToCopy : public torch::lazy::TsNode {
  public:
+  static OpKind ClassOpKind() {
+    return OpKind(at::aten::_to_copy);
+  }
+
   ToCopy(const torch::lazy::Value& self, const c10::optional<at::ScalarType>& dtype, const c10::optional<at::Layout>& layout, const c10::optional<at::Device>& device, const c10::optional<bool>& pin_memory, const bool& non_blocking, const c10::optional<at::MemoryFormat>& memory_format, std::vector<torch::lazy::Shape>&& shapes)
-      : torch::lazy::TsNode(torch::lazy::OpKind(at::aten::_to_copy),
+      : torch::lazy::TsNode(ClassOpKind(),
               {self}, std::move(shapes),
               /* num_outputs */ 1,
               torch::lazy::MHash(dtype, layout, device, pin_memory, non_blocking, memory_format)),
@@ -24,6 +28,20 @@ class ToCopy : public torch::lazy::TsNode {
         pin_memory(pin_memory),
         non_blocking(non_blocking),
         memory_format(memory_format) {}
+
+  bool CanBeReused(const torch::lazy::Value& self,
+             const c10::optional<at::ScalarType>& dtype,
+             const c10::optional<at::Layout>& layout,
+             const c10::optional<at::Device>& device,
+             const c10::optional<bool>& pin_memory, const bool& non_blocking,
+             const c10::optional<at::MemoryFormat>& memory_format) const {
+    size_t i = 0;
+    return (operand(i++) == self && this->dtype == dtype &&
+            this->layout == layout && this->device == device &&
+            this->pin_memory == pin_memory &&
+            this->non_blocking == non_blocking &&
+            this->memory_format == memory_format);
+  }
 
   std::string ToString() const override {
     std::stringstream ss;
@@ -85,5 +103,6 @@ class ToCopy : public torch::lazy::TsNode {
   bool non_blocking;
   c10::optional<at::MemoryFormat> memory_format;
 };
+
 }  // namespace lazy
 }  // namespace torch
