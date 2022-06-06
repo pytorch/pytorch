@@ -38,7 +38,6 @@ from torch.testing._internal.common_methods_invocations import (
     ops_and_refs,
     python_ref_db,
     BinaryUfuncInfo,
-    clone_sample,
 )
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
@@ -420,6 +419,7 @@ class TestCommon(TestCase):
                     raise e
 
                 ex = e
+
 
             # Goes to next sample if these results are close
             if not ex:
