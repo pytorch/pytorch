@@ -48,6 +48,7 @@ std::vector<std::string> splitString(
   size_t start = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t end;
+  // Iterate through each delimiter
   while ((end = s.find(delim, start)) != std::string::npos) {
     tokens.emplace_back(s.substr(start, end - start));
     start = end + delim.length();
@@ -55,6 +56,8 @@ std::vector<std::string> splitString(
   tokens.emplace_back(s.substr(start));
   return tokens;
 }
+
+const std::string allWorkerInfosKey = "_ALL_WORKER_INFOS";
 
 std::unordered_map<std::string, worker_id_t> collectCurrentNames(
     ::c10d::PrefixStore store,
@@ -83,7 +86,6 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
   nameToId.emplace(selfName, selfId);
 
   // Check to see if there is list of worker names in the store
-  std::string allWorkerInfosKey("AllWorkerInfos");
   bool worker_names_available =
       store.check(std::vector<std::string>{allWorkerInfosKey});
   std::string allWorkerInfos;
@@ -92,36 +94,58 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
     std::vector<uint8_t> allWorkerInfosKeyVector = store.get(allWorkerInfosKey);
     allWorkerInfos = std::string(
         (char*)allWorkerInfosKeyVector.data(), allWorkerInfosKeyVector.size());
-    // workerInfos are comma separated, (e.g.
-    // "Name1-Rank1,Name2-Rank2,Name3-Rank2") parse list of workers
-    for (const std::string& workerInfo : splitString(allWorkerInfos, ",")) {
-      auto workerInfoVec = splitString(workerInfo, "-");
-      std::string workerName = workerInfoVec.at(0);
-      int workerId = std::stoi(workerInfoVec.at(1));
+    // workerInfos are comma separated with a comma at the end (e.g.
+    // "Name1-Rank1,Name2-Rank2,Name3-Rank2,") parse list of workers.
+    if (!allWorkerInfos.empty()) {
+      for (const std::string& workerInfoString : splitString(
+               allWorkerInfos.substr(0, allWorkerInfos.size() - 1), ",")) {
+        auto workerInfoVec = splitString(workerInfoString, "-");
+        std::string workerName = workerInfoVec.at(0);
+        int workerId = std::stoi(workerInfoVec.at(1));
 
-      TORCH_CHECK(
-          nameToId.find(workerName) == nameToId.end(),
-          "RPC worker name ",
-          workerName,
-          " is not unique. Workers ",
-          nameToId.find(workerName)->second,
-          " and ",
-          workerId,
-          " share the same name.");
+        TORCH_CHECK(
+            nameToId.find(workerName) == nameToId.end(),
+            "RPC worker name ",
+            workerName,
+            " is not unique. Workers ",
+            nameToId.find(workerName)->second,
+            " and ",
+            workerId,
+            " share the same name.");
 
-      nameToId.emplace(workerName, workerId);
+        nameToId.emplace(workerName, workerId);
+      }
     }
-    allWorkerInfos = fmt::format("{},{}-{}", allWorkerInfos, selfName, selfId);
-  } else {
-    // Add own name to worker list
-    allWorkerInfos = fmt::format("{}-{}", selfName, selfId);
   }
+  // Add own name to worker list
+  allWorkerInfos = fmt::format("{}{}-{},", allWorkerInfos, selfName, selfId);
   std::vector<uint8_t> allWorkerInfosVector(
       (uint8_t*)allWorkerInfos.c_str(),
       (uint8_t*)allWorkerInfos.c_str() + allWorkerInfos.length());
   store.set(allWorkerInfosKey, allWorkerInfosVector);
 
   return nameToId;
+}
+
+void removeCurrentName(
+    ::c10d::PrefixStore store,
+    const worker_id_t selfId,
+    const std::string& selfName) {
+  // Get current list of names/ranks
+  std::vector<uint8_t> allWorkerInfosKeyVector = store.get(allWorkerInfosKey);
+  std::string allWorkerInfos = std::string(
+      (char*)allWorkerInfosKeyVector.data(), allWorkerInfosKeyVector.size());
+
+  // Remove the current name and rank
+  std::string str_to_erase = fmt::format("{}-{},", selfName, selfId);
+  int start_position_to_erase = allWorkerInfos.find(str_to_erase);
+  allWorkerInfos.erase(start_position_to_erase, str_to_erase.length());
+
+  // Set the new data
+  std::vector<uint8_t> newAllWorkerInfosVector(
+      (uint8_t*)allWorkerInfos.c_str(),
+      (uint8_t*)allWorkerInfos.c_str() + allWorkerInfos.length());
+  store.set(allWorkerInfosKey, newAllWorkerInfosVector);
 }
 
 const string storeKeyBarrierId = "_ID_";

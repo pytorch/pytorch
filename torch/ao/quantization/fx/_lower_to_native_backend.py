@@ -58,6 +58,7 @@ def is_fixed_qparams_node(node, modules):
         torch.nn.Hardsigmoid,
         torch.nn.Sigmoid,
         torch.nn.Tanh,
+        torch.nn.Softmax,
     ]
     return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
@@ -236,6 +237,7 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
     nn.InstanceNorm3d: nnq.InstanceNorm3d,
     nn.LayerNorm: nnq.LayerNorm,
     nn.Dropout: nnq.Dropout,
+    nn.Softmax: nnq.Softmax,
     nni.BNReLU2d: nniq.BNReLU2d,
     nni.BNReLU3d: nniq.BNReLU3d,
 }
@@ -302,6 +304,20 @@ CONV_FUNCTIONAL_OPS: Set[Callable] = {
     F.conv1d,
     F.conv2d,
     F.conv3d,
+}
+
+QBIN_OP_MAPPING: Dict[Union[Callable, str], Callable] = {
+    operator.add: torch.ops.quantized.add,
+    torch.add: torch.ops.quantized.add,
+    operator.mul: torch.ops.quantized.mul,
+    torch.mul: torch.ops.quantized.mul,
+    torch.matmul: torch.ops.quantized.matmul,
+}
+QBIN_RELU_OP_MAPPING: Dict[Union[Callable, str], Callable] = {
+    operator.add: torch.ops.quantized.add_relu,
+    torch.add: torch.ops.quantized.add_relu,
+    operator.mul: torch.ops.quantized.mul_relu,
+    torch.mul: torch.ops.quantized.mul_relu,
 }
 
 def fold_weight(
@@ -756,19 +772,6 @@ def _lower_dynamic_weighted_ref_functional(
 def _lower_quantized_binary_op(
         model: QuantizedGraphModule,
         qconfig_map: Dict[str, QConfigAny]):
-    qbin_op_mapping: Dict[Union[Callable, str], Callable] = {
-        operator.add: torch.ops.quantized.add,
-        torch.add: torch.ops.quantized.add,
-        operator.mul: torch.ops.quantized.mul,
-        torch.mul: torch.ops.quantized.mul,
-        torch.matmul: torch.ops.quantized.matmul,
-    }
-    qbin_relu_op_mapping: Dict[Union[Callable, str], Callable] = {
-        operator.add: torch.ops.quantized.add_relu,
-        torch.add: torch.ops.quantized.add_relu,
-        operator.mul: torch.ops.quantized.mul_relu,
-        torch.mul: torch.ops.quantized.mul_relu,
-    }
     binary_ops_to_lower: List[Callable] = [operator.add, torch.add, operator.mul, torch.mul, torch.matmul]
     modules = dict(model.named_modules(remove_duplicate=False))
     for n in model.graph.nodes:
@@ -794,8 +797,8 @@ def _lower_quantized_binary_op(
         assert(num_dq_nodes > 0)
 
         # Step 2: Swap binary op to quantized binary op
-        assert bop_node.target in qbin_op_mapping
-        binop_to_qbinop = qbin_op_mapping if relu_node is None else qbin_relu_op_mapping
+        assert bop_node.target in QBIN_OP_MAPPING
+        binop_to_qbinop = QBIN_OP_MAPPING if relu_node is None else QBIN_RELU_OP_MAPPING
         qbin_op = binop_to_qbinop[bop_node.target]
         # prepare the args for quantized bianry op
         # (x, y)
@@ -823,7 +826,8 @@ def special_pattern_replacement(model: QuantizedGraphModule):
     for n in model.graph.nodes:
         q_node = n
         is_quantize = q_node.target == torch.quantize_per_tensor
-        is_to_fp16 = q_node.op == "call_method" and q_node.target == "to" and q_node.args[1] == torch.float16
+        is_to_fp16 = q_node.op == "call_method" and q_node.target == "to" and \
+            len(q_node.args) == 2 and q_node.args[1] == torch.float16
         if not (is_quantize or is_to_fp16):
             continue
         ref_node = q_node.args[0]

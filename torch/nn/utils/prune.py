@@ -307,7 +307,7 @@ class PruningContainer(BasePruningMethod):
                 + " Found '{}'".format(method._tensor_name)
             )
         # if all checks passed, add to _pruning_methods tuple
-        self._pruning_methods += (method,)
+        self._pruning_methods += (method,)  # type: ignore[operator]
 
     def __len__(self):
         return len(self._pruning_methods)

@@ -89,7 +89,7 @@ class LazyModuleMixin:
     >>> lazy_mlp = LazyMLP()
     >>> # transforms the network's device and dtype
     >>> # NOTE: these transforms can and should be applied after construction and before any 'dry runs'
-    >>> lazy_mlp = mlp.cuda().double()
+    >>> lazy_mlp = lazy_mlp.cuda().double()
     >>> lazy_mlp
     LazyMLP( (fc1): LazyLinear(in_features=0, out_features=10, bias=True)
       (relu1): ReLU()
