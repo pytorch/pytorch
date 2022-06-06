@@ -1,4 +1,4 @@
-#include <ATen/native/quantized/affine_quantizer_base.h>
+#include <ATen/native/quantized/AffineQuantizerBase.h>
 #include <c10/util/irange.h>
 #include <cfenv>
 #include <climits>
