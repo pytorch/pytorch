@@ -384,6 +384,9 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
     and if only nondeterministic algorithms are available they will throw a
     :class:`RuntimeError` when called.
 
+    .. note:: This setting alone is not always enough to make an application
+        reproducible. Refer to :ref:`reproducibility` for more information.
+
     .. note:: :func:`torch.set_deterministic_debug_mode` offers an alternative
         interface for this feature.
 
@@ -927,4 +930,5 @@ def _register_device_module(device_type, module):
 from . import return_types
 if sys.executable != 'torch_deploy':
     from . import library
-    from . import _meta_registrations
+    if not TYPE_CHECKING:
+        from . import _meta_registrations
