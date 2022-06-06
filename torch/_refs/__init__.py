@@ -188,6 +188,7 @@ __all__ = [
     "flip",
     "fliplr",
     "flipud",
+    "hstack",
     "narrow",
     "permute",
     "reshape",
@@ -201,6 +202,7 @@ __all__ = [
     "transpose",
     "unsqueeze",
     "view",
+    "vstack",
     #
     # Tensor Creation
     #
@@ -883,15 +885,25 @@ def isclose(
     atol: float = 1e-08,
     equal_nan: bool = False,
 ) -> TensorLikeType:
-    if a.dtype != b.dtype:
-        msg = "Attempting to compare tensors of different dtypes {0} and {1}!".format(
+    check(
+        a.dtype == b.dtype,
+        lambda: "torch.isclose: Attempting to compare tensors of different dtypes {0} and {1}!".format(
             a.dtype, b.dtype
-        )
-        raise ValueError(a, b)
-    if rtol < 0:
-        msg = "rtol must be greater than or equal to zero, but got {0}!".format(rtol)
-    if atol < 0:
-        msg = "atol must be greater than or equal to zero, but got {0}!".format(atol)
+        ),
+        ValueError,
+    )
+    check(
+        rtol >= 0,
+        lambda: "torch.isclose: rtol must be greater than or equal to zero, but got {0}!".format(
+            rtol
+        ),
+    )
+    check(
+        atol >= 0,
+        lambda: "torch.isclose: atol must be greater than or equal to zero, but got {0}!".format(
+            atol
+        ),
+    )
 
     close = eq(a, b)
     if equal_nan and (utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype)):
@@ -1692,7 +1704,8 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
 
 @out_wrapper
 def dstack(tensors: TensorSequenceType) -> TensorLikeType:
-    aligned_tensors = tuple(x if x.ndim > 2 else atleast_3d(x) for x in tensors)
+    check(len(tensors) > 0, lambda: "dstack expects a non-empty TensorList")
+    aligned_tensors = atleast_3d(*tensors)
     return cat(aligned_tensors, 2)
 
 
@@ -1993,6 +2006,22 @@ def rot90(
 def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     tensors = tuple(unsqueeze(a, dim) for a in tensors)
     return cat(tensors, dim)
+
+
+@out_wrapper
+def hstack(tensors: TensorSequenceType) -> TensorLikeType:
+    check(len(tensors) > 0, lambda: "hstack expects a non-empty TensorList")
+    aligned_tensors = atleast_1d(*tensors)
+    if aligned_tensors[0].ndim == 1:
+        return cat(aligned_tensors, 0)
+    return cat(aligned_tensors, 1)
+
+
+@out_wrapper
+def vstack(tensors: TensorSequenceType) -> TensorLikeType:
+    check(len(tensors) > 0, lambda: "vstack expects a non-empty TensorList")
+    aligned_tensors = atleast_2d(*tensors)
+    return cat(aligned_tensors, 0)
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
