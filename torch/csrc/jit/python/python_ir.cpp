@@ -204,7 +204,6 @@ void initPythonIRBindings(PyObject* module_) {
           "has_writers",
           [&](AliasDb& db, Value* v1) { return db.hasWriters(v1); })
       .def("__str__", &AliasDb::toString);
-
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")
       .def(py::init<>())
@@ -378,6 +377,11 @@ void initPythonIRBindings(PyObject* module_) {
       .GS(eraseInput)
       .GS(eraseOutput)
       .GS(registerOutput)
+      .def(
+          "permuteInputs",
+          [](Graph& g, const std::vector<size_t>& new_inputs) {
+            g.block()->permuteInputs(new_inputs);
+          })
       .def(
           "create",
           [](Graph& g, const char* str) {
@@ -639,6 +643,11 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "getModuleHierarchy",
           [](Node& n) { return torch::jit::utils::getNodesModuleHierarchy(n); })
+      .def(
+          "namedInput",
+          [](Node& n, const std::string& unqualName) {
+            return n.namedInput(unqualName);
+          })
       .NS(addInput)
       .NS(copyMetadata)
       .NS(replaceInput)
@@ -744,6 +753,16 @@ void initPythonIRBindings(PyObject* module_) {
           "z",
           [](Node& n, const char* name) { return n.t(Symbol::attr(name)); })
       .def(
+          "ty_",
+          [](Node& n, const char* name, const TypePtr& type) {
+            return n.ty_(Symbol::attr(name), type);
+          })
+      .def(
+          "tys_",
+          [](Node& n, const char* name, const std::vector<TypePtr>& types) {
+            return n.tys_(Symbol::attr(name), types);
+          })
+      .def(
           "zs_",
           [](Node& n, const char* name, TensorsAttr::ValueType v) {
             for (auto& i : v) {
@@ -785,6 +804,9 @@ void initPythonIRBindings(PyObject* module_) {
             s << t;
             return s.str();
           })
+      .def(
+          "containedTypes",
+          [](Type& self) { return self.containedTypes().vec(); })
       .def("kind", [](const Type& t) { return typeKindToString(t.kind()); })
       .def(
           "dim",
@@ -951,6 +973,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &NumberType::get);
   py::class_<IntType, Type, IntTypePtr>(m, "IntType")
       .def_static("get", &IntType::get);
+  py::class_<SymIntType, Type, SymIntTypePtr>(m, "SymIntType")
+      .def_static("get", &SymIntType::get);
   py::class_<FloatType, Type, FloatTypePtr>(m, "FloatType")
       .def_static("get", &FloatType::get);
   py::class_<ComplexType, Type, ComplexTypePtr>(m, "ComplexType")
@@ -987,10 +1011,7 @@ void initPythonIRBindings(PyObject* module_) {
       });
   py::class_<UnionType, Type, UnionTypePtr>(m, "UnionType")
       .def(py::init(
-          [](const std::vector<TypePtr>& a) { return UnionType::create(a); }))
-      .def("containedTypes", [](UnionType& self) {
-        return self.containedTypes().vec();
-      });
+          [](const std::vector<TypePtr>& a) { return UnionType::create(a); }));
   py::class_<ListType, Type, ListTypePtr>(m, "ListType")
       .def(py::init([](TypePtr a) { return ListType::create(a); }))
       .def_static("ofInts", &ListType::ofInts)

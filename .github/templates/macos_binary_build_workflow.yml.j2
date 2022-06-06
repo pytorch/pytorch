@@ -33,9 +33,10 @@ on:
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
 {%- for label in ciflow_config.labels | sort %}
-  {%- if label != "ciflow/default" %}
+    {%- if loop.first and branches != "nightly" %}
+    tags:
+    {%- endif %}
       - '!{{ label }}/*'
-  {%- endif %}
 {%- endfor %}
   workflow_dispatch:
 
@@ -60,7 +61,11 @@ jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
+    {%- if config["package_type"] == "libtorch" %}
     runs-on: macos-10.15
+    {%- else %}
+    runs-on: macos-12
+    {%- endif %}
 {%- if config["package_type"] == "libtorch" %}
     # libtorch builds take a long time on github hosted runners
     timeout-minutes: 720

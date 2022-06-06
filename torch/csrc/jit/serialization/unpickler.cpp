@@ -77,6 +77,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case StreamObjType::Kind:
       case QSchemeType::Kind:
       case LayoutType::Kind:
+      case MemoryFormatType::Kind:
       case ScalarTypeType::Kind:
       case RRefType::Kind:
       case AnyType::Kind:
@@ -84,6 +85,10 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case AnyTupleType::Kind:
       case AnyClassType::Kind:
       case AnyEnumType::Kind:
+        // no op, there is nothing to tag
+        break;
+      case c10::SymIntType::Kind:
+        TORCH_CHECK(!w.value.toSymInt().is_symbolic());
         // no op, there is nothing to tag
         break;
       case DynamicType::Kind:

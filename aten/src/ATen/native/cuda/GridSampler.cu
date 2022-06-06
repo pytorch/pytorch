@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/cuda/GridSampler.h>
+#include <ATen/native/GridSamplerUtils.h>
 #include <ATen/native/cuda/GridSampler.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/cuda/CUDAContext.h>
@@ -739,10 +740,14 @@ namespace {
   }
 }  // namespace
 
-// No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 void launch_grid_sampler_2d_forward_kernel(
     const TensorBase &output, const TensorBase &input, const TensorBase &grid,
     int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
+  // See NOTE [ grid_sampler Native Functions ].
+  // Add checks here in case this is called instead of grid_sampler.
+  check_grid_sampler_common(input, grid);
+  check_grid_sampler_2d(input, grid);
+
   auto N = input.size(0);
   auto H = grid.size(1);
   auto W = grid.size(2);
@@ -777,10 +782,14 @@ void launch_grid_sampler_2d_forward_kernel(
   }
 }
 
-// No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 void launch_grid_sampler_3d_forward_kernel(
     const TensorBase &output, const TensorBase &input, const TensorBase &grid,
     int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
+  // See NOTE [ grid_sampler Native Functions ].
+  // Add checks here in case this is called instead of grid_sampler.
+  check_grid_sampler_common(input, grid);
+  check_grid_sampler_3d(input, grid, interpolation_mode);
+
   auto N = input.size(0);
   auto D = grid.size(1);
   auto H = grid.size(2);
@@ -816,12 +825,16 @@ void launch_grid_sampler_3d_forward_kernel(
   }
 }
 
-// No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 void launch_grid_sampler_2d_backward_kernel(
     const TensorBase &grad_input, const TensorBase &grad_grid,
     const TensorBase &grad_output, const TensorBase &input,
     const TensorBase &grid, int64_t interpolation_mode, int64_t padding_mode,
     bool align_corners, std::array<bool,2> output_mask) {
+  // See NOTE [ grid_sampler Native Functions ].
+  // Add checks here in case this is called instead of grid_sampler.
+  check_grid_sampler_common(input, grid);
+  check_grid_sampler_2d(input, grid);
+
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("grid_sampler_2d_backward_cuda");
@@ -873,12 +886,16 @@ void launch_grid_sampler_2d_backward_kernel(
   }
 }
 
-// No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 void launch_grid_sampler_3d_backward_kernel(
     const TensorBase &grad_input, const TensorBase &grad_grid,
     const TensorBase& grad_output, const TensorBase& input,
     const TensorBase& grid, int64_t interpolation_mode, int64_t padding_mode,
     bool align_corners, std::array<bool,2> output_mask) {
+  // See NOTE [ grid_sampler Native Functions ].
+  // Add checks here in case this is called instead of grid_sampler.
+  check_grid_sampler_common(input, grid);
+  check_grid_sampler_3d(input, grid, interpolation_mode);
+
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("grid_sampler_3d_backward_cuda");

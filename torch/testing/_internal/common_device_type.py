@@ -13,7 +13,8 @@ import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, DeterministicGuard, \
-    _TestParametrizer, compose_parametrize_fns, dtype_name, TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES
+    _TestParametrizer, compose_parametrize_fns, dtype_name, \
+    TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_dtype import get_all_dtypes
 
@@ -485,6 +486,13 @@ class CUDATestBase(DeviceTypeTestBase):
         # Acquires the current device as the primary (test) device
         cls.primary_device = 'cuda:{0}'.format(torch.cuda.current_device())
 
+class MPSTestBase(DeviceTypeTestBase):
+    device_type = 'mps'
+
+    def _should_stop_test_suite(self):
+        return False
+
+    # TODO: Maybe override `_get_dtypes`, `_get_precision_override`
 
 # Adds available device-type-specific test base classes
 def get_device_type_test_bases():
@@ -503,9 +511,12 @@ def get_device_type_test_bases():
         test_bases.append(CPUTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
+        # Disable MPS testing in generic device testing temporarily while we're
+        # ramping up support.
+        # elif torch.backends.mps.is_available():
+        #   test_bases.append(MPSTestBase)
 
     return test_bases
-
 
 device_type_test_bases = get_device_type_test_bases()
 
@@ -635,9 +646,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 # Category of dtypes to run an OpInfo-based test for
 # Example use: @ops(dtype=OpDTypes.supported)
 #
-# There are 6 categories:
-# - basic: The dtypes the operator wants to be tested on by default. This will be
-#          a subset of the types supported by the operator.
+# There are 5 categories:
 # - supported: Every dtype supported by the operator. Use for exhaustive
 #              testing of all dtypes.
 # - unsupported: Run tests on dtypes not supported by the operator. e.g. for
@@ -649,13 +658,12 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 # - none: Useful for tests that are not dtype-specific. No dtype will be passed to the test
 #         when this is selected.
 class OpDTypes(Enum):
-    basic = 0  # Test the basic set of dtypes (default)
-    supported = 1  # Test all supported dtypes
-    unsupported = 2  # Test only unsupported dtypes
-    supported_backward = 3  # Test all supported backward dtypes
-    unsupported_backward = 4  # Test only unsupported backward dtypes
-    any_one = 5  # Test precisely one supported dtype
-    none = 6  # Instantiate no dtype variants (no dtype kwarg needed)
+    supported = 0  # Test all supported dtypes (default)
+    unsupported = 1  # Test only unsupported dtypes
+    supported_backward = 2  # Test all supported backward dtypes
+    unsupported_backward = 3  # Test only unsupported backward dtypes
+    any_one = 4  # Test precisely one supported dtype
+    none = 5  # Instantiate no dtype variants (no dtype kwarg needed)
 
 
 # Decorator that defines the OpInfos a test template should be instantiated for.
@@ -670,9 +678,7 @@ class OpDTypes(Enum):
 # on each device the OpInfo's operator supports, and for every dtype supported by
 # that operator. There are a few caveats to the dtype rule, explained below.
 #
-# First, if the OpInfo defines "default_test_dtypes" then the test
-# is instantiated for the intersection of default_test_dtypes and the
-# dtypes the operator supports. Second, the @ops decorator can accept two
+# The @ops decorator can accept two
 # additional arguments, "dtypes" and "allowed_dtypes". If "dtypes" is specified
 # then the test variants are instantiated for those dtypes, regardless of
 # what the operator supports. If given "allowed_dtypes" then test variants
@@ -698,9 +704,9 @@ class OpDTypes(Enum):
 #   they're instantiated for.
 
 class ops(_TestParametrizer):
-    def __init__(self, op_list, *, dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.basic,
+    def __init__(self, op_list, *, dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.supported,
                  allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
-        self.op_list = op_list
+        self.op_list = list(op_list)
         self.opinfo_dtypes = dtypes
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
 
@@ -724,8 +730,6 @@ class ops(_TestParametrizer):
                 dtypes = set(get_all_dtypes()).difference(op.supported_dtypes(device_cls.device_type))
             elif self.opinfo_dtypes == OpDTypes.supported:
                 dtypes = op.supported_dtypes(device_cls.device_type)
-            elif self.opinfo_dtypes == OpDTypes.basic:
-                dtypes = op.default_test_dtypes(device_cls.device_type)
             elif self.opinfo_dtypes == OpDTypes.any_one:
                 # Arbitrary order
                 dtype_order = (
@@ -752,6 +756,8 @@ class ops(_TestParametrizer):
                     if dtype in dtype_set:
                         dtypes = {dtype}
                         break
+                else:
+                    dtypes = {}
             elif self.opinfo_dtypes == OpDTypes.none:
                 dtypes = {None}
             else:
@@ -1083,6 +1089,10 @@ class dtypesIfCUDA(dtypes):
     def __init__(self, *args):
         super().__init__(*args, device_type='cuda')
 
+class dtypesIfMPS(dtypes):
+
+    def __init__(self, *args):
+        super().__init__(*args, device_type='mps')
 
 def onlyCPU(fn):
     return onlyOn('cpu')(fn)

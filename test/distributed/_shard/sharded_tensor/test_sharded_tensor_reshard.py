@@ -45,6 +45,7 @@ class TestReshard(ShardedTensorTestBase):
         st.reshard(reshard_spec)
         self.assertEqual(1, len(st.local_shards()))
         self.assertEqual(1, len(st_compare.local_shards()))
+        st_compare._metadata.shards_metadata.sort(key=lambda metadata: metadata.placement.rank())
         self.assertEqual(st._metadata, st_compare._metadata)
         self.assertEqual(st.local_tensor(), st_compare.local_tensor())
         self.assertEqual(
