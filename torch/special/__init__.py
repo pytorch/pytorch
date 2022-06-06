@@ -1264,7 +1264,8 @@ def _logsumexp_return_sign_true(
         >>> torch.dist(torch.logsumexp(a, 1), torch.log(torch.sum(torch.exp(a), 1)))
         tensor(1.6859e-07)
     """
-    return _special._special_logsumexp_with_sign(input, dim, keepdim, b, return_sign, out=out)
+    return _special._special_logsumexp_with_sign(input, dim, keepdim, b=b, return_sign=return_sign,
+                                                 out=out)
 
 
 logsumexp = boolean_dispatch(

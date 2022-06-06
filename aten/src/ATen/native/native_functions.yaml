@@ -11175,13 +11175,13 @@
 - func: special_logsumexp.out(Tensor self, int[1] dim, bool keepdim=False, Tensor? b=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
-- func: _special_logsumexp_with_sign(Tensor self, int[1] dim, bool keepdim=False, Tensor? b=None, bool return_sign=False) -> (Tensor value_out, Tensor sign_out)
+- func: _special_logsumexp_with_sign(Tensor self, int[1] dim, bool keepdim=False, *, Tensor? b=None, bool return_sign=False) -> (Tensor value_out, Tensor sign_out)
   python_module: special
   variants: function
   dispatch:
     CompositeExplicitAutograd: _special_logsumexp_with_sign
 
-- func: _special_logsumexp_with_sign.out(Tensor self, int[1] dim, bool keepdim=False, Tensor? b=None, bool return_sign=False, *, Tensor(a!) value_out, Tensor(s!) sign_out) -> (Tensor(a!), Tensor(s!))
+- func: _special_logsumexp_with_sign.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor? b=None, bool return_sign=False, Tensor(a!) value_out, Tensor(s!) sign_out) -> (Tensor(a!), Tensor(s!))
   python_module: special
   variants: function
   dispatch:
