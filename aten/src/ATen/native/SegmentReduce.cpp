@@ -271,8 +271,6 @@ Tensor _segment_reduce_cpu_backward_kernel(
   axis = lengths_contig.dim() - 1;
   int64_t segment_count = lengths_contig.size(axis);
   int64_t lengths_stride_axis = lengths_contig.stride(axis);
-  auto output_shape = data_contig.sizes().vec();
-  output_shape[axis] = segment_count;
   auto grad_input = at::zeros({data_contig.sizes()}, grad_contig.options());
 
   AT_DISPATCH_INDEX_TYPES(
