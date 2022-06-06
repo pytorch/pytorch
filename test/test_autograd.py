@@ -42,7 +42,7 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipMeta, dtypesIfMPS)
 from torch.testing._internal.common_dtype import floating_types_and
-from torch.testing._internal.logging_tensor import no_dispatch
+from torch.utils._mode_utils import no_dispatch
 
 import pickle
 
@@ -4300,6 +4300,14 @@ class TestAutograd(TestCase):
         b_id_saved = id(b)
         b.data = a
         self.assertTrue(b_id_saved == id(b))
+
+    def test_set_data_self_requires_grad(self):
+        a = torch.tensor(1.0, requires_grad=True)
+        b = torch.tensor(2.0)
+        c = torch.tensor(3, dtype=torch.int64)
+        a.data = b
+        with self.assertRaisesRegex(RuntimeError, 'must be floating point or complex dtype'):
+            a.data = c
 
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     def test_thread_shutdown(self):
