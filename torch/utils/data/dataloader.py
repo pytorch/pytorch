@@ -15,9 +15,9 @@ from typing import Any, Callable, Iterable, TypeVar, Generic, Sequence, List, Op
 
 import multiprocessing as python_multiprocessing
 import torch
+import torch.distributed as dist
 import torch.multiprocessing as multiprocessing
 import torch.utils.data.graph_settings
-import torch.distributed as dist
 
 from torch._utils import ExceptionWrapper
 from torch._six import string_classes
@@ -543,12 +543,36 @@ class DataLoader(Generic[T_co]):
                 self.num_workers,
                 cpuset_checked))
 
+    def _get_shared_seed(self):
+        if isinstance(self.dataset, IterDataPipe):
+            _shared_tensor_seed = torch.empty((), dtype=torch.int64).random_(generator=self.generator)
+            if dist.is_available() and dist.is_initialized():
+                rank = dist.get_rank()
+                if rank == 0:
+                    ws = dist.get_world_size()
+                    reqs = []
+                    for rank_id in range(1, ws):
+                        req = dist.isend(tensor=_shared_tensor_seed, dst=rank_id, tag=rank_id)
+                        reqs.append(req)
+                    for req in reqs:
+                        req.wait()
+                else:
+                    dist.recv(tensor=_shared_tensor_seed, src=0, tag=rank)
+            _shared_seed = _shared_tensor_seed.item()
+            del _shared_tensor_seed
+            return _shared_seed
+        else:
+            return None
+
 
 class _BaseDataLoaderIter(object):
     def __init__(self, loader: DataLoader) -> None:
         self._dataset = loader.dataset
+        self._shared_seed = loader._get_shared_seed()
         if isinstance(self._dataset, IterDataPipe):
-            self._dataset = torch.utils.data.graph_settings.apply_shuffle_seed(self._dataset, loader.generator)
+            shared_rng = torch.Generator()
+            shared_rng.manual_seed(self._shared_seed)
+            self._dataset = torch.utils.data.graph_settings.apply_shuffle_seed(self._dataset, shared_rng)
         self._dataset_kind = loader._dataset_kind
         self._IterableDataset_len_called = loader._IterableDataset_len_called
         self._auto_collation = loader._auto_collation
@@ -585,6 +609,11 @@ class _BaseDataLoaderIter(object):
         self._sampler_iter = iter(self._index_sampler)
         self._num_yielded = 0
         self._IterableDataset_len_called = loader._IterableDataset_len_called
+        self._shared_seed = loader._get_shared_seed()
+        if isinstance(self._dataset, IterDataPipe):
+            shared_rng = torch.Generator()
+            shared_rng.manual_seed(self._shared_seed)
+            self._dataset = torch.utils.data.graph_settings.apply_shuffle_seed(self._dataset, shared_rng)
 
     def _next_index(self):
         return next(self._sampler_iter)  # may raise StopIteration
@@ -985,7 +1014,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                       self._worker_result_queue, self._workers_done_event,
                       self._auto_collation, self._collate_fn, self._drop_last,
                       self._base_seed, self._worker_init_fn, i, self._num_workers,
-                      self._persistent_workers))
+                      self._persistent_workers, self._shared_seed))
             w.daemon = True
             # NB: Process.start() actually take some time as it needs to
             #     start a process and pass the arguments over via a pipe.
@@ -1055,7 +1084,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # We resume the prefetching in case it was enabled
         if not first_iter:
             for idx in range(self._num_workers):
-                self._index_queues[idx].put(_utils.worker._ResumeIteration())
+                self._index_queues[idx].put(_utils.worker._ResumeIteration(self._shared_seed))
             resume_iteration_cnt = self._num_workers
             while resume_iteration_cnt > 0:
                 return_idx, return_data = self._get_data()
