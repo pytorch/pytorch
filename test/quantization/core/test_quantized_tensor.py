@@ -977,7 +977,7 @@ class TestQuantizedTensor(TestCase):
             q_filled.fill_(val2fill)
             # reference tensor for comparing q_filled
             q_ref = torch.quantize_per_channel(ones * val2fill, scales=scales,
-                                                  zero_points=zero_points, axis=axis, dtype=qtype)
+                                               zero_points=zero_points, axis=axis, dtype=qtype)
             self.assertEqual(q_filled.int_repr(), q_ref.int_repr())
             self.assertEqual(q_filled.dequantize(), q_ref.dequantize())
             # Make sure the scale and zero_point don't change
