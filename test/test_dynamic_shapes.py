@@ -6,9 +6,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 import unittest
 import torch
 from torch.utils._pytree import tree_map
-from contextlib import contextmanager
 aten = torch.ops.aten
-
 
 try:
     import sympy
@@ -16,15 +14,6 @@ try:
 except ImportError:
     HAS_SYMPY = False
 skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
-
-
-@contextmanager
-def no_dispatch():
-    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
-    try:
-        yield
-    finally:
-        del guard
 
 
 meta_funcs = {}
