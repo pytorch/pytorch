@@ -209,6 +209,34 @@ std::shared_ptr<TEWrapper> createClamp() {
   return wrap;
 }
 
+std::shared_ptr<TEWrapper> createClampNanToNum() {
+  static auto symbol =
+      c10::Symbol::fromQualString("static_runtime::clamp_nan_to_num");
+  auto wrap = lookupNNCCache(symbol);
+  if (wrap) {
+    return wrap;
+  }
+  wrap = std::make_shared<TEWrapper>();
+  auto N = VarHandle("N", kInt);
+  auto min_handle = VarHandle("min", kFloat);
+  auto max_handle = VarHandle("max", kFloat);
+  auto nan_replace_val = VarHandle("nan_replace_val", kFloat);
+
+  BufHandle A("A", {N}, kFloat);
+  Tensor result = Compute("aten_clamp", {N}, [&](const VarHandle& i) {
+    auto a = A.load(i);
+    auto clamp = tensorexpr::clamp(min_handle, max_handle, a);
+    auto is_nan = tensorexpr::isnan(clamp);
+    auto nans_replaced =
+        tensorexpr::CompareSelect::make(is_nan, 1, nan_replace_val, clamp, kEQ);
+    return nans_replaced;
+  });
+  wrap = wrapTECompute(
+      wrap, result, {A, min_handle, max_handle, nan_replace_val, N});
+  updateNNCCache(symbol, wrap);
+  return wrap;
+}
+
 std::shared_ptr<TEWrapper> createSignedLog1p() {
   static auto signed_log1p_symbol =
       c10::Symbol::fromQualString("static_runtime::signed_log1p");

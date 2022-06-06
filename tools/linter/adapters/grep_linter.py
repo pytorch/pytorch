@@ -175,7 +175,7 @@ def main() -> None:
     )
 
     try:
-        proc = run_command(["grep", "-nPHI", args.pattern, *args.filenames])
+        proc = run_command(["grep", "-nEHI", args.pattern, *args.filenames])
     except Exception as err:
         err_msg = LintMessage(
             path=None,

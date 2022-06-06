@@ -11,6 +11,7 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests)
 from torch.testing._internal.common_subclass import subclass_db, DiagTensorBelow
 from torch.testing._internal.logging_tensor import LoggingTensor
+from torch.utils._pytree import tree_map
 from unittest import expectedFailure
 
 # The current test methodology in this file is to test a variety of real use cases
@@ -203,6 +204,40 @@ class TestSubclass(TestCase):
         output = m(self._create_tensor(tensor_cls))
         self.assertFalse(m.has_uninitialized_params())
         self.assertIsInstance(m.param, tensor_cls)
+
+    def test_non_rewrapping_torch_dispatch_subclass_as_parameter_throws_for_detach(self):
+
+        # Define a subclass that does not rewrap for any function in its __torch_dispatch__ impl.
+        class NonRewrappingTensor(torch.Tensor):
+            @staticmethod
+            def __new__(
+                cls, t: torch.Tensor
+            ):
+                r = super(NonRewrappingTensor, cls)._make_wrapper_subclass(
+                    cls, t.shape, dtype=t.dtype, requires_grad=t.requires_grad, device=t.device)
+                return r
+
+            def __init__(self, t) -> None:
+                self.tensor: torch.Tensor = t
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+
+                def unwrap(e) -> torch.Tensor:
+                    if isinstance(e, NonRewrappingTensor):
+                        t = e.tensor
+                        return t
+                    else:
+                        return e
+
+                r = func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
+                # Return an unwrapped tensor no longer of original subclass type.
+                return r
+
+        with self.assertRaisesRegex(RuntimeError, r"requires that detach\(\) returns an instance of the same type"):
+            param = nn.Parameter(NonRewrappingTensor(torch.randn(3)))
 
 instantiate_parametrized_tests(TestSubclass)
 
