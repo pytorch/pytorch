@@ -58,7 +58,7 @@ class C10_API SymbolicIntNode
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual std::ostream& operator<<(std::ostream& os) {
+  std::ostream& operator<<(std::ostream& os) {
     os << str();
     return os;
   };
