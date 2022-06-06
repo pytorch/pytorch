@@ -25,6 +25,8 @@ __all__ = [
     "celu",
     "dropout",
     "elu",
+    "relu",
+    "hardtanh",
     "hinge_embedding_loss",
     "margin_ranking_loss",
     "mish",
@@ -125,6 +127,22 @@ def elu(
         rhs = refs.expm1(a)
 
     return refs.where(refs.gt(a, 0), a, rhs)
+
+
+@register_decomposition(torch.ops.aten.relu)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def relu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.relu
+    """
+
+    if inplace:
+        raise NotImplementedError
+
+    return torch.where(torch.le(a, 0), 0, a)
 
 
 @register_decomposition(torch.ops.aten.leaky_relu)
@@ -294,3 +312,38 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
             "Expected a tensor input for an elementwise unary operation!"
         )
     return refs.sub(a, refs.tanh(a))
+
+
+@register_decomposition(torch.ops.aten.hardtanh)
+@elementwise_unary_scalar_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def hardtanh(
+    a: TensorLikeType,
+    min_val: NumberType = -1,
+    max_val: NumberType = 1,
+    inplace: bool = False,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.hardtanh
+    """
+    if inplace:
+        raise NotImplementedError
+    if not isinstance(a, TensorLike):
+        raise RuntimeError(
+            "Expected a tensor input for an elementwise unary operation!"
+        )
+    if utils.is_boolean_dtype(a.dtype):
+        raise RuntimeError("Bool inputs not supported for hardtanh")
+
+    # preserve legacy behavior of boundaries not causing type promotion
+    if utils.is_integer_dtype(a.dtype):
+        min_val = int(min_val)  # type: ignore[arg-type]
+        max_val = int(max_val)  # type: ignore[arg-type]
+        if not (a.dtype != torch.uint8 or (min_val >= 0 and max_val >= 0)):
+            raise RuntimeError(
+                "Cannot do hardtanh on an unsigned type with negative limits"
+            )
+    return torch.clamp(a, min_val, max_val)  # type: ignore[arg-type]
