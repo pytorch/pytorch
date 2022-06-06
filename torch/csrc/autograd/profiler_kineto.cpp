@@ -46,11 +46,6 @@ namespace profiler {
 
 namespace {
 const std::string kMemoryEventName = "[memory]";
-// TODO: consider TLS (tid + tls counter)
-uint64_t next_correlation_id() {
-  static std::atomic<uint64_t> corr_id_{1};
-  return corr_id_++;
-}
 
 inline int64_t getTimeUs() {
 #ifdef USE_KINETO
@@ -320,7 +315,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
         // NB: also sets fields on `kineto_events_.back()`.
         auto visitor = EventFieldsVisitor(
-          e, kineto_events_.back(), getEventPostProcessingCallback());
+            e, kineto_events_.back(), getEventPostProcessingCallback());
 
         cpu_trace_.addCPUActivity(
             e->name(),
@@ -349,7 +344,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
     // TODO: by Mike Guo
     // reenable the forward/backward correlation when kineto fix the following raw pointer
     //    GenericTraceActivity.flow.linkedActivity
-
     /*
     std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>
         tidSeq2activity;
@@ -623,13 +617,7 @@ std::unique_ptr<at::ObserverContext> onFunctionEnter(const at::RecordFunction& f
   if (!state_ptr) {
     return nullptr;
   }
-  auto corr_id = next_correlation_id();
-  if (fn.scope() == at::RecordScope::USER_SCOPE) {
-    torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
-  } else {
-    torch::profiler::impl::kineto::pushCorrelationId(corr_id);
-  }
-  return state_ptr->record_queue_.getSubqueue()->begin_op(fn, corr_id);
+  return state_ptr->record_queue_.getSubqueue()->begin_op(fn);
 }
 
 // @lint-ignore CLANGTIDY clang-diagnostic-unused-parameter
@@ -641,7 +629,7 @@ void onFunctionExit(const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) 
   }
   const auto& config = state_ptr->config();
   auto* kineto_ctx_ptr =
-    static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
+      static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
   TORCH_INTERNAL_ASSERT(kineto_ctx_ptr != nullptr);
   kineto_ctx_ptr->event_->end_time_ = torch::profiler::impl::getApproximateTime();
   kineto_ctx_ptr->event_->basic_fields_.end_tid_ = at::RecordFunction::currentThreadId();

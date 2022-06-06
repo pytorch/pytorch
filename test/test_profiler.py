@@ -1182,6 +1182,29 @@ class TestProfiler(TestCase):
             """  # noqa: B950
         )
 
+    def test_profiler_correlation_id(self):
+        '''
+        We expect the correlation_id to be unique across multiple invokation of the profiler,
+        So we will reuse id_uniqueness_set.
+        '''
+        id_uniqueness_set = set()
+        model = torch.nn.Sequential(
+            nn.Conv2d(16, 33, 18),
+            nn.ReLU(),
+            nn.Linear(243, 243),
+            nn.ReLU(),
+        )
+        inputs = torch.randn(40, 16, 18, 260)
+        uint32_max = 2**32 - 1
+        for i in range(5):
+            with profile() as prof:
+                model(inputs)
+            for event in prof.profiler.kineto_results.events():
+                corr_id = event.correlation_id()
+                if (corr_id):
+                    self.assertTrue(corr_id not in id_uniqueness_set)
+                    id_uniqueness_set.add(corr_id)
+                    self.assertTrue(corr_id < uint32_max)
 
 if __name__ == '__main__':
     run_tests()

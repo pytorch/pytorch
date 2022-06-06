@@ -37,10 +37,16 @@ namespace impl {
 // Performance drops off for larger values, so testing on a case-by-case basis
 // is recommended if performance is absolutely critical.
 
-template <typename T, size_t ChunkSize>
+template <
+    typename T,
+    size_t ChunkSize,
+    template <typename U, size_t N> class block_t = std::array>
 class AppendOnlyList {
  public:
-  using array_t = std::array<T, ChunkSize>;
+  using array_t = block_t<T, ChunkSize>;
+  static_assert(
+      std::is_base_of<std::array<T, ChunkSize>, array_t>::value,
+      "AppendOnlyList expects raw low level pointer storage.");
   static_assert(ChunkSize > 0, "Block cannot be empty.");
 
   AppendOnlyList() : buffer_last_{buffer_.before_begin()} {}
@@ -74,7 +80,7 @@ class AppendOnlyList {
     using reference         = T&;
 
     Iterator(std::forward_list<array_t>& buffer, const size_t size)
-      : block_{buffer.begin()}, size_{size} {}
+        : block_{buffer.begin()}, size_{size} {}
 
     // End iterator.
     Iterator() = default;
