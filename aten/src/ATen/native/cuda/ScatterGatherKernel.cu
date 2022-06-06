@@ -130,7 +130,7 @@ struct _cuda_scatter_gather_internal_kernel {
     if (!iter.can_use_32bit_indexing()) {
       for (auto& sub_iter : iter.with_32bit_indexing()) {
         _cuda_scatter_gather_internal_kernel<is_scatter_like, scalar_t>()(
-          sub_iter, index_size, index_stride, index_sizes, src_sizes, numel, f
+          sub_iter, index_size, index_stride, index_sizes, src_sizes, src_strides, numel, f, index_larger_than_src
         );
       }
       return;
