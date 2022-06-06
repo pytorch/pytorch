@@ -3,48 +3,22 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "onnx::Pow_4"
-    name: "Constant_0"
-    op_type: "Constant"
+    input: "onnx::BitShift_0"
+    input: "onnx::BitShift_7"
+    output: "3"
+    name: "BitShift_0"
+    op_type: "BitShift"
     attribute {
-      name: "value"
-      t {
-        data_type: 1
-        raw_data: "\000\000\000@"
-      }
-      type: TENSOR
+      name: "direction"
+      s: "RIGHT"
+      type: STRING
     }
   }
   node {
-    input: "onnx::Pow_4"
-    input: "onnx::Pow_11"
-    output: "onnx::Cast_5"
-    name: "Pow_1"
-    op_type: "Pow"
-  }
-  node {
-    input: "onnx::Cast_5"
-    output: "onnx::Div_6"
-    name: "Cast_2"
-    op_type: "Cast"
-    attribute {
-      name: "to"
-      i: 1
-      type: INT
-    }
-  }
-  node {
-    input: "onnx::Div_0"
-    input: "onnx::Div_6"
-    output: "7"
-    name: "Div_3"
-    op_type: "Div"
-  }
-  node {
-    input: "onnx::BitShift_1"
-    input: "onnx::BitShift_12"
-    output: "10"
-    name: "BitShift_4"
+    input: "onnx::BitShift_0"
+    input: "onnx::BitShift_8"
+    output: "6"
+    name: "BitShift_1"
     op_type: "BitShift"
     attribute {
       name: "direction"
@@ -54,36 +28,17 @@ graph {
   }
   name: "torch_jit"
   initializer {
-    data_type: 1
-    name: "onnx::Pow_11"
-    raw_data: "\000\000\200?"
+    data_type: 2
+    name: "onnx::BitShift_7"
+    raw_data: "\001"
   }
   initializer {
     data_type: 2
-    name: "onnx::BitShift_12"
+    name: "onnx::BitShift_8"
     raw_data: "\002"
   }
   input {
-    name: "onnx::Div_0"
-    type {
-      tensor_type {
-        elem_type: 1
-        shape {
-          dim {
-            dim_value: 3
-          }
-          dim {
-            dim_value: 4
-          }
-          dim {
-            dim_value: 2
-          }
-        }
-      }
-    }
-  }
-  input {
-    name: "onnx::BitShift_1"
+    name: "onnx::BitShift_0"
     type {
       tensor_type {
         elem_type: 2
@@ -102,10 +57,10 @@ graph {
     }
   }
   output {
-    name: "7"
+    name: "3"
     type {
       tensor_type {
-        elem_type: 1
+        elem_type: 2
         shape {
           dim {
             dim_value: 3
@@ -121,7 +76,7 @@ graph {
     }
   }
   output {
-    name: "10"
+    name: "6"
     type {
       tensor_type {
         elem_type: 2

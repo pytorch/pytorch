@@ -439,7 +439,8 @@ TEST(StaticRuntime, LongModel) {
   torch::jit::StaticModule smod(mod);
   at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
-  EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+  EXPECT_TRUE(
+      torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 }
 
 TEST(StaticRuntime, TrivialModel) {
@@ -457,7 +458,8 @@ TEST(StaticRuntime, TrivialModel) {
   torch::jit::StaticModule smod(mod);
   at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
-  EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+  EXPECT_TRUE(
+      torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 }
 
 TEST(StaticRuntime, DeepWide) {
@@ -482,7 +484,8 @@ TEST(StaticRuntime, DeepWide) {
       ASSERT_TRUE(outputs.size() > 0);
       at::Tensor output_2 = outputs[0].toTensor();
       smod.runtime().check_for_memory_leak();
-      EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+      EXPECT_TRUE(
+          torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
     }
   }
 }
@@ -509,7 +512,8 @@ TEST(StaticRuntime, KWargsAPI_1) {
         smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
-        EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+        EXPECT_TRUE(
+            torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 
         // check for output aliasing
         EXPECT_EQ(output_ivalue.use_count(), 1);
@@ -553,7 +557,8 @@ TEST(StaticRuntime, KWargsAPI_2) {
         smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
-        EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+        EXPECT_TRUE(
+            torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 
         // check for output aliasing
         EXPECT_EQ(output_ivalue.use_count(), 1);
@@ -630,7 +635,8 @@ TEST(StaticRuntime, CleanUpMemory) {
             ASSERT_TRUE(outputs.size() > 0);
             auto output_2 = outputs[0].toTensor();
             runtime.check_for_memory_leak();
-            EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+            EXPECT_TRUE(torch::allclose(
+                output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
             if (manage_output_tensors) {
               runtime.deallocateOutputTensors();
               runtime.checkOutputTensorMemoryLeaks();
@@ -875,7 +881,8 @@ TEST(StaticRuntime, FusionPass) {
       }
       EXPECT_TRUE(hit);
       auto output_2 = getTensor(module.forward(inputs));
-      EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+      EXPECT_TRUE(
+          torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
     }
   }
 }
@@ -1691,3 +1698,69 @@ TEST(EliminateNoOpSlice, NoneStart) {
   EliminateNoOpSlice(graph);
   EXPECT_FALSE(hasNodeWithKind(graph, "aten::slice"));
 }
+
+#ifdef FBCODE_CAFFE2
+// FuseClampNaNToNum pass is disabled externally to avoid MSVC errors in CI
+TEST(FuseClampNaNToNum, FusionHappens) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        y = torch.clamp(x, min=0.0, max=1.0)
+        z = y.nan_to_num()
+        return z.clone()
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  FuseClampNaNToNum(graph);
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::clamp"));
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::nan_to_num"));
+  EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::clamp_nan_to_num"));
+  // Correctness of the op is exercised in StaticRuntime.clamp_nan_to_num
+}
+
+TEST(FuseClampNaNToNum, NoFusion) {
+  const auto src1 = R"JIT(
+    def forward(self, x, a: float, b: float):
+        y = torch.clamp(x, a, b)
+        z = y.nan_to_num()
+        return z.clone()
+  )JIT";
+
+  const auto src2 = R"JIT(
+    def forward(self, x):
+        y = torch.clamp(x, min=0.0)
+        z = y.nan_to_num()
+        return z.clone()
+  )JIT";
+
+  const auto src3 = R"JIT(
+    def forward(self, x):
+        y = torch.clamp(x, max=0.0)
+        z = y.nan_to_num()
+        return z.clone()
+  )JIT";
+
+  const auto src4 = R"JIT(
+    def forward(self, x):
+        y = torch.clamp(x)
+        z = y.nan_to_num()
+        return z.clone()
+  )JIT";
+
+
+  auto checkScript = [](const char* src) {
+    torch::jit::Module mod("m");
+    mod.define(src);
+    auto graph = mod.get_method("forward").graph();
+    FuseClampNaNToNum(graph);
+    EXPECT_TRUE(hasNodeWithKind(graph, "aten::clamp"));
+    EXPECT_TRUE(hasNodeWithKind(graph, "aten::nan_to_num"));
+    EXPECT_FALSE(hasNodeWithKind(graph, "static_runtime::clamp_nan_to_num"));
+  };
+
+  checkScript(src1);
+  checkScript(src2);
+  checkScript(src3);
+  checkScript(src4);
+}
+#endif

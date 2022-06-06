@@ -175,6 +175,8 @@ inline std::ostream& operator<<(std::ostream& stream, const Node& node) {
   return stream;
 }
 
+// Note: Keep this version of NodeCast for smooth PyTorch/XLA migration, and
+// clean up once the migration is done.
 template <typename T>
 const T* NodeCast(const Node* node, OpKind op) {
   if (op != node->op()) {
@@ -185,6 +187,17 @@ const T* NodeCast(const Node* node, OpKind op) {
 #else
   return &dynamic_cast<const T&>(*node);
 #endif
+}
+
+template <typename T>
+const T* NodeCast(const Node* node) {
+  if (T::ClassOpKind() != node->op()) {
+    return nullptr;
+  }
+  // TODO: Some IR classes share the same opkind, such as Mean and MeanDim, so
+  // static_cast is not safe here. Unless we have opkind unique for each class,
+  // we have to use dynamic_cast here.
+  return dynamic_cast<const T*>(node);
 }
 
 
@@ -201,10 +214,15 @@ struct TORCH_API Output {
       : node(node), index(index) {}
 
   hash_t hash() const;
+  hash_t shapeHash() const;
 
   bool operator==(const Output& rhs) const {
     return node == rhs.node && index == rhs.index;
   }
+
+  // To compare the operands of to-be-constructed node and to-be-reused node
+  bool operator==(const Value& rhs) const;
+
   bool operator!=(const Output& rhs) const {
     return !operator==(rhs);
   }
