@@ -1536,8 +1536,16 @@ def error_inputs_hsplit(op_info, device, **kwargs):
                                   dtype=torch.float32,
                                   device=device),
                       args=(0,),)
-    return (ErrorInput(si1, error_regex=err_msg1),
-            ErrorInput(si2, error_regex=err_msg2),)
+
+    # Incorrect type for indices_or_section argument
+    err_msg3 = ("received an invalid combination of arguments.")
+    si3 = SampleInput(make_tensor((S, S, S),
+                                  dtype=torch.float32,
+                                  device=device),
+                      args=("abc",),)
+    yield ErrorInput(si1, error_regex=err_msg1)
+    yield ErrorInput(si2, error_regex=err_msg2)
+    yield ErrorInput(si3, error_type=TypeError, error_regex=err_msg3)
 
 def error_inputs_vsplit(op_info, device, **kwargs):
     err_msg1 = ("torch.vsplit requires a tensor with at least 2 dimension, "
@@ -1553,8 +1561,16 @@ def error_inputs_vsplit(op_info, device, **kwargs):
                                   dtype=torch.float32,
                                   device=device),
                       args=(0,),)
-    return (ErrorInput(si1, error_regex=err_msg1),
-            ErrorInput(si2, error_regex=err_msg2),)
+
+    # Incorrect type for indices_or_section argument
+    err_msg3 = ("received an invalid combination of arguments.")
+    si3 = SampleInput(make_tensor((S, S, S),
+                                  dtype=torch.float32,
+                                  device=device),
+                      args=("abc",),)
+    yield ErrorInput(si1, error_regex=err_msg1)
+    yield ErrorInput(si2, error_regex=err_msg2)
+    yield ErrorInput(si3, error_type=TypeError, error_regex=err_msg3)
 
 def error_inputs_dsplit(op_info, device, **kwargs):
     err_msg1 = ("torch.dsplit requires a tensor with at least 3 dimension, "
@@ -2060,6 +2076,7 @@ def generate_elementwise_binary_small_value_tensors(
     _int_vals = (0, -1, 1, -55, 55, -127, 127, -128)
     _float_vals = (
         0.0,
+        -0.0,
         -0.001,
         0.001,
         -0.25,
@@ -2929,6 +2946,19 @@ def sample_inputs_isclose(op, device, dtype, requires_grad, **kwargs):
 
         yield SampleInput(lhs, args=(rhs,),
                           kwargs=dict(rtol=rtol, atol=atol, equal_nan=equal_nan))
+
+
+def error_inputs_isclose(op, device, **kwargs):
+    make_float_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
+
+    yield ErrorInput(SampleInput(make_float_arg(()), args=(make_float_arg(()),), kwargs={'rtol': -0.4}),
+                     error_type=RuntimeError,
+                     error_regex='rtol must be greater than or equal to zero')
+
+    yield ErrorInput(SampleInput(make_float_arg(()), args=(make_float_arg(()),), kwargs={'atol': -0.4}),
+                     error_type=RuntimeError,
+                     error_regex='atol must be greater than or equal to zero')
+
 
 def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -4051,13 +4081,29 @@ def _floor_divide_np(a, b):
     return np.floor_divide(a, b)
 
 def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad, **kwargs):
-    tensors = [
-        make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-        make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-        make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-    ]
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    tensor_shapes = (
+        # First Tensor being 1-D is special
+        # case for hstack
+        ((S,), (S,), (S,)),
+        ((S, S), (S, S), (S, S)),
+    )
+    for s1, s2, s3 in tensor_shapes:
+        tensors = (make_arg(s1,), make_arg(s2,), make_arg(s3))
+        yield SampleInput(tensors)
 
-    return (SampleInput(tensors),)
+def error_inputs_hstack_dstack_vstack(op, device):
+    make_arg = partial(make_tensor, dtype=torch.int32, device=device, requires_grad=False)
+    tensor_shapes = (
+        ((S,), (S, S, S, S), (S,)),
+    )
+    for s1, s2, s3 in tensor_shapes:
+        tensors = (make_arg(s1,), make_arg(s2,), make_arg(s3))
+        # Different dimension tensor
+        yield ErrorInput(SampleInput(tensors), error_regex="Tensors must have same number of dimensions")
+
+    # empty tensor list
+    yield ErrorInput(SampleInput(()), error_regex="expects a non-empty TensorList")
 
 def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
     return (
@@ -13034,6 +13080,7 @@ op_db: List[OpInfo] = [
                     ref=np.isclose,
                     dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
                     sample_inputs_func=sample_inputs_isclose,
+                    error_inputs_func=error_inputs_isclose,
                     supports_autograd=False,
                     supports_out=False,
                     supports_rhs_python_scalar=False,
@@ -15736,6 +15783,9 @@ op_db: List[OpInfo] = [
                        # RuntimeError: "nonzero_count_cpu" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_consistency',
                                     dtypes=(torch.chalf,),),
+                       # Ref: https://github.com/pytorch/pytorch/issues/78413
+                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_small',
+                                    dtypes=(torch.bfloat16, torch.float16, torch.float32, torch.float64),),
                    )),
     UnaryUfuncInfo('isfinite',
                    ref=np.isfinite,
@@ -16904,6 +16954,7 @@ op_db: List[OpInfo] = [
     OpInfo('hstack',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
+           error_inputs_func=error_inputs_hstack_dstack_vstack,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            ),
@@ -17005,6 +17056,7 @@ op_db: List[OpInfo] = [
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
+           error_inputs_func=error_inputs_hstack_dstack_vstack,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
@@ -17014,6 +17066,7 @@ op_db: List[OpInfo] = [
     OpInfo('dstack',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
+           error_inputs_func=error_inputs_hstack_dstack_vstack,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            ),
@@ -19783,6 +19836,10 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.elu",
     ),
     PythonRefInfo(
+        "_refs.nn.functional.hardtanh",
+        torch_opinfo_name="nn.functional.hardtanh",
+    ),
+    PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",
     ),
@@ -20062,6 +20119,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.dstack",
         torch_opinfo_name="dstack",
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/78613
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.flatten",
@@ -20078,6 +20139,14 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.flipud",
         torch_opinfo_name="flipud",
+    ),
+    PythonRefInfo(
+        "_refs.hstack",
+        torch_opinfo_name="hstack",
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/78613
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.narrow",
@@ -20120,6 +20189,14 @@ python_ref_db = [
         )
     ),
     PythonRefInfo(
+        "_refs.hsplit",
+        torch_opinfo_name="hsplit",
+    ),
+    PythonRefInfo(
+        "_refs.vsplit",
+        torch_opinfo_name="vsplit",
+    ),
+    PythonRefInfo(
         "_refs.transpose",
         torch_opinfo_name="transpose",
     ),
@@ -20134,6 +20211,14 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.view",
         torch_opinfo_name="view",
+    ),
+    PythonRefInfo(
+        "_refs.vstack",
+        torch_opinfo_name="vstack",
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/78613
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     #
     # Reduction Reference OpInfos
