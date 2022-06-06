@@ -580,6 +580,7 @@ Tensor& linalg_matrix_rank_out(
   checkNotComplexTolerance(atol, "torch.linalg.matrix_rank", "atol");
   checkNotComplexTolerance(rtol, "torch.linalg.matrix_rank", "rtol");
 
+  // NOTE [matrix rank output shape]
   // matrix_rank assigns a scalar value for each matrix in the batch so
   // result's shape is equal to input.shape[0:input.ndim-2]
   // for single matrix result_shape = {}
@@ -621,13 +622,21 @@ Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> atol, optio
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, const optional<Tensor>& atol, const optional<Tensor>& rtol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
+  // For Composite Compliance, allocate `result` of correct shape to
+  // avoid resizing in `out` variant.
+  // See also `NOTE [matrix rank output shape]`
+  auto result_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
+  Tensor result = at::empty(result_shape, input.options().dtype(ScalarType::Long));
   result = at::linalg_matrix_rank_outf(input, atol, rtol, hermitian, result);
   return result;
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
+  // For Composite Compliance, allocate `result` of correct shape to
+  // avoid resizing in `out` variant.
+  // See also `NOTE [matrix rank output shape]`
+  auto result_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
+  Tensor result = at::empty(result_shape, input.options().dtype(ScalarType::Long));
   result = at::linalg_matrix_rank_outf(input, atol, rtol, hermitian, result);
   return result;
 }
@@ -648,13 +657,21 @@ Tensor& linalg_matrix_rank_out(const Tensor& input, double tol, bool hermitian, 
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, const Tensor& tol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
+  // For Composite Compliance, allocate `result` of correct shape to
+  // avoid resizing in `out` variant.
+  // See also `NOTE [matrix rank output shape]`
+  auto result_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
+  Tensor result = at::empty(result_shape, input.options().dtype(ScalarType::Long));
   result = at::linalg_matrix_rank_outf(input, tol, hermitian, result);
   return result;
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, double tol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
+  // For Composite Compliance, allocate `result` of correct shape to
+  // avoid resizing in `out` variant.
+  // See also `NOTE [matrix rank output shape]`
+  auto result_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
+  Tensor result = at::empty(result_shape, input.options().dtype(ScalarType::Long));
   result = at::linalg_matrix_rank_outf(input, tol, hermitian, result);
   return result;
 }
