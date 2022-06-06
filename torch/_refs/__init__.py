@@ -2394,7 +2394,7 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             lambda: f"could not convert to type {python_type} without overflow",
         )
 
-    # Since `where`` allows type-promotion,
+    # Since `where` allows type-promotion,
     # cast value to correct type before passing to `where`
     if isinstance(value, NumberType):
         return where(mask, python_type(value), a)
