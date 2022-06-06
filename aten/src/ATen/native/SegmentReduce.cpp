@@ -131,7 +131,7 @@ void _segment_reduce_lengths_cpu_kernel1(
       });
 }
 
-Tensor _segment_reduce_cpu_kernel(
+Tensor _segment_reduce_lengths_cpu_kernel(
     SegmentReductionType reduction,
     const Tensor& data,
     const Tensor& lengths,
@@ -148,9 +148,9 @@ Tensor _segment_reduce_cpu_kernel(
   output_shape[axis] = segment_count;
   auto output = at::empty(output_shape, data.options());
 
-  AT_DISPATCH_INDEX_TYPES(lengths.scalar_type(), "_segment_reduce_cpu_kernel1", [&]() {
+  AT_DISPATCH_INDEX_TYPES(lengths.scalar_type(), "_segment_reduce_lengths_cpu_kernel1", [&]() {
     const auto* lengths_data = lengths.data_ptr<index_t>();
-    _segment_reduce_cpu_kernel1(
+    _segment_reduce_lengths_cpu_kernel1(
         reduction, data, lengths_data, axis, initial, output, segment_count, lengths_stride_axis);
   });
 
@@ -320,7 +320,7 @@ void _segment_reduce_cpu_lengths_backward_kernel1(
       });
 }
 
-Tensor _segment_reduce_cpu_backward_kernel(
+Tensor _segment_reduce_cpu_lengths_backward_kernel(
     const Tensor& grad_contig,
     const Tensor& output_contig,
     const Tensor& data_contig,
@@ -467,13 +467,13 @@ Tensor segment_reduce_kernel(
 }
 
 REGISTER_ARCH_DISPATCH(
-    _segment_reduce_stub,
+    _segment_reduce_lengths_stub,
     DEFAULT,
-    &_segment_reduce_cpu_kernel);
-REGISTER_AVX2_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
-REGISTER_AVX512_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
-REGISTER_VSX_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
-REGISTER_ZVECTOR_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
+    &_segment_reduce_lengths_cpu_kernel);
+REGISTER_AVX2_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel);
+REGISTER_AVX512_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel);
+REGISTER_VSX_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel);
+REGISTER_ZVECTOR_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel);
 
 // offsets dispatches
 REGISTER_ARCH_DISPATCH(
@@ -540,21 +540,21 @@ Tensor _segment_reduce_backward_kernel(
 }
 
 REGISTER_ARCH_DISPATCH(
-    _segment_reduce_backward_stub,
+    _segment_reduce_lengths_backward_stub,
     DEFAULT,
-    &_segment_reduce_cpu_backward_kernel);
+    &_segment_reduce_cpu_lengths_backward_kernel);
 REGISTER_AVX512_DISPATCH(
-    _segment_reduce_backward_stub,
-    &_segment_reduce_cpu_backward_kernel);
+    _segment_reduce_lengths_backward_stub,
+    &_segment_reduce_cpu_lengths_backward_kernel);
 REGISTER_AVX2_DISPATCH(
-    _segment_reduce_backward_stub,
-    &_segment_reduce_cpu_backward_kernel);
+    _segment_reduce_lengths_backward_stub,
+    &_segment_reduce_cpu_lengths_backward_kernel);
 REGISTER_VSX_DISPATCH(
-    _segment_reduce_backward_stub,
-    &_segment_reduce_cpu_backward_kernel);
+    _segment_reduce_lengths_backward_stub,
+    &_segment_reduce_cpu_lengths_backward_kernel);
 REGISTER_ZVECTOR_DISPATCH(
-    _segment_reduce_backward_stub,
-    &_segment_reduce_cpu_backward_kernel);
+    _segment_reduce_lengths_backward_stub,
+    &_segment_reduce_cpu_lengths_backward_kernel);
 
 REGISTER_ARCH_DISPATCH(
     _segment_reduce_offsets_backward_stub,
