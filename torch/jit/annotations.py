@@ -393,6 +393,7 @@ def try_ann_to_type(ann, loc):
             return torch.jit._script._recursive_compile_class(ann, loc)
     if inspect.isclass(ann) and issubclass(ann, torch.nn.Module):
         return _qualified_name(ann)
+
     # Maybe resolve a NamedTuple to a Tuple Type
     def fake_rcb(key):
         return None
