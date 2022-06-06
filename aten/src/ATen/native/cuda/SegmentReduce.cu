@@ -295,7 +295,8 @@ Tensor _segment_reduce_cuda_lengths_offsets_backward_kernel(
   int64_t lengths_stride_axis = lengths_or_offsets_contig.stride(axis);
   auto grad_input = at::zeros({data_contig.sizes()}, grad_contig.options());
 
-  Tensor offsets, lengths;
+  Tensor offsets;
+  Tensor lengths;
   if (is_offsets_like) {
     offsets = lengths_or_offsets_contig;
     lengths = offsets.diff();
