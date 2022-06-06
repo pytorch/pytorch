@@ -191,9 +191,9 @@ struct cuda_scatter_gather_base_kernel {
   ) {
     at::assert_no_internal_overlap(self);
 
-    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
-    auto self_strides = ensure_nonempty_vec(self.strides().vec());
-    auto src_strides = ensure_nonempty_vec(src.strides().vec());
+    auto index_sizes_vec = ensure_nonempty_vec(index.sizes().vec());
+    auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
+    auto src_strides_vec = ensure_nonempty_vec(src.strides().vec());
 
     // restride self and src such that
     // self.shape = src.shape = index.shape
@@ -202,11 +202,11 @@ struct cuda_scatter_gather_base_kernel {
     // if (is_scatter_like) self.stride[dim] = 0
     // else src.stride[dim] = 0
     auto self_restrided = is_scatter_like ?
-        restride_dim(self, dim, index_sizes)
-      : self.as_strided(index_sizes, self_strides);
+        restride_dim(self, dim, index_sizes_vec)
+      : self.as_strided(index_sizes_vec, self_strides_vec);
     auto src_restrided = is_scatter_like ?
-        src.as_strided(index_sizes, src_strides)
-      : restride_dim(src, dim, index_sizes);
+        src.as_strided(index_sizes_vec, src_strides_vec)
+      : restride_dim(src, dim, index_sizes_vec);
 
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
@@ -249,9 +249,9 @@ struct cuda_scatter_gather_base_kernel {
   ) {
     at::assert_no_internal_overlap(self);
 
-    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
-    auto self_strides = ensure_nonempty_vec(self.strides().vec());
-    auto src_strides = ensure_nonempty_vec(src.strides().vec());
+    auto index_sizes_vec = ensure_nonempty_vec(index.sizes().vec());
+    auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
+    auto src_strides_vec = ensure_nonempty_vec(src.strides().vec());
 
     // restride self and src such that
     // self.shape = src.shape = index.shape
@@ -260,11 +260,11 @@ struct cuda_scatter_gather_base_kernel {
     // if (is_scatter_like) self.stride[dim] = 0
     // else src.stride[dim] = 0
     auto self_restrided = is_scatter_like ?
-        restride_dim(self, dim, index_sizes)
-      : self.as_strided(index_sizes, self_strides);
+        restride_dim(self, dim, index_sizes_vec)
+      : self.as_strided(index_sizes_vec, self_strides_vec);
     auto src_restrided = is_scatter_like ?
-        src.as_strided(index_sizes, src_strides)
-      : restride_dim(src, dim, index_sizes);
+        src.as_strided(index_sizes_vec, src_strides_vec)
+      : restride_dim(src, dim, index_sizes_vec);
 
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
@@ -308,9 +308,9 @@ struct cuda_scatter_gather_base_kernel {
   ) {
     at::assert_no_internal_overlap(self);
 
-    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
-    auto self_strides = ensure_nonempty_vec(self.strides().vec());
-    auto src_strides = ensure_nonempty_vec(src.strides().vec());
+    auto index_sizes_vec = ensure_nonempty_vec(index.sizes().vec());
+    auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
+    auto src_strides_vec = ensure_nonempty_vec(src.strides().vec());
 
     // restride self and src such that
     // self.shape = src.shape = index.shape
@@ -319,11 +319,11 @@ struct cuda_scatter_gather_base_kernel {
     // if (is_scatter_like) self.stride[dim] = 0
     // else src.stride[dim] = 0
     auto self_restrided = is_scatter_like ?
-        restride_dim(self, dim, index_sizes)
-      : self.as_strided(index_sizes, self_strides);
+        restride_dim(self, dim, index_sizes_vec)
+      : self.as_strided(index_sizes_vec, self_strides_vec);
     auto src_restrided = is_scatter_like ?
-        src.as_strided(index_sizes, src_strides)
-      : restride_dim(src, dim, index_sizes);
+        src.as_strided(index_sizes_vec, src_strides_vec)
+      : restride_dim(src, dim, index_sizes_vec);
 
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
@@ -414,12 +414,12 @@ struct cuda_scatter_fill_base_kernel {
   ) {
     at::assert_no_internal_overlap(self);
 
-    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
+    auto index_sizes_vec = ensure_nonempty_vec(index.sizes().vec());
 
     // restride self such that
     // self.shape = index.shape and
     // self.stride[dim] = 0
-    auto self_restrided = restride_dim(self, dim, index_sizes);
+    auto self_restrided = restride_dim(self, dim, index_sizes_vec);
 
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
@@ -457,12 +457,12 @@ struct cuda_scatter_fill_base_kernel {
   ) {
     at::assert_no_internal_overlap(self);
 
-    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
+    auto index_sizes_vec = ensure_nonempty_vec(index.sizes().vec());
 
     // restride self such that
     // self.shape = index.shape and
     // self.stride[dim] = 0
-    auto self_restrided = restride_dim(self, dim, index_sizes);
+    auto self_restrided = restride_dim(self, dim, index_sizes_vec);
 
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
