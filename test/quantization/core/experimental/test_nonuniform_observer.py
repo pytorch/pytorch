@@ -24,10 +24,11 @@ class TestNonUniformObserver(unittest.TestCase):
         * n = 2 (number of additive terms)
         * note: b = k * n
         """
-        obs2 = APoTObserver(b = 2, k = 2)
+        obs2 = APoTObserver(max_val = 1.0, b = 4, k = 2)
 
         ObserverList = [obs1, obs2]
 
+        # print("***")
         print(obs2.calculate_qparams(signed=False))
 
         # t = torch.Tensor()
