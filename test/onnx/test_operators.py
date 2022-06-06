@@ -69,7 +69,7 @@ class FuncModule(Module):
     def __init__(self, f, params=None):
         if params is None:
             params = ()
-        super(FuncModule, self).__init__()
+        super().__init__()
         self.f = f
         self.params = nn.ParameterList(list(params))
 
@@ -120,7 +120,7 @@ class TestOperators(TestCase):
                 for index, var in enumerate(flatten(args)):
                     tensor = onnx.numpy_helper.from_array(var.data.numpy())
                     with open(
-                        os.path.join(data_dir, "input_{}.pb".format(index)), "wb"
+                        os.path.join(data_dir, f"input_{index}.pb"), "wb"
                     ) as file:
                         file.write(tensor.SerializeToString())
                 outputs = m(*args)
@@ -129,7 +129,7 @@ class TestOperators(TestCase):
                 for index, var in enumerate(flatten(outputs)):
                     tensor = onnx.numpy_helper.from_array(var.data.numpy())
                     with open(
-                        os.path.join(data_dir, "output_{}.pb".format(index)), "wb"
+                        os.path.join(data_dir, f"output_{index}.pb"), "wb"
                     ) as file:
                         file.write(tensor.SerializeToString())
 
@@ -921,12 +921,11 @@ class TestOperators(TestCase):
 
     def test_bitshift(self):
         class BitshiftModel(torch.nn.Module):
-            def forward(self, input, input2):
-                return input >> 1, input2 >> 2
+            def forward(self, input):
+                return input >> 1, input >> 2
 
-        input = torch.arange(24, dtype=torch.float32).reshape(3, 4, 2)
-        input2 = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
-        self.assertONNX(BitshiftModel(), (input, input2), opset_version=11)
+        input = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
+        self.assertONNX(BitshiftModel(), input, opset_version=11)
 
     @skipIfCaffe2
     def test_layer_norm_aten(self):

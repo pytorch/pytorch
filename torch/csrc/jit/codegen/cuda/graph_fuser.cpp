@@ -100,8 +100,8 @@ Value* createConditionalConstant(Node* profile_ivalue) {
     // ival
     val = IValue(profile_ivalue->ival(Symbol::attr("profiled_ival")));
   } else {
-    GRAPH_DEBUG("profile_ivalue: ", *profile_ivalue);
-    TORCH_WARN(
+    GRAPH_DEBUG("no profile info in profile_ivalue node: ", *profile_ivalue);
+    TORCH_WARN_ONCE(
         __func__,
         " profile_node ",
         *profile_ivalue,
@@ -2045,7 +2045,7 @@ void decomposeLinearOps(Block* block) {
     for (Block* b : n->blocks()) {
       decomposeLinearOps(b);
     }
-    // only decompose `linear` layer with bias.
+    // only decompose `linear` layer with bias
     if (n->kind() == aten::linear &&
         !n->input(2)->type()->isSubtypeOf(
             static_cast<c10::TypePtr>(NoneType::get()))) {
@@ -2060,6 +2060,11 @@ void decomposeLinearOps(Block* block) {
     auto matmul = graph->insertNode(
         graph->create(aten::matmul, {n->input(0), weight_t->output()}, 1));
     auto input_tensor_type = n->input(0)->type()->cast<c10::TensorType>();
+    if (!input_tensor_type) {
+      TORCH_WARN_ONCE(
+          "linear input 0 is required to be tensor for linear decompose");
+      continue;
+    }
     auto mat0_size = input_tensor_type->sizes().concrete_sizes();
     auto mat1_size =
         n->input(1)->type()->cast<c10::TensorType>()->sizes().concrete_sizes();
@@ -2072,6 +2077,13 @@ void decomposeLinearOps(Block* block) {
           "concrete shape for linear input & weight are required to decompose into matmul + bias");
       continue;
     }
+
+    // only decompose for input with nDims >= 4. since lower rank linear eager
+    // is already fused
+    if (mat0_size->size() < 4) {
+      continue;
+    }
+
     auto out_size = mat0_size.value();
     TORCH_INTERNAL_ASSERT(
         mat1_size->size() == 2 || mat1_size->size() == 1,
@@ -2098,12 +2110,13 @@ void decomposeLinearOps(Block* block) {
 // Replace 'operation' with 'operation_copy' to guard alias operations.
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
-  static std::unordered_map<Symbol, Symbol> alias_to_copy_mapping(
-      // TODO: revert disabled aten::view
-      {// {aten::view, prim::view_copy},
-       // {aten::reshape, prim::reshape_copy},
-       {aten::squeeze, prim::squeeze_copy},
-       {aten::unsqueeze, prim::unsqueeze_copy}});
+  static std::unordered_map<Symbol, Symbol> alias_to_copy_mapping;
+  // TODO: revert disabled aten::view
+  //    ({{aten::view, prim::view_copy},
+  //     {aten::reshape, prim::reshape_copy},
+  //     {aten::squeeze, prim::squeeze_copy},
+  //     {aten::unsqueeze, prim::unsqueeze_copy},
+  //     {aten::flatten, prim::flatten_copy}});
 
   std::vector<Node*> maybe_safe_alias_nodes;
   for (Node* n : block->nodes()) {
@@ -2147,12 +2160,13 @@ void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
 // e.g., Any non-fused alias operation including within the prim::FallbackGraph
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void revertAliasCopyOps(std::shared_ptr<Graph>& graph, Block* block) {
-  static std::unordered_map<Symbol, Symbol> copy_to_alias_mapping(
-      // TODO: revert disabled aten::view
-      {// {prim::view_copy, aten::view},
-       // {prim::reshape_copy, aten::reshape},
-       {prim::squeeze_copy, aten::squeeze},
-       {prim::unsqueeze_copy, aten::unsqueeze}});
+  static std::unordered_map<Symbol, Symbol> copy_to_alias_mapping;
+  // TODO: revert disabled aten::view
+  //    ({{prim::view_copy, aten::view},
+  //     {prim::flatten_copy, aten::flatten},
+  //     {prim::reshape_copy, aten::reshape},
+  //     {prim::squeeze_copy, aten::squeeze},
+  //     {prim::unsqueeze_copy, aten::unsqueeze}});
 
   std::vector<Node*> alias_copy_ops;
   for (Node* n : block->nodes()) {
@@ -2215,9 +2229,11 @@ void decomposeConvOps(Block* block) {
 
     auto bias_tensor_type = n->input(2)->type()->cast<c10::TensorType>();
     auto bias_size_opt = bias_tensor_type->sizes().concrete_sizes();
-    TORCH_INTERNAL_ASSERT(
-        bias_size_opt.has_value(),
-        "concrete shape for bias input to conv2d are required");
+    if (!bias_size_opt.has_value()) {
+      TORCH_WARN_ONCE(
+          "concrete shape for bias input is required to decompose into conv + bias");
+      continue;
+    }
     // bias shape (C)
     auto bias_size = bias_size_opt.value();
 
