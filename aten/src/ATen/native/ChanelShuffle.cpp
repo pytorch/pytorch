@@ -28,7 +28,6 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
               "channel_shuffle expects input with > 2 dims, but got input with sizes ",
               self.sizes());
   int64_t c = self.size(1);
-  TORCH_CHECK(self.numel() != 0, "nn.ChannelShuffle: Input tensor must not be empty");
   TORCH_CHECK(groups > 0,
               "Number of groups to divide channels in must be positive.",
               " Value of groups:", groups);
@@ -39,11 +38,12 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
   if (self.is_contiguous(MemoryFormat::ChannelsLast) &&
       xnnpack::use_channel_shuffle(self, groups)) {
-    return xnnpack::channel_shuffle(self, groups);
+    auto output = self.numel() == 0 ? self : xnnpack::channel_shuffle(self, groups);
+    return output;
   }
 #endif
 
-  auto output = at::native_channel_shuffle(self, groups);
+  auto output = self.numel() == 0 ? self : at::native_channel_shuffle(self, groups);
   return namedinference::propagate_names_if_nonempty(
       output,
       self.has_names() ? self.names() : at::ArrayRef<Dimname>{});

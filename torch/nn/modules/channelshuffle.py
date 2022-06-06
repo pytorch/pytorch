@@ -46,6 +46,8 @@ class ChannelShuffle(Module):
         self.groups = groups
 
     def forward(self, input: Tensor) -> Tensor:
+        if input.numel() == 0:
+            return input
         return F.channel_shuffle(input, self.groups)
 
     def extra_repr(self) -> str:
