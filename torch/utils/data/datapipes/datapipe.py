@@ -111,8 +111,9 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     def __getattr__(self, attribute_name):
         if attribute_name in IterDataPipe.functions:
             if attribute_name in _deprecated_functional_names:
-                kwargs = _deprecated_functional_names[attribute_name]
-                _deprecation_warning(**kwargs)
+                type, kwargs = _deprecated_functional_names[attribute_name]
+                if type == "IterDataPipe":
+                    _deprecation_warning(**kwargs)
             function = functools.partial(IterDataPipe.functions[attribute_name], self)
             return function
         else:
@@ -236,6 +237,10 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
 
     def __getattr__(self, attribute_name):
         if attribute_name in MapDataPipe.functions:
+            if attribute_name in _deprecated_functional_names:
+                type, kwargs = _deprecated_functional_names[attribute_name]
+                if type == "MapDataPipe":
+                    _deprecation_warning(**kwargs)
             function = functools.partial(MapDataPipe.functions[attribute_name], self)
             return function
         else:
