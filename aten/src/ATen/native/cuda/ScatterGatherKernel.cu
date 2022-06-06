@@ -152,7 +152,7 @@ struct _cuda_scatter_gather_internal_kernel {
         && "index out of bounds");
 
       uint32_t src_offset;
-      if (is_scatter_like && !index_larger_than_src) {
+      if (is_scatter_like && index_larger_than_src) {
         src_offset = 0;
 
         auto original_index_offset = offsets[2];
