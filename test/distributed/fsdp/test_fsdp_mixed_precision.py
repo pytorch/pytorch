@@ -8,6 +8,7 @@ from itertools import product
 import torch
 import torch.cuda.nccl as nccl
 import torch.nn as nn
+import torch.nn.functional as F
 from torch import distributed as dist
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
@@ -16,6 +17,9 @@ from torch.distributed.fsdp import (
     BackwardPrefetch,
     ShardingStrategy,
 )
+from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
+from torch.nn.modules.batchnorm import _BatchNorm
+from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
@@ -26,8 +30,17 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    sandcastle_skip_if,
 )
 from torch.testing._internal.common_cuda import CUDA11OrLater
+
+try:
+    import torchvision
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+
+skipIfNoTorchVision = sandcastle_skip_if(not HAS_TORCHVISION, "no torchvision")
 
 
 if not dist.is_available():
@@ -74,7 +87,7 @@ if nccl_supports_bf16:
 # Buffer original dtype, which can differ from model params.
 _BUFFER_ORIG_DTYPE = torch.float64
 
-params = "mp_config,cpu_offload,backward_prefetch,full_precision_param_dtype"
+params = "mp_config,cpu_offload,backward_prefetch,full_precision_param_dtype,sharded_grad_scaler"
 cpu_offload_config = [
     CPUOffload(offload_params=True), CPUOffload(offload_params=False)
 ]
@@ -82,11 +95,14 @@ backward_prefetch_config = [
     BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST
 ]
 full_precision_param_dtype_config = [torch.float32, torch.float64]
+sharded_grad_scaler = ["enable_sharded_grad_scaler", None]
+
 configs = list(product(
     mp_configs,
     cpu_offload_config,
     backward_prefetch_config,
     full_precision_param_dtype_config,
+    sharded_grad_scaler,
 ))
 
 test_name_mapping = {
@@ -100,6 +116,7 @@ test_name_mapping = {
     str(mp_no_mixed_precision): "mp_no_mp",
     str(torch.float32): "fp32",
     str(torch.float64): "fp64",
+    "enable_sharded_grad_scaler": "sharded_grad_scaler"
 }
 
 if nccl_supports_bf16:
@@ -284,6 +301,7 @@ class TestFSDPMixedPrecision(FSDPTest):
         backward_prefetch,
         full_precision_param_dtype,
         sharding_strategy,
+        sharded_grad_scaler,
     ):
         torch.cuda.set_device(self.rank)
         fsdp_models = [
@@ -312,6 +330,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                 self._reduce_scatter_base_validate_mp, orig_reduce_scatter, mp_config,
             )
             with patch_reduce_scatter(test_reduce_scatter, full_precision_param_dtype):
+                scaler = ShardedGradScaler(enabled=sharded_grad_scaler)
                 optim = torch.optim.Adam(model.parameters())
 
                 for _ in range(3):
@@ -339,6 +358,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                             self._validate_no_mp_shard(model)
 
                     loss = act.sum()
+                    loss = scaler.scale(loss)
                     if mp_config.param_dtype is not None:
                         self.assertEqual(loss.dtype, mp_config.param_dtype)
                     else:
@@ -365,7 +385,10 @@ class TestFSDPMixedPrecision(FSDPTest):
                         if param.grad is not None:
                             self.assertEqual(param.grad.dtype, full_precision_param_dtype)
 
-                    optim.step()
+                    # Unscale the gradients and step
+                    scaler.step(optim)
+                    # Update the scale factor
+                    scaler.update()
 
                     # Summon full params should be in full precision
                     with model.summon_full_params(model):
@@ -429,6 +452,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             backward_prefetch=None,
             full_precision_param_dtype=torch.float64,
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
+            sharded_grad_scaler=False,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -438,7 +462,8 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         mp_config,
         cpu_offload,
         backward_prefetch,
-        full_precision_param_dtype
+        full_precision_param_dtype,
+        sharded_grad_scaler,
     ):
         self._run_test_mixed_precision_e2e(
             mp_config,
@@ -446,6 +471,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             backward_prefetch,
             full_precision_param_dtype,
             ShardingStrategy.FULL_SHARD,
+            sharded_grad_scaler,
         )
 
     def _test_mixed_precision_embedding_table(self, mp_config):
@@ -505,6 +531,100 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         )
         self._test_mixed_precision_embedding_table(mp_config=params_and_reduce_different)
 
+    @skip_if_lt_x_gpu(2)
+    @skipIfNoTorchVision
+    def test_mixed_precision_resnet(self):
+        """
+        End to end test to ensure mixed precision + auto_wrap works
+        for ResNet model.
+        """
+        resnet_model = torchvision.models.resnet50().cuda()
+        resnet_model = nn.SyncBatchNorm.convert_sync_batchnorm(
+            resnet_model,
+            process_group=dist.distributed_c10d._get_default_group()
+        )
+        n_bn = sum(1 if isinstance(x, _BatchNorm) else 0 for x in resnet_model.modules())
+        inp = torch.ones(1, 3, 1000, 1000, device='cuda')
+        mp_config = MixedPrecision(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float16,
+            buffer_dtype=torch.float16,
+        )
+        fsdp = FSDP(
+            resnet_model,
+            auto_wrap_policy=size_based_auto_wrap_policy,
+            mixed_precision=mp_config
+        )
+        # Batchnorm units should be wrapped individually. Validate this by
+        # ensuring there are equal no. of FSDP units that are BN as BN units
+        # in original resnet model.
+        fsdp_bn = 0
+        for module in fsdp.fsdp_modules(fsdp):
+            wrapped_module = module.module
+            if isinstance(wrapped_module, _BatchNorm):
+                fsdp_bn += 1
+
+        self.assertEqual(fsdp_bn, n_bn)
+        # Would throw type mismatch issue without mixed precision autowrapping.
+        loss = fsdp(inp).sum()
+        loss.backward()
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("convert_sync_bn", [True, False])
+    def test_mp_batchnorm(self, convert_sync_bn):
+        class BatchNormNet(nn.Module):
+            def __init__(self, affine=True):
+                super(BatchNormNet, self).__init__()
+                self.fc1 = nn.Linear(2, 40, bias=False)
+                self.bn = nn.BatchNorm1d(4, affine=affine)
+                self.fc2 = nn.Linear(40, 4, bias=False)
+
+            def forward(self, x):
+                x = torch.reshape(self.fc1(x), (-1, 4, 10))
+                x = self.bn(x)
+                x = torch.reshape(x, (-1, 40))
+                x = self.fc2(x)
+                return F.softmax(x, dim=1)
+
+        def never_wrap_policy(*args, **kwargs):
+            return False
+
+        net = BatchNormNet().cuda()
+        if convert_sync_bn:
+            net = nn.SyncBatchNorm.convert_sync_batchnorm(net)
+        # FSDP detects that mixed precision + batchnorm will cause issues
+        # and thus wrap batchnorm in a distinct FSDP unit that does not
+        # use mixed precision.
+        mp_config = MixedPrecision(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float16,
+            buffer_dtype=torch.float16,
+        )
+        with self.assertWarnsRegex(
+            expected_warning=UserWarning,
+            expected_regex="BatchNorm units will be wrapped as a separate"
+        ):
+            model = FSDP(
+                net,
+                mixed_precision=mp_config,
+                auto_wrap_policy=never_wrap_policy,
+            )
+
+        bn = model.bn
+        self.assertTrue(isinstance(bn, FSDP))
+        # policy should not have wrapped any other submodules
+        self.assertFalse(isinstance(model.fc1, FSDP))
+        self.assertFalse(isinstance(model.fc2, FSDP))
+        self.assertEqual(None, bn.mixed_precision)
+        self.assertNotEqual(None, model.mixed_precision)
+
+        inp = torch.randn((1, 2), device='cuda')
+        # Without FSDP BN mixed precision fix, this would result in
+        # RuntimeError: Expected counts to have type Half but got Float
+        # for syncBN
+        model(inp).sum().backward()
+
+
 class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
     """
     Smaller test suite for unshared param (i.e. world_size == 1) case.
@@ -524,6 +644,7 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
             backward_prefetch=None,
             full_precision_param_dtype=torch.float64,
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
+            sharded_grad_scaler=False,
         )
 
     @skip_if_lt_x_gpu(1)
@@ -535,6 +656,7 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
             backward_prefetch=None,
             full_precision_param_dtype=torch.float64,
             sharding_strategy=ShardingStrategy.FULL_SHARD,
+            sharded_grad_scaler=False,
         )
 
 instantiate_parametrized_tests(TestFSDPMixedPrecisionSharded)
