@@ -930,6 +930,10 @@ def main() -> None:
         import traceback
         traceback.print_exc()
 
+    msg = f"@pytorchbot successfully started a {'revert' if args.revert else 'merge'} job."
+    msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
+    gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
+
     if args.revert:
         try:
             try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id, reason=args.reason)
