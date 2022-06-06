@@ -1,10 +1,17 @@
 #include <ATen/Dispatch.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/TensorIndexing.h>
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/ops/sparse_coo_tensor.h>
 #include <c10/util/ArrayRef.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/sparse_coo_tensor.h>
+#endif
 
 namespace at {
 namespace native {

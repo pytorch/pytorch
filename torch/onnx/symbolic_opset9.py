@@ -8,7 +8,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import Optional
+from typing import List, Optional
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -361,6 +361,8 @@ def atan(g, self):
     return g.op("Atan", self)
 
 
+# Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qsigmoid.cpp
+@symbolic_helper.quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
@@ -1029,6 +1031,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
 
 
 def _max_pool(name, tuple_fn, ndims, return_indices):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "is", "i")
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if set(tuple_fn(dilation)) != {1}:
@@ -2376,13 +2379,9 @@ def exp(g, self):
 @symbolic_helper.parse_args("v", "f", "i")
 def dropout(g, input, p, train):
     symbolic_helper.check_training_mode(train, "dropout")
-    # in eval mode, dropout is non-op - if the node's train param is set to False, dropout is non-op
+    # if train is False, dropout is no-op
     if not train:
         return input
-    warnings.warn(
-        "Dropout is a training op and should not be exported in inference mode. "
-        "For inference, make sure to call eval() on the model and to export it with param training=False."
-    )
     r, _ = g.op("Dropout", input, ratio_f=p, outputs=2)
     return r
 
@@ -3889,7 +3888,7 @@ def scatter_add(g, self, dim, index, src):
 
 def log2(g, self):
     _ln2 = 0.693147180559945309
-    return g.op("Div", log(g, self), g.op("Constant", value_t=torch.tensor([_ln2])))
+    return g.op("Div", log(g, self), g.op("Constant", value_t=torch.tensor(_ln2)))
 
 
 def is_floating_point(g, self):
@@ -4961,7 +4960,12 @@ class Prim:
         return None
 
     @staticmethod
-    def ListUnpack(g, *inputs, **kwargs):
+    def ListUnpack(g, *inputs, **kwargs) -> Optional[List[_C.Value]]:
+        if len(inputs) == 1 and inputs[0].node().kind() == "prim::ListConstruct":
+            # Cancel the previous node if it is ListConstruct by returning its inputs
+            # TODO(justinchuby): Use a public method in the helper module
+            return symbolic_helper._unpack_list(inputs[0])
+
         return None
 
     @staticmethod
