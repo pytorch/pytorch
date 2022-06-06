@@ -220,6 +220,8 @@ jobs:
           python3 -mpip install mypy==0.960 --user
           make setup_lint
       - name: Test tools
+        env:
+          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
         run: |
           python3 -m unittest discover -vs tools/test -p 'test_*.py'
           python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
