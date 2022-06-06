@@ -122,6 +122,7 @@ struct _cuda_scatter_gather_internal_kernel {
     int64_t index_stride,
     c10::IntArrayRef index_sizes,
     c10::IntArrayRef src_sizes,
+    c10::IntArrayRef src_strides,
     int64_t numel,  // Do not use `const` qualifier here as it may cause issue in cuda 11.6.x. See #75434, #75545
     const func_t& f,
     bool index_larger_than_src = false
@@ -139,7 +140,6 @@ struct _cuda_scatter_gather_internal_kernel {
     char* src_ptr = (char*)iter.data_ptr(1);
     char* index_ptr = (char*)iter.data_ptr(2);
 
-    auto src_strides = iter.strides(1);
     auto index_strides = iter.strides(2);
     auto ndim = iter.ndim();
 
@@ -194,6 +194,7 @@ struct cuda_scatter_gather_base_kernel {
 
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
+    auto index_strides_vec = ensure_nonempty_vec(index.strides().vec());
     auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
@@ -250,7 +251,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, index_sizes, src.sizes(), self.numel(), f, index_larger_than_src
+          iter, index_size, index_stride, index_sizes, src.sizes(), src_strides, self.numel(), f, index_larger_than_src
         );
       }
     );
@@ -266,6 +267,7 @@ struct cuda_scatter_gather_base_kernel {
 
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
+    auto index_strides_vec = ensure_nonempty_vec(index.strides().vec());
     auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
@@ -322,7 +324,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, index_sizes, src.sizes(), self.numel(), f, index_larger_than_src
+          iter, index_size, index_stride, index_sizes, src.sizes(), src_strides, self.numel(), f, index_larger_than_src
         );
       }
     );
@@ -339,6 +341,7 @@ struct cuda_scatter_gather_base_kernel {
 
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
+    auto index_strides_vec = ensure_nonempty_vec(index.strides().vec());
     auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
@@ -395,7 +398,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, index_sizes, src.sizes(), self.numel(), f, index_larger_than_src
+          iter, index_size, index_stride, index_sizes, src.sizes(), src_strides, self.numel(), f, index_larger_than_src
         );
       }
     );
