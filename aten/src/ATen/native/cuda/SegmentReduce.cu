@@ -295,17 +295,15 @@ Tensor _segment_reduce_cuda_lengths_offsets_backward_kernel(
   int64_t lengths_stride_axis = lengths_or_offsets_contig.stride(axis);
   auto grad_input = at::zeros({data_contig.sizes()}, grad_contig.options());
 
-  Tensor offsets;
-  Tensor lengths;
+  auto offsets = lengths_or_offsets_contig;
+  auto lengths = lengths_or_offsets_contig;
   if (is_offsets_like) {
-    offsets = lengths_or_offsets_contig;
-    lengths = offsets.diff();
+    lengths = lengths.diff();
   } else {
-    lengths = lengths_or_offsets_contig;
     // _get_complete_sum only supports 1D
-    auto zeros_shape = lengths.sizes().vec();
+    auto zeros_shape = offsets.sizes().vec();
     zeros_shape[axis] = 1;
-    offsets = at::cat({at::zeros(zeros_shape, lengths.options()), lengths}, axis);
+    offsets = at::cat({at::zeros(zeros_shape, offsets.options()), offsets}, axis);
     offsets.cumsum_(axis);
   }
 
@@ -402,16 +400,15 @@ Tensor _segment_reduce_cuda_kernel(
   auto output = at::empty(output_shape, data.options());
 
 
-  Tensor offsets, lengths;
+  auto offsets = lengths_or_offsets;
+  auto lengths = lengths_or_offsets;
   if (is_offsets_like) {
-    offsets = lengths_or_offsets;
-    lengths = offsets.diff();
+    lengths = lengths.diff();
   } else {
-    lengths = lengths_or_offsets;
     // _get_complete_sum only supports 1D
-    auto zeros_shape = lengths.sizes().vec();
+    auto zeros_shape = offsets.sizes().vec();
     zeros_shape[axis] = 1;
-    offsets = at::cat({at::zeros(zeros_shape, lengths.options()), lengths}, axis);
+    offsets = at::cat({at::zeros(zeros_shape, offsets.options()), offsets}, axis);
     offsets.cumsum_(axis);
   }
 
