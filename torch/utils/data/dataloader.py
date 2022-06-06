@@ -18,7 +18,6 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as multiprocessing
 import torch.utils.data.graph_settings
-import torch.distributed as dist
 
 from torch._utils import ExceptionWrapper
 from torch._six import string_classes
