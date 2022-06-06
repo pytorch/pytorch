@@ -19673,7 +19673,10 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', dtypes=(torch.complex64, torch.complex128,)),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                dtypes=(torch.complex64, torch.complex128,)
+            ),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -19894,7 +19897,10 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', dtypes=(torch.complex64, torch.complex128,)),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                dtypes=(torch.complex64, torch.complex128,)
+            ),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -19905,7 +19911,10 @@ python_ref_db = [
             # Test doesn't account for float -> double type promotion
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
             # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', dtypes=(torch.complex64, torch.complex128,)),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                dtypes=(torch.complex64, torch.complex128,)
+            ),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -19980,7 +19989,10 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', dtypes=(torch.complex64, torch.complex128,)),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                dtypes=(torch.complex64, torch.complex128,)
+            ),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -19989,7 +20001,10 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', dtypes=(torch.complex64, torch.complex128,)),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                dtypes=(torch.complex64, torch.complex128,)
+            ),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -19998,7 +20013,10 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', dtypes=(torch.complex64, torch.complex128,)),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                dtypes=(torch.complex64, torch.complex128,)
+            ),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20031,7 +20049,10 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', dtypes=(torch.complex64, torch.complex128,)),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                dtypes=(torch.complex64, torch.complex128,)
+            ),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20040,7 +20061,10 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', dtypes=(torch.complex64, torch.complex128,)),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                dtypes=(torch.complex64, torch.complex128,)
+            ),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20054,7 +20078,10 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', dtypes=(torch.complex64, torch.complex128,)),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                dtypes=(torch.complex64, torch.complex128,)
+            ),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20077,7 +20104,10 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', dtypes=(torch.complex64, torch.complex128,)),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                dtypes=(torch.complex64, torch.complex128,)
+            ),
         ),
     ),
     #

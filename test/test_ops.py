@@ -505,7 +505,7 @@ class TestCommon(TestCase):
 
         # nvFuser tests are rather slow so we only run int32 and float32 types
         if executor == "nvfuser" and dtype not in [torch.int32, torch.float32]:
-            raise unittest.SkipTest(f"skipped for speed")
+            raise unittest.SkipTest("skipped for speed")
 
         if executor == "nvfuser" and not op.supports_nvfuser:
             raise unittest.SkipTest(f"{op.name} doesn't support nvfuser")

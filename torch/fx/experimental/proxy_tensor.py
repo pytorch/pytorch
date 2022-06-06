@@ -177,7 +177,10 @@ def wrap_key(f, inps):
         for idx, arg in enumerate(flat_args):
             if isinstance(flat_inps[idx], torch.Tensor):
                 with no_dispatch():
-                    flat_args[idx] = ProxyTensor(flat_inps[idx], arg, requires_grad=flat_inps[idx].is_leaf and flat_inps[idx].requires_grad)
+                    flat_args[idx] = ProxyTensor(
+                        flat_inps[idx], arg,
+                        requires_grad=flat_inps[idx].is_leaf and flat_inps[idx].requires_grad
+                    )
             else:
                 flat_args[idx] = flat_inps[idx]
 
