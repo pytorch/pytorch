@@ -167,6 +167,7 @@ def leaky_relu(
     return torch.where(torch.gt(a, 0), a, torch.mul(a, negative_slope))
 
 
+@register_decomposition(torch.ops.aten.mish)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -178,8 +179,7 @@ def mish(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
 
     if inplace:
         raise NotImplementedError
-
-    return refs.mul(a, refs.tanh(refs.nn.functional.softplus(a)))
+    return a * torch.tanh(torch.nn.functional.softplus(a))
 
 
 @elementwise_type_promotion_wrapper(
@@ -197,12 +197,13 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     alpha = 1.6732632423543772848170429916717
     scale = 1.0507009873554804934193349852946
 
-    rhs = refs.mul(alpha, refs.expm1(a))
+    rhs = alpha * torch.expm1(a)
 
-    return refs.mul(scale, refs.where(refs.gt(a, 0), a, rhs))
+    return scale * torch.where(a > 0, a, rhs)
 
 
 # softplus is implemented specially because it has beta and threshold arguments
+@register_decomposition(torch.ops.aten.softplus)
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -229,13 +230,13 @@ def softplus(
                 type(beta), python_type
             )
             raise ValueError(msg)
-        scaled_input = refs.mul(a, beta)
-        rhs = refs.true_divide(refs.log1p(refs.exp(scaled_input)), beta)
+        scaled_input = a * beta
+        rhs = torch.true_divide(torch.log1p(torch.exp(scaled_input)), beta)
     else:
         scaled_input = a
-        rhs = refs.log1p(refs.exp(scaled_input))
+        rhs = torch.log1p(torch.exp(scaled_input))
 
-    return refs.where(refs.gt(scaled_input, threshold), a, rhs)
+    return torch.where(scaled_input > threshold, a, rhs)
 
 
 # Losses
