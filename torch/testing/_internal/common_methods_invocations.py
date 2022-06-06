@@ -2221,11 +2221,11 @@ def generate_elementwise_binary_with_scalar_samples(
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
     )
 
-    scalar_shapes = ((), (3,), (5, 3), (0, 1, 3), (1, 5))
+    shapes = ((), (3,), (5, 3), (0, 1, 3), (1, 5))
     if op.supports_rhs_python_scalar:
-        for scalar_shape in scalar_shapes:
-            lhs = make_arg(scalar_shape, **op.lhs_make_tensor_kwargs)
-            rhs = make_arg(scalar_shape, **op.rhs_make_tensor_kwargs)
+        for shape in shapes:
+            lhs = make_arg(shape, **op.lhs_make_tensor_kwargs)
+            rhs = make_arg(shape, **op.rhs_make_tensor_kwargs)
             lhs_scalar = make_arg((), **op.lhs_make_tensor_kwargs).item()
             rhs_scalar = make_arg((), **op.rhs_make_tensor_kwargs).item()
 
@@ -2241,6 +2241,26 @@ def generate_elementwise_binary_with_scalar_samples(
 
         yield SampleInput(lhs_scalar, args=(rhs_scalar,))
 
+# Returns a generator of pairs of contiguous tensors and 0d tensos and scalars and type promotion
+def generate_elementwise_binary_with_scalar_and_type_promotion_samples(
+    op, *, device, dtype, requires_grad=False
+):
+    # add these samples only for logical and comparison ops, arithmetic ops are not happy about extremal scalars
+    if op.name in ('eq', 'ne', 'gt', 'ge', 'lt', 'le', 'logical_and', 'logical_or', 'logical_xor'):
+        make_arg = partial(
+            make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        )
+        shape = (23,)  # this shape is big enough to trigger vectorization, and has non-vectorized tail
+        values = (float('nan'), float('inf'), -float('inf'))
+        scalar_tensors = tuple(torch.tensor(val) for val in values)
+        if op.supports_rhs_python_scalar:
+            lhs = make_arg(shape, **op.lhs_make_tensor_kwargs)
+            rhs = make_arg(shape, **op.rhs_make_tensor_kwargs)
+            for scalar in values + scalar_tensors:
+                yield SampleInput(lhs, args=(scalar,))
+                # Extends with scalar lhs
+                if op.supports_one_python_scalar:
+                    yield SampleInput(scalar, args=(rhs,))
 
 # Returns a generator of pairs of noncontiguous tensors
 def generate_elementwise_binary_noncontiguous_tensors(
@@ -2402,6 +2422,10 @@ def _reference_inputs_elementwise_binary(op, device, dtype, requires_grad, exclu
             op, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
         )
     yield from generate_elementwise_binary_with_scalar_samples(
+        op, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
+    yield from generate_elementwise_binary_with_scalar_and_type_promotion_samples(
         op, device=device, dtype=dtype, requires_grad=requires_grad
     )
 
@@ -11314,14 +11338,11 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_scatter),
     BinaryUfuncInfo('eq',
+                    ref=np.equal,
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
                     always_returns_bool=True,
                     supports_autograd=False,
-                    sample_inputs_func=sample_inputs_comparison_ops,
-                    skips=(
-                        # https://github.com/pytorch/pytorch/issues/76805
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-                    )),
+                    sample_inputs_func=sample_inputs_comparison_ops),
     BinaryUfuncInfo('fmax',
                     op=torch.fmax,
                     dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -11916,6 +11937,7 @@ op_db: List[OpInfo] = [
                                     active_if=IS_WINDOWS),
                    )),
     BinaryUfuncInfo('ge',
+                    ref=np.greater_equal,
                     aliases=('greater_equal',),
                     dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
                     always_returns_bool=True,
@@ -11932,6 +11954,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
            )),
     BinaryUfuncInfo('gt',
+                    ref=np.greater,
                     aliases=('greater',),
                     dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
                     always_returns_bool=True,
@@ -12001,6 +12024,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_kthvalue,
            error_inputs_func=error_inputs_kthvalue),
     BinaryUfuncInfo('le',
+                    ref=np.less_equal,
                     aliases=('less_equal',),
                     dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
                     always_returns_bool=True,
@@ -12505,6 +12529,7 @@ op_db: List[OpInfo] = [
                                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
                    )),
     BinaryUfuncInfo('lt',
+                    ref=np.less,
                     aliases=('less',),
                     dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
                     always_returns_bool=True,
@@ -13293,15 +13318,17 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_fwgrad_bwgrad", dtypes=(torch.float64,)),
         ),
     ),
-    OpInfo('nn.functional.relu',
-           aten_name="relu",
-           supports_autograd=True,
-           dtypes=all_types_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_nn_activation_relu,
-           supports_out=False,
-           supports_fwgrad_bwgrad=True,
-           supports_forward_ad=True),
+    UnaryUfuncInfo(
+        'nn.functional.relu',
+        aten_name="relu",
+        ref=lambda a: np.where(a <= 0, 0, a),
+        supports_autograd=True,
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=sample_inputs_nn_activation_relu,
+        supports_out=False,
+        supports_fwgrad_bwgrad=True,
+        supports_forward_ad=True),
     OpInfo('nn.functional.conv_transpose1d',
            aten_name='conv_transpose1d',
            aliases=('conv_transpose1d',),
@@ -14727,14 +14754,11 @@ op_db: List[OpInfo] = [
                  ),
                  sample_kwargs=lambda device, dtype, input: ({'p': 5}, {'d': 5})),
     BinaryUfuncInfo('ne',
+                    ref=np.not_equal,
                     aliases=('not_equal',),
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
                     always_returns_bool=True,
-                    supports_autograd=False,
-                    skips=(
-                        # https://github.com/pytorch/pytorch/issues/76805
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-                    )),
+                    supports_autograd=False),
     OpInfo('narrow',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            supports_out=False,
@@ -19376,6 +19400,12 @@ def _inherit_constructor_args(name, op, inherited, overrides):
     kwargs.update(common_kwargs)
     kwargs.update(overrides)
 
+    kwargs['supports_autograd'] = False
+    kwargs['supports_gradgrad'] = False
+    kwargs['supports_fwgrad_bwgrad'] = False
+    kwargs['supports_inplace_autograd'] = False
+    kwargs['supports_forward_ad'] = False
+
     return kwargs
 
 class PythonRefInfo(OpInfo):
@@ -19707,6 +19737,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.relu",
+        torch_opinfo_name="nn.functional.relu",
         decorators=(
             # Need FakeTensor support for meta coverage
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
@@ -19974,6 +20008,14 @@ python_ref_db = [
         torch_opinfo_name="column_stack",
     ),
     PythonRefInfo(
+        "_refs.dsplit",
+        torch_opinfo_name="dsplit",
+    ),
+    PythonRefInfo(
+        "_refs.dstack",
+        torch_opinfo_name="dstack",
+    ),
+    PythonRefInfo(
         "_refs.flatten",
         torch_opinfo_name="flatten",
     ),
@@ -20014,11 +20056,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.stack",
         torch_opinfo_name="stack",
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/77046
-            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
-            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-        ),
     ),
     PythonRefInfo(
         "_refs.squeeze",
@@ -20041,10 +20078,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.t",
         torch_opinfo_name="t",
-        decorators=(
-            # Need FakeTensor support for meta coverage
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
-        ),
     ),
     PythonRefInfo(
         "_refs.unsqueeze",
@@ -20116,8 +20149,6 @@ python_ref_db = [
         "_refs.addr",
         torch_opinfo_name="addr",
         decorators=(
-            # RuntimeError: no _refs support for torch.outer
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
         ),
     ),
