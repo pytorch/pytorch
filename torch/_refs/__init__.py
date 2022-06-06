@@ -188,6 +188,7 @@ __all__ = [
     "flip",
     "fliplr",
     "flipud",
+    "hstack",
     "narrow",
     "permute",
     "reshape",
@@ -201,6 +202,7 @@ __all__ = [
     "transpose",
     "unsqueeze",
     "view",
+    "vstack"
     #
     # Tensor Creation
     #
@@ -1692,7 +1694,7 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
 
 @out_wrapper
 def dstack(tensors: TensorSequenceType) -> TensorLikeType:
-    aligned_tensors = tuple(x if x.ndim > 2 else atleast_3d(x) for x in tensors)
+    aligned_tensors = atleast_3d(*tensors)
     return cat(aligned_tensors, 2)
 
 
@@ -1997,8 +1999,8 @@ def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
 @out_wrapper
 def hstack(tensors: TensorSequenceType) -> TensorLikeType:
-    check(len(tensors) > 0, "hstack expects a non-empty TensorList")
-    aligned_tensors = tuple(x if x.ndim > 0 else atleast_1d(x) for x in tensors)
+    check(len(tensors) > 0, lambda: "hstack expects a non-empty TensorList")
+    aligned_tensors = atleast_1d(*tensors)
     if aligned_tensors[0].ndim == 1:
         return cat(aligned_tensors, 0)
     return cat(aligned_tensors, 1)
@@ -2006,8 +2008,8 @@ def hstack(tensors: TensorSequenceType) -> TensorLikeType:
 
 @out_wrapper
 def vstack(tensors: TensorSequenceType) -> TensorLikeType:
-    check(len(tensors) > 0, "vstack expects a non-empty TensorList")
-    aligned_tensors = tuple(x if x.ndim > 1 else atleast_2d(x) for x in tensors)
+    check(len(tensors) > 0, lambda: "vstack expects a non-empty TensorList")
+    aligned_tensors = atleast_2d(*tensors)
     return cat(aligned_tensors, 0)
 
 
