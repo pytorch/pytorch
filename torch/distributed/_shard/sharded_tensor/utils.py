@@ -15,6 +15,8 @@ from .metadata import TensorProperties, ShardedTensorMetadata
 from .shard import Shard
 
 def _parse_and_validate_remote_device(pg, remote_device):
+    if remote_device is None:
+        raise ValueError("remote device is None")
 
     worker_name = remote_device.worker_name()
     rank = remote_device.rank()

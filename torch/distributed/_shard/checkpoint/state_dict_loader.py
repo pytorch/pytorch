@@ -34,24 +34,23 @@ from .storage import (
 
 from .api import CheckpointException
 
-def _create_shard_metadata(size: torch.Size, device: str) -> ShardMetadata:
+def _create_shard_metadata(size: torch.Size) -> ShardMetadata:
     rank = dist.get_rank() if dist.is_initialized() else 0
     return ShardMetadata(
         shard_offsets=[0] * len(size),
         shard_sizes=list(size),
-        placement=f"rank:{rank}/{device}"
     )
 
 def _create_shard_for(tensor: Tensor) -> Shard:
     return Shard(
         tensor=tensor,
-        metadata=_create_shard_metadata(tensor.size(), str(tensor.device))
+        metadata=_create_shard_metadata(tensor.size()),
     )
 
 def _create_checkpoint_shard_for(storage: TensorStorageMetadata) -> ShardStorageMetadata:
     return ShardStorageMetadata(
         # The metadata device is not used during loading.
-        shard_metadata=_create_shard_metadata(storage.size, "cpu"),
+        shard_metadata=_create_shard_metadata(storage.size),
         storage_key=storage.storage_key,
     )
 
