@@ -1177,14 +1177,6 @@ void initJITBindings(PyObject* module) {
           [](py::object obj) -> std::shared_ptr<c10::SymbolicIntNode> {
             return std::make_shared<PythonSymbolicIntNode>(obj);
           })
-      .def_static(
-          "cast_to_shared_ptr",
-          [](py::object obj) {
-            std::cerr << "torch::is_symint_node(obj) = " << obj << std::endl;
-            auto n = obj.cast<std::shared_ptr<c10::SymbolicIntNode>>();
-            std::cerr << "symint for " << n->toSymInt() << std::endl;
-            // return false;
-          })
       .def(
           "__add__",
           [](std::shared_ptr<c10::SymbolicIntNode> a,
