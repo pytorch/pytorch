@@ -216,9 +216,9 @@ private:
 };
 
 struct StoreWithCastVariant {
-#define DEFINE_CASE(index) std::unique_ptr<memory::StoreWithCast<index>>,
+#define DEFINE_CASE(index) std::unique_ptr<memory::StoreWithCast<index>>
   using StoreWithCastPtr = c10::variant<
-    AT_FOR_8_CASES(DEFINE_CASE)
+    AT_FOR_8_CASES_WITH_COMMA(DEFINE_CASE)
   >;
 #undef DEFINE_CASE
 
