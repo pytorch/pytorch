@@ -145,8 +145,8 @@ __all__ = [
     #
     # Conditional references
     #
-    "where",
     "masked_fill",
+    "where",
     #
     # Data conversion and movement references
     #
