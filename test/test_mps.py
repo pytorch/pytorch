@@ -3154,6 +3154,23 @@ class TestNLLLoss(TestCase):
         for shape in [[], (2, 3), (2, 8, 4, 5)]:
             for alpha in [0.000001, 1.0, 2.3, 0.34, 23]:
                 helper(shape, alpha)
+
+    # Test softplus
+
+    def test_softplus(self):
+        def helper(shape):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            softplus_result = torch.nn.Softplus(beta=0.5, threshold=0.5)(x)
+            softplus_result_cpu = torch.nn.Softplus(beta=0.5, threshold=0.5)(cpu_x)
+
+            self.assertEqual(softplus_result, softplus_result_cpu)
+
+        # Test empty shape too
+        for shape in [(), (2, 3), (10, 10), (2, 3, 4, 5)]:
+            helper(shape)
+
     # Test silu
 
     def test_silu(self):
