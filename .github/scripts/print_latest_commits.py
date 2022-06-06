@@ -5,7 +5,7 @@ from gitutils import _check_output
 from rockset import Client, ParamDict  # type: ignore[import]
 import os
 
-class workflowCheck(NamedTuple):
+class WorkflowCheck(NamedTuple):
     workflowName: str
     name: str
     jobName: str
@@ -54,7 +54,7 @@ def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, A
     workflow_checks = []
     for check in results['results']:
         if check['sha'] == commit:
-            workflow_checks.append(workflowCheck(
+            workflow_checks.append(WorkflowCheck(
                 workflowName=check['workflowName'],
                 name=check['name'],
                 jobName=check['jobName'],
@@ -62,7 +62,7 @@ def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, A
             )._asdict())
     return workflow_checks
 
-def isGreen(results: List[workflowCheck]) -> bool:
+def isGreen(results: List[Dict[str, Any]]) -> bool:
     return True
 
 def main() -> None:

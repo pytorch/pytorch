@@ -1,12 +1,12 @@
 from unittest import TestCase, main, mock
 from typing import Any, List, Dict
-from print_latest_commits import isGreen, workflowCheck
+from print_latest_commits import isGreen, WorkflowCheck
 
 class TestChecks:
     def make_test_checks(self) -> List[Dict[str, Any]]:
         workflow_checks = []
         for i in range(20):
-            workflow_checks.append(workflowCheck(
+            workflow_checks.append(WorkflowCheck(
                 workflowName="test",
                 name="test/job",
                 jobName="job",
