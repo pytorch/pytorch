@@ -413,29 +413,13 @@ class TestCommon(TestCase):
                     exact_layout=True,
                     exact_is_coalesced=True,
                 )
-            except AssertionError:
-                # see issue #78389:
-                # https://github.com/pytorch/pytorch/issues/78389
-                torch_sample = clone_sample(sample)
-                torch_result = op.torch_opinfo(torch_sample.input, *torch_sample.args, **torch_sample.kwargs)
+            except AssertionError as e:
+                # Raises the error if the precise dtype comparison wouldn't be
+                # different
+                if dtype is precise_dtype:
+                    raise e
 
-                try:
-                    self.assertEqual(
-                        ref_result,
-                        torch_result,
-                        exact_stride=False,
-                        exact_device=True,
-                        exact_layout=True,
-                        exact_is_coalesced=True,
-                    )
-
-                except AssertionError as e:
-                    # Raises the error if the precise dtype comparison wouldn't be
-                    # different
-                    if dtype is precise_dtype:
-                        raise e
-
-                    ex = e
+                ex = e
 
             # Goes to next sample if these results are close
             if not ex:

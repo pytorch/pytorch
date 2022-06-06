@@ -21,7 +21,8 @@ def make_tensor(
     high: Optional[float] = None,
     requires_grad: bool = False,
     noncontiguous: bool = False,
-    exclude_zero: bool = False
+    exclude_zero: bool = False,
+    custom_tiny: float = None
 ) -> torch.Tensor:
     r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
     values uniformly drawn from ``[low, high)``.
@@ -151,10 +152,12 @@ def make_tensor(
         if dtype in _integral_types or dtype is torch.bool:
             replace_with = torch.tensor(1, device=device, dtype=dtype)
         elif dtype in _floating_types:
-            replace_with = torch.tensor(torch.finfo(dtype).tiny, device=device, dtype=dtype)
+            tiny = custom_tiny if custom_tiny else torch.finfo(dtype).tiny
+            replace_with = torch.tensor(tiny, device=device, dtype=dtype)
         else:  # dtype in _complex_types:
             float_dtype = complex_to_corresponding_float_type_map[dtype]
-            float_eps = torch.tensor(torch.finfo(float_dtype).tiny, device=device, dtype=float_dtype)
+            tiny = custom_tiny if custom_tiny else torch.finfo(float_dtype).tiny
+            float_eps = torch.tensor(tiny, device=device, dtype=float_dtype)
             replace_with = torch.complex(float_eps, float_eps)
         result[result == 0] = replace_with
 
