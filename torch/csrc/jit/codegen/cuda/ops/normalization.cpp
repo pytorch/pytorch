@@ -461,11 +461,11 @@ ForwardNormResult batch_norm(
       auto var_hat = mul(running_var, rev_momentum);
       auto new_var_hat = add(var_hat, current_var_hat);
 
-      // when inputs have been casted by parser. We want to alias the output to
-      // the pre-casted input, so we can still update running stats
+      // when inputs have been cast by parser. We want to alias the output to
+      // the pre-cast input, so we can still update running stats
       auto cast_to_input_dtype = [fusion](
-                                     Val* casted_input, Val* aliased_output) {
-        auto unary_op = casted_input->definition();
+                                     Val* cast_input, Val* aliased_output) {
+        auto unary_op = cast_input->definition();
         TORCH_INTERNAL_ASSERT(
             unary_op->isA<UnaryOp>() &&
                 unary_op->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Cast,
@@ -478,9 +478,9 @@ ForwardNormResult batch_norm(
         TORCH_INTERNAL_ASSERT(
             rm_dtype.has_value(),
             "Input running stats must have dtype defined");
-        auto casted_output = castOp(*rm_dtype, aliased_output);
+        auto cast_output = castOp(*rm_dtype, aliased_output);
 
-        fusion->aliasOutputToInput(casted_output, input_to_cast);
+        fusion->aliasOutputToInput(cast_output, input_to_cast);
       };
 
       if (running_mean->isFusionInput()) {

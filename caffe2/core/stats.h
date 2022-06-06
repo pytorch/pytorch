@@ -348,6 +348,7 @@ _ScopeGuard<T> ScopeGuard(T f) {
         stats.field.groupName.c_str(),                              \
         __caffe_event_value_,                                       \
         ##__VA_ARGS__);                                             \
+    (void)__caffe_event_value_;                                     \
   }
 
 #define CAFFE_DURATION(stats, field, ...)                        \

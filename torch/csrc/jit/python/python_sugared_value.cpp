@@ -327,9 +327,21 @@ SugaredValuePtr ModuleValue::getitem(
           loc, m, idx, type_hint);
     }
   } else if (
-      concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
+      concreteType_->getIterableModuleKind() == IterableModuleKind::PARAMLIST) {
+    return getSugaredNamedParameterList(loc, m)->getModules()->getitem(
+        loc, m, idx, type_hint);
+  } else if (
+      concreteType_->getIterableModuleKind() == IterableModuleKind::DICT ||
+      concreteType_->getIterableModuleKind() == IterableModuleKind::PARAMDICT) {
     if (auto ivalue = toIValue(idx)) {
-      auto sd = getSugaredDict(loc, m);
+      std::shared_ptr<SugaredDict> sd;
+      if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
+        sd = getSugaredDict(loc, m);
+      } else if (
+          concreteType_->getIterableModuleKind() ==
+          IterableModuleKind::PARAMDICT) {
+        sd = getSugaredNamedParameterDict(loc, m);
+      }
       auto idx_str = ivalue->toStringRef();
       auto keys_iter = sd->keys_;
       auto module_values_iter = sd->modules_;
@@ -364,7 +376,8 @@ SugaredValuePtr ModuleValue::getitem(
         << "Enumeration of ModuleDict is supported, e.g. 'for k, v in self.items(): ...'";
   }
   throw ErrorReport(loc)
-      << "Only ModuleList, Sequential, and ModuleDict modules are subscriptable";
+      << "Only ModuleList, Sequential, ModuleDict, "
+      << "ParameterList, and ParameterDict modules are subscriptable";
 }
 
 void checkInterface(
@@ -443,6 +456,34 @@ std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedBufferDict(
       std::make_shared<SugaredTupleValue>(values));
 }
 
+std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedParameterList(
+    const SourceRange& loc,
+    GraphFunction& m) {
+  std::vector<std::string> paramNames;
+  std::vector<SugaredValuePtr> values;
+
+  const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
+  for (size_t i = 0; i < selfType->numAttributes(); ++i) {
+    if (selfType->is_parameter(i)) {
+      paramNames.push_back(selfType->getAttributeName(i));
+    }
+  }
+
+  std::vector<SugaredValuePtr> keys;
+  for (const auto& name : paramNames) {
+    auto name_v =
+        std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
+    m.graph()->insertGetAttr(self_, name);
+    values.push_back(tryGetAttr(loc, m, name));
+    keys.push_back(name_v);
+  }
+
+  return std::make_shared<SugaredDict>(
+      std::make_shared<ModuleValue>(self_, concreteType_),
+      std::make_shared<SugaredTupleValue>(keys),
+      std::make_shared<SugaredTupleValue>(values));
+}
+
 std::shared_ptr<SugaredDict> ModuleValue::getSugaredDict(
     const SourceRange& loc,
     GraphFunction& m) {
@@ -466,6 +507,35 @@ std::shared_ptr<SugaredDict> ModuleValue::getSugaredDict(
 
     keys.push_back(name_v);
     values.push_back(mod_v);
+  }
+
+  return std::make_shared<SugaredDict>(
+      std::make_shared<ModuleValue>(self_, concreteType_),
+      std::make_shared<SugaredTupleValue>(keys),
+      std::make_shared<SugaredTupleValue>(values));
+}
+
+std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedParameterDict(
+    const SourceRange& loc,
+    GraphFunction& m) {
+  std::vector<std::string> paramNames;
+  const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
+  for (size_t i = 0; i < selfType->numAttributes(); ++i) {
+    if (selfType->is_parameter(i)) {
+      paramNames.push_back(selfType->getAttributeName(i));
+    }
+  }
+
+  std::vector<SugaredValuePtr> keys;
+  std::vector<SugaredValuePtr> values;
+  for (const auto& name : paramNames) {
+    auto name_v =
+        std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
+    m.graph()->insertGetAttr(self_, name);
+    auto val = tryGetAttr(loc, m, name);
+    TORCH_INTERNAL_ASSERT(val != nullptr, "Could not find attribute ", name);
+    values.push_back(val);
+    keys.push_back(name_v);
   }
 
   return std::make_shared<SugaredDict>(
@@ -796,13 +866,18 @@ SugaredValuePtr ModuleValue::iter(const SourceRange& loc, GraphFunction& m) {
   const auto iterableModuleKind = concreteType_->getIterableModuleKind();
   if (iterableModuleKind == IterableModuleKind::NONE) {
     throw ErrorReport(loc)
-        << "Only constant Sequential, ModueList, or ModuleDict can be used as an iterable";
+        << "Only constant Sequential, ModuleList, ModuleDict, or "
+        << "ParameterList can be used as an iterable";
   }
 
-  auto module_dict = getSugaredDict(loc, m);
   if (iterableModuleKind == IterableModuleKind::DICT) {
+    auto module_dict = getSugaredDict(loc, m);
     return module_dict->keys_;
   } else if (iterableModuleKind == IterableModuleKind::LIST) {
+    auto module_dict = getSugaredDict(loc, m);
+    return module_dict->modules_;
+  } else if (iterableModuleKind == IterableModuleKind::PARAMLIST) {
+    auto module_dict = getSugaredNamedParameterList(loc, m);
     return module_dict->modules_;
   } else {
     TORCH_INTERNAL_ASSERT(false);
