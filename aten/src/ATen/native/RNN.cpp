@@ -5,7 +5,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
@@ -21,7 +21,6 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
     bool is_miopen_acceptable = ((input.scalar_type() == at::kFloat)|| (input.scalar_type() == at::kHalf)) &&
                                 (detail::getCUDAHooks().compiledWithMIOpen()) &&
                                 (input.is_cuda()) &&
-                                (dropout_state == 0.0) &&
                                 (at::globalContext().userEnabledCuDNN());
     return is_miopen_acceptable;
 }
@@ -1118,6 +1117,18 @@ bool _use_cudnn_rnn_flatten_weight() {
   return detail::getCUDAHooks().compiledWithCuDNN();
 }
 
+// NB: This a (composite) wrapper for _thnn_fused_lstm_cell_backward_impl.
+//     It duplicates the outputs of this function so the non-composite verison doesn't have to.
+//     The point is so that we avoid triggering TensorImpl use count asserts in debug mode
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
+      const Tensor& cx, const Tensor& cy,
+      const Tensor& workspace, bool has_bias) {
+  TORCH_INTERNAL_ASSERT(!GradMode::is_enabled());
+  auto ret = at::_thnn_fused_lstm_cell_backward_impl(grad_hy_opt, grad_cy_opt, cx, cy, workspace, has_bias);
+  return std::make_tuple(std::get<0>(ret), std::get<0>(ret), std::get<1>(ret), std::get<2>(ret), std::get<2>(ret));
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // PUBLIC FUNCTIONS
 ////////////////////////////////////////////////////////////////////////////////
@@ -1377,6 +1388,14 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
             num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
+#ifdef USE_MPS
+  if (_input.is_mps() && !bidirectional) {
+    std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> output = at::_lstm_mps(_input, hx, _params, has_biases,
+            num_layers, dropout_p, train, bidirectional, batch_first);
+    std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(std::get<0>(output), std::get<1>(output), std::get<2>(output));
+    return return_values;
+  }
+#endif
   // if cells are of different size, that means projections are used
   bool has_projections = (hx[0].size(2) != hx[1].size(2));
   if (use_miopen(_input, dropout_p)) {
@@ -1833,7 +1852,7 @@ DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple_hx_typ
 
 namespace {
 
-static auto ensure_linear_params_registered = register_linear_params();
+static C10_UNUSED auto ensure_linear_params_registered = register_linear_params();
 
 static auto cell_params_base_registry =
     torch::selective_class_<CellParamsBase>("rnn", TORCH_SELECTIVE_CLASS("CellParamsBase"))
