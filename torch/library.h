@@ -66,7 +66,6 @@
 // Just for inferFunctionSchemaFromFunctor
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/enum_tag.h>
-#include <c10/util/Optional.h>
 
 namespace torch {
 
@@ -600,7 +599,7 @@ class TORCH_API Library final {
   template <typename Schema>
   Library& def(Schema&& raw_schema, const std::vector<at::Tag>& tags = {}) & {
     c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema));
-    return _def(std::move(s), nullptr, std::move(tags));
+    return _def(std::move(s), nullptr, tags);
   }
   /// Define an operator for a schema and then register an implementation for
   /// it.  This is typically what you would use if you aren't planning
