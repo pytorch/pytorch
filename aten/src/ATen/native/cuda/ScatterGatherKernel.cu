@@ -251,7 +251,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, index_sizes, src.sizes(), src_strides, self.numel(), f, index_larger_than_src
+          iter, index_size, index_stride, index_sizes, src_sizes, src_strides, self.numel(), f, index_larger_than_src
         );
       }
     );
@@ -324,7 +324,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, index_sizes, src.sizes(), src_strides, self.numel(), f, index_larger_than_src
+          iter, index_size, index_stride, index_sizes, src_sizes, src_strides, self.numel(), f, index_larger_than_src
         );
       }
     );
@@ -398,7 +398,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, index_sizes, src.sizes(), src_strides, self.numel(), f, index_larger_than_src
+          iter, index_size, index_stride, index_sizes, src_sizes, src_strides, self.numel(), f, index_larger_than_src
         );
       }
     );
