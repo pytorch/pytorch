@@ -18901,7 +18901,7 @@ op_db: List[OpInfo] = [
         error_inputs_func=error_inputs_hinge_embedding_loss,
         reference_inputs_func=reference_inputs_hinge_embedding_loss,
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+            # DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
         )
     ),
     OpInfo(

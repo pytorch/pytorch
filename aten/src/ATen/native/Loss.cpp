@@ -139,7 +139,13 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
 
 Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double margin, int64_t reduction) {
   auto zeros = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto margin_clamp = (margin - self).clamp_min_(0);
+  auto margin_diff = (margin - self);
+  // For Composite Compliance,
+  // In Forward AD, if `self` is a CCT but its tangent isn't,
+  // using inplace clamp_min doesn't work.
+  auto margin_clamp = self._fw_grad(/*level*/ 0).defined()
+      ? margin_diff.clamp_min(0)
+      : margin_diff.clamp_min_(0);
   auto output_margin = at::where(target != 1, margin_clamp, zeros);
   auto output_self = at::where(target != -1, self, zeros);
   auto output = output_margin + output_self;
