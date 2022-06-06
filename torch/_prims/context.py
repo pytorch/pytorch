@@ -6,7 +6,6 @@ import torch
 import torch.overrides
 
 from torch._prims.utils import torch_function_passthrough
-import torch._refs as refs
 
 import torch._refs
 import torch._refs.nn
@@ -14,19 +13,6 @@ import torch._refs.nn.functional
 import torch._refs.special
 
 import torch._prims
-
-
-# TODO:  automap torch operations to references
-# (need to throw a good assertion if the mapping doesn't exist)
-_torch_to_reference_map = {
-    torch.add: refs.add,
-    # torch.div: refs.div,
-    torch.mul: refs.mul,
-    torch.ge: refs.ge,
-    torch.gt: refs.gt,
-    torch.le: refs.le,
-    torch.lt: refs.lt,
-}
 
 
 @functools.lru_cache(None)
@@ -45,6 +31,11 @@ def torch_to_refs_map():
     for mod_torch, mod_refs in modules:
         for s in mod_refs.__all__:  # type: ignore[attr-defined]
             r[mod_torch.__dict__.get(s)] = mod_refs.__dict__.get(s)
+
+    # Support remapping torch.Tensor.foo to _refs.foo
+    for s in dir(torch.Tensor):
+        if s in torch._refs.__all__:
+            r[getattr(torch.Tensor, s)] = torch._refs.__dict__.get(s)
     return r
 
 
