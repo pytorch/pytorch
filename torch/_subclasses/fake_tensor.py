@@ -206,7 +206,6 @@ class FakeTensor(torch.Tensor):
         # elem does not need to be recorded, because FakeTensor *is a* elem
         assert elem.device.type == "meta"
         device = device if isinstance(device, torch.device) else torch.device(device)
-        assert device.type != "meta"
         self.fake_device = device
 
     @staticmethod
