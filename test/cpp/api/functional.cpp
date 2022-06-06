@@ -917,15 +917,21 @@ TEST_F(FunctionalTest, ELU) {
     for (const auto alpha : {0.0, 0.42, 1.0, 4.2, 42.42}) {
       auto x = torch::linspace(-10.0, 10.0, size * size * size);
       x.resize_({size, size, size});
+      auto x_bf16 = torch::linspace(-10.0, 10.0, size * size * size).to(torch::kBFloat16);
+      x_bf16.resize_({size, size, size});
+
       auto y_exp = torch::max(torch::zeros_like(x), x) +
                 torch::min(torch::zeros_like(x), alpha * (torch::exp(x) - 1.0));
       auto y = F::elu(x, F::ELUFuncOptions().alpha(alpha).inplace(inplace));
+      auto y_bf16 = F::elu(x_bf16, F::ELUFuncOptions().alpha(alpha).inplace(inplace));
 
       ASSERT_EQ(y.ndimension(), 3);
       ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
       ASSERT_TRUE(torch::allclose(y, y_exp));
+      ASSERT_TRUE(torch::allclose(y_bf16.to(torch::kFloat), y, 1e-2, 1e-2));
       if (inplace) {
         ASSERT_TRUE(torch::allclose(x, y_exp));
+        ASSERT_TRUE(torch::allclose(x_bf16.to(torch::kFloat), y, 1e-2, 1e-2));
       }
     }
   }
@@ -938,15 +944,19 @@ TEST_F(FunctionalTest, SELU) {
     const double alpha = 1.6732632423543772848170429916717;
     for (const auto inplace : {false, true}) {
       auto input = torch::randn({5, 5});
+      auto input_bf16 = input.clone().to(torch::kBFloat16);
       auto expected = scale *
           (torch::max(torch::zeros_like(input), input) +
            torch::min(
                torch::zeros_like(input), alpha * (torch::exp(input) - 1)));
       auto output = F::selu(input, inplace);
+      auto output_bf16 = F::selu(input_bf16, inplace);
 
       ASSERT_TRUE(output.allclose(expected));
+      ASSERT_TRUE(output_bf16.to(torch::kFloat).allclose(output, 1e-2, 1e-2));
       if (inplace) {
         ASSERT_TRUE(input.allclose(expected));
+        ASSERT_TRUE(input_bf16.to(torch::kFloat).allclose(output, 1e-2, 1e-2));
       }
     }
   }
@@ -1535,15 +1545,19 @@ TEST_F(FunctionalTest, CELU) {
     for (const auto alpha : {0.42, 1.0, 4.2, 42.42}) {
       auto x = torch::linspace(-10.0, 10.0, size * size * size);
       x.resize_({size, size, size});
+      auto x_bf16 = x.clone().to(torch::kBFloat16);
       auto y_exp = torch::max(torch::zeros_like(x), x) +
         torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
       auto y = F::celu(x, F::CELUFuncOptions().alpha(alpha).inplace(inplace));
+      auto y_bf16 = F::celu(x_bf16, F::CELUFuncOptions().alpha(alpha).inplace(inplace));
 
       ASSERT_EQ(y.ndimension(), 3);
       ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
       ASSERT_TRUE(torch::allclose(y, y_exp));
+      ASSERT_TRUE(torch::allclose(y_bf16.to(torch::kFloat), y, 1e-2, 1e-2));
       if (inplace) {
         ASSERT_TRUE(torch::allclose(x, y_exp));
+        ASSERT_TRUE(torch::allclose(x_bf16.to(torch::kFloat), y, 1e-2, 1e-2));
       }
     }
   }
@@ -1555,13 +1569,16 @@ TEST_F(FunctionalTest, CELUDefaultOptions) {
   const auto alpha = 1.0;
   auto x = torch::linspace(-10.0, 10.0, size * size * size);
   x.resize_({size, size, size});
+  auto x_bf16 = x.clone().to(torch::kBFloat16);
   auto y_exp = torch::max(torch::zeros_like(x), x) +
     torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
   auto y = F::celu(x);
+  auto y_bf16 = F::celu(x_bf16);
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
   ASSERT_TRUE(torch::allclose(y, y_exp));
+  ASSERT_TRUE(torch::allclose(y_bf16.to(torch::kFloat), y, 1e-2, 1e-2));
 }
 
 TEST_F(FunctionalTest, PixelShuffle) {

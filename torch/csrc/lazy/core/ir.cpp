@@ -19,10 +19,20 @@ hash_t Output::hash() const {
   return HashCombine(node->hash(), Hash(index));
 }
 
+hash_t Output::shapeHash() const {
+  return HashCombine(node->shapeHash(), Hash(index));
+}
+
 std::string Output::ToString() const {
   std::stringstream ss;
   ss << node->ToString() << ", index=" << index;
   return ss.str();
+}
+
+bool Output::operator==(const Value& rhs) const {
+  // Either side could be kNullValue which has node as nullptr
+  return (!node == !rhs.node) && (!node ||
+      (node->hash() == rhs.node->hash() && index == rhs.index));
 }
 
 hash_t Value::hash() const {
@@ -138,7 +148,7 @@ std::string Node::ToString() const {
 
 void Node::AddOperand(NodePtr node, size_t index) {
   CHECK_LT(index, node->num_outputs());
-  operands_.push_back(std::move(node));
+  operands_.push_back(node);
   operands_as_outputs_.emplace_back(operands_.back().get(), index);
 }
 

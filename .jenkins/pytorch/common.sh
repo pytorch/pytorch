@@ -25,6 +25,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
   export PYTORCH_TEST_WITH_ROCM=1
   # temporary to locate some kernel issues on the CI nodes
   export HSAKMT_DEBUG_LEVEL=4
+  # improve rccl performance for distributed tests
+  export HSA_FORCE_FINE_GRAIN_PCIE=1
 fi
 
 # This token is used by a parser on Jenkins logs for determining
@@ -133,12 +135,8 @@ if [ -z "$COMPACT_JOB_NAME" ]; then
 fi
 
 # TODO: Renable libtorch testing for MacOS, see https://github.com/pytorch/pytorch/issues/62598
-if [[ "$BUILD_ENVIRONMENT" == *linux-trusty-py3.6-gcc7* ]]; then
-  BUILD_TEST_LIBTORCH=1
-else
-  # shellcheck disable=SC2034
-  BUILD_TEST_LIBTORCH=0
-fi
+# shellcheck disable=SC2034
+BUILD_TEST_LIBTORCH=0
 
 # Use conda cmake in some CI build. Conda cmake will be newer than our supported
 # min version (3.5 for xenial and 3.10 for bionic),
@@ -148,7 +146,8 @@ fi
 # export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 if [[ "${TEST_CONFIG:-}" == *xla* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *centos* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *linux-bionic* ]]; then
+   [[ "$BUILD_ENVIRONMENT" == *linux-bionic* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *linux-focal* ]]; then
   if ! which conda; then
     echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
     exit 1

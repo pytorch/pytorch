@@ -32,8 +32,8 @@ TORCH_META_FUNC(topk)
   if (topKSize.size() > 0) {
     topKSize[dim] = k;
   }
-  set_output(0, topKSize, self.options());
-  set_output(1, topKSize, self.options().dtype(at::kLong));
+  set_output_raw_strided(0, topKSize, {}, self.options());
+  set_output_raw_strided(1, topKSize, {}, self.options().dtype(at::kLong));
 }
 
 TORCH_META_FUNC2(sort, stable)
@@ -50,8 +50,8 @@ TORCH_META_FUNC2(sort, stable)
       ? self.strides().vec()
       : at::infer_dense_strides(self.sizes(), self.strides());
 
-  set_output(0, self.sizes(), strides, self.options(), {});
-  set_output(1, self.sizes(), strides, self.options().dtype(kLong), {});
+  set_output_raw_strided(0, self.sizes(), strides, self.options(), {});
+  set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(kLong), {});
 }
 
 } // namespace meta
@@ -888,13 +888,20 @@ TORCH_IMPL_FUNC(sort_stable_out)
  bool descending,
  const Tensor& values,
  const Tensor& indices) {
-  values.copy_(self);
   // check if self is scalar
   if (self.dim() == 0 && self.numel() == 1) {
+    values.copy_(self);
     indices.zero_();
   } else {
-    dim = maybe_wrap_dim(dim, self.dim());
-    sort_stub(self.device().type(), self, values, indices, dim, descending, stable.value());
+    // compare on acc type for reduced precision
+    if (self.scalar_type() == kBFloat16) {
+      Tensor values_acc = self.toType(kFloat);
+      sort_stub(self.device().type(), self, values_acc, indices, dim, descending, stable.value());
+      values.copy_(values_acc);
+    } else {
+      values.copy_(self);
+      sort_stub(self.device().type(), self, values, indices, dim, descending, stable.value());
+    }
   }
 }
 
