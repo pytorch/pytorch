@@ -4071,7 +4071,7 @@ def error_inputs_hstack_dstack_vstack(op, device):
         tensors = (make_arg(s1,), make_arg(s2,), make_arg(s3))
         # Different dimension tensor
         yield ErrorInput(SampleInput(tensors), error_regex="Tensors must have same number of dimensions")
-    
+
     # empty tensor list
     yield ErrorInput(SampleInput(()), error_regex="expects a non-empty TensorList")
 
