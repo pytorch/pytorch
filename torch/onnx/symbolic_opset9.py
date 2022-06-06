@@ -4765,6 +4765,9 @@ def movedim(g, self, source, destination):
 
     assert source.size() == destination.size()
 
+    if (source == destination).all():
+        return self
+
     self_rank = symbolic_helper._get_tensor_rank(self)
 
     perm = list(range(self_rank))
