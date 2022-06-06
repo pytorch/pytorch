@@ -87,6 +87,10 @@ jobs:
           # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
           # does not support the '\u000a' syntax (which is relevant for local linters)
           (! git --no-pager grep -In "$(printf '\xC2\xA0')" -- . || (echo "The above lines have non-breaking spaces (U+00A0); please convert them to spaces (U+0020)"; false))
+      - name: Ensure cross-OS compatible file names
+        if: always()
+        run: |
+          (! git ls-files | grep -E '([<>:"|?*]|[ .]$)' || (echo "The above file names are not valid across all operating systems. Please ensure they don't contain the characters '<>:""|?*' and don't end with a white space or a '.' "; false))
       - name: Ensure no versionless Python shebangs
         if: always()
         run: |
@@ -213,7 +217,7 @@ jobs:
           pip3 install typing-extensions==3.10 --user
           pip3 install -r requirements-flake8.txt --user
           python3 -mpip install -r requirements.txt --user
-          python3 -mpip install mypy==0.812 --user
+          python3 -mpip install mypy==0.960 --user
           make setup_lint
       - name: Test tools
         run: |
