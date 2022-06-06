@@ -31,7 +31,7 @@ class NnapiBackend : public PyTorchBackendInterface {
   c10::impl::GenericDict compile(
       c10::IValue processed,
       c10::impl::GenericDict method_compile_spec) override {
-    // Wrap procesed in dictionary: {"forward": processed}
+    // Wrap processed in dictionary: {"forward": processed}
     auto dict = processed.toGenericDict();
     c10::Dict<c10::IValue, c10::IValue> handles(
         c10::StringType::get(), c10::AnyType::get());
@@ -64,7 +64,7 @@ class NnapiBackend : public PyTorchBackendInterface {
     auto inp_mem_fmts = dict.at("inp_mem_fmts").toIntList();
     TORCH_CHECK(tensorInp.size() == inp_mem_fmts.size());
     std::vector<at::Tensor> fixed_inputs;
-    for (int i = 0; i < tensorInp.size(); i++) {
+    for (auto i = 0U; i < tensorInp.size(); i++) {
       int fmt = inp_mem_fmts[i];
       // These constants match the values in DimOrder in serializer.py
       // 0: NCHW, 1: NHWC
@@ -84,7 +84,7 @@ class NnapiBackend : public PyTorchBackendInterface {
     // Adjust output memory formats
     auto out_mem_fmts = dict.at("out_mem_fmts").toIntList();
     TORCH_CHECK(outputs.size() == out_mem_fmts.size());
-    for (int i = 0; i < outputs.size(); i++) {
+    for (auto i = 0U; i < outputs.size(); i++) {
       int fmt = out_mem_fmts[i];
       // These constants match the values in DimOrder in serializer.py
       // 0: NCHW, 1: NHWC

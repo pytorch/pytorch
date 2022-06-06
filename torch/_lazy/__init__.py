@@ -20,3 +20,14 @@ def wait_device_ops(devices=None):
     if devices is None:
         devices = []
     torch._C._lazy._wait_device_ops(devices=devices)
+
+def sync_multi(tensors, devices):
+    """
+    Sync the list of lazy tensors so there IR get lowered for the activate backend
+    and the compiled computation graph get cached.
+    """
+    torch._C._lazy._sync_multi(tensors, devices)
+
+def get_tensor_id(tensor):
+    """Return a unique id of the lazy tensor maintained by LTC"""
+    return torch._C._lazy._get_tensor_id(tensor)

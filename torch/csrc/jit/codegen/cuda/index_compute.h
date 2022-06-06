@@ -60,6 +60,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+class ContigIDs;
+
 class IndexCompute : public BackwardVisitor {
  protected:
   using BackwardVisitor::handle;
@@ -69,7 +71,7 @@ class IndexCompute : public BackwardVisitor {
   void handle(Expr*) override;
 
   // return extent_map_[id] if exists, else return id->extent()
-  Val* getExtent(IterDomain* id);
+  Val* getExtent(IterDomain* id) const;
 
   //! True if a domain is not used to index
   bool isZero(IterDomain* id) const;
@@ -103,7 +105,10 @@ class IndexCompute : public BackwardVisitor {
   std::unordered_set<IterDomain*> zero_merged_in_;
 
   // IDs that are a result of contiguous merges
-  std::unordered_set<IterDomain*> contig_ids;
+  std::unordered_set<IterDomain*> contig_ids_;
+
+  // Map from root to indexed domains
+  std::unordered_map<IterDomain*, IterDomain*> root_to_indexed_id_;
 
   // Mentions if we should propagate an index down a particular IterDomain path
   // if there's an option
@@ -130,6 +135,10 @@ class IndexCompute : public BackwardVisitor {
     return zero_merged_in_;
   }
 
+  const std::unordered_map<IterDomain*, IterDomain*>& rootToContigID() const {
+    return root_to_indexed_id_;
+  }
+
   // Propagate back from _td using initial_index_map
   IndexCompute(
       const TensorDomain* _td,
@@ -137,7 +146,16 @@ class IndexCompute : public BackwardVisitor {
       std::unordered_map<IterDomain*, Val*> _extent_map,
       std::unordered_set<IterDomain*> zero_domains,
       std::unordered_set<IterDomain*> _zero_merged_in,
-      const std::vector<bool>& _root_contiguity,
+      std::unordered_set<IterDomain*> preferred_paths = {},
+      std::unordered_map<IterDomain*, Val*> reference_halo_extent_map = {});
+
+  IndexCompute(
+      const TensorDomain* _td,
+      std::unordered_map<IterDomain*, Val*> initial_index_map,
+      std::unordered_map<IterDomain*, Val*> _extent_map,
+      std::unordered_set<IterDomain*> zero_domains,
+      std::unordered_set<IterDomain*> _zero_merged_in,
+      const ContigIDs& contig_finder,
       std::unordered_set<IterDomain*> preferred_paths = {},
       std::unordered_map<IterDomain*, Val*> reference_halo_extent_map = {});
 
@@ -146,9 +164,9 @@ class IndexCompute : public BackwardVisitor {
   IndexCompute updateIndexCompute(
       const TensorDomain* new_td,
       const std::unordered_map<IterDomain*, IterDomain*>& id_map,
-      const std::vector<bool>& _root_contiguity,
+      const ContigIDs& contig_finder,
       const std::unordered_map<IterDomain*, Val*>& reference_halo_extent_map =
-          {});
+          {}) const;
 
   virtual void run();
 };

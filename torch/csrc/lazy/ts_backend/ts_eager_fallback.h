@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
@@ -16,6 +17,11 @@ void ts_eager_fallback(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
     c10::DeviceType device_type);
+
+// The TorchScript backend does not register itself with pytorch dispatcher
+// until it is explicitly initialized.  This function should only be called
+// by the main Torchscript backend init function.
+void register_ts_ltc_eager_fallback();
 
 } // namespace lazy
 } // namespace torch

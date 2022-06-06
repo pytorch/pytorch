@@ -14,10 +14,9 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM)
+    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
-
 
 # List of all namespaces containing modules to test.
 MODULE_NAMESPACES: List[ModuleType] = [
@@ -32,7 +31,6 @@ MODULES_TO_SKIP: Set[Type] = {
     torch.nn.Module,  # abstract base class
     torch.nn.Container,  # deprecated
     torch.nn.NLLLoss2d,  # deprecated
-    torch.nn.quantized.modules._ConvNd,  # abstract base class
     torch.nn.quantized.MaxPool2d,  # aliases to nn.MaxPool2d
 }
 
@@ -995,21 +993,29 @@ rnn_gru_lstm_module_info_decorators = (
 module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.AdaptiveAvgPool2d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-               module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool2d),
+               module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool2d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.AvgPool1d,
                module_inputs_func=module_inputs_torch_nn_AvgPool1d,
                skips=(
                    # No channels_last support for AvgPool1d as it does not take 4D inputs
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.BatchNorm2d,
                module_inputs_func=module_inputs_torch_nn_BatchNorm2d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=(
                    # Failure on ROCM for BatchNorm2d float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),)
                ),
     ModuleInfo(torch.nn.BatchNorm3d,
                module_inputs_func=module_inputs_torch_nn_BatchNorm3d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=(
                    # Failure on ROCM for BatchNorm3d float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),)
@@ -1023,6 +1029,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64])
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1036,6 +1043,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1049,6 +1057,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=8005), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1062,6 +1071,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1075,6 +1085,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1088,17 +1099,22 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=8005), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
                )),
     ModuleInfo(torch.nn.ELU,
-               module_inputs_func=module_inputs_torch_nn_ELU),
+               module_inputs_func=module_inputs_torch_nn_ELU,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.L1Loss,
                module_inputs_func=module_inputs_torch_nn_L1Loss,
                skips=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.LazyConv1d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=True),
@@ -1112,6 +1128,7 @@ module_db: List[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1121,6 +1138,7 @@ module_db: List[ModuleInfo] = [
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # channels_last support on cuda requires cudnn >= 7603
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
@@ -1144,6 +1162,7 @@ module_db: List[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1160,6 +1179,7 @@ module_db: List[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1176,6 +1196,7 @@ module_db: List[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1192,6 +1213,7 @@ module_db: List[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1199,6 +1221,7 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear,
                skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # No channels_last support for Linear currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
@@ -1212,6 +1235,7 @@ module_db: List[ModuleInfo] = [
                        'TestModule', 'test_forward', device_type='cpu')
                ],
                skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # No channels_last support for Bilinear currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
@@ -1222,72 +1246,105 @@ module_db: List[ModuleInfo] = [
                    # return_indices=True for MaxPool2D), submit fix
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_non_contiguous_tensors'),
                    # TODO: test_cpu_gpu_parity doesn't handle case where output is not a singleton, submit fix
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.NLLLoss,
                module_inputs_func=module_inputs_torch_nn_NLLLoss,
                skips=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.GaussianNLLLoss,
                module_inputs_func=module_inputs_torch_nn_GaussianNLLLoss,
                skips=(
                    # No channels_last support for loss functions.
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)),
     ModuleInfo(torch.nn.CrossEntropyLoss,
-               module_inputs_func=module_inputs_torch_nn_CrossEntropyLoss),
+               module_inputs_func=module_inputs_torch_nn_CrossEntropyLoss,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.Hardswish,
                module_inputs_func=module_inputs_torch_nn_Hardswish,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                supports_gradgrad=False),
     ModuleInfo(torch.nn.TransformerEncoderLayer,
                module_inputs_func=module_inputs_torch_nn_TransformerEncoderLayer,
                skips=(
                    # No channels_last support for TransformerEncoderLayer currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.TransformerDecoderLayer,
                module_inputs_func=module_inputs_torch_nn_TransformerDecoderLayer,
                skips=(
                    # No channels_last support for TransformerDecoderLayer currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.Transformer,
                module_inputs_func=module_inputs_torch_nn_Transformer,
                skips=(
                    # No channels_last support for Transformer currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.MultiheadAttention,
                module_inputs_func=module_inputs_torch_nn_MultiheadAttention,
                skips=(
                    # No channels_last support for MultiheadAttention currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.Embedding,
                module_inputs_func=module_inputs_torch_nn_Embedding,
                skips=(
-                   # No channels_last support for Embedding.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.ReLU,
-               module_inputs_func=module_inputs_torch_nn_ReLU),
+               module_inputs_func=module_inputs_torch_nn_ReLU,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.RNNCell,
-               module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True)),
+               module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True),
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.GRUCell,
-               module_inputs_func=module_inputs_torch_nn_RNN_GRU_Cell),
+               module_inputs_func=module_inputs_torch_nn_RNN_GRU_Cell,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.LSTMCell,
-               module_inputs_func=module_inputs_torch_nn_LSTMCell),
+               module_inputs_func=module_inputs_torch_nn_LSTMCell,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.Sigmoid,
-               module_inputs_func=module_inputs_torch_nn_Sigmoid),
+               module_inputs_func=module_inputs_torch_nn_Sigmoid,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.RNN,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=True),
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators
                ),
     ModuleInfo(torch.nn.GRU,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=False),
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.LSTM,
                module_inputs_func=module_inputs_torch_nn_LSTM,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators)
 ]

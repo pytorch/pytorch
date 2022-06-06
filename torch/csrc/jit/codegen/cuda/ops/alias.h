@@ -16,10 +16,17 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+TORCH_CUDA_CU_API TensorView* view(TensorView* x, DataType dtype);
+
 TORCH_CUDA_CU_API TensorView* view(
     TensorView* x,
     const std::vector<int64_t>& original_sizes,
     const std::vector<int64_t>& new_sizes);
+
+TORCH_CUDA_CU_API TensorView* flatten(
+    TensorView* x,
+    int64_t start_dim = 0,
+    int64_t end_dim = -1);
 
 TORCH_CUDA_CU_API TensorView* squeeze(
     TensorView* x,

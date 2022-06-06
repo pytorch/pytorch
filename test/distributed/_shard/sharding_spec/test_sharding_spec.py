@@ -320,6 +320,22 @@ class TestShardingSpec(TestCase):
 
         shards_metadata = [
             ShardMetadata(
+                shard_offsets=[0],
+                shard_sizes=[16],
+                placement="cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[16],
+                shard_sizes=[9],
+                placement="cuda:1",
+            )
+        ]
+        spec = _infer_sharding_spec_from_shards_metadata(shards_metadata)
+        self.assertTrue(isinstance(spec, EnumerableShardingSpec))
+        self.assertEqual(spec.shards, shards_metadata)
+
+        shards_metadata = [
+            ShardMetadata(
                 shard_offsets=[0, 0],
                 shard_sizes=[5, 5],
                 placement="rank:0/cuda:0",

@@ -4,8 +4,7 @@
 ${lazy_ir_sysinc}
 ${lazy_ir_inc}
 
-namespace torch {
-namespace lazy {
+${namespace_prologue}
 using at::operator<<;
 
 // kNullValue is used to contribute a static hash value any time
@@ -17,5 +16,4 @@ static const torch::lazy::Value kNullValue = torch::lazy::Value();
 
 ${ir_declarations}
 
-} // namespace lazy
-} // namespace torch
+${namespace_epilogue}
