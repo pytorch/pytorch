@@ -11,21 +11,13 @@ class WorkflowCheck(NamedTuple):
     jobName: str
     conclusion: str
 
-rs = rockset.Client(
-    api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-)
-qlambda = rs.QueryLambda.retrieve(
-    'commit_jobs_batch_query',
-    version='15aba20837ae9d75',
-    workspace='commons')
-
 def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Print latest commits")
     parser.add_argument("--minutes", type=int, default=30, help="duration in minutes of last commits")
     return parser.parse_args()
 
-def print_latest_commits(minutes: int = 30) -> None:
+def print_latest_commits(qlambda: Any, minutes: int = 30) -> None:
     current_time = datetime.now()
     time_since = current_time - timedelta(minutes=minutes)
     timestamp_since = datetime.timestamp(time_since)
@@ -69,7 +61,14 @@ def isGreen(results: List[Dict[str, Any]]) -> bool:
 
 def main() -> None:
     args = parse_args()
-    print_latest_commits(args.minutes)
+    rs = rockset.Client(
+        api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+    )
+    qlambda = rs.QueryLambda.retrieve(
+        'commit_jobs_batch_query',
+        version='15aba20837ae9d75',
+        workspace='commons')
+    print_latest_commits(qlambda, args.minutes)
 
 if __name__ == "__main__":
     main()
