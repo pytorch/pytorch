@@ -2661,7 +2661,7 @@ const auto spherical_bessel_j1_string = jiterator_stringify(
             return T(0.0);
         }
 
-        if (abs(x) < T(3.1) * std::numeric_limits<T>::min()) {
+        if (abs(x) < T(3.1) * T(2.2250738585072014e-308) {
             return NAN;
         }
 
