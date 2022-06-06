@@ -184,10 +184,10 @@ class StreamWrapper:
         else:
             # Traverve only simple structures
             if isinstance(v, dict):
-                for vv in v:
+                for vv in v.items():
                     cls.close_streams(vv, depth=depth + 1)
             elif isinstance(v, list) or isinstance(v, tuple):
-                for kk, vv in v.items():
+                for kk, vv in v:
                     cls.close_streams(vv, depth=depth + 1)
 
     def __getattr__(self, name):
