@@ -2,7 +2,7 @@ from typing import Any, Dict, List, NamedTuple
 from datetime import datetime, timedelta
 from gitutils import _check_output
 
-from rockset import Client, ParamDict  # type: ignore[import]
+import rockset  # type: ignore[import]
 import os
 
 class WorkflowCheck(NamedTuple):
@@ -11,7 +11,9 @@ class WorkflowCheck(NamedTuple):
     jobName: str
     conclusion: str
 
-rs = Client(api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"])
+rs = rockset.Client(
+    api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+)
 qlambda = rs.QueryLambda.retrieve(
     'commit_jobs_batch_query',
     version='15aba20837ae9d75',
@@ -37,7 +39,7 @@ def print_latest_commits(minutes: int = 30) -> None:
         encoding="ascii",
     ).splitlines()
 
-    params = ParamDict()
+    params = rockset.ParamDict()
     params['shas'] = ",".join(commits)
     results = qlambda.execute(parameters=params)
 
