@@ -5,6 +5,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/api/OpProfiler.h>
+#include <ATen/native/vulkan/ops/Copy.h>
 #include <c10/util/irange.h>
 
 // TODO: These functions should move to a common place.
@@ -13,7 +14,6 @@ namespace {
 
 bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
   float maxValue = 0.0f;
-
   for (const auto& tensor : inputs) {
     maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
   }
@@ -27,7 +27,21 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
   return diff.abs().max().item<float>() <= (tolerance * maxValue);
 }
 
+
+bool checkRtolInt(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
+  float maxValue = 0.0f;
+  for (const auto& tensor : inputs) {
+    maxValue = fmax(tensor.abs().max().item<int>(), maxValue);
+  }
+
+  return diff.abs().max().item<float>() <= (1 * maxValue);
+}
+
 bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
+  if (a.dtype() == c10::ScalarType::QUInt8) {
+    return checkRtolInt(a-b, {a,b});
+  }
+
   return checkRtol(a - b, {a, b});
 }
 
@@ -1390,6 +1404,8 @@ TEST_F(VulkanAPITest, threshold) {
     return;
   }
 
+
+
   const auto in_cpu = at::rand({1, 2, 3, 4}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
   const auto in_vulkan = in_cpu.vulkan();
 
@@ -1407,6 +1423,57 @@ TEST_F(VulkanAPITest, threshold) {
   }
 
   ASSERT_TRUE(check);
+}
+
+
+TEST_F(VulkanAPITest, threshold_alt) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const double scale = 1.0;
+  const int64_t zero_point = 2;
+  auto in_cpu = at::rand({1, 2, 3, 4}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
+  auto in_cpu_quantized = at::quantize_per_tensor(in_cpu, scale, zero_point, c10::ScalarType::QUInt8);
+
+
+
+  auto in_cpu_copy = at::rand({1, 2, 3, 4}, at::device(at::kCPU).dtype(at::kFloat))*11 - 6;
+  auto in_cpu_quantized_copy = at::quantize_per_tensor(in_cpu_copy, scale, zero_point, c10::ScalarType::QUInt8);
+
+  auto in_vulkan = at::empty({1,2,3,4}, at::device(at::kCPU)).vulkan();
+
+  in_vulkan = at::native::vulkan::ops::copy_(in_vulkan, in_cpu_quantized);
+  //auto in_cpu_quantized_copy = at::empty({1, 2, 3, 4}, at::device(at::kCPU).dtype(at::kQUInt8));
+  in_cpu_quantized_copy = at::native::vulkan::ops::copy_(in_cpu_quantized_copy, in_vulkan);
+
+  //std::cout << "cpu : " << in_cpu << std::endl;
+  std::cout << "cpu q: " << in_cpu_quantized << std::endl;
+  std::cout << "cpu q copy : " << in_cpu_quantized_copy << std::endl;
+
+  //const auto check = almostEqual(in_cpu_quantized_copy.float(), in_cpu_quantized.float());
+  //ASSERT_TRUE(check);
+  //std::cout << "Calling vulkan transfer" << std::endl;
+  //const auto in_vulkan = in_cpu_quantized.vulkan();
+
+
+/*
+  const float threshold = 2.0f;
+  const float value = 5.0f;
+
+  const auto out_cpu = at::threshold(in_cpu_quantized, threshold, value);
+  const auto out_vulkan = at::threshold(in_vulkan, threshold, value);
+  std::cout << "cpu : " << out_cpu << std::endl;
+  std::cout << "vulk : " << out_vulkan.cpu() << std::endl;
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  //std::cout << "cpu : " << out_cpu << std::endl;
+  //std::cout << "vulk : " << out_vulkan.cpu() << std::endl;
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+*/
 }
 
 TEST_F(VulkanAPITest, hardswish_) {
@@ -2369,6 +2436,7 @@ TEST_F(VulkanAPITest, cat_dim1_mult4ch_nonmult4ch_success) {
 
   ASSERT_TRUE(check);
 }
+
 
 TEST_F(VulkanAPITest, cat_dim2_sameheight_success) {
   // Guard

@@ -223,6 +223,7 @@ struct Resource final {
       VkImageLayout layout;
       VkImageView view;
       VkSampler sampler;
+      VkFormat format;
 
       operator bool() const;
     };
@@ -243,6 +244,7 @@ struct Resource final {
 
     Object object;
     Memory memory;
+    Descriptor descriptor;
 
     operator bool() const;
   };
