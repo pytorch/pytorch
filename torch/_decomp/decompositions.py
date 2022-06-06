@@ -136,12 +136,6 @@ def hardsigmoid_backward(grad_output: Tensor, self: Tensor):
     )
 
 
-@register_decomposition(aten.hardtanh)
-@pw_cast_for_opmath
-def hardtanh(self: Tensor, min_val: float = -1, max_val: float = 1) -> Tensor:
-    return torch.clamp(self, min_val, max_val)
-
-
 @register_decomposition(aten.hardtanh_backward)
 @pw_cast_for_opmath
 def hardtanh_backward(
@@ -448,6 +442,23 @@ def _nll_loss_backward(
 
     return grad_input * grad_output
 
+
+@register_decomposition(aten.glu_backward)
+@pw_cast_for_opmath
+def glu_backward(grad_output: Tensor, self: Tensor, dim: int) -> Tensor:
+    assert self.dim() > 0, "glu does not support 0-dimensional tensors"
+    wrap_dim = utils.canonicalize_dim(self.dim(), dim)
+    nIn = self.size(wrap_dim)
+    assert nIn % 2 == 0, f"Halving dimension must be even, but dimension {wrap_dim} is size {nIn}"
+    inputSize = nIn // 2
+    firstHalf = self.narrow(wrap_dim, 0, inputSize)
+    secondHalf = self.narrow(wrap_dim, inputSize, inputSize)
+    gradInputFirstHalf = torch.sigmoid(secondHalf)
+    gradInputSecondHalf = (1.0 - gradInputFirstHalf) * gradInputFirstHalf * firstHalf * grad_output
+    gradInputFirstHalf = gradInputFirstHalf * grad_output
+    return torch.cat([gradInputFirstHalf, gradInputSecondHalf], dim=wrap_dim)
+
+
 @register_decomposition(aten.nll_loss_backward)
 def nll_loss_backward(
     grad_output: Tensor,
@@ -685,8 +696,8 @@ def logit_backward(
 @register_decomposition(aten.native_dropout)
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
     if train:
-        bool_mask = torch.rand_like(input) < p
-        res = bool_mask * input * float(1.0 / p)
+        bool_mask = torch.rand_like(input) > p
+        res = bool_mask * input * float(1.0 / (1.0 - p))
         return (res, bool_mask)
     else:
         return (input, torch.ones_like(input, dtype=torch.bool))
@@ -1231,11 +1242,6 @@ def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
     return torch.permute(self, perm)
 
 
-@register_decomposition(aten.t.default)
-def t(self: Tensor) -> Tensor:
-    return self.transpose(0, 0 if self.dim() < 2 else 1)
-
-
 def check_stack_inputs(tensors: List[Tensor]):
     entry_shape = tensors[0].shape
     for i in range(1, len(tensors)):
@@ -1301,3 +1307,34 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     else:
         buffer = z
     return min - torch.log1p(z), buffer
+
+# The implementation matches torch.ops.aten.norm
+# torch.ops.aten.norm only supports numeric p, does not support Frobenius norm or nuclear norm
+# For 2-norm and -2 matrix norm, it doesn't compute the singular values, it just compute the norm the same as when p > 2.
+@register_decomposition([aten.norm.Scalar, aten.norm.ScalarOpt_dim])
+@reduction_complex_to_real
+def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = False):
+    if dim is None:
+        dim = []
+
+    if p == 0:
+        return (self != 0).sum(dim, keepdim=keepdim)
+    elif p == float('inf'):
+        return self.abs().amax(dim, keepdim=keepdim)
+    elif p == -float('inf'):
+        return self.abs().amin(dim, keepdim=keepdim)
+
+    def fast_pow(x, ord):
+        if ord == 1.0:
+            return x
+        elif ord == 2.0:
+            return x.square()
+        elif ord == 0.5:
+            return x.sqrt()
+        else:
+            return x.pow(ord)
+
+    if not (p % 2.0 == 0.0 and utils.is_float_dtype(self.dtype)):
+        self = self.abs()
+
+    return fast_pow(fast_pow(self, p).sum(dim, keepdim=keepdim), 1.0 / p)
