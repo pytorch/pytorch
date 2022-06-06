@@ -154,6 +154,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "view_as",
     "roll",
     "clone",
+    "block_diag",
     "diag_embed",
     "repeat",
     "expand",
@@ -197,6 +198,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "select",
     "where",
     "as_strided",
+    "as_strided_scatter",
     "slice",
     "constant_pad_nd",
     "unbind",
@@ -332,7 +334,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "to_sparse",
     "sparse_sampled_addmm",
     "linalg_lu",
-    "linalg_lu_solve",
+    "pixel_shuffle",
+    "pixel_unshuffle",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -348,7 +351,7 @@ GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
 GRADIENT_IMPLEMENTED_FOR_COMPLEX.update(GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX)
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
-RESET_GRAD_ACCUMULATOR = {"set", "resize"}
+RESET_GRAD_ACCUMULATOR = {"set_", "resize_"}
 
 # NOTE [ TensorImpl and Storage Pointer Sanity Checks ]
 #
@@ -370,10 +373,11 @@ c10::optional<Storage> ${tensor_name}_storage_saved =
 """
 )
 
+
 # If tensor_name == out_tensor_name, used to enforce (1), otherwise used for (2)
 ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate(
     """\
-if (${tensor_name}_storage_saved.has_value())
+if (${tensor_name}_storage_saved.has_value() && !torch_dispatch_set())
   AT_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${out_tensor_name}.storage()));
 """
 )
@@ -390,7 +394,7 @@ for (const Tensor& tensor : ${tensorlist_name})
 ENFORCE_SAME_TENSORLIST_STORAGE = CodeTemplate(
     """\
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}_storage_saved[i].has_value())
+  if (${tensorlist_name}_storage_saved[i].has_value() && !torch_dispatch_set())
     AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(${tensorlist_name}[i].storage()));
 }
 """
@@ -407,7 +411,7 @@ for (const c10::optional<Tensor>& tensor : ${tensorlist_name})
 
 ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+for (size_t i=0; i<${tensorlist_name}.size() && !torch_dispatch_set(); i++) {
   if (${tensorlist_name}_storage_saved[i].has_value())
     AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(
         static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->storage()));
@@ -424,19 +428,21 @@ if (${tensor_name}.defined()) ${tensor_name}_impl_saved = ${tensor_name}.getIntr
 
 ENFORCE_SAME_TENSOR_IMPL = CodeTemplate(
     """\
-if (${tensor_name}_impl_saved) AT_ASSERT(${tensor_name}_impl_saved == ${tensor_name}.getIntrusivePtr());
+if (${tensor_name}_impl_saved && !torch_dispatch_set()) AT_ASSERT(${tensor_name}_impl_saved == ${tensor_name}.getIntrusivePtr());
 """
 )
 
 ENFORCE_TENSOR_IMPL_USE_COUNT_LT_OR_EQ_ONE = CodeTemplate(
     """\
-AT_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
+if (!torch_dispatch_set()) AT_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
 """
 )
 
 ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE = CodeTemplate(
     """\
-if (${tensor_name}.has_storage()) AT_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
+if (${tensor_name}.has_storage() && !torch_dispatch_set()) {
+  AT_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
+}
 """
 )
 
@@ -450,7 +456,7 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++)
 
 ENFORCE_SAME_TENSORLIST_IMPL = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+for (size_t i=0; i<${tensorlist_name}.size() && !torch_dispatch_set(); i++) {
   if (${tensorlist_name}_impl_saved[i])
     AT_ASSERT(${tensorlist_name}_impl_saved[i] == ${tensorlist_name}[i].getIntrusivePtr());
 }
@@ -469,7 +475,7 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 
 ENFORCE_SAME_OPTIONALTENSORLIST_IMPL = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+for (size_t i=0; i<${tensorlist_name}.size() && !torch_dispatch_set(); i++) {
   if (${tensorlist_name}_impl_saved[i])
     AT_ASSERT(${tensorlist_name}_impl_saved[i] == static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->getIntrusivePtr());
 }
@@ -496,6 +502,8 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # just in case
     "_cudnn_rnn",
     "dequantize_self",
+    # lift() should never actually be called with a requires_grad=True tensor,
+    "lift",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
@@ -503,6 +511,8 @@ DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
     "_slow_conv2d_forward",
     "slow_conv3d_forward",
     "channel_shuffle",
+    # lift() should never actually be called with a requires_grad=True tensor,
+    "lift",
     # If an input is returned as-is in output, we cannot guarantee its storage_impl
     # use count to be 1 either.
     *DONT_ENFORCE_TENSOR_IMPL_USE_COUNT,
@@ -729,7 +739,7 @@ def gen_variable_type_func(
 
         if (
             fn.info is None
-            and not get_base_name(f) in RESET_GRAD_ACCUMULATOR
+            and not str(f.func.name.name) in RESET_GRAD_ACCUMULATOR
             and not get_base_name(f) in DONT_REQUIRE_DERIVATIVE
             and len(gen_differentiable_outputs(fn)) > 0
             and not cpp.name(f.func) in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE
@@ -852,7 +862,14 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         and (len(differentiable_outputs) > 0)
     )
 
-    if info is not None and info.has_derivatives and not requires_derivative:
+    if (
+        info is not None
+        and info.has_derivatives
+        and not requires_derivative
+        # out= ops are allowed to have zero returns which cause requires_derivative to be False
+        # we shouldn't error out though (out= ops for autograd just redispatch)
+        and len(f.func.returns) > 0
+    ):
         raise RuntimeError(
             f"ERROR: derivative ignored for {name} -- specified an autograd function without derivative"
         )
@@ -1523,7 +1540,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # Save only after the forward AD has been set up
         body.append(emit_save_outputs())
 
-    if base_name in RESET_GRAD_ACCUMULATOR:
+    if str(f.func.name.name) in RESET_GRAD_ACCUMULATOR:
         # `inplace` implies that there is exactly one output named `self`,
         # so we can keep the generated code easy. If you need to
         # `reset_grad_accumulator` in an operator that's not `inplace`, you can
