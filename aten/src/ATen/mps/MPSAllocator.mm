@@ -144,12 +144,10 @@ BufferBlock* MPSHeapAllocatorImpl::get_allocated_buffer_block(void* ptr)
   return it->second;
 }
 
-bool MPSHeapAllocatorImpl::trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event) {
-    bool result = false;
-    for (const auto& name : MPSAllocatorCallbacksRegistry()->Keys()) {
-      result |= MPSAllocatorCallbacksRegistry()->Create(name)->executeMPSAllocatorCallback(buffer_block->buffer, event);
-    }
-    return result;
+void MPSHeapAllocatorImpl::trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event) {
+  for (const auto& name : MPSAllocatorCallbacksRegistry()->Keys()) {
+    MPSAllocatorCallbacksRegistry()->Create(name)->executeMPSAllocatorCallback(buffer_block->buffer, event);
+  }
 }
 
 bool MPSHeapAllocatorImpl::isSharedBuffer(void* ptr)

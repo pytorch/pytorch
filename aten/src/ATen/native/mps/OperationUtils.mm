@@ -449,17 +449,6 @@ MPSGraph* make_mps_graph() {
   return mpsGraph;
 }
 
-MPSGraphTensor* mpsGraphConstantPlaceHolder(MPSGraph *mpsGraph, const double value, MPSShape* mpsShape, MPSDataType dataType) {
-  // Bool is not handled by constantWithScalar
-  MPSGraphTensor* constPlaceHolder = [mpsGraph constantWithScalar:value
-                                                            shape:mpsShape
-                                                         dataType:(dataType == MPSDataTypeBool ? MPSDataTypeFloat32 : dataType)];
-  if (dataType == MPSDataTypeBool)
-    return [mpsGraph castTensor:constPlaceHolder toType:MPSDataTypeBool name:@"ConstantBoolTensor"];
-
-  return constPlaceHolder;
-}
-
 MPSGraphTensor* mpsGraphUnrankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType) {
   return [mpsGraph placeholderWithShape:nil
                                dataType:dataType
@@ -501,11 +490,10 @@ class MPSGraphCacheCallback : public IMpsAllocatorCallback {
 public:
   MPSGraphCacheCallback() : graph_cache(MPSGraphCache::getInstance()) { }
 
-  bool executeMPSAllocatorCallback(void* ptr, EventType event) override {
+  void executeMPSAllocatorCallback(void* ptr, EventType event) override {
     if (event == EventType::FREED || event == EventType::RELEASED) {
-      return graph_cache->FindAndRemoveViewEntry(ptr);
+      graph_cache->FindAndRemoveViewEntry(ptr);
     }
-    return false;
   }
 private:
   MPSGraphCache* graph_cache;

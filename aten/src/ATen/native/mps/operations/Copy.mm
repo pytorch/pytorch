@@ -252,7 +252,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_,
 
   auto storage_byte_offset = src_.storage_offset() * src_.itemsize();
   id<MTLBuffer> sourceBuffer = __builtin_bit_cast(id<MTLBuffer>, src_.storage().data());
-  if (src_.is_view()) {
+  if (!src_.is_contiguous()) {
     id<MTLBuffer> gatherTensor = gatherViewTensor(src_, sourceBuffer);
     if (gatherTensor) {
       sourceBuffer = gatherTensor;
