@@ -82,6 +82,13 @@ class vTensor final {
       api::Resource::Pool* pool,
       IntArrayRef sizes,
       const TensorOptions& options);
+  vTensor(
+      api::Context* context,
+      api::Resource::Pool* pool,
+      IntArrayRef sizes,
+      const TensorOptions& options,
+      double q_scale,
+      long long q_zero_point);
 
   /*
     Types
@@ -196,6 +203,8 @@ class vTensor final {
   IntArrayRef sizes() const;
   IntArrayRef strides() const;
   size_t nbytes() const;
+  double q_scale; // store scale used for quantization and dequantization
+  int q_zero_point; // store zero point used for quantization and dequantization
 
  private:
   // Some overloads below are intentionally disabled to enforce a usage pattern

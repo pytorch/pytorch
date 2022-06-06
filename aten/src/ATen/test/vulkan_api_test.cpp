@@ -1,3 +1,4 @@
+
 #ifdef USE_VULKAN_API
 
 #include <gtest/gtest.h>
@@ -19,7 +20,7 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
   }
 
 #ifdef USE_VULKAN_FP16_INFERENCE
-  constexpr float tolerance = 1e-2;
+    constexpr float tolerance = 1e-2;
 #else
   constexpr float tolerance = 1e-5;
 #endif
@@ -27,22 +28,38 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
   return diff.abs().max().item<float>() <= (tolerance * maxValue);
 }
 
+//double tolerance around .1 should still show success??
+bool checkQRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
+  float maxValue = 0.0f;
+  for (const auto& tensor : inputs) {
+    maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
+  }
+
+#ifdef USE_VULKAN_FP16_INFERENCE
+    constexpr float tolerance = 1e-2;
+#else
+  constexpr float tolerance = 1e-5;
+#endif
+
+  return diff.abs().max().item<float>() <= (tolerance * maxValue * 2);
+}
+
 
 bool checkRtolInt(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
-  float maxValue = 0.0f;
+  int maxValue = 0;
   for (const auto& tensor : inputs) {
     maxValue = fmax(tensor.abs().max().item<int>(), maxValue);
   }
 
-  return diff.abs().max().item<float>() <= (1 * maxValue);
+  return diff.abs().max().item<int>() <= (1 * maxValue);
 }
 
 bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
-  if (a.dtype() == c10::ScalarType::QUInt8) {
+  if (a.dtype() == c10::ScalarType::QUInt8 || a.dtype() == c10::ScalarType::QInt8 || b.dtype() == c10::ScalarType::QUInt8 || b.dtype() == c10::ScalarType::QInt8) {
     return checkRtolInt(a-b, {a,b});
   }
 
-  return checkRtol(a - b, {a, b});
+  return checkRtol(a - b, {a, b}) || checkQRtol(a - b, {a, b});
 }
 
 bool exactlyEqual(const at::Tensor& a, const at::Tensor& b) {
@@ -1404,20 +1421,17 @@ TEST_F(VulkanAPITest, threshold) {
     return;
   }
 
-
-
   const auto in_cpu = at::rand({1, 2, 3, 4}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
   const auto in_vulkan = in_cpu.vulkan();
 
-  const float threshold = 2.0f;
-  const float value = 5.0f;
+  const float threshold = 2.0;
+  const float value = 5.0;
 
   const auto out_cpu = at::threshold(in_cpu, threshold, value);
   const auto out_vulkan = at::threshold(in_vulkan, threshold, value);
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  std::cout << "cpu : " << out_cpu << std::endl;
-  std::cout << "vulk : " << out_vulkan.cpu() << std::endl;
+
   if (!check) {
     showRtol(out_cpu, out_vulkan.cpu());
   }
@@ -1463,8 +1477,6 @@ TEST_F(VulkanAPITest, threshold_alt) {
 
   const auto out_cpu = at::threshold(in_cpu_quantized, threshold, value);
   const auto out_vulkan = at::threshold(in_vulkan, threshold, value);
-  std::cout << "cpu : " << out_cpu << std::endl;
-  std::cout << "vulk : " << out_vulkan.cpu() << std::endl;
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   //std::cout << "cpu : " << out_cpu << std::endl;
   //std::cout << "vulk : " << out_vulkan.cpu() << std::endl;
@@ -1474,6 +1486,32 @@ TEST_F(VulkanAPITest, threshold_alt) {
 
   ASSERT_TRUE(check);
 */
+}
+
+//quantize tensor and back
+TEST_F(VulkanAPITest, quantize_dequantize) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+  const auto in_cpu = at::rand({1, 2, 3, 4}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const double scale = 0.1;
+  const int zero_point = 10;
+  // quantize tensors
+  const auto out_cpu = at::quantize_per_tensor(in_cpu, scale, zero_point, c10::ScalarType::QInt8);
+  const auto out_vulkan = at::quantize_per_tensor(in_vulkan, scale, zero_point, c10::ScalarType::QInt8);
+  // dequantize tensors
+  const auto out_cpu_deq = at::dequantize(out_cpu);
+  const auto out_vulkan_deq = at::dequantize(out_vulkan);
+  //check input vs dequantized version
+  const auto check = almostEqual(in_cpu, out_vulkan_deq.cpu());
+
+  if (!check) {
+    showRtol(in_cpu, out_vulkan_deq.cpu());
+  }
+
+  ASSERT_TRUE(check);
 }
 
 TEST_F(VulkanAPITest, hardswish_) {

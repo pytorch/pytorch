@@ -1,6 +1,6 @@
 #include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 //#include <xplat/caffe2/c10/util/quint8.h>
 //#include "gen/03598924/xplat/caffe2/c10/c10#header-mode-symlink-tree-with-header-map,headers/c10/util/qint8.h"
 
