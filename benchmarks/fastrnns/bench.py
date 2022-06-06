@@ -6,6 +6,7 @@ import sys
 import json
 import copy
 import time
+from torch.autograd.profiler import record_function
 
 from .fuser import set_fuser
 from .runner import get_nn_runners
@@ -73,7 +74,8 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
         gc.collect()
 
         fwd_start_event.record()
-        forward_output = modeldef.forward(*modeldef.inputs)
+        with record_function("## forward ##"):
+            forward_output = modeldef.forward(*modeldef.inputs)
         fwd_end_event.record()
 
         # XXX: Use if need to print something

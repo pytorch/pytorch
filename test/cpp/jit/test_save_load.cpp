@@ -27,6 +27,18 @@ Module roundtripThroughMobile(const Module& m) {
       mobilem._ivalue(), files, constants, 8);
 }
 
+template <class Functor>
+inline void expectThrowsEq(Functor&& functor, const char* expectedMessage) {
+  try {
+    std::forward<Functor>(functor)();
+  } catch (const Error& e) {
+    EXPECT_STREQ(e.what_without_backtrace(), expectedMessage);
+    return;
+  }
+  ADD_FAILURE() << "Expected to throw exception with message \""
+                << expectedMessage << "\" but didn't throw";
+}
+
 } // namespace
 
 TEST(SerializationTest, ExtraFilesHookPreference) {
@@ -236,6 +248,15 @@ TEST(TestSourceRoundTrip,
     auto refd = ref.toTensor().item<float>();
     AT_ASSERT(resd == refd);
   }
+}
+
+TEST(SerializationTest, ParentDirNotExist) {
+  expectThrowsEq(
+      []() {
+        auto t = torch::nn::Linear(5, 5);
+        torch::save(t, "./doesnotexist/file.pt");
+      },
+      "Parent directory ./doesnotexist does not exist.");
 }
 
 } // namespace jit

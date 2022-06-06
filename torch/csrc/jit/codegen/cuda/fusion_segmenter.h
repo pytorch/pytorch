@@ -129,7 +129,7 @@ class TORCH_CUDA_CU_API SegmentedGroup {
   int group_id_ = -1;
 
   //! The scheduler to use for compiling this group
-  ScheduleHeuristic heuristic_ = ScheduleHeuristic::PointWise;
+  ScheduleHeuristic heuristic_ = ScheduleHeuristic::None;
 
   //! Exprs that make up the group
   std::vector<Expr*> exprs_;
@@ -275,7 +275,7 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   }
 
   //! Returns the original un-segmented fusion
-  Fusion* completeFusion() {
+  Fusion* completeFusion() const {
     return complete_fusion_.get();
   }
 
@@ -442,7 +442,8 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
       SegmentCandidateFinderOptions options = SegmentCandidateFinderOptions()) {
     auto fusion_copy = std::make_unique<Fusion>(*fusion);
     if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
-      std::cout << "Segment the fusion: " << std::endl;
+      std::cout << "Segment the fusion (Original Fusion Un-modified): "
+                << std::endl;
       fusion_copy->printMath();
     }
     SegmentCandidateFinder scf(std::move(fusion_copy), inputs, options);
@@ -456,7 +457,8 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
       SegmentCandidateFinderOptions options = SegmentCandidateFinderOptions()) {
     SegmentCandidateFinder scf(std::move(fusion), inputs, options);
     if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
-      std::cout << "Segment the fusion: " << std::endl;
+      std::cout << "Segment the fusion (Original Fusion Un-modified): "
+                << std::endl;
       scf.completeFusion()->printMath();
     }
     return std::move(scf.segmented_fusion_);
@@ -606,6 +608,7 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
   const at::ArrayRef<IValue>& runtime_inputs_;
 };
 
+// TODO: Make as member functions on classes instead of global scope
 TORCH_CUDA_CU_API std::string toString(const SegmentedGroup* group);
 TORCH_CUDA_CU_API std::string toString(const SegmentedEdge* edge);
 TORCH_CUDA_CU_API std::string toString(const SegmentedFusion* segmented_fusion);

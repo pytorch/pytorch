@@ -22,6 +22,8 @@ namespace at {
 
 class Tensor;
 
+enum class TORCH_API Float32MatmulPrecision {HIGHEST, HIGH, MEDIUM};
+
 class TORCH_API Context {
  public:
   Context();
@@ -80,15 +82,17 @@ class TORCH_API Context {
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
   }
+  static bool hasIPU() {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::IPU);
+  }
   static bool hasXLA() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
   }
   static bool hasLazy() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::Lazy);
   }
-  static bool hasMLC() {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::MLC);
-  }
+  static bool hasMPS();
+
   static bool hasORT() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::ORT);
   }
@@ -202,10 +206,13 @@ class TORCH_API Context {
   // https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
   void alertCuBLASConfigNotDeterministic() const;
 
+  void setFloat32MatmulPrecision(const std::string & s);
   bool allowTF32CuDNN() const;
   void setAllowTF32CuDNN(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
+  Float32MatmulPrecision float32MatmulPrecision() const;
+  void setFloat32MatmulPrecision(Float32MatmulPrecision p);
   bool allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(bool);
   at::QEngine qEngine() const;
@@ -243,8 +250,8 @@ class TORCH_API Context {
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
   bool benchmark_cudnn = false;
+  Float32MatmulPrecision float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;
   bool allow_tf32_cudnn = true;
-  bool allow_tf32_cublas = true;
   bool allow_fp16_reduction_cublas = true;
   bool enabled_mkldnn = true;
   at::LinalgBackend linalg_preferred_backend = at::LinalgBackend::Default;
@@ -287,6 +294,11 @@ static inline DeprecatedTypeProperties& HIP(ScalarType s) {
       Backend::HIP, s);
 }
 
+static inline DeprecatedTypeProperties& MPS(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::MPS, s);
+}
+
 static inline bool hasCUDA() {
   return globalContext().hasCUDA();
 }
@@ -295,12 +307,16 @@ static inline bool hasHIP() {
   return globalContext().hasHIP();
 }
 
+static inline bool hasIPU() {
+  return globalContext().hasIPU();
+}
+
 static inline bool hasXLA() {
   return globalContext().hasXLA();
 }
 
-static inline bool hasMLC() {
-  return globalContext().hasMLC();
+static inline bool hasMPS() {
+  return globalContext().hasMPS();
 }
 
 static inline bool hasORT() {
@@ -386,5 +402,15 @@ struct TORCH_API NoTF32Guard {
 private:
   bool changed = false;
 };
+
+#ifdef USE_ROCM
+struct TORCH_API ROCmBackwardPassGuard {
+  ROCmBackwardPassGuard();
+  ~ROCmBackwardPassGuard();
+  static bool is_backward_pass();
+private:
+  static thread_local bool is_backward_pass_;
+};
+#endif
 
 } // namespace at
