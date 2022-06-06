@@ -19400,6 +19400,12 @@ def _inherit_constructor_args(name, op, inherited, overrides):
     kwargs.update(common_kwargs)
     kwargs.update(overrides)
 
+    kwargs['supports_autograd'] = False
+    kwargs['supports_gradgrad'] = False
+    kwargs['supports_fwgrad_bwgrad'] = False
+    kwargs['supports_inplace_autograd'] = False
+    kwargs['supports_forward_ad'] = False
+
     return kwargs
 
 class PythonRefInfo(OpInfo):
@@ -19731,10 +19737,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",
-        decorators=(
-            # Need FakeTensor support for meta coverage
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu",
@@ -20054,11 +20056,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.stack",
         torch_opinfo_name="stack",
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/77046
-            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
-            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-        ),
     ),
     PythonRefInfo(
         "_refs.squeeze",
@@ -20081,10 +20078,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.t",
         torch_opinfo_name="t",
-        decorators=(
-            # Need FakeTensor support for meta coverage
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
-        ),
     ),
     PythonRefInfo(
         "_refs.unsqueeze",
@@ -20156,8 +20149,6 @@ python_ref_db = [
         "_refs.addr",
         torch_opinfo_name="addr",
         decorators=(
-            # RuntimeError: no _refs support for torch.outer
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
         ),
     ),
