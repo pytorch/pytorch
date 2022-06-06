@@ -17340,7 +17340,11 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bool, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
            assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_special_logsumexp),
+           sample_inputs_func=sample_inputs_special_logsumexp,
+           skips=(
+               # test does not work with passing lambda for op
+               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+           )),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
