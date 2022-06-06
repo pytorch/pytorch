@@ -19735,6 +19735,10 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.elu",
     ),
     PythonRefInfo(
+        "_refs.nn.functional.hardtanh",
+        torch_opinfo_name="nn.functional.hardtanh",
+    ),
+    PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",
     ),
