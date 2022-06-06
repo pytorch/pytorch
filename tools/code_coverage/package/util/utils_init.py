@@ -6,9 +6,9 @@ from .setting import (
     JSON_FOLDER_BASE_DIR,
     LOG_DIR,
     MERGED_FOLDER_BASE_DIR,
+    Option,
     PROFILE_DIR,
     SUMMARY_FOLDER_DIR,
-    Option,
 )
 from .utils import create_folder, get_raw_profiles_folder, remove_file
 

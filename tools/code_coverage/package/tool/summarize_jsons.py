@@ -4,8 +4,8 @@ import time
 from typing import Any, Dict, List, Set, Tuple
 
 from ..util.setting import (
-    JSON_FOLDER_BASE_DIR,
     CompilerType,
+    JSON_FOLDER_BASE_DIR,
     TestList,
     TestPlatform,
     TestStatusType,

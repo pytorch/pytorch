@@ -1,6 +1,17 @@
 """isort:skip_file"""
-from pickle import EXT1, EXT2, EXT4, GLOBAL, STACK_GLOBAL, Pickler, PicklingError
-from pickle import _compat_pickle, _extension_registry, _getattribute, _Pickler  # type: ignore[attr-defined]
+from pickle import (  # type: ignore[attr-defined]
+    _compat_pickle,
+    _extension_registry,
+    _getattribute,
+    _Pickler,
+    EXT1,
+    EXT2,
+    EXT4,
+    GLOBAL,
+    Pickler,
+    PicklingError,
+    STACK_GLOBAL,
+)
 from struct import pack
 from types import FunctionType
 
