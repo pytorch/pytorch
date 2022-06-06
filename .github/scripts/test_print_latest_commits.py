@@ -1,9 +1,9 @@
 from unittest import TestCase, main, mock
-from typing import Any
+from typing import Any, List, Dict
 from print_latest_commits import isGreen, workflowCheck
 
 class TestChecks:
-    def make_test_checks(self):
+    def make_test_checks(self) -> List[Dict[str, Any]]:
         workflow_checks = []
         for i in range(20):
             workflow_checks.append(workflowCheck(
@@ -42,7 +42,7 @@ class TestPrintCommits(TestCase):
         workflow_checks.pop(0)
         self.assertFalse(isGreen(workflow_checks))
 
-    #this may need to change, depending on the necessary specs for isGreen
+    # this may need to change, depending on the necessary specs for isGreen
 
 if __name__ == "__main__":
     main()
