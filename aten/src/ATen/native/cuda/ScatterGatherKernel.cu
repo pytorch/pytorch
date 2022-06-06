@@ -158,7 +158,6 @@ struct _cuda_scatter_gather_internal_kernel {
         auto original_index_offset = offsets[2];
         uint32_t index_idx;
 
-        TORCH_CHECK(ndim <= 1 || index_strides[0] > index_strides[1], "Index strides: ", index_strides);
         for (auto d = ndim - 1; d >= 0; d--) {
           index_idx = (original_index_offset / index_strides[d]) % index_sizes[d];
           original_index_offset -= index_idx * index_strides[d];
