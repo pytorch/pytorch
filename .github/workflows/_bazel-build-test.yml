@@ -96,6 +96,7 @@ jobs:
 
       # !{{ common_android.upload_android_binary_size("", "")}}
       - name: Test
+        id: test
         # Time out the test phase after 3.5 hours
         timeout-minutes: 210
         env:
@@ -155,7 +156,7 @@ jobs:
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
-        if: always()
+        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
         with:
           file-suffix: bazel-${{ github.job }}_${{ steps.get-job-id.outputs.job-id }}
 
