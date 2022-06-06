@@ -300,6 +300,14 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertTrue(pathname in self.temp_files)
         self.assertEqual(count, 2 * len(self.temp_files))
 
+        # test functional API
+        datapipe = datapipe.list_files()
+        count = 0
+        for pathname in datapipe:
+            count += 1
+            self.assertTrue(pathname in self.temp_files)
+        self.assertEqual(count, 2 * len(self.temp_files))
+
     def test_listdirfilesdeterministic_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
 
