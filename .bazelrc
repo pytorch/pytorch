@@ -13,15 +13,20 @@ build:no-tty --curses no
 build:no-tty --progress_report_interval 10
 build:no-tty --show_progress_rate_limit 10
 
-# Configuration to build with GPU support
-build:gpu --define=cuda=true
-# define a separate build folder for faster switching between configs
-build:gpu --platform_suffix=-gpu
-# See the note on the config-less build for details about why we are
-# doing this. We must also do it for the "-gpu" platform suffix.
-build --copt=-isystem --copt=bazel-out/k8-fastbuild-gpu/bin
+# Build with GPU support by default.
+build --define=cuda=true
 # rules_cuda configuration
-build:gpu --@rules_cuda//cuda:enable_cuda
-build:gpu --@rules_cuda//cuda:cuda_targets=sm_52
-build:gpu --@rules_cuda//cuda:compiler=nvcc
-build:gpu --repo_env=CUDA_PATH=/usr/local/cuda
+build --@rules_cuda//cuda:enable_cuda
+build --@rules_cuda//cuda:cuda_targets=sm_52
+build --@rules_cuda//cuda:compiler=nvcc
+build --repo_env=CUDA_PATH=/usr/local/cuda
+
+# Configuration to build without GPU support
+build:cpu-only --define=cuda=false
+# define a separate build folder for faster switching between configs
+build:cpu-only --platform_suffix=-cpu-only
+# See the note on the config-less build for details about why we are
+# doing this. We must also do it for the "-cpu-only" platform suffix.
+build --copt=-isystem --copt=bazel-out/k8-fastbuild-cpu-only/bin
+# rules_cuda configuration
+build:cpu-only --@rules_cuda//cuda:enable_cuda=False
