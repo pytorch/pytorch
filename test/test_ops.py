@@ -514,7 +514,13 @@ class TestCommon(TestCase):
         from copy import copy
         op = copy(op)
         op.op = partial(make_traced(op.op), executor=executor)
-        self._ref_test_helper(contextlib.nullcontext, device, dtype, op, skip_zero_numel=True)
+        self._ref_test_helper(
+            contextlib.nullcontext,
+            device,
+            dtype,
+            op,
+            skip_zero_numel=(executor == "nvfuser"),  # nvfuser doesn't support zero-sized tensors
+        )
 
     @skipMeta
     @onlyNativeDeviceTypes
