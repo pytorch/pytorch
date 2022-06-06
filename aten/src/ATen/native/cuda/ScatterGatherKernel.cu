@@ -222,7 +222,7 @@ struct cuda_scatter_gather_base_kernel {
         restride_dim(self, dim, index_sizes_vec)
       : self.as_strided(index_sizes_vec, self_strides_vec);
     auto src_restrided = is_scatter_like ?
-        src.as_strided(index_sizes_vec, src_strides_vec)
+        src.as_strided(index_sizes_vec, index_larger_than_src ? std::vector<int64_t> (ndim, 0) : src_strides_vec)
       : restride_dim(src, dim, index_sizes_vec);
 
     auto iter = TensorIteratorConfig()
@@ -295,7 +295,7 @@ struct cuda_scatter_gather_base_kernel {
         restride_dim(self, dim, index_sizes_vec)
       : self.as_strided(index_sizes_vec, self_strides_vec);
     auto src_restrided = is_scatter_like ?
-        src.as_strided(index_sizes_vec, src_strides_vec)
+        src.as_strided(index_sizes_vec, index_larger_than_src ? std::vector<int64_t> (ndim, 0) : src_strides_vec)
       : restride_dim(src, dim, index_sizes_vec);
 
     auto iter = TensorIteratorConfig()
@@ -369,7 +369,7 @@ struct cuda_scatter_gather_base_kernel {
         restride_dim(self, dim, index_sizes_vec)
       : self.as_strided(index_sizes_vec, self_strides_vec);
     auto src_restrided = is_scatter_like ?
-        src.as_strided(index_sizes_vec, src_strides_vec)
+        src.as_strided(index_sizes_vec, index_larger_than_src ? std::vector<int64_t> (ndim, 0) : src_strides_vec)
       : restride_dim(src, dim, index_sizes_vec);
 
     auto iter = TensorIteratorConfig()
