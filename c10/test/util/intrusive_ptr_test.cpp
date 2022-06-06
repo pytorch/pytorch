@@ -1706,6 +1706,13 @@ template <
 weak_intrusive_ptr<T, NullType> make_invalid_weak() {
   return weak_intrusive_ptr<T, NullType>(intrusive_ptr<T, NullType>());
 }
+
+struct WeakReferenceToSelf : public intrusive_ptr_target {
+  void release_resources() override {
+    ptr.reset();
+  }
+  weak_intrusive_ptr<intrusive_ptr_target> ptr = weak_intrusive_ptr<intrusive_ptr_target>(make_intrusive<intrusive_ptr_target>());
+};
 } // namespace
 
 static_assert(
@@ -3538,4 +3545,9 @@ TEST(WeakIntrusivePtrTest, givenStackObject_whenReclaimed_thenCrashes) {
 #else
   EXPECT_ANY_THROW(ptr = weak_intrusive_ptr<SomeClass>::reclaim(&obj));
 #endif
+}
+
+TEST(WeakIntrusivePtrTest, givenObjectWithWeakReferenceToSelf_whenDestroyed_thenDoesNotCrash) {
+  auto p = make_intrusive<WeakReferenceToSelf>();
+  p->ptr = weak_intrusive_ptr<intrusive_ptr_target>(intrusive_ptr<intrusive_ptr_target>(p));
 }

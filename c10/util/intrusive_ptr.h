@@ -293,8 +293,7 @@ class intrusive_ptr final {
       if (target_->weakcount_.load(std::memory_order_acquire) == 1) {
         delete target_;
       } else {
-        reset_clean_up_weak_references_path();
-      }
+        reset_clean_up_weak_reference_path();
       }
     }
   }
