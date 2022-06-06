@@ -674,7 +674,7 @@ def _sparse_csr_segment_reduction_helper(op,
         assert len(dims) == 2
         nnz = min(1, values.numel())
         if (nnz == 1):
-            op_kwargs = dict(keepdim=True)
+            op_kwargs = {'keepdim' : True}
             # amax and amin do not support dtype kwarg
             if reduce not in ['amax', 'amin']:
                 op_kwargs['dtype'] = output_dtype
