@@ -10,11 +10,15 @@ import threading
 import itertools
 import warnings
 import queue
+import functools
 from typing import Any, Callable, Iterable, TypeVar, Generic, Sequence, List, Optional, Union
 
 import multiprocessing as python_multiprocessing
 import torch
 import torch.multiprocessing as multiprocessing
+import torch.utils.data.graph_settings
+import torch.distributed as dist
+
 from torch._utils import ExceptionWrapper
 from torch._six import string_classes
 
@@ -31,8 +35,6 @@ from . import (
 from torch.utils.data.datapipes.datapipe import _IterDataPipeSerializationWrapper, _MapDataPipeSerializationWrapper
 
 from . import _utils
-
-import torch.utils.data.graph_settings
 
 __all__ = [
     "DataLoader",
@@ -89,6 +91,18 @@ class _InfiniteConstantSampler(Sampler):
         while True:
             yield None
 
+
+def _sharding_worker_init_fn(worker_init_fn, worker_id):
+    global_worker_id = worker_id
+    info = torch.utils.data.get_worker_info()
+    total_workers = info.num_workers
+    datapipe = info.dataset
+    if dist.is_available() and dist.is_initialized():
+        total_workers *= dist.get_world_size()
+        global_worker_id = dist.get_rank() * info.num_workers + global_worker_id
+    torch.utils.data.graph_settings.apply_sharding(datapipe, total_workers, global_worker_id)
+    if worker_init_fn is not None:
+        worker_init_fn(worker_id)
 
 class DataLoader(Generic[T_co]):
     r"""
@@ -220,11 +234,19 @@ class DataLoader(Generic[T_co]):
         self.worker_init_fn = worker_init_fn
         self.multiprocessing_context = multiprocessing_context
 
-        # _DataPipeSerializationWrapper container makes it easier to serialize without redefining pickler
+        # Adds several forward compatibilities so classic DataLoader can work with DataPipes
+        # 1. _DataPipeSerializationWrapper container makes it easier to serialize without redefining pickler
+        # 2. Additional worker init function will take care of sharding in MP and Distributed
         if isinstance(self.dataset, IterDataPipe):
             self.dataset = _IterDataPipeSerializationWrapper(self.dataset)
+            self.worker_init_fn = functools.partial(
+                _sharding_worker_init_fn, self.worker_init_fn)
         elif isinstance(self.dataset, MapDataPipe):
             self.dataset = _MapDataPipeSerializationWrapper(self.dataset)
+            self.worker_init_fn = functools.partial(
+                _sharding_worker_init_fn, self.worker_init_fn)
+
+
 
         # Arg-check dataset related before checking samplers because we want to
         # tell users that iterable-style datasets are incompatible with custom
