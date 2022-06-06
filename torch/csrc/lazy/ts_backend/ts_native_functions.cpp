@@ -7,7 +7,8 @@
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/shape_inference.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
-#include <torch/csrc/lazy/core/view_ops/as_strided.h>
+#include <torch/csrc/lazy/core/ir_builder.h>
+#include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/tensor_impl.h>
 #include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
@@ -54,7 +55,7 @@ at::Tensor LazyNativeFunctions::as_strided(
   torch::lazy::LazyTensorPtr self_tensor = torch::lazy::TryGetLtcTensor(self);
   auto xsize = torch::lazy::ToI64Vector(size);
   auto xstride = torch::lazy::ToI64Vector(stride);
-  if (!torch::lazy::AsStrided::StrideIsSupported(xstride)) {
+  if (!torch::lazy::StrideIsSupported(xstride)) {
     return at::native::call_fallback_fn<
         &ltc_eager_fallback, ATEN_OP(as_strided)>::call(self, size, stride,
                                                         storage_offset);
@@ -70,7 +71,7 @@ const at::Tensor& LazyNativeFunctions::as_strided_(
   auto self_tensor = torch::lazy::TryGetLtcTensor(self);
   auto xsize = torch::lazy::ToI64Vector(size);
   auto xstride = torch::lazy::ToI64Vector(stride);
-  if (!torch::lazy::AsStrided::StrideIsSupported(xstride)) {
+  if (!torch::lazy::StrideIsSupported(xstride)) {
     return at::native::call_fallback_fn<
         &ltc_eager_fallback, ATEN_OP(as_strided_)>::call(self, size, stride,
                                                          storage_offset);
@@ -237,16 +238,19 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
       // lazy:0 -> lazy:1 is handled in case3, so we can safely drop the device argument
       device = c10::nullopt;
 
-      auto shapes = torch::lazy::compute_shape__to_copy(self, dtype, layout, device, pin_memory, non_blocking, memory_format);
-      TORCH_INTERNAL_ASSERT(shapes.size() == 1);
-      auto node = torch::lazy::MakeNode<ToCopy>(lazy_self->GetIrValue(),
-                            dtype,
-                            layout,
-                            device,
-                            pin_memory,
-                            non_blocking,
-                            memory_format,
-                            std::move(shapes));
+      torch::lazy::NodePtr node = torch::lazy::ReuseNode<ToCopy>(
+          lazy_self->GetIrValue(), dtype, layout, device, pin_memory,
+          non_blocking, memory_format);
+      if (!node) {
+        auto shapes = torch::lazy::compute_shape__to_copy(
+            self, dtype, layout, device, pin_memory, non_blocking,
+            memory_format);
+        TORCH_INTERNAL_ASSERT(shapes.size() == 1);
+        node = torch::lazy::MakeNode<ToCopy>(
+            lazy_self->GetIrValue(), dtype, layout, device, pin_memory,
+            non_blocking, memory_format, std::move(shapes));
+        CacheNode(node);
+      }
 
       auto result = torch::lazy::CreateAtenFromLtcTensor(
               torch::lazy::LazyTensor::Create(std::move(node), lazy_self->GetDevice()));
@@ -398,6 +402,13 @@ at::Tensor LazyNativeFunctions::max_pool3d_with_indices_backward(
                                                        kernel_size, stride,
                                                        padding, dilation,
                                                        ceil_mode, indices);
+}
+
+at::Tensor LazyNativeFunctions::narrow(const at::Tensor& self, int64_t dim, int64_t start, int64_t length) {
+  TORCH_LAZY_FN_COUNTER("lazy::");
+  auto self_tensor = torch::lazy::TryGetLtcTensor(self);
+  return torch::lazy::CreateAtenFromLtcTensor(torch::lazy::narrow(
+      self_tensor, dim, start, length));
 }
 
 at::Tensor & LazyNativeFunctions::normal_(at::Tensor & self, double mean, double std, c10::optional<at::Generator> generator) {

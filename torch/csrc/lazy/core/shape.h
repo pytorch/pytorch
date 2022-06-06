@@ -66,10 +66,10 @@ class TORCH_API Shape {
 
 TORCH_API std::ostream& operator<<(std::ostream& out, const Shape& shape);
 
-bool symbolicShapeEnabled();
+TORCH_API bool symbolicShapeEnabled();
 // Calculate and applies symbolic shapes onto the
 // Shape objects passed to result_shapes
-void applySymbolicShapesOnLT(
+TORCH_API void applySymbolicShapesOnLT(
     const char* schema_str,
     std::vector<c10::IValue> args,
     std::vector<Shape>& result_shapes);

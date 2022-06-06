@@ -66,6 +66,12 @@ void badArgType(const T& v) {
 thread_local std::shared_ptr<TracingState> tracing_state;
 } // namespace detail
 
+static std::atomic<bool> tracer_state_warn_mode{true};
+
+std::atomic<bool>& getTracerStateWarnMode() {
+  return tracer_state_warn_mode;
+}
+
 std::function<void()> pauseTracing() {
   // NOLINTNEXTLINE
   std::shared_ptr<tracer::TracingState> state = getTracingState();
@@ -798,6 +804,10 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
   }
   n->addInput(
       g->insertNode(g->createList(jit::IntType::get(), info))->output());
+}
+
+void addInputs(Node* n, const char* name, c10::SymIntArrayRef value) {
+  TORCH_CHECK(false, "Tracing operations taking symbolic ints isn't supported");
 }
 
 void addInputs(

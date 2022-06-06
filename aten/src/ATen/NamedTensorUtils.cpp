@@ -127,6 +127,14 @@ static void assert_names_equal(DimnameList a, DimnameList b) {
       ". Please rename the out tensor's dims with `Tensor.rename`.");
 }
 
+const Tensor& propagate_names_if_present_and_nonempty(const Tensor& result,
+    c10::optional<DimnameList> maybe_names,
+    bool validate_names) {
+  auto maybe_name_list = maybe_names.value_or(at::ArrayRef<Dimname>{});
+  propagate_names_if_nonempty(result.unsafeGetTensorImpl(), maybe_name_list, validate_names);
+  return result;
+}
+
 const Tensor& propagate_names_if_nonempty(const Tensor& result,
     DimnameList maybe_names,
     bool validate_names) {
@@ -459,7 +467,7 @@ std::vector<Dimname> broadcast_to_outnames(
   return unify_from_right(reference_names, tensor_names);
 }
 
-std::vector<Dimname> compute_cat_outnames(TensorList tensors) {
+std::vector<Dimname> compute_cat_outnames(ITensorListRef tensors) {
   if (!at::has_names(tensors)) {
     return {};
   }
