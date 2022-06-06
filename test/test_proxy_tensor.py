@@ -57,8 +57,6 @@ except ImportError:
                   "`--no-deps` to avoid overwriting the pytorch installation",
                   UserWarning)
 
-# NB: numpy is a testing dependency!
-
 
 class TestProxyTensor(TestCase):
     def test_make_fx(self, device):
@@ -196,7 +194,6 @@ class TestProxyTensorOpInfo(TestCase):
                 continue
             new_out = new_f(args, kwargs)
             self.assertEqual(new_out, old_out)
-            pass
 
 
 
