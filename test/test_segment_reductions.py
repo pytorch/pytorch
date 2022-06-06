@@ -305,6 +305,9 @@ class TestSegmentReductions(TestCase):
     def test_pytorch_scatter_test_cases(self, device, dtypes, reduce):
         val_dtype, length_dtype = dtypes
         # zero-length segments are filled with reduction inits contrary to pytorch_scatter.
+        # TODO: these test cases from pytorch_scatter don't test the case where indices/indptr is like [[1, 2, 3]]
+        # which would undergo expansion. Currently segment_reduce doesn't support this expansion either.
+        # This is probably something that should be covered by index_reduce
         tests = [
             {
                 'src': [1, 2, 3, 4, 5, 6],
@@ -373,8 +376,9 @@ class TestSegmentReductions(TestCase):
         for test in tests:
             data = torch.tensor(test['src'], dtype=val_dtype, device=device, requires_grad=True)
             indptr = torch.tensor(test['indptr'], dtype=length_dtype, device=device)
+            index = torch.tensor(test['index'], dtype=length_dtype, device=device)
             dim = indptr.ndim - 1
-            # calculate lengths from indptr
+            # calculate lengths from indptr and test lengths
             lengths = torch.diff(indptr, dim=dim)
             expected = torch.tensor(test[reduce], dtype=val_dtype, device=device)
 
@@ -397,6 +401,17 @@ class TestSegmentReductions(TestCase):
             )
             self.assertEqual(actual_result, expected)
 
+            if (device == 'cpu'):
+                # test indices
+                actual_result = torch.segment_reduce(
+                    data=data,
+                    reduce=reduce,
+                    indices=index,
+                    axis=dim,
+                    unsafe=True,
+                )
+                self.assertEqual(actual_result, expected)
+
             if val_dtype == torch.float64:
                 def fn(x, mode='lengths'):
                     initial = 1
@@ -412,9 +427,37 @@ class TestSegmentReductions(TestCase):
                         segment_reduce_kwargs[mode] = lengths
                     elif mode == 'offsets':
                         segment_reduce_kwargs[mode] = indptr
+                    elif mode == 'indices':
+                        segment_reduce_kwargs[mode] = index
                     return torch.segment_reduce(*segment_reduce_args, **segment_reduce_kwargs)
                 self.assertTrue(gradcheck(partial(fn, mode='lengths'), (data.clone().detach().requires_grad_(True))))
                 self.assertTrue(gradcheck(partial(fn, mode='offsets'), (data.clone().detach().requires_grad_(True))))
+                if device == 'cpu':
+                    self.assertTrue(gradcheck(partial(fn, mode='indices'), (data.clone().detach().requires_grad_(True))))
+
+
+            # test indices
+            if (device == 'cpu'):
+                actual_result = torch.segment_reduce(
+                    data=data,
+                    reduce=reduce,
+                    indices=index,
+                    axis=dim,
+                    unsafe=True,
+                )
+                self.assertEqual(actual_result, expected)
+
+                if val_dtype == torch.float64:
+                    def indices_fn(x):
+                        initial = 1
+                        # supply initial values to prevent gradcheck from failing for 0 length segments
+                        # where nan/inf are reduction identities that produce nans when calculating the numerical jacobian
+                        if reduce == 'min':
+                            initial = 1000
+                        elif reduce == 'max':
+                            initial = -1000
+                        return torch.segment_reduce(x, reduce, indices=index, axis=dim, unsafe=True, initial=initial)
+                    self.assertTrue(gradcheck(indices_fn, (data.clone().detach().requires_grad_(True))))
 
 
     @dtypes(

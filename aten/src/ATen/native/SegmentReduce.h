@@ -27,6 +27,14 @@ using segment_reduce_offsets_fn = Tensor (*)(
     const c10::optional<Scalar>&);
 DECLARE_DISPATCH(segment_reduce_offsets_fn, _segment_reduce_offsets_stub);
 
+using segment_reduce_indices_fn = Tensor (*)(
+    SegmentReductionType,
+    const Tensor&,
+    const Tensor&,
+    int64_t,
+    const c10::optional<Scalar>&);
+DECLARE_DISPATCH(segment_reduce_indices_fn, _segment_reduce_indices_stub);
+
 using segment_reduce_lengths_backward_fn = Tensor (*)(
     const Tensor&,
     const Tensor&,
@@ -46,6 +54,16 @@ using segment_reduce_offsets_backward_fn = Tensor (*)(
     int64_t,
     const c10::optional<Scalar>&);
 DECLARE_DISPATCH(segment_reduce_offsets_backward_fn, _segment_reduce_offsets_backward_stub);
+
+using segment_reduce_indices_backward_fn = Tensor (*)(
+    const Tensor&,
+    const Tensor&,
+    const Tensor&,
+    SegmentReductionType,
+    const Tensor&,
+    int64_t,
+    const c10::optional<Scalar>&);
+DECLARE_DISPATCH(segment_reduce_indices_backward_fn, _segment_reduce_indices_backward_stub);
 
 } // namespace native
 } // namespace at

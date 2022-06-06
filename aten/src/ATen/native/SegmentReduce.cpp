@@ -10,8 +10,10 @@ namespace native {
 
 DEFINE_DISPATCH(_segment_reduce_lengths_stub);
 DEFINE_DISPATCH(_segment_reduce_offsets_stub);
+DEFINE_DISPATCH(_segment_reduce_indices_stub);
 DEFINE_DISPATCH(_segment_reduce_lengths_backward_stub);
 DEFINE_DISPATCH(_segment_reduce_offsets_backward_stub);
+DEFINE_DISPATCH(_segment_reduce_indices_backward_stub);
 
 namespace {
 
@@ -54,7 +56,7 @@ void _segment_reduce_lengths_cpu_kernel1(
   auto output_stride_axis = output.stride(axis);
   auto output_size_axis = output.size(axis);
   AT_DISPATCH_FLOATING_TYPES_AND2(
-      kBFloat16, kHalf, data.scalar_type(), "_segment_reduce_cpu", [&]() {
+      kBFloat16, kHalf, data.scalar_type(), "_segment_reduce_lengths_cpu", [&]() {
         auto* output_data = output.data_ptr<scalar_t>();
         const auto* values_data = data.data_ptr<scalar_t>();
         for (const auto outer_idx : c10::irange(outer_offset)) {
@@ -131,7 +133,7 @@ void _segment_reduce_lengths_cpu_kernel1(
       });
 }
 
-Tensor _segment_reduce_cpu_kernel(
+Tensor _segment_reduce_lengths_cpu_kernel(
     SegmentReductionType reduction,
     const Tensor& data,
     const Tensor& lengths,
@@ -148,9 +150,9 @@ Tensor _segment_reduce_cpu_kernel(
   output_shape[axis] = segment_count;
   auto output = at::empty(output_shape, data.options());
 
-  AT_DISPATCH_INDEX_TYPES(lengths.scalar_type(), "_segment_reduce_cpu_kernel1", [&]() {
+  AT_DISPATCH_INDEX_TYPES(lengths.scalar_type(), "_segment_reduce_lengths_cpu_kernel1", [&]() {
     const auto* lengths_data = lengths.data_ptr<index_t>();
-    _segment_reduce_cpu_kernel1(
+    _segment_reduce_lengths_cpu_kernel1(
         reduction, data, lengths_data, axis, initial, output, segment_count, lengths_stride_axis);
   });
 
@@ -178,6 +180,153 @@ Tensor _segment_reduce_offsets_cpu_kernel(
     const auto* offsets_data = offsets.data_ptr<index_t>();
     _segment_reduce_lengths_cpu_kernel1<index_t, /*is_offsets_like=*/true>(
         reduction, data, offsets_data, axis, initial, output, segment_count, offsets_stride_axis);
+  });
+
+  return output;
+}
+
+template <typename T>
+void _segment_reduce_indices_cpu_kernel1(
+    SegmentReductionType reduction,
+    const Tensor& data,
+    const T* indices_data,
+    int64_t axis,
+    const c10::optional<Scalar>& initial,
+    Tensor& output,
+    int64_t indices_stride_axis) {
+  // outer_offset is the size of the outer dimensions of output (before axis)
+  // inner_offset is the size of the inner dimensions of output (after axis)
+  int64_t outer_offset = 1, inner_offset = 1;
+  for (int64_t d = 0; d < axis; d++)
+      outer_offset *= output.size(d);
+  for (int64_t d = axis + 1; d < output.dim(); d++)
+      inner_offset *= output.size(d);
+  auto data_dim_size = data.size(axis);
+  auto data_dim_stride = data.stride(axis);
+  auto output_dim_size = output.size(axis);
+  auto output_dim_stride = output.stride(axis);
+  bool initial_has_value = initial.has_value();
+
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, data.scalar_type(), "_segment_reduce_indices_cpu", [&]() {
+        auto* output_data = output.data_ptr<scalar_t>();
+        const auto* values_data = data.data_ptr<scalar_t>();
+
+        // ===== step1: initialize starting value
+        scalar_t initial_value;
+        if (initial_has_value) {
+          initial_value = initial.value().to<scalar_t>();
+        } else if (reduction == SegmentReductionType::MAX) {
+          initial_value = -std::numeric_limits<scalar_t>::infinity();
+        } else if (reduction == SegmentReductionType::MEAN ||
+                   reduction == SegmentReductionType::SUM) {
+          initial_value = 0;
+        } else if (reduction == SegmentReductionType::MIN) {
+          initial_value = std::numeric_limits<scalar_t>::infinity();
+        } else if (reduction == SegmentReductionType::PROD) {
+          initial_value = 1;
+        }
+
+        // Fill output with reduction inits so indices not written to will be filled with reduction inits.
+        if (!initial_has_value && reduction == SegmentReductionType::MEAN) {
+          // for reduction=mean empty segments (where indices[:, i] != indices[:, i + 1] should be NAN
+          output.fill_(static_cast<scalar_t>(NAN));
+        } else {
+          output.fill_(initial_value);
+        }
+
+        // temp vector to hold intermediate results
+        std::vector<scalar_t> vals(inner_offset);
+        T out_dim_idx, next_out_dim_idx, curr_idx_start;
+        for (const auto outer_idx : c10::irange(outer_offset)) {
+          // fill temp vector with reduction inits
+          std::fill(vals.begin(), vals.end(), initial_value);
+          // Keep track of first location that corresponded to the current out_dim_idx
+          curr_idx_start = 0;
+          for (const auto data_dim_idx : c10::irange(data_dim_size)) {
+            int64_t indices_index = outer_idx * indices_stride_axis * data_dim_size + data_dim_idx;
+            out_dim_idx = indices_data[indices_index];
+            for (const auto inner_idx : c10::irange(inner_offset)) {
+              // ===== step2: update indices sequentially
+              int64_t data_index = outer_idx * data_dim_stride * data_dim_size
+                                    + data_dim_idx * data_dim_stride + inner_idx;
+              const auto val = values_data[data_index];
+              auto output_val = vals[inner_idx];
+              if (reduction == SegmentReductionType::MAX) {
+                output_val = at::_isnan(val)
+                    ? val
+                    : std::max<scalar_t>(output_val, val);
+              } else if (
+                  reduction == SegmentReductionType::MEAN ||
+                  reduction == SegmentReductionType::SUM) {
+                output_val = output_val + val;
+              } else if (reduction == SegmentReductionType::MIN) {
+                output_val = at::_isnan(val)
+                    ? val
+                    : std::min<scalar_t>(output_val, val);
+              } else if (reduction == SegmentReductionType::PROD) {
+                output_val = output_val * val;
+              }
+              vals[inner_idx] = output_val;
+            }
+
+            if (data_dim_idx == data_dim_size - 1) {
+              for (const auto i : c10::irange(inner_offset)) {
+                int64_t output_index = outer_idx * output_dim_stride * output_dim_size
+                                       + out_dim_idx * output_dim_stride + i;
+                if (reduction == SegmentReductionType::MEAN) {
+                  auto segment_length = data_dim_idx + 1 - curr_idx_start;
+                  output_data[output_index] = vals[i] / segment_length;
+                } else {
+                  output_data[output_index] = vals[i];
+                }
+              }
+            } else {
+              int64_t next_indices_index = outer_idx * indices_stride_axis * data_dim_size + (data_dim_idx + 1);
+              next_out_dim_idx = indices_data[next_indices_index];
+              TORCH_CHECK(next_out_dim_idx >= out_dim_idx,
+                          "segment_reduce(): indices must be sorted along the last dimension");
+              if (out_dim_idx != next_out_dim_idx) {
+                for (const auto i : c10::irange(inner_offset)) {
+                  int64_t output_index = outer_idx * output_dim_stride * output_dim_size
+                                        + out_dim_idx * output_dim_stride + i;
+                  if (reduction == SegmentReductionType::MEAN) {
+                    auto segment_length = data_dim_idx + 1 - curr_idx_start;
+                    output_data[output_index] = vals[i] / segment_length;
+                  } else {
+                    output_data[output_index] = vals[i];
+                  }
+                }
+                std::fill(vals.begin(), vals.end(), initial_value);
+                curr_idx_start = data_dim_idx + 1;
+              }
+            }
+          }
+        }
+      });
+}
+
+Tensor _segment_reduce_indices_cpu_kernel(
+    SegmentReductionType reduction,
+    const Tensor& data,
+    const Tensor& indices,
+    int64_t axis,
+    const c10::optional<Scalar>& initial) {
+  // data and indices should be contiguous from the call to .contiguous() in segment_reduce_kernel
+  TORCH_CHECK(data.is_contiguous(), "Expected data to be contiguous.");
+  TORCH_CHECK(indices.is_contiguous(), "Expected indices to be contiguous.");
+  // this calculation of segments assumes that the indices are sorted (which they should be)
+  auto last_indices = indices.select(axis, indices.size(axis) - 1);
+  int64_t segment_count = (last_indices.numel() > 1 ? last_indices.max() : last_indices).item<int64_t>() + 1;
+  int64_t indices_stride_axis = indices.stride(axis);
+  auto output_shape = data.sizes().vec();
+  output_shape[axis] = segment_count;
+  auto output = at::empty(output_shape, data.options());
+
+  AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "_segment_reduce_indices_cpu_kernel1", [&]() {
+    const auto* indices_data = indices.data_ptr<index_t>();
+    _segment_reduce_indices_cpu_kernel1(
+        reduction, data, indices_data, axis, initial, output, indices_stride_axis);
   });
 
   return output;
@@ -320,7 +469,7 @@ void _segment_reduce_cpu_lengths_backward_kernel1(
       });
 }
 
-Tensor _segment_reduce_cpu_backward_kernel(
+Tensor _segment_reduce_cpu_lengths_backward_kernel(
     const Tensor& grad_contig,
     const Tensor& output_contig,
     const Tensor& data_contig,
@@ -354,7 +503,6 @@ Tensor _segment_reduce_cpu_backward_kernel(
   return grad_input;
 }
 
-
 Tensor _segment_reduce_cpu_offsets_backward_kernel(
     const Tensor& grad_contig,
     const Tensor& output_contig,
@@ -387,6 +535,179 @@ Tensor _segment_reduce_cpu_offsets_backward_kernel(
   return grad_input;
 }
 
+template <typename T>
+void _segment_reduce_cpu_indices_backward_kernel1(
+    const Tensor& grad_contig,
+    const Tensor& output_contig,
+    const Tensor& data_contig,
+    SegmentReductionType reduction,
+    const T* indices_data,
+    int64_t axis,
+    const c10::optional<Scalar>& initial,
+    Tensor& grad_input,
+    int64_t indices_stride_axis) {
+  // outer_offset is the size of the outer dimensions of output (before axis)
+  // inner_offset is the size of the inner dimensions of output (after axis)
+  int64_t outer_offset = 1, inner_offset = 1;
+  for (int64_t d = 0; d < axis; d++)
+      outer_offset *= output_contig.size(d);
+  for (int64_t d = axis + 1; d < output_contig.dim(); d++)
+      inner_offset *= output_contig.size(d);
+  auto data_dim_size = data_contig.size(axis);
+  auto data_dim_stride = data_contig.stride(axis);
+
+  // TODO: Switch to TensorIterator for better maintainablility and
+  // readability
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16,
+      kHalf,
+      data_contig.scalar_type(),
+      "_segment_reduce_cpu",
+      [&]() {
+        auto* output_data = output_contig.data_ptr<scalar_t>();
+        auto* grad_data = grad_contig.data_ptr<scalar_t>();
+        auto* grad_input_data = grad_input.data_ptr<scalar_t>();
+        const auto* values_data = data_contig.data_ptr<scalar_t>();
+        // Used to calculate exclusive prod
+        scalar_t initial_prod_value;
+        if (reduction == SegmentReductionType::PROD) {
+          if (initial.has_value()) {
+            initial_prod_value = initial.value().to<scalar_t>();
+          } else {
+            initial_prod_value = 1;
+          }
+        }
+
+        T data_dim_idx, out_dim_idx, next_out_dim_idx, curr_idx_start, curr_idx_end;
+        for (const auto outer_idx : c10::irange(outer_offset)) {
+          data_dim_idx = 0;
+          int64_t indices_index = outer_idx * indices_stride_axis * data_dim_size + data_dim_idx;
+          next_out_dim_idx = indices_data[indices_index];
+          while (data_dim_idx < data_dim_size) {
+            curr_idx_start = data_dim_idx;
+            out_dim_idx = next_out_dim_idx;
+            // find end of current segment
+            if (data_dim_idx == data_dim_size - 1) {
+              data_dim_idx += 1;
+              curr_idx_end = data_dim_idx;
+            } else {
+              while (data_dim_idx < data_dim_size) {
+                data_dim_idx += 1;
+                if (data_dim_idx == data_dim_size) {
+                  curr_idx_end = data_dim_idx;
+                  break;
+                }
+                int64_t next_indices_index = outer_idx * indices_stride_axis * data_dim_size + data_dim_idx;
+                next_out_dim_idx = indices_data[next_indices_index];
+                if (out_dim_idx != next_out_dim_idx) {
+                  curr_idx_end = data_dim_idx;
+                  break;
+                }
+              }
+            }
+
+            int64_t segment_length = curr_idx_end - curr_idx_start;
+            for (const auto inner_idx : c10::irange(inner_offset)) {
+              int64_t output_index = outer_idx * output_contig.stride(axis) * output_contig.size(axis)
+                                      + out_dim_idx * output_contig.stride(axis) + inner_idx;
+              if (reduction == SegmentReductionType::MAX ||
+                  reduction == SegmentReductionType::MIN) {
+                int64_t counter = 0;
+                for (const auto j : c10::irange(segment_length)) {
+                  int64_t data_index = outer_idx * data_dim_stride * data_contig.size(axis)
+                                       + (curr_idx_start + j) * data_dim_stride + inner_idx;
+                  if (at::_isnan(values_data[data_index]) ||
+                      values_data[data_index] == output_data[output_index]) {
+                    grad_input_data[data_index] = grad_data[output_index];
+                    counter++;
+                  }
+                }
+                // Average gradient based on number of maximum elements in
+                // the segment
+                if (counter < 2) {
+                  continue;
+                }
+                for (const auto j : c10::irange(segment_length)) {
+                  int64_t data_index = outer_idx * data_dim_stride * data_contig.size(axis)
+                                       + (curr_idx_start + j) * data_dim_stride + inner_idx;
+                  if (grad_input_data[data_index] > 0) {
+                    grad_input_data[data_index] =
+                        grad_input_data[data_index] / counter;
+                  }
+                }
+              } else if (reduction == SegmentReductionType::MEAN) {
+                auto grad_val = grad_data[output_index] / segment_length;
+                for (const auto j : c10::irange(segment_length)) {
+                  int64_t data_index = outer_idx * data_dim_stride * data_contig.size(axis)
+                                       + (curr_idx_start + j) * data_dim_stride + inner_idx;
+                  grad_input_data[data_index] = grad_val;
+                }
+              } else if (reduction == SegmentReductionType::SUM) {
+                const auto& grad_val = grad_data[output_index];
+                for (const auto j : c10::irange(segment_length)) {
+                  int64_t data_index = outer_idx * data_dim_stride * data_contig.size(axis)
+                                       + (curr_idx_start + j) * data_dim_stride + inner_idx;
+                  grad_input_data[data_index] = grad_val;
+                }
+              } else if (reduction == SegmentReductionType::PROD) {
+                const auto& grad_val = grad_data[output_index] * output_data[output_index];
+                for (const auto j : c10::irange(segment_length)) {
+                  int64_t data_index = outer_idx * data_dim_stride * data_contig.size(axis)
+                                       + (curr_idx_start + j) * data_dim_stride + inner_idx;
+                  if (at::_isnan(values_data[data_index]) ||
+                      values_data[data_index] == 0) {
+                    // explicitly compute exclusive prod
+                    scalar_t exclusive_prod = initial_prod_value;
+                    int64_t idx;
+                    for (const auto k : c10::irange(segment_length)) {
+                      if (k != j) {
+                        idx = outer_idx * data_dim_stride * data_contig.size(axis)
+                              + (curr_idx_start + k) * data_dim_stride + inner_idx;
+                        exclusive_prod *= values_data[idx];
+                      }
+                    }
+                    grad_input_data[data_index] = grad_data[output_index] * exclusive_prod;
+                  } else {
+                    grad_input_data[data_index] = grad_val / values_data[data_index];
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+}
+
+Tensor _segment_reduce_cpu_indices_backward_kernel(
+    const Tensor& grad_contig,
+    const Tensor& output_contig,
+    const Tensor& data_contig,
+    SegmentReductionType reduction,
+    const Tensor& indices_contig,
+    int64_t axis,
+    const c10::optional<Scalar>& initial) {
+  axis = indices_contig.dim() - 1;
+  int64_t indices_stride_axis = indices_contig.stride(axis);
+  auto grad_input = at::zeros({data_contig.sizes()}, grad_contig.options());
+
+  AT_DISPATCH_INDEX_TYPES(
+      indices_contig.scalar_type(), "_segment_reduce_cpu_indices_backward_kernel1", [&] {
+        const auto* indices_data = indices_contig.data_ptr<index_t>();
+        _segment_reduce_cpu_indices_backward_kernel1(
+            grad_contig,
+            output_contig,
+            data_contig,
+            reduction,
+            indices_data,
+            axis,
+            initial,
+            grad_input,
+            indices_stride_axis);
+      });
+
+  return grad_input;
+}
+
 } // namespace
 
 Tensor segment_reduce_kernel(
@@ -399,17 +720,16 @@ Tensor segment_reduce_kernel(
     bool unsafe,
     const c10::optional<Scalar>& initial) {
   axis = maybe_wrap_dim(axis, data.ndimension());
-  TORCH_CHECK(data.numel() > 0);
+  TORCH_CHECK(data.numel() > 0,
+              "segment_reduce(): data.numel() must be non-zero");
 
-  // check that one of lengths or offsets is defined
+  // check that one of lengths, indices or offsets is defined
   auto lengths_has_value = lengths.has_value();
+  auto indices_has_value = indices.has_value();
   auto offsets_has_value = offsets.has_value();
   TORCH_CHECK(
-    !indices.has_value(),
-    "segment_reduce(): indices based reduction is not supported yet.");
-  TORCH_CHECK(
-      lengths_has_value || offsets_has_value,
-      "segment_reduce(): Either lengths or offsets must be defined.")
+      lengths_has_value || offsets_has_value || indices_has_value,
+      "segment_reduce(): Either lengths, offsets or indices must be defined.")
 
   auto reduction = get_reduction_enum(reduce);
   const auto data_contig = data.contiguous();
@@ -463,17 +783,58 @@ Tensor segment_reduce_kernel(
       lengths_contig,
       axis,
       initial);
+  } else {
+    const auto& indices_value = indices.value();
+    // indices related checks
+    TORCH_CHECK(data.get_device() == indices_value.get_device());
+    TORCH_CHECK(data.dim() >= indices_value.dim());
+    TORCH_CHECK(axis == indices_value.dim() - 1,
+                "segment_reduce(): Expected axis to be the last dimension of indices but got ", axis, ".");
+    for (const auto i : c10::irange(indices_value.dim())){
+      TORCH_CHECK(indices_value.size(i) == data.size(i),
+      "segment_reduce(): dim ", i, "of indices and data must have the same size but got indices.size(i) ",
+      indices_value.size(i), "and data.size(i) ", data.size(i), ".");
+    }
+
+    if (!unsafe) {
+      auto min_index = indices_value.min().item<int64_t>();
+      auto max_index = indices_value.max().item<int64_t>();
+      TORCH_CHECK((min_index >= 0 && max_index < data.size(axis)),
+                  "segment_reduce(): Expected all indices to be in the range of [0, data.size(axis)) but got [",
+                  min_index, ", ", max_index, "]");
+    }
+
+    const auto indices_contig = indices_value.contiguous();
+
+    return _segment_reduce_indices_stub(
+      data_contig.device().type(),
+      reduction,
+      data_contig,
+      indices_contig,
+      axis,
+      initial);
   }
 }
 
+// lengths dispatches
 REGISTER_ARCH_DISPATCH(
-    _segment_reduce_stub,
+    _segment_reduce_lengths_stub,
     DEFAULT,
-    &_segment_reduce_cpu_kernel);
-REGISTER_AVX2_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
-REGISTER_AVX512_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
-REGISTER_VSX_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
-REGISTER_ZVECTOR_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
+    &_segment_reduce_lengths_cpu_kernel);
+REGISTER_AVX2_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel);
+REGISTER_AVX512_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel);
+REGISTER_VSX_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel);
+REGISTER_ZVECTOR_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel);
+
+// indices dispatches
+REGISTER_ARCH_DISPATCH(
+    _segment_reduce_indices_stub,
+    DEFAULT,
+    &_segment_reduce_indices_cpu_kernel);
+REGISTER_AVX2_DISPATCH(_segment_reduce_indices_stub, &_segment_reduce_indices_cpu_kernel);
+REGISTER_AVX512_DISPATCH(_segment_reduce_indices_stub, &_segment_reduce_indices_cpu_kernel);
+REGISTER_VSX_DISPATCH(_segment_reduce_indices_stub, &_segment_reduce_indices_cpu_kernel);
+REGISTER_ZVECTOR_DISPATCH(_segment_reduce_indices_stub, &_segment_reduce_indices_cpu_kernel);
 
 // offsets dispatches
 REGISTER_ARCH_DISPATCH(
@@ -493,18 +854,21 @@ Tensor _segment_reduce_backward_kernel(
     const Tensor& data,
     c10::string_view reduce,
     const c10::optional<Tensor>& lengths,
+    const c10::optional<Tensor>& indices,
     const c10::optional<Tensor>& offsets,
     int64_t axis,
     const c10::optional<Scalar>& initial) {
+  // FIXME: check that axis is last dim of indices/lengths or can we skip this since it's already done in the forward pass?
   axis = maybe_wrap_dim(axis, data.ndimension());
-  // check that one of lengths or offsets is defined
+  // check that one of lengths, indices or offsets is defined
   // codegen for derivatives.yaml passes an undefined Tensor for None rather than a c10::optional
   // so checking has_value() doesn't work unlike in the forward pass
   auto lengths_has_value = lengths.has_value() && lengths.value().defined();
+  auto indices_has_value = indices.has_value() && indices.value().defined();
   auto offsets_has_value = offsets.has_value() && offsets.value().defined();
   TORCH_CHECK(
-      lengths_has_value ||  offsets_has_value,
-      "segment_reduce(): Either lengths or offsets must be defined.");
+      lengths_has_value ||  indices_has_value || offsets_has_value,
+      "segment_reduce(): Either lengths, indices or offsets must be defined.");
 
   const auto grad_contig = grad.contiguous();
   const auto output_contig = output.contiguous();
@@ -523,8 +887,7 @@ Tensor _segment_reduce_backward_kernel(
       offsets_contig,
       axis,
       initial);
-  }
-  else if (lengths_has_value) {
+  } else if (lengths_has_value) {
     const auto& lengths_value = lengths.value();
     const auto lengths_contig = lengths_value.contiguous();
     return _segment_reduce_lengths_backward_stub(
@@ -536,25 +899,54 @@ Tensor _segment_reduce_backward_kernel(
       lengths_contig,
       axis,
       initial);
+  } else {
+    const auto& indices_value = indices.value();
+    const auto indices_contig = indices_value.contiguous();
+    return _segment_reduce_indices_backward_stub(
+      grad_contig.device().type(),
+      grad_contig,
+      output_contig,
+      data_contig,
+      reduction,
+      indices_contig,
+      axis,
+      initial);
   }
 }
 
 REGISTER_ARCH_DISPATCH(
-    _segment_reduce_backward_stub,
+    _segment_reduce_lengths_backward_stub,
     DEFAULT,
-    &_segment_reduce_cpu_backward_kernel);
+    &_segment_reduce_cpu_lengths_backward_kernel);
 REGISTER_AVX512_DISPATCH(
-    _segment_reduce_backward_stub,
-    &_segment_reduce_cpu_backward_kernel);
+    _segment_reduce_lengths_backward_stub,
+    &_segment_reduce_cpu_lengths_backward_kernel);
 REGISTER_AVX2_DISPATCH(
-    _segment_reduce_backward_stub,
-    &_segment_reduce_cpu_backward_kernel);
+    _segment_reduce_lengths_backward_stub,
+    &_segment_reduce_cpu_lengths_backward_kernel);
 REGISTER_VSX_DISPATCH(
-    _segment_reduce_backward_stub,
-    &_segment_reduce_cpu_backward_kernel);
+    _segment_reduce_lengths_backward_stub,
+    &_segment_reduce_cpu_lengths_backward_kernel);
 REGISTER_ZVECTOR_DISPATCH(
-    _segment_reduce_backward_stub,
-    &_segment_reduce_cpu_backward_kernel);
+    _segment_reduce_lengths_backward_stub,
+    &_segment_reduce_cpu_lengths_backward_kernel);
+
+REGISTER_ARCH_DISPATCH(
+    _segment_reduce_indices_backward_stub,
+    DEFAULT,
+    &_segment_reduce_cpu_indices_backward_kernel);
+REGISTER_AVX512_DISPATCH(
+    _segment_reduce_indices_backward_stub,
+    &_segment_reduce_cpu_indices_backward_kernel);
+REGISTER_AVX2_DISPATCH(
+    _segment_reduce_indices_backward_stub,
+    &_segment_reduce_cpu_indices_backward_kernel);
+REGISTER_VSX_DISPATCH(
+    _segment_reduce_indices_backward_stub,
+    &_segment_reduce_cpu_indices_backward_kernel);
+REGISTER_ZVECTOR_DISPATCH(
+    _segment_reduce_indices_backward_stub,
+    &_segment_reduce_cpu_indices_backward_kernel);
 
 REGISTER_ARCH_DISPATCH(
     _segment_reduce_offsets_backward_stub,
