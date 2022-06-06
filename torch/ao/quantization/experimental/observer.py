@@ -4,6 +4,7 @@ the values observed during calibration (PTQ) or training (QAT).
 """
 
 import torch
+import itertools
 from torch.ao.quantization.observer import ObserverBase
 from typing import Tuple
 from torch.ao.quantization.utils import check_min_max_valid, calculate_qmin_qmax
@@ -45,6 +46,10 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         # compute n and store as member variable
         self.n = self.b // self.k
 
+        print("n", self.n)
+        print("b", self.b)
+        print("k", self.k)
+
         # store a tensor of subtensors (all levels)
         p_all = []
 
@@ -60,10 +65,12 @@ class NonUniformQuantizationObserverBase(ObserverBase):
                 if signed:
                     p_curr = torch.cat((p_curr, torch.tensor([-curr_ele])))
 
-            # sort tensor before adding to list
-            sorted, indices = torch.sort(p_curr)
-            print(sorted)
-            p_all.append(sorted)
+            if signed:
+                # sort tensor before adding to list
+                sorted, indices = torch.sort(p_curr)
+                p_all.append(sorted)
+            else:
+                p_all.append(p_curr)
 
         # gamma calculation:
         # loop through all tensors, add element at index 1 for each tensor
@@ -71,17 +78,58 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         for tens in p_all:
             p_sum += tens[1]
 
+        print("p sum: ", p_sum)
+
         # assign gamma
         self.gamma = self.alpha / p_sum
 
+        print("alpha: ", self.alpha)
+        print("gamma: ", self.gamma)
+
+        # hard code this to test
+        p_all.append(torch.Tensor([0, 1, 0.25, 0.0625]))
+
         # get all possible quantization levels
+        quantization_levels = torch.tensor([])
+
+        # calculate cartesian product
+        cartesian_product = list(itertools.product(p_all))
+
+        quantization_levels = []
+
+        # calculate sum of each row
+        for row in cartesian_product:
+            sum = 0
+            for ele in row:
+                sum += ele
+            quantization_levels.append(sum)
+
+        quantization_levels = [self.gamma * ele for ele in quantization_levels]
+
+        # if len(p_all) >= 2:
+        #     quantization_levels = torch.cartesian_prod(p_all[0], p_all[1])
+
+        #     count = 2
+
+        #     while count < len(p_all):
+        #         print(p_all[count])
+        #         quantization_levels = torch.cartesian_prod(quantization_levels, p_all[count])
+
+        # calculate quantization levels
+        quantization_levels.apply_(lambda x: (x))
+
+        print("tensors: ")
+        for t in p_all:
+            print(t)
+
+        print("quantization levels", quantization_levels)
 
         # tensor size: 2**b x 2**b
-        tensor_size = 2**self.b
-        levels = torch.zeros(size=(tensor_size, tensor_size))
-        for level0 in range(tensor_size):
-            for level1 in range(tensor_size):
-                levels[level0][level1] = self.gamma * (p0[level0] + p1[level1])
+        # tensor_size = 2**self.b
+        # levels = torch.zeros(size=(tensor_size, tensor_size))
+        # for level0 in range(tensor_size):
+        #     for level1 in range(tensor_size):
+        #         levels[level0][level1] = self.gamma * (p0[level0] + p1[level1])
 
         # -------------------------------------------------------------------------------------------
 
