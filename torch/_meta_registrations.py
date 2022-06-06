@@ -112,6 +112,18 @@ def meta_inverse(self):
     r.transpose_(-2, -1)
     return r
 
+@torch.library.impl(meta_lib, "clone")
+def meta_clone(self, *, memory_format=None):
+    return torch.empty_like(self, memory_format=memory_format)
+
+@torch.library.impl(meta_lib, "copy_")
+def meta_copy_(self, src, non_blocking=False):
+    return self
+
+@torch.library.impl(meta_lib, "_linalg_check_errors")
+def meta_linalg_check_error(info, api_name, *, is_matrix):
+    pass
+
 @torch.library.impl(meta_lib, "bernoulli.out")
 def meta_bernoulli(self, *, generator=None, out):
     torch._resize_output_(out, self.size(), self.device)

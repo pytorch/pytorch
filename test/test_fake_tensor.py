@@ -36,10 +36,10 @@ class FakeTensorTest(TestCase):
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
         mode = FakeTensorMode(inner=None)
-        x = torch.tensor(0.)  # TODO: tensor() errors
         with enable_torch_dispatch_mode(mode):
+            x = torch.tensor(0.)
             y = torch.rand([4, 4], device="cuda")
-            out = mode.from_tensor(x) + y
+            out = x + y
             self.assertEqual(out.shape, (4, 4))
             self.assertEqual(out.device, y.device)
             self.assertTrue(isinstance(out, FakeTensor))
@@ -104,12 +104,13 @@ class FakeTensorTest(TestCase):
             self.assertTrue(isinstance(z, FakeTensor))
             self.assertEqual(z.device.type, "cuda")
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cpu_fallback_returned_impl(self):
-        with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_cpu_fallback=True)):
-            x = torch.randn([4, 4]).cuda()
-            with self.assertRaises(NotImplementedError):
-                out = torch.relu_(x)
+    def test_binary_op_type_promotion(self):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+            x = torch.empty([2, 2], dtype=torch.float)
+            y = torch.empty([2, 2], dtype=torch.int64)
+            out = x / y
+            self.assertEqual(out.dtype, torch.float)
+            self.assertEqual(out.device.type, "cpu")
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cpu_fallback(self):
