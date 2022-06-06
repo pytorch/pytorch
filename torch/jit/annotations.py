@@ -303,8 +303,6 @@ def is_tensor(ann):
 
 
 def try_ann_to_type(ann, loc):
-    if inspect.isclass(ann) and issubclass(ann, torch.nn.Module):
-        return _qualified_name(ann)
     if ann is inspect.Signature.empty:
         return TensorType.getInferred()
     if ann is None:
@@ -393,7 +391,8 @@ def try_ann_to_type(ann, loc):
             return maybe_script_class
         if torch._jit_internal.can_compile_class(ann):
             return torch.jit._script._recursive_compile_class(ann, loc)
-
+    if inspect.isclass(ann) and issubclass(ann, torch.nn.Module):
+        return _qualified_name(ann)
     # Maybe resolve a NamedTuple to a Tuple Type
     def fake_rcb(key):
         return None
