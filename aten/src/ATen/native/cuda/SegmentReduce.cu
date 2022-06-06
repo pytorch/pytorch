@@ -295,8 +295,8 @@ Tensor _segment_reduce_cuda_lengths_offsets_backward_kernel(
   int64_t lengths_stride_axis = lengths_or_offsets_contig.stride(axis);
   auto grad_input = at::zeros({data_contig.sizes()}, grad_contig.options());
 
-  auto offsets = lengths_or_offsets_contig;
-  auto lengths = lengths_or_offsets_contig;
+  Tensor& offsets = lengths_or_offsets_contig;
+  Tensor& lengths = lengths_or_offsets_contig;
   if (is_offsets_like) {
     lengths = lengths.diff();
   } else {
@@ -400,8 +400,8 @@ Tensor _segment_reduce_cuda_kernel(
   auto output = at::empty(output_shape, data.options());
 
 
-  auto offsets = lengths_or_offsets;
-  auto lengths = lengths_or_offsets;
+  Tensor& offsets = lengths_or_offsets;
+  Tensor& lengths = lengths_or_offsets;
   if (is_offsets_like) {
     lengths = lengths.diff();
   } else {
