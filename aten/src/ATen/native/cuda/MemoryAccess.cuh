@@ -96,7 +96,7 @@ struct multi_outputs_store_helper {
 struct LoadWithoutCast {
   template<typename scalar_t>
   __device__ scalar_t load(char *base_ptr, uint32_t offset, int arg) {
-    return *(reinterpret_cast<scalar_t *>(base_ptr) + offset);
+    return c10::load(reinterpret_cast<scalar_t *>(base_ptr) + offset);
   }
 };
 
@@ -159,6 +159,31 @@ struct StoreWithCast {
 template<typename scalar_t, int vec_size>
 struct alignas(sizeof(scalar_t) * vec_size) aligned_vector {
   scalar_t val[vec_size];
+};
+
+template <typename scalar_t>
+struct LoadVector {
+  template <int vec_size>
+  static __device__ aligned_vector<scalar_t, vec_size> load(const scalar_t *base_ptr, uint32_t offset) {
+    using vec_t = aligned_vector<scalar_t, vec_size>;
+    auto *from = reinterpret_cast<const vec_t *>(base_ptr);
+    return from[offset];
+  }
+};
+
+template <>
+struct LoadVector<bool> {
+  template <int vec_size>
+  static __device__ aligned_vector<bool, vec_size> load(const bool *base_ptr, uint32_t offset) {
+    // See NOTE [Loading boolean values]
+    auto tmp = LoadVector<uint8_t>::load<vec_size>(
+        reinterpret_cast<const uint8_t*>(base_ptr), offset);
+    aligned_vector<bool, vec_size> ret;
+    for (int i = 0; i < vec_size; ++i) {
+      ret.val[i] = bool(tmp.val[i]);
+    }
+    return ret;
+  }
 };
 
 namespace policies {
@@ -236,13 +261,11 @@ struct vectorized {
 
   template<typename accessor_t, typename scalar_t>
   __device__ inline void load_single_arg(accessor_t to, scalar_t *from) {
-    using vec_t = aligned_vector<scalar_t, vec_size>;
-    vec_t *from_ = reinterpret_cast<vec_t *>(from);
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < loop_size; i++) {
       int index = thread_idx + i * num_threads();
-      vec_t v = from_[index];
+      auto v = LoadVector<scalar_t>::load<vec_size>(from, index);
       #pragma unroll
       for (int j = 0; j < vec_size; j++) {
         to(vec_size * i + j) = v.val[j];
