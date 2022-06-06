@@ -191,7 +191,8 @@ struct cuda_scatter_gather_base_kernel {
   ) {
     at::assert_no_internal_overlap(self);
 
-    auto index_sizes_vec = ensure_nonempty_vec(index.sizes().vec());
+    auto index_sizes = index.sizes();
+    auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_strides_vec = ensure_nonempty_vec(src.strides().vec());
 
@@ -235,7 +236,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, index.sizes(), src.sizes(), self.numel(), f
+          iter, index_size, index_stride, index_sizes, src.sizes(), self.numel(), f
         );
       }
     );
@@ -249,7 +250,8 @@ struct cuda_scatter_gather_base_kernel {
   ) {
     at::assert_no_internal_overlap(self);
 
-    auto index_sizes_vec = ensure_nonempty_vec(index.sizes().vec());
+    auto index_sizes = index.sizes();
+    auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_strides_vec = ensure_nonempty_vec(src.strides().vec());
 
@@ -293,7 +295,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, index.sizes(), src.sizes(), self.numel(), f
+          iter, index_size, index_stride, index_sizes, src.sizes(), self.numel(), f
         );
       }
     );
@@ -308,7 +310,8 @@ struct cuda_scatter_gather_base_kernel {
   ) {
     at::assert_no_internal_overlap(self);
 
-    auto index_sizes_vec = ensure_nonempty_vec(index.sizes().vec());
+    auto index_sizes = index.sizes();
+    auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_strides_vec = ensure_nonempty_vec(src.strides().vec());
 
@@ -352,7 +355,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, index.sizes(), src.sizes(), self.numel(), f
+          iter, index_size, index_stride, index_sizes, src.sizes(), self.numel(), f
         );
       }
     );
