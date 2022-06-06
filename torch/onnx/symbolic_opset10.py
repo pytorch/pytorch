@@ -142,6 +142,7 @@ max_pool3d_with_indices = _max_pool(
 
 
 def _avg_pool(name, tuple_fn):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
@@ -188,6 +189,7 @@ avg_pool3d = _avg_pool("avg_pool3d", torch.nn.modules.utils._triple)
 
 
 def _interpolate(name, dim, interpolate_mode):
+    @symbolic_helper.quantized_args(True, False, False)
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = symbolic_helper._get_interpolate_attributes(
             g, interpolate_mode, args
@@ -541,6 +543,16 @@ class Quantized:
         y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
 
         output = opset9.add(g, x, y)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def add_relu(g, x, y, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+        y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
+
+        output = opset9.add(g, x, y)
+        output = opset9.relu(g, output)
 
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 

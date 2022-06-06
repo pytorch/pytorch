@@ -1068,6 +1068,7 @@ class TestSparse(TestCase):
         # more sophisticated algos
         run_test((10, 100, 100))
 
+    @onlyCPU
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_index_select_parallelization(self, device, dtype, coalesced):
@@ -1663,11 +1664,9 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
-        with self.assertWarnsOnceRegex(UserWarning, '__floordiv__'):
-            y1 = x1 // 37.5
+        y1 = x1 // 37.5
         y2 = x1.clone()
-        with self.assertWarnsOnceRegex(UserWarning, 'floor_divide'):
-            y2.floor_divide_(37.5)
+        y2.floor_divide_(37.5)
         expected = self.safeToDense(x1) // 37.5
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
@@ -3010,7 +3009,7 @@ class TestSparse(TestCase):
                                / torch.tensor(1., device=device).to_sparse())
 
     def test_floor_divide_by_sparse_error(self, device):
-        self.assertRaisesRegex(RuntimeError, 'Sparse division requires',
+        self.assertRaisesRegex(RuntimeError, 'Sparse floor division requires',
                                lambda: torch.tensor(1., device=device).to_sparse()
                                // torch.tensor(1., device=device).to_sparse())
 
