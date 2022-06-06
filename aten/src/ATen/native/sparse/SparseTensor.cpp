@@ -345,7 +345,7 @@ void _validate_sparse_coo_tensor_args(
     Tensor max_indices =
         std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
     Tensor cpu_min_indices, cpu_max_indices;
-    if (indices.is_cuda()) {
+    if (!indices.is_cpu()) {
       cpu_min_indices = min_indices.to(at::DeviceType::CPU);
       cpu_max_indices = max_indices.to(at::DeviceType::CPU);
     } else {
@@ -542,29 +542,6 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
 
   Tensor sparse = at::sparse_coo_tensor(indices, values, sizes, sparse_options);
   return sparse._coalesced_(true);
-}
-
-SparseTensor sparse_csr_to_sparse(const Tensor& self, int64_t sparse_dim) {
-  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
-  TORCH_CHECK(sparse_dim > 0, "sparse_dim must be >0");
-  TORCH_CHECK(sparse_dim <= 2,
-              "sparse_dim must be less than or equal to 2");
-  if (sparse_dim == 2) {
-    auto sizes = self.sizes();
-    Tensor crow_indices = self.crow_indices();
-    Tensor col_indices = self.col_indices();
-    Tensor values = self.values();
-    Tensor indices = at::_convert_indices_from_csr_to_coo(crow_indices, col_indices, false, false);
-    return at::native::_sparse_coo_tensor_unsafe(indices, values, sizes)._coalesced_(true);
-  } else {
-    TORCH_CHECK(false, "sparse dim 1 is not supported by sparse_csr_to_dense");
-    // TODO: implement coo.to_sparse(sparse_dim) and then use
-    // return self.to_sparse().to_sparse(sparse_dim);
-  }
-}
-
-SparseTensor sparse_csr_to_sparse(const Tensor& self) {
-  return sparse_csr_to_sparse(self, 2);
 }
 
 // NB: Dropped the resizeNd variants
@@ -785,7 +762,7 @@ SparseTensor& sparse_mask_out_cpu(
     // TODO: Re-audit this; it used to be an indexSelect directly into r_values
     at::index_select_out(r_values, t_view, 0, indices);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(r_values.scalar_type(), "sparse_mask", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, r_values.scalar_type(), "sparse_mask", [&] {
       sparse_mask_out_cpu_kernel<scalar_t>(
           r_values, t, r_nnz, sparse_dim, mask_indices);
     });

@@ -92,7 +92,6 @@ bool isUnsupportedOp(Node* node) {
 bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
   // check for sub-blocks
   bool can_support = true;
-  bool has_blocks = false;
   for (auto* node : graph->block()->nodes()) {
     const auto kind = node->kind();
     if (kind == prim::Constant) {
@@ -141,6 +140,7 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
+  EliminateNoOpSlice(graph);
   EliminateDeadCode(graph);
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
@@ -153,18 +153,22 @@ void OptimizeGraph(
         graph,
         fromQualString("fb::sigrid_transforms_torch_bind"),
         fromQualString("fb::variadic_sigrid_transforms_torch_bind"));
+    // These fused ops only have out variants - we can't do the fusion when
+    // out variants are disabled.
     FuseSignLog1P(graph);
+    FuseClampNaNToNum(graph);
 
-    // TODO: we can avoid this guard by moving operations
-    // to exposed folders.
 #ifdef FBCODE_CAFFE2
     if (opts.use_copy_variants && !opts.enable_tensorexpr_fusion) {
       ReplaceWithCopy(graph);
+    } else {
+      ReplacePermuteWithCopy(graph);
     }
     if (opts.use_maybe_copy_variants && !opts.enable_tensorexpr_fusion) {
       ReplaceWithMaybeCopy(graph);
     }
     FuseListUnpack(graph);
+    RemoveUnnecessaryOutputs(graph);
 #endif
   }
 
@@ -1196,17 +1200,16 @@ template <typename IValueList>
 c10::IValue BlockRunner::run_impl_record_functions(
     IValueList&& args,
     const KeywordArgs& kwargs) {
-  bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    at::RecordFunction guard(
-        at::RecordScope::STATIC_RUNTIME_MODEL, pre_sampled);
-    if (guard.isActive()) {
-      if (guard.needsInputs()) {
-        guard.before("forward", &args);
-      } else {
-        guard.before("forward");
-      }
-    }
+  auto step_callbacks =
+      at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_MODEL);
+  if (C10_UNLIKELY(step_callbacks.has_value())) {
+    at::RecordFunction guard(std::move(*step_callbacks));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
+    guard.needsInputs()
+        ? guard.before(
+              "forward", c10::ArrayRef<const IValue>(args.data(), args.size()))
+        : guard.before("forward");
+
     return run_impl(std::forward<IValueList>(args), kwargs);
   }
   return run_impl(std::forward<IValueList>(args), kwargs);
@@ -1841,16 +1844,23 @@ std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
 
 void ProcessedNode::run() {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    at::RecordFunction guard(at::RecordScope::STATIC_RUNTIME_OP, pre_sampled);
-    if (guard.isActive()) {
-      if (guard.needsInputs()) {
-        guard.before(get_op_name(), inputs_ivalue_vec());
-      } else {
-        guard.before(get_op_name());
-      }
+  auto step_callbacks =
+      at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_OP);
+  if (C10_UNLIKELY(step_callbacks.has_value())) {
+    at::RecordFunction guard(std::move(*step_callbacks));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
+    if (guard.needsInputs()) {
+      const auto inputs = inputs_ivalue_vec();
+      guard.before(
+          get_op_name(),
+          c10::ArrayRef<const IValue>(inputs.data(), inputs.size()));
+    } else {
+      guard.before(get_op_name());
     }
+    if (has_out_variant()) {
+      guard._setStaticRuntimeOutVariant();
+    }
+
     fn_->run(this);
   } else {
     fn_->run(this);

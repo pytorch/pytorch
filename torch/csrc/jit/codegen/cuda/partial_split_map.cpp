@@ -8,7 +8,6 @@ namespace fuser {
 namespace cuda {
 
 void PartialSplitMap::build(Fusion* fusion) {
-  const auto gpu_lower = GpuLower::current();
   auto used_vals = ir_utils::allTvs(fusion);
 
   for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
