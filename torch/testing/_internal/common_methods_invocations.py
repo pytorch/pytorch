@@ -5495,6 +5495,7 @@ def sample_inputs_gelu(self, device, dtype, requires_grad, **kwargs):
 
 
 def error_inputs_gelu(op, device, **kwargs):
+    # Tests thtat gelu errors out when passed an approximation we don't know.
     yield ErrorInput(SampleInput(make_tensor((), dtype=torch.float, device=device), kwargs={"approximate": "asdf"}),
                      error_regex="approximate argument must be either")
 
@@ -19782,14 +19783,9 @@ python_ref_db = [
         "_refs.nn.functional.hardtanh",
         torch_opinfo_name="nn.functional.hardtanh",
     ),
-    PythonRefInfo(
+    PythonRefInfo(  # TODO: Port this to an UnaryOpInfo
         "_refs.nn.functional.gelu",
         torch_opinfo_name="nn.functional.gelu",
-        decorators=(
-            # Need FakeTensor support for meta coverage
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
-        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
