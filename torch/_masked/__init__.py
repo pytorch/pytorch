@@ -674,10 +674,10 @@ def _sparse_csr_segment_reduction_helper(op,
         assert len(dims) == 2
         nnz = min(1, values.numel())
         if (nnz == 1):
-            op_kwargs = {'keepdim' : True}
+            op_kwargs = {'keepdim' : True, 'dtype' : output_dtype}
             # amax and amin do not support dtype kwarg
-            if reduce not in ['amax', 'amin']:
-                op_kwargs['dtype'] = output_dtype
+            if reduce in ['amax', 'amin']:
+                del op_kwargs['dtype']
             new_values = op(values, 0, **op_kwargs)
         else:
             new_values = torch.empty(0, dtype=output_dtype)
