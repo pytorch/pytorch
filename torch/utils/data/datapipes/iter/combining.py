@@ -295,9 +295,6 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         >>> list(dp2)
         [1, 3]
     """
-
-    instances = {}
-
     def __new__(cls, datapipe: IterDataPipe, num_instances: int,
                 classifier_fn: Callable[[T_co], Optional[int]], drop_none: bool = False, buffer_size: int = 1000):
         if num_instances < 1:
@@ -309,13 +306,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         # but keep it as Demultiplexer for the sake of consistency
         # like throwing Error when classification result is out of o range
         container = _DemultiplexerIterDataPipe(datapipe, num_instances, classifier_fn, drop_none, buffer_size)
-        DemultiplexerIterDataPipe.instances[container] = 1
         return [_ChildDataPipe(container, i) for i in range(num_instances)]
-
-    def buffers():
-        for instance in DemultiplexerIterDataPipe.instances:
-            for buffer in instance.child_buffers:
-                print(buffer)
 
 
 class _DemultiplexerIterDataPipe(IterDataPipe):
@@ -419,7 +410,6 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self.main_datapipe_exhausted = False
 
     def __del__(self):
-        del DemultiplexerIterDataPipe.instances[self]
         for dq in self.child_buffers:
             dq.clear()
 
