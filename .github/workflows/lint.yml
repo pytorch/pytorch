@@ -230,9 +230,16 @@ jobs:
     runs-on: linux.20_04.4x
     strategy:
       matrix:
-        with_torch: [with_torch, without_torch]
+        test_type: [with_torch, without_torch, older_python_version]
     steps:
-      - name: Setup Python
+      - name: Setup Python 3.5
+        if: matrix.test_type == 'older_python_version'
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.5
+          architecture: x64
+      - name: Setup Python 3.8
+        if: matrix.test_type != 'older_python_version'
         uses: actions/setup-python@v2
         with:
           python-version: 3.8
@@ -245,7 +252,7 @@ jobs:
           submodules: false
           fetch-depth: 1
       - name: Install torch
-        if: matrix.with_torch == 'with_torch'
+        if: matrix.test_type == 'with_torch'
         run: |
           # Doesn't really matter what torch version, we just need ANY torch installed
           pip install 'torch==1.*'
