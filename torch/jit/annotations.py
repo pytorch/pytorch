@@ -303,6 +303,8 @@ def is_tensor(ann):
 
 
 def try_ann_to_type(ann, loc):
+    if inspect.isclass(ann) and issubclass(ann, torch.nn.Module):
+        return str(ann)
     if ann is inspect.Signature.empty:
         return TensorType.getInferred()
     if ann is None:
