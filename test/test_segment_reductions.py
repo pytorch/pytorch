@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: scatter & gather ops"]
 
 from itertools import product
 
