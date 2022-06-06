@@ -14,20 +14,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-xenial-py3_7-gcc5_4-build:
-    name: linux-xenial-py3.7-gcc5.4
+  linux-focal-py3_7-gcc7-build:
+    name: linux-focal-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-py3.7-gcc5.4
-      docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
+      build-environment: linux-focal-py3.7-gcc7
+      docker-image-name: pytorch-linux-focal-py3.7-gcc7
 
-  linux-xenial-py3_7-gcc5_4-test:
-    name: linux-xenial-py3.7-gcc5.4
+  linux-focal-py3_7-gcc7-test:
+    name: linux-focal-py3.7-gcc7
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-xenial-py3_7-gcc5_4-build
+    needs: linux-focal-py3_7-gcc7-build
     with:
-      build-environment: linux-xenial-py3.7-gcc5.4
-      docker-image: ${{ needs.linux-xenial-py3_7-gcc5_4-build.outputs.docker-image }}
+      build-environment: linux-focal-py3.7-gcc7
+      docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -41,10 +41,10 @@ jobs:
   linux-docs:
     name: linux-docs
     uses: ./.github/workflows/_docs.yml
-    needs: linux-xenial-py3_7-gcc5_4-build
+    needs: linux-focal-py3_7-gcc7-build
     with:
-      build-environment: linux-xenial-py3.7-gcc5.4
-      docker-image: ${{ needs.linux-xenial-py3_7-gcc5_4-build.outputs.docker-image }}
+      build-environment: linux-focal-py3.7-gcc7
+      docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
 
   linux-xenial-py3_7-gcc7-build:
     name: linux-xenial-py3.7-gcc7
@@ -82,10 +82,11 @@ jobs:
       docker-image: ${{ needs.linux-xenial-py3_7-clang7-asan-build.outputs.docker-image }}
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 4, runner: "linux.2xlarge" },
-          { config: "default", shard: 3, num_shards: 4, runner: "linux.2xlarge" },
-          { config: "default", shard: 4, num_shards: 4, runner: "linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 5, runner: "linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 5, runner: "linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 5, runner: "linux.2xlarge" },
+          { config: "default", shard: 4, num_shards: 5, runner: "linux.2xlarge" },
+          { config: "default", shard: 5, num_shards: 5, runner: "linux.2xlarge" },
         ]}
 
   linux-xenial-py3_7-gcc7-no-ops:
@@ -179,34 +180,13 @@ jobs:
       docker-image: ${{ needs.linux-xenial-cuda11_3-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "distributed", shard: 1, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
           { config: "distributed", shard: 2, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
         ]}
-
-  linux-bionic-rocm5_1-py3_7-build:
-    name: linux-bionic-rocm5.1-py3.7
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-bionic-rocm5.1-py3.7
-      docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7
-
-  linux-bionic-rocm5_1-py3_7-test:
-    name: linux-bionic-rocm5.1-py3.7
-    uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-bionic-rocm5_1-py3_7-build
-    with:
-      build-environment: linux-bionic-rocm5.1-py3.7
-      docker-image: ${{ needs.linux-bionic-rocm5_1-py3_7-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
-        ]}
-    secrets:
-      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
-      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
   linux-xenial-py3-clang5-mobile-build:
     name: linux-xenial-py3-clang5-mobile-build
@@ -263,26 +243,15 @@ jobs:
           { config: "default", shard: 2, num_shards: 2, runner: "windows.4xlarge" },
         ]}
 
+  # please ensure that this and its corresponding job in trunk.yml are in sync
   win-vs2019-cuda11_3-py3-build:
+    # don't run build twice on master
+    if: github.event_name == 'pull_request'
     name: win-vs2019-cuda11.3-py3
     uses: ./.github/workflows/_win-build.yml
     with:
       build-environment: win-vs2019-cuda11.3-py3
       cuda-version: "11.3"
-
-  win-vs2019-cuda11_3-py3-test:
-    name: win-vs2019-cuda11.3-py3
-    uses: ./.github/workflows/_win-test.yml
-    needs: win-vs2019-cuda11_3-py3-build
-    with:
-      build-environment: win-vs2019-cuda11.3-py3
-      cuda-version: "11.3"
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
-        ]}
 
   linux-xenial-cuda11_3-py3_7-gcc7-bazel-test:
     name: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
@@ -305,13 +274,15 @@ jobs:
       build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
 
-  linux-xenial-py3_7-gcc5_4-mobile-lightweight-dispatch-build:
-    name: linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build
-      docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
-      build-generates-artifacts: false
+  # https://github.com/pytorch/pytorch/issues/78540
+  # linux-focal-py3_7-gcc7-mobile-lightweight-dispatch-build:
+  #   if: false()
+  #   name: linux-focal-py3.7-gcc7-mobile-lightweight-dispatch-build
+  #   uses: ./.github/workflows/_linux-build.yml
+  #   with:
+  #     build-environment: linux-focal-py3.7-gcc7-mobile-lightweight-dispatch-build
+  #     docker-image-name: pytorch-linux-focal-py3.7-gcc7
+  #     build-generates-artifacts: false
 
   deploy-linux-xenial-cuda11_3-py3_7-gcc7-build:
     name: deploy-linux-xenial-cuda11.3-py3.7-gcc7

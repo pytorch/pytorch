@@ -7,7 +7,7 @@ from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch._decomp import decomposition_table
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
-from torch.testing._internal.logging_tensor import no_dispatch
+from torch.utils._mode_utils import no_dispatch
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     TestCase,
@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 
+import itertools
 import functools
 from functools import partial
 import unittest
@@ -143,19 +144,27 @@ def _getDefaultRtolAndAtol(dtype0, dtype1):
     return rtol, atol
 
 
-def op_assert_ref(test_case, op, orig, decomp, ref, args, kwargs):
-    assert orig.dtype == decomp.dtype, f"Operation:  {op}"
+def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs):
+    assert orig.dtype == decomp.dtype, f"{i} Operation:  {op}"
     if orig.numel() == 0 or decomp.numel() == 0:
         assert orig.numel() == decomp.numel()
         return
+    assert orig.shape == decomp.shape, f"{i} Operation:  {op}"
+    tol_table = {
+        (torch.bfloat16, torch.ops.aten.native_layer_norm.default): 1e-5,
+        (torch.float16, torch.ops.aten.native_layer_norm.default): 1e-5,
+        (torch.bfloat16, torch.ops.aten.native_batch_norm.default): 1e-5,
+        (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
+    }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
         decomp_diff = (decomp - ref).abs().max()
-        atol = 1e-10
+        atol = tol_table.get((test_dtype, op), 1e-7)
         if decomp_diff > orig_diff + atol:
             raise RuntimeError(
                 f"Difference from float64 is larger with decomposition {op.__name__}"
-                f" than original. Original max diff: {orig_diff}, Decomp max diff: {decomp_diff}\n"
+                f" than original on output {i}. Original max diff: {orig_diff}, Decomp max diff: {decomp_diff}\n"
+                f"atol = {atol}\n"
                 f"args = {args}\n"
                 f"kwargs = {kwargs}"
             )
@@ -165,8 +174,9 @@ def op_assert_ref(test_case, op, orig, decomp, ref, args, kwargs):
         )
 
 
-def op_assert_equal(test_case, op, orig, decomp, args, kwargs):
-    assert orig.dtype == decomp.dtype, f"Operation:  {op}"
+def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
+    test_case.assertEqual(
+        orig.dtype, decomp.dtype, f"Operation: {op}, orig.dtype: {orig.dtype}, decomp.dtype: {decomp.dtype}, {args}, {kwargs}")
     # Before adding an entry to this table, make sure your decomposition is right :)
     tol_table = {
         # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
@@ -176,7 +186,7 @@ def op_assert_equal(test_case, op, orig, decomp, args, kwargs):
             1e-3,
         ),
     }
-    if (decomp.dtype, op) in tol_table:
+    if (test_dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
     else:
         rtol, atol = _getDefaultRtolAndAtol(orig.dtype, decomp.dtype)
@@ -224,31 +234,15 @@ def normalize_op_input_output2(
 
 
 # NB: This also upcasts dtype arguments
-
-
-def upcast_tensor(func, x, dtype=torch.float32):
-    # TODO: stop hardcoding integer values to pass in
-    # dtype in torch.ops
-    FLOAT16_DTYPE = 5
-    BFLOAT16_DTYPE = 15
-    FLOAT64_DTYPE = 7
-
-    # Some functions take a dtype as argument, so we need to
-    # manually change that dtype in order to run it with a
-    # higher precision
-    dtype_arg_table = {
-        torch.ops.aten._softmax_backward_data.default,
-        torch.ops.aten._log_softmax_backward_data.default,
-    }
-
+# TODO: handle complex correctly
+def upcast_tensor(x, dtype=torch.float32):
     if isinstance(x, Tensor) and x.dtype.is_floating_point:
         return x.to(dtype=dtype)
     elif (
-        isinstance(x, int)
-        and func in dtype_arg_table
-        and x in [FLOAT16_DTYPE, BFLOAT16_DTYPE]
+        isinstance(x, torch.dtype)
+        and x in [torch.float16, torch.bfloat16]
     ):
-        return FLOAT64_DTYPE
+        return dtype
     else:
         return x
 
@@ -277,12 +271,6 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.float64, "nn.functional.dropout"),
     ("cuda", torch.float32, "nn.functional.dropout"),
     # decomp has problem even with opmath
-    ("cuda", torch.bfloat16, "nn.functional.layer_norm"),
-    ("cuda", torch.float16, "nn.functional.layer_norm"),
-    ("cuda", torch.bfloat16, "nn.functional.batch_norm"),
-    ("cuda", torch.float16, "nn.functional.batch_norm"),
-    ("cuda", torch.bfloat16, "nn.functional.instance_norm"),
-    ("cuda", torch.float16, "nn.functional.instance_norm"),
     # doesn't work
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
 
@@ -314,6 +302,27 @@ def dump_ops():
 
 atexit.register(dump_ops)
 """
+
+
+def any_unsupported(args, kwargs):
+    def test_unsupported(t):
+        if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
+            # These are all things that we haven't coded decompositions
+            # to handle correctly.  Maybe they should.
+            return any([
+                t.is_sparse_csr, t.is_sparse, t.is_mkldnn, t.is_quantized,
+                t.is_nested, torch._is_functional_tensor(t),
+            ])
+        elif torch.overrides.is_tensor_like(t):
+            # Decompositions will generally change the behavior of Tensor-like
+            # subclasses, so bypass tests in this case too
+            return True
+        else:
+            return False
+
+    flat_args, _ = tree_flatten(args)
+    flat_kwargs, _ = tree_flatten(kwargs)
+    return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
 
 
 class TestDecomp(TestCase):
@@ -375,7 +384,7 @@ class TestDecomp(TestCase):
                 # (TODO: remove detach from the decomp table?)
                 if func not in decomposition_table or func in [
                     torch.ops.aten.detach.default
-                ]:
+                ] or any_unsupported(args, kwargs):
                     return func(*args, **kwargs)
 
                 decomposed.add(func)
@@ -400,21 +409,21 @@ class TestDecomp(TestCase):
                 assert len(real_out) == len(decomp_out)
 
                 if do_relative_check:
-                    upcast = partial(upcast_tensor, func, dtype=torch.float64)
+                    upcast = partial(upcast_tensor, dtype=torch.float64)
                     real_out_double, _ = tree_flatten(
                         func(*tree_map(upcast, args), **tree_map(upcast, kwargs))
                     )
-                    for orig, decomp, ref in zip(real_out, decomp_out, real_out_double):
+                    for i, orig, decomp, ref in zip(range(len(real_out)), real_out, decomp_out, real_out_double):
                         if orig is None:
                             assert decomp is None
                             continue
-                        op_assert_ref(self, func, orig, decomp, ref, args, kwargs)
+                        op_assert_ref(self, func, test_dtype, i, orig, decomp, ref, args, kwargs)
                 else:
                     for orig, decomp in zip(real_out, decomp_out):
                         if orig is None:
                             assert decomp is None
                             continue
-                        op_assert_equal(self, func, orig, decomp, args, kwargs)
+                        op_assert_equal(self, func, test_dtype, orig, decomp, args, kwargs)
 
                 return real_out_unflat
 

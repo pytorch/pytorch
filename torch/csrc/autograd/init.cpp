@@ -22,6 +22,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/profiler/execution_graph_observer.h>
 #include <c10/core/ScalarType.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 
@@ -269,9 +270,24 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         return e.nBytes();
       });
 
+  {
+    using torch::profiler::impl::Result;
+    py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
+        .def("name", &Result::name)
+        .def_property_readonly(
+            "id",
+            [](const Result& r) {
+              return reinterpret_cast<intptr_t>(r.shared_from_this().get());
+            })
+        .def_property_readonly(
+            "parent", [](const Result& r) { return r.parent_.lock(); })
+        .def_readonly("children", &Result::children_);
+  }
+
   py::class_<ProfilerResult>(m, "_ProfilerResult")
     .def("trace_start_us", &ProfilerResult::trace_start_us)
     .def("events", &ProfilerResult::events)
+    .def("experimental_event_tree", &ProfilerResult::event_tree)
 #ifdef USE_KINETO
     .def("save", &ProfilerResult::save)
 #endif // USE_KINETO
@@ -288,6 +304,12 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_kineto_step", profilerStep);  // Only if `USE_KINETO` is set
   m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
 
+  // PyTorch profiler execution graph internal interface.
+  m.def("_add_execution_graph_observer", &torch::profiler::impl::addExecutionGraphObserver, py::arg("output_file_name"));
+  m.def("_remove_execution_graph_observer", &torch::profiler::impl::removeExecutionGraphObserver);
+  m.def("_enable_execution_graph_observer", &torch::profiler::impl::enableExecutionGraphObserver);
+  m.def("_disable_execution_graph_observer", &torch::profiler::impl::disableExecutionGraphObserver);
+
   // NOTICE: These record functions are not torch operators and may not show up
   // in TorchScript tracing, FX transforms, or operator serialization. For these
   // use cases, please use `torch.profiler.record_function`.
@@ -303,7 +325,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         for (const auto& arg : args) {
             iv_inputs.push_back(torch::jit::toTypeInferredIValue(arg));
         }
-        rec->before(name, iv_inputs);
+        rec->before(name, c10::ArrayRef<const c10::IValue>(iv_inputs.data(), iv_inputs.size()));
       } else {
         rec->before(name);
       }
