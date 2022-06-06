@@ -913,13 +913,17 @@ class TestSparseCSR(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                     torch.addmm(s, csr, m2)
 
-    #@skipCPUIfNoMklSparse
-    #@skipCUDAIfNoCusparseGeneric
+    @skipCPUIfNoMklSparse
+    @skipCUDAIfNoCusparseGeneric
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if SM53OrLater else [],
                   *[torch.bfloat16] if SM80OrLater else []))
     def test_csr_matvec(self, device, dtype):
+
+        if TEST_WITH_ROCM and (dtype == torch.half or dtype == torch.bfloat16):
+            self.skipTest("ROCm doesn't work with half dtypes correctly.")
+
         side = 100
         for index_dtype in [torch.int32, torch.int64]:
             csr = self.genSparseCSRTensor((side, side), 1000, device=device, dtype=dtype, index_dtype=index_dtype)
