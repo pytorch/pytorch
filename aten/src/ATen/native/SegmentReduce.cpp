@@ -418,7 +418,6 @@ Tensor segment_reduce_kernel(
     const auto& offsets_value = offsets.value();
 
     // offsets related checks
-    // FIXME: maybe these 3 checks can be moved out of the if statement to reduce code duplication
     TORCH_CHECK(data.get_device() == offsets_value.get_device());
     TORCH_CHECK(data.dim() >= offsets_value.dim());
     TORCH_CHECK(axis == offsets_value.dim() - 1,
@@ -448,7 +447,6 @@ Tensor segment_reduce_kernel(
     if (!unsafe) {
       auto min_length = lengths_value.min().item<int64_t>();
       TORCH_CHECK((min_length >= 0), "lengths contains negative value!");
-      // FIXME: maybe do this in a loop
       TORCH_CHECK(all(lengths_value.sum({-1}) == data.size(axis)).item<bool>(),
                   "segment_reduce(): Expected all rows of lengths along axis ",
                   "to sum to data.size(lengths.dim()-1) when !unsafe.");
