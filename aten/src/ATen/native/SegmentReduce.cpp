@@ -22,8 +22,10 @@ SegmentReductionType get_reduction_enum(const c10::string_view& reduce) {
     return SegmentReductionType::MIN;
   } else if (reduce == "sum") {
     return SegmentReductionType::SUM;
+  } else if (reduce == "prod") {
+    return SegmentReductionType::PROD;
   } else {
-    TORCH_CHECK(false, "unsopported reduction given! ", reduce);
+    TORCH_CHECK(false, "unsupported reduction given! ", reduce);
   }
 }
 
@@ -56,6 +58,8 @@ void _segment_reduce_cpu_kernel1(
               initial_value = 0;
             } else if (reduction == SegmentReductionType::MIN) {
               initial_value = std::numeric_limits<scalar_t>::infinity();
+            } else if (reduction == SegmentReductionType::PROD) {
+              initial_value = 1;
             }
 
             // ===== step2: apply reduction
@@ -76,6 +80,8 @@ void _segment_reduce_cpu_kernel1(
                 initial_value = at::_isnan(data)
                     ? data
                     : std::min<scalar_t>(initial_value, data);
+              } else if (reduction == SegmentReductionType::PROD) {
+                initial_value = initial_value * data;
               }
             }
 
@@ -125,6 +131,7 @@ void _segment_reduce_cpu_backward_kernel1(
     SegmentReductionType reduction,
     const T* lengths_data,
     int64_t axis,
+    const c10::optional<Scalar>& initial,
     Tensor& grad_input,
     int64_t segment_count) {
   int64_t stride_count = data_contig.numel() / data_contig.size(axis);
@@ -140,6 +147,15 @@ void _segment_reduce_cpu_backward_kernel1(
         auto* grad_data = grad_contig.data_ptr<scalar_t>();
         auto* grad_input_data = grad_input.data_ptr<scalar_t>();
         const auto* values_data = data_contig.data_ptr<scalar_t>();
+        // Used to calculate exclusive prod
+        scalar_t initial_prod_value;
+        if (reduction == SegmentReductionType::PROD) {
+          if (initial.has_value()) {
+            initial_prod_value = initial.value().to<scalar_t>();
+          } else {
+            initial_prod_value = 1;
+          }
+        }
 
         int64_t lengths_cum_sum = 0;
         for (const auto i : c10::irange(segment_count)) {
@@ -189,6 +205,27 @@ void _segment_reduce_cpu_backward_kernel1(
                     ((lengths_cum_sum + j) * stride_count) + l;
                 grad_input_data[starting_index] = grad_val;
               }
+            } else if (reduction == SegmentReductionType::PROD) {
+              const auto& grad_val = grad_data[output_index] * output_data[output_index];
+              for (const auto j : c10::irange(lengths_data[i])) {
+                int64_t starting_index =
+                    ((lengths_cum_sum + j) * stride_count) + l;
+                if (at::_isnan(values_data[starting_index]) ||
+                    values_data[starting_index] == 0) {
+                  // explicitly compute exclusive prod
+                  scalar_t exclusive_prod = initial_prod_value;
+                  int64_t idx;
+                  for (const auto k : c10::irange(lengths_data[i])) {
+                    if (k != j) {
+                      idx = ((lengths_cum_sum + k) * stride_count) + l;
+                      exclusive_prod *= values_data[idx];
+                    }
+                  }
+                  grad_input_data[starting_index] = grad_data[output_index] * exclusive_prod;
+                } else {
+                  grad_input_data[starting_index] = grad_val / values_data[starting_index];
+                }
+              }
             }
           }
 
@@ -203,7 +240,8 @@ Tensor _segment_reduce_cpu_backward_kernel(
     const Tensor& data_contig,
     SegmentReductionType reduction,
     const Tensor& lengths_contig,
-    int64_t axis) {
+    int64_t axis,
+    const c10::optional<Scalar>& initial) {
   int64_t segment_count = lengths_contig.numel();
   auto output_shape = data_contig.sizes().vec();
   output_shape[axis] = segment_count;
@@ -219,6 +257,7 @@ Tensor _segment_reduce_cpu_backward_kernel(
             reduction,
             lengths_data,
             axis,
+            initial,
             grad_input,
             segment_count);
       });
@@ -285,7 +324,8 @@ Tensor _segment_reduce_backward_kernel(
     const Tensor& data,
     c10::string_view reduce,
     const c10::optional<Tensor>& lengths,
-    int64_t axis) {
+    int64_t axis,
+    const c10::optional<Scalar>& initial) {
   axis = maybe_wrap_dim(axis, data.ndimension());
   TORCH_CHECK(axis == 0, "Currently only dim=0 is supported! ", axis);
   TORCH_CHECK(
@@ -306,7 +346,8 @@ Tensor _segment_reduce_backward_kernel(
       data_contig,
       reduction,
       lengths_contig,
-      axis);
+      axis,
+      initial);
 }
 
 REGISTER_ARCH_DISPATCH(
