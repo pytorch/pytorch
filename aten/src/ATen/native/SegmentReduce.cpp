@@ -436,7 +436,7 @@ Tensor segment_reduce_kernel(
       axis,
       initial);
 
-  } else if (lengths_has_value) {
+  } else {
     const auto& lengths_value = lengths.value();
 
     // length related checks
@@ -523,8 +523,7 @@ Tensor _segment_reduce_backward_kernel(
       offsets_contig,
       axis,
       initial);
-  }
-  else if (lengths_has_value) {
+  } else {
     const auto& lengths_value = lengths.value();
     const auto lengths_contig = lengths_value.contiguous();
     return _segment_reduce_lengths_backward_stub(
