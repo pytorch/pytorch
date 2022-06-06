@@ -1,75 +1,15 @@
 import yaml
 import csv
 import torch
-import sys
-import os
 from collections import defaultdict
 
 
-class CapturedOutput(object):
-    """
-    Class used to grab standard output.
-    We need this instead of contextlib.redirect_stdout() if the printed text
-    that we want to capture comes from C++.
-    The result is stored in capturedtext.
-    Pulled partially from https://www.py4u.net/discuss/66399.
-    """
-    escape_char = "\b"
-
-    def __init__(self):
-        self.origstream = sys.stdout
-        self.origstreamfd = self.origstream.fileno()
-        self.capturedtext = ""
-        # Create a pipe so the stream can be captured:
-        self.pipe_out, self.pipe_in = os.pipe()
-
-    def __enter__(self):
-        self.capturedtext = ""
-        # Save a copy of the stream:
-        self.streamfd = os.dup(self.origstreamfd)
-        # Replace the original stream with our write pipe:
-        os.dup2(self.pipe_in, self.origstreamfd)
-        return self
-
-    def __exit__(self, type, value, traceback):
-        # Print the escape character to make the readOutput method stop:
-        self.origstream.write(self.escape_char)
-        # Flush the stream to make sure all our data goes in before
-        # the escape character:
-        self.origstream.flush()
-        self.readOutput()
-        # Close the pipe:
-        os.close(self.pipe_in)
-        os.close(self.pipe_out)
-        # Restore the original stream:
-        os.dup2(self.streamfd, self.origstreamfd)
-        # Close the duplicate stream:
-        os.close(self.streamfd)
-
-    def readOutput(self):
-        """
-        Read the stream data (one byte at a time)
-        and save the text in `capturedtext`.
-        """
-        while True:
-            char = os.read(self.pipe_out, 1)
-            if not char:
-                break
-            char = char.decode("utf-8")
-            if self.escape_char in char:
-                break
-            self.capturedtext += char
-
-
 def get_ops_for_key(key):
-    all_out = CapturedOutput()
-    with all_out:
-        if key is None:
-            torch._C._dispatch_print_registrations_for_dispatch_key()
-        else:
-            torch._C._dispatch_print_registrations_for_dispatch_key(key)
-
-    ops = all_out.capturedtext.split('\n')
+    # Needs modified PyTorch C++ code to work
+    if key is None:
+        ops = torch._C._dispatch_get_registrations_for_dispatch_key()
+    else:
+        ops = torch._C._dispatch_get_registrations_for_dispatch_key(key)
     cleaned_ops = []
     for i in ops:
         if 'aten::' not in i:
@@ -161,7 +101,6 @@ def gen_data(special_op_lists, analysis_name):
 
     annotate_ops(ops, is_unique=False)
     with open(f"{analysis_name}", 'w') as f:
-        # import pdb; pdb.set_trace()
         for op in ops:
             info = [
                 op['full_name'], op['meta'], not (op['full_name'] in noncomposite_ops)
@@ -186,6 +125,11 @@ def remove_suffix(input_string, suffix):
         return input_string[:-len(suffix)]
     return input_string
 
+def remove_prefix(input_string, prefix):
+    if prefix and input_string.startswith(prefix):
+        return input_string[len(prefix):]
+    return input_string
+
 
 if True:
     with open('run_ops.txt', 'r') as f:
@@ -194,9 +138,20 @@ if True:
         opinfo_counts = [i.strip() for i in f.readlines()]
         opinfo_counts = defaultdict(int, {k: v for k, v in zip(opinfo_ops, opinfo_counts)})
 
-        def count_fn(x):
-            return opinfo_counts[x['full_name']]
+    def count_fn(x):
+        return opinfo_counts[x['full_name']]
 
     with open('run_decompositions.txt', 'r') as f:
         decomposed_ops = [remove_suffix(i.strip(), '.default') for i in f.readlines()]
-    gen_data([full_name_check(opinfo_ops), full_name_check(decomposed_ops), count_fn], 'decompositions.txt')
+
+    with open('public_api', 'r') as f:
+        ref_api = [i.strip() for i in f.readlines()]
+
+    def has_ref_impl(x):
+        name = x['name']
+        for prefix in ["linalg_", "special_"]:
+            name = remove_prefix(name, prefix)
+        prefixes = ['nn.functional', 'fft', 'special', 'linalg']
+        return any(f"{prefix}.{name}" in ref_api for prefix in prefixes) or name in ref_api
+
+    gen_data([full_name_check(opinfo_ops), full_name_check(decomposed_ops), count_fn, has_ref_impl], 'decompositions.txt')
