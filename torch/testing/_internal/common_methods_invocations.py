@@ -16203,6 +16203,15 @@ op_db: List[OpInfo] = [
                # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_complex_half_reference_testing',
                             device_type='cuda'),
+               # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta',
+                            device_type='cuda', dtypes=(torch.chalf,)),
+               # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta',
+                            device_type='cuda', dtypes=(torch.chalf,)),
+               # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
+                            device_type='cuda', dtypes=(torch.chalf,)),
            )
            ),
     OpInfo('reshape',
