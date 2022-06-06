@@ -3116,28 +3116,68 @@ class _TestONNXRuntime:
         self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    def test_listunpack(self):
-        class ListUnpack(torch.jit.ScriptModule):
-            @torch.jit.script_method
+    def test_list_unpack_scripted(self):
+        class ListUnpack(torch.nn.Module):
             def forward(self, x):
                 a, b = x.shape
                 return x.new_zeros((a, b))
 
         x = torch.randn(2, 3)
-        self.run_test(ListUnpack(), x, input_names=["x"], dynamic_axes={"x": [0, 1]})
-        self.run_test(ListUnpack(), x, remained_onnx_input_idx=[])
+        self.run_test(
+            torch.jit.script(ListUnpack()),
+            x,
+            input_names=["x"],
+            dynamic_axes={"x": [0, 1]},
+        )
+        self.run_test(torch.jit.script(ListUnpack()), x, remained_onnx_input_idx=[])
 
-        class ListUnpackSlice(torch.jit.ScriptModule):
-            @torch.jit.script_method
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_list_unpack_scripted_runs_without_error_with_constructed_list_as_input(
+        self,
+    ):
+        class PackUnpack(torch.nn.Module):
+            """Create and unpack a list of tensors.
+
+            When scripted, it should produce a graph similar to
+
+            ```
+            graph(%self : __torch__.PackUnpack,
+                %a.1 : Tensor,
+                %b.1 : Tensor):
+            %packed.1 : Tensor[] = prim::ListConstruct(%a.1, %b.1)
+            %c.1 : Tensor, %8 : Tensor = prim::ListUnpack(%packed.1)
+            return (%c.1)
+            ```
+            """
+
+            def forward(self, a, b):
+                packed = [a, b]
+                c, _ = packed
+                return c
+
+        self.run_test(
+            torch.jit.script(PackUnpack()),
+            (torch.tensor(0), torch.tensor([42])),
+            remained_onnx_input_idx=[0],
+        )
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_list_unpack_slice_scripted(self):
+        class ListUnpackSlice(torch.nn.Module):
             def forward(self, x):
                 a, b = x.shape[2:]
                 return x.new_zeros((a, b))
 
         x = torch.randn(2, 3, 4, 5)
         self.run_test(
-            ListUnpackSlice(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2, 3]}
+            torch.jit.script(ListUnpackSlice()),
+            x,
+            input_names=["x"],
+            dynamic_axes={"x": [0, 1, 2, 3]},
         )
-        self.run_test(ListUnpackSlice(), x, remained_onnx_input_idx=[])
+        self.run_test(
+            torch.jit.script(ListUnpackSlice()), x, remained_onnx_input_idx=[]
+        )
 
     def test_pow(self):
         class PowModule(torch.nn.Module):
@@ -7445,6 +7485,15 @@ class _TestONNXRuntime:
         model = Log10()
         self.run_test(model, x)
 
+    def test_log2(self):
+        class Log2(torch.nn.Module):
+            def forward(self, input):
+                return torch.log2(input)
+
+        x = torch.tensor(1.0)
+        model = Log2()
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_round(self):
         class Round(torch.nn.Module):
@@ -9826,6 +9875,7 @@ class _TestONNXRuntime:
             x,
             model_onnx,
             opset_version=self.opset_version,
+            do_constant_folding=False,
             training=torch.onnx.TrainingMode.TRAINING,
         )
         ort_sess = verification._ort_session(model_onnx)
@@ -9840,6 +9890,7 @@ class _TestONNXRuntime:
             x,
             model_onnx,
             opset_version=self.opset_version,
+            do_constant_folding=False,
             training=torch.onnx.TrainingMode.TRAINING,
         )
         ort_outs = verification._run_ort(ort_sess, (x,))
@@ -9872,6 +9923,7 @@ class _TestONNXRuntime:
             x,
             model_onnx,
             opset_version=self.opset_version,
+            do_constant_folding=False,
             training=torch.onnx.TrainingMode.TRAINING,
         )
         ort_sess = verification._ort_session(model_onnx)
@@ -9896,6 +9948,7 @@ class _TestONNXRuntime:
             x,
             model_onnx,
             opset_version=self.opset_version,
+            do_constant_folding=False,
             training=torch.onnx.TrainingMode.TRAINING,
         )
         ort_sess = verification._ort_session(model_onnx)
@@ -12046,6 +12099,13 @@ class _TestONNXRuntime:
         self.run_test(model, q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
+    def test_quantized_sigmoid(self):
+        model = torch.nn.Sigmoid()
+        input = torch.randn(2, 6)
+        q_input = torch.quantize_per_tensor(input, 0.26, 128, torch.quint8)
+        self.run_test(model, q_input)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_flatten(self):
         class FlattenModel(torch.nn.Module):
             def forward(self, input):
@@ -12273,6 +12333,32 @@ class _TestONNXRuntime:
 
         # Set fixed input to avoid flaky test.
         input = _construct_tensor_for_quantization_test((4, 4, 3, 2))
+        self.run_test(model, input)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_qat_avg_pool2d(self):
+        model = torch.nn.Sequential(
+            torch.quantization.QuantStub(),
+            torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1),
+            torch.quantization.DeQuantStub(),
+        )
+        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model = torch.quantization.prepare_qat(model.train())
+        model = torch.quantization.convert(model)
+        input = _construct_tensor_for_quantization_test((4, 4, 3, 2))
+        self.run_test(model, input)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_qat_upsample_nearest2d(self):
+        model = torch.nn.Sequential(
+            torch.quantization.QuantStub(),
+            torch.nn.UpsamplingNearest2d(scale_factor=1.5),
+            torch.quantization.DeQuantStub(),
+        )
+        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model = torch.quantization.prepare_qat(model.train())
+        model = torch.quantization.convert(model)
+        input = _construct_tensor_for_quantization_test((4, 3, 2, 2))
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(9)
