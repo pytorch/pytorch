@@ -1694,7 +1694,8 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
 
 @out_wrapper
 def dstack(tensors: TensorSequenceType) -> TensorLikeType:
-    aligned_tensors = tuple(x if x.ndim > 2 else atleast_3d(x) for x in tensors)
+    check(len(tensors) > 0, lambda: "hstack expects a non-empty TensorList")
+    aligned_tensors = atleast_3d(*tensors)
     return cat(aligned_tensors, 2)
 
 
