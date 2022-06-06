@@ -1132,8 +1132,8 @@ def clamp(
 )
 def where(
     pred: Tensor,
-    a: Optional[Union[TensorLikeType, NumberType]] = None,
-    b: Optional[Union[TensorLikeType, NumberType]] = None,
+    a: Optional[TensorOrNumberLikeType] = None,
+    b: Optional[TensorOrNumberLikeType] = None,
 ):
     """ """
 
@@ -2372,11 +2372,35 @@ def uniform(
     return prims.uniform(shape, low=low, high=high, dtype=dtype, device=device)
 
 
-def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: float):
-    result = where(mask, value, a)
-    if utils.is_boolean_dtype(a.dtype):
-        return prims.to_dtype(result, torch.bool)
-    return result
+def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType):
+    python_type = utils.dtype_to_type(a.dtype)
+    if isinstance(value, NumberType):
+        value_type = type(value)
+    else:
+        # NOTE: Could not use value = item(value) as it resulted in
+        # RuntimeError: Cannot cast FakeTensor(cpu) to number
+        assert isinstance(value, TensorLikeType)
+        check(
+            value.ndim == 0,
+            lambda: "only supports a 0-dimensional value tensor, but got tensor with 1 dimension",
+        )
+        value_type = utils.dtype_to_type(value.dtype)
+
+    if python_type is not bool:
+        # Any type can be converted to `bool` without overflow
+        # Probably a bug in this case?
+        check(
+            utils.is_weakly_lesser_type(value_type, python_type),
+            lambda: f"could not convert to type {python_type} without overflow",
+        )
+
+    # Since `where`` allows type-promotion,
+    # cast value to correct type before passing to `where`
+    if isinstance(value, NumberType):
+        return where(mask, python_type(value), a)
+
+    assert isinstance(value, TensorLikeType)
+    return where(mask, prims.to_dtype(value, a.dtype), a)
 
 
 # TODO: add OpInfo for torch.equal and refs.equal
