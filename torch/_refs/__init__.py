@@ -2374,12 +2374,12 @@ def uniform(
 
 def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType):
     python_type = utils.dtype_to_type(a.dtype)
-    if isinstance(value, NumberType):
+    if isinstance(value, Number):
         value_type = type(value)
     else:
         # NOTE: Could not use value = item(value) as it resulted in
         # RuntimeError: Cannot cast FakeTensor(cpu) to number
-        assert isinstance(value, TensorLikeType)
+        assert isinstance(value, TensorLike)
         check(
             value.ndim == 0,
             lambda: "only supports a 0-dimensional value tensor, but got tensor with 1 dimension",
@@ -2396,10 +2396,10 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
 
     # Since `where` allows type-promotion,
     # cast value to correct type before passing to `where`
-    if isinstance(value, NumberType):
+    if isinstance(value, Number):
         return where(mask, python_type(value), a)
 
-    assert isinstance(value, TensorLikeType)
+    assert isinstance(value, TensorLike)
     return where(mask, prims.to_dtype(value, a.dtype), a)
 
 
