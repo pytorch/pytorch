@@ -142,7 +142,8 @@ class TestPythonJiterator(TestCase):
         function_body = ""
         for i in range(num_outputs):
             function_body += f"out{i} = input + {i};\n"
-        code_string = f"template <typename T> T my_kernel(T input, {output_string}) {{ {function_body} }}"
+        # NB: return type must be void, otherwise ROCm silently fails
+        code_string = f"template <typename T> void my_kernel(T input, {output_string}) {{ {function_body} }}"
 
         jitted_fn = create_multi_output_jit_fn(code_string, num_outputs)
 
