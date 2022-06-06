@@ -548,12 +548,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return sizes_default();
   }
 
-  c10::SymIntArrayRef sym_sizes() const {
-    if (C10_UNLIKELY(
-            sizes_strides_policy_ >=
-            static_cast<uint8_t>(SizesStridesPolicy::CustomSymSizes))) {
-      return sym_sizes_custom();
-    }
+  virtual c10::SymIntArrayRef sym_sizes() const {
     return sym_sizes_default();
   }
 

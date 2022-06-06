@@ -43,6 +43,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   bool is_contiguous_custom(MemoryFormat) const override;
   IntArrayRef sizes_custom() const override;
   c10::SymIntArrayRef sym_sizes_custom() const override;
+  c10::SymIntArrayRef sym_sizes() const override;
   IntArrayRef strides_custom() const override;
 
   // this one is real

@@ -58,7 +58,7 @@ NestedTensorImpl::NestedTensorImpl(
   key_set_ =
       key_set_ - c10::DispatchKeySet({c10::DispatchKey::ADInplaceOrView});
   refresh_dim();
-  set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomSymSizes);
+  set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
 
 void NestedTensorImpl::refresh_dim() {
@@ -81,6 +81,10 @@ IntArrayRef NestedTensorImpl::sizes_custom() const {
 }
 c10::SymIntArrayRef NestedTensorImpl::sym_sizes_custom() const {
   TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
+}
+
+c10::SymIntArrayRef NestedTensorImpl::sym_sizes() const {
+  return sym_sizes_custom();
 }
 
 IntArrayRef NestedTensorImpl::strides_custom() const {
