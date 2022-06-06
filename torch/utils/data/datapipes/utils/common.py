@@ -173,7 +173,10 @@ class StreamWrapper:
         StreamWrapper.session_streams[self] = 1
 
     @classmethod
-    def cleanup_structure(cls, v, depth=0):
+    def close_streams(cls, v, depth=0):
+        '''
+        Traverse structure and attempts to close all found StreamWrappers on best effort basis.
+        '''
         if depth > 10:
             return
         if isinstance(v, StreamWrapper):
@@ -182,10 +185,10 @@ class StreamWrapper:
             # Traverve only simple structures
             if isinstance(v, dict):
                 for vv in v:
-                    cls.cleanup_structure(vv, depth=depth + 1)
+                    cls.close_streams(vv, depth=depth + 1)
             elif isinstance(v, list) or isinstance(v, tuple):
                 for kk, vv in v.items():
-                    cls.cleanup_structure(vv, depth=depth + 1)
+                    cls.close_streams(vv, depth=depth + 1)
 
     def __getattr__(self, name):
         file_obj = self.__dict__['file_obj']
@@ -200,6 +203,9 @@ class StreamWrapper:
         self.file_obj.close(*args, **kwargs)
 
     def autoclose(self):
+        '''
+        Marks Steam to close automatically as soon as all child streams are closed.
+        '''
         if self.child_counter == 0:
             self.close()
         self.close_on_last_child = True

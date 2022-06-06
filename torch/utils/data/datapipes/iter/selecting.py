@@ -81,7 +81,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
             if self._isNonEmpty(filtered):
                 yield filtered
             else:
-                StreamWrapper.cleanup_structure(data)
+                StreamWrapper.close_streams(data)
 
     def _returnIfTrue(self, data):
         condition = self._apply_filter_fn(data)

@@ -345,7 +345,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             value = next(self._datapipe_iterator)
             classification = self.classifier_fn(value)
             if classification is None and self.drop_none:
-                StreamWrapper.cleanup_structure(value)
+                StreamWrapper.close_streams(value)
                 continue
             if classification is None or classification >= self.num_instances or classification < 0:
                 raise ValueError(f"Output of the classification fn should be between 0 and {self.num_instances - 1}. " +
@@ -515,12 +515,13 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         for data in zip(*iterators):
             yield data
 
-        tail = []
+        unused = []
         for iterator in iterators:
-            tail += list(iterator)
+            unused += list(iterator)
 
-        if len(tail) > 0:
-            raise Exception('Unconsumed elements in zip')
+        # TODO(VitalyFedyunin): This should be Exception or warning when torchdata.debug is enabled
+        for item in unused:
+            StreamWrapper.close_streams(item)
 
     def __len__(self) -> int:
         if self.length is not None:
