@@ -195,7 +195,6 @@ struct cuda_scatter_gather_base_kernel {
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
     auto index_strides_vec = ensure_nonempty_vec(index.strides().vec());
-    auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
     auto src_strides = src.strides();
@@ -203,6 +202,7 @@ struct cuda_scatter_gather_base_kernel {
 
     bool index_larger_than_src = false;
     if (is_scatter_like) {
+      auto ndim = index_sizes.size();
       for (int i = 0; i < ndim; i++) {
         if (index_sizes[i] > src_sizes[i]) {
           index_larger_than_src = true;
@@ -268,7 +268,6 @@ struct cuda_scatter_gather_base_kernel {
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
     auto index_strides_vec = ensure_nonempty_vec(index.strides().vec());
-    auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
     auto src_strides = src.strides();
@@ -276,6 +275,7 @@ struct cuda_scatter_gather_base_kernel {
 
     bool index_larger_than_src = false;
     if (is_scatter_like) {
+      auto ndim = index_sizes.size();
       for (int i = 0; i < ndim; i++) {
         if (index_sizes[i] > src_sizes[i]) {
           index_larger_than_src = true;
@@ -342,7 +342,6 @@ struct cuda_scatter_gather_base_kernel {
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
     auto index_strides_vec = ensure_nonempty_vec(index.strides().vec());
-    auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
     auto src_strides = src.strides();
@@ -350,6 +349,7 @@ struct cuda_scatter_gather_base_kernel {
 
     bool index_larger_than_src = false;
     if (is_scatter_like) {
+      auto ndim = index_sizes.size();
       for (int i = 0; i < ndim; i++) {
         if (index_sizes[i] > src_sizes[i]) {
           index_larger_than_src = true;
