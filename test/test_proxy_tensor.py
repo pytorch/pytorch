@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: fx"]
+
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import unittest
@@ -93,6 +95,46 @@ class TestProxyTensor(TestCase):
         grads2 = [a.grad for a in mod.parameters()]
         self.assertEqual(grads, grads2)
 
+    def test_proxy_tensor(self):
+        def f_grad(x):
+            val = x.cos().cos().sum()
+            return torch.autograd.grad(val, x)
+
+        def f_backward(x):
+            val = x.cos().cos().sum()
+            val.backward()
+            return x.grad
+
+        for f in [f_grad, f_backward]:
+            traced_graph = make_fx(f)(torch.randn(3, requires_grad=True))
+            inp = torch.randn(3, requires_grad=True)
+            traced_graph_out = traced_graph(inp)
+            assert inp.grad is None
+            torch.testing.assert_close(traced_graph_out, f(inp))
+
+    def test_mode_tracing_factory_function(self):
+        def f(x):
+            return x + torch.randn(x.shape)
+
+        traced = make_fx(f, trace_factory_functions=True)(torch.randn(3))
+        self.assertTrue(
+            any(
+                isinstance(node.target, torch._ops.OpOverloadPacket) and node.target._qualified_op_name == 'aten::randn'
+                for node in traced.graph.nodes
+            )
+        )
+
+    def test_mode_tracing_factory_function_default_behavior(self):
+        def f(x):
+            return x + torch.randn(x.shape)
+
+        traced = make_fx(f)(torch.randn(3))  # default behavior should not trace factory functions
+        self.assertFalse(
+            any(
+                isinstance(node.target, torch._ops.OpOverloadPacket) and node.target._qualified_op_name == 'aten::randn'
+                for node in traced.graph.nodes
+            )
+        )
 
 make_fx_failures = {
     xfail('allclose'),
@@ -114,9 +156,19 @@ make_fx_failures = {
     skip('nn.functional.max_unpool1d', '', device_type='cpu'),  # flaky
     skip('nn.functional.max_unpool2d', '', device_type='cpu'),  # flaky
     skip('nn.functional.max_unpool3d', '', device_type='cpu'),  # flaky
+    skip('empty'),  # nondeterministic
     skip('linalg.lstsq'),  # flaky, probably just a precision issue
     xfail('histogram'),
-    xfail('scatter')
+    xfail('scatter'),
+    # data-dependent control flow
+    xfail('cov'),
+    xfail('istft'),
+    xfail('nanquantile'),
+    xfail('nn.functional.gaussian_nll_loss'),
+    xfail('quantile'),
+    xfail('tensor_split'),
+    # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
+    xfail('sparse.sampled_addmm'),
 }
 
 
