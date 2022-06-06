@@ -2665,8 +2665,8 @@ Create a new floating-point tensor with the magnitude of :attr:`input` and the s
 
 .. math::
     \text{out}_{i} = \begin{cases}
-        -|\text{input}_{i}| & \text{if} \text{other}_{i} \leq -0.0 \\
-        |\text{input}_{i}| & \text{if} \text{other}_{i} \geq 0.0 \\
+        -|\text{input}_{i}| & \text{if } \text{other}_{i} \leq -0.0 \\
+         |\text{input}_{i}| & \text{if } \text{other}_{i} \geq 0.0 \\
     \end{cases}
 """ + r"""
 
@@ -8819,7 +8819,7 @@ add_docstr(torch.signbit,
            r"""
 signbit(input, *, out=None) -> Tensor
 
-Tests if each element of :attr:`input` has its sign bit set (is less than zero) or not.
+Tests if each element of :attr:`input` has its sign bit set or not.
 
 Args:
   {input}

@@ -663,6 +663,17 @@ void initJITBindings(PyObject* module) {
       .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
 #endif
       .def(
+          "_jit_set_tracer_state_warn",
+          [](bool new_warn) {
+            jit::tracer::getTracerStateWarnMode() = new_warn;
+          })
+      .def(
+          "_jit_get_tracer_state_warn",
+          []() {
+            bool current_tracer_warn = jit::tracer::getTracerStateWarnMode();
+            return current_tracer_warn;
+          })
+      .def(
           "_jit_set_nvfuser_skip_node_kind",
           // Args:
           //     `op_name`: Symbol of op;
