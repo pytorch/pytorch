@@ -105,22 +105,22 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
 
 
 # Deprecated function names and its corresponding DataPipe type and kwargs for the `_deprecation_warning` function
-_deprecated_functional_names: Dict[str, Tuple] = {"open_file_by_fsspec":
-                                                  ("IterDataPipe",
-                                                   {"old_class_name": "FSSpecFileOpener",
-                                                    "deprecation_version": "1.12",
-                                                    "removal_version": "1.14",
-                                                    "old_functional_name": "open_file_by_fsspec",
-                                                    "new_functional_name": "open_files_by_fsspec",
-                                                    "deprecate_functional_name_only": True}),
-                                                  "open_file_by_iopath":
-                                                  ("IterDataPipe",
-                                                   {"old_class_name": "IoPathFileOpener",
-                                                    "deprecation_version": "1.12",
-                                                    "removal_version": "1.14",
-                                                    "old_functional_name": "open_file_by_iopath",
-                                                    "new_functional_name": "open_files_by_iopath",
-                                                    "deprecate_functional_name_only": True})}
+_iter_deprecated_functional_names: Dict[str, Dict] = {"open_file_by_fsspec":
+                                                      {"old_class_name": "FSSpecFileOpener",
+                                                       "deprecation_version": "1.12",
+                                                       "removal_version": "1.14",
+                                                       "old_functional_name": "open_file_by_fsspec",
+                                                       "new_functional_name": "open_files_by_fsspec",
+                                                       "deprecate_functional_name_only": True},
+                                                      "open_file_by_iopath":
+                                                      {"old_class_name": "IoPathFileOpener",
+                                                       "deprecation_version": "1.12",
+                                                       "removal_version": "1.14",
+                                                       "old_functional_name": "open_file_by_iopath",
+                                                       "new_functional_name": "open_files_by_iopath",
+                                                       "deprecate_functional_name_only": True}}
+
+_map_deprecated_functional_names: Dict[str, Dict] = {}
 
 
 def _deprecation_warning(
