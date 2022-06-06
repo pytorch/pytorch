@@ -87,13 +87,10 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         print("gamma: ", self.gamma)
 
         # hard code this to test
-        p_all.append(torch.Tensor([0, 1, 0.25, 0.0625]))
-
-        # get all possible quantization levels
-        quantization_levels = torch.tensor([])
+        # p_all.append(torch.Tensor([0, 1, 0.25, 0.0625]))
 
         # calculate cartesian product
-        cartesian_product = list(itertools.product(p_all))
+        cartesian_product = list(itertools.product(*p_all))
 
         quantization_levels = []
 
@@ -105,6 +102,9 @@ class NonUniformQuantizationObserverBase(ObserverBase):
             quantization_levels.append(sum)
 
         quantization_levels = [self.gamma * ele for ele in quantization_levels]
+        quantization_levels = torch.Tensor(quantization_levels)
+
+        quantization_levels = quantization_levels.sort()
 
         # if len(p_all) >= 2:
         #     quantization_levels = torch.cartesian_prod(p_all[0], p_all[1])
@@ -114,9 +114,6 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         #     while count < len(p_all):
         #         print(p_all[count])
         #         quantization_levels = torch.cartesian_prod(quantization_levels, p_all[count])
-
-        # calculate quantization levels
-        quantization_levels.apply_(lambda x: (x))
 
         print("tensors: ")
         for t in p_all:
