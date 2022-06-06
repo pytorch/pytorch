@@ -7,6 +7,7 @@ from test_pytorch_onnx_onnxruntime import run_model_test
 
 import unittest
 
+
 class TestAutogradFuns(unittest.TestCase):
     opset_version = GLOBALS.export_onnx_opset_version
     keep_initializers_as_inputs = False
@@ -23,7 +24,7 @@ class TestAutogradFuns(unittest.TestCase):
 
             @staticmethod
             def backward(ctx, grad_output):
-                result, = ctx.saved_tensors
+                (result,) = ctx.saved_tensors
                 return grad_output * result
 
         class Caller(torch.nn.Module):
@@ -33,7 +34,7 @@ class TestAutogradFuns(unittest.TestCase):
 
         model = Caller()
         input = torch.ones(1)
-        run_model_test(self, model, input_args=(input,))
+        run_model_test(self, model, input_args=(input,), verbose=True)
 
     def test_multi_output(self):
         class MultiOut(torch.autograd.Function):
@@ -46,7 +47,7 @@ class TestAutogradFuns(unittest.TestCase):
 
             @staticmethod
             def backward(ctx, grad_output):
-                result, = ctx.saved_tensors
+                (result,) = ctx.saved_tensors
                 return grad_output * result
 
         class Caller(torch.nn.Module):
@@ -68,7 +69,7 @@ class TestAutogradFuns(unittest.TestCase):
 
             @staticmethod
             def backward(ctx, grad_output):
-                result, = ctx.saved_tensors
+                (result,) = ctx.saved_tensors
                 return grad_output * result
 
         class Parent(torch.autograd.Function):
@@ -81,7 +82,7 @@ class TestAutogradFuns(unittest.TestCase):
 
             @staticmethod
             def backward(ctx, grad_output):
-                result, = ctx.saved_tensors
+                (result,) = ctx.saved_tensors
                 return grad_output * result
 
         class Caller(torch.nn.Module):
