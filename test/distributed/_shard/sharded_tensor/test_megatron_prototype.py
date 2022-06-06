@@ -65,9 +65,7 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         # Shard the parameter. First col-wise sharding and then row-wise
         _shard_parameter(sharded_megatron_lm, spec)
 
-        # Run sharded computation
-        torch.manual_seed(self.rank)  # inputs different on each rank
-        inp = torch.rand(*input_size).cuda(self.rank)
+        # Setup resharding of output.
         reshard_spec = copy.deepcopy(spec[1])
         reshard_spec.placements.sort(key=lambda placement: placement.rank())
         reshard_spec.dim = 0
@@ -75,17 +73,35 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         sharded_megatron_lm = _collect_local_shard(
             _reshard_output(sharded_megatron_lm, reshard_spec)
         )
-        sharded_output = sharded_megatron_lm(inp)
+
+
+        torch.manual_seed(self.rank)  # inputs different on each rank
+        inp = torch.rand(*input_size, requires_grad=True, device=self.rank)
 
         # Run local computation
         local_output = local_megatron_lm(inp)
 
-        # Verify
-        self.assertEqual(local_output, sharded_output)
-
         # Compute loss and run backward pass.
         local_output.sum().backward()
+
+        # Save and reset input grads.
+        local_input_grad = inp.grad
+        self.assertIsNotNone(inp.grad)
+        inp.grad = None
+
+        # Run sharded computation
+        sharded_output = sharded_megatron_lm(inp)
+
+        # Verify local and sharded results
+        self.assertEqual(local_output, sharded_output)
+
         sharded_output.sum().backward()
+        sharded_input_grad = inp.grad
+        self.assertIsNotNone(inp.grad)
+
+        # Verify sharded and local grads.
+        self.assertEqual(local_input_grad, sharded_input_grad)
+
         (
             local_weight_grad_fc1,
             local_weight_grad_fc2,
@@ -129,18 +145,18 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         )
 
         # Test backward gradient calculation.
-        self.assertEqual(sharded_weight_fc1.grad, local_grad_narrowed_fc1)
-        self.assertEqual(sharded_weight_fc2.grad, local_grad_narrowed_fc2)
-        self.assertEqual(bias_grad_fc1, local_bias_grad_fc1)
-        self.assertEqual(bias_grad_fc2, local_bias_grad_fc2)
+        self.assertEqual(sharded_weight_fc1.grad, local_grad_narrowed_fc1, atol=1e-3, rtol=1e-6)
+        self.assertEqual(sharded_weight_fc2.grad, local_grad_narrowed_fc2, atol=1e-4, rtol=1e-6)
+        self.assertEqual(bias_grad_fc1, local_bias_grad_fc1, atol=1e-4, rtol=1e-6)
+        self.assertEqual(bias_grad_fc2, local_bias_grad_fc2, atol=1e-4, rtol=1e-6)
 
         # Test optimizer.
         bias_fc1, bias_fc2 = sharded_megatron_lm.get_biases()
         local_bias_fc1, local_bias_fc2 = local_megatron_lm.get_biases()
-        self.assertEqual(bias_fc1, local_bias_fc1)
-        self.assertEqual(bias_fc2, local_bias_fc2)
-        self.assertEqual(bias_fc1.grad, local_bias_fc1.grad)
-        self.assertEqual(bias_fc2.grad, local_bias_fc2.grad)
+        self.assertEqual(bias_fc1, local_bias_fc1, atol=1e-4, rtol=1e-6)
+        self.assertEqual(bias_fc2, local_bias_fc2, atol=1e-4, rtol=1e-6)
+        self.assertEqual(bias_fc1.grad, local_bias_fc1.grad, atol=1e-4, rtol=1e-6)
+        self.assertEqual(bias_fc2.grad, local_bias_fc2.grad, atol=1e-4, rtol=1e-6)
         previous_sharded_weight_fc1 = sharded_weight_fc1.clone()
         previous_sharded_weight_fc2 = sharded_weight_fc2.clone()
         previous_bias_fc1 = bias_fc1.clone()
@@ -161,19 +177,19 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         )
 
         # Test weight value after optimizer.
-        self.assertEqual(sharded_weight_fc1.size(), local_weight_fc1_narrowed.size())
-        self.assertEqual(sharded_weight_fc2.size(), local_weight_fc2_narrowed.size())
+        self.assertEqual(sharded_weight_fc1.size(), local_weight_fc1_narrowed.size(), atol=1e-4, rtol=1e-6)
+        self.assertEqual(sharded_weight_fc2.size(), local_weight_fc2_narrowed.size(), atol=1e-4, rtol=1e-6)
         self.assertNotEqual(previous_sharded_weight_fc1, sharded_weight_fc1)
         self.assertNotEqual(previous_sharded_weight_fc2, sharded_weight_fc2)
-        self.assertEqual(sharded_weight_fc1, local_weight_fc1_narrowed)
-        self.assertEqual(sharded_weight_fc2, local_weight_fc2_narrowed)
+        self.assertEqual(sharded_weight_fc1, local_weight_fc1_narrowed, atol=1e-4, rtol=1e-6)
+        self.assertEqual(sharded_weight_fc2, local_weight_fc2_narrowed, atol=1e-4, rtol=1e-6)
 
         # Test bias value after optimizer.
         local_bias_fc1, local_bias_fc2 = local_megatron_lm.get_biases()
         self.assertNotEqual(previous_bias_fc1, bias_fc1)
-        self.assertEqual(bias_fc1, local_bias_fc1)
+        self.assertEqual(bias_fc1, local_bias_fc1, atol=1e-4, rtol=1e-6)
         self.assertNotEqual(previous_bias_fc2, bias_fc2)
-        self.assertEqual(bias_fc2, local_bias_fc2)
+        self.assertEqual(bias_fc2, local_bias_fc2, atol=1e-4, rtol=1e-6)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
@@ -186,6 +202,18 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
             self._run_megatron_linear(spec, [28, 21], [[21, 11], [11, 29]])
             self._run_megatron_linear(spec, [37, 23], [[23, 13], [13, 24]])
             self._run_megatron_linear(spec, [24, 15], [[15, 14], [14, 20]])
+
+            # Test multiple input dims
+            self._run_megatron_linear(spec, [10, 22, 17], [[17, 12], [12, 29]])
+            self._run_megatron_linear(spec, [13, 28, 21], [[21, 11], [11, 29]])
+            self._run_megatron_linear(spec, [27, 37, 23], [[23, 13], [13, 24]])
+            self._run_megatron_linear(spec, [100, 24, 15], [[15, 14], [14, 20]])
+
+            # Test single input dim
+            self._run_megatron_linear(spec, [17], [[17, 12], [12, 29]])
+            self._run_megatron_linear(spec, [21], [[21, 11], [11, 29]])
+            self._run_megatron_linear(spec, [23], [[23, 13], [13, 24]])
+            self._run_megatron_linear(spec, [15], [[15, 14], [14, 20]])
 
 
 if __name__ == "__main__":
