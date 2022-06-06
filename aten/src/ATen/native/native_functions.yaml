@@ -11168,11 +11168,11 @@
 - func: special_polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
-- func: special_logsumexp(Tensor self, int[1] dim, bool keepdim=False, Tensor? b=None) -> Tensor
+- func: special_logsumexp(Tensor self, int[1] dim, bool keepdim=False, *, Tensor? b=None) -> Tensor
   python_module: special
   variants: function
 
-- func: special_logsumexp.out(Tensor self, int[1] dim, bool keepdim=False, Tensor? b=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: special_logsumexp.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor? b=None, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
 - func: _special_logsumexp_with_sign(Tensor self, int[1] dim, bool keepdim=False, *, Tensor? b=None, bool return_sign=False) -> (Tensor value_out, Tensor sign_out)
