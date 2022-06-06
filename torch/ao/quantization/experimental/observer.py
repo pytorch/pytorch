@@ -106,8 +106,6 @@ class NonUniformQuantizationObserverBase(ObserverBase):
 
         quantization_levels = [self.gamma * ele for ele in quantization_levels]
 
-        print(quantization_levels)
-
         # if len(p_all) >= 2:
         #     quantization_levels = torch.cartesian_prod(p_all[0], p_all[1])
 
