@@ -114,6 +114,7 @@ commands:
             brew install moreutils
             brew link parallel --overwrite
             brew install expect
+            brew install libomp
 
   brew_install:
     description: "Install Homebrew formulae"
