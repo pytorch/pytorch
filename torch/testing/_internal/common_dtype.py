@@ -10,6 +10,7 @@ from torch.testing._legacy import (
     all_types_and_complex_and,
     all_types_and_half,
     complex_types,
+    complex_types_and,
     empty_types,
     floating_and_complex_types,
     floating_and_complex_types_and,

@@ -264,8 +264,7 @@ c10::impl::GenericList Function::run(
     const c10::IValue& input = inputs[i];
     const auto& spec = input_specs_[i];
     const auto& input_tensor = input.toTensor();
-    TORCH_CHECK(
-        input_specs_[i].validate(input_tensor), "Invalid input at pos: ", i);
+    TORCH_CHECK(spec.validate(input_tensor), "Invalid input at pos: ", i);
     args[i] = input_tensor.data_ptr();
   }
   offset += inputs.size();

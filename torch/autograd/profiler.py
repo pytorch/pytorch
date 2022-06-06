@@ -8,6 +8,7 @@ from torch.autograd import (
     kineto_available, _ProfilerResult, _disable_profiler, _enable_profiler,
     _prepare_profiler, _supported_activities, _kineto_step,
 )
+from torch._C._autograd import _ExperimentalConfig
 import torch
 import torch.cuda
 from torch.futures import Future
@@ -83,6 +84,10 @@ class profile(object):
         use_cpu (bool, optional): profile CPU events; setting to ``False`` requires
             ``use_kineto=True`` and can be used to lower the overhead for GPU-only profiling.
 
+        experimental_config (_ExperimentalConfig) : A set of experimental options
+            used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
+
+
     .. warning:
         Enabling memory profiling or source attribution incurs additional profiler
         overhead
@@ -127,7 +132,8 @@ class profile(object):
             with_stack=False,
             with_modules=False,
             use_kineto=False,
-            use_cpu=True):
+            use_cpu=True,
+            experimental_config=None):
         self.enabled: bool = enabled
         if not self.enabled:
             return
@@ -141,6 +147,9 @@ class profile(object):
         self.with_stack = with_stack
         self.with_modules = with_modules
         self.use_cpu = use_cpu
+        if experimental_config is None:
+            experimental_config = _ExperimentalConfig()
+        self.experimental_config = experimental_config
         self.kineto_results: Optional[_ProfilerResult] = None
 
         if not self.use_cpu:
@@ -175,7 +184,8 @@ class profile(object):
             self.profile_memory,
             self.with_stack,
             self.with_flops,
-            self.with_modules)
+            self.with_modules,
+            self.experimental_config)
 
     def __enter__(self):
         if not self.enabled:
@@ -428,20 +438,17 @@ class record_function(ContextDecorator):
         self.args: Optional[str] = args
         # Whether or not we should run record function's end callbacks when exiting.
         self.run_callbacks_on_exit: bool = True
-        # TODO: TorchScript ignores standard type annotation here
-        # self.record: Optional["torch.classes.profiler._RecordFunction"] = None
-        self.record = torch.jit.annotate(Optional["torch.classes.profiler._RecordFunction"], None)
+        # Stores underlying RecordFunction as a tensor. TODO: move to custom
+        # class (https://github.com/pytorch/pytorch/issues/35026).
+        self.handle: torch.Tensor = torch.zeros(1)
 
     def __enter__(self):
-        self.record = torch.ops.profiler._record_function_enter_new(self.name, self.args)
+        self.handle = torch.ops.profiler._record_function_enter(self.name, self.args)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
         if self.run_callbacks_on_exit:
-            # Local variable is needed by TorchScript to refine Optional[T] to T
-            record = self.record
-            assert record is not None
-            torch.ops.profiler._record_function_exit(record)
+            torch.ops.profiler._record_function_exit(self.handle)
 
     def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
         """
@@ -468,11 +475,7 @@ class record_function(ContextDecorator):
         # We are scheduling to run this RecordFunction's end callbacks when the
         # passed in future completes, so don't run end callbacks on exit.
         self.run_callbacks_on_exit = False
-
-        # Local variable is needed by TorchScript to refine Optional[T] to T
-        record = self.record
-        assert record is not None
-        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(record, fut)
+        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(self.handle, fut)
         return profiled_future
 
 
@@ -576,7 +579,8 @@ class emit_nvtx(object):
                 False,
                 False,
                 False,
-                False),
+                False,
+                _ExperimentalConfig()),
             set()
         )
         return self

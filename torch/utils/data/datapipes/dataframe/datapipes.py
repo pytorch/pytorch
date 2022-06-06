@@ -5,6 +5,16 @@ from torch.utils.data.datapipes.datapipe import DFIterDataPipe, IterDataPipe
 
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 
+__all__ = [
+    "ConcatDataFramesPipe",
+    "DataFramesAsTuplesPipe",
+    "ExampleAggregateAsDataFrames",
+    "FilterDataFramesPipe",
+    "PerRowDataFramesPipe",
+    "ShuffleDataFramesPipe",
+]
+
+
 @functional_datapipe('_dataframes_as_tuples')
 class DataFramesAsTuplesPipe(IterDataPipe):
     def __init__(self, source_datapipe):

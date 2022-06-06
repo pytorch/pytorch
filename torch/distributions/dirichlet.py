@@ -76,6 +76,14 @@ class Dirichlet(ExponentialFamily):
         return self.concentration / self.concentration.sum(-1, True)
 
     @property
+    def mode(self):
+        concentrationm1 = (self.concentration - 1).clamp(min=0.)
+        mode = concentrationm1 / concentrationm1.sum(-1, True)
+        mask = (self.concentration < 1).all(axis=-1)
+        mode[mask] = torch.nn.functional.one_hot(mode[mask].argmax(axis=-1), concentrationm1.shape[-1]).to(mode)
+        return mode
+
+    @property
     def variance(self):
         con0 = self.concentration.sum(-1, True)
         return self.concentration * (con0 - self.concentration) / (con0.pow(2) * (con0 + 1))
