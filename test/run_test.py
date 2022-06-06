@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     shell,
     set_cwd,
+    parser as common_parser,
 )
 import torch.distributed as dist
 from typing import Dict, Optional, List
@@ -175,6 +176,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/nn/jit/test_instantiator",
     "distributed/rpc/test_faulty_agent",
     "distributed/rpc/test_tensorpipe_agent",
+    "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
     "distributed/pipeline/sync/skip/test_api",
     "distributed/pipeline/sync/skip/test_gpipe",
@@ -200,11 +202,14 @@ WINDOWS_BLOCKLIST = [
     "distributed/pipeline/sync/test_worker",
     "distributed/elastic/agent/server/test/api_test",
     "distributed/elastic/multiprocessing/api_test",
+    "distributed/_shard/checkpoint/test_checkpoint"
+    "distributed/_shard/checkpoint/test_file_system_checkpoint"
     "distributed/_shard/sharding_spec/test_sharding_spec",
+    "distributed/_shard/sharding_plan/test_sharding_plan",
     "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
-    "distributed/_shard/sharded_tensor/test_partial_tensor",
+    "distributed/_shard/sharded_tensor/ops/test_chunk",
     "distributed/_shard/sharded_tensor/ops/test_elementwise_ops",
     "distributed/_shard/sharded_tensor/ops/test_embedding",
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
@@ -212,8 +217,10 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_init",
     "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
-    "distributed/_shard/sharding_spec/test_sharding_spec",
+    "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
+    "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
+    "distributed/_shard/test_partial_tensor",
     "distributed/_shard/test_replicated_tensor",
 ] + FSDP_TEST
 
@@ -221,11 +228,16 @@ ROCM_BLOCKLIST = [
     "distributed/nn/jit/test_instantiator",
     "distributed/rpc/test_faulty_agent",
     "distributed/rpc/test_tensorpipe_agent",
+    "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
+    "distributed/_shard/checkpoint/test_checkpoint"
+    "distributed/_shard/checkpoint/test_file_system_checkpoint"
+    "distributed/_shard/sharding_spec/test_sharding_spec",
+    "distributed/_shard/sharding_plan/test_sharding_plan",
     "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
-    "distributed/_shard/sharded_tensor/test_partial_tensor",
+    "distributed/_shard/sharded_tensor/ops/test_chunk",
     "distributed/_shard/sharded_tensor/ops/test_elementwise_ops",
     "distributed/_shard/sharded_tensor/ops/test_embedding",
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
@@ -233,14 +245,16 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_init",
     "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
-    "distributed/_shard/sharding_spec/test_sharding_spec",
+    "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
+    "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
+    "distributed/_shard/test_partial_tensor",
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
     "test_type_hints",
     "test_openmp",
-] + FSDP_TEST
+]
 
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
@@ -474,6 +488,7 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     python_path = os.environ.get("PYTHONPATH", "")
     from shutil import copyfile
 
+    os.environ['USE_NINJA'] = shell_env['USE_NINJA']
     test_module = "test_cpp_extensions_aot" + ("_ninja" if use_ninja else "_no_ninja")
     copyfile(
         test_directory + "/test_cpp_extensions_aot.py",
@@ -495,6 +510,7 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         os.environ["PYTHONPATH"] = python_path
         if os.path.exists(test_directory + "/" + test_module + ".py"):
             os.remove(test_directory + "/" + test_module + ".py")
+        os.environ.pop('USE_NINJA')
 
 
 def test_cpp_extensions_aot_ninja(test_module, test_directory, options):
@@ -530,6 +546,7 @@ def test_distributed(test_module, test_directory, options):
                         backend, with_init
                     )
                 )
+            old_environ = dict(os.environ)
             os.environ["TEMP_DIR"] = tmp_dir
             os.environ["BACKEND"] = backend
             os.environ["INIT_METHOD"] = "env://"
@@ -580,6 +597,8 @@ def test_distributed(test_module, test_directory, options):
                     return return_code
             finally:
                 shutil.rmtree(tmp_dir)
+                os.environ.clear()
+                os.environ.update(old_environ)
     return 0
 
 
@@ -597,6 +616,7 @@ CUSTOM_HANDLERS = {
     "distributed/test_pg_wrapper": get_run_test_with_subprocess_fn(),
     "distributed/rpc/test_faulty_agent": get_run_test_with_subprocess_fn(),
     "distributed/rpc/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
+    "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
     "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
 }
 
@@ -617,6 +637,7 @@ def parse_args():
         description="Run the PyTorch unit test suite",
         epilog="where TESTS is any of: {}".format(", ".join(TESTS)),
         formatter_class=argparse.RawTextHelpFormatter,
+        parents=[common_parser]
     )
     parser.add_argument(
         "-v",

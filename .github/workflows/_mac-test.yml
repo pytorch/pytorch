@@ -65,6 +65,7 @@ jobs:
           auto-update-conda: true
           python-version: 3.8
           activate-environment: build
+          miniconda-version: 4.7.12
 
       - name: Install macOS homebrew dependencies
         run: |
@@ -103,6 +104,8 @@ jobs:
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          TEST_CONFIG: ${{ matrix.config }}
+          SHARD_NUMBER: ${{ matrix.shard }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}

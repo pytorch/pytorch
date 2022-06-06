@@ -60,7 +60,7 @@ class AppendOnlyList {
 
   void clear() {
     buffer_.clear();
-    buffer_last_ = buffer_.begin();
+    buffer_last_ = buffer_.before_begin();
     n_blocks_ = 0;
     next_ = nullptr;
     end_ = nullptr;

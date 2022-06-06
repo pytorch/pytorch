@@ -28,11 +28,17 @@ Features described in this documentation are classified by release status:
   binary distributions like PyPI or Conda, except sometimes behind run-time
   flags, and are at an early stage for feedback and testing.
 
+.. toctree::
+   :glob:
+   :maxdepth: 1
+   :caption: Community
+
+   community/*
 
 .. toctree::
    :glob:
    :maxdepth: 1
-   :caption: Notes
+   :caption: Developer Notes
 
    notes/*
 
@@ -93,6 +99,7 @@ Features described in this documentation are classified by release status:
    torch.utils.checkpoint <checkpoint>
    torch.utils.cpp_extension <cpp_extension>
    torch.utils.data <data>
+   torch.utils.jit <jit_utils>
    torch.utils.dlpack <dlpack>
    torch.utils.mobile_optimizer <mobile_optimizer>
    torch.utils.model_zoo <model_zoo>
@@ -107,17 +114,12 @@ Features described in this documentation are classified by release status:
    :caption: Libraries
 
    torchaudio <https://pytorch.org/audio/stable>
+   TorchData <https://pytorch.org/data>
+   TorchRec <https://pytorch.org/torchrec>
+   TorchServe <https://pytorch.org/serve>
    torchtext <https://pytorch.org/text/stable>
    torchvision <https://pytorch.org/vision/stable>
-   TorchServe <https://pytorch.org/serve>
    PyTorch on XLA Devices <http://pytorch.org/xla/>
-
-.. toctree::
-   :glob:
-   :maxdepth: 1
-   :caption: Community
-
-   community/*
 
 Indices and tables
 ==================

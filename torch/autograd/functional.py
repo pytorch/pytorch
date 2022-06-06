@@ -686,7 +686,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, st
                             raise RuntimeError(msg)
                         jac_i_el.append(torch.zeros_like(inp_el))
 
-            jacobian += (tuple(torch.stack(jac_i_el, dim=0).view(out.size()
+            jacobian += (tuple(torch.stack(jac_i_el, dim=0).view(out.size()  # type: ignore[operator]
                          + inputs[el_idx].size()) for (el_idx, jac_i_el) in enumerate(jac_i)), )
 
         jacobian = _grad_postprocess(jacobian, create_graph)
