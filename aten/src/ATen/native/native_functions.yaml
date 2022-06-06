@@ -5249,6 +5249,10 @@
   dispatch:
     CPU: spdiags_sparse_cpu
 
+- func: _spdiags_backward(Tensor grad_output, Tensor offsets, int[] input_shape) -> Tensor
+  dispatch:
+    SparseCPU: spdiags_backward_sparse_cpu
+
 - func: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method

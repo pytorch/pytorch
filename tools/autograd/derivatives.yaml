@@ -2923,3 +2923,13 @@
 
 - name: special_shifted_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
   x: non_differentiable
+
+- name: _spdiags(Tensor diagonals, Tensor offsets, int[] shape, Layout? layout=None) -> Tensor
+  diagonals: _spdiags_backward(grad, offsets, diagonals.sizes())
+  offsets: non_differentiable
+  result: auto_linear
+
+- name: _spdiags_backward(Tensor grad_output, Tensor offsets, int[] input_shape) -> Tensor
+  grad_output: _spdiags(grad, offsets, grad_output.sizes())
+  offsets: non_differentiable
+  result: auto_linear

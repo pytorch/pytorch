@@ -3498,12 +3498,13 @@ class TestSparse(TestCase):
     @dtypes(*all_types_and_complex_and(torch.bool))
     def test_sparse_spdiags(self, device, dtype):
 
-        make_diags = functools.partial(make_tensor, dtype=dtype, device=device)
+        requires_grad = dtype in (torch.double, torch.cdouble)
+        make_diags = functools.partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
         make_offsets = functools.partial(torch.tensor, dtype=torch.long, device=device)
 
         if TEST_SCIPY:
             def reference(diags, offsets, shape):
-                return scipy.sparse.spdiags(diags, offsets, *shape).toarray()
+                return scipy.sparse.spdiags(diags.detach(), offsets, *shape).toarray()
 
         else:
             def reference(diags, offsets, shape):
@@ -3528,6 +3529,13 @@ class TestSparse(TestCase):
             out_dense = out.to_dense()
             self.assertTrue(out.layout == ex_layout, f"Output layout {out.layout} expected {ex_layout}")
             self.assertEqual(out_dense, ref_out, f"Result:\n{out_dense} does not match reference:\n{ref_out}")
+
+            if requires_grad and (layout is None):
+                def gc_fn(d):
+                    return _sparse_to_dense(torch.sparse.spdiags(d, offsets, shape, layout=layout))
+
+                self.assertTrue(gradcheck(gc_fn, (diags,)))
+
 
         def check_invalid(args, error):
             with self.assertRaisesRegex(RuntimeError, error):
