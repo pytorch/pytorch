@@ -1322,9 +1322,9 @@ Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor
     if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
       // for integral inputs, promote input to default floating type.
       auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
-      logsumexp_out_impl(result, self.to(default_dtype), dims, keepdim, {}, false);
+      logsumexp_out_impl(result, result, self.to(default_dtype), dims, keepdim, {}, false);
     } else {
-      logsumexp_out_impl(result, self, dims, keepdim, {}, false);
+      logsumexp_out_impl(result, result, self, dims, keepdim, {}, false);
     }
   }
   namedinference::propagate_names_for_reduction(result, self, dims, keepdim);
