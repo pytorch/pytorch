@@ -493,9 +493,8 @@ class TestCommon(TestCase):
         # Direct calls to refs and prims are not translated
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
-    # @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
-    # @skipIfRocm
     @ops(python_ref_db)
     @parametrize('executor', ['aten', 'nvfuser'])
     def test_python_ref_executor(self, device, dtype, op, executor):
