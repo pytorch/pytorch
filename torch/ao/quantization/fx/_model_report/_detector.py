@@ -45,7 +45,7 @@ def _detect_per_channel(model: GraphModule) -> Tuple[str, Dict[str, Any]]:
     # store information on submodules and if per_channel quantization is supported and used as well as qconfig information
     per_channel_info = {"qconfig": config_chosen, "per_channel_status": {}}
 
-    def _detect_per_channel_helper(module: nn.Module):
+    def _detect_per_channel_helper(module: nn.Module) -> Dict:
         """
         Recursive operation to determine if per_channel quantization is supported in modules and submodules.
 

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Owner(s): ["ao"]
+# Owner(s): ["oncall: quantization"]
 
 import torch
 import torch.ao.quantization.quantize_fx
