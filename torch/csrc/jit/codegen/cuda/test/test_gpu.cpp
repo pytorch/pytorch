@@ -23450,6 +23450,91 @@ TEST_F(NVFuserTest, FusionExpand_CUDA) {
       __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionExpandIssue1751_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto x = 3, y = 4, z = 5;
+
+  // y, z
+  auto tv0 = makeSymbolicTensor(2);
+  fusion->addInput(tv0);
+
+  auto tv1 = broadcast(tv0, {true, false, false});
+
+  // Two ways to propagate extents as is: use -1 or explicitly pass
+  // the extent vals.
+
+  auto tv2 = expand(
+      tv1,
+      {IrBuilder::create<Int>(x),
+       IrBuilder::create<Int>(-1),
+       IrBuilder::create<Int>(-1)});
+
+  auto tv3 = expand(
+      tv1,
+      {IrBuilder::create<Int>(x),
+       tv0->axis(0)->extent(),
+       tv0->axis(1)->extent()});
+
+  fusion->addOutput(tv2);
+  fusion->addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({y, z}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+
+  for (const auto& cg_out : cg_outputs) {
+    TORCH_INTERNAL_ASSERT(cg_out.size(0) == x);
+    TORCH_INTERNAL_ASSERT(cg_out.size(1) == y);
+    TORCH_INTERNAL_ASSERT(cg_out.size(2) == z);
+  }
+
+  auto t2 = t0.expand({x, y, z});
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0}, {t2, t2}, __LINE__, __FILE__);
+}
+
+// TODO: Make sure the kernel uses the expanded concrete size instead
+// of the symbolic size
+TEST_F(NVFuserTest, FusionExpandToConcrete_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto x = 3, y = 4;
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion->addInput(tv0);
+
+  auto tv1 = broadcast(tv0, {true, false});
+
+  auto tv2 =
+      expand(tv1, {IrBuilder::create<Int>(x), IrBuilder::create<Int>(y)});
+
+  fusion->addOutput(tv2);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({y}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+
+  for (const auto& cg_out : cg_outputs) {
+    TORCH_INTERNAL_ASSERT(cg_out.size(0) == x);
+    TORCH_INTERNAL_ASSERT(cg_out.size(1) == y);
+  }
+
+  auto t2 = t0.expand({x, y});
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0}, {t2}, __LINE__, __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionReproNoncontigBroadcast_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());

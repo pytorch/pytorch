@@ -745,7 +745,8 @@ ExpandOp::ExpandOp(
   for (auto expanded_extent : expanded_extents_) {
     TORCH_INTERNAL_ASSERT(expanded_extent != nullptr);
     TORCH_INTERNAL_ASSERT(
-        expanded_extent->isA<Int>(), "Expanded extents must be of Int type.");
+        expanded_extent->dtype() == DataType::Int,
+        "Expanded extents must be of Int type.");
     addInput(expanded_extent);
   }
 }

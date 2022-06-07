@@ -993,18 +993,39 @@ TensorView* expand(TensorView* inp, const std::vector<Val*>& expanded_sizes) {
     auto out_id_builder = IterDomainBuilder(inp_id);
     maybe_expanded_sizes[i] = inp_domain[i]->extent();
 
-    // Input id is a broadcast and expanded_sizes is not one.
-    if (inp_id->isBroadcast() && !expanded_sizes[i]->isOneInt()) {
+    auto expanded_size_int = expanded_sizes[i]->getInt();
+
+    // If the expanded size is -1, let the input extent be propagated
+    // as is
+    if (expanded_size_int == -1) {
+      // This is just done for clarity. It isn't necessary as it's
+      // already done when constructing out_id_builder.
+      out_id_builder.extent(inp_id->extent());
+    } else if (inp_id->isBroadcast()) {
+      // When input id is a broadcast, expand the extent to the given
+      // size, which can be concrete or symbolic.
       expanded = true;
       out_id_builder.expanded_extent(expanded_sizes[i]);
       maybe_expanded_sizes[i] = expanded_sizes[i];
-    }
-
-    // If not broadcast, we could still promote the extent to a compile time
-    // constant based on passed in value.
-    if (!inp_id->isBroadcast() && !expanded_sizes[i]->isOneInt() &&
-        !inp_id->extent()->isConstInt()) {
+    } else if (!inp_id->extent()->isConstInt()) {
+      // Input id is non-broadcast and its extent is symbolic. Promote
+      // the extent to the given expanded size.
+      // Note that expansion to 1 just means its extent becomes 1 and
+      // does not mean the ID becomes a broadcast.
       out_id_builder.extent(expanded_sizes[i]);
+    } else {
+      // Input id is non-broadcast and its extent is concrete. Nothing
+      // to expand, but the input and expanded sizes should match if
+      // the expanded size is also concrete.
+      auto inp_id_size_int = inp_id->extent()->getInt();
+      if (expanded_size_int.has_value()) {
+        TORCH_CHECK(
+            inp_id_size_int == expanded_size_int,
+            "Invalid expand size, ",
+            expanded_sizes[i]->toString(),
+            ", for ",
+            inp_id->toString());
+      }
     }
     out_domain.push_back(out_id_builder.build());
   }
