@@ -34,7 +34,7 @@ class TestAutogradFuns(unittest.TestCase):
 
         model = Caller()
         input = torch.ones(1)
-        run_model_test(self, model, input_args=(input,), verbose=True)
+        run_model_test(self, model, input_args=(input,))
 
     def test_multi_output(self):
         class MultiOut(torch.autograd.Function):

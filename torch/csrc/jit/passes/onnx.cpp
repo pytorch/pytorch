@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/onnx_log.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
-#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
@@ -366,7 +365,7 @@ void NodeToONNX(
     }
   };
 
-  // Inline the prim::PythonOp node and add it to the new graph
+  // Inline the prim::PythonOp subgraph nodes and append them to the onnx graph
   auto inlineAutograd = [&](Node* PythonOpNode) {
     auto subgraph = PythonOpNode->g(attr::Subgraph);
     for (const auto i : c10::irange(PythonOpNode->inputs().size())) {
