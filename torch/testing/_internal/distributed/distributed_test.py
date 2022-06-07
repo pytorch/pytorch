@@ -4944,7 +4944,7 @@ class DistributedTest:
                 copy.deepcopy(DDP_NET).cuda(),
                 device_ids=[self.rank]
             )
-            
+
             # Process group cannot be pickled in some environments,
             # so cannot deep copy an averager. See:
             # https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496
@@ -4964,7 +4964,6 @@ class DistributedTest:
             loss_fn = nn.MSELoss()
 
             for _ in range(20):
-                
                 post_localSGD_opt.zero_grad()
                 output_using_post_localSGD_opt = net_using_post_localSGD_opt(input)
                 loss_using_post_localSGD_opt = loss_fn(output_using_post_localSGD_opt, target)
@@ -4975,7 +4974,6 @@ class DistributedTest:
                 torch.save({'optimizer_state_dict': post_localSGD_opt.state_dict()}, chkpt_file)
 
             dist.barrier()
-            
             map_location = {'cuda:%d' % 0: 'cuda:%d' % self.rank}
             checkpoint = torch.load(chkpt_file, map_location=map_location)
 
