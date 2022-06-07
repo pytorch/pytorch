@@ -440,7 +440,7 @@ at::Tensor & LazyNativeFunctions::logsumexp_out(const at::Tensor & self, at::Int
 // re-use the composite kernel from core, that way we don't need to provide a
 // backwards formula for native_group_norm
 std::tuple<at::Tensor, at::Tensor, at::Tensor>
-XLANativeFunctions::native_group_norm(const at::Tensor& input,
+LazyNativeFunctions::native_group_norm(const at::Tensor& input,
                                       const c10::optional<at::Tensor>& weight,
                                       const c10::optional<at::Tensor>& bias,
                                       int64_t N, int64_t C, int64_t HxW,
