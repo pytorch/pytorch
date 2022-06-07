@@ -252,8 +252,11 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
 }
 
 // Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig, eig)
+static inline void checkIsMatrix(const Tensor& A, const char* const f_name, const char* const arg_name = "A") {
+  TORCH_CHECK(A.dim() >= 2, f_name, ": The input tensor ", arg_name, " must have at least 2 dimensions.");
+}
 static inline void squareCheckInputs(const Tensor& self, const char* const f_name) {
-  TORCH_CHECK(self.dim() >= 2, f_name, ": The input tensor must have at least 2 dimensions.");
+  checkIsMatrix(self, f_name);
   TORCH_CHECK(self.size(-1) == self.size(-2),
               f_name,
               ": A must be batches of square matrices, "

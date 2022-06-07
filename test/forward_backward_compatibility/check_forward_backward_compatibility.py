@@ -63,6 +63,8 @@ ALLOW_LIST = [
     ("aten::mkldnn_convolution_backward", datetime.date(2022, 1, 31)),
     ("aten::mkldnn_convolution_backward_input", datetime.date(2022, 1, 31)),
     ("aten::mkldnn_convolution_backward_weights", datetime.date(2022, 1, 31)),
+    ("aten::linalg_qr_out", datetime.date(2022, 8, 1)),
+    ("aten::_linalg_qr_helper", datetime.date(2022, 8, 1)),
     ("aten::_nnpack_spatial_convolution_backward", datetime.date(2022, 1, 31)),
     ("aten::_nnpack_spatial_convolution_backward_input", datetime.date(2022, 1, 31)),
     ("aten::_nnpack_spatial_convolution_backward_weight", datetime.date(2022, 1, 31)),
