@@ -110,7 +110,6 @@ def elu(
     """
     Reference implementation of torch.nn.functional.elu
     """
-    import pdb; pdb.set_trace()
     if inplace:
         raise NotImplementedError
 
