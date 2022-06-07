@@ -14,7 +14,7 @@ from fx2trt_oss.fx.utils import LowerPrecision
 from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.passes import shape_prop
 from torch.testing._internal.common_utils import TestCase
-
+import time
 
 def fetch_attr(mod, target):
     """
@@ -54,8 +54,10 @@ class TRTTestCase(TestCase):
                 self.assert_has_op(mod, expected_ops)
             if unexpected_ops:
                 self.assert_unexpected_op(mod, unexpected_ops)
-
+            start = time.perf_counter()
             interpreter_result = interpreter.run(lower_precision=precision)
+            sec = time.perf_counter() - start
+            print("Interpreter run time(s):", sec)
             trt_mod = TRTModule(
                 interpreter_result.engine,
                 interpreter_result.input_names,
@@ -63,7 +65,15 @@ class TRTTestCase(TestCase):
             )
 
             ref_outputs = mod(*inputs)
+
+            torch.cuda.synchronize()
+            start_event = torch.cuda.Event(enable_timing=True)
+            end_event = torch.cuda.Event(enable_timing=True)
+            start_event.record()
             outputs = trt_mod(*cuda_inputs)
+            end_event.record()
+            torch.cuda.synchronize()
+            print("TRT run time(s)=", (start_event.elapsed_time(end_event) * 1.0e-3))
 
             if isinstance(outputs, torch.Tensor):
                 ref_outputs = [ref_outputs]
