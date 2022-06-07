@@ -4379,13 +4379,17 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # Wait for all init to complete.
         dist.barrier()
 
+        # Use a different file name for the next initialization
+        new_backend_options = self.rpc_backend_options
+        new_backend_options.init_method += "init_2"
+
         # Ensure rpc initialization works again.
         rpc.init_rpc(
             name=worker_name(self.rank),
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
-            rpc_backend_options=self.rpc_backend_options,
+            rpc_backend_options=new_backend_options,
         )
 
         # Verify RPCs work after re-init.
@@ -4394,191 +4398,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         rpc.rpc_sync(dst, foo_add, args=())
 
         rpc.shutdown()
-
-    # Test init_rpc without world_size argument
-    @dist_init(setup_rpc=False)
-    def test_init_rpc_without_world_size(self):
-        rpc.init_rpc(
-            name=worker_name(self.rank),
-            backend=self.rpc_backend,
-            rank=self.rank,
-            rpc_backend_options=self.rpc_backend_options,
-        )
-        rpc.shutdown()
-
-    # Dynamic RPC new ranks communicate with existing ranks
-    @dist_init(setup_rpc=False)
-    def test_without_world_size_new_rank_can_communicated_with_existing_rank(self):
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
-
-        if self.rank == 0:
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-
-        # Rank 0 will be initialized with RPC after this barrier
-        dist.barrier()
-
-        if self.rank != 0:
-            # Newly joined ranks will be able to communicate with rank 0, since that was created first
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-            result = rpc.rpc_sync(worker_name(0), torch.add, args=(torch.tensor(1), torch.tensor(1)))
-            self.assertEqual(torch.add(torch.tensor(1), torch.tensor(1)), result)
-
-        # Barrier to ensure that all rpc_sync calls are finished
-        dist.barrier()
-        rpc.shutdown()
-
-    # Dynamic RPC existing ranks can communicate with new ranks
-    @dist_init(setup_rpc=False)
-    def test_without_world_size_existing_rank_can_communicate_with_new_rank(self):
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
-
-        if self.rank == 0:
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-
-        # Rank 0 will be initialized with RPC after this barrier
-        dist.barrier()
-
-        # Rest of ranks join after barrier
-        if self.rank != 0:
-            # Newly joined ranks will be able to communicate with rank 0, since that was created first
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-
-        dist.barrier()
-        if self.rank == 0:
-            for i in range(1, self.world_size):
-                result = rpc.rpc_sync(worker_name(i), torch.add, args=(torch.tensor(1), torch.tensor(1)))
-                self.assertEqual(torch.add(torch.tensor(1), torch.tensor(1)), result)
-
-        # Barrier to ensure that all rpc_sync calls are finished
-        dist.barrier()
-        rpc.shutdown()
-
-    # Dynamic RPC existing ranks can communicate with new ranks using CUDA rpc
-    @skip_if_lt_x_gpu(2)
-    @dist_init(setup_rpc=False)
-    def test_without_world_size_existing_rank_can_communicate_with_new_rank_cuda(self):
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
-
-        if self.rank == 0:
-            options = self.rpc_backend_options
-            for i in range(1, self.world_size):
-                dst = worker_name(i)
-                options.set_device_map(dst, {1: 0})
-                options.set_device_map(dst, {0: 1})
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                rpc_backend_options=options,
-            )
-
-        # Rank 0 will be initialized with RPC after this barrier
-        dist.barrier()
-
-        # Rest of ranks join after barrier
-        if self.rank != 0:
-            # Newly joined ranks will be able to communicate with rank 0, since that was created first
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-
-        dist.barrier()
-        if self.rank == 0:
-            for i in range(1, self.world_size):
-                x = torch.ones(2)
-                result_on_device_0 = rpc.rpc_sync(worker_name(i), torch.add, args=(x.to(0), 1))
-                result_on_device_1 = rpc.rpc_sync(worker_name(i), torch.add, args=(x.to(1), 1))
-                self.assertEqual(torch.add(torch.ones(2), 1), result_on_device_0)
-                self.assertEqual(torch.device('cuda:0'), result_on_device_0.device)
-                self.assertEqual(torch.add(torch.ones(2), 1), result_on_device_1)
-                self.assertEqual(torch.device('cuda:1'), result_on_device_1.device)
-
-        # Barrier to ensure that all rpc_sync calls are finished
-        dist.barrier()
-        rpc.shutdown()
-
-    @dist_init(setup_rpc=False)
-    def test_init_rpc_without_world_size_without_rank(self):
-        # default initialization uses file init
-        with self.assertRaisesRegex(ValueError, "rank parameter missing"):
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-
-        # env init
-        with self.assertRaisesRegex(ValueError, "environment variable RANK expected"):
-            rpc_backend_options = rpc.TensorPipeRpcBackendOptions(init_method="env://")
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rpc_backend_options=rpc_backend_options,
-            )
-
-        # tcp init
-        with self.assertRaisesRegex(ValueError, "rank parameter missing"):
-            rpc_backend_options = rpc.TensorPipeRpcBackendOptions(init_method="tcp://127.0.0.1:23456")
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rpc_backend_options=rpc_backend_options,
-            )
-
-    @dist_init(setup_rpc=False)
-    def test_init_dynamic_and_static_rpc_group(self):
-        # Initialize a static rpc group with size = self.world_size - 1
-        dist.init_process_group(
-            backend='gloo',
-            init_method=self.file_init_method,
-            rank=self.rank,
-            world_size=self.world_size)
-
-        world_size_minus_one = self.world_size - 1
-        if self.rank < world_size_minus_one:
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                world_size=world_size_minus_one,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-
-        dist.barrier()
-
-        # Attempt to add an additional dynamic group member
-        if self.rank == world_size_minus_one:
-            with self.assertRaisesRegex(RuntimeError, "RPC group mixes statically and dynamically\
- initialized members which is not supported."):
-                rpc.init_rpc(
-                    name=worker_name(self.rank),
-                    backend=self.rpc_backend,
-                    rank=self.rank,
-                    rpc_backend_options=self.rpc_backend_options,
-                )
 
     def test_wrong_types(self):
         with self.assertRaisesRegex(
@@ -5439,6 +5258,191 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_my_parameter_server_sparse(self):
         self._my_parameter_server(True)
 
+    # Test init_rpc without world_size argument
+    @dist_init(setup_rpc=False)
+    def test_dynamic_rpc_init_rpc(self):
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+        rpc.shutdown()
+
+    # Dynamic RPC new ranks communicate with existing ranks
+    @dist_init(setup_rpc=False)
+    def test_dynamic_rpc_new_rank_can_communicated_with_existing_rank(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+
+        if self.rank == 0:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        # Rank 0 will be initialized with RPC after this barrier
+        dist.barrier()
+
+        if self.rank != 0:
+            # Newly joined ranks will be able to communicate with rank 0, since that was created first
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+            result = rpc.rpc_sync(worker_name(0), torch.add, args=(torch.tensor(1), torch.tensor(1)))
+            self.assertEqual(torch.add(torch.tensor(1), torch.tensor(1)), result)
+
+        # Barrier to ensure that all rpc_sync calls are finished
+        dist.barrier()
+        rpc.shutdown()
+
+    # Dynamic RPC existing ranks can communicate with new ranks
+    @dist_init(setup_rpc=False)
+    def test_dynamic_rpc_existing_rank_can_communicate_with_new_rank(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+
+        if self.rank == 0:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        # Rank 0 will be initialized with RPC after this barrier
+        dist.barrier()
+
+        # Rest of ranks join after barrier
+        if self.rank != 0:
+            # Newly joined ranks will be able to communicate with rank 0, since that was created first
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        dist.barrier()
+        if self.rank == 0:
+            for i in range(1, self.world_size):
+                result = rpc.rpc_sync(worker_name(i), torch.add, args=(torch.tensor(1), torch.tensor(1)))
+                self.assertEqual(torch.add(torch.tensor(1), torch.tensor(1)), result)
+
+        # Barrier to ensure that all rpc_sync calls are finished
+        dist.barrier()
+        rpc.shutdown()
+
+    # Dynamic RPC existing ranks can communicate with new ranks using CUDA rpc
+    @skip_if_lt_x_gpu(2)
+    @dist_init(setup_rpc=False)
+    def test_dynamic_rpc_existing_rank_can_communicate_with_new_rank_cuda(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+
+        if self.rank == 0:
+            options = self.rpc_backend_options
+            for i in range(1, self.world_size):
+                dst = worker_name(i)
+                options.set_device_map(dst, {1: 0})
+                options.set_device_map(dst, {0: 1})
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=options,
+            )
+
+        # Rank 0 will be initialized with RPC after this barrier
+        dist.barrier()
+
+        # Rest of ranks join after barrier
+        if self.rank != 0:
+            # Newly joined ranks will be able to communicate with rank 0, since that was created first
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        dist.barrier()
+        if self.rank == 0:
+            for i in range(1, self.world_size):
+                x = torch.ones(2)
+                result_on_device_0 = rpc.rpc_sync(worker_name(i), torch.add, args=(x.to(0), 1))
+                result_on_device_1 = rpc.rpc_sync(worker_name(i), torch.add, args=(x.to(1), 1))
+                self.assertEqual(torch.add(torch.ones(2), 1), result_on_device_0)
+                self.assertEqual(torch.device('cuda:0'), result_on_device_0.device)
+                self.assertEqual(torch.add(torch.ones(2), 1), result_on_device_1)
+                self.assertEqual(torch.device('cuda:1'), result_on_device_1.device)
+
+        # Barrier to ensure that all rpc_sync calls are finished
+        dist.barrier()
+        rpc.shutdown()
+
+    @dist_init(setup_rpc=False)
+    def test_dynamic_rpc_init_rpc_without_rank(self):
+        # default initialization uses file init
+        with self.assertRaisesRegex(ValueError, "rank parameter missing"):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        # env init
+        with self.assertRaisesRegex(ValueError, "environment variable RANK expected"):
+            rpc_backend_options = rpc.TensorPipeRpcBackendOptions(init_method="env://")
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rpc_backend_options=rpc_backend_options,
+            )
+
+        # tcp init
+        with self.assertRaisesRegex(ValueError, "rank parameter missing"):
+            rpc_backend_options = rpc.TensorPipeRpcBackendOptions(init_method="tcp://127.0.0.1:23456")
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rpc_backend_options=rpc_backend_options,
+            )
+
+    @dist_init(setup_rpc=False)
+    def test_dynamic_and_static_init_rpc_together(self):
+        # Initialize a static rpc group with size = self.world_size - 1
+        dist.init_process_group(
+            backend='gloo',
+            init_method=self.file_init_method,
+            rank=self.rank,
+            world_size=self.world_size)
+
+        world_size_minus_one = self.world_size - 1
+        if self.rank < world_size_minus_one:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=world_size_minus_one,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        dist.barrier()
+
+        # Attempt to add an additional dynamic group member
+        if self.rank == world_size_minus_one:
+            # Expect error message to be thrown
+            with self.assertRaisesRegex(RuntimeError, "RPC group mixes statically and dynamically\
+ initialized members which is not supported."):
+                rpc.init_rpc(
+                    name=worker_name(self.rank),
+                    backend=self.rpc_backend,
+                    rank=self.rank,
+                    rpc_backend_options=self.rpc_backend_options,
+                )
 
 class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
