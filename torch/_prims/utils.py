@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Union, Sequence, Optional, Tuple, List
+from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
@@ -1129,9 +1129,11 @@ def check_in_bounds_for_storage(
         raise ValueError(msg)
 
 
-def check(b, s, exc_type=RuntimeError):
+def check(
+    b: bool, s: Callable[[], str], exc_type: Type[Exception] = RuntimeError
+) -> None:
     """
-    Helper function for raising a RuntimeError if a boolean condition fails.
+    Helper function for raising an error_type (default: RuntimeError) if a boolean condition fails.
     Error message is a callable producing a string (to avoid wasting time
     string formatting in non-error case, and also to make it easier for torchdynamo
     to trace.)
