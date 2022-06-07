@@ -922,7 +922,9 @@ def merge_on_green(pr_num: int, repo: GitRepo,
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 60 seconds.")
             time.sleep(60)
         except MandatoryChecksNotRunError as ex:
+            last_exception = str(ex)
             print(f"Merged failed due to: {ex}. Retrying in 60 seconds.")
+            time.sleep(60)
             # Wait for 10 minutes for jobs to kick off before assuming they aren't run
             if elapsed_time > 10 * 60:
                 raise ex
