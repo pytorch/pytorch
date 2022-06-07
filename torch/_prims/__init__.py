@@ -288,7 +288,11 @@ class RETURN_TYPE(Enum):
 
 def _wrap_tensor_meta(f):
     def wrap(t):
-        if isinstance(t, torch.Tensor) and not isinstance(t, FakeTensor) and not t.device.type == 'meta':
+        if (
+            isinstance(t, torch.Tensor)
+            and not isinstance(t, FakeTensor)
+            and not t.device.type == "meta"
+        ):
             return FakeTensor.from_tensor(t)
         else:
             return t

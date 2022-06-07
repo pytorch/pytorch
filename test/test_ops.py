@@ -15,7 +15,6 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     all_types_and_complex_and,
 )
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.testing._internal.common_utils import (
     TestCase,
     is_iterable_of_tensors,
@@ -51,11 +50,9 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     skipMeta,
 )
-from torch.utils._pytree import tree_map
 from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
-    FakeTensorConverter,
 )
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch._prims as prims
@@ -364,6 +361,7 @@ class TestCommon(TestCase):
             self.skipTest("Skipping chalf until it has more operator support")
 
         mode = FakeTensorMode()
+
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
                 return FakeTensor.from_tensor(x, mode)
@@ -515,6 +513,7 @@ class TestCommon(TestCase):
     @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_python_ref_errors(self, device, op):
         mode = FakeTensorMode()
+
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
                 return FakeTensor.from_tensor(x, mode)
