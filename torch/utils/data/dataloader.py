@@ -92,6 +92,13 @@ class _InfiniteConstantSampler(Sampler):
             yield None
 
 
+def _apply_distributed_sharding(datapipe):
+    if dist.is_available() and dist.is_initialized():
+        total_workers = dist.get_world_size()
+        global_worker_id = dist.get_rank()
+        torch.utils.data.graph_settings.apply_sharding(datapipe, total_workers, global_worker_id)
+    return datapipe
+
 def _sharding_worker_init_fn(worker_init_fn, worker_id):
     global_worker_id = worker_id
     info = torch.utils.data.get_worker_info()
@@ -239,12 +246,18 @@ class DataLoader(Generic[T_co]):
         # 2. Additional worker init function will take care of sharding in MP and Distributed
         if isinstance(self.dataset, IterDataPipe):
             self.dataset = _IterDataPipeSerializationWrapper(self.dataset)
-            self.worker_init_fn = functools.partial(
-                _sharding_worker_init_fn, self.worker_init_fn)
+            if num_workers > 0:
+                self.worker_init_fn = functools.partial(
+                    _sharding_worker_init_fn, self.worker_init_fn)
+            else:
+                self.dataset = _apply_distributed_sharding(self.dataset)
         elif isinstance(self.dataset, MapDataPipe):
             self.dataset = _MapDataPipeSerializationWrapper(self.dataset)
-            self.worker_init_fn = functools.partial(
-                _sharding_worker_init_fn, self.worker_init_fn)
+            if num_workers > 0:
+                self.worker_init_fn = functools.partial(
+                    _sharding_worker_init_fn, self.worker_init_fn)
+            else:
+                self.dataset = _apply_distributed_sharding(self.dataset)
 
 
 
