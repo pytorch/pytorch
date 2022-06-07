@@ -9855,6 +9855,14 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
     ),
 ]
 
+
+def reference_logsumexp(a, axis=None, keepdims=False, b=None, return_sign=False):
+    # Numpy doesn't accept scalars, but torch does. Simply return the input if we have a scalar.
+    if a.ndim == 0:
+        return a
+    return scipy.special.logsumexp(a, axis=axis, b=b, keepdims=keepdims, return_sign=return_sign)
+
+
 def reference_sign(x):
     if x.dtype == np.bool_:
         # `np.sign` doesn't support `bool`.
@@ -17335,12 +17343,14 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_logsumexp,
-           gradcheck_fast_mode=False),
+           gradcheck_fast_mode=False,
+           ref=reference_logsumexp if TEST_SCIPY else _NOTHING),
     OpInfo('special.logsumexp',
            dtypes=all_types_and(torch.bool, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_special_logsumexp,
+           ref=reference_logsumexp if TEST_SCIPY else _NOTHING,
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
