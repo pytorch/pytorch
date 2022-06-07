@@ -5748,63 +5748,48 @@ Example::
 add_docstr(torch.lu_unpack, r"""
 lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
-Unpacks the data and pivots from a LU factorization of a tensor into tensors ``L`` and ``U`` and a permutation tensor ``P``
-such that ``LU_data, LU_pivots = (P @ L @ U).lu()``.
+Unpacks the LU decomposition returned by :func:`~linalg.lu_factor` into the `P, L, U` matrices.
 
-Returns a tuple of tensors as ``(the P tensor (permutation matrix), the L tensor, the U tensor)``.
+.. seealso::
 
-.. note:: ``P.dtype == LU_data.dtype`` and ``P.dtype`` is not an integer type so that matrix products with ``P``
-          are possible without casting it to a floating type.
+    :func:`~linalg.lu` returns the matrices from the LU decomposition. Its gradient formula is more efficient
+    than that of doing :func:`~linalg.lu_factor` followed by :func:`~linalg.lu_unpack`.
 
 Args:
     LU_data (Tensor): the packed LU factorization data
     LU_pivots (Tensor): the packed LU factorization pivots
     unpack_data (bool): flag indicating if the data should be unpacked.
-                        If ``False``, then the returned ``L`` and ``U`` are ``None``.
+                        If ``False``, then the returned ``L`` and ``U`` are empty tensors.
                         Default: ``True``
     unpack_pivots (bool): flag indicating if the pivots should be unpacked into a permutation matrix ``P``.
-                          If ``False``, then the returned ``P`` is  ``None``.
+                          If ``False``, then the returned ``P`` is  an empty tensor.
                           Default: ``True``
-    out (tuple, optional): a tuple of three tensors to use for the outputs ``(P, L, U)``.
+
+Keyword args:
+    out (tuple, optional): output tuple of three tensors. Ignored if `None`.
+
+Returns:
+    A namedtuple ``(P, L, U)``
 
 Examples::
 
     >>> A = torch.randn(2, 3, 3)
-    >>> A_LU, pivots = A.lu()
-    >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
-    >>>
-    >>> # can recover A from factorization
-    >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
+    >>> LU, pivots = torch.linalg.lu_factor(A)
+    >>> P, L, U = torch.lu_unpack(LU, pivots)
+    >>> # We can recover A from the factorization
+    >>> A_ = P @ L @ U
+    >>> torch.allclose(A, A_)
+    True
 
     >>> # LU factorization of a rectangular matrix:
     >>> A = torch.randn(2, 3, 2)
-    >>> A_LU, pivots = A.lu()
-    >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
-    >>> P
-    tensor([[[1., 0., 0.],
-             [0., 1., 0.],
-             [0., 0., 1.]],
+    >>> LU, pivots = torch.linalg.lu_factor(A)
+    >>> P, L, U = torch.lu_unpack(LU, pivots)
+    >>> # P, L, U are the same as returned by linalg.lu
+    >>> P_, L_, U_ = torch.linalg.lu(A)
+    >>> torch.allclose(P, P_) and torch.allclose(L, L_) and torch.allclose(U, U_)
+    True
 
-            [[0., 0., 1.],
-             [0., 1., 0.],
-             [1., 0., 0.]]])
-    >>> A_L
-    tensor([[[ 1.0000,  0.0000],
-             [ 0.4763,  1.0000],
-             [ 0.3683,  0.1135]],
-
-            [[ 1.0000,  0.0000],
-             [ 0.2957,  1.0000],
-             [-0.9668, -0.3335]]])
-    >>> A_U
-    tensor([[[ 2.1962,  1.0881],
-             [ 0.0000, -0.8681]],
-
-            [[-1.0947,  0.3736],
-             [ 0.0000,  0.5718]]])
-    >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
-    >>> torch.norm(A_ - A)
-    tensor(2.9802e-08)
 """.format(**common_args))
 
 add_docstr(torch.less, r"""
