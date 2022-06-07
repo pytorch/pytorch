@@ -18,7 +18,7 @@ class APoTObserver(ObserverBase):
         level_indices: torch.Tensor,
             b: int,
             k: int) -> None:
-        super(APoTObserver, self).__init__(min_val, max_val, level_indices, b, k)
+        super().__init__
 
     def calculate_qparams(self):
         return self._calculate_qparams()
