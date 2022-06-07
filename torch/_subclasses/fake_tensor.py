@@ -132,7 +132,8 @@ def contructors(fake_mode, func, *args, **kwargs):
         # cpu is default device if none is specified
         default_device = torch.device("cpu")
         args = ()
-    out_device = new_kwargs.pop("device", default_device)
+    out_device = new_kwargs.pop("device")
+    out_device = out_device if out_device else default_device
     new_kwargs["device"] = torch.device("meta")
     r = func(*args, **new_kwargs)
     return FakeTensor(fake_mode, r, out_device)
