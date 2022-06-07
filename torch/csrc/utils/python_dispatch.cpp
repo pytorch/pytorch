@@ -233,6 +233,10 @@ void initDispatchBindings(PyObject* module) {
     return c10::impl::tls_is_dispatch_key_excluded(c10::parseDispatchKey(dispatch_key));
   });
 
+
+  py::class_<at::AutoDispatchBelowAutograd>(m, "_AutoDispatchBelowAutograd")
+    .def(py::init<>());
+
   // Prints out the name of every operator that has a kernel registered to the Dispatcher
   // under [dispatch_key].
   // If no arguments are specified, it'll print out the name of every operator that the Dispatcher knows of.
