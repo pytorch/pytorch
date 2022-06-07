@@ -19887,6 +19887,10 @@ python_ref_db = [
     PythonRefInfo(  # TODO: Port this to an UnaryOpInfo
         "_refs.nn.functional.gelu",
         torch_opinfo_name="nn.functional.gelu",
+        skips=(
+            # RuntimeError: TypeError: _traced() got an unexpected keyword argument 'approximate'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
@@ -20447,10 +20451,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.hsplit",
         torch_opinfo_name="hsplit",
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.vsplit",
         torch_opinfo_name="vsplit",
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.transpose",
