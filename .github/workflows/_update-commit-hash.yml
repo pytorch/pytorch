@@ -7,6 +7,10 @@ on:
         required: true
         type: string
         description: Name of the repository we're updating commit hash for.  Must be in pytorch org.
+      branch:
+        required: true
+        type: string
+        description: Branch to fetch commit of
     secrets:
       MERGEBOT_TOKEN:
         required: true
@@ -56,7 +60,7 @@ jobs:
           BRANCH_NAME: ${{ steps.already-existing.outputs.result || env.NEW_BRANCH_NAME }}
         run: |
           pushd ${{ inputs.repo-name }}
-          git rev-parse master > ../.github/${{ inputs.repo-name }}_commit_hash.txt
+          git rev-parse ${{ inputs.branch }} > ../.github/${{ inputs.repo-name }}_commit_hash.txt
           popd
 
           if [[ $(git diff --exit-code .github/${{ inputs.repo-name }}_commit_hash.txt) ]]; then
@@ -82,7 +86,7 @@ jobs:
               owner,
               repo,
               head: `${NEW_BRANCH_NAME}`,
-              base: 'master',
+              base: '${{ inputs.branch }}',
               body: [
                 'This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/master/.github/workflows/_update-commit-hash.yml).\n',
                 `Update the pinned ${{ inputs.repo-name }} hash.`

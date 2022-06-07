@@ -13,6 +13,7 @@ jobs:
     uses: ./.github/workflows/_update-commit-hash.yml
     with:
       repo-name: xla
+      branch: master
     secrets:
       MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
 
@@ -20,5 +21,6 @@ jobs:
     uses: ./.github/workflows/_update-commit-hash.yml
     with:
       repo-name: torchdynamo
+      branch: main
     secrets:
       MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
