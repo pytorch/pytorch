@@ -143,7 +143,7 @@ class PythonSymbolicIntNode : public c10::SymbolicIntNode {
 
   virtual std::shared_ptr<SymbolicIntNode> wrap(int64_t num) override {
     auto r = getPyObj().attr("wrap")(num);
-    return std::shared_ptr<SymbolicIntNode>(new PythonSymbolicIntNode(r));
+    return std::make_shared<PythonSymbolicIntNode>(r);
   }
 
   virtual bool bool_() override {
@@ -163,51 +163,51 @@ class PythonSymbolicIntNode : public c10::SymbolicIntNode {
 
   virtual std::shared_ptr<SymbolicIntNode> dispatch_common_(
       const char* fname,
-      std::shared_ptr<SymbolicIntNode> other) {
+      const std::shared_ptr<SymbolicIntNode>& other) {
     auto pother = std::dynamic_pointer_cast<PythonSymbolicIntNode>(other);
     TORCH_CHECK(pother);
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr(fname)(pother->getPyObj());
-    return std::shared_ptr<SymbolicIntNode>(new PythonSymbolicIntNode(r));
+    return std::make_shared<PythonSymbolicIntNode>(r);
   }
 
   virtual std::shared_ptr<SymbolicIntNode> add(
-      std::shared_ptr<SymbolicIntNode> other) override {
+      const std::shared_ptr<SymbolicIntNode>& other) override {
     return dispatch_common_(__FUNCTION__, other);
   }
 
   virtual std::shared_ptr<SymbolicIntNode> sub(
-      std::shared_ptr<SymbolicIntNode> other) override {
+      const std::shared_ptr<SymbolicIntNode>& other) override {
     return dispatch_common_(__FUNCTION__, other);
   }
 
   virtual std::shared_ptr<SymbolicIntNode> mul(
-      std::shared_ptr<SymbolicIntNode> other) override {
+      const std::shared_ptr<SymbolicIntNode>& other) override {
     return dispatch_common_(__FUNCTION__, other);
   }
 
   virtual std::shared_ptr<SymbolicIntNode> div(
-      std::shared_ptr<SymbolicIntNode> other) override {
+      const std::shared_ptr<SymbolicIntNode>& other) override {
     return dispatch_common_(__FUNCTION__, other);
   }
 
   virtual std::shared_ptr<SymbolicIntNode> mod(
-      std::shared_ptr<SymbolicIntNode> other) override {
+      const std::shared_ptr<SymbolicIntNode>& other) override {
     return dispatch_common_(__FUNCTION__, other);
   }
 
   virtual std::shared_ptr<SymbolicIntNode> eq(
-      std::shared_ptr<SymbolicIntNode> other) override {
+      const std::shared_ptr<SymbolicIntNode>& other) override {
     return dispatch_common_(__FUNCTION__, other);
   }
 
   virtual std::shared_ptr<SymbolicIntNode> gt(
-      std::shared_ptr<SymbolicIntNode> other) override {
+      const std::shared_ptr<SymbolicIntNode>& other) override {
     return dispatch_common_(__FUNCTION__, other);
   }
 
   virtual std::shared_ptr<SymbolicIntNode> lt(
-      std::shared_ptr<SymbolicIntNode> other) override {
+      const std::shared_ptr<SymbolicIntNode>& other) override {
     return dispatch_common_(__FUNCTION__, other);
   }
 
