@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, Set, Tuple
+from typing import Any, Dict, Set, Tuple
 
 import torch
 import torch.nn as nn
@@ -6,9 +6,10 @@ from torch.ao.sparsity.sparsifier.utils import module_to_fqn
 from torch.fx import GraphModule
 from torch.nn.qat.modules.conv import _ConvNd as QatConvNd
 from torch.nn.qat.modules.linear import Linear as QatLinear
+from torch.ao.quantization.qconfig import QConfig
 
 # Default map for representing supported per channel quantization modules for different backends
-DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES: Dict[str, Set[Callable]] = {
+DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES: Dict[str, Set[Any]] = {
     "fbgemm": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, QatLinear, QatConvNd]),
     "qnnpack": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, QatLinear, QatConvNd]),
     "onednn": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, QatLinear, QatConvNd]),
@@ -45,7 +46,7 @@ def _detect_per_channel(model: GraphModule) -> Tuple[str, Dict[str, Any]]:
     # store information on submodules and if per_channel quantization is supported and used as well as qconfig information
     per_channel_info = {"qconfig": config_chosen, "per_channel_status": {}}
 
-    def _detect_per_channel_helper(module: nn.Module) -> Dict:
+    def _detect_per_channel_helper(module: nn.Module):
         """
         Recursive operation to determine if per_channel quantization is supported in modules and submodules.
 
@@ -69,6 +70,11 @@ def _detect_per_channel(model: GraphModule) -> Tuple[str, Dict[str, Any]]:
         if is_in_include_list:
             per_channel_supported = True
             # check if the module per_channel_is_supported
+
+            # assert statement for MyPy
+            q_config_file = module.qconfig
+            assert isinstance(q_config_file, QConfig)
+
             if hasattr(module.qconfig.weight.p.func(), "ch_axis"):
                 per_channel_info["per_channel_status"][fqn] = {
                     "per_channel_supported": per_channel_supported,
@@ -92,6 +98,10 @@ def _detect_per_channel(model: GraphModule) -> Tuple[str, Dict[str, Any]]:
     further_optims_str = "Further Optimizations for qconfig {}: \n".format(
         config_chosen
     )
+
+    # assert for MyPy check
+    assert isinstance(per_channel_info["per_channel_status"], dict)
+
     optimizations_possible = False
     for fqn in per_channel_info["per_channel_status"]:
         fqn_dict = per_channel_info["per_channel_status"][fqn]
