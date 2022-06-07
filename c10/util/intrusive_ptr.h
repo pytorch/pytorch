@@ -274,26 +274,19 @@ class intrusive_ptr final {
     }
   }
 
-  C10_ALWAYS_INLINE_UNLESS_MOBILE void reset_clean_up_weak_reference_path() {
-    // justification for const_cast: release_resources is basically a
-    // destructor and a destructor always mutates the object, even for const
-    // objects. NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
-    const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
-    if (detail::atomic_weakcount_decrement(target_->weakcount_) == 0) {
-      delete target_;
-    }
-  }
-
   void reset_() noexcept {
     if (target_ != NullType::singleton() &&
         detail::atomic_refcount_decrement(target_->refcount_) == 0) {
       // See comment above about weakcount. As long as refcount>0,
       // weakcount is one larger than the actual number of weak references.
       // So we need to decrement it here.
-      if (target_->weakcount_.load(std::memory_order_acquire) == 1) {
+      bool should_delete = target_->weakcount_.load(std::memory_order_acquire) == 1;
+      if (!should_delete) {
+        const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
+        should_delete = detail::atomic_weakcount_decrement(target_->weakcount_) == 0;
+      }
+      if (should_delete) {
         delete target_;
-      } else {
-        reset_clean_up_weak_reference_path();
       }
     }
   }
