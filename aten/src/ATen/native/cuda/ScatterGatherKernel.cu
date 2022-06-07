@@ -155,7 +155,7 @@ struct _cuda_scatter_gather_internal_kernel {
       if (is_scatter_like && index_larger_than_src) {
         src_offset = 0;
 
-        auto original_index_offset = offsets[2];
+        auto original_index_offset = offsets[2] / 8;
         uint32_t index_idx;
         for (auto d = ndim - 1; d >= 0; d--) {
           index_idx = (original_index_offset / index_strides[d]) % index_sizes[d];
@@ -164,6 +164,8 @@ struct _cuda_scatter_gather_internal_kernel {
           index_idx %= src_sizes[d];
           src_offset += src_strides[d] * index_idx;
         }
+
+        src_offset = src_offset * 4;
       }
       else {
         src_offset = offsets[1];
