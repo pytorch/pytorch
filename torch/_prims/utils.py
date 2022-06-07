@@ -4,7 +4,8 @@ from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
-from torch._subclasses.fake_tensor import FakeTensor
+import weakref
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 import torch
 
@@ -61,6 +62,7 @@ TensorLike = torch.Tensor
 TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 
+prim_fake_mode_ref = None
 
 def TensorMeta(
     tensorlike: Optional[Union[NumberType, torch.Tensor]] = None,
@@ -102,8 +104,15 @@ def TensorMeta(
     if isinstance(device, str):
         device = torch.device(device)
 
+    global prim_fake_mode_ref
+    if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
+        mode = FakeTensorMode()
+        prim_fake_mode = weakref.ref(mode)
+    else:
+        mode = prim_fake_mode_ref()
+
     return FakeTensor(
-        torch.empty_strided(shape, strides, dtype=dtype, device="meta"), device
+        mode, torch.empty_strided(shape, strides, dtype=dtype, device="meta"), device
     )
 
 
