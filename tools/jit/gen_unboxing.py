@@ -149,10 +149,10 @@ OperatorGenerator(
 
 
 def gen_unboxing(
-        *,
-        native_functions: Sequence[NativeFunction],
-        cpu_fm: FileManager,
-        selector: SelectiveBuilder,
+    *,
+    native_functions: Sequence[NativeFunction],
+    cpu_fm: FileManager,
+    selector: SelectiveBuilder,
 ) -> None:
     def key_func(fn: Union[NativeFunction, NativeFunctionsGroup]) -> str:
         return fn.root_name
@@ -217,17 +217,17 @@ def main() -> None:
     parser.add_argument(
         "--op_selection_yaml_path",
         help="Provide a path to the operator selection (for custom build) YAML "
-         "that contains the information about the set of selected operators "
-         "and their categories (training, ...). Each operator is either a "
-         "full operator name with overload or just a bare operator name. "
-         "The operator names also contain the namespace prefix (e.g. aten::)",
+        "that contains the information about the set of selected operators "
+        "and their categories (training, ...). Each operator is either a "
+        "full operator name with overload or just a bare operator name. "
+        "The operator names also contain the namespace prefix (e.g. aten::)",
     )
     parser.add_argument(
         "--TEST_ONLY_op_registration_allowlist_yaml_path",
         help="Provide a path to the operator selection (for custom build) YAML "
-         "which contains a list of operators. It is to serve testing purpose and "
-         "each item is `namespace`::`operator name` without overload name; "
-         "e.g.: aten::empty aten::conv2d ...",
+        "which contains a list of operators. It is to serve testing purpose and "
+        "each item is `namespace`::`operator name` without overload name; "
+        "e.g.: aten::empty aten::conv2d ...",
     )
 
     options = parser.parse_args()
