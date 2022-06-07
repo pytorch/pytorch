@@ -1858,7 +1858,8 @@ std::pair<bool, bool> AreInputsReliableOrStatic(Node* n) {
       continue;
     }
     auto input = n->inputs()[idx];
-    // Skip None input.
+    // Always consider None reliable and complete, because it represents
+    // unspecified optional inputs in ONNX.
     if (input->node()->mustBeNone()) {
       continue;
     }
