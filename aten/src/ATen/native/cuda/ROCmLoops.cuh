@@ -257,7 +257,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
     if (idx + num_threads() * i < N) {
       #pragma unroll
       for (int j = 0; j < arity; j++) {
-        args[i][j] = c10::load<arg_t>(args_base[j] + i * num_threads());
+        args[i][j] = c10::load(args_base[j] + i * num_threads());
       }
     }
   }
