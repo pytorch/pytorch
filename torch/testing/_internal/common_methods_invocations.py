@@ -19340,11 +19340,11 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo(
         'special.spherical_bessel_j1',
         decorators=(
-            precisionOverride(
+            toleranceOverride(
                 {
-                    torch.float32: 1e-03,
-                    torch.float64: 1e-05,
-                },
+                    torch.float32: tol(atol=1e-03, rtol=1e-03),
+                    torch.float64: tol(atol=1e-05, rtol=1e-03),
+                }
             ),
         ),
         dtypes=all_types_and(torch.bool),
