@@ -467,9 +467,8 @@ meta_function_expected_failures = {
     torch.geqrf: {f32, f64},  # aten::geqrf
     torch.linalg.det: {f32, f64},  # aten::_det_lu_based_helper
     torch.linalg.eig: {f32, f64},  # aten::linalg_eig
-    torch.linalg.eigh: {f32, f64},
+    torch.linalg.eigh: {f32, f64},  # some error in the backward???
     torch.linalg.eigvals: {f32, f64},
-    torch.linalg.eigvalsh: {f32, f64},  # aten::linalg_eigvalsh.out
     torch.linalg.householder_product: {f32, f64},  # aten::linalg_householder_product
     torch.linalg.lstsq: {f32, f64},  # aten::linalg_lstsq.out
     torch.linalg.slogdet: {f32, f64},  # aten::linalg_slogdet
@@ -728,8 +727,6 @@ meta_dispatch_expected_failures = {
     aten.eig.default: {f32, f64},  # aten::_local_scalar_dense
     aten.geqrf.default: {f32, f64},  # aten::geqrf
     aten.linalg_eig.default: {f32, f64},  # aten::linalg_eig
-    aten.linalg_eigh.default: {f32, f64},
-    aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
     aten.linalg_householder_product.default: {f32, f64},  # aten::linalg_householder_product
     aten.linalg_householder_product.out: {f32, f64},  # aten::linalg_householder_product.out
     aten.linalg_lstsq.default: {f32, f64},  # aten::linalg_lstsq.out
