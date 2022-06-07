@@ -106,5 +106,5 @@ def _detect_per_channel(model: GraphModule) -> Tuple[str, Dict[str, Any]]:
     else:
         further_optims_str += "No further per_channel optimizations possible."
 
-    # return the human readable string and the dictionary form of same information
+    # return the string and the dictionary form of same information
     return (further_optims_str, per_channel_info)
