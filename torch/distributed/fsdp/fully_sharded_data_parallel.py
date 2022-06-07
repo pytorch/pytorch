@@ -69,7 +69,12 @@ from .flatten_params_wrapper import (
     FlatParameter,
     FlattenParamsWrapper,
 )
-from .wrap import _or_policy, _recursive_wrap, _wrap_batchnorm_individually
+from .wrap import (
+    _or_policy,
+    _recursive_wrap,
+    _wrap_batchnorm_individually,
+    NonrecursiveWrapPolicy
+)
 
 _TORCHDISTX_AVAIL = True
 try:
@@ -625,6 +630,29 @@ class FullyShardedDataParallel(nn.Module):
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
     ):
+        if isinstance(auto_wrap_policy, NonrecursiveWrapPolicy):
+            self.__init__(
+                module=module,
+                process_group=process_group,
+                sharding_strategy=sharding_strategy,
+                cpu_offload=cpu_offload,
+                auto_wrap_policy=auto_wrap_policy.init_policy,
+                backward_prefetch=backward_prefetch,
+                mixed_precision=mixed_precision,
+                ignored_modules=ignored_modules,
+                param_init_fn=param_init_fn,
+                device_id=device_id,
+                sync_module_states=sync_module_states,
+            )
+            self._is_non_recursive : bool = True
+            self._nonrecursive_prep_stage : bool = True
+            self._fsdp_param_names_exec_order: List[str] = []
+            for m in self.modules():
+                if m is not self and isinstance(m, FullyShardedDataParallel):
+                    m._fsdp_param_names_exec_order = self._fsdp_param_names_exec_order
+            self._register_params_exec_order_hook()
+            return
+
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
         # Validate the ignored modules and derive the ignored parameters/buffers
@@ -1091,6 +1119,9 @@ class FullyShardedDataParallel(nn.Module):
         self._lazy_init()
         assert self._is_root is not None
         return self._is_root
+
+    def is_non_recursive(self) -> bool:
+        return hasattr(self, "_is_non_recursive") and self._is_non_recursive
 
     @staticmethod
     def fsdp_modules(
@@ -2262,7 +2293,19 @@ class FullyShardedDataParallel(nn.Module):
         with self.set_state_dict_type(StateDictType.SHARDED_STATE_DICT):
             return self.load_state_dict(state_dict, strict)
 
+    def _params_exec_order_hook(self, param_name: str, *unused: Any) -> None:
+        self._fsdp_param_names_exec_order.append(param_name)
+
+    def _register_params_exec_order_hook(self) -> None:
+        for name, p in self.named_parameters():
+            if p.requires_grad:
+                p._params_exec_order_hook_handle = p.register_hook(
+                    functools.partial(self._params_exec_order_hook, name))
+
     def forward(self, *args: Any, **kwargs: Any) -> Any:
+
+        print("_fsdp_param_names_exec_order", self._fsdp_param_names_exec_order)
+
         with torch.autograd.profiler.record_function("FullyShardedDataParallel.forward"):
             self._lazy_init()
 
@@ -3020,6 +3063,25 @@ class FullyShardedDataParallel(nn.Module):
                 if m._is_root:
                     # reset this flag for cases like "one forward pass + multiple backward passes"
                     self._post_backward_callback_queued = False
+
+        if (self.is_non_recursive() and self._nonrecursive_prep_stage):
+            self._nonrecursive_prep_stage = False
+            for name, p in self.named_parameters():
+                if hasattr(p, "_params_exec_order_hook_handle"):
+                    p._params_exec_order_hook_handle.remove()
+                    delattr(p, "_params_exec_order_hook_handle")
+            # TODO: Construct a fsdp_wrap_map whose keys are all children modules with a FSDP wrap, and values are
+            # its FSDP wraps. These children FSDP wraps will be detached from the root FSDP module and will be used
+            # to schedule the parameters (rebuild_full_params and reshard).
+            # TODO: Remove all internal FSDP wraps from the root FSDP module.
+            # TODO: Based on self._fsdp_param_names_exec_order, get the information needed to patch the forward()
+            # function of each key in the fsdp_wrap_map. The rules are as follows:
+            # 1: Before each forward(), rebuild_full_params of all parameters that are currently sharded and
+            # will be used in the forward, and reshard all parameters that are currently full and will not be
+            # used in the next forward()
+            # 2: After each forward(), reshard all parameters just used in the forward, and rebuild_full_params of
+            # all parameters that will be used next.
+            # TODO: Patch the forward of each model in the keys of fsdp_wrap_map based on the information above.
 
     def _update_p_data(self, p, output_tensor: torch.Tensor) -> None:
         """

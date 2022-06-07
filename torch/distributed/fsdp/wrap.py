@@ -239,6 +239,11 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
     return module
 
 
+class NonrecursiveWrapPolicy:
+    def __init__(self, init_policy=always_wrap_policy):
+        self.init_policy = init_policy
+
+
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:
     assert wrapper_cls is not None
     if hasattr(module, '_wrap_overrides'):
