@@ -207,6 +207,50 @@ class TestONNXShapeInference(unittest.TestCase):
         pad = g.op("Pad", input, constant, none, mode_s="constant")
         self.run_test(g, pad.node(), expect_tensor("Float", shape=(None, None, None)))
 
+    def test_resize(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.float).with_sizes([4, 32, 64, 64]))
+        none = g.op("prim::Constant").setType(torch.NoneType.get())
+        scales = self.insert_tensor_constant(
+            g, torch.tensor([1, 1, 2, 2], dtype=torch.float)
+        )
+        resize = g.op(
+            "Resize",
+            input,
+            none,
+            scales,
+            coordinate_transformation_mode_s="align_corners",
+            cubic_coeff_a_f=-0.75,
+            mode_s="linear",
+            nearest_mode_s="floor",
+        )
+        self.run_test(g, resize.node(), expect_tensor("Float", shape=(4, 32, 128, 128)))
+
+    def test_resize_after_concat(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.float).with_sizes([4, 32, 64, 64]))
+        none = g.op("prim::Constant").setType(torch.NoneType.get())
+        scale_1 = self.insert_tensor_constant(
+            g, torch.tensor([1, 1], dtype=torch.float)
+        )
+        scale_2 = self.insert_tensor_constant(
+            g, torch.tensor([2, 2], dtype=torch.float)
+        )
+        scales = g.op("Concat", scale_1, scale_2, axis_i=0)
+        resize = g.op(
+            "Resize",
+            input,
+            none,
+            scales,
+            coordinate_transformation_mode_s="align_corners",
+            cubic_coeff_a_f=-0.75,
+            mode_s="linear",
+            nearest_mode_s="floor",
+        )
+        self.run_test(g, resize.node(), expect_tensor("Float", shape=(4, 32, 128, 128)))
+
 
 if __name__ == "__main__":
     unittest.main()
