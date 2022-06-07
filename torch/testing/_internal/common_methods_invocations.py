@@ -9608,7 +9608,7 @@ def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
                 input = make(input_shape, low=None, high=0)
                 target = make(target_shape, low=None, high=0) if log_target else make(shape, low=0, high=1)
                 sample = SampleInput(input, args=(target,), kwargs=dict(reduction=reduction, log_target=log_target))
-                yield clone_sample(sample)
+                yield sample
 
 def sample_inputs_pdist(op_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
