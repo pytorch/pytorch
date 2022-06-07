@@ -209,7 +209,7 @@ struct alignas(2) BFloat16 {
 }
 )ESCAPE";
 
-// copy-pasted from c10/util/TypeCast.h
+// copy-pasted from c10/util/TypeCast.h and c10/core/DynamicCast.h
 const std::string dynamic_cast_support_literal = R"ESCAPE(
 
   template <typename T>
@@ -280,10 +280,30 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
     }
   };
 
+  template <typename T>
+  struct LoadImpl {
+    __device__ static T apply(const void *src) {
+      return *reinterpret_cast<const T*>(src);
+    }
+  };
+
+  template <>
+  struct LoadImpl<bool> {
+    __device__ static bool apply(const void *src) {
+      static_assert(sizeof(bool) == sizeof(char), "");
+      return LoadImpl<char>::apply(src);
+    }
+  };
+
+  template <typename T>
+  __device__ T load(const void *src) {
+    return LoadImpl<T>::apply(src);
+  }
+
   // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
   #define FETCH_AND_CAST_CASE(type, scalartype) \
     case ScalarType::scalartype:                \
-      return static_cast_with_inter_type<dest_t, type>::apply(*(const type*)ptr);
+      return static_cast_with_inter_type<dest_t, type>::apply(load<type>(ptr));
   template<typename dest_t>
   __device__ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
     switch (src_type) {
