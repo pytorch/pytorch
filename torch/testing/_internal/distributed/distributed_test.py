@@ -5005,7 +5005,7 @@ class DistributedTest:
             # Check if checkpoint without a 'step' entry invokes a warning
             with self.assertWarnsRegex(
                 expected_warning=UserWarning,
-                expected_regex="Loaded state dict does not contain a step counter for an averager. " +
+                expected_regex="Loaded state dict does not contain a step counter for an averager. "
                 "Setting step counter to 0."
             ):
                 dummy_post_localSGD_opt.load_state_dict(checkpoint['optimizer_state_dict'])
