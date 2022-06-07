@@ -89,8 +89,10 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_GPU_CU_SRCS ${ATen_CUDA_CU_SRCS})
   list(APPEND Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
+  list(APPEND Caffe2_MPS_SRCS ${ATen_MPS_SRCS})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
+  list(APPEND Caffe2_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS})
   list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
   list(APPEND Caffe2_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
@@ -230,6 +232,11 @@ if(PRINT_CMAKE_DEBUG_INFO)
     message(STATUS "  " ${tmp})
   endforeach()
 
+  message(STATUS "MPS sources: ")
+  foreach(tmp ${Caffe2_MPS_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
+
   message(STATUS "HIP test sources: ")
   foreach(tmp ${Caffe2_HIP_TEST_SRCS})
     message(STATUS "  " ${tmp})
@@ -237,6 +244,11 @@ if(PRINT_CMAKE_DEBUG_INFO)
 
   message(STATUS "ATen CPU test sources: ")
   foreach(tmp ${ATen_CPU_TEST_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
+
+  message(STATUS "ATen MPS test sources: ")
+  foreach(tmp ${ATen_MPS_TEST_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
 
@@ -352,7 +364,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
     if(BUILD_LAZY_TS_BACKEND)
       list(APPEND GENERATED_CXX_TORCH
-        "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyIr.cpp"
         "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.cpp"
         "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterAutogradLazy.cpp"
         "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterLazy.cpp"
@@ -369,6 +380,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     list(APPEND GENERATED_H_TORCH
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
       "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyIr.h"
+      "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNonNativeIr.h"
       "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.h"
     )
   endif()
@@ -433,7 +445,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp"
     "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
-    "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.cpp"
+    "${TORCH_ROOT}/aten/src/ATen/templates/LazyNonNativeIr.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
@@ -659,10 +671,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
   endif()
 
-  if(USE_MLCOMPUTE)
-    include(../mlc/mlc_build.cmake)
-  endif()
-
   if(BUILD_ONEDNN_GRAPH)
     list(APPEND Caffe2_CPU_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/LlgaTensorImpl.cpp
@@ -765,7 +773,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 endif()
 
-# NOTE [ Linking AVX-n and non-AVX-n files ]
+if(USE_MPS)
+  list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
+endif()
+
+# NOTE [ Linking AVX and non-AVX files ]
 #
 # Regardless of the CPU capabilities, we build some files with AVX2, and AVX512
 # instruction set. If the host CPU doesn't support those, we simply ignore their
@@ -1816,6 +1828,25 @@ if(BUILD_TEST)
       endif()
     endif()
   endforeach()
+
+  if(USE_MPS)
+    foreach(test_src ${Caffe2_MPS_TEST_SRCS})
+      get_filename_component(test_name ${test_src} NAME_WE)
+      add_executable(${test_name} "${test_src}")
+      target_link_libraries(${test_name} torch_library gtest_main)
+      target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+      target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
+      add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+      if(INSTALL_TEST)
+        install(TARGETS ${test_name} DESTINATION test)
+        # Install PDB files for MSVC builds
+        if(MSVC AND BUILD_SHARED_LIBS)
+          install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
+        endif()
+      endif()
+    endforeach()
+  endif()
 
   if(USE_CUDA)
     foreach(test_src ${Caffe2_GPU_TEST_SRCS})
