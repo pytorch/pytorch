@@ -245,10 +245,12 @@ static void UpdateScalarTypeForInputs(
     const c10::ScalarType& scalar_type) {
   const int64_t onnx_type = ScalarTypeToONNXType(scalar_type);
   if (onnx_type < 0) {
-    std::cerr << "Warning: ONNX Scalar Type Analysis - Scalar type: "
-              << c10::toString(scalar_type)
-              << " of input tensor in operator: " << n->kind().toDisplayString()
-              << " not supported in ONNX. " << std::endl;
+    TORCH_WARN(
+        "ONNX Scalar Type Analysis - Scalar type: ",
+        c10::toString(scalar_type),
+        " of input tensor in operator: ",
+        n->kind().toDisplayString(),
+        " not supported in ONNX. ");
     return;
   }
 

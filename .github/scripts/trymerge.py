@@ -718,8 +718,11 @@ class GitHubPR:
         if not dry_run:
             gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
 
+
 class MandatoryChecksMissingError(Exception):
     pass
+
+
 @dataclass
 class MergeRule:
     name: str
@@ -784,7 +787,7 @@ def find_matching_merge_rule(pr: GitHubPR,
         if len(rule.approved_by) > 0 and len(approved_by) == 0:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
-                reject_reason = f"Matched rule {rule_name}, but PR has not been reviewed yet"
+                reject_reason = f"Matched rule {rule_name}, but PR #{pr.pr_num} has not been reviewed yet"
             continue
 
         rule_approvers_set = set()
@@ -799,8 +802,8 @@ def find_matching_merge_rule(pr: GitHubPR,
         if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
-                reject_reason = (f"Matched rule {rule_name}, but it was not reviewed yet by any of:" +
-                                 f"{','.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}")
+                reject_reason = (f"Matched rule {rule_name}, but PR #{pr.pr_num} was not reviewed yet by any of: " +
+                                 f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}")
             continue
         if rule.mandatory_checks_name is not None:
             pending_checks: List[Tuple[str, Optional[str]]] = []
@@ -821,7 +824,7 @@ def find_matching_merge_rule(pr: GitHubPR,
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
-                reject_reason = ("Refusing to merge as mandatory check(s)" +
+                reject_reason = ("Refusing to merge as mandatory check(s) " +
                                  checks_to_str(failed_checks) + f" failed for rule {rule_name}")
             continue
         elif len(pending_checks) > 0:
@@ -898,12 +901,13 @@ def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False, timeout_mi
         elapsed_time = current_time - start_time
 
 
+        print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
         try:
             return pr.merge_into(repo, dry_run=dry_run)
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
-            print(f"Merged failed due to: {ex}. Retrying in 60 seconds.")
+            print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 60 seconds.")
             time.sleep(60)
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
@@ -926,6 +930,10 @@ def main() -> None:
         gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
+
+    msg = f"@pytorchbot successfully started a {'revert' if args.revert else 'merge'} job."
+    msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
+    gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
 
     if args.revert:
         try:
