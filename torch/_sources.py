@@ -48,13 +48,20 @@ def normalize_source_lines(sourcelines: List[str]) -> List[str]:
         return text[text.startswith(prefix) and len(prefix):]
 
     # Find the line and line number containing the function definition
+    idx = None
     for i, l in enumerate(sourcelines):
         if l.lstrip().startswith("def"):
             idx = i
             break
-    fn_def = sourcelines[idx]
+
+    # This will happen when the function is a lambda- we won't find "def" anywhere in the source
+    # lines in that case. Currently trying to JIT compile a lambda will throw an error up in
+    # `parse_def()`, but we might want to handle this case in the future.
+    if idx is None:
+        return sourcelines
 
     # Get a string representing the amount of leading whitespace
+    fn_def = sourcelines[idx]
     whitespace = fn_def.split("def")[0]
 
     # Add this leading whitespace to all lines before and after the `def`
