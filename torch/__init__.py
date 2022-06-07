@@ -581,9 +581,9 @@ def get_float32_matmul_precision() -> builtins.str:
 
 def set_float32_matmul_precision(precision):
     r"""Sets the precision of float32 matrix multiplication (one of HIGHEST, HIGH, MEDIUM).
-    Original RFC: https://github.com/pytorch/pytorch/issues/76440
+    Original RFC `<https://github.com/pytorch/pytorch/issues/76440>`
     Args:
-        precision(str): default "highest": avoid internally reducing precision with
+        precision(str): default "highest", avoid internally reducing precision with
         formats such as TF32.
         If "high," allow TF32.
         If "medium," allow TF32.
