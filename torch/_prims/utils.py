@@ -64,6 +64,7 @@ TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 
 prim_fake_mode_ref = None
 
+
 def TensorMeta(
     tensorlike: Optional[Union[NumberType, torch.Tensor]] = None,
     *,
