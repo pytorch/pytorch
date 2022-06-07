@@ -469,6 +469,25 @@ class TestSegmentReductions(TestCase):
                     check_backward,
                 )
 
+    @onlyCPU
+    @dtypes(torch.int, torch.int64)
+    def test_unsafe_flag(self, device, dtype):
+        length_type = dtype
+        lengths = torch.tensor([0, 2, 3, 0], dtype=length_type)
+        data = torch.arange(6).float()
+
+        # test for error on 1-D lenghts
+        with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
+            torch.segment_reduce(data, 'sum', lengths=lengths, axis=0, unsafe=False)
+
+        # test for error on multi-D lengths
+        nd_lengths = torch.tensor([[0, 3, 3, 0], [2, 3, 0, 0]], dtype=length_type)
+        nd_data = torch.arange(12).reshape(2, 6).float()
+        with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
+            torch.segment_reduce(nd_data, 'sum', lengths=nd_lengths, axis=1, unsafe=False)
+
+
+
 
 instantiate_device_type_tests(TestSegmentReductions, globals())
 
