@@ -50,6 +50,10 @@ class Cauchy(Distribution):
         return torch.full(self._extended_shape(), nan, dtype=self.loc.dtype, device=self.loc.device)
 
     @property
+    def mode(self):
+        return self.loc
+
+    @property
     def variance(self):
         return torch.full(self._extended_shape(), inf, dtype=self.loc.dtype, device=self.loc.device)
 
