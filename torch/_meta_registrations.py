@@ -305,7 +305,7 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     )
     check(
         self.size(0) == dim1 and self.size(1) == dim2,
-        "self tensor does not match matmul output shape"
+        lambda: "self tensor does not match matmul output shape"
     )
     return self.new_empty(self.size())
 
