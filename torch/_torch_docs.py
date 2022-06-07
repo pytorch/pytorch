@@ -1731,7 +1731,7 @@ This function is based on NumPy's :func:`numpy.hsplit`.
 
 Args:
     input (Tensor): tensor to split.
-    indices_or_sections (Tensor, int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+    indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
 Example::
     >>> t = torch.arange(16.0).reshape(4,4)
@@ -1778,7 +1778,7 @@ This function is based on NumPy's :func:`numpy.vsplit`.
 
 Args:
     input (Tensor): tensor to split.
-    indices_or_sections (Tensor, int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+    indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
 Example::
     >>> t = torch.arange(16.0).reshape(4,4)
@@ -1817,7 +1817,7 @@ This function is based on NumPy's :func:`numpy.dsplit`.
 
 Args:
     input (Tensor): tensor to split.
-    indices_or_sections (Tensor, int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+    indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
 Example::
     >>> t = torch.arange(16.0).reshape(2, 2, 4)
@@ -2665,8 +2665,8 @@ Create a new floating-point tensor with the magnitude of :attr:`input` and the s
 
 .. math::
     \text{out}_{i} = \begin{cases}
-        -|\text{input}_{i}| & \text{if} \text{other}_{i} \leq -0.0 \\
-        |\text{input}_{i}| & \text{if} \text{other}_{i} \geq 0.0 \\
+        -|\text{input}_{i}| & \text{if } \text{other}_{i} \leq -0.0 \\
+         |\text{input}_{i}| & \text{if } \text{other}_{i} \geq 0.0 \\
     \end{cases}
 """ + r"""
 
@@ -6731,7 +6731,7 @@ documentation for the exact semantics of this method.
 Args:
     {input}
     {dim} If ``None``, the argmin of the flattened input is returned.
-    {keepdim} Ignored if ``dim=None``.
+    {keepdim}.
 
 Example::
 
@@ -8819,7 +8819,7 @@ add_docstr(torch.signbit,
            r"""
 signbit(input, *, out=None) -> Tensor
 
-Tests if each element of :attr:`input` has its sign bit set (is less than zero) or not.
+Tests if each element of :attr:`input` has its sign bit set or not.
 
 Args:
   {input}
