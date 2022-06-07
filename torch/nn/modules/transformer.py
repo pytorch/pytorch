@@ -226,9 +226,10 @@ class TransformerEncoder(Module):
                         first_layer.linear2.bias,
                     )
                     if not torch.overrides.has_torch_function(tensor_args):
-                        if output.is_cuda or 'cpu' in str(output.device):
-                            convert_to_nested = True
-                            output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not())
+                        if not torch.is_grad_enabled() or all([not x.requires_grad for x in tensor_args]):
+                            if output.is_cuda or 'cpu' in str(output.device):
+                                convert_to_nested = True
+                                output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not())
 
         for mod in self.layers:
             if convert_to_nested:
