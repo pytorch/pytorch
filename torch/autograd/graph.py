@@ -1,5 +1,7 @@
 import torch
 from typing import Callable, Any
+import contextlib
+from torch.utils._python_dispatch import TorchDispatchMode, push_torch_dispatch_mode
 
 class saved_tensors_hooks():
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
@@ -130,3 +132,81 @@ class save_on_cpu(saved_tensors_hooks):
             return tensor.to(device, non_blocking=pin_memory)
 
         super().__init__(pack_to_cpu, unpack_from_cpu)
+
+
+_cloned = dict()
+_use_counts = dict()
+_keep_graph = False
+class _swap_with_cloned(saved_tensors_hooks):
+    def __init__(self):
+        def pack_hook(t):
+            uid = (t.data_ptr(), t._version)
+            if not _keep_graph:
+                _use_counts[uid] = _use_counts.get(uid, 0) + 1
+            return uid, t
+
+        def unpack_hook(tup):
+            uid, t = tup
+            if uid in _cloned:
+                res = _cloned[uid]
+            else:
+                res = t
+            if not _keep_graph:
+                if uid not in _use_counts:
+                    raise RuntimeError("If you are trying to backward through the graph a second time "
+                                       "or trying to compute higher-order gradients, please specify "
+                                       "`keep_graph=True` when enabling allow_mutation_on_saved_tensors")
+                _use_counts[uid] -= 1
+                if _use_counts[uid] == 0:
+                    if uid in _cloned:
+                        del _cloned[uid]
+                    del _use_counts[uid]
+            return res
+        super().__init__(pack_hook, unpack_hook)
+
+class _CloneArgBeforeMutateMode(TorchDispatchMode):
+    @staticmethod
+    def is_mutating(func):
+        # We may want to also handle out= later
+        return func.__name__.split('.')[0][-1] == "_"
+
+    @staticmethod
+    def maybe_clone_arg(t):
+        uid = (t.data_ptr(), t._version)
+        if uid not in _cloned:
+            _cloned[uid] = t.clone()
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        if _CloneArgBeforeMutateMode.is_mutating(func):
+            _CloneArgBeforeMutateMode.maybe_clone_arg(args[0])
+        rs = func(*args, **kwargs)
+        return rs
+
+@contextlib.contextmanager
+def allow_mutation_on_saved_tensors(keep_graph=False):
+    """Context manager under which mutating tensors that will be saved
+    for backward is allowed.
+
+    When using this context manager, if tensors that are saved for backward
+    are mutated, instead of raising an error, a copy of that tensor before
+    mutation is stored to be used for the backward pass.
+
+    Args:
+        keep_graph (bool): If ``True``, allows one to backward through the graph
+                           multiple times and enables higher-order gradients.
+                           Defaults to ``False``.
+    """
+    with _swap_with_cloned(), push_torch_dispatch_mode(_CloneArgBeforeMutateMode):
+        global _keep_graph
+        # Do we even care about nesting? Maybe just track nesting level and raise an error?
+        prev_keep_graph = _keep_graph
+        _keep_graph = keep_graph
+        try:
+            yield
+        finally:
+            if _keep_graph:
+                _cloned.clear()
+                _use_counts.clear()
+            _keep_graph = prev_keep_graph
