@@ -1999,11 +1999,11 @@ def rot90(
         )
     k = k % 4  # Rotation direction is from the second towards the first axis for k < 0
     if k == 1:
-        return transpose(flip(a, (dims[1],)), dims[0], dims[1])
+        return torch.transpose(torch.flip(a, (dims[1],)), dims[0], dims[1])
     elif k == 2:
-        return flip(a, dims)
+        return torch.flip(a, dims)
     elif k == 3:
-        return transpose(flip(a, (dims[0],)), dims[0], dims[1])
+        return torch.transpose(torch.flip(a, (dims[0],)), dims[0], dims[1])
     else:
         return clone(a)
 
