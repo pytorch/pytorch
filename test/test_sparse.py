@@ -9,7 +9,7 @@ import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard, first_sample, IS_LINUX
+    DeterministicGuard, first_sample
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -157,7 +157,7 @@ class TestSparse(TestCase):
             self.assertEqual(i, x._indices())
             self.assertEqual(v, x._values())
             self.assertEqual(x.ndimension(), len(with_size))
-            self.assertEqual(x.coalesce()._nnz(), nnz)
+            self.assertEqual(x.coalesce()._nnz(), nnz if x.is_coalesced() else nnz // 2)
             self.assertEqual(list(x.size()), with_size)
 
             # Test .indices() and .values()
@@ -999,6 +999,106 @@ class TestSparse(TestCase):
                 test_shape(len(sizes) // 2, 10, sizes, d, index)
                 test_shape(len(sizes), 10, sizes, d, index)
 
+    def _test_index_select_exhaustive_index(self, sizes, dims, device, dtype, coalesced):
+        t = make_tensor(sizes, dtype=dtype, device=device)
+        t_sparse = t.to_sparse().coalesce() if coalesced else t.to_sparse()
+        t_small_sparse, _, _ = self._gen_sparse(len(sizes), 2, sizes, dtype, device, coalesced)
+        t_small = t_small_sparse.to_dense()
+        for d in dims:
+            # NOTE: indices are negative
+            idx_dim_d_range = list(range(-sizes[d], 0))
+            for idx_len in range(sizes[d], sizes[d] + 1):
+                # creates all possible valid indices into dim d of lenght idx_len
+                for idx in itertools.product(*itertools.repeat(idx_dim_d_range, idx_len)):
+                    t_idx = torch.tensor(idx, dtype=torch.long, device=device)
+
+                    # NOTE: index_select for dense does not support negative indices,
+                    # hence + sizes[d]. See https://github.com/pytorch/pytorch/issues/76347
+
+                    # tests the nnz > sizes[d] branch
+                    dense_result = t.index_select(d, t_idx + sizes[d])
+                    sparse_result = t_sparse.index_select(d, t_idx)
+                    self.assertEqual(dense_result, sparse_result)
+
+                    # tests the nnz <= sizes[d] branch
+                    small_dense_result = t_small.index_select(d, t_idx + sizes[d])
+                    small_sparse_result = t_small_sparse.index_select(d, t_idx)
+                    self.assertEqual(small_dense_result, small_sparse_result)
+
+    @coalescedonoff
+    @dtypes(torch.double, torch.cdouble)
+    def test_index_select_exhaustive_index_small(self, device, dtype, coalesced):
+        # will trigger brute-force algo
+        self._test_index_select_exhaustive_index((3, 3, 4), range(3), device, dtype, coalesced)
+
+    @coalescedonoff
+    @dtypes(torch.double, torch.cdouble)
+    def test_index_select_exhaustive_index_large(self, device, dtype, coalesced):
+        # will trigger more sophisticated algos
+        self._test_index_select_exhaustive_index((100, 50, 3, 3), (2, 3), device, dtype, coalesced)
+
+    @coalescedonoff
+    @dtypes(torch.double, torch.cdouble)
+    def test_index_select_empty_and_non_contiguous_index(self, device, dtype, coalesced):
+        # empty index
+        idx_empty = torch.tensor([], dtype=torch.long, device=device)
+        t = make_tensor((5, 5), dtype=dtype, device=device)
+        res_dense = t.index_select(0, idx_empty)
+        res_sparse = t.to_sparse().index_select(0, idx_empty)
+        self.assertEqual(res_dense, res_sparse)
+
+        # non-contigous index
+        idx = torch.randint(low=0, high=5, size=(10, 2), device=device)[:, 0]
+
+        def run_test(sizes):
+            # case nnz > size[d]
+            t = make_tensor(sizes, dtype=dtype, device=device)
+            res_dense = t.index_select(0, idx)
+            res_sparse = t.to_sparse().index_select(0, idx)
+            self.assertEqual(res_dense, res_sparse)
+
+            # case nnz <= size[d]
+            t_small_sparse, _, _ = self._gen_sparse(len(sizes), 2, sizes, dtype, device, coalesced)
+            res_sparse = t_small_sparse.index_select(0, idx)
+            res_dense = t_small_sparse.to_dense().index_select(0, idx)
+            self.assertEqual(res_dense, res_sparse)
+
+        # brute-force
+        run_test((10, 10))
+        # more sophisticated algos
+        run_test((10, 100, 100))
+
+    @onlyCPU
+    @coalescedonoff
+    @dtypes(torch.double, torch.cdouble)
+    def test_index_select_parallelization(self, device, dtype, coalesced):
+        """
+        Test with sizes that will trigger parallelization (i.e. with sizes
+        that are >= at::internal::GRAIN_SIZE)
+        """
+        def run_test(nnz, size):
+            t_sparse, _, _ = self._gen_sparse(1, nnz, (size,), dtype, device, coalesced)
+            t_dense = t_sparse.to_dense()
+
+            # idx_small to (sort) and (binary) search into t_sparse
+            idx_small = torch.randint(size, (nnz // 2,), device=device)
+            # idx_large to (sort) and (binary) search into idx_large
+            # NOTE: when coalesced=True, the (binary) search will be
+            # done over t_sparse anyway, as it is already sorted.
+            idx_large = torch.randint(size, (nnz * 2,), device=device)
+            for idx in (idx_small, idx_large):
+                res_dense = t_dense.index_select(0, idx)
+                res_sparse = t_sparse.index_select(0, idx)
+                self.assertEqual(res_dense, res_sparse)
+
+        # NOTE: GRAIN_SIZE = 32768
+        # case nnz <= size[d]
+        tlen = 70000  # > 2 * GRAIN_SIZE
+        run_test(tlen, tlen)
+
+        # case nnz > size[d]
+        run_test(tlen, tlen // 2)
+
     @onlyCPU
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
@@ -1243,9 +1343,8 @@ class TestSparse(TestCase):
         true_result = (bias.to_dense() + torch.matmul(weight.to_dense(), x)).to_sparse()
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
-    # TODO: remove skipIf when https://github.com/pytorch/pytorch/pull/73428 lands
     @coalescedonoff
-    @unittest.skipIf(IS_WINDOWS or IS_LINUX, "See https://github.com/pytorch/pytorch/issues/73145")
+    @unittest.skip("See https://github.com/pytorch/pytorch/issues/73145")
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
     def test_sparse_addmm(self, device, dtype, coalesced):
         def test_shape(m, n, p, nnz, broadcast, alpha_beta=None):
@@ -1565,11 +1664,9 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
-        with self.assertWarnsOnceRegex(UserWarning, '__floordiv__'):
-            y1 = x1 // 37.5
+        y1 = x1 // 37.5
         y2 = x1.clone()
-        with self.assertWarnsOnceRegex(UserWarning, 'floor_divide'):
-            y2.floor_divide_(37.5)
+        y2.floor_divide_(37.5)
         expected = self.safeToDense(x1) // 37.5
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
@@ -2912,7 +3009,7 @@ class TestSparse(TestCase):
                                / torch.tensor(1., device=device).to_sparse())
 
     def test_floor_divide_by_sparse_error(self, device):
-        self.assertRaisesRegex(RuntimeError, 'Sparse division requires',
+        self.assertRaisesRegex(RuntimeError, 'Sparse floor division requires',
                                lambda: torch.tensor(1., device=device).to_sparse()
                                // torch.tensor(1., device=device).to_sparse())
 

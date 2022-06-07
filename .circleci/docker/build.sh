@@ -76,6 +76,10 @@ elif [[ "$image" == *rocm* ]]; then
   DOCKERFILE="${OS}-rocm/Dockerfile"
 fi
 
+if [[ "$image" == *xenial* ]] || [[ "$image" == *bionic* ]]; then
+  CMAKE_VERSION=3.13.5
+fi
+
 TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
 
 # It's annoying to rename jobs every time you want to rewrite a
@@ -84,28 +88,16 @@ TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/u
 case "$image" in
   pytorch-linux-xenial-py3.8)
     ANACONDA_PYTHON_VERSION=3.8
-    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     # Do not install PROTOBUF, DB, and VISION as a test
     ;;
-  pytorch-linux-xenial-py3.7-gcc5.4)
-    ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.12.4  # To make sure XNNPACK is enabled for the BACKWARDS_COMPAT_TEST used with this image
-    GCC_VERSION=5
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    ;;
   pytorch-linux-xenial-py3.7-gcc7.2)
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     # Do not install PROTOBUF, DB, and VISION as a test
     ;;
   pytorch-linux-xenial-py3.7-gcc7)
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -115,7 +107,6 @@ case "$image" in
     CUDA_VERSION=10.2
     CUDNN_VERSION=7
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -127,7 +118,6 @@ case "$image" in
     CUDNN_VERSION=8
     TENSORRT_VERSION=8.0.1.6
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -139,19 +129,7 @@ case "$image" in
     CUDNN_VERSION=8
     TENSORRT_VERSION=8.0.1.6
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
     CLANG_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    ;;
-  pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.5.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
-    GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -161,7 +139,6 @@ case "$image" in
     CUDA_VERSION=11.6.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -171,7 +148,6 @@ case "$image" in
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.7
     CLANG_VERSION=5.0
-    CMAKE_VERSION=3.13.5
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -179,7 +155,6 @@ case "$image" in
   pytorch-linux-xenial-py3-clang7-asan)
     ANACONDA_PYTHON_VERSION=3.7
     CLANG_VERSION=7
-    CMAKE_VERSION=3.10.3
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -187,7 +162,6 @@ case "$image" in
   pytorch-linux-xenial-py3-clang7-onnx)
     ANACONDA_PYTHON_VERSION=3.7
     CLANG_VERSION=7
-    CMAKE_VERSION=3.10.3
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -195,7 +169,6 @@ case "$image" in
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c)
     ANACONDA_PYTHON_VERSION=3.7
     CLANG_VERSION=5.0
-    CMAKE_VERSION=3.13.5
     LLVMDEV=yes
     PROTOBUF=yes
     ANDROID=yes
@@ -205,7 +178,6 @@ case "$image" in
     ;;
   pytorch-linux-xenial-py3.7-clang7)
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
     CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -261,15 +233,21 @@ case "$image" in
     VISION=yes
     ROCM_VERSION=5.1.1
     ;;
+  pytorch-linux-focal-py3.7-gcc7)
+    ANACONDA_PYTHON_VERSION=3.7
+    CMAKE_VERSION=3.12.4  # To make sure XNNPACK is enabled for the BACKWARDS_COMPAT_TEST used with this image
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
   *)
     # Catch-all for builds that are not hardcoded.
     PROTOBUF=yes
     DB=yes
     VISION=yes
     echo "image '$image' did not match an existing build configuration"
-    if [[ "$image" == *xenial* ]]; then
-      CMAKE_VERSION=3.10.3
-    fi
     if [[ "$image" == *py* ]]; then
       extract_version_from_image_name py ANACONDA_PYTHON_VERSION
     fi
