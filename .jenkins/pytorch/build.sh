@@ -181,11 +181,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
   export USE_PER_OPERATOR_HEADERS=0
 fi
 
-# TODO: Remove after xenial->focal migration
-if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.7-gcc7-build* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.7-gcc5.4-build* ]]; then
-  export USE_GLOO_WITH_OPENSSL=ON
-fi
-
 if [[ "${BUILD_ENVIRONMENT}" == *linux-focal-py3.7-gcc7-build*  ]]; then
   export USE_GLOO_WITH_OPENSSL=ON
 fi
@@ -208,10 +203,10 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 
   get_bazel
 
-  # first build torch, the Python module, and tests for CPU-only
-  tools/bazel build --config=no-tty :torch :_C.so :all_tests
-  # then build everything with CUDA
-  tools/bazel build --config=no-tty --config=gpu :all
+  tools/bazel build --config=no-tty //...
+  # Build torch, the Python module, and tests for CPU-only
+  tools/bazel build --config=no-tty --config=cpu-only :torch :_C.so :all_tests
+
 else
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
