@@ -343,7 +343,6 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
         return counter - 1
 
     def unpack(x):
-        nonlocal storage
         unpack_counter = 0
         if len(storage) == 0:
 

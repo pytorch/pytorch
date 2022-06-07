@@ -4488,9 +4488,8 @@ for shape in [(1,), ()]:
         loss.backward()
         mem_no_reentrant_checkpoint = torch.cuda.max_memory_allocated()
 
-        print(mem_no_checkpoint, mem_reentrant_checkpoint, mem_no_reentrant_checkpoint)
         self.assertTrue(mem_reentrant_checkpoint < mem_no_checkpoint)
-        self.assertTrue(mem_no_reentrant_checkpoint <= mem_reentrant_checkpoint)
+        self.assertTrue(mem_no_reentrant_checkpoint < mem_no_checkpoint)
 
     def test_checkpointing_without_reentrant_custom_function(self):
         """
@@ -4509,18 +4508,20 @@ for shape in [(1,), ()]:
             def backward(ctx, grad_out):
                 x, y, z, w, out = ctx.saved_tensors
                 x_2, y_2, z_2, w_2, out_2 = ctx.saved_tensors
-                self.assertEqual(x, x_2)
-                self.assertEqual(y, y_2)
-                self.assertEqual(z, z_2)
+                self.assertEqual(x.data_ptr(), x_2.data_ptr())
+                self.assertEqual(y.data_ptr(), y_2.data_ptr())
+                self.assertEqual(z.data_ptr(), z_2.data_ptr())
                 self.assertEqual(w, w_2)
                 self.assertEqual(out, out_2)
-                # Ensure same tensors were returned on
-                # second access.
                 return x, x, x
+                return grad_out, grad_out, grad_out
 
         x = torch.tensor(1., requires_grad=True)
         y = torch.tensor(2., requires_grad=True)
         z = torch.tensor(3., requires_grad=True)
+        x = x * y * z
+        y = y * y * z
+        z = z * z
         out = checkpoint(MyFunc.apply, x, y, z, use_reentrant=False)
         out.sum().backward()
 
