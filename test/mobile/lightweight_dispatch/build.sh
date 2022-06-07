@@ -25,7 +25,9 @@ export USE_DISTRIBUTED=0
 export USE_LIGHTWEIGHT_DISPATCH=1
 export STATIC_DISPATCH_BACKEND="CPU"
 export BUILD_LITE_INTERPRETER=1
-
+OP_LIST="lightweight_dispatch_ops.yaml"
+export SELECTED_OP_LIST=$TEST_SRC_ROOT/$OP_LIST
+export USE_FBGEMM=0
 python "${BUILD_LIBTORCH_PY}"
 ret=$?
 
@@ -43,12 +45,6 @@ fi
 
 # shutdown test
 python "$TEST_SRC_ROOT/tests_setup.py" shutdown
-
-# run lite interpreter tests
-if ! build/bin/test_lite_interpreter_runtime; then
-  echo "test_lite_interpreter_runtime has failure!"
-  exit 1
-fi
 
 popd
 
