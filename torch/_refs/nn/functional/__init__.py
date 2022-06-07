@@ -62,7 +62,7 @@ def celu(
                 )
             )
             raise ValueError(msg)
-        rhs = alpha * torch.expm1(torch.true_divide(a, alpha))  # ignore: [arg-type]
+        rhs = alpha * torch.expm1(torch.true_divide(a, alpha))  # type: ignore[arg-type]
     else:
         rhs = torch.expm1(a)
 
@@ -233,7 +233,7 @@ def softplus(
             )
             raise ValueError(msg)
         scaled_input = a * beta
-        rhs = torch.true_divide(torch.log1p(torch.exp(scaled_input)), beta)  # ignore: [arg-type]
+        rhs = torch.true_divide(torch.log1p(torch.exp(scaled_input)), beta)  # type : ignore[arg-type]
 
     else:
         scaled_input = a
