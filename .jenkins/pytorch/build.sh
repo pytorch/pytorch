@@ -65,8 +65,13 @@ fi
 pip_install -r requirements.txt || true
 
 # Enable LLVM dependency for TensorExpr testing
-export USE_LLVM=/opt/llvm
-export LLVM_DIR=/opt/llvm/lib/cmake/llvm
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export USE_LLVM=/opt/rocm/llvm
+  export LLVM_DIR=/opt/rocm/llvm/lib/cmake/llvm
+else
+  export USE_LLVM=/opt/llvm
+  export LLVM_DIR=/opt/llvm/lib/cmake/llvm
+fi
 
 # TODO: Don't install this here
 if ! which conda; then
