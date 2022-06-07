@@ -6,7 +6,6 @@ the values observed during calibration (PTQ) or training (QAT).
 import torch
 import itertools
 from torch.ao.quantization.observer import ObserverBase
-from typing import Tuple
 
 class NonUniformQuantizationObserverBase(ObserverBase):
     min_val: torch.tensor([])
