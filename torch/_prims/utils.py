@@ -65,6 +65,16 @@ TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 prim_fake_mode_ref = None
 
 
+def get_prim_fake_mode():
+    global prim_fake_mode_ref
+    if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
+        mode = FakeTensorMode()
+        prim_fake_mode_ref = weakref.ref(mode)
+        return mode
+    else:
+        return prim_fake_mode_ref()
+
+
 def TensorMeta(
     tensorlike: Optional[Union[NumberType, torch.Tensor]] = None,
     *,
@@ -105,12 +115,7 @@ def TensorMeta(
     if isinstance(device, str):
         device = torch.device(device)
 
-    global prim_fake_mode_ref
-    if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
-        mode = FakeTensorMode()
-        prim_fake_mode = weakref.ref(mode)
-    else:
-        mode = prim_fake_mode_ref()
+    mode = get_prim_fake_mode()
 
     return FakeTensor(
         mode, torch.empty_strided(shape, strides, dtype=dtype, device="meta"), device
@@ -1143,7 +1148,7 @@ def check(
     b: bool, s: Callable[[], str], exc_type: Type[Exception] = RuntimeError
 ) -> None:
     """
-    Helper function for raising a RuntimeError if a boolean condition fails.
+    Helper function for raising an error_type (default: RuntimeError) if a boolean condition fails.
     Error message is a callable producing a string (to avoid wasting time
     string formatting in non-error case, and also to make it easier for torchdynamo
     to trace.)
