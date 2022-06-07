@@ -8,7 +8,7 @@ tensor(ccol_indices=tensor([0, 2, 4]),
 
                       [[ 3., 33.]],
 
-                      [[ 4., 44.]]]), device='cuda:0', size=(2, 2), nnz=4,
+                      [[ 4., 44.]]]), device='cuda:0', size=(2, 4), nnz=4,
        layout=torch.sparse_bsc)
 # _ccol_indices
 tensor([0, 2, 4], device='cuda:0', dtype=torch.int32)
@@ -57,7 +57,7 @@ tensor(ccol_indices=tensor([[0, 2, 4],
 
                        [[ 3., 33.]],
 
-                       [[ 4., 44.]]]]), device='cuda:0', size=(2, 2, 2), nnz=4,
+                       [[ 4., 44.]]]]), device='cuda:0', size=(2, 2, 4), nnz=4,
        layout=torch.sparse_bsc)
 # _ccol_indices
 tensor([[0, 2, 4],
@@ -151,7 +151,7 @@ tensor(ccol_indices=tensor([[[0, 2, 4],
 
                         [[ 3., 33.]],
 
-                        [[ 4., 44.]]]]]), device='cuda:0', size=(2, 3, 2, 2),
+                        [[ 4., 44.]]]]]), device='cuda:0', size=(2, 3, 2, 4),
        nnz=4, layout=torch.sparse_bsc)
 # _ccol_indices
 tensor([[[0, 2, 4],
@@ -235,7 +235,7 @@ tensor(ccol_indices=tensor([0, 2, 4]),
 
                       [[ 3., 33.]],
 
-                      [[ 4., 44.]]]), device='cuda:0', size=(2, 2), nnz=4,
+                      [[ 4., 44.]]]), device='cuda:0', size=(2, 4), nnz=4,
        dtype=torch.float64, layout=torch.sparse_bsc)
 # _ccol_indices
 tensor([0, 2, 4], device='cuda:0', dtype=torch.int32)
@@ -284,7 +284,7 @@ tensor(ccol_indices=tensor([[0, 2, 4],
 
                        [[ 3., 33.]],
 
-                       [[ 4., 44.]]]]), device='cuda:0', size=(2, 2, 2), nnz=4,
+                       [[ 4., 44.]]]]), device='cuda:0', size=(2, 2, 4), nnz=4,
        dtype=torch.float64, layout=torch.sparse_bsc)
 # _ccol_indices
 tensor([[0, 2, 4],
@@ -378,7 +378,7 @@ tensor(ccol_indices=tensor([[[0, 2, 4],
 
                         [[ 3., 33.]],
 
-                        [[ 4., 44.]]]]]), device='cuda:0', size=(2, 3, 2, 2),
+                        [[ 4., 44.]]]]]), device='cuda:0', size=(2, 3, 2, 4),
        nnz=4, dtype=torch.float64, layout=torch.sparse_bsc)
 # _ccol_indices
 tensor([[[0, 2, 4],
@@ -462,7 +462,7 @@ tensor(ccol_indices=tensor([0, 2, 4]),
 
                       [[ 3., 33.]],
 
-                      [[ 4., 44.]]]), device='cuda:0', size=(2, 2), nnz=4,
+                      [[ 4., 44.]]]), device='cuda:0', size=(2, 4), nnz=4,
        layout=torch.sparse_bsc)
 # _ccol_indices
 tensor([0, 2, 4], device='cuda:0')
@@ -511,7 +511,7 @@ tensor(ccol_indices=tensor([[0, 2, 4],
 
                        [[ 3., 33.]],
 
-                       [[ 4., 44.]]]]), device='cuda:0', size=(2, 2, 2), nnz=4,
+                       [[ 4., 44.]]]]), device='cuda:0', size=(2, 2, 4), nnz=4,
        layout=torch.sparse_bsc)
 # _ccol_indices
 tensor([[0, 2, 4],
@@ -605,7 +605,7 @@ tensor(ccol_indices=tensor([[[0, 2, 4],
 
                         [[ 3., 33.]],
 
-                        [[ 4., 44.]]]]]), device='cuda:0', size=(2, 3, 2, 2),
+                        [[ 4., 44.]]]]]), device='cuda:0', size=(2, 3, 2, 4),
        nnz=4, layout=torch.sparse_bsc)
 # _ccol_indices
 tensor([[[0, 2, 4],
@@ -689,7 +689,7 @@ tensor(ccol_indices=tensor([0, 2, 4]),
 
                       [[ 3., 33.]],
 
-                      [[ 4., 44.]]]), device='cuda:0', size=(2, 2), nnz=4,
+                      [[ 4., 44.]]]), device='cuda:0', size=(2, 4), nnz=4,
        dtype=torch.float64, layout=torch.sparse_bsc)
 # _ccol_indices
 tensor([0, 2, 4], device='cuda:0')
@@ -738,7 +738,7 @@ tensor(ccol_indices=tensor([[0, 2, 4],
 
                        [[ 3., 33.]],
 
-                       [[ 4., 44.]]]]), device='cuda:0', size=(2, 2, 2), nnz=4,
+                       [[ 4., 44.]]]]), device='cuda:0', size=(2, 2, 4), nnz=4,
        dtype=torch.float64, layout=torch.sparse_bsc)
 # _ccol_indices
 tensor([[0, 2, 4],
@@ -832,7 +832,7 @@ tensor(ccol_indices=tensor([[[0, 2, 4],
 
                         [[ 3., 33.]],
 
-                        [[ 4., 44.]]]]]), device='cuda:0', size=(2, 3, 2, 2),
+                        [[ 4., 44.]]]]]), device='cuda:0', size=(2, 3, 2, 4),
        nnz=4, dtype=torch.float64, layout=torch.sparse_bsc)
 # _ccol_indices
 tensor([[[0, 2, 4],
