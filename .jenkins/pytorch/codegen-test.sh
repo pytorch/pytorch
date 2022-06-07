@@ -27,6 +27,7 @@ rm -rf "$OUT"
 
 # aten codegen
 python -m torchgen.gen \
+  -s aten/src/ATen \
   -d "$OUT"/torch/share/ATen
 
 # torch codegen
