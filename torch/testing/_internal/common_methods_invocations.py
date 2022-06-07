@@ -1536,8 +1536,16 @@ def error_inputs_hsplit(op_info, device, **kwargs):
                                   dtype=torch.float32,
                                   device=device),
                       args=(0,),)
-    return (ErrorInput(si1, error_regex=err_msg1),
-            ErrorInput(si2, error_regex=err_msg2),)
+
+    # Incorrect type for indices_or_section argument
+    err_msg3 = ("received an invalid combination of arguments.")
+    si3 = SampleInput(make_tensor((S, S, S),
+                                  dtype=torch.float32,
+                                  device=device),
+                      args=("abc",),)
+    yield ErrorInput(si1, error_regex=err_msg1)
+    yield ErrorInput(si2, error_regex=err_msg2)
+    yield ErrorInput(si3, error_type=TypeError, error_regex=err_msg3)
 
 def error_inputs_vsplit(op_info, device, **kwargs):
     err_msg1 = ("torch.vsplit requires a tensor with at least 2 dimension, "
@@ -1553,8 +1561,16 @@ def error_inputs_vsplit(op_info, device, **kwargs):
                                   dtype=torch.float32,
                                   device=device),
                       args=(0,),)
-    return (ErrorInput(si1, error_regex=err_msg1),
-            ErrorInput(si2, error_regex=err_msg2),)
+
+    # Incorrect type for indices_or_section argument
+    err_msg3 = ("received an invalid combination of arguments.")
+    si3 = SampleInput(make_tensor((S, S, S),
+                                  dtype=torch.float32,
+                                  device=device),
+                      args=("abc",),)
+    yield ErrorInput(si1, error_regex=err_msg1)
+    yield ErrorInput(si2, error_regex=err_msg2)
+    yield ErrorInput(si3, error_type=TypeError, error_regex=err_msg3)
 
 def error_inputs_dsplit(op_info, device, **kwargs):
     err_msg1 = ("torch.dsplit requires a tensor with at least 3 dimension, "
@@ -20123,6 +20139,14 @@ python_ref_db = [
             # RuntimeError: no _refs support for torch.Tensor.tolist
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
         )
+    ),
+    PythonRefInfo(
+        "_refs.hsplit",
+        torch_opinfo_name="hsplit",
+    ),
+    PythonRefInfo(
+        "_refs.vsplit",
+        torch_opinfo_name="vsplit",
     ),
     PythonRefInfo(
         "_refs.transpose",
