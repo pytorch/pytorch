@@ -10,4 +10,3 @@ setuptools
 six
 types-dataclasses
 typing_extensions
-rockset
