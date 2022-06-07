@@ -265,6 +265,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"MPS", c10::DispatchKey::MPS},
       {"Vulkan", c10::DispatchKey::Vulkan},
       {"Metal", c10::DispatchKey::Metal},
+      {"DML", c10::DispatchKey::DML},
       {"VE", c10::DispatchKey::VE},
       {"Meta", c10::DispatchKey::Meta},
       {"Quantized", c10::DispatchKey::Quantized},

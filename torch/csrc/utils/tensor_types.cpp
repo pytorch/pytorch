@@ -20,6 +20,7 @@ static const char* backend_to_string(const at::Backend& backend) {
   switch (backend) {
     case at::Backend::CPU: return "torch";
     case at::Backend::CUDA: return "torch.cuda";
+    case at::Backend::DML: return "torch.dml";
     case at::Backend::XPU: return "torch.xpu";
     case at::Backend::IPU: return "torch.ipu";
     case at::Backend::SparseCPU: return "torch.sparse";

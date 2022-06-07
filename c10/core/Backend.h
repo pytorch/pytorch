@@ -187,6 +187,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CPU;
     case Backend::CUDA:
       return DeviceType::CUDA;
+    case Backend::DML:
+      return DeviceType::DML;
     case Backend::HIP:
       return DeviceType::HIP;
     case Backend::VE:

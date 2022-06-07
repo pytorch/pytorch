@@ -1496,6 +1496,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
       common_device_.type() == DeviceType::IPU  ||
       common_device_.type() == DeviceType::Lazy ||
       common_device_.type() == DeviceType::ORT  ||
+      common_device_.type() == DeviceType::DML  ||
       common_device_.type() == DeviceType::HPU) return;
 
   for (auto& op : operands_) {
