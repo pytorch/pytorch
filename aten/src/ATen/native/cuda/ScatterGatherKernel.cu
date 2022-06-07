@@ -165,14 +165,10 @@ struct _cuda_scatter_gather_internal_kernel {
           index_idx %= src_sizes[d_aux];
           src_offset += src_strides[d_aux] * index_idx;
         }
-
-        TORCH_CHECK(ndim <= 1, "Index strides: ", index_strides[0], " ", index_strides[1], "\nSource strides: ", src_strides[0], " ", src_strides[1], "\n\nIndex sizes: ", index_sizes[0], " ", index_sizes[1], "\nSource sizes: ", src_sizes[0], " ", src_sizes[1], "\n\nOriginal index offset: ", original_index_offset, "\nFinal source offset: ", src_offset);
       }
       else {
         src_offset = offsets[1];
       }
-
-      TORCH_CHECK(false, "Offset: ", src_offset);
 
       f(
         (scalar_t*)(self_ptr + offsets[0]),
