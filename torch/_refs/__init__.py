@@ -161,7 +161,7 @@ __all__ = [
     "any",
     "mean",
     "std_mean",
-    "std_var",
+    "var_mean",
     "sum",
     "prod",
     "var",
@@ -1150,7 +1150,7 @@ def where(
 #
 # Data Movement References
 #
-@register_decomposition(torch.ops.aten.clone)
+# TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 def clone(
     a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:
@@ -1930,6 +1930,7 @@ def _reshape_view_helper(
     return a_
 
 
+# TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 def reshape(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=True)
 
@@ -2019,11 +2020,6 @@ def _check_stack_inputs(tensors: TensorSequenceType) -> None:
         )
 
 
-def _get_stack_inputs(tensors: TensorSequenceType, dim: int):
-    _check_stack_inputs(tensors)
-    return [t.unsqueeze(dim) for t in tensors]
-
-
 @register_decomposition(torch.ops.aten.stack)
 @out_wrapper
 def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
@@ -2036,8 +2032,8 @@ def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
         result_sizes.insert(wrapped_dim, len(tensors))
         out = torch.cat(tensors, wrapped_dim)
         return out.view(result_sizes)
-    else:
-        return torch.cat(_get_stack_inputs(tensors, wrapped_dim), dim)
+
+    return torch.cat([t.unsqueeze(wrapped_dim) for t in tensors], dim)
 
 
 @out_wrapper
@@ -2288,6 +2284,7 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
     return prims.expand_dims(a, (dim,))
 
 
+# TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 def view(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=False)
 
