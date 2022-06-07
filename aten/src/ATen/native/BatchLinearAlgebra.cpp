@@ -2387,7 +2387,7 @@ TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
 
   // geqrf requires m x n workspace input that is modified in-place
   // if m > n and reduced==true we use Q tensor for storing the result of geqrf operation
-  // otherwise R tensor is used provided it has the right size. 
+  // otherwise R tensor is used provided it has the right size.
   Tensor QR;
   if (m <= n) {
     QR = R;
