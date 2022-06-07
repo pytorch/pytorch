@@ -156,7 +156,8 @@ def torch_dispatch_impl(cls_or_mode_instance, func, types, args, kwargs, run_fun
             # cpu is default device if none is specified
             default_device = torch.device("cpu")
             args = ()
-        out_device = new_kwargs.pop("device", default_device)
+        out_device = new_kwargs.pop("device")
+        out_device = out_device if out_device is not None else default_device
         new_kwargs["device"] = torch.device("meta")
         r = run_function(func, types, args, new_kwargs)
         return FakeTensor(r, out_device)
