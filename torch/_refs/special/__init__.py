@@ -50,8 +50,8 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
         eps = -1.0
     lo = eps
     hi = 1 - eps
-    self = torch.clamp(self, lo, hi)
-    return torch.log(torch.true_divide(self, torch.sub(1, self)))
+    self = refs.clamp(self, lo, hi)
+    return refs.log(refs.true_divide(self, refs.sub(1, self)))
 
 
 zeta = _make_elementwise_binary_reference(
