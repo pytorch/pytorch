@@ -233,7 +233,7 @@ def softplus(
             )
             raise ValueError(msg)
         scaled_input = a * beta
-        rhs = torch.true_divide(torch.log1p(torch.exp(scaled_input)), beta)  # type : ignore[arg-type]
+        rhs = torch.true_divide(torch.log1p(torch.exp(scaled_input)), beta)  # type: ignore[arg-type]
 
     else:
         scaled_input = a
