@@ -686,10 +686,15 @@ def run_tests(argv=UNITTEST_ARGS):
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print('Test results will be stored in {}'.format(test_report_path))
-        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
-            output=test_report_path,
-            verbosity=2 if verbose else 1,
-            resultclass=XMLTestResultVerbose))
+        if "test_ops" in test_filename:
+            subprocess.run([sys.executable, "-m", "pip", "install", "pytest", "pytest-xdist"])
+            import pytest
+            pytest.main(args=[inspect.getfile(sys._getframe(1)), '-n=auto', '-v', f'--junitxml={test_report_path}.xml'])
+        else:
+            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+                output=test_report_path,
+                verbosity=2 if verbose else 1,
+                resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
