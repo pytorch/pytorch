@@ -91,7 +91,20 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // replace_() swaps out the wrapped tensor, value_, with tmp.
   void replace_(const Tensor& other);
 
+  // See Note[resize_() in functionalization pass]
+  void maybe_replace_storage(const Tensor& other);
+
   ~FunctionalTensorWrapper() override = default;
+
+  // FunctionalTensorWrapper overrides all custom size/stride function,
+  // so that if the inner tensor has a custo implementation
+  // we make sure to call that implementation.
+  at::IntArrayRef sizes_custom() const override;
+  at::IntArrayRef strides_custom() const override;
+  int64_t dim_custom() const override;
+  int64_t numel_custom() const override;
+  bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
+  c10::SymIntArrayRef sym_sizes_custom() const override;
 
  private:
   const char* tensorimpl_type_name() const override;
@@ -130,8 +143,8 @@ TORCH_API c10::List<c10::optional<Tensor>> to_functional_tensor(const c10::List<
 TORCH_API std::vector<Tensor> to_functional_tensor(const std::vector<Tensor>& t_list);
 TORCH_API std::vector<Tensor> to_functional_tensor(const TensorList& t_list);
 
-TORCH_API Tensor from_functional_tensor(const Tensor& tensor);
-TORCH_API c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t);
+TORCH_API Tensor from_functional_tensor(const Tensor& tensor, bool assert_functional=true);
+TORCH_API c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t, bool assert_functional=true);
 TORCH_API c10::List<Tensor> from_functional_tensor(const c10::List<Tensor>& t_list);
 TORCH_API c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list);
 TORCH_API std::vector<Tensor> from_functional_tensor(const TensorList& tensors);

@@ -226,12 +226,6 @@ bool IsValidONNXNode(const Node* n) {
     }
   }
 
-  for (auto inp : n->inputs()) {
-    if (inp->type() == NoneType::get()) {
-      return false;
-    }
-  }
-
   return true;
 }
 
@@ -483,9 +477,8 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
     if (input_shape.is_static()) {
       if (shape_ratio >=
           std::numeric_limits<uint64_t>::max() / input_shape.static_size()) {
-        std::cerr
-            << "WARNING: ComputeShapeFromReshape(), shape_ratio overflows, skip shape inference."
-            << std::endl;
+        TORCH_WARN(
+            "ComputeShapeFromReshape(), shape_ratio overflows, skip shape inference.");
         return c10::nullopt;
       } else {
         shape_ratio *= static_cast<uint64_t>(input_shape.static_size());
@@ -1914,11 +1907,11 @@ void UpdateReliable(
       nodeTypeReliableForTracer.end();
   if (!inferred && !isTypeReliableForTracer &&
       !output->node()->kind().is_onnx()) {
-    std::cerr
-        << "WARNING: The shape inference of "
-        << output->node()->kind().toDisplayString()
-        << " type is missing, so it may result in wrong shape inference for the exported graph. "
-        << "Please consider adding it in symbolic function." << std::endl;
+    TORCH_WARN(
+        "The shape inference of ",
+        output->node()->kind().toDisplayString(),
+        " type is missing, so it may result in wrong shape inference for the exported graph. ",
+        "Please consider adding it in symbolic function.");
   }
   auto reliable = false;
   if (inferred) {
