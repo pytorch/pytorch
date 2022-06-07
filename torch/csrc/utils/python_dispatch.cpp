@@ -233,6 +233,10 @@ void initDispatchBindings(PyObject* module) {
     return c10::impl::tls_is_dispatch_key_excluded(c10::parseDispatchKey(dispatch_key));
   });
 
+
+  py::class_<at::AutoDispatchBelowAutograd>(m, "_AutoDispatchBelowAutograd")
+    .def(py::init<>());
+
   // Prints out the name of every operator that has a kernel registered to the Dispatcher
   // under [dispatch_key].
   // If no arguments are specified, it'll print out the name of every operator that the Dispatcher knows of.
@@ -243,6 +247,17 @@ void initDispatchBindings(PyObject* module) {
     for (auto& op : op_names) {
         std::cout << op << std::endl;
     }
+  }, py::arg("dispatch_key") = static_cast<const char*>(""));
+
+  m.def("_dispatch_get_registrations_for_dispatch_key", [](const char* dispatch_key = "") {
+    auto k = std::string(dispatch_key) == "" ? c10::nullopt : c10::make_optional(c10::parseDispatchKey(dispatch_key));
+    auto op_names = c10::Dispatcher::singleton().getRegistrationsForDispatchKey(k);
+    std::vector<std::string> names;
+    names.reserve(op_names.size());
+    for (auto& op : op_names) {
+      names.push_back(op.name + (op.overload_name == "" ? "" : "." + op.overload_name));
+    }
+    return names;
   }, py::arg("dispatch_key") = static_cast<const char*>(""));
 }
 
