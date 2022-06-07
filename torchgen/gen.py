@@ -36,6 +36,8 @@ from torchgen.model import (
 from torchgen.native_function_generation import (
     pre_group_native_functions,
     add_generated_native_functions,
+    gen_composite_functional_kernel,
+    gen_composite_out_kernel,
 )
 from torchgen.api.types import (
     Binding,
@@ -76,7 +78,6 @@ from torchgen.gen_functionalization_type import (
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
     gen_composite_view_copy_kernel,
-    gen_composite_functional_kernel,
 )
 
 T = TypeVar("T")
@@ -2286,6 +2287,12 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                     structured_native_functions,
                 )
             ),
+            "GeneratedCompositeOut_Definitions": list(
+                mapMaybe(
+                    gen_composite_out_kernel,
+                    structured_native_functions,
+                )
+            ),
         },
     )
 
@@ -2297,6 +2304,14 @@ def gen_declarations_yaml(
         "Declarations.yaml",
         lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]),
     )
+
+
+def get_torchgen_root() -> pathlib.Path:
+    """
+    If you're depending on torchgen out-of-tree, you can use the root to figure
+    out the path to native_functions.yaml
+    """
+    return pathlib.Path(__file__).parent.resolve()
 
 
 def main() -> None:
