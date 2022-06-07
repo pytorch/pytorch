@@ -8285,6 +8285,30 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs
                           args=(1, idx, src, reduce),
                           kwargs={'include_self': True})
 
+def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, **kwargs):
+    def _tensor(shape, dtype=dtype, low=None, high=None):
+        return make_tensor(shape, dtype=dtype, device=device, low=low, high=high, requires_grad=requires_grad)
+
+    zero = torch.tensor(0, dtype=torch.long, device=device)
+    test_cases = (
+        # inp_shape, dim, lengths, unsafe
+        ((S,), 0, [0, 1, 2, 2], False),
+        ((S,), 0, [0, 1, 2, 2], True),
+        ((S,), 0, [2, 0, 3, 0], False),
+        ((S, S), 0, [0, 1, 2, 2], False),
+        # test when lengths do not sum to dim size
+        ((M, S, S), 0, [1, 2, 0, 6, 0], True),
+    )
+
+    reductions = ["max", "mean", "min", "sum", "prod"]
+    for args, reduce, initial in product(test_cases, reductions, [1, 2]):
+        inp_shape, dim, lengths, unsafe = args
+        lengths_t = torch.tensor(lengths, dtype=torch.long, device=device)
+        yield SampleInput(_tensor(inp_shape),
+                          args=(reduce,),
+                          kwargs={'lengths': lengths_t, 'axis': dim, 'unsafe': unsafe, 'initial': initial})
+
+
 def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
     samples = (SampleInput(make_tensor((S, S, S), dtype=dtype, device=device,
                                        low=None, high=None,
@@ -19295,6 +19319,24 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
+    ),
+    OpInfo(
+        'segment_reduce',
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
+        supports_gradgrad=False,
+        sample_inputs_func=sample_inputs_segment_reduce,
+        skips=(
+            # FIXME: CUDA driver API confirmed a leak in
+            # __main__.TestJitCUDA.test_variant_consistency_jit_segment_reduce_cuda_float32
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="cuda",
+            ),
+        ),
     ),
     UnaryUfuncInfo(
         'special.bessel_j0',
