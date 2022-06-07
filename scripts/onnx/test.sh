@@ -71,14 +71,14 @@ if [[ "${SHARD_NUMBER}" == "1" ]]; then
   # Tests that cannot run in parallel.
   pytest "${args[@]}" \
     "$top_dir/test/onnx/test_onnx_export.py" \
-    "$top_dir/test/onnx/test_models_onnxruntime.py"
+    "$top_dir/test/onnx/test_models_onnxruntime.py" \
+    "$top_dir/test/onnx/test_custom_ops.py" \
+    "$top_dir/test/onnx/test_utility_funs.py"
 
   pytest "${args[@]}" "${args_parallel[@]}" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset7" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset8" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset9" \
-    "$top_dir/test/onnx/test_custom_ops.py" \
-    "$top_dir/test/onnx/test_utility_funs.py" \
     "$top_dir/test/onnx/test_pytorch_onnx_shape_inference.py" \
     "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py" \
     "$top_dir/test/onnx/test_pytorch_onnx_caffe2_quantized.py"
