@@ -37,6 +37,7 @@ __all__ = [
 
 # celu is implemented specially because it has an alpha argument
 # celu is very similar to elu
+@register_decomposition(torch.ops.aten.celu)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -61,11 +62,11 @@ def celu(
                 )
             )
             raise ValueError(msg)
-        rhs = refs.mul(alpha, refs.expm1(refs.true_divide(a, alpha)))
+        rhs = alpha * torch.expm1(torch.true_divide(a, alpha))
     else:
-        rhs = refs.expm1(a)
+        rhs = torch.expm1(a)
 
-    return refs.where(refs.gt(a, 0), a, rhs)
+    return torch.where(a > 0, a, rhs)
 
 
 # TODO: should we allow the user to set a different dtype for the mask generation?
@@ -98,6 +99,7 @@ def dropout(
 
 
 # elu is implemented specially because it has an alpha argument
+@register_decomposition(torch.ops.aten.elu)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -122,11 +124,11 @@ def elu(
                 )
             )
             raise ValueError(msg)
-        rhs = refs.mul(alpha, refs.expm1(a))
+        rhs = alpha * torch.expm1(a)
     else:
-        rhs = refs.expm1(a)
+        rhs = torch.expm1(a)
 
-    return refs.where(refs.gt(a, 0), a, rhs)
+    return torch.where(a > 0, a, rhs)
 
 
 @register_decomposition(torch.ops.aten.relu)
