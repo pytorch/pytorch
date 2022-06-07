@@ -2286,7 +2286,7 @@ class TestLinalg(TestCase):
                 expected = np.linalg.norm(xn, p, keepdims=keepdim)
                 msg = gen_error_message(x.size(), p, keepdim)
                 self.assertEqual(res.shape, expected.shape, msg=msg)
-                self.assertEqual(res, expected, msg=msg, rtol=1.3e-6, atol=3e-4)
+                self.assertEqual(res, expected, msg=msg, rtol=4e-6, atol=6e-4)
 
     # Ensure torch.norm with p='fro' and p=2 give the same results for mutually supported input combinations
     @dtypes(torch.float)
@@ -2495,7 +2495,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
-    @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
+    @precisionOverride({torch.float: 1e-4, torch.cfloat: 2e-4})
     @setLinalgBackendsToDefaultFinally
     @dtypes(*floating_and_complex_types())
     def test_svd(self, device, dtype):
@@ -2510,24 +2510,31 @@ class TestLinalg(TestCase):
             if has_cusolver():
                 backends.append("cusolver")
 
-        ns = (5, 2, 0)
+        ns = (12, 4, 2, 0)
         batches = ((), (0,), (1,), (2,), (2, 1), (0, 2))
+        drivers = (None, 'gesvd', 'gesvdj', 'gesvda')
 
         for backend in backends:
             torch.backends.cuda.preferred_linalg_library(backend)
 
-            for batch, m, n in product(batches, ns, ns):
+            for batch, m, n, driver in product(batches, ns, ns, drivers):
+                if not (backend == 'cusolver' or driver is None):
+                    # only test cases below and skip otherwise:
+                    # - backend == 'cusolver' (driver can be anything)
+                    # - backend != 'cusolver' (driver should only be None)
+                    continue
+
                 shape = batch + (m, n)
                 k = min(m, n)
                 A = make_arg(shape)
-                U, S, Vh = torch.linalg.svd(A, full_matrices=False)
+                U, S, Vh = torch.linalg.svd(A, full_matrices=False, driver=driver)
                 self.assertEqual((U @ S.to(A.dtype).diag_embed()) @ Vh, A)
 
-                U_f, S_f, Vh_f = torch.linalg.svd(A, full_matrices=True)
+                U_f, S_f, Vh_f = torch.linalg.svd(A, full_matrices=True, driver=driver)
                 self.assertEqual(S_f, S)
                 self.assertEqual((U_f[..., :k] @ S_f.to(A.dtype).diag_embed()) @ Vh_f[..., :k, :], A)
 
-                S_s = torch.linalg.svdvals(A)
+                S_s = torch.linalg.svdvals(A, driver=driver)
                 self.assertEqual(S_s, S)
 
                 U, S, V = torch.svd(A, some=True)
@@ -5216,7 +5223,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
-    @skipCUDAIfRocm
     def test_lobpcg_ortho(self, device, dtype):
         self._test_lobpcg_method(device, dtype, 'ortho')
 
