@@ -330,3 +330,71 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     output_shape = list(torch.broadcast_shapes(batch_tensor1, batch_tensor2))
     output_shape.extend([r1, r2])
     return x1.new_empty(output_shape)
+
+@torch.library.impl(meta_lib, "_embedding_bag")
+def meta_embedding_bag(
+    weight, indices, offsets, scale_grad_by_freq=False, mode=0,
+    sparse=False, per_sample_weights=None, include_last_offset=False, padding_idx=-1
+):
+    check(indices.dtype in (torch.long, torch.int), lambda: f"expected indices to be long or int, got {indices.dtype}")
+    check(offsets.dtype in (torch.long, torch.int), lambda: f"expected offsets to be long or int, got {indices.dtype}")
+    check(
+        indices.dtype == offsets.dtype,
+        lambda: f"expected indices ({indices.dtype}) and offsets ({offsets.dtype}) to have same dtype"
+    )
+
+    num_bags = offsets.size(0)
+    if include_last_offset:
+        check(num_bags >= 1, lambda: "include_last_offset: numBags should be at least 1")
+        num_bags -= 1
+
+    output = weight.new_empty(num_bags, weight.size(1))
+    MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
+
+    def is_fast_path_index_select_scale(src, scale, output, padding_idx):
+        return (
+            (src.dtype == torch.float or src.dtype == torch.half)
+            and src.stride(1) == 1
+            and output.stride(1) == 1
+            and scale.stride(0) == 1
+            and padding_idx < 0
+        )
+
+    def is_fast_path_index_select(src, output, padding_idx):
+        return (
+            (src.dtype == torch.float or src.dtype == torch.half)
+            and src.stride(1) == 1
+            and output.stride(1) == 1
+            and padding_idx < 0
+        )
+
+    def is_fast_path(src, scale, output, padding_idx):
+        if scale is not None:
+            return is_fast_path_index_select_scale(src, scale, output, padding_idx)
+        else:
+            return is_fast_path_index_select(src, output, padding_idx)
+
+
+    if offsets.device.type != "cpu":
+        offset2bag = indices.new_empty(indices.size(0))
+        bag_size = indices.new_empty(offsets.size())
+        if mode == MODE_MAX:
+            max_indices = indices.new_empty(num_bags, weight.size(1))
+        else:
+            max_indices = indices.new_empty(0)
+    else:
+        fast_path_sum = is_fast_path(weight, per_sample_weights, output, padding_idx)
+        if mode == MODE_MEAN or mode == MODE_MAX or not fast_path_sum:
+            offset2bag = offsets.new_empty(indices.size(0))
+        else:
+            offset2bag = offsets.new_empty(0)
+        bag_size = offsets.new_empty(num_bags)
+        max_indices = offsets.new_empty(bag_size.size())
+    return output, offset2bag, bag_size, max_indices
+
+@torch.library.impl(meta_lib, "_embedding_bag_forward_only")
+def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
+    output, offset2bag, bag_size, max_indices = meta_embedding_bag(weight, indices, offsets, *args)
+    if offsets.device.type == "cpu":
+        bag_size = offsets.new_empty(offsets.size())
+    return output, offset2bag, bag_size, max_indices
