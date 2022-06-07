@@ -1731,7 +1731,7 @@ This function is based on NumPy's :func:`numpy.hsplit`.
 
 Args:
     input (Tensor): tensor to split.
-    indices_or_sections (Tensor, int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+    indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
 Example::
     >>> t = torch.arange(16.0).reshape(4,4)
@@ -1778,7 +1778,7 @@ This function is based on NumPy's :func:`numpy.vsplit`.
 
 Args:
     input (Tensor): tensor to split.
-    indices_or_sections (Tensor, int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+    indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
 Example::
     >>> t = torch.arange(16.0).reshape(4,4)
@@ -1817,7 +1817,7 @@ This function is based on NumPy's :func:`numpy.dsplit`.
 
 Args:
     input (Tensor): tensor to split.
-    indices_or_sections (Tensor, int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+    indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
 Example::
     >>> t = torch.arange(16.0).reshape(2, 2, 4)
@@ -2065,9 +2065,6 @@ real(input) -> Tensor
 
 Returns a new tensor containing real values of the :attr:`self` tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
-
-.. warning::
-    :func:`real` is only supported for tensors with complex dtypes.
 
 Args:
     {input}
@@ -2668,8 +2665,8 @@ Create a new floating-point tensor with the magnitude of :attr:`input` and the s
 
 .. math::
     \text{out}_{i} = \begin{cases}
-        -|\text{input}_{i}| & \text{if} \text{other}_{i} \leq -0.0 \\
-        |\text{input}_{i}| & \text{if} \text{other}_{i} \geq 0.0 \\
+        -|\text{input}_{i}| & \text{if } \text{other}_{i} \leq -0.0 \\
+         |\text{input}_{i}| & \text{if } \text{other}_{i} \geq 0.0 \\
     \end{cases}
 """ + r"""
 
@@ -5291,11 +5288,11 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.randn(5)
+    >>> a = torch.rand(5) * 5
     >>> a
-    tensor([-0.7168, -0.5471, -0.8933, -1.4428, -0.1190])
+    tensor([4.7767, 4.3234, 1.2156, 0.2411, 4.5739])
     >>> torch.log(a)
-    tensor([ nan,  nan,  nan,  nan,  nan])
+    tensor([ 1.5637,  1.4640,  0.1952, -1.4226,  1.5204])
 """.format(**common_args))
 
 add_docstr(torch.log10,
@@ -6734,7 +6731,7 @@ documentation for the exact semantics of this method.
 Args:
     {input}
     {dim} If ``None``, the argmin of the flattened input is returned.
-    {keepdim} Ignored if ``dim=None``.
+    {keepdim}.
 
 Example::
 
@@ -8822,7 +8819,7 @@ add_docstr(torch.signbit,
            r"""
 signbit(input, *, out=None) -> Tensor
 
-Tests if each element of :attr:`input` has its sign bit set (is less than zero) or not.
+Tests if each element of :attr:`input` has its sign bit set or not.
 
 Args:
   {input}
