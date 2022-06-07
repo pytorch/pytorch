@@ -19965,6 +19965,10 @@ python_ref_db = [
         "_refs.logical_and",
         torch_opinfo_name="logical_and",
     ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.logical_not",
+        torch_opinfo_name="logical_not",
+    ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_or",
         torch_opinfo_name="logical_or",
@@ -20272,6 +20276,15 @@ python_ref_db = [
         torch_opinfo_name="addr",
         decorators=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.trace",
+        torch_opinfo_name="trace",
+        decorators=(
+            # torch.diag is currently not supported by either refs or meta funcs
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
         ),
     ),
     #

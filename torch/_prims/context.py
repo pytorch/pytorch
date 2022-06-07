@@ -27,7 +27,9 @@ def torch_to_refs_map():
         (torch.nn.functional, torch._refs.nn.functional),
         (torch.special, torch._refs.special),
     ]
-    r = {}
+    r = {
+        torch.Tensor.__invert__: torch._refs.bitwise_not,
+    }
     for mod_torch, mod_refs in modules:
         for s in mod_refs.__all__:  # type: ignore[attr-defined]
             r[mod_torch.__dict__.get(s)] = mod_refs.__dict__.get(s)
