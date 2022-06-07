@@ -72,13 +72,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         to ensure reload does not cause unnecessary warm up again.
         """
         optim_state_dict = self.optim.state_dict()
-<<<<<<< HEAD
         optim_state_dict['step'] = self.averager.step
-=======
-        #print(optim_state_dict)
-        if 'step' not in optim_state_dict['param_groups'][-1].keys():
-            optim_state_dict['param_groups'][-1]['step']= self.averager.step
->>>>>>> Fixed state_dict() in post_localSGD and added unit test
         return optim_state_dict
 
     def load_state_dict(self, state_dict):

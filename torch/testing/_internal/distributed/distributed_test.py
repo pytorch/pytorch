@@ -4936,14 +4936,13 @@ class DistributedTest:
         def _create_periodic_model_averager(self):
             return averagers.PeriodicModelAverager(period=4, warmup_steps=10)
 
-        def _test_post_localSGD_optimizer_step_reload(self, create_averager, grad_is_view):
+        def _test_post_localSGD_optimizer_step_reload(self, create_averager):
             learning_rate = 0.03
             chkpt_file = os.path.join(os.environ["TEMP_DIR"], "checkpoint.pt")
 
             net_using_post_localSGD_opt = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(DDP_NET).cuda(),
-                device_ids=[self.rank],
-                gradient_as_bucket_view=grad_is_view,
+                device_ids=[self.rank]
             )
             
             # Process group cannot be pickled in some environments,
@@ -4976,25 +4975,14 @@ class DistributedTest:
                 torch.save({'optimizer_state_dict': post_localSGD_opt.state_dict()}, chkpt_file)
 
             dist.barrier()
-            """
-            if self.rank == 0:
-                print(os.path.exists(chkpt_file))
-            """
+            
             map_location = {'cuda:%d' % 0: 'cuda:%d' % self.rank}
             checkpoint = torch.load(chkpt_file, map_location=map_location)
-            #ddp_model.load_state_dict(
-            #torch.load(CHECKPOINT_PATH, map_location=map_location))
 
-            #os.unlink(chkpt_file)
-
-            #checkpoint = torch.load(chkpt_file)
             dummy_post_localSGD_opt.load_state_dict(checkpoint['optimizer_state_dict'])
-            if self.rank==0:
-                print("dummy: {}".format(dummy_post_localSGD_opt))
-                print("dummy: {}".format(dummy_post_localSGD_opt.state_dict()))
 
-            # Also check if the built-in step counters are the same to prevent a bug like #74737.
-            self.assertEqual(post_localSGD_opt.state_dict()['param_groups'][-1]['step'], dummy_post_localSGD_opt.state_dict()['param_groups'][-1]['step'])
+            # Check if dummy averager was initialized to a correct value
+            self.assertEqual(averager.step, averager2.step)
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
@@ -5060,8 +5048,7 @@ class DistributedTest:
         def test_post_localSGD_optimizer_step_reload(self):
             torch.cuda.set_device(self.rank)
             self._test_post_localSGD_optimizer_step_reload(
-                self._create_periodic_model_averager,
-                grad_is_view=False,
+                self._create_periodic_model_averager
             )
 
         @sandcastle_skip_if(
