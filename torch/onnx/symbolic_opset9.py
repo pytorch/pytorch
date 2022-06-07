@@ -4789,10 +4789,6 @@ def movedim(g, self, source, destination):
     return g.op("Transpose", self, perm_i=perm)
 
 
-def moveaxis(g, self, source, destination):
-    movedim(g, self, source, destination)
-
-
 @symbolic_helper.parse_args("v", "v")
 def fill(g, self, value):
     dtype = self.type().scalarType()
