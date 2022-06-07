@@ -115,6 +115,45 @@ def all_gather(tensor, group=group.WORLD):
     """
     return _AllGather.apply(group, tensor)
 
+def _all_gather_base(output_tensor, input_tensor, group=group.WORLD):
+    """
+    Single tensor all gather. Gathers a single tensor from all ranks, and puts them in a single output tensor.
+
+    Args:
+        output_tensor (Tensor): Output tensor. It should contain
+            correctly-sized tensors to be used for output of the collective.
+        input_tensor (Tensor): Tensor to be broadcast from current process.
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        async_op (bool, optional): Whether this op should be an async op
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group
+
+    Examples:
+        >>> # All tensors below are of torch.int64 dtype.
+        >>> # We have 2 process groups, 2 ranks.
+        >>> output_tensor = torch.zeros(2, dtype=torch.int64)
+        >>> output_tensor
+        [tensor([0, 0])] # Rank 0 and 1
+        >>> tensor = torch.arange(1, dtype=torch.int64) + 1 + rank
+        >>> tensor
+        tensor([1]) # Rank 0
+        tensor([2]) # Rank 1
+        >>> dist.all_gather_base(output_tensor, tensor)
+        >>> output_tensor
+        tensor([1,2]) # Rank 0
+        tensor([1,2]) # Rank 1
+
+    .. warning::
+        `_all_gather_base` is experimental and subject to change.
+        It is the caller's responsibility to ensure the output_tensor
+        is correctly sized.
+
+    """
+    return _AllGatherBase.apply(output_tensor, input_tensor, group)
+
 
 def all_to_all(output_tensor_list, input_tensor_list, group=group.WORLD):
     """
@@ -301,6 +340,30 @@ class _AllGather(Function):
             gx = torch.sum(torch.stack(gxs), dim=0)
         return (None, gx)
 
+class _AllGatherBase(Function):
+    @staticmethod
+    def forward(ctx, output_tensor, input_tensor, group):
+        ctx.group = group
+        dist._all_gather_base(output_tensor, input_tensor.contiguous(), group=group)
+        return output_tensor
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
+            rank = dist.get_rank(group=ctx.group)
+            world_size = dist.get_world_size(group=ctx.group)
+            out_size = list(grad_output.size())
+            if out_size[0] % world_size != 0:
+                raise RuntimeError(
+                    f'Tensor with dimensions: {out_size} does '
+                    f'not have first dimension divisible by world_size: {world_size}'
+                )
+            out_size[0] = out_size[0] // dist.get_world_size(group=ctx.group)
+            gx = torch.empty(out_size, device=grad_output.device)
+            dist._reduce_scatter_base(gx, grad_output, ReduceOp.SUM, ctx.group)
+        else:
+            raise RuntimeError("Backend not supported!")
+        return (None, gx, None)
 
 class _AlltoAll(Function):
     @staticmethod
