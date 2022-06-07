@@ -1978,6 +1978,7 @@ def roll(
     return torch.cat((t0, t1), dim)
 
 
+@register_decomposition(torch.ops.aten.rot90)
 def rot90(
     a: TensorLikeType, k: int = 1, dims: DimsSequenceType = (0, 1)
 ) -> TensorLikeType:
