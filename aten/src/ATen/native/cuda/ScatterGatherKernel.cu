@@ -121,6 +121,7 @@ struct _cuda_scatter_gather_internal_kernel {
     int64_t index_size,
     int64_t index_stride,
     IntArrayRef index_sizes,
+    IntArrayRef index_strides,
     IntArrayRef src_sizes,
     IntArrayRef src_strides,
     int64_t numel,  // Do not use `const` qualifier here as it may cause issue in cuda 11.6.x. See #75434, #75545
@@ -130,7 +131,7 @@ struct _cuda_scatter_gather_internal_kernel {
     if (!iter.can_use_32bit_indexing()) {
       for (auto& sub_iter : iter.with_32bit_indexing()) {
         _cuda_scatter_gather_internal_kernel<is_scatter_like, scalar_t>()(
-          sub_iter, index_size, index_stride, index_sizes, src_sizes, src_strides, numel, f, index_larger_than_src
+          sub_iter, index_size, index_stride, index_sizes, index_strides, src_sizes, src_strides, numel, f, index_larger_than_src
         );
       }
       return;
@@ -140,7 +141,6 @@ struct _cuda_scatter_gather_internal_kernel {
     char* src_ptr = (char*)iter.data_ptr(1);
     char* index_ptr = (char*)iter.data_ptr(2);
 
-    auto index_strides = iter.strides(2);
     auto ndim = iter.ndim();
 
     auto offset_calc = make_offset_calculator<3>(iter);
@@ -194,7 +194,8 @@ struct cuda_scatter_gather_base_kernel {
 
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
-    auto index_strides_vec = ensure_nonempty_vec(index.strides().vec());
+    auto index_strides = index.strides();
+    auto index_strides_vec = ensure_nonempty_vec(index_strides.vec());
     auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
@@ -251,7 +252,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, index_sizes, src_sizes, src_strides, self.numel(), f, index_larger_than_src
+          iter, index_size, index_stride, index_sizes, index_strides, src_sizes, src_strides, self.numel(), f, index_larger_than_src
         );
       }
     );
@@ -267,7 +268,8 @@ struct cuda_scatter_gather_base_kernel {
 
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
-    auto index_strides_vec = ensure_nonempty_vec(index.strides().vec());
+    auto index_strides = index.strides();
+    auto index_strides_vec = ensure_nonempty_vec(index_strides.vec());
     auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
@@ -324,7 +326,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, index_sizes, src_sizes, src_strides, self.numel(), f, index_larger_than_src
+          iter, index_size, index_stride, index_sizes, index_strides, src_sizes, src_strides, self.numel(), f, index_larger_than_src
         );
       }
     );
@@ -341,7 +343,8 @@ struct cuda_scatter_gather_base_kernel {
 
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
-    auto index_strides_vec = ensure_nonempty_vec(index.strides().vec());
+    auto index_strides = index.strides();
+    auto index_strides_vec = ensure_nonempty_vec(index_strides.vec());
     auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
@@ -398,7 +401,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, index_sizes, src_sizes, src_strides, self.numel(), f, index_larger_than_src
+          iter, index_size, index_stride, index_sizes, index_strides, src_sizes, src_strides, self.numel(), f, index_larger_than_src
         );
       }
     );
