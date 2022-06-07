@@ -860,8 +860,10 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         for (auto i : c10::irange(p_node->num_inputs())) {
           stack.emplace_back(p_node->Input(i));
         }
-        InterpreterState interpreter{code};
-        interpreter.runAsync(stack);
+        TaskLauncher taskLauncher_ = at::launch;
+        InterpreterState interpreter{code, taskLauncher_};
+        InterpreterContinuation continuation(interpreter, stack);
+        taskLauncher_(std::move(continuation));
         p_node->Output(0) = interpreter.getFuture();
       };
     });
