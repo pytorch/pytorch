@@ -309,3 +309,23 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
 
 torch.library.impl(meta_lib, "addbmm")(meta_addbmm)
 torch.library.impl(meta_lib, "addbmm.out")(meta_addbmm)
+
+@torch.library.impl(meta_lib, "_cdist_forward")
+def meta_cdist_forward(x1, x2, p, compute_mode):
+    check(x1.dim() >= 2, lambda: f"cdist only supports at least 2D tensors, X1 got: {x1.dim()}D")
+    check(x2.dim() >= 2, lambda: f"cdist only supports at least 2D tensors, X2 got: {x2.dim()}D")
+    check(
+        x1.size(-1) == x2.size(-1),
+        lambda: f"X1 and X2 must have the same number of columns. X1: {x1.size(-1)} X2: {x2.size(-1)}"
+    )
+    check(utils.is_float_dtype(x1.dtype), lambda: "cdist only supports floating-point dtypes, X1 got: {x1.dtype}")
+    check(utils.is_float_dtype(x2.dtype), lambda: "cdist only supports floating-point dtypes, X2 got: {x2.dtype}")
+    check(p >= 0, lambda: "cdist only supports non-negative p values")
+    check(compute_mode >= 0 and compute_mode <= 2, lambda: f"possible modes: 0, 1, 2, but was: {compute_mode}")
+    r1 = x1.size(-2)
+    r2 = x2.size(-2)
+    batch_tensor1 = x1.shape[:-2]
+    batch_tensor2 = x2.shape[:-2]
+    output_shape = list(torch.broadcast_shapes(batch_tensor1, batch_tensor2))
+    output_shape.extend([r1, r2])
+    return x1.new_empty(output_shape)

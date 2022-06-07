@@ -632,7 +632,6 @@ aten = torch.ops.aten
 
 # these always fail
 meta_dispatch_expected_failures = {
-    aten._cdist_forward.default: {f64, f32},
     aten._conj_physical.default: {c32},
     aten._convolution.default: {c64, i64, f64, c128, bf16, f32},
     aten._ctc_loss.default: {f64, f32},
