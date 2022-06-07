@@ -847,7 +847,7 @@ fmin = _make_elementwise_binary_reference(
 # TODO: add docstring
 fmod = _make_elementwise_binary_reference(
     prims.fmod,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
     aten_op=torch.ops.aten.fmod,
 )
 
