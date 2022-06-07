@@ -161,7 +161,7 @@ __all__ = [
     "any",
     "mean",
     "std_mean",
-    "std_var",
+    "var_mean",
     "sum",
     "prod",
     "var",
@@ -188,6 +188,8 @@ __all__ = [
     "flip",
     "fliplr",
     "flipud",
+    "hsplit",
+    "hstack",
     "narrow",
     "permute",
     "reshape",
@@ -201,6 +203,8 @@ __all__ = [
     "transpose",
     "unsqueeze",
     "view",
+    "vsplit",
+    "vstack",
     #
     # Tensor Creation
     #
@@ -883,15 +887,25 @@ def isclose(
     atol: float = 1e-08,
     equal_nan: bool = False,
 ) -> TensorLikeType:
-    if a.dtype != b.dtype:
-        msg = "Attempting to compare tensors of different dtypes {0} and {1}!".format(
+    check(
+        a.dtype == b.dtype,
+        lambda: "torch.isclose: Attempting to compare tensors of different dtypes {0} and {1}!".format(
             a.dtype, b.dtype
-        )
-        raise ValueError(a, b)
-    if rtol < 0:
-        msg = "rtol must be greater than or equal to zero, but got {0}!".format(rtol)
-    if atol < 0:
-        msg = "atol must be greater than or equal to zero, but got {0}!".format(atol)
+        ),
+        ValueError,
+    )
+    check(
+        rtol >= 0,
+        lambda: "torch.isclose: rtol must be greater than or equal to zero, but got {0}!".format(
+            rtol
+        ),
+    )
+    check(
+        atol >= 0,
+        lambda: "torch.isclose: atol must be greater than or equal to zero, but got {0}!".format(
+            atol
+        ),
+    )
 
     close = eq(a, b)
     if equal_nan and (utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype)):
@@ -1647,6 +1661,7 @@ def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
     return prims.broadcast_in_dim(a, size, dims)
 
 
+@register_decomposition(torch.ops.aten.cat)
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("tensors",),
@@ -1692,7 +1707,8 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
 
 @out_wrapper
 def dstack(tensors: TensorSequenceType) -> TensorLikeType:
-    aligned_tensors = tuple(x if x.ndim > 2 else atleast_3d(x) for x in tensors)
+    check(len(tensors) > 0, lambda: "dstack expects a non-empty TensorList")
+    aligned_tensors = atleast_3d(*tensors)
     return cat(aligned_tensors, 2)
 
 
@@ -1766,6 +1782,7 @@ def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeTy
     return prims.slice_in_dim(a, start, start + length, axis=dim)
 
 
+@register_decomposition(torch.ops.aten.permute)
 def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     _permutation = utils.canonicalize_dims(a.ndim, dims)
     return prims.transpose(a, _permutation)
@@ -1959,6 +1976,7 @@ def roll(
     return cat((t0, t1), dim)
 
 
+@register_decomposition(torch.ops.aten.rot90)
 def rot90(
     a: TensorLikeType, k: int = 1, dims: DimsSequenceType = (0, 1)
 ) -> TensorLikeType:
@@ -1979,11 +1997,11 @@ def rot90(
         )
     k = k % 4  # Rotation direction is from the second towards the first axis for k < 0
     if k == 1:
-        return transpose(flip(a, (dims[1],)), dims[0], dims[1])
+        return torch.transpose(torch.flip(a, (dims[1],)), dims[0], dims[1])
     elif k == 2:
-        return flip(a, dims)
+        return torch.flip(a, dims)
     elif k == 3:
-        return transpose(flip(a, (dims[0],)), dims[0], dims[1])
+        return torch.transpose(torch.flip(a, (dims[0],)), dims[0], dims[1])
     else:
         return clone(a)
 
@@ -1993,6 +2011,22 @@ def rot90(
 def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     tensors = tuple(unsqueeze(a, dim) for a in tensors)
     return cat(tensors, dim)
+
+
+@out_wrapper
+def hstack(tensors: TensorSequenceType) -> TensorLikeType:
+    check(len(tensors) > 0, lambda: "hstack expects a non-empty TensorList")
+    aligned_tensors = atleast_1d(*tensors)
+    if aligned_tensors[0].ndim == 1:
+        return cat(aligned_tensors, 0)
+    return cat(aligned_tensors, 1)
+
+
+@out_wrapper
+def vstack(tensors: TensorSequenceType) -> TensorLikeType:
+    check(len(tensors) > 0, lambda: "vstack expects a non-empty TensorList")
+    aligned_tensors = atleast_2d(*tensors)
+    return cat(aligned_tensors, 0)
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
@@ -2088,6 +2122,88 @@ def tensor_split(
             start_idx = x
         splits.append(prims.slice_in_dim(a, start_idx, a.shape[_dim], axis=_dim))
         return tuple(splits)
+
+
+def hsplit(
+    a: TensorLikeType, indices_or_sections: DimsType
+) -> Tuple[TensorLikeType, ...]:
+    check(
+        a.ndim >= 1,
+        lambda: (
+            "torch.hsplit requires a tensor with at least 1 dimension, but got a tensor with "
+            + str(a.ndim)
+            + " dimensions!"
+        ),
+    )
+    dim = 0 if a.ndim == 1 else 1
+    if isinstance(indices_or_sections, int):
+        split_size = indices_or_sections
+        check(
+            (split_size != 0 and a.shape[dim] % split_size == 0),
+            lambda: (
+                "torch.hsplit attempted to split along dimension "
+                + str(dim)
+                + ", but the size of the dimension "
+                + str(a.shape[dim])
+                + " is not divisible by the split_size "
+                + str(split_size)
+                + "!"
+            ),
+        )
+        return tensor_split(a, split_size, dim)
+
+    check(
+        isinstance(indices_or_sections, (list, tuple)),
+        lambda: (
+            "hsplit(): received an invalid combination of arguments. "
+            "Expected indices_or_sections to be of type int, list of ints or tuple of ints "
+            f"but got type {type(indices_or_sections)}"
+        ),
+        exc_type=TypeError,
+    )
+
+    split_sizes = indices_or_sections
+    return tensor_split(a, split_sizes, dim)
+
+
+def vsplit(
+    a: TensorLikeType, indices_or_sections: DimsType
+) -> Tuple[TensorLikeType, ...]:
+    check(
+        a.ndim >= 2,
+        lambda: (
+            "torch.vsplit requires a tensor with at least 2 dimension, but got a tensor with "
+            + str(a.ndim)
+            + " dimensions!"
+        ),
+    )
+    if isinstance(indices_or_sections, int):
+        split_size = indices_or_sections
+        check(
+            (split_size != 0 and a.shape[0] % split_size == 0),
+            lambda: (
+                "torch.vsplit attempted to split along dimension 0 "
+                + ", but the size of the dimension "
+                + str(a.shape[0])
+                + " is not divisible by the split_size "
+                + str(split_size)
+                + "!"
+            ),
+        )
+        return tensor_split(a, split_size, 0)
+
+    check(
+        isinstance(indices_or_sections, (list, tuple)),
+        lambda: (
+            "vsplit(): received an invalid combination of arguments. "
+            "Expected indices_or_sections to be of type int, list of ints or tuple of ints "
+            f"but got type {type(indices_or_sections)}"
+        ),
+        exc_type=TypeError,
+    )
+
+    split_sizes = indices_or_sections
+    return tensor_split(a, split_sizes, 0)
 
 
 def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
