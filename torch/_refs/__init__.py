@@ -29,12 +29,14 @@ from torch._prims.wrappers import (
     _safe_copy_out,
 )
 
+from collections.abc import Iterable
 from functools import reduce, partial
 from typing import Sequence, Optional, Union, Callable, List, Tuple
 import operator
 import warnings
 import math
 from enum import Enum
+import collections
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -48,8 +50,6 @@ __all__ = [
     "acosh",
     "asin",
     "atan",
-    # "bessel_i0e",  # special.i0e
-    # "bessel_i1e",  # special.i1e
     "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
@@ -74,10 +74,14 @@ __all__ = [
     "log1p",
     "log2",
     "log10",
+    "nan_to_num",
     "neg",
+    "positive",
     "reciprocal",
     "round",  # TODO: model kwargs
+    "sigmoid",
     "sign",
+    "signbit",
     "sin",
     "sinh",
     "sqrt",
@@ -100,8 +104,9 @@ __all__ = [
     "eq",
     "float_power",
     # 'floor_divide', # requires floor
-    # 'fmax', # requires where
-    # 'fmod',
+    "fmax",
+    "fmin",
+    "fmod",
     # 'gcd',
     "ge",
     "gt",
@@ -115,7 +120,7 @@ __all__ = [
     "le",
     "logical_and",
     "logical_or",
-    # 'logical_xor',
+    "logical_xor",
     "lt",
     # 'max', # implement with reductions
     "maximum",
@@ -156,8 +161,9 @@ __all__ = [
     "any",
     "mean",
     "std_mean",
-    "std_var",
+    "var_mean",
     "sum",
+    "prod",
     "var",
     #
     # Linear algebra ops
@@ -166,24 +172,39 @@ __all__ = [
     #
     # View & Shape Ops
     #
+    "atleast_1d",
+    "atleast_2d",
+    "atleast_3d",
     "as_strided",
+    "broadcast_shapes",
     "broadcast_tensors",
+    "broadcast_to",
     "cat",
     "chunk",
+    "column_stack",
+    "dsplit",
+    "dstack",
     "flatten",
     "flip",
     "fliplr",
     "flipud",
+    "hsplit",
+    "hstack",
     "narrow",
     "permute",
     "reshape",
+    "roll",
+    "rot90",
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
+    "t",
     "tensor_split",
     "transpose",
     "unsqueeze",
     "view",
+    "vsplit",
+    "vstack",
     #
     # Tensor Creation
     #
@@ -210,7 +231,10 @@ Tensor = torch.Tensor
 
 
 def _broadcast_shapes(*_shapes):
-    shapes = tuple(filter(lambda x: x is not None, _shapes))
+    shapes = tuple(
+        (x,) if isinstance(x, int) else x
+        for x in filter(lambda x: x is not None, _shapes)
+    )
 
     # Short-circuits on no input
     if len(shapes) == 0:
@@ -510,6 +534,41 @@ log10 = _make_elementwise_unary_reference(
 )
 
 
+@register_decomposition(torch.ops.aten.nan_to_num)
+@out_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a,"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def nan_to_num(
+    a: TensorLikeType,
+    *,
+    nan: Optional[NumberType] = 0.0,
+    posinf: Optional[NumberType] = None,
+    neginf: Optional[NumberType] = None,
+) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+
+    if a.dtype == torch.bool:
+        return clone(a)
+
+    if posinf is None:
+        posinf = prims.maximum_value(a.dtype)
+
+    if neginf is None:
+        neginf = prims.minimum_value(a.dtype)
+
+    result = where(isnan(a), nan, a)
+
+    is_neg = signbit(a)
+    is_neginf = bitwise_and(isinf(a), is_neg)
+    result = where(is_neginf, neginf, result)
+
+    is_posinf = bitwise_and(isinf(a), bitwise_not(is_neg))
+    result = where(is_posinf, posinf, result)
+    return result
+
+
 def _neg_meta(a: TensorLikeType):
     if a.dtype is torch.bool:
         msg = "neg is not supported on bool tensors."
@@ -521,6 +580,16 @@ neg = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     extra_meta=_neg_meta,
 )
+
+
+# positive does not use _make_elementwise_unary_reference because it does not support out
+def positive(a: TensorLikeType) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+    if a.dtype is torch.bool:
+        msg = "positive does not support bool tensors."
+        raise RuntimeError(msg)
+    return a
+
 
 reciprocal = _make_elementwise_unary_reference(
     prims.reciprocal,
@@ -534,9 +603,26 @@ round = _make_elementwise_unary_reference(
     aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
 )
 
+
+def _sigmoid(a: TensorLikeType) -> TensorLikeType:
+    return true_divide(1, add(1, exp(neg(a))))
+
+
+sigmoid = _make_elementwise_unary_reference(
+    _sigmoid,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=torch.ops.aten.sigmoid,
+)
+
 sign = _make_elementwise_unary_reference(
     prims.sign,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+signbit = _make_elementwise_unary_reference(
+    prims.signbit,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
 sin = _make_elementwise_unary_reference(
@@ -554,8 +640,13 @@ sqrt = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
+
+def _square(a: TensorLikeType) -> TensorLikeType:
+    return mul(a, a)
+
+
 square = _make_elementwise_unary_reference(
-    prims.square,
+    _square,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
     aten_op=None,  # CompositeImplicitAutograd,
 )
@@ -740,6 +831,27 @@ def float_power(
 
 
 # TODO: add docstring
+fmax = _make_elementwise_binary_reference(
+    prims.fmax,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmax,
+)
+
+# TODO: add docstring
+fmin = _make_elementwise_binary_reference(
+    prims.fmin,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmin,
+)
+
+# TODO: add docstring
+fmod = _make_elementwise_binary_reference(
+    prims.fmod,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmod,
+)
+
+# TODO: add docstring
 ge = _make_elementwise_binary_reference(
     prims.ge,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
@@ -775,15 +887,25 @@ def isclose(
     atol: float = 1e-08,
     equal_nan: bool = False,
 ) -> TensorLikeType:
-    if a.dtype != b.dtype:
-        msg = "Attempting to compare tensors of different dtypes {0} and {1}!".format(
+    check(
+        a.dtype == b.dtype,
+        lambda: "torch.isclose: Attempting to compare tensors of different dtypes {0} and {1}!".format(
             a.dtype, b.dtype
-        )
-        raise ValueError(a, b)
-    if rtol < 0:
-        msg = "rtol must be greater than or equal to zero, but got {0}!".format(rtol)
-    if atol < 0:
-        msg = "atol must be greater than or equal to zero, but got {0}!".format(atol)
+        ),
+        ValueError,
+    )
+    check(
+        rtol >= 0,
+        lambda: "torch.isclose: rtol must be greater than or equal to zero, but got {0}!".format(
+            rtol
+        ),
+    )
+    check(
+        atol >= 0,
+        lambda: "torch.isclose: atol must be greater than or equal to zero, but got {0}!".format(
+            atol
+        ),
+    )
 
     close = eq(a, b)
     if equal_nan and (utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype)):
@@ -855,6 +977,23 @@ logical_or = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.logical_or,
 )
+
+
+def _logical_xor(a: TensorLikeType, b: TensorLikeType):
+    if not utils.is_boolean_dtype(a.dtype):
+        a = ne(a, 0)
+    if not utils.is_boolean_dtype(b.dtype):
+        b = ne(b, 0)
+    return bitwise_xor(a, b)
+
+
+# TODO: skip unnecessary conversion of long to float
+logical_xor = _make_elementwise_binary_reference(
+    _logical_xor,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.logical_xor,
+)
+
 
 # TODO: add docstring
 lt = _make_elementwise_binary_reference(
@@ -1150,7 +1289,7 @@ def any(
     return result
 
 
-# TODO: register decomp after stride logic is fixed
+@register_decomposition(torch.ops.aten.sum)
 def sum(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -1170,6 +1309,34 @@ def sum(
     return _reduction(
         a,
         prims.sum,
+        dims=dim,
+        keepdims=keepdim,
+        dtype=dtype,
+        out=out,
+        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    )
+
+
+@register_decomposition(torch.ops.aten.prod)
+def prod(
+    a: TensorLikeType,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
+    keepdim: bool = False,
+    *,
+    dtype=None,
+    out: Optional[Tensor] = None,
+) -> TensorLikeType:
+    if dtype is None:
+        if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
+            dtype = torch.int64
+        else:
+            dtype = a.dtype
+    # reduces over all dimensions if dim=() is passed
+    if dim == () or dim == []:
+        dim = None
+    return _reduction(
+        a,
+        prims.prod,
         dims=dim,
         keepdims=keepdim,
         dtype=dtype,
@@ -1282,18 +1449,22 @@ def std(
     if dim == () or dim == []:
         dim = None
 
+    opmath_dtype, dtype = utils.reduction_dtypes(
+        a, REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
+    )
+
     result = _reduction(
         a,
         partial(prims.var, correction=correction),
         dims=dim,
         keepdims=keepdim,
-        dtype=None,
+        dtype=opmath_dtype,
         out=None,
         has_identity=True,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
     )
     result = sqrt(result)
-    return result
+    return _maybe_convert_to_dtype(result, dtype)  # type: ignore[return-value,arg-type]
 
 
 def mean(
@@ -1337,6 +1508,7 @@ def mean(
     return result
 
 
+@register_decomposition(torch.ops.aten.std_mean.correction)
 def std_mean(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -1389,11 +1561,11 @@ def addr(
         # Integers are accepted for booleans
         check(
             is_weakly_lesser_type(type(beta), int),
-            f"expected bool/int beta but got {type(beta)}",
+            lambda: f"expected bool/int beta but got {type(beta)}",
         )
         check(
             is_weakly_lesser_type(type(alpha), int),
-            f"expected bool/int alpha but got {type(beta)}",
+            lambda: f"expected bool/int alpha but got {type(beta)}",
         )
         if not beta:
             return torch.outer(vec1, vec2) if alpha else torch.full_like(self, False)
@@ -1405,11 +1577,11 @@ def addr(
     else:
         check(
             is_weakly_lesser_type(type(beta), dtype_to_type(self.dtype)),
-            f"cannot safely convert {type(beta)} to {self.dtype}",
+            lambda: f"cannot safely convert {type(beta)} to {self.dtype}",
         )
         check(
             is_weakly_lesser_type(type(alpha), dtype_to_type(self.dtype)),
-            f"cannot safely convert {type(alpha)} to {self.dtype}",
+            lambda: f"cannot safely convert {type(alpha)} to {self.dtype}",
         )
         if beta == 0:
             # This means NaNs from self are dropped if beta is zero
@@ -1418,16 +1590,78 @@ def addr(
             return beta * self + alpha * torch.outer(vec1, vec2)
 
 
+def atleast_1d(
+    arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
+) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
+    """Reference implementation of :func:`torch.atleast_1d`."""
+    if not args and isinstance(arg, collections.Sequence):
+        args_ = arg
+    else:
+        assert not isinstance(arg, collections.Sequence)
+        args_ = (arg,) + args
+    res = tuple(a if a.ndim >= 1 else unsqueeze(a, 0) for a in args_)
+    return res if len(res) > 1 else res[0]
+
+
+# Helper function with assert to avoid MyPy error
+# of incompatible type passed to unsqueeze
+def _unsqueeze_atleast(
+    at_least_fn: Callable, dim: int, arg: TensorLikeType
+) -> TensorLikeType:
+    arg_ = at_least_fn(arg)
+    assert isinstance(arg_, TensorLike)
+    return unsqueeze(arg_, dim)
+
+
+def atleast_2d(
+    arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
+) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
+    """Reference implementation of :func:`torch.atleast_2d`."""
+    if not args and isinstance(arg, collections.Sequence):
+        args_ = arg
+    else:
+        assert not isinstance(arg, collections.Sequence)
+        args_ = (arg,) + args
+    unsqueeze_atleast_1d = partial(_unsqueeze_atleast, atleast_1d, 0)
+    res = tuple(a if a.ndim >= 2 else unsqueeze_atleast_1d(a) for a in args_)
+    return res if len(res) > 1 else res[0]
+
+
+def atleast_3d(
+    arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
+) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
+    """Reference implementation of :func:`torch.atleast_3d`."""
+    if not args and isinstance(arg, collections.Sequence):
+        args_ = arg
+    else:
+        assert not isinstance(arg, collections.Sequence)
+        args_ = (arg,) + args
+    unsqueeze_atleast_2d = partial(_unsqueeze_atleast, atleast_2d, -1)
+    res = tuple(a if a.ndim >= 3 else unsqueeze_atleast_2d(a) for a in args_)
+    return res if len(res) > 1 else res[0]
+
+
 def as_strided(
     a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int = 0
 ) -> TensorLikeType:
     return prims.as_strided(a, size, stride, storage_offset)
 
 
+def broadcast_shapes(*shapes) -> ShapeType:
+    return torch.Size(_broadcast_shapes(*shapes))
+
+
 def broadcast_tensors(*tensors) -> List[TensorLikeType]:
     return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
 
 
+def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
+    start = len(size) - len(a.shape)
+    dims = tuple(range(start, len(a.shape) + start))
+    return prims.broadcast_in_dim(a, size, dims)
+
+
+@register_decomposition(torch.ops.aten.cat)
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("tensors",),
@@ -1460,6 +1694,22 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
         return empty((0,), dtype=t.dtype, device=t.device, requires_grad=requires_grad)
 
     return prims.cat(filtered, dim)
+
+
+@out_wrapper
+def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
+    aligned_tensors = tuple(
+        x if x.ndim > 1 else prims.expand_dims(x, list(range(x.ndim, 2)))
+        for x in tensors
+    )
+    return cat(aligned_tensors, 1)
+
+
+@out_wrapper
+def dstack(tensors: TensorSequenceType) -> TensorLikeType:
+    check(len(tensors) > 0, lambda: "dstack expects a non-empty TensorList")
+    aligned_tensors = atleast_3d(*tensors)
+    return cat(aligned_tensors, 2)
 
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
@@ -1532,6 +1782,7 @@ def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeTy
     return prims.slice_in_dim(a, start, start + length, axis=dim)
 
 
+@register_decomposition(torch.ops.aten.permute)
 def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     _permutation = utils.canonicalize_dims(a.ndim, dims)
     return prims.transpose(a, _permutation)
@@ -1681,11 +1932,101 @@ def reshape(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=True)
 
 
+def roll(
+    a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
+) -> TensorLikeType:
+    """Reference implementation of :func:`torch.roll`."""
+    dims = utils.canonicalize_dims(a.ndim, dims)
+    # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
+    if not isinstance(shifts, Iterable):
+        shifts = (shifts,)
+    if not isinstance(dims, Iterable):
+        dims = (dims,)
+
+    # Avoid modulo by zero
+    if a.numel() == 0:
+        return clone(a)
+
+    len_shifts = len(shifts)
+    len_dims = len(dims)
+    if len_shifts != 1 or len_dims != 1:
+        if len_shifts == 0:
+            raise RuntimeError("`shifts` required")
+        # Takes care of the case when dims is not specified (default)
+        # By default, the tensor is flattened before shifting, after which the original shape is restored
+        if len_dims == 0 and len_shifts == 1:
+            return view(roll(flatten(a), shifts, 0), a.shape)
+        if len_shifts != len_dims:
+            raise RuntimeError(
+                f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}"
+            )
+        assert len_dims > 1
+        tail_shifts = shifts[1:]
+        tail_dims = dims[1:]
+        first_dim_rolled = roll(a, shifts[0], dims[0])
+        return roll(first_dim_rolled, tail_shifts, tail_dims)
+
+    # This path is taken when only one dimension is rolled
+    # For example to get `first_dim_rolled` above
+    dim = dims[0]
+    size = a.shape[dim]
+    start = (size - shifts[0]) % size
+    t0 = narrow(a, dim, start, size - start)
+    t1 = narrow(a, dim, 0, start)
+    return cat((t0, t1), dim)
+
+
+@register_decomposition(torch.ops.aten.rot90)
+def rot90(
+    a: TensorLikeType, k: int = 1, dims: DimsSequenceType = (0, 1)
+) -> TensorLikeType:
+    """Reference implementation of :func:`torch.rot90`."""
+    dims_ = utils.canonicalize_dims(a.ndim, dims)
+    # Required to silence MyPy errors
+    assert isinstance(dims_, (tuple, list))
+    dims = dims_
+    if len(dims) != 2:
+        raise RuntimeError(
+            f"expected total rotation dims == 2, but got dims = {len(dims)}"
+        )
+    if a.ndim < 2:
+        raise RuntimeError(f"expected total dims >= 2, but got total dims = {a.ndim}")
+    if dims[0] == dims[1]:
+        raise RuntimeError(
+            f"expected rotation dims to be different, but got dim0 = {dims[0]} and dim1 = {dims[1]}"
+        )
+    k = k % 4  # Rotation direction is from the second towards the first axis for k < 0
+    if k == 1:
+        return torch.transpose(torch.flip(a, (dims[1],)), dims[0], dims[1])
+    elif k == 2:
+        return torch.flip(a, dims)
+    elif k == 3:
+        return torch.transpose(torch.flip(a, (dims[0],)), dims[0], dims[1])
+    else:
+        return clone(a)
+
+
 # update to cat then view instead of unsqueezing each tensor
 @out_wrapper
 def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     tensors = tuple(unsqueeze(a, dim) for a in tensors)
     return cat(tensors, dim)
+
+
+@out_wrapper
+def hstack(tensors: TensorSequenceType) -> TensorLikeType:
+    check(len(tensors) > 0, lambda: "hstack expects a non-empty TensorList")
+    aligned_tensors = atleast_1d(*tensors)
+    if aligned_tensors[0].ndim == 1:
+        return cat(aligned_tensors, 0)
+    return cat(aligned_tensors, 1)
+
+
+@out_wrapper
+def vstack(tensors: TensorSequenceType) -> TensorLikeType:
+    check(len(tensors) > 0, lambda: "vstack expects a non-empty TensorList")
+    aligned_tensors = atleast_2d(*tensors)
+    return cat(aligned_tensors, 0)
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
@@ -1783,10 +2124,123 @@ def tensor_split(
         return tuple(splits)
 
 
+def hsplit(
+    a: TensorLikeType, indices_or_sections: DimsType
+) -> Tuple[TensorLikeType, ...]:
+    check(
+        a.ndim >= 1,
+        lambda: (
+            "torch.hsplit requires a tensor with at least 1 dimension, but got a tensor with "
+            + str(a.ndim)
+            + " dimensions!"
+        ),
+    )
+    dim = 0 if a.ndim == 1 else 1
+    if isinstance(indices_or_sections, int):
+        split_size = indices_or_sections
+        check(
+            (split_size != 0 and a.shape[dim] % split_size == 0),
+            lambda: (
+                "torch.hsplit attempted to split along dimension "
+                + str(dim)
+                + ", but the size of the dimension "
+                + str(a.shape[dim])
+                + " is not divisible by the split_size "
+                + str(split_size)
+                + "!"
+            ),
+        )
+        return tensor_split(a, split_size, dim)
+
+    check(
+        isinstance(indices_or_sections, (list, tuple)),
+        lambda: (
+            "hsplit(): received an invalid combination of arguments. "
+            "Expected indices_or_sections to be of type int, list of ints or tuple of ints "
+            f"but got type {type(indices_or_sections)}"
+        ),
+        exc_type=TypeError,
+    )
+
+    split_sizes = indices_or_sections
+    return tensor_split(a, split_sizes, dim)
+
+
+def vsplit(
+    a: TensorLikeType, indices_or_sections: DimsType
+) -> Tuple[TensorLikeType, ...]:
+    check(
+        a.ndim >= 2,
+        lambda: (
+            "torch.vsplit requires a tensor with at least 2 dimension, but got a tensor with "
+            + str(a.ndim)
+            + " dimensions!"
+        ),
+    )
+    if isinstance(indices_or_sections, int):
+        split_size = indices_or_sections
+        check(
+            (split_size != 0 and a.shape[0] % split_size == 0),
+            lambda: (
+                "torch.vsplit attempted to split along dimension 0 "
+                + ", but the size of the dimension "
+                + str(a.shape[0])
+                + " is not divisible by the split_size "
+                + str(split_size)
+                + "!"
+            ),
+        )
+        return tensor_split(a, split_size, 0)
+
+    check(
+        isinstance(indices_or_sections, (list, tuple)),
+        lambda: (
+            "vsplit(): received an invalid combination of arguments. "
+            "Expected indices_or_sections to be of type int, list of ints or tuple of ints "
+            f"but got type {type(indices_or_sections)}"
+        ),
+        exc_type=TypeError,
+    )
+
+    split_sizes = indices_or_sections
+    return tensor_split(a, split_sizes, 0)
+
+
+def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
+    if a.ndim < 3:
+        raise RuntimeError(
+            f"torch.dsplit requires a tensor with at least 3 dimension, but got a tensor with {a.ndim} dimensions!"
+        )
+    if isinstance(sections, int) and (sections == 0 or a.shape[2] % sections != 0):
+        raise RuntimeError(
+            "torch._refs.dsplit attempted to split along dimension 2, "
+            + f"but the size of the dimension {a.shape[2]} is not divisible by the split_size {sections}!"
+        )
+    return tensor_split(a, sections, 2)
+
+
+@register_decomposition(torch.ops.aten.t.default)
+def t(a: TensorLikeType):
+    # TODO: Add sparse support
+    # if a.is_sparse:
+    #     sparse_dim = a.sparse_dim()
+    #     dense_dim = a.dense_dim()
+    #     if not (sparse_dim <= 2 and dense_dim == 0):
+    #         raise RuntimeError(
+    #             f"t() expects a tensor with <= 2 sparse and 0 dense dimensions, but got {sparse_dim} sparse and"
+    #             f"{dense_dim} dense dimensions"
+    #         )
+    if a.ndim > 2:
+        raise RuntimeError(
+            f"t() expects a tensor with <= 2 dimensions, but self is {a.ndim}D"
+        )
+    return torch.transpose(a, 0, 0 if a.ndim < 2 else 1)
+
+
 def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
 
-    if a.ndim <= 1:
+    if a.ndim <= 1 or dim0 == dim1:
         return prims.view_of(a)
 
     _permutation = list(range(0, a.ndim))
@@ -1938,3 +2392,8 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
         return True
 
     return item(all(eq(a, b)))  # type: ignore[return-value]
+
+
+# populate the decomp table
+import torch._refs.nn.functional
+import torch._refs.special

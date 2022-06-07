@@ -56,6 +56,7 @@ from jit.test_typing import TestTyping  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
 from jit.test_complex import TestComplex  # noqa: F401
 from jit.test_jit_utils import TestJitUtils  # noqa: F401
+from jit.test_schema_check import TestSchemaCheck  # noqa: F401
 from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
 from jit.test_types import TestTypesAndAnnotation  # noqa: F401
 from jit.test_misc import TestMisc  # noqa: F401
@@ -7090,19 +7091,6 @@ a")
         self.checkScript(div_int_nofuture, ())
         self.checkScript(div_float_nofuture, ())
 
-    def test_floor_div(self):
-        @torch.jit.script
-        def foo(a, b):
-            # type: (int, int) -> int
-            return a // b
-        for i in range(-8, 8):
-            for j in range(-8, 8):
-                if j != 0:
-                    self.assertEqual(foo(i, j), i // j)
-                else:
-                    with self.assertRaisesRegex(RuntimeError, 'division by 0'):
-                        foo(i, j)
-
     # Testing bitwise shorthand aug assignment
     def test_bool_augassign_bitwise_or(self):
         def func(a: bool, b: bool) -> bool:
@@ -12514,6 +12502,16 @@ dedent """
         for a, b in zip(eager_out, script_out):
             check_equal_and_dtype(a, b)
 
+    def test_floor_div(self):
+        @torch.jit.script
+        def foo(a, b):
+            # type: (int, int) -> int
+            return a // b
+        for i in range(-8, 8):
+            for j in range(-8, 8):
+                if j != 0:
+                    self.assertEqual(foo(i, j), i // j)
+
     def test_floordiv(self):
         funcs_template = dedent('''
         def fn():
@@ -12532,8 +12530,7 @@ dedent """
                 cu = torch.jit.CompilationUnit(funcs_str)
                 f_script = cu.fn
                 f = scope['fn']
-                with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
-                    self.assertEqual(f_script(), f())
+                self.assertEqual(f_script(), f())
 
     def test_call_python_fn_from_script_fn(self):
         @torch.jit.ignore
@@ -16397,9 +16394,6 @@ for test in criterion_tests:
 
 if __name__ == '__main__':
     run_tests()
-    import test_jit_py3
     import jit.test_module_interface
-    suite = unittest.findTestCases(test_jit_py3)
-    unittest.TextTestRunner().run(suite)
     suite = unittest.findTestCases(jit.test_module_interface)
     unittest.TextTestRunner().run(suite)

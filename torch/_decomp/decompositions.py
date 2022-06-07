@@ -79,7 +79,6 @@ def softplus_backward(out_grad: Tensor, x: Tensor, beta: float, threshold: float
     z = (x * beta).exp()
     return torch.where((x * beta) > threshold, out_grad, out_grad * z / (z + 1.0))
 
-
 @register_decomposition(aten.elu)
 @pw_cast_for_opmath
 def elu(
@@ -136,12 +135,6 @@ def hardsigmoid_backward(grad_output: Tensor, self: Tensor):
     )
 
 
-@register_decomposition(aten.hardtanh)
-@pw_cast_for_opmath
-def hardtanh(self: Tensor, min_val: float = -1, max_val: float = 1) -> Tensor:
-    return torch.clamp(self, min_val, max_val)
-
-
 @register_decomposition(aten.hardtanh_backward)
 @pw_cast_for_opmath
 def hardtanh_backward(
@@ -188,24 +181,6 @@ def leaky_relu_backward(
     grad_output: Tensor, self: Tensor, negative_slope: float, self_is_result: bool
 ):
     return torch.where(self > 0, grad_output, grad_output * negative_slope)
-
-
-
-@register_decomposition(aten.gelu)
-@pw_cast_for_opmath
-def gelu(self: Tensor, approximate: str = 'none') -> Tensor:
-    M_SQRT2 = 1.41421356237309504880
-    M_SQRT1_2 = 0.70710678118654752440
-    M_2_SQRTPI = 1.12837916709551257390
-    if approximate == 'tanh':
-        kBeta = M_SQRT2 * M_2_SQRTPI * 0.5
-        kKappa = 0.044715
-        x_cube = self * self * self
-        inner = kBeta * (self + kKappa * x_cube)
-        return 0.5 * self * (1 + torch.tanh(inner))
-    else:
-        kAlpha = M_SQRT1_2
-        return self * 0.5 * (1 + torch.erf(self * kAlpha))
 
 
 @register_decomposition(aten.gelu_backward)
@@ -448,6 +423,23 @@ def _nll_loss_backward(
 
     return grad_input * grad_output
 
+
+@register_decomposition(aten.glu_backward)
+@pw_cast_for_opmath
+def glu_backward(grad_output: Tensor, self: Tensor, dim: int) -> Tensor:
+    assert self.dim() > 0, "glu does not support 0-dimensional tensors"
+    wrap_dim = utils.canonicalize_dim(self.dim(), dim)
+    nIn = self.size(wrap_dim)
+    assert nIn % 2 == 0, f"Halving dimension must be even, but dimension {wrap_dim} is size {nIn}"
+    inputSize = nIn // 2
+    firstHalf = self.narrow(wrap_dim, 0, inputSize)
+    secondHalf = self.narrow(wrap_dim, inputSize, inputSize)
+    gradInputFirstHalf = torch.sigmoid(secondHalf)
+    gradInputSecondHalf = (1.0 - gradInputFirstHalf) * gradInputFirstHalf * firstHalf * grad_output
+    gradInputFirstHalf = gradInputFirstHalf * grad_output
+    return torch.cat([gradInputFirstHalf, gradInputSecondHalf], dim=wrap_dim)
+
+
 @register_decomposition(aten.nll_loss_backward)
 def nll_loss_backward(
     grad_output: Tensor,
@@ -685,8 +677,8 @@ def logit_backward(
 @register_decomposition(aten.native_dropout)
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
     if train:
-        bool_mask = torch.rand_like(input) < p
-        res = bool_mask * input * float(1.0 / p)
+        bool_mask = torch.rand_like(input) > p
+        res = bool_mask * input * float(1.0 / (1.0 - p))
         return (res, bool_mask)
     else:
         return (input, torch.ones_like(input, dtype=torch.bool))
@@ -1071,12 +1063,6 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
-# TODO: these logical decomps are buggy for complex inputs
-@register_decomposition(aten.logical_xor)
-def logical_xor(self: Tensor, other: Tensor) -> Tensor:
-    return self.to(dtype=torch.bool) ^ other.to(dtype=torch.bool)
-
-
 @register_decomposition(aten.logical_not)
 def logical_not(self: Tensor) -> Tensor:
     return ~self.to(dtype=torch.bool)
@@ -1202,27 +1188,6 @@ def cudnn_batch_norm_backward(
     )
 
 
-@register_decomposition(aten.rot90.default)
-def rot90(self: Tensor, k: int = 1, dims: List[int] = [0, 1]) -> Tensor:  # noqa: B006
-    total_dims = self.dim()
-    total_rot_dims = len(dims)
-    assert total_rot_dims == 2, f"expected total rotation dims == 2, but got dims = {total_rot_dims}"
-    assert total_dims >= 2, f"expected total dims >= 2, but got total dims = {total_dims}"
-    assert dims[0] != dims[1] and abs(dims[0] - dims[1]) != total_dims,\
-           f"expected rotation dims to be different, but got dim0 = {dims[0]} and dim1 = {dims[1]}"
-    assert dims[0] < total_dims and dims[0] >= -total_dims, f"Rotation dim0 out of range, dim0 = {dims[0]}"
-    assert dims[1] < total_dims and dims[1] >= -total_dims, f"Rotation dim1 out of range, dim1 = {dims[1]}"
-    k = k % 4
-    if k == 1:
-        return self.flip(dims[1]).transpose(dims[0], dims[1])
-    elif k == 2:
-        return self.flip(dims)
-    elif k == 3:
-        return self.flip(dims[0]).transpose(dims[0], dims[1])
-    else:
-        return self.clone(memory_format=torch.contiguous_format)
-
-
 @register_decomposition(aten.transpose.int)
 def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
     dim0, dim1 = utils.canonicalize_dims(self.dim(), (dim0, dim1))  # type: ignore[misc]
@@ -1235,11 +1200,6 @@ def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
     perm = list(range(self.dim()))
     perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
     return torch.permute(self, perm)
-
-
-@register_decomposition(aten.t.default)
-def t(self: Tensor) -> Tensor:
-    return self.transpose(0, 0 if self.dim() < 2 else 1)
 
 
 def check_stack_inputs(tensors: List[Tensor]):
@@ -1307,3 +1267,34 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     else:
         buffer = z
     return min - torch.log1p(z), buffer
+
+# The implementation matches torch.ops.aten.norm
+# torch.ops.aten.norm only supports numeric p, does not support Frobenius norm or nuclear norm
+# For 2-norm and -2 matrix norm, it doesn't compute the singular values, it just compute the norm the same as when p > 2.
+@register_decomposition([aten.norm.Scalar, aten.norm.ScalarOpt_dim])
+@reduction_complex_to_real
+def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = False):
+    if dim is None:
+        dim = []
+
+    if p == 0:
+        return (self != 0).sum(dim, keepdim=keepdim)
+    elif p == float('inf'):
+        return self.abs().amax(dim, keepdim=keepdim)
+    elif p == -float('inf'):
+        return self.abs().amin(dim, keepdim=keepdim)
+
+    def fast_pow(x, ord):
+        if ord == 1.0:
+            return x
+        elif ord == 2.0:
+            return x.square()
+        elif ord == 0.5:
+            return x.sqrt()
+        else:
+            return x.pow(ord)
+
+    if not (p % 2.0 == 0.0 and utils.is_float_dtype(self.dtype)):
+        self = self.abs()
+
+    return fast_pow(fast_pow(self, p).sum(dim, keepdim=keepdim), 1.0 / p)
