@@ -1125,7 +1125,7 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition([aten.detach, aten.lift],disable_meta=True)
+@register_decomposition([aten.detach, aten.lift, aten.alias], disable_meta=True)
 def nop_decomposition(x):
     return x
 
@@ -1265,7 +1265,13 @@ def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = Fals
 
 
 @register_decomposition(torch.ops.aten.kl_div_backward)
-def kl_div_backward(grad_output: Tensor, self: Tensor, target: Tensor, reduction: int=Reduction.MEAN, log_target: bool=False) -> Tensor:
+def kl_div_backward(
+    grad_output: Tensor,
+    self: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+    log_target: bool = False
+) -> Tensor:
     grad_expand = grad_output.expand_as(self)
     if not log_target:
         grad_input = torch.where(target > 0, -target * grad_output, 0)
