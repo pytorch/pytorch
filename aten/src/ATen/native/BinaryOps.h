@@ -102,5 +102,16 @@ DECLARE_DISPATCH(structured_binary_fn, xlogy_stub);
 DECLARE_DISPATCH(structured_binary_fn, xlog1py_stub);
 DECLARE_DISPATCH(structured_binary_fn, zeta_stub);
 DECLARE_DISPATCH(structured_binary_fn, chebyshev_polynomial_t_stub);
+DECLARE_DISPATCH(structured_binary_fn, chebyshev_polynomial_u_stub);
+DECLARE_DISPATCH(structured_binary_fn, chebyshev_polynomial_v_stub);
+DECLARE_DISPATCH(structured_binary_fn, chebyshev_polynomial_w_stub);
+DECLARE_DISPATCH(structured_binary_fn, hermite_polynomial_h_stub);
+DECLARE_DISPATCH(structured_binary_fn, hermite_polynomial_he_stub);
+DECLARE_DISPATCH(structured_binary_fn, laguerre_polynomial_l_stub);
+DECLARE_DISPATCH(structured_binary_fn, legendre_polynomial_p_stub);
+DECLARE_DISPATCH(structured_binary_fn, shifted_chebyshev_polynomial_t_stub);
+DECLARE_DISPATCH(structured_binary_fn, shifted_chebyshev_polynomial_u_stub);
+DECLARE_DISPATCH(structured_binary_fn, shifted_chebyshev_polynomial_v_stub);
+DECLARE_DISPATCH(structured_binary_fn, shifted_chebyshev_polynomial_w_stub);
 
 }} // namespace at::native

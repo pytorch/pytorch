@@ -15,20 +15,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  parallelnative-linux-xenial-py3_7-gcc5_4-build:
-    name: parallelnative-linux-xenial-py3.7-gcc5.4
+  parallelnative-linux-focal-py3_7-gcc7-build:
+    name: parallelnative-linux-focal-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: parallelnative-linux-xenial-py3.7-gcc5.4
-      docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
+      build-environment: parallelnative-linux-focal-py3.7-gcc7
+      docker-image-name: pytorch-linux-focal-py3.7-gcc7
 
-  parallelnative-linux-xenial-py3_7-gcc5_4-test:
-    name: parallelnative-linux-xenial-py3.7-gcc5.4
+  parallelnative-linux-focal-py3_7-gcc7-test:
+    name: parallelnative-linux-focal-py3.7-gcc7
     uses: ./.github/workflows/_linux-test.yml
-    needs: parallelnative-linux-xenial-py3_7-gcc5_4-build
+    needs: parallelnative-linux-focal-py3_7-gcc7-build
     with:
-      build-environment: parallelnative-linux-xenial-py3.7-gcc5.4
-      docker-image: ${{ needs.parallelnative-linux-xenial-py3_7-gcc5_4-build.outputs.docker-image }}
+      build-environment: parallelnative-linux-focal-py3.7-gcc7
+      docker-image: ${{ needs.parallelnative-linux-focal-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -36,12 +36,12 @@ jobs:
         ]}
 
   # Build PyTorch with BUILD_CAFFE2=ON
-  caffe2-linux-xenial-py3_7-gcc5_4-build:
-    name: caffe2-linux-xenial-py3.7-gcc5.4
+  caffe2-linux-focal-py3_7-gcc7-build:
+    name: caffe2-linux-focal-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: caffe2-linux-xenial-py3.7-gcc5.4
-      docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
+      build-environment: caffe2-linux-focal-py3.7-gcc7
+      docker-image-name: pytorch-linux-focal-py3.7-gcc7
 
   linux-bionic-cuda10_2-py3_9-gcc7-build:
     name: linux-bionic-cuda10.2-py3.9-gcc7
@@ -198,10 +198,17 @@ jobs:
       build-environment: macos-10-15-py3-arm64
       xcode-version: "13.3.1"
       runner-type: macos-12
-      build-generates-artifacts: false
+      build-generates-artifacts: true
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
+
+  macos-12-3-py38-arm64-test:
+    name: macos-12.3-py3.8-arm64-test
+    uses: ./.github/workflows/_mac-test-arm64.yml
+    needs: macos-10-15-py3-arm64
+    with:
+      build-environment: macos-10-15-py3-arm64
 
   # please ensure that this and its corresponding job in pull.yml are in sync
   win-vs2019-cuda11_3-py3-build:
@@ -250,3 +257,7 @@ jobs:
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
+
+  buck-build-test:
+    name: buck-build-test
+    uses: ./.github/workflows/_buck-build-test.yml
