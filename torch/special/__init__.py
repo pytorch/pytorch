@@ -1220,7 +1220,7 @@ Keyword args:
 def _logsumexp_return_sign_false(
         input: Tensor, dim: typing.List[int], keepdim: bool = False,
         b: typing.Optional[Tensor] = None, return_sign: bool = False, out: Tensor = None) -> Tensor:
-    return _special.special_logsumexp(input, dim, keepdim, b, out=out)
+    return _special.special_logsumexp(input, dim, keepdim, b=b, out=out)
 
 
 def _logsumexp_return_sign_true(
