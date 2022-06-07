@@ -113,7 +113,7 @@ def vector_norm(
             if p == 1.0:
                 return x
             elif p == 2.0:
-                return prims.square(x)
+                return x * x
             elif p == 0.5:
                 return prims.sqrt(x)
             else:
