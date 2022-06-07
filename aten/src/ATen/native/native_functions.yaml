@@ -9686,6 +9686,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: softplus_out
+    MPS: softplus_out_mps
 
 - func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
   structured_delegate: softplus.out
@@ -11944,7 +11945,7 @@
   dispatch:
     CPU, CUDA: segment_reduce_kernel
 
-- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None, int axis=0) -> Tensor
+- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None, int axis=0, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: _segment_reduce_backward_kernel
