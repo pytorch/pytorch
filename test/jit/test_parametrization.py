@@ -43,3 +43,27 @@ class TestParametrization(JitTestCase):
                                     'Cannot trace a model while caching'):
             with parametrize.cached():
                 traced_model = torch.jit.trace_module(model, {'forward': x})
+
+    def test_scriptable(self):
+        # TODO: Need to fix the scripting in parametrizations
+        #       Currently, all the tests below will throw torch.jit.Error
+        model = nn.Linear(5, 5)
+        parametrize.register_parametrization(model, "weight", self.Symmetric())
+
+        x = torch.randn(3, 5)
+        y = model(x)
+
+        with self.assertRaises(torch.jit.Error):
+            # Check scripting works
+            scripted_model = torch.jit.script(model)
+            y_hat = scripted_model(x)
+            self.assertEqual(y, y_hat)
+
+            with parametrize.cached():
+                # Check scripted model works when caching
+                y_hat = scripted_model(x)
+                self.assertEqual(y, y_hat)
+
+                # Check the scripting process throws an error when caching
+                with self.assertRaisesRegex(RuntimeError, 'Caching is not implemented'):
+                    scripted_model = torch.jit.trace_module(model)
