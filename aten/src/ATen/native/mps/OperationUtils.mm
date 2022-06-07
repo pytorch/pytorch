@@ -489,7 +489,7 @@ public:
 
   void executeMPSAllocatorCallback(void* ptr, EventType event) override {
     if (event == EventType::FREED || event == EventType::RELEASED) {
-      graph_cache->FindAndRemoveViewEntry(ptr);
+      //graph_cache->FindAndRemoveViewEntry(ptr);
     }
   }
 private:
