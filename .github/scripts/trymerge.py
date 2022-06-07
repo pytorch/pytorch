@@ -901,12 +901,13 @@ def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False, timeout_mi
         elapsed_time = current_time - start_time
 
 
+        print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
         try:
             return pr.merge_into(repo, dry_run=dry_run)
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
-            print(f"Merged failed due to: {ex}. Retrying in 60 seconds.")
+            print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 60 seconds.")
             time.sleep(60)
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
