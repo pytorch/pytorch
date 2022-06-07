@@ -36,7 +36,6 @@ jobs:
           - docker-image-name: pytorch-linux-xenial-py3-clang5-asan
           - docker-image-name: pytorch-linux-xenial-py3-clang7-asan
           - docker-image-name: pytorch-linux-xenial-py3-clang7-onnx
-          - docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
           - docker-image-name: pytorch-linux-xenial-py3.7-gcc7
           - docker-image-name: pytorch-linux-focal-py3.7-gcc7
     env:
@@ -63,6 +62,7 @@ jobs:
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
+          force_push: true
 
       - name: Pull docker image
         uses: ./.github/actions/pull-docker-image
