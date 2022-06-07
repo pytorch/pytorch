@@ -52,7 +52,7 @@ __all__ = [
 
 def is_in_onnx_export() -> bool:
     """Returns whether it is in the middle of ONNX export."""
-    return _exporter_states.IN_ONNX_EXPORT
+    return GLOBALS.in_onnx_export
 
 
 # TODO(justinchuby): Remove dependency to this global variable from constant_fold.cpp
@@ -1028,8 +1028,8 @@ def _export(
             "unwrap model from torch.nn.DataParallel. Try "
             "torch.onnx.export(model.module, ...)"
         )
-    assert _exporter_states.IN_ONNX_EXPORT is False
-    _exporter_states.IN_ONNX_EXPORT = True
+    assert GLOBALS.in_onnx_export is False
+    GLOBALS.in_onnx_export = True
     try:
 
         symbolic_helper._set_onnx_shape_inference(onnx_shape_inference)
@@ -1208,8 +1208,8 @@ def _export(
                 except RuntimeError as e:
                     raise errors.CheckerError(e)
     finally:
-        assert _exporter_states.IN_ONNX_EXPORT
-        _exporter_states.IN_ONNX_EXPORT = False
+        assert GLOBALS.in_onnx_export
+        GLOBALS.in_onnx_export = False
         _reset_trace_module_map()
 
     return torch_out

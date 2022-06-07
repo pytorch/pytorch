@@ -4,9 +4,6 @@ from typing import Dict
 
 from torch import _C as _C
 
-# the flag to tell the user whether it's in the middle of ONNX export or not
-IN_ONNX_EXPORT = False
-
 
 class ExportTypes:
     r"""Specifies how the ONNX model is stored."""
