@@ -447,7 +447,6 @@ meta_function_expected_failures = {
     torch.nn.functional.one_hot: {i64},  # aten::_local_scalar_dense
     torch.nn.functional.pdist: {f32, f64},  # aten::_pdist_forward
     torch.nn.functional.prelu: {bf16, f32, f64},  # aten::prelu
-    torch.nn.functional.relu: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::relu
     torch.nn.functional.rrelu: {bf16, f32, f64},  # aten::rrelu_with_noise
     torch.nn.functional.unfold: {bf16, f16, f32, f64},  # aten::im2col
     torch.nonzero: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero, aten::nonzero.out
@@ -567,7 +566,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.nn.functional.multi_margin_loss: {bf16, f16},  # aten::multi_margin_loss
     torch.nn.functional.multilabel_margin_loss: {bf16, f16},  # aten::multilabel_margin_loss_forward
     torch.nn.functional.prelu: {f16},  # aten::prelu
-    torch.nn.functional.relu: {f16},  # aten::relu
     torch.nn.functional.rrelu: {f16},  # aten::rrelu_with_noise
     torch.ormqr: {f32, f64},  # aten::ormqr, aten::ormqr.out
     torch.trace: {b8, bf16, f16},  # aten::diag.out
@@ -705,7 +703,6 @@ meta_dispatch_expected_failures = {
     aten.nonzero.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.polar.default: {f64, f32},
     aten.prelu.default: {bf16, f64, f32},
-    aten.relu.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.roll.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.rrelu_with_noise.default: {bf16, f64, f32},
     aten.searchsorted.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
@@ -815,7 +812,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
     aten.prelu.default: {f16},  # aten::prelu
-    aten.relu.default: {f16},  # aten::relu
     aten.rrelu_with_noise.default: {f16},  # aten::rrelu_with_noise
     aten.tensordot.out: {f16},  # aten::tensordot.out
     aten.trace.default: {b8, bf16, f16},  # aten::diag.out
