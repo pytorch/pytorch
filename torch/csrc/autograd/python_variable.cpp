@@ -30,6 +30,7 @@
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
@@ -216,6 +217,7 @@ void concrete_dispatch_fn(
     const std::shared_ptr<SafePyObject>& type);
 bool concrete_is_contiguous_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
 c10::Device concrete_device_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
+int64_t concrete_dim_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
 
 class PyInterpreterHolder {
  public:
@@ -226,7 +228,8 @@ class PyInterpreterHolder {
             &concrete_detach_fn,
             &concrete_dispatch_fn,
             &concrete_is_contiguous_fn,
-            &concrete_device_fn)) {}
+            &concrete_device_fn,
+            &concrete_dim_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -1093,6 +1096,17 @@ PyObject *THPVariable_get_shape(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_is_cpu(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "is_cpu");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_cpu());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_is_cuda(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -1342,6 +1356,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"name", (getter)THPVariable_get_name, nullptr, nullptr, nullptr},
   {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
   {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
+  {"is_cpu", (getter)THPVariable_is_cpu, nullptr, nullptr, nullptr},
   {"is_xpu", (getter)THPVariable_is_xpu, nullptr, nullptr, nullptr},
   {"is_ipu", (getter)THPVariable_is_ipu, nullptr, nullptr, nullptr},
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
@@ -2039,6 +2054,32 @@ bool concrete_is_contiguous_fn(const c10::impl::PyInterpreter*, const c10::Tenso
   TORCH_CHECK(PyBool_Check(out.ptr()), "is_contiguous returned invalid type ", py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())), ", expected bool");
 
   return PyObject_IsTrue(out.ptr());
+}
+
+int64_t concrete_dim_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "dim",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("dim")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  TORCH_CHECK(
+      PyLong_Check(out.ptr()),
+      "dim returned invalid type ",
+      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
+      ", expected int");
+
+  return THPUtils_unpackLong(out.ptr());
 }
 
 c10::Device concrete_device_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {
