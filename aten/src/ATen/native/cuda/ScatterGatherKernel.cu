@@ -157,8 +157,6 @@ struct _cuda_scatter_gather_internal_kernel {
 
         auto original_index_offset = offsets[2];
         uint32_t index_idx;
-
-        CUDA_KERNEL_ASSERT((ndim <= 1 || index_strides[0] > index_strides[1]) && "wrong order");
         for (auto d = ndim - 1; d >= 0; d--) {
           auto d_aux = index_strides[0] > index_strides[1] ? d : ndim - 1 - d;
           index_idx = (original_index_offset / index_strides[d_aux]) % index_sizes[d_aux];
@@ -167,12 +165,14 @@ struct _cuda_scatter_gather_internal_kernel {
           index_idx %= src_sizes[d_aux];
           src_offset += src_strides[d_aux] * index_idx;
         }
+
+        TORCH_CHECK(ndim <= 1, "Index strides: ", index_strides[0], " ", index_strides[1], "\nSource strides: ", src_strides[0], " ", src_strides[1], "\n\nIndex sizes: ", index_sizes[0], " ", index_sizes[1], "\nSource sizes: ", src_sizes[0], " ", src_sizes[1], "\n\nOriginal index offset: ", original_index_offset, "\nFinal source offset: ", src_offset);
       }
       else {
         src_offset = offsets[1];
       }
 
-      CUDA_KERNEL_ASSERT(false && src_offset);
+      TORCH_CHECK(false, "Offset: ", src_offset);
 
       f(
         (scalar_t*)(self_ptr + offsets[0]),
