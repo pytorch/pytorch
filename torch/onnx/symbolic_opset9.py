@@ -2712,12 +2712,11 @@ def slice(g, self, *args):
         step = symbolic_helper._parse_arg(step, "i")
         if step != 1:
             raise RuntimeError("step!=1 is currently not supported")
-        is_start_none = (
-            start.node().kind() == "prim::Constant"
-            and start.type().kind() == "NoneType"
+        is_start_none = start.node().kind() == "prim::Constant" and isinstance(
+            start.type(), _C.NoneType
         )
-        is_end_none = (
-            end.node().kind() == "prim::Constant" and end.type().kind() == "NoneType"
+        is_end_none = end.node().kind() == "prim::Constant" and isinstance(
+            end.type(), _C.NoneType
         )
         is_start_onnx_const = start.node().kind() == "onnx::Constant"
         is_end_onnx_const = end.node().kind() == "onnx::Constant"
@@ -2758,12 +2757,11 @@ def slice(g, self, *args):
         # aten::slice(t[] l, int start, int end, int step) -> t[]
         start, end, step = args
         dim = 0
-        is_start_none = (
-            start.node().kind() == "prim::Constant"
-            and start.type().kind() == "NoneType"
+        is_start_none = start.node().kind() == "prim::Constant" and isinstance(
+            start.type(), _C.NoneType
         )
-        is_end_none = (
-            end.node().kind() == "prim::Constant" and end.type().kind() == "NoneType"
+        is_end_none = end.node().kind() == "prim::Constant" and isinstance(
+            end.type(), _C.NoneType
         )
         start = 0 if is_start_none else symbolic_helper._parse_arg(start, "i")
         end = (
@@ -5008,14 +5006,14 @@ class Prim:
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
     @staticmethod
-    def device(ctx: torch.onnx.SymbolicContext, g, *inputs, **kwargs):
-        n = ctx.cur_node
-
-        if n.output().type().kind() == "DeviceObjType":
+    def device(ctx: torch.onnx.SymbolicContext, g: _C.Graph, *inputs, **kwargs) -> None:
+        output_type = ctx.cur_node.output().type()
+        if isinstance(output_type, _C.DeviceObjType):
             return None
 
         return symbolic_helper._unimplemented(
-            "prim::device", "output type is not `DeviceObjType`."
+            "prim::device",
+            f"output type should be 'DeviceObjType', not '{output_type.kind()}'",
         )
 
     @staticmethod
