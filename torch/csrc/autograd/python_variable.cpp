@@ -30,6 +30,7 @@
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
@@ -215,6 +216,8 @@ void concrete_dispatch_fn(
     torch::jit::Stack* stack,
     const std::shared_ptr<SafePyObject>& type);
 bool concrete_is_contiguous_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
+c10::Device concrete_device_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
+int64_t concrete_dim_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
 
 class PyInterpreterHolder {
  public:
@@ -224,7 +227,9 @@ class PyInterpreterHolder {
             &concrete_decref_fn,
             &concrete_detach_fn,
             &concrete_dispatch_fn,
-            &concrete_is_contiguous_fn)) {}
+            &concrete_is_contiguous_fn,
+            &concrete_device_fn,
+            &concrete_dim_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -238,6 +243,22 @@ class PyInterpreterHolder {
 };
 PyInterpreterHolder self_interpreter;
 
+c10::TensorImpl::SizesStridesPolicy parseSizesStridesPolicyArgument(
+    c10::string_view arg) {
+  if (arg == "strides") {
+    return c10::TensorImpl::SizesStridesPolicy::CustomStrides;
+  }
+
+  if (arg == "sizes") {
+    return c10::TensorImpl::SizesStridesPolicy::CustomSizes;
+  }
+
+  TORCH_CHECK_VALUE(
+      false,
+      "Unknown sizes_strides_policy: ",
+      arg,
+      "; expected 'strides' or 'sizes'");
+}
 } // anonymous namespace
 
 c10::impl::PyInterpreter* getPyInterpreter() {
@@ -260,12 +281,12 @@ static const char* VOLATILE_WARNING =
 
 static bool check_has_torch_dispatch(PyObject *obj) {
   PyTypeObject *tp = Py_TYPE(obj);
+  if (THPVariable_CheckTypeExact(tp)) {
+    return false;
+  }
   py::object attr = PyObject_FastGetAttrString(obj, "__torch_dispatch__");
-  return (
-    !THPVariable_CheckTypeExact(tp) &&
-    // TODO: test if Python key is disabled
-    attr.ptr() != nullptr &&
-    attr.ptr() != torch::disabled_torch_dispatch_impl()
+  return (attr.ptr() != nullptr &&
+          attr.ptr() != torch::disabled_torch_dispatch_impl()
   );
 }
 
@@ -536,9 +557,9 @@ static PyObject* THPVariable_as_subclass(PyObject* _self, PyObject* args, PyObje
 static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, bool dispatch_strides=False)",
+    "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False)",
   });
-  ParsedArgs<4> parsed_args{};
+  ParsedArgs<5> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
@@ -557,8 +578,13 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   // ```
   data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
   data.set_requires_grad(r.toBool(2));
-  if (r.toBool(3)) {
-    data.unsafeGetTensorImpl()->set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomStrides);
+  const auto sizes_strides_policy = r.stringViewOptional(3);
+  if (sizes_strides_policy.has_value()) {
+    data.unsafeGetTensorImpl()->set_sizes_strides_policy(
+        parseSizesStridesPolicyArgument(*sizes_strides_policy));
+  }
+  if (r.toBool(4)) {
+    data.unsafeGetTensorImpl()->set_custom_device(true);
   }
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
@@ -572,9 +598,12 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   // NB: pin_memory doesn't actually do anything
   // TODO: strides variant?
   static PythonArgParser parser({
-    "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, bool dispatch_strides=False)",
+      "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, "
+      "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
+      "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
+      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False)",
   });
-  ParsedArgs<11> parsed_args{};
+  ParsedArgs<12> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
@@ -614,8 +643,13 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
         .make_tensor();
   data.set_requires_grad(r.toBool(9));
 
-  if (r.toBool(10)) {
-    data.unsafeGetTensorImpl()->set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomStrides);
+  const auto sizes_strides_policy = r.stringViewOptional(10);
+  if (sizes_strides_policy.has_value()) {
+    data.unsafeGetTensorImpl()->set_sizes_strides_policy(
+        parseSizesStridesPolicyArgument(*sizes_strides_policy));
+  }
+  if (r.toBool(11)) {
+    data.unsafeGetTensorImpl()->set_custom_device(true);
   }
 
   return THPVariable_NewWithVar(
@@ -1062,6 +1096,17 @@ PyObject *THPVariable_get_shape(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_is_cpu(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "is_cpu");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_cpu());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_is_cuda(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -1311,6 +1356,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"name", (getter)THPVariable_get_name, nullptr, nullptr, nullptr},
   {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
   {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
+  {"is_cpu", (getter)THPVariable_is_cpu, nullptr, nullptr, nullptr},
   {"is_xpu", (getter)THPVariable_is_xpu, nullptr, nullptr, nullptr},
   {"is_ipu", (getter)THPVariable_is_ipu, nullptr, nullptr, nullptr},
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
@@ -2008,6 +2054,50 @@ bool concrete_is_contiguous_fn(const c10::impl::PyInterpreter*, const c10::Tenso
   TORCH_CHECK(PyBool_Check(out.ptr()), "is_contiguous returned invalid type ", py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())), ", expected bool");
 
   return PyObject_IsTrue(out.ptr());
+}
+
+int64_t concrete_dim_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "dim",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("dim")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  TORCH_CHECK(
+      PyLong_Check(out.ptr()),
+      "dim returned invalid type ",
+      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
+      ", expected int");
+
+  return THPUtils_unpackLong(out.ptr());
+}
+
+c10::Device concrete_device_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "device",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("prim")
+          .attr("device")
+          .attr("default")
+          .ptr(),
+      "torch.ops.prim");
+
+  return toDevice(out.ptr());
 }
 
 } // anonymous namespace

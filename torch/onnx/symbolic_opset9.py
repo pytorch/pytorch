@@ -8,7 +8,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import Optional
+from typing import List, Optional
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -361,6 +361,8 @@ def atan(g, self):
     return g.op("Atan", self)
 
 
+# Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qsigmoid.cpp
+@symbolic_helper.quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
@@ -413,7 +415,7 @@ def overload_by_arg_count(fn):
             arg_descriptors = overload._arg_descriptors
             if len(arg_descriptors) == len(args):
                 return overload(g, *args)
-        raise NotImplementedError("Unknown aten::{} signature".format(fn.__name__))
+        raise NotImplementedError(f"Unknown aten::{fn.__name__} signature")
 
     return wrapper
 
@@ -808,9 +810,7 @@ def prelu(g, self, weight):
     if self_rank is not None and weight_rank is not None:
         assert (
             self_rank >= weight_rank
-        ), "rank(x) should be >= rank(slope) but got {} < {}".format(
-            self_rank, weight_rank
-        )
+        ), f"rank(x) should be >= rank(slope) but got {self_rank} < {weight_rank}"
     return g.op("PRelu", self, weight)
 
 
@@ -1031,6 +1031,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
 
 
 def _max_pool(name, tuple_fn, ndims, return_indices):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "is", "i")
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if set(tuple_fn(dilation)) != {1}:
@@ -1431,7 +1432,7 @@ def wrap_logical_op_with_cast_to(to_type):
 def wrap_logical_op_with_cast_to_and_from(to_type):
     def decorator(fn):
         def wrap_with_cast(g, input, other):
-            to_cast_func = globals()["_cast_{}".format(to_type)]
+            to_cast_func = globals()[f"_cast_{to_type}"]
             from_cast_func = wrap_logical_op_with_cast_to(input.type().scalarType())(fn)
             return from_cast_func(
                 g, to_cast_func(g, input, False), to_cast_func(g, other, False)
@@ -2378,13 +2379,9 @@ def exp(g, self):
 @symbolic_helper.parse_args("v", "f", "i")
 def dropout(g, input, p, train):
     symbolic_helper.check_training_mode(train, "dropout")
-    # in eval mode, dropout is non-op - if the node's train param is set to False, dropout is non-op
+    # if train is False, dropout is no-op
     if not train:
         return input
-    warnings.warn(
-        "Dropout is a training op and should not be exported in inference mode. "
-        "For inference, make sure to call eval() on the model and to export it with param training=False."
-    )
     r, _ = g.op("Dropout", input, ratio_f=p, outputs=2)
     return r
 
@@ -2470,7 +2467,7 @@ def _unique2(g, input, sorted, return_inverse, return_counts):
 # TODO(justinchuby): Clean up this function generation magic by defining the functions
 # explicitly.
 for k, v in symbolic_helper.cast_pytorch_to_onnx.items():
-    name = "_cast_{}".format(k)
+    name = f"_cast_{k}"
     globals()[name] = symbolic_helper.parse_args("v", "i")(
         functools.partial(symbolic_helper._cast_func_template, v)
     )
@@ -3305,9 +3302,9 @@ def _generic_rnn(
         if variant == "RNN":
             weight_ih, weight_hh = weights
         elif variant == "GRU" or variant == "LSTM":
-            weight_ih, weight_hh = [
+            weight_ih, weight_hh = (
                 reform_weights(g, w, hidden_size, reform_permutation) for w in weights
-            ]
+            )
         return tuple(
             symbolic_helper._unsqueeze_helper(g, x, [0]) for x in (weight_ih, weight_hh)
         )
@@ -3317,9 +3314,9 @@ def _generic_rnn(
         if variant == "RNN":
             weight_ih, weight_hh, bias_ih, bias_hh = weights
         elif variant == "GRU" or variant == "LSTM":
-            weight_ih, weight_hh, bias_ih, bias_hh = [
+            weight_ih, weight_hh, bias_ih, bias_hh = (
                 reform_weights(g, w, hidden_size, reform_permutation) for w in weights
-            ]
+            )
         bias_concat = g.op("Concat", bias_ih, bias_hh, axis_i=0)
         return tuple(
             symbolic_helper._unsqueeze_helper(g, x, [0])
@@ -3891,7 +3888,7 @@ def scatter_add(g, self, dim, index, src):
 
 def log2(g, self):
     _ln2 = 0.693147180559945309
-    return g.op("Div", log(g, self), g.op("Constant", value_t=torch.tensor([_ln2])))
+    return g.op("Div", log(g, self), g.op("Constant", value_t=torch.tensor(_ln2)))
 
 
 def is_floating_point(g, self):
@@ -4963,7 +4960,12 @@ class Prim:
         return None
 
     @staticmethod
-    def ListUnpack(g, *inputs, **kwargs):
+    def ListUnpack(g, *inputs, **kwargs) -> Optional[List[_C.Value]]:
+        if len(inputs) == 1 and inputs[0].node().kind() == "prim::ListConstruct":
+            # Cancel the previous node if it is ListConstruct by returning its inputs
+            # TODO(justinchuby): Use a public method in the helper module
+            return symbolic_helper._unpack_list(inputs[0])
+
         return None
 
     @staticmethod
@@ -5009,11 +5011,11 @@ class Prim:
     def device(ctx: torch.onnx.SymbolicContext, g, *inputs, **kwargs):
         n = ctx.cur_node
 
-        if n.output().type().kind() == "_C.DeviceObjType":
+        if n.output().type().kind() == "DeviceObjType":
             return None
 
         return symbolic_helper._unimplemented(
-            "prim::device", "output type is not `_C.DeviceObjType`."
+            "prim::device", "output type is not `DeviceObjType`."
         )
 
     @staticmethod
@@ -5119,8 +5121,7 @@ class Prim:
             for idx in range(len(if_output_list)):
                 if current_b_list[idx] not in env:
                     raise RuntimeError(
-                        "The sub block ATen output {}"
-                        " is not in env.".format(current_b_list[idx])
+                        f"The sub block ATen output {current_b_list[idx]} is not in env."
                     )  # type:ignore[operator]
                 onnx_b = env[current_b_list[idx]]
                 final_b_list.append(onnx_b)
@@ -5172,9 +5173,7 @@ class Prim:
             return g.op("Constant", value_t=torch.tensor(n["value"]))
         else:
             raise RuntimeError(
-                "Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
-                    n.kindOf("value")
-                )
+                f"Unsupported prim::Constant kind: `{n.kindOf('value')}`. Send a bug report."
             )
 
 
