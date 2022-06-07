@@ -32,7 +32,7 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
         y = slopes[index] * x_ + intercepts[index]
         return y
 
-    @given(n=st.integers(1, 100), **hu.gcs)
+    @given(n=st.integers(1, 100), **hu.gcs_cpu_only)
     @settings(deadline=10000)
     def test_multi_predictions_params_from_arg(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
@@ -60,7 +60,7 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [X], piecewise)
         self.assertDeviceChecks(dc, op, [X], [0])
 
-    @given(n=st.integers(1, 100), **hu.gcs)
+    @given(n=st.integers(1, 100), **hu.gcs_cpu_only)
     @settings(deadline=10000)
     def test_binary_predictions_params_from_arg(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, size=n).astype(np.float32)
@@ -87,7 +87,7 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [X], piecewise)
         self.assertDeviceChecks(dc, op, [X], [0])
 
-    @given(n=st.integers(1, 100), **hu.gcs)
+    @given(n=st.integers(1, 100), **hu.gcs_cpu_only)
     @settings(deadline=10000)
     def test_multi_predictions_params_from_input(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
@@ -115,7 +115,7 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
             gc, op, [X, bounds, slopes, intercepts], piecewise)
         self.assertDeviceChecks(dc, op, [X, bounds, slopes, intercepts], [0])
 
-    @given(n=st.integers(1, 100), **hu.gcs)
+    @given(n=st.integers(1, 100), **hu.gcs_cpu_only)
     @settings(deadline=10000)
     def test_binary_predictions_params_from_input(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, size=n).astype(np.float32)
@@ -141,7 +141,7 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
             gc, op, [X, bounds, slopes, intercepts], piecewise)
         self.assertDeviceChecks(dc, op, [X, bounds, slopes, intercepts], [0])
 
-    @given(n=st.integers(1, 100), **hu.gcs)
+    @given(n=st.integers(1, 100), **hu.gcs_cpu_only)
     @settings(deadline=10000)
     def test_1D_predictions_params_from_input(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, size=n).astype(np.float32)

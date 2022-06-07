@@ -1,6 +1,8 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/native/Pool.h>
@@ -11,6 +13,13 @@
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/LaunchUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/max_pool2d_with_indices_native.h>
+#include <ATen/ops/max_pool2d_with_indices_backward_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -128,8 +137,8 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
         hstart += dilation_h;
       while(wstart < 0)
         wstart += dilation_w;
-      for (int ih = hstart; ih < hend; ih++) {
-        for (int iw = wstart; iw < wend; iw++) {
+      for (int ih = hstart; ih < hend; ih += dilation_h) {
+        for (int iw = wstart; iw < wend; iw += dilation_w) {
           int cached_index = threadIdx.x;
           const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
           for(int c = channel_offset; c < channels; c+= blockDim.x*kernel_stride_C) {

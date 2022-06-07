@@ -198,14 +198,14 @@ void storage_fill(at::Storage self, uint8_t value) {
 }
 
 void storage_set(at::Storage self, ptrdiff_t idx, uint8_t value) {
-  TORCH_CHECK((idx >= 0) && (idx < self.nbytes()), "out of bounds");
+  TORCH_CHECK((idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())), "out of bounds");
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
   auto self_t = at::empty({0}, {}, options).set_(self);
   self_t[idx].fill_(value);
 }
 
 uint8_t storage_get(at::Storage self, ptrdiff_t idx) {
-  TORCH_CHECK((idx >= 0) && (idx < self.nbytes()), "out of bounds");
+  TORCH_CHECK((idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())), "out of bounds");
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
   auto self_t = at::empty({0}, {}, options).set_(self);
   return self_t[idx].item<uint8_t>();

@@ -289,14 +289,11 @@ class AutodiffRemoveUnusedGradientsTest : public ::testing::Test {
   void SetUp() override {
     prev_exec = getExecutorMode();
     getExecutorMode() = true;
-    prev_profiling = getProfilingMode();
-    getProfilingMode() = true;
     prev_inline_autodiff = getAutodiffSubgraphInlining();
     debugSetAutodiffSubgraphInlining(false);
   }
   void TearDown() override {
     getExecutorMode() = prev_exec;
-    getProfilingMode() = prev_profiling;
     debugSetAutodiffSubgraphInlining(prev_inline_autodiff);
   }
 

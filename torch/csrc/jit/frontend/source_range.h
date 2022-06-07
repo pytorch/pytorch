@@ -20,9 +20,12 @@ struct SourceRange;
 // This has advantage of not needing continues memory.
 struct TORCH_API StringCordView {
   StringCordView();
+  StringCordView(const StringCordView&) = default;
   StringCordView(
       std::vector<c10::string_view> inputs,
       std::vector<std::shared_ptr<std::string>> ownerships);
+
+  StringCordView& operator=(const StringCordView&) = default;
 
   size_t size() const {
     return accumulated_sizes_.back();
@@ -46,9 +49,9 @@ struct TORCH_API StringCordView {
     return ss.str();
   }
 
-  bool operator==(const std::string& rhs);
+  bool operator==(const std::string& rhs) const;
 
-  bool operator==(const StringCordView& rhs);
+  bool operator==(const StringCordView& rhs) const;
 
   c10::string_view piece(size_t index) const {
     return pieces_[index];
@@ -63,6 +66,9 @@ struct TORCH_API StringCordView {
         : line_(start_line), pos_(start_pos), str_(str), size_(size) {}
     explicit Iterator(const StringCordView* str)
         : Iterator(str, 0, 0, str->size()) {}
+
+    Iterator() : Iterator(nullptr, 0, 0, 0) {}
+
     Iterator(const Iterator&) = default;
     Iterator(Iterator&&) = default;
     Iterator& operator=(const Iterator&) = default;
@@ -87,6 +93,29 @@ struct TORCH_API StringCordView {
       return prev;
     }
 
+    Iterator next_iter() const {
+      Iterator next(*this);
+      ++next;
+      return next;
+    }
+
+    Iterator& operator+=(size_t num) {
+      if (!has_next()) {
+        return *this;
+      }
+      size_t target_pos = pos_ + num;
+      if (target_pos >= str_->accumulated_sizes_[line_] &&
+          (line_ + 1) < str_->accumulated_sizes_.size() &&
+          target_pos < str_->accumulated_sizes_[line_ + 1]) {
+        pos_ = target_pos;
+        return *this;
+      }
+
+      size_t target_abs_pos = pos() + num;
+      *this = str_->iter_for_pos(target_abs_pos);
+      return *this;
+    }
+
     bool operator==(const Iterator& rhs) const {
       if (!has_next() && !rhs.has_next()) {
         return true;
@@ -106,6 +135,23 @@ struct TORCH_API StringCordView {
       return str_->pieces_[line_].at(pos_);
     }
 
+    // returns rest of the line of the current iterator
+    c10::string_view rest_line() const {
+      if (line_ >= str_->pieces_.size()) {
+        return "";
+      }
+
+      c10::string_view cur_line = str_->pieces_[line_];
+      return cur_line.substr(pos_, std::string::npos);
+    }
+
+    size_t pos() const {
+      if (size_ == 0) {
+        return 0;
+      }
+      return str_->accumulated_sizes_[line_] + pos_;
+    }
+
    private:
     size_t line_;
     size_t pos_;
@@ -120,10 +166,9 @@ struct TORCH_API StringCordView {
   Iterator end() const {
     return Iterator(this, pieces_.size(), 0, 0);
   }
-
- private:
   Iterator iter_for_pos(size_t pos) const;
 
+ private:
   std::vector<c10::string_view> pieces_;
   std::vector<size_t> accumulated_sizes_;
   std::vector<std::shared_ptr<std::string>> owned_strings_;
@@ -205,8 +250,7 @@ struct TORCH_API Source {
     return text_view_.substr(start, size);
   }
 
-  // Note: this makes a copy
-  StringCordView text_str() const {
+  const StringCordView& text_str() const {
     return text_view_;
   }
 
@@ -257,8 +301,27 @@ struct TORCH_API Source {
 // `end` byte offsets into the source text.
 struct TORCH_API SourceRange {
   SourceRange(std::shared_ptr<Source> source_view_, size_t start_, size_t end_)
-      : source_view_(std::move(source_view_)), start_(start_), end_(end_) {}
+      : source_view_(std::move(source_view_)), start_(start_), end_(end_) {
+    if (source_view_) {
+      start_iter_ = source_view_->text_str().iter_for_pos(start_);
+    }
+  }
+
   SourceRange() : source_view_(nullptr), start_(0), end_(0) {}
+
+  SourceRange(
+      std::shared_ptr<Source> source_view_,
+      StringCordView::Iterator start_iter,
+      size_t end_)
+      : source_view_(std::move(source_view_)),
+        start_(start_iter.pos()),
+        end_(end_),
+        start_iter_(start_iter) {}
+
+  const c10::string_view token_text() const {
+    size_t size = end() - start();
+    return start_iter_.rest_line().substr(0, size);
+  }
 
   const StringCordView text() const {
     return source_view_->text_str().substr(start(), end() - start());
@@ -327,6 +390,7 @@ struct TORCH_API SourceRange {
  private:
   size_t start_;
   size_t end_;
+  StringCordView::Iterator start_iter_;
 };
 
 // OwnedSourceRange is just like a SourceRange except that it owns a `Source`
@@ -354,7 +418,7 @@ struct StackEntry {
   SourceRange range;
 };
 
-C10_EXPORT void format_stack_trace(
+TORCH_API void format_stack_trace(
     std::ostream& out,
     const std::vector<StackEntry>& entries);
 

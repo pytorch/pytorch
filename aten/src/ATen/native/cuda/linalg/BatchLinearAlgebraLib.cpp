@@ -1,8 +1,8 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAEvent.h>
@@ -10,6 +10,7 @@
 #include <c10/util/irange.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/TransposeType.h>
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/cuda/linalg/CUDASolver.h>
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
@@ -95,6 +96,8 @@ static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, con
 #ifndef CUDART_VERSION
   TORCH_CHECK(false, "lu_solve: cuBLAS backend for lu_solve is not available.")
 #else
+  TORCH_INTERNAL_ASSERT(batchCount(b) == batchCount(lu), "batch_size of b and lu must be the same");
+  TORCH_INTERNAL_ASSERT(batchCount(lu) == batchCount(pivots.unsqueeze(-1)), "batch_size of lu and pivots must be the same");
   const auto trans = to_cublas(transpose);
 
   auto pivots_data = pivots.data_ptr<int>();
@@ -120,6 +123,181 @@ void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pi
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(lu.scalar_type(), "lu_solve_cublas", [&]{
     apply_lu_solve_batched_cublas<scalar_t>(b, lu, pivots, trans);
   });
+}
+
+namespace {
+
+template <typename scalar_t>
+void apply_ldl_factor_cusolver(
+    const Tensor& A,
+    const Tensor& pivots,
+    const Tensor& info,
+    bool upper) {
+#ifndef USE_CUSOLVER
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.ldl_factor on a CUDA tensor requires compiling ",
+      "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");
+#else
+  auto batch_size = batchCount(A);
+  auto n = cuda_int_cast(A.size(-2), "A.size(-2)");
+  auto lda = cuda_int_cast(A.stride(-1), "A.stride(-1)");
+  auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+
+  auto a_stride = A.dim() > 2 ? A.stride(-3) : 0;
+  auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
+
+  auto a_data = A.data_ptr<scalar_t>();
+  auto pivots_data = pivots.data_ptr<int>();
+  auto info_data = info.data_ptr<int>();
+
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+  int lwork = 0;
+  at::cuda::solver::sytrf_bufferSize(handle, n, a_data, lda, &lwork);
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto work = allocator.allocate(sizeof(scalar_t) * lwork);
+
+  for (const auto i : c10::irange(batch_size)) {
+    auto* a_working_ptr = &a_data[i * a_stride];
+    auto* pivots_working_ptr = &pivots_data[i * pivots_stride];
+    auto* info_working_ptr = &info_data[i];
+    at::cuda::solver::sytrf(
+        handle,
+        uplo,
+        n,
+        a_working_ptr,
+        lda,
+        pivots_working_ptr,
+        reinterpret_cast<scalar_t*>(work.get()),
+        lwork,
+        info_working_ptr);
+  }
+#endif
+}
+
+template <typename scalar_t>
+void apply_ldl_solve_cusolver(
+    const Tensor& A,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool upper) {
+#if !(defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && \
+    CUSOLVER_VERSION >= 11102)
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.ldl_solve on a CUDA tensor requires compiling ",
+      "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER 11.1.2+ (CUDA 11.3.1+) support.");
+#else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) > 0);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(pivots.unsqueeze(-1)) > 0);
+  auto batch_size = batchCount(B);
+  auto n = A.size(-2);
+  auto nrhs = B.size(-1);
+  auto lda = A.stride(-1);
+  auto ldb = B.stride(-1);
+  auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+
+  auto a_stride = A.dim() > 2 ? A.stride(-3) : 0;
+  auto b_stride = B.dim() > 2 ? B.stride(-3) : 0;
+  auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
+
+  auto a_data = A.data_ptr<scalar_t>();
+  auto b_data = B.data_ptr<scalar_t>();
+
+  auto pivots_ = pivots.to(kLong);
+  auto pivots_data = pivots_.data_ptr<int64_t>();
+
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  auto datatype = at::cuda::solver::get_cusolver_datatype<scalar_t>();
+  size_t worksize_device = 0;
+  size_t worksize_host = 0;
+
+  TORCH_CUSOLVER_CHECK(cusolverDnXsytrs_bufferSize(
+      handle,
+      uplo,
+      n,
+      nrhs,
+      datatype,
+      a_data,
+      lda,
+      pivots_data,
+      datatype,
+      b_data,
+      ldb,
+      &worksize_device,
+      &worksize_host));
+
+  // allocate workspace storage
+  auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
+  auto workdata_device = device_allocator.allocate(worksize_device);
+  void* workdata_device_ptr = workdata_device.get();
+
+  auto& host_allocator = *at::getCPUAllocator();
+  auto workdata_host = host_allocator.allocate(worksize_host);
+  void* workdata_host_ptr = workdata_host.get();
+
+  Tensor info = at::zeros({}, A.options().dtype(at::kInt));
+  for (const auto i : c10::irange(batch_size)) {
+    auto* a_working_ptr = &a_data[i * a_stride];
+    auto* b_working_ptr = &b_data[i * b_stride];
+    auto* pivots_working_ptr = &pivots_data[i * pivots_stride];
+    TORCH_CUSOLVER_CHECK(cusolverDnXsytrs(
+        handle,
+        uplo,
+        n,
+        nrhs,
+        datatype,
+        a_working_ptr,
+        lda,
+        pivots_working_ptr,
+        datatype,
+        b_working_ptr,
+        ldb,
+        workdata_device_ptr,
+        worksize_device,
+        workdata_host_ptr,
+        worksize_host,
+        info.data_ptr<int>()));
+  }
+
+  // info from sytrs only reports if the i-th parameter is wrong
+  // so we don't need to check it all the time
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.item().toInt() == 0);
+#endif
+}
+
+} // anonymous namespace
+
+void ldl_factor_cusolver(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& info,
+    bool upper,
+    bool hermitian) {
+  if (LD.is_complex()) {
+    TORCH_CHECK(
+        !hermitian,
+        "torch.linalg.ldl_factor: complex tensors with hermitian=True flag are not supported with cuSOLVER backend. ",
+        "Currently preferred backend is ",
+        at::globalContext().linalgPreferredBackend(),
+        ", please set 'default' or 'magma' backend with torch.backends.cuda.preferred_linalg_library");
+  }
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      LD.scalar_type(), "ldl_factor_looped_cusolver", [&] {
+        apply_ldl_factor_cusolver<scalar_t>(LD, pivots, info, upper);
+      });
+}
+
+void ldl_solve_cusolver(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool upper) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      LD.scalar_type(), "ldl_solve_looped_cusolver", [&] {
+        apply_ldl_solve_cusolver<scalar_t>(LD, pivots, B, upper);
+      });
 }
 
 template <typename scalar_t>
@@ -432,6 +610,7 @@ inline static void apply_svd_cusolver_gesvd(const Tensor& A, const Tensor& U, co
   }
 }
 
+// We'll copy A inside svd_cusolver_gesvd
 inline static void svd_cusolver_gesvd(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
   const Tensor& infos, bool full_matrices, bool compute_uv,
   const bool calculate_all_batches = true,
@@ -487,8 +666,8 @@ inline static void apply_svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, c
   TORCH_CUSOLVER_CHECK(cusolverDnCreateGesvdjInfo(&gesvdj_params));
 
   // Todo: expose the following two parameters to users
-  // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetTolerance(gesvdj_params, 1.0e-7));
-  // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetMaxSweeps(gesvdj_params, 15));
+  TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetTolerance(gesvdj_params, std::numeric_limits<scalar_t>::epsilon()));
+  TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetMaxSweeps(gesvdj_params, cusolver_gesvdj_max_sweeps));
 
   int lwork = -1;
   at::cuda::solver::gesvdj_buffersize<scalar_t>(
@@ -512,6 +691,12 @@ inline static void apply_svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, c
       infos.data_ptr<int>() + i,
       gesvdj_params
     );
+
+    // // The following code can be used to check or report the gesvdj residual.
+    // // Note: this will introduce a device-host sync and may negatively affect the performance
+    // double residual = 0;
+    // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjGetResidual(handle, gesvdj_params, &residual));
+    // printf("gesvdj residual = %.6e\n", residual);
   }
 
   TORCH_CUSOLVER_CHECK(cusolverDnDestroyGesvdjInfo(gesvdj_params));
@@ -519,6 +704,7 @@ inline static void apply_svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, c
 
 // wrapper around apply_svd_cusolver_gesvdj that handles dtype dispatch
 // note that gesvdj returns V, which is what we want
+// Need to pass a copy of A, since A will be rewritten inside the function call
 inline static void svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V, const Tensor& infos, bool full_matrices, bool compute_uv) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "svd_cuda_gesvdj", [&] {
     apply_svd_cusolver_gesvdj<scalar_t>(A, U, S, V, infos, full_matrices, compute_uv);
@@ -558,8 +744,8 @@ inline static void apply_svd_cusolver_gesvdjBatched(const Tensor& A, const Tenso
   TORCH_CUSOLVER_CHECK(cusolverDnCreateGesvdjInfo(&gesvdj_params));
 
   // Todo: expose the following two parameters to users
-  // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetTolerance(gesvdj_params, 1.0e-7));
-  // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetMaxSweeps(gesvdj_params, 15));
+  TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetTolerance(gesvdj_params, std::numeric_limits<scalar_t>::epsilon()));
+  TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetMaxSweeps(gesvdj_params, cusolver_gesvdj_max_sweeps));
   TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetSortEig(gesvdj_params, 1));
 
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
@@ -578,8 +764,79 @@ inline static void svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, 
   });
 }
 
-// Check if gesvdj results converge. If not, return a vector that contains the non-converging batch index.
-// If the returned vector is empty, all the matrices converged.
+template<typename scalar_t>
+inline static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
+    const Tensor& infos, bool full_matrices, bool compute_uv) {
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  int m = cuda_int_cast(A.size(-2), "m");
+  int n = cuda_int_cast(A.size(-1), "n");
+  TORCH_INTERNAL_ASSERT(m >= n, "cusolver gesvdaStridedBatched requires m >= n");
+  int batchsize = cuda_int_cast(batchCount(A), "batch size");
+
+  int lda = A.stride(-1);
+  int ldu = compute_uv ? U.stride(-1) : m;
+  int ldv = compute_uv ? V.stride(-1) : n;
+
+  auto A_stride = matrixStride(A);
+  auto S_stride = S.size(-1);
+  auto rank = S_stride; // number of singular values
+  auto U_stride = compute_uv ? matrixStride(U) : ldu * rank;  // The strides for "empty matrices" are needed to satisfy cusolver.
+  auto V_stride = compute_uv ? matrixStride(V) : ldv * rank;
+
+  // Need to pass allocated memory to the function, otherwise it fails
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto dataPtr_U = !compute_uv ? allocator.allocate(sizeof(scalar_t) * batchsize * m * n) : c10::DataPtr{};
+  auto dataPtr_V = !compute_uv ? allocator.allocate(sizeof(scalar_t) * batchsize * n * n) : c10::DataPtr{};
+
+  auto A_data = A.data_ptr<scalar_t>();
+  auto U_data = compute_uv ? U.data_ptr<scalar_t>() : reinterpret_cast<scalar_t*>(dataPtr_U.get());
+  auto S_data = S.data_ptr<value_t>();
+  auto V_data = compute_uv ? V.data_ptr<scalar_t>() : reinterpret_cast<scalar_t*>(dataPtr_V.get());
+
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  auto jobz = compute_uv ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR;
+
+  int lwork = -1;
+  at::cuda::solver::gesvdaStridedBatched_buffersize<scalar_t>(
+    handle, jobz, rank, m, n, A_data, lda, A_stride, S_data, S_stride, U_data, ldu, U_stride, V_data, ldv, V_stride,
+    &lwork, batchsize);
+  TORCH_INTERNAL_ASSERT(lwork >= 0, "gesvdaStridedBatched_buffersize failed to get needed buffer size, got lwork = ", lwork);
+  auto workspace = allocator.allocate(sizeof(scalar_t)*lwork);
+
+  // The residual Frobenius norm is always returned in double.
+  // cuSOLVER remark: if the user is confident on the accuracy of singular values and singular vectors,
+  //   for example, certain conditions hold (required singular value is far from zero),
+  //   then the performance can be improved by passing a null pointer to h_RnrmF, i.e. no computation of residual norm.
+  // Comment: calculation of Frobenius norm is expensive and doesn't affect accuracy of the result
+
+  at::cuda::solver::gesvdaStridedBatched<scalar_t>(
+    handle, jobz, rank, m, n, A_data, lda, A_stride, S_data, S_stride, U_data, ldu, U_stride, V_data, ldv, V_stride,
+    reinterpret_cast<scalar_t*>(workspace.get()),
+    lwork, infos.data_ptr<int>(),
+    nullptr,  // cuSOLVER h_RnrmF is not calculated: reinterpret_cast<double*>(residual_frobenius_norm.get()),
+    batchsize);
+}
+
+// We'll copy A inside svd_cusolver_gesvdaStridedBatched
+inline static void svd_cusolver_gesvdaStridedBatched(
+    const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
+    const Tensor& infos, bool full_matrices, bool compute_uv) {
+  // We need to pass a copy of A, as it will be overwritten
+  // gesvdaStridedBatched just knows how to handle m >= n, so in the other case we need to transpose A
+  const auto not_A_H = A.size(-2) >= A.size(-1);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "svd_cuda_gesvdaStridedBatched", [&] {
+    apply_svd_cusolver_gesvdaStridedBatched<scalar_t>(
+      cloneBatchedColumnMajor(not_A_H ? A : A.mH()),
+      not_A_H ? U : V,
+      S,
+      not_A_H ? V : U,
+      infos, full_matrices, compute_uv);
+  });
+}
+
+// Check convergence of gesvdj/gesvdjBatched/gesvdaStridedBatched results.
+// If not converged, return a vector that contains indices of the non-converging batches.
+// If the returned vector is empty, all the matrices are converged.
 // This function will cause a device-host sync.
 std::vector<int64_t> _check_gesvdj_convergence(const Tensor& infos, int64_t non_converging_info) {
   at::Tensor infos_cpu = infos.cpu();
@@ -593,7 +850,12 @@ std::vector<int64_t> _check_gesvdj_convergence(const Tensor& infos, int64_t non_
     // From cusolver doc, if info < 0, the i-th function call parameter is wrong,
     // which means pytorch implementation of cusolver is wrong.
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info_for_batch_i >= 0);
+
+    // In our use case, gesvdj, gesvdjBatched, and gesvdaStridedBatched have the same notations for `info`.
     if (info_for_batch_i == non_converging_info) res.push_back(i);
+
+    // However, it is not the same for gesvd, though we don't use this function to check gesvd convergence either.
+    // If it's implemented some day in the future, this needs to be handled carefully.
   }
 
   return res;
@@ -627,6 +889,7 @@ std::string _format_non_converging_batches(const std::vector<int64_t>& batches) 
 void svd_cusolver(const Tensor& A,
                   const bool full_matrices,
                   const bool compute_uv,
+                  const c10::optional<c10::string_view>& driver,
                   const Tensor& U,
                   const Tensor& S,
                   const Tensor& V,
@@ -637,31 +900,52 @@ void svd_cusolver(const Tensor& A,
   const auto n = A.size(-1);
   const auto k = std::min(m, n);
 
-  // heuristic for using `gesvdjBatched` over `gesvdj`
-  // gesvdjBatched just works for square matrices
-  // Need to pass a copy of A, since A will be rewritten inside the function call
-  if (m <= 32 && n <= 32 && batch_size > 1 && (full_matrices || m == n)) {
-    svd_cusolver_gesvdjBatched(cloneBatchedColumnMajor(A), U, S, V, info, compute_uv);
+  static const char* check_svd_doc = "Check doc at https://pytorch.org/docs/stable/generated/torch.linalg.svd.html";
+
+  // The default heuristic is to use gesvdj driver
+  const auto driver_v = driver.value_or("gesvdj");
+
+  if (driver_v == "gesvd") {
+    svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv);
+  } else if (driver_v == "gesvdj") {
+    if (m <= 32 && n <= 32 && batch_size > 1 && (full_matrices || m == n)) {
+      svd_cusolver_gesvdjBatched(cloneBatchedColumnMajor(A), U, S, V, info, compute_uv);
+    } else {
+      // gesvdj driver may be numerically unstable for large sized matrix
+      svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
+    }
+  } else if (driver_v == "gesvda") {
+    // cuSOLVER: gesvdaStridedBatched is preferred for "tall skinny" (m > n) matrices
+    // We do a transpose here to make it also work for (m < n) matrices.
+    svd_cusolver_gesvdaStridedBatched(A, U, S, V, info, full_matrices, compute_uv);
   } else {
-    svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
+    TORCH_CHECK(false, "torch.linalg.svd: unknown svd driver ", driver_v, " in svd_cusolver computation. ", check_svd_doc);
   }
 
-  // A device-host sync will be performed.
-  const auto gesvdj_convergence_check = _check_gesvdj_convergence(info, k + 1);
+  // Need convergence check
+  if (driver_v != "gesvd") {
+    // A device-host sync will be performed.
+    // Todo: implement the svd_ex variant to not check result convergence, thus removing the device-host sync
+    const auto svd_non_converging_batches = _check_gesvdj_convergence(info, k + 1);
 
-  if (!gesvdj_convergence_check.empty()) {
-    // fall back to gesvd path for those non-converging batches
+    if (!svd_non_converging_batches.empty()) {
+      TORCH_WARN_ONCE("torch.linalg.svd: During SVD computation with the selected cusolver driver, ",
+                      _format_non_converging_batches(svd_non_converging_batches),
+                      " failed to converge. ",
+                      (driver.has_value()
+                        ?  "It is recommended to redo this SVD with another driver. "
+                        : "A more accurate method will be used to compute the SVD as a fallback. "),
+                      check_svd_doc);
 
-    TORCH_WARN_ONCE("During the SVD execution, ",
-                    _format_non_converging_batches(gesvdj_convergence_check),
-                    " failed to converge. ",
-                    "A more accurate method will be used to calculate the SVD as a fallback.");
-    // We'll copy A inside svd_cusolver_gesvd
-    svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv,
-      /* calculate_all_batches = */ false,
-      /* batches = */ gesvdj_convergence_check
-      );
+      // We'll do the fallback if user doesn't specify a driver and the default heuristic doesn't converge well.
+      // However, if user manually chooses a driver, should we just do a warning or a hard crash?
+      if (!driver.has_value()) {
+        svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv, false, svd_non_converging_batches);
+      }
+    }
   }
+
+  // `info` will be checked later at `TORCH_IMPL_FUNC(_linalg_svd_out)` function.
 }
 
 
@@ -1445,26 +1729,34 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
     const auto trans = to_cublas(transpose);
     int n = cuda_int_cast(lu.size(-2), "n");
     int nrhs = cuda_int_cast(b.size(-1), "nrhs");
-    auto batch_size = batchCount(lu);
+    auto batch_size = batchCount(b);
     auto info = at::zeros({1}, lu.options().dtype(kInt));
     auto info_data = info.data_ptr<int>();
     auto b_data = b.data_ptr<scalar_t>();
     auto lu_data = lu.data_ptr<scalar_t>();
     auto pivots_data = pivots.data_ptr<int>();
-    auto pivots_stride = pivots.size(-1);
-    auto lu_stride = matrixStride(lu);
+    auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
+    auto lu_stride = lu.dim() > 2 ? lu.stride(-3) : 0;
     auto b_stride = matrixStride(b);
     int leading_dimension = cuda_int_cast(std::max<int>(1, n), "leading_dimension");
 
+    // lu and pivots tensors can be broadcast to b
+    // here we construct a helper indexing tensor to linearly index into lu and pivots
+    IntArrayRef lu_batch_shape(lu.sizes().data(), lu.dim() - 2);
+    IntArrayRef b_batch_shape(b.sizes().data(), b.dim() - 2);
+    BroadcastLinearIndices lu_index(
+        batchCount(lu), lu_batch_shape, b_batch_shape);
+
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
+      int64_t lu_index_i = lu_index(batch);
       at::cuda::solver::getrs<scalar_t>(
         handle,
         n,
         nrhs,
-        lu_data + batch * lu_stride,
+        lu_data + lu_index_i * lu_stride,
         leading_dimension,
-        pivots_data + batch * pivots_stride,
+        pivots_data + lu_index_i * pivots_stride,
         b_data + batch * b_stride,
         leading_dimension,
         info_data,

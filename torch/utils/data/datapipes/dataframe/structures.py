@@ -1,6 +1,7 @@
-from torch.utils.data import (
-    DataChunk,
-)
+from torch.utils.data.datapipes.datapipe import DataChunk
+
+__all__ = ["DataChunkDF", ]
+
 
 class DataChunkDF(DataChunk):
     """

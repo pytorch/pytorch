@@ -36,7 +36,8 @@ from torch.utils.data.datapipes.map import SequenceWrapper
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
-                                                  load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE)
+                                                  load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
+                                                  IS_MACOS)
 
 
 try:
@@ -659,8 +660,6 @@ class TestProperExitIterableDataset(IterableDataset):
             raise StopIteration
         return torch.tensor(-1000)
 
-    next = __next__  # py2 compatibility
-
 
 # See TestDataLoader.test_proper_exit for usage
 def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
@@ -840,6 +839,21 @@ class BulkLoadingSampler(torch.utils.data.Sampler):
 
     def __len__(self):
         return int(math.ceil(len(self.dataset) / float(self.batch_size)))
+
+
+class TestMultiEpochDataset(IterableDataset):
+    def __init__(self, length):
+        self.length = length
+
+    def __iter__(self):
+        worker_info = torch.utils.data.get_worker_info()
+        assert worker_info is not None
+        worker_id = worker_info.id
+        for idx in range(self.length // worker_info.num_workers):
+            yield worker_id
+
+    def __len__(self):
+        return self.length
 
 
 class CustomList(list):
@@ -1360,6 +1374,7 @@ except RuntimeError as e:
         with self.assertRaisesRegex(AssertionError, "ChainDataset only supports IterableDataset"):
             list(iter(ChainDataset([dataset1, self.dataset])))
 
+    @unittest.skipIf(IS_MACOS, "Not working on macos")
     def test_multiprocessing_contexts(self):
         reference = [
             torch.arange(3),
@@ -1425,6 +1440,19 @@ except RuntimeError as e:
         batch_size = 1
         dataset = SynchronizedSeedDataset(num_workers, batch_size, num_workers)
         self.assertEqual(set(int(batch) for batch in get_dataloader()), set(int(batch) for batch in get_dataloader()))
+
+    def test_multi_epochs_reproducibility(self):
+        num_workers = 2
+        batch_size = 10
+        num_epochs = 3
+
+        dataset = TestMultiEpochDataset(batch_size * num_workers)
+        dataloader = self._get_data_loader(dataset, batch_size=batch_size,
+                                           shuffle=False, num_workers=num_workers)
+
+        for ind in range(num_epochs):
+            for batch_idx, sample in enumerate(dataloader):
+                self.assertEqual(sample.tolist(), [batch_idx % num_workers] * batch_size)
 
     def test_worker_init_fn(self):
         dataset = SeedDataset(4)
@@ -2138,12 +2166,19 @@ class TestDataLoader2(TestCase):
     def test_basics(self):
         # TODO(VitalyFedyunin): This test will start breaking if we remove guaranteed order
         # of traversing workers
-        dp = IterableWrapper(list(range(1000)))
+        dp = IterableWrapper(list(range(1000))).sharding_filter()
         dl = DataLoader(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
         dl2 = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
         dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2, parallelism_mode='thread')
         self.assertEqual(list(dl), list(dl2))
         self.assertEqual(list(dl), list(dl2_threading))
+
+    class Sorter(IterDataPipe):
+        def __init__(self, datapipe):
+            self.datapipe = datapipe
+
+        def __iter__(self):
+            return iter(sorted(self.datapipe))
 
     def test_shuffle(self):
         items = list(range(1000))
@@ -2152,18 +2187,20 @@ class TestDataLoader2(TestCase):
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False)
         self.assertEqual(items, list(dl))
 
-        dl = DataLoader(dp, batch_size=None, num_workers=2, shuffle=False,
-                        worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
-        self.assertEqual(items, list(dl))
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
+        self.assertNotEqual(items, list(dl))
+        self.assertEqual(items, sorted(list(dl)))
 
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
         self.assertNotEqual(items, list(dl))
         self.assertEqual(items, sorted(list(dl)))
 
-        dl = DataLoader(dp, batch_size=None, num_workers=2, shuffle=True,
-                        worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
-        self.assertNotEqual(items, list(dl))
-        self.assertEqual(items, sorted(list(dl)))
+        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
+        self.assertEqual(list(dl), items)
+
+        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
+        self.assertEqual(list(dl), items)
+
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -2306,6 +2343,19 @@ class TestDictDataLoader(TestCase):
             self.assertTrue(sample['a_tensor'].is_pinned())
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_pin_memory_device(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True, pin_memory_device='cuda')
+        for sample in loader:
+            self.assertTrue(sample['a_tensor'].is_pinned(device='cuda'))
+            self.assertTrue(sample['another_dict']['a_number'].is_pinned(device='cuda'))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_pin_memory_with_only_device(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory_device='cuda')
+        for sample in loader:
+            self.assertFalse(sample['a_tensor'].is_pinned(device='cuda'))
+            self.assertFalse(sample['another_dict']['a_number'].is_pinned(device='cuda'))
 
 class DummyDataset(torch.utils.data.Dataset):
     def __init__(self):

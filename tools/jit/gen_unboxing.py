@@ -3,14 +3,16 @@ import argparse
 import os
 import pathlib
 from dataclasses import dataclass
-from tools.codegen.api import unboxing
-from tools.codegen.api.translate import translate
-from tools.codegen.api.types import CppSignatureGroup
-from tools.codegen.api.unboxing import convert_arguments
-from tools.codegen.context import method_with_native_function
-from tools.codegen.gen import parse_native_yaml, cpp_string
-from tools.codegen.model import NativeFunction, NativeFunctionsGroup, Variant
-from tools.codegen.utils import Target, FileManager, mapMaybe, make_file_manager
+from torchgen.api import cpp
+from torchgen.api import unboxing
+from torchgen.api.translate import translate
+from torchgen.api.types import CppSignatureGroup
+from torchgen.api.unboxing import convert_arguments
+from torchgen.context import method_with_native_function
+from torchgen.gen import parse_native_yaml, cpp_string, get_custom_build_selector
+from torchgen.model import NativeFunction, NativeFunctionsGroup, Variant, Argument
+from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import Target, FileManager, mapMaybe, make_file_manager
 from typing import Union, Sequence
 from typing_extensions import Literal
 
@@ -19,9 +21,12 @@ from typing_extensions import Literal
 @dataclass(frozen=True)
 class ComputeUnboxingFunctions:
     target: Union[Literal[Target.DECLARATION], Literal[Target.DEFINITION]]
+    selector: SelectiveBuilder
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> str:
+        if not self.selector.is_root_operator(f"aten::{f.func.name}"):
+            return ""
 
         if self.target is Target.DECLARATION:
             # Note [The ATen Codegen Unboxing API]
@@ -52,7 +57,9 @@ TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack);
             arg_connector = ", "
             # function call and push back to stack
             prefix = "self_base." if sig.method else "at::"
-            translated_args = translate(binding_list, sig.arguments(), method=sig.method)
+            translated_args = translate(
+                binding_list, sig.arguments(), method=sig.method
+            )
             args_str = f"{arg_connector.join(e.expr for e in translated_args)}"
             if len(f.func.returns) == 0:
                 ret_str = ""
@@ -78,21 +85,58 @@ TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack) {{
 # Generates RegisterCodegenUnboxedKernels.cpp.
 @dataclass(frozen=True)
 class ComputeCodegenUnboxedKernels:
+    selector: SelectiveBuilder
+
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> str:
+        if not self.selector.is_root_operator(f"aten::{f.func.name}"):
+            return ""
         # We unconditionally generate function wrappers,
-        sig_group = CppSignatureGroup.from_native_function(
-            f, method=(Variant.method in f.variants)
-        )
+        sig_group = CppSignatureGroup.from_native_function(f, method=False)
 
         sig = sig_group.most_faithful_signature()
 
         # escape double quote in schema, get rid of extra double quotes
         schema = cpp_string(str(sig.func))[1:-1]
 
+        # arguments
+        args = sig.arguments()
+        connector = ",\n\t\t"
+        args_code = []
+        for arg in args:
+            # Using method=False faithful C++ API, so we should not see SelfArgument/TensorOptionsArgument
+            assert isinstance(arg.argument, Argument)
+            if not arg.argument.default:
+                arg_cpp = "c10::IValue(c10::nullopt)"
+            else:
+                # The unboxing code uses the faithful C++ API to avoid the overhead
+                # from wrapping/unwrapping TensorOptios.
+                # However, we would look to include default args for schema parsing.
+                # Default args only show up in the nonfaithful C++ API,
+                arg_default = cpp.default_expr(arg.argument.default, arg.argument.type)
+                if arg_default.startswith("{"):
+                    arg_cpp = f"c10::IntArrayRef({arg_default})"
+                else:
+                    arg_cpp = f"c10::IValue({arg_default})"
+            args_code.append(
+                f"""c10::Argument("{arg.name}", nullptr, c10::nullopt, {arg_cpp})"""
+            )
+
+        returns = f.func.returns
+        returns_code = []
+        for ret in returns:
+            returns_code.append(f"""c10::Argument("{ret.name if ret.name else ""}")""")
         return f"""
+// aten::{schema}
 OperatorGenerator(
-    TORCH_SELECTIVE_SCHEMA("aten::{schema}"),
+    "aten::{f.func.name.name}",
+    "{f.func.name.overload_name}",
+    {{
+        {connector.join(args_code)}
+    }},
+    {{
+        {connector.join(returns_code)}
+    }},
     [](Stack & stack) {{
         RECORD_FUNCTION("{sig.name()}", std::vector<c10::IValue>());
         at::unboxing::{unboxing.name(f)}(stack);
@@ -103,9 +147,10 @@ OperatorGenerator(
 
 
 def gen_unboxing(
-        *,
-        native_functions: Sequence[NativeFunction],
-        cpu_fm: FileManager,
+    *,
+    native_functions: Sequence[NativeFunction],
+    cpu_fm: FileManager,
+    selector: SelectiveBuilder,
 ) -> None:
     def key_func(fn: Union[NativeFunction, NativeFunctionsGroup]) -> str:
         return fn.root_name
@@ -115,7 +160,7 @@ def gen_unboxing(
         native_functions,
         key_fn=key_func,
         env_callable=lambda fn: {
-            "definitions": [ComputeUnboxingFunctions(Target.DEFINITION)(fn)]
+            "definitions": [ComputeUnboxingFunctions(Target.DEFINITION, selector)(fn)]
         },
         num_shards=5,
         sharded_keys={"definitions"},
@@ -124,7 +169,10 @@ def gen_unboxing(
         "UnboxingFunctions.h",
         lambda: {
             "declarations": list(
-                mapMaybe(ComputeUnboxingFunctions(Target.DECLARATION), native_functions)
+                mapMaybe(
+                    ComputeUnboxingFunctions(Target.DECLARATION, selector),
+                    native_functions,
+                )
             ),
         },
     )
@@ -132,8 +180,10 @@ def gen_unboxing(
         "RegisterCodegenUnboxedKernels.cpp",
         native_functions,
         key_fn=key_func,
-        env_callable=lambda fn: {"unboxed_ops": [ComputeCodegenUnboxedKernels()(fn)]},
-        num_shards=5,
+        env_callable=lambda fn: {
+            "unboxed_ops": [ComputeCodegenUnboxedKernels(selector)(fn)]
+        },
+        num_shards=10,
         sharded_keys={"unboxed_ops"},
     )
 
@@ -150,24 +200,48 @@ def main() -> None:
         "-d", "--install_dir", help="output directory", default="build/aten/src/ATen"
     )
     parser.add_argument(
-        '-o',
-        '--output-dependencies',
-        help='output a list of dependencies into the given file and exit')
+        "-o",
+        "--output-dependencies",
+        help="output a list of dependencies into the given file and exit",
+    )
     parser.add_argument(
-        '--dry-run', action='store_true',
-        help='run without writing any files (still updates outputs)')
+        "--dry-run",
+        action="store_true",
+        help="run without writing any files (still updates outputs)",
+    )
+    parser.add_argument(
+        "--op_selection_yaml_path",
+        help="Provide a path to the operator selection (for custom build) YAML "
+        "that contains the information about the set of selected operators "
+        "and their categories (training, ...). Each operator is either a "
+        "full operator name with overload or just a bare operator name. "
+        "The operator names also contain the namespace prefix (e.g. aten::)",
+    )
+    parser.add_argument(
+        "--op_registration_allowlist",
+        nargs="*",
+        help="filter op registrations by the allowlist (if set); "
+        "each item is `namespace`::`operator name` without overload name; "
+        "e.g.: aten::empty aten::conv2d ...",
+    )
 
     options = parser.parse_args()
 
+    selector = get_custom_build_selector(
+        options.op_registration_allowlist,
+        options.op_selection_yaml_path,
+    )
+
     native_yaml_path = os.path.join(options.source_path, "native/native_functions.yaml")
-    parsed_yaml = parse_native_yaml(native_yaml_path)
+    tags_yaml_path = os.path.join(options.source_path, "native/tags.yaml")
+    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path)
     native_functions, backend_indices = (
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,
     )
 
     cpu_fm = make_file_manager(options=options)
-    gen_unboxing(native_functions=native_functions, cpu_fm=cpu_fm)
+    gen_unboxing(native_functions=native_functions, cpu_fm=cpu_fm, selector=selector)
 
     if options.output_dependencies:
         depfile_path = pathlib.Path(options.output_dependencies).resolve()

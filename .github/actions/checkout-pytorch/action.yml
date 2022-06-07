@@ -1,0 +1,44 @@
+name: Checkout PyTorch
+
+description: Clean workspace and check out PyTorch
+
+inputs:
+  no-sudo:
+    description: If set to any value, don't use sudo to clean the workspace
+    required: false
+  submodules:
+    description: Works as stated in actions/checkout, but the default value is recursive
+    required: false
+    default: recursive
+  fetch-depth:
+    description: Works as stated in actions/checkout, but the default value is 0
+    required: false
+    default: "0"
+
+runs:
+  using: composite
+  steps:
+    - name: Clean workspace
+      shell: bash
+      env:
+        NO_SUDO: ${{ inputs.no-sudo }}
+      run: |
+        retry () {
+          $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+        }
+        echo "${GITHUB_WORKSPACE}"
+        if [ -z "${NO_SUDO}" ]; then
+          retry sudo rm -rf "${GITHUB_WORKSPACE}"
+        else
+          retry rm -rf "${GITHUB_WORKSPACE}"
+        fi
+        mkdir "${GITHUB_WORKSPACE}"
+
+    - name: Checkout PyTorch
+      uses: malfet/checkout@silent-checkout
+      with:
+        ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        # --depth=1 for speed, manually fetch history and other refs as necessary
+        fetch-depth: ${{ inputs.fetch-depth }}
+        submodules: ${{ inputs.submodules }}
+        quiet-checkout: true

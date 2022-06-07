@@ -1,16 +1,23 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Histogram.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/sum.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
+
 #include <algorithm>
-#include <mutex>
 #include <numeric>
-#include <tuple>
 #include <functional>
-#include <ATen/TensorIndexing.h>
 
 namespace at { namespace native {
 
@@ -219,7 +226,7 @@ void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor
         bin_edges_contig[dim] = bin_edges[dim].contiguous();
     }
 
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "histogram_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, self.scalar_type(), "histogram_cpu", [&]() {
         histogramdd_cpu_contiguous<scalar_t, bin_algorithm>(
                 hist, bin_edges_contig, reshaped_input, reshaped_weight);
     });
