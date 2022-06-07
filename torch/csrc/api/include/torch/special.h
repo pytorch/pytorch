@@ -565,6 +565,82 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
   return torch::special_softmax(self, dim, dtype);
 }
 
+/// Bessel function of the first kind of order 0.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.bessel_j0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::bessel_j0(x);
+/// ```
+inline Tensor bessel_j0(const Tensor& self) {
+  return torch::special_bessel_j0(self);
+}
+
+inline Tensor& bessel_j0_out(Tensor& result, const Tensor& self) {
+  return torch::special_bessel_j0_out(result, self);
+}
+
+/// Bessel function of the first kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.bessel_j1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::bessel_j1(x);
+/// ```
+inline Tensor bessel_j1(const Tensor& self) {
+  return torch::special_bessel_j1(self);
+}
+
+inline Tensor& bessel_j1_out(Tensor& result, const Tensor& self) {
+  return torch::special_bessel_j1_out(result, self);
+}
+
+/// Bessel function of the second kind of order 0.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.bessel_y0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::bessel_y0(x);
+/// ```
+inline Tensor bessel_y0(const Tensor& self) {
+  return torch::special_bessel_y0(self);
+}
+
+inline Tensor& bessel_y0_out(Tensor& result, const Tensor& self) {
+  return torch::special_bessel_y0_out(result, self);
+}
+
+/// Bessel function of the second kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.bessel_y1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::bessel_y1(x);
+/// ```
+inline Tensor bessel_y1(const Tensor& self) {
+  return torch::special_bessel_y1(self);
+}
+
+inline Tensor& bessel_y1_out(Tensor& result, const Tensor& self) {
+  return torch::special_bessel_y1_out(result, self);
+}
+
 /// Chebyshev polynomial of the first kind.
 ///
 /// See https://pytorch.org/docs/master/special.html#torch.special.chebyshev_polynomial_t.
@@ -635,6 +711,78 @@ inline Tensor& chebyshev_polynomial_u_out(Tensor& output, const Scalar& x, const
 
 inline Tensor& chebyshev_polynomial_u_out(Tensor& output, const Tensor& x, const Scalar& n) {
   return torch::special_chebyshev_polynomial_u_out(output, x, n);
+}
+
+/// Chebyshev polynomial of the third kind.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.chebyshev_polynomial_v.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto n = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::chebyshev_polynomial_v(x, n);
+/// ```
+inline Tensor chebyshev_polynomial_v(const Tensor& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_v(x, n);
+}
+
+inline Tensor chebyshev_polynomial_v(const Scalar& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_v(x, n);
+}
+
+inline Tensor chebyshev_polynomial_v(const Tensor& x, const Scalar& n) {
+  return torch::special_chebyshev_polynomial_v(x, n);
+}
+
+inline Tensor& chebyshev_polynomial_v_out(Tensor& output, const Tensor& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_v_out(output, x, n);
+}
+
+inline Tensor& chebyshev_polynomial_v_out(Tensor& output, const Scalar& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_v_out(output, x, n);
+}
+
+inline Tensor& chebyshev_polynomial_v_out(Tensor& output, const Tensor& x, const Scalar& n) {
+  return torch::special_chebyshev_polynomial_v_out(output, x, n);
+}
+
+/// Chebyshev polynomial of the fourth kind.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.chebyshev_polynomial_w.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto n = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::chebyshev_polynomial_w(x, n);
+/// ```
+inline Tensor chebyshev_polynomial_w(const Tensor& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_w(x, n);
+}
+
+inline Tensor chebyshev_polynomial_w(const Scalar& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_w(x, n);
+}
+
+inline Tensor chebyshev_polynomial_w(const Tensor& x, const Scalar& n) {
+  return torch::special_chebyshev_polynomial_w(x, n);
+}
+
+inline Tensor& chebyshev_polynomial_w_out(Tensor& output, const Tensor& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_w_out(output, x, n);
+}
+
+inline Tensor& chebyshev_polynomial_w_out(Tensor& output, const Scalar& x, const Tensor& n) {
+  return torch::special_chebyshev_polynomial_w_out(output, x, n);
+}
+
+inline Tensor& chebyshev_polynomial_w_out(Tensor& output, const Tensor& x, const Scalar& n) {
+  return torch::special_chebyshev_polynomial_w_out(output, x, n);
 }
 
 /// Physicist’s Hermite polynomial.
@@ -743,6 +891,262 @@ inline Tensor& laguerre_polynomial_l_out(Tensor& output, const Scalar& x, const 
 
 inline Tensor& laguerre_polynomial_l_out(Tensor& output, const Tensor& x, const Scalar& n) {
   return torch::special_laguerre_polynomial_l_out(output, x, n);
+}
+
+/// Legendre polynomial.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.legendre_polynomial_p.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto n = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::legendre_polynomial_p(x, n);
+/// ```
+inline Tensor legendre_polynomial_p(const Tensor& x, const Tensor& n) {
+  return torch::special_legendre_polynomial_p(x, n);
+}
+
+inline Tensor legendre_polynomial_p(const Scalar& x, const Tensor& n) {
+  return torch::special_legendre_polynomial_p(x, n);
+}
+
+inline Tensor legendre_polynomial_p(const Tensor& x, const Scalar& n) {
+  return torch::special_legendre_polynomial_p(x, n);
+}
+
+inline Tensor& legendre_polynomial_p_out(Tensor& output, const Tensor& x, const Tensor& n) {
+  return torch::special_legendre_polynomial_p_out(output, x, n);
+}
+
+inline Tensor& legendre_polynomial_p_out(Tensor& output, const Scalar& x, const Tensor& n) {
+  return torch::special_legendre_polynomial_p_out(output, x, n);
+}
+
+inline Tensor& legendre_polynomial_p_out(Tensor& output, const Tensor& x, const Scalar& n) {
+  return torch::special_legendre_polynomial_p_out(output, x, n);
+}
+
+/// Modified Bessel function of the first kind of order 0.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_i0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::modified_bessel_i0(x);
+/// ```
+inline Tensor modified_bessel_i0(const Tensor& self) {
+  return torch::special_modified_bessel_i0(self);
+}
+
+inline Tensor& modified_bessel_i0_out(Tensor& result, const Tensor& self) {
+  return torch::special_modified_bessel_i0_out(result, self);
+}
+
+/// Modified Bessel function of the first kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_i1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::modified_bessel_i1(x);
+/// ```
+inline Tensor modified_bessel_i1(const Tensor& self) {
+  return torch::special_modified_bessel_i1(self);
+}
+
+inline Tensor& modified_bessel_i1_out(Tensor& result, const Tensor& self) {
+  return torch::special_modified_bessel_i1_out(result, self);
+}
+
+/// Modified Bessel function of the second kind of order 0.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_k0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::modified_bessel_k0(x);
+/// ```
+inline Tensor modified_bessel_k0(const Tensor& self) {
+  return torch::special_modified_bessel_k0(self);
+}
+
+inline Tensor& modified_bessel_k0_out(Tensor& result, const Tensor& self) {
+  return torch::special_modified_bessel_k0_out(result, self);
+}
+
+/// Modified Bessel function of the second kind of order 1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_k1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::modified_bessel_k1(x);
+/// ```
+inline Tensor modified_bessel_k1(const Tensor& self) {
+  return torch::special_modified_bessel_k1(self);
+}
+
+inline Tensor& modified_bessel_k1_out(Tensor& result, const Tensor& self) {
+  return torch::special_modified_bessel_k1_out(result, self);
+}
+
+/// Shifted Chebyshev polynomial of the first kind.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.shifted_chebyshev_polynomial_t.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto n = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::shifted_chebyshev_polynomial_t(x, n);
+/// ```
+inline Tensor shifted_chebyshev_polynomial_t(const Tensor& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_t(x, n);
+}
+
+inline Tensor shifted_chebyshev_polynomial_t(const Scalar& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_t(x, n);
+}
+
+inline Tensor shifted_chebyshev_polynomial_t(const Tensor& x, const Scalar& n) {
+  return torch::special_shifted_chebyshev_polynomial_t(x, n);
+}
+
+inline Tensor& shifted_chebyshev_polynomial_t_out(Tensor& output, const Tensor& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_t_out(output, x, n);
+}
+
+inline Tensor& shifted_chebyshev_polynomial_t_out(Tensor& output, const Scalar& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_t_out(output, x, n);
+}
+
+inline Tensor& shifted_chebyshev_polynomial_t_out(Tensor& output, const Tensor& x, const Scalar& n) {
+  return torch::special_shifted_chebyshev_polynomial_t_out(output, x, n);
+}
+
+/// Shifted Chebyshev polynomial of the second kind.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.shifted_chebyshev_polynomial_u.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto n = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::shifted_chebyshev_polynomial_u(x, n);
+/// ```
+inline Tensor shifted_chebyshev_polynomial_u(const Tensor& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_u(x, n);
+}
+
+inline Tensor shifted_chebyshev_polynomial_u(const Scalar& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_u(x, n);
+}
+
+inline Tensor shifted_chebyshev_polynomial_u(const Tensor& x, const Scalar& n) {
+  return torch::special_shifted_chebyshev_polynomial_u(x, n);
+}
+
+inline Tensor& shifted_chebyshev_polynomial_u_out(Tensor& output, const Tensor& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_u_out(output, x, n);
+}
+
+inline Tensor& shifted_chebyshev_polynomial_u_out(Tensor& output, const Scalar& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_u_out(output, x, n);
+}
+
+inline Tensor& shifted_chebyshev_polynomial_u_out(Tensor& output, const Tensor& x, const Scalar& n) {
+  return torch::special_shifted_chebyshev_polynomial_u_out(output, x, n);
+}
+
+/// Shifted Chebyshev polynomial of the third kind.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.shifted_chebyshev_polynomial_v.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto n = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::shifted_chebyshev_polynomial_v(x, n);
+/// ```
+inline Tensor shifted_chebyshev_polynomial_v(const Tensor& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_v(x, n);
+}
+
+inline Tensor shifted_chebyshev_polynomial_v(const Scalar& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_v(x, n);
+}
+
+inline Tensor shifted_chebyshev_polynomial_v(const Tensor& x, const Scalar& n) {
+  return torch::special_shifted_chebyshev_polynomial_v(x, n);
+}
+
+inline Tensor& shifted_chebyshev_polynomial_v_out(Tensor& output, const Tensor& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_v_out(output, x, n);
+}
+
+inline Tensor& shifted_chebyshev_polynomial_v_out(Tensor& output, const Scalar& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_v_out(output, x, n);
+}
+
+inline Tensor& shifted_chebyshev_polynomial_v_out(Tensor& output, const Tensor& x, const Scalar& n) {
+  return torch::special_shifted_chebyshev_polynomial_v_out(output, x, n);
+}
+
+/// Shifted Chebyshev polynomial of the fourth kind.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.shifted_chebyshev_polynomial_w.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto n = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::shifted_chebyshev_polynomial_w(x, n);
+/// ```
+inline Tensor shifted_chebyshev_polynomial_w(const Tensor& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_w(x, n);
+}
+
+inline Tensor shifted_chebyshev_polynomial_w(const Scalar& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_w(x, n);
+}
+
+inline Tensor shifted_chebyshev_polynomial_w(const Tensor& x, const Scalar& n) {
+  return torch::special_shifted_chebyshev_polynomial_w(x, n);
+}
+
+inline Tensor& shifted_chebyshev_polynomial_w_out(Tensor& output, const Tensor& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_w_out(output, x, n);
+}
+
+inline Tensor& shifted_chebyshev_polynomial_w_out(Tensor& output, const Scalar& x, const Tensor& n) {
+  return torch::special_shifted_chebyshev_polynomial_w_out(output, x, n);
+}
+
+inline Tensor& shifted_chebyshev_polynomial_w_out(Tensor& output, const Tensor& x, const Scalar& n) {
+  return torch::special_shifted_chebyshev_polynomial_w_out(output, x, n);
 }
 
 }} // torch::special
