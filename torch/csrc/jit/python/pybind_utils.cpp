@@ -6,6 +6,7 @@
 
 #include <ATen/ScalarOps.h>
 
+#include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
 
 namespace torch {
@@ -354,12 +355,18 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
+    case TypeKind::QSchemeType: {
+      if (py::isinstance<py::int_>(obj)) {
+        return static_cast<at::QScheme>(py::cast<int64_t>(obj));
+      }
+      throw py::cast_error(
+          c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
+    }
     case TypeKind::DynamicType:
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
     case TypeKind::QuantizerType:
     case TypeKind::VarType:
-    case TypeKind::QSchemeType:
     case TypeKind::AnyListType:
     case TypeKind::AnyTupleType:
     case TypeKind::AnyClassType:
