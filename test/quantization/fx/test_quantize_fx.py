@@ -150,8 +150,6 @@ from torch.testing._internal.common_utils import TemporaryFileName
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
-from torch.testing._internal.common_quantization import ConvModel
-
 from torch.testing import FileCheck
 
 import copy
@@ -465,23 +463,6 @@ class TestFuseFx(QuantizationTestCase):
 
         self.checkGraphModuleNodes(m, expected_node=ns.call_module(torch.nn.intrinsic.modules.fused.LinearReLU))
 
-    def test_fuse_custom_config_dict_validity(self):
-        r"""
-        Verifies that if a user passes an invalid key or makes a typo when
-        constructing a fuse_custom_config_dict, an error will be thrown and
-        users will be notified of what keys are supported.
-        """
-        m = ConvModel().eval()
-        fuse_custom_config_dict = {"typo": None}
-
-        with self.assertRaises(ValueError) as context:
-            m = fuse_fx(m, fuse_custom_config_dict=fuse_custom_config_dict)
-        self.assertTrue(
-            'Expected fuse_custom_config_dict to have the following keys:'
-            in str(context.exception)
-        )
-        self.assertTrue('But found \'typo\' instead.' in str(context.exception))
-
     @unittest.skip("Temprorarily skipping the test case, will enable after the simple"
                    "pattern format is supported")
     def test_fuse_addtional_fuser_method(self):
@@ -501,7 +482,7 @@ class TestFuseFx(QuantizationTestCase):
                 return self.relu(self.conv(x))
 
         m = M().eval()
-        m = fuse_fx(m, fuse_custom_config_dict={
+        m = fuse_fx(m, fuse_custom_config={
             "additional_fuser_method_mapping": {
                 (torch.nn.Conv2d, torch.nn.ReLU): my_conv_relu_fuser
             }
@@ -1397,7 +1378,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 original_m_copy,
                 qconfig_dict,
                 example_inputs=example_inputs,
-                prepare_custom_config_dict=prepare_config)
+                prepare_custom_config=prepare_config)
             # calibration
             m(*example_inputs)
             self.checkGraphModuleNodes(m, expected_node_occurrence=prepare_count_check)
@@ -2046,47 +2027,6 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_dict = self._get_qconfig_dict_for_qconfig_mapping_test(global_qconfig, qconfig1, qconfig2)
         self.assertEqual(qconfig_mapping.to_dict(), qconfig_dict)
 
-    def test_prepare_custom_config_dict_validity(self):
-        r"""
-        Verifies that if a user passes an invalid key or makes a typo when
-        constructing a prepare_custom_config_dict, an error will be thrown and
-        users will be notified of what keys are supported.
-        """
-        m = ConvModel().eval()
-        qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
-        prepare_custom_config_dict = {"typo": None}
-
-        with self.assertRaises(ValueError) as context:
-            m = prepare_fx(
-                m,
-                qconfig_dict,
-                example_inputs=(torch.randn(1, 3, 3, 3),),
-                prepare_custom_config_dict=prepare_custom_config_dict)
-        self.assertTrue(
-            'Expected prepare_custom_config_dict to have the following keys:'
-            in str(context.exception)
-        )
-        self.assertTrue('But found \'typo\' instead.' in str(context.exception))
-
-    def test_convert_custom_config_dict_validity(self):
-        r"""
-        Verifies that if a user passes an invalid key or makes a typo when
-        constructing a convert_custom_config_dict, an error will be thrown and
-        users will be notified of what keys are supported.
-        """
-        m = ConvModel().eval()
-        qconfig_dict = {"module_name_regex": [("conv*", default_qconfig)]}
-        m = prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 3, 3, 3),))
-        convert_custom_config_dict = {"typo": None}
-
-        with self.assertRaises(ValueError) as context:
-            m = convert_fx(m, convert_custom_config_dict=convert_custom_config_dict)
-        self.assertTrue(
-            'Expected convert_custom_config_dict to have the following keys:'
-            in str(context.exception)
-        )
-        self.assertTrue('But found \'typo\' instead.' in str(context.exception))
-
     def test_remove_qconfig(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2271,7 +2211,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m,
             {"": default_qconfig},
             example_inputs=example_inputs,
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
 
         def assertAttrPreserved(m):
             self.assertTrue(hasattr(m, "preserved_attr"))
@@ -2281,7 +2221,7 @@ class TestQuantizeFx(QuantizationTestCase):
         convert_custom_config_dict = {
             "preserved_attributes": ["preserved_attr"]
         }
-        m = convert_fx(m, convert_custom_config_dict=convert_custom_config_dict)
+        m = convert_fx(m, convert_custom_config=convert_custom_config_dict)
         assertAttrPreserved(m)
 
     @skipIfNoFBGEMM
@@ -2481,7 +2421,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 original_m,
                 qconfig_dict,
                 example_inputs=example_inputs,
-                prepare_custom_config_dict=prepare_custom_config_dict)
+                prepare_custom_config=prepare_custom_config_dict)
             # calibration
             m(*example_inputs)
             # all activation observers are inserted in the top level module
@@ -2493,7 +2433,7 @@ class TestQuantizeFx(QuantizationTestCase):
             # check converted/quantized model
             m = convert_fx(
                 m,
-                convert_custom_config_dict=convert_custom_config_dict)
+                convert_custom_config=convert_custom_config_dict)
             if quant_type == QuantType.STATIC:
                 count_check = {
                     ns.call_function(torch.quantize_per_tensor) : 1,
@@ -2587,11 +2527,11 @@ class TestQuantizeFx(QuantizationTestCase):
             m,
             {"": default_qconfig},
             example_inputs=example_inputs,
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
         # make sure it works
         m = convert_fx(
             m,
-            convert_custom_config_dict=convert_custom_config_dict)
+            convert_custom_config=convert_custom_config_dict)
         # make sure it runs
         m(*example_inputs)
 
@@ -2640,7 +2580,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m = prepare_fx(
             m, qconfig_dict,
             example_inputs=({"key": torch.randn(1)},),
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
 
         node_occurrence = {
             ns.call_module(NonTraceable) : 1,
@@ -2773,7 +2713,7 @@ class TestQuantizeFx(QuantizationTestCase):
         mp = torch.ao.quantization.quantize_fx.prepare_fx(
             m, qconfig_dict,
             example_inputs=example_inputs,
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
         self.checkGraphModuleNodes(mp, expected_node_occurrence=prepare_count_check)
         mp(*example_inputs)
         mq = torch.ao.quantization.quantize_fx.convert_fx(mp)
@@ -3635,7 +3575,7 @@ class TestQuantizeFx(QuantizationTestCase):
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
             },
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
 
         # quantizeable node, quantized output
         class M2(torch.nn.Module):
@@ -3657,7 +3597,7 @@ class TestQuantizeFx(QuantizationTestCase):
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
             },
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
 
         # quantizeable node, quantized dictionary output
         class M3(torch.nn.Module):
@@ -3679,7 +3619,7 @@ class TestQuantizeFx(QuantizationTestCase):
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
             },
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
 
     def test_deepcopy_preserve_attributes(self):
         class M(torch.nn.Module):
@@ -3695,11 +3635,11 @@ class TestQuantizeFx(QuantizationTestCase):
             m,
             {"": default_qconfig},
             example_inputs=(torch.randn(1),),
-            prepare_custom_config_dict={"preserved_attributes": ["attr"]})
+            prepare_custom_config={"preserved_attributes": ["attr"]})
         self.assertTrue(hasattr(m, "attr"))
         m2 = copy.deepcopy(m)
         self.assertTrue(hasattr(m2, "attr"))
-        m = convert_fx(m, convert_custom_config_dict={"preserved_attributes": ["attr"]})
+        m = convert_fx(m, convert_custom_config={"preserved_attributes": ["attr"]})
         self.assertTrue(hasattr(m, "attr"))
         m2 = copy.deepcopy(m)
         self.assertTrue(hasattr(m2, "attr"))
@@ -4491,11 +4431,11 @@ class TestQuantizeFx(QuantizationTestCase):
         example_inputs = (torch.randn(2, 2),)
         mod_prep = torch.ao.quantization.quantize_fx.prepare_qat_fx(
             mod.train(), qconfig_dict, example_inputs=example_inputs,
-            prepare_custom_config_dict=prepare_custom_config_dict
+            prepare_custom_config=prepare_custom_config_dict
         )
         mod_prep = torch.ao.quantization.quantize_fx.prepare_qat_fx(
             mod.train(), qconfig_dict, example_inputs=example_inputs,
-            prepare_custom_config_dict=prepare_custom_config_dict
+            prepare_custom_config=prepare_custom_config_dict
         )
         self.assertTrue(
             isinstance(mod_prep.untraceable_module_class.linear, torch.nn.Linear)
@@ -5374,7 +5314,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         mp = torch.ao.quantization.quantize_fx.prepare_qat_fx(
             m, {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')},
             example_inputs=(torch.randn(1),),
-            prepare_custom_config_dict={"input_quantized_idxs": [0]})
+            prepare_custom_config={"input_quantized_idxs": [0]})
         expected_node_occurrence = {
             ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 1,
         }
@@ -6159,7 +6099,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         example_inputs = (torch.randn(1, 3, 3, 3),)
         prepared = prepare_fx(
             m, qconfig_dict, example_inputs=example_inputs,
-            prepare_custom_config_dict={"input_quantized_idxs": [0]})
+            prepare_custom_config={"input_quantized_idxs": [0]})
 
         # not runnable
         quantized = convert_fx(prepared)

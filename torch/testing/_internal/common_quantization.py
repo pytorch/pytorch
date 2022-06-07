@@ -865,7 +865,7 @@ class QuantizationTestCase(TestCase):
             prepared = prepare(
                 model, qconfig_dict,
                 example_inputs=inputs,
-                prepare_custom_config_dict=prepare_custom_config_dict,
+                prepare_custom_config=prepare_custom_config_dict,
                 backend_config_dict=backend_config_dict)
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
