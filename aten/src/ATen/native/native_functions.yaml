@@ -9686,6 +9686,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: softplus_out
+    MPS: softplus_out_mps
 
 - func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
   structured_delegate: softplus.out

@@ -2681,16 +2681,18 @@ class TestNLLLoss(TestCase):
 
     def test_divmode(self):
         def helper(shape, rounding_mode):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            mps_x = cpu_x.detach().clone().to('mps')
-            # clamp to avoid division by 0
-            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False).clamp_min_(0.1)
-            mps_y = cpu_y.detach().clone().to('mps')
+            for dtype in [torch.float32]:
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+                mps_x = cpu_x.detach().clone().to('mps')
+                # clamp to avoid division by 0
+                cpu_y = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+                mps_y = cpu_y.detach().clone().to('mps')
 
-            result_div_cpu = torch.div(cpu_x, cpu_y, rounding_mode=rounding_mode)
-            result_div_mps = torch.div(mps_x, mps_y, rounding_mode=rounding_mode)
-            self.assertEqual(result_div_mps, result_div_cpu)
+                result_div_cpu = torch.div(cpu_x, cpu_y, rounding_mode=rounding_mode)
+                result_div_mps = torch.div(mps_x, mps_y, rounding_mode=rounding_mode)
+                self.assertEqual(result_div_mps, result_div_cpu)
 
+        helper((2, 8, 4, 5), None)
         helper((2, 8, 4, 5), "floor")
         helper((2, 8, 4, 5), "trunc")
 
@@ -3152,6 +3154,23 @@ class TestNLLLoss(TestCase):
         for shape in [[], (2, 3), (2, 8, 4, 5)]:
             for alpha in [0.000001, 1.0, 2.3, 0.34, 23]:
                 helper(shape, alpha)
+
+    # Test softplus
+
+    def test_softplus(self):
+        def helper(shape):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            softplus_result = torch.nn.Softplus(beta=0.5, threshold=0.5)(x)
+            softplus_result_cpu = torch.nn.Softplus(beta=0.5, threshold=0.5)(cpu_x)
+
+            self.assertEqual(softplus_result, softplus_result_cpu)
+
+        # Test empty shape too
+        for shape in [(), (2, 3), (10, 10), (2, 3, 4, 5)]:
+            helper(shape)
+
     # Test silu
 
     def test_silu(self):
@@ -3920,38 +3939,70 @@ class TestNLLLoss(TestCase):
     # Test add
     def test_add_binary_op(self):
         def helper(shape, alpha):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
+            for dtype in [torch.float16, torch.float32]:
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+                mps_x = cpu_x.detach().clone().to('mps')
 
-            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            y = cpu_y.detach().clone().to('mps')
+                cpu_y = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+                mps_y = cpu_y.detach().clone().to('mps')
 
-            cpu_out = torch.add(cpu_x, cpu_y, alpha=alpha)
-            out = torch.add(x, y, alpha=alpha)
+                cpu_out = torch.add(cpu_x, cpu_y, alpha=alpha)
+                mps_out = torch.add(mps_x, mps_y, alpha=alpha)
+                # fp16 isn't accurate when alpha is passed
+                # TODO: remove or fix 'tol' when we fix problems with fp16
+                tol = 1e-3 if dtype is torch.float16 else None
+                self.assertEqual(mps_out, cpu_out, rtol=tol, atol=tol)
+                # create a scalar tensor
+                cpu_s = torch.tensor(2.3, device='cpu', dtype=dtype, requires_grad=False)
+                mps_s = cpu_s.detach().clone().to('mps')
+                # primary tensor is scalar
+                self.assertEqual(torch.add(cpu_s, cpu_y), torch.add(mps_s, mps_y))
+                # secondary tensor is scalar
+                self.assertEqual(torch.add(cpu_x, cpu_s), torch.add(mps_x, mps_s))
 
-            self.assertEqual(out, cpu_out)
-
+        helper((2, 8, 4, 5), 1.0)
+        helper((2, 8, 4, 5), 0.0)
         helper((2, 8, 4, 5), 0.1)
         helper((2, 8, 3, 5), 0.1)
         helper((2, 8, 3, 5), 0.2)
 
     # Test add
     def test_add_scalars(self):
-        def helper(alpha=1.0):
-            cpu_x = torch.tensor(2.3, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
+        def helper(alpha):
+            for dtype in [torch.float16, torch.float32]:
+                cpu_x = torch.tensor(2.3, device='cpu', dtype=dtype, requires_grad=False)
+                x = cpu_x.detach().clone().to('mps')
 
-            cpu_y = torch.tensor(3.4, device='cpu', dtype=torch.float, requires_grad=False)
-            y = cpu_y.detach().clone().to('mps')
+                cpu_y = torch.tensor(3.4, device='cpu', dtype=dtype, requires_grad=False)
+                y = cpu_y.detach().clone().to('mps')
 
-            cpu_out = torch.add(cpu_x, cpu_y, alpha=alpha)
-            out = torch.add(x, y, alpha=alpha)
+                cpu_out = torch.add(cpu_x, cpu_y, alpha=alpha)
+                out = torch.add(x, y, alpha=alpha)
+                # fp16 isn't accurate when alpha is passed
+                tol = 1e-3 if dtype is torch.float16 else None
+                self.assertEqual(out, cpu_out, rtol=tol, atol=tol)
 
-            self.assertEqual(out, cpu_out)
-
-        helper()
+        helper(1.0)
+        helper(0.0)
         helper(0.1)
         helper(0.2)
+
+    def test_unary_ops(self):
+        def helper(shape, op):
+            for dtypef in [torch.float32]:
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtypef, requires_grad=False)
+                mps_x = cpu_x.detach().clone().to('mps')
+                self.assertEqual(op(cpu_x), op(mps_x))
+
+            for dtypei in [torch.int32, torch.int16]:
+                cpu_x = torch.randint(0, 1000, shape, device='cpu', dtype=dtypei, requires_grad=False)
+                mps_x = cpu_x.to('mps')
+                self.assertEqual(op(cpu_x), op(mps_x), rtol=1e-4, atol=1e-4)
+
+        helper((2, 8, 4, 5), torch.exp)
+        helper((2, 8, 3, 5), torch.exp2)
+        helper((2, 8, 3, 5), torch.log)
+        helper((2, 8, 3, 5), torch.cos)
 
     def test_atan2(self):
         def helper(shape):
