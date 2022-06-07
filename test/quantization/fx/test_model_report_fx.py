@@ -1,36 +1,14 @@
+# -*- coding: utf-8 -*-
+# Owner(s): ["ao"]
+
 import torch
 import torch.ao.quantization.quantize_fx
-import torch.nn as nn
 from torch.ao.quantization import QConfigMapping
-
 from torch.ao.quantization.fx._model_report._detector import _detect_per_channel
-from torch.fx import GraphModule
 
 from torch.testing._internal.common_quantization import (
     ConvModel,
-    ConvReluAddModel,
-    ConvReluConvModel,
-    ConvReluModel,
-    EmbeddingModule,
-    FunctionalConvReluConvModel,
-    FunctionalConvReluModel,
-    FunctionalLinearAddModel,
-    FunctionalLinearReluLinearModel,
-    FunctionalLinearReluModel,
-    LinearAddModel,
-    LinearReluAddModel,
-    LinearReluLinearModel,
-    LinearReluModel,
-    NodeSpec as ns,
     QuantizationTestCase,
-    SingleLayerFunctionalConvModel,
-    SingleLayerFunctionalLinearModel,
-    SingleLayerLinearModel,
-    skipIfNoFBGEMM,
-    TwoLayerConvModel,
-    TwoLayerFunctionalConvModel,
-    TwoLayerFunctionalLinearModel,
-    TwoLayerLinearModel,
 )
 
 
