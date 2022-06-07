@@ -65,6 +65,7 @@ jobs:
           auto-update-conda: true
           python-version: 3.8
           activate-environment: build
+          miniconda-version: 4.7.12
 
       - name: Install macOS homebrew dependencies
         run: |
@@ -76,6 +77,7 @@ jobs:
         run: .github/scripts/parse_ref.py
 
       - name: Test
+        id: test
         run: |
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
           export COMMIT_MESSAGES
@@ -91,7 +93,7 @@ jobs:
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
-        if: always()
+        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}

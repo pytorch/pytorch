@@ -77,27 +77,50 @@ extern "C"
   pym.def(
       "_save_mobile_module",
       [](const torch::jit::mobile::Module& module,
-         const std::string& filename) {
-        return torch::jit::save_mobile_module(module, filename);
+         const std::string& filename,
+         const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+        return torch::jit::save_mobile_module(module, filename, _extra_files);
       });
   pym.def(
       "_save_jit_module",
-      [](const torch::jit::Module& module, const std::string& filename) {
-        return torch::jit::save_jit_module(module, filename);
+      [](const torch::jit::Module& module,
+         const std::string& filename,
+         const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+        return torch::jit::save_jit_module(module, filename, _extra_files);
       });
   pym.def(
       "_save_mobile_module_to_bytes",
-      [](const torch::jit::mobile::Module& module) {
-        auto detached_buffer = torch::jit::save_mobile_module_to_bytes(module);
+      [](const torch::jit::mobile::Module& module,
+         const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+        auto detached_buffer =
+            torch::jit::save_mobile_module_to_bytes(module, _extra_files);
         return py::bytes(
             reinterpret_cast<char*>(detached_buffer.data()),
             detached_buffer.size());
       });
-  pym.def("_save_jit_module_to_bytes", [](const torch::jit::Module& module) {
-    auto detached_buffer = torch::jit::save_jit_module_to_bytes(module);
-    return py::bytes(
-        reinterpret_cast<char*>(detached_buffer.data()),
-        detached_buffer.size());
-  });
+  pym.def(
+      "_save_jit_module_to_bytes",
+      [](const torch::jit::Module& module,
+         const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+        auto detached_buffer =
+            torch::jit::save_jit_module_to_bytes(module, _extra_files);
+        return py::bytes(
+            reinterpret_cast<char*>(detached_buffer.data()),
+            detached_buffer.size());
+      });
+  pym.def(
+      "_get_module_info_from_flatbuffer", [](std::string flatbuffer_content) {
+        py::gil_scoped_acquire acquire;
+        py::dict result;
+        mobile::ModuleInfo minfo =
+            torch::jit::get_module_info_from_flatbuffer(&flatbuffer_content[0]);
+        result["bytecode_version"] = minfo.bytecode_version;
+        result["operator_version"] = minfo.operator_version;
+        result["function_names"] = minfo.function_names;
+        result["type_names"] = minfo.type_names;
+        result["opname_to_num_args"] = minfo.opname_to_num_args;
+        return result;
+      });
+
   return module;
 }

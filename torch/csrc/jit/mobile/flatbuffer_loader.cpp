@@ -213,8 +213,12 @@ mobile::Module FlatbufferLoader::parseModule(
   }
 
   module_parsed_ = true;
-  return mobile::Module(module_ivalue.toObject(), mcu_);
+  auto m = mobile::Module(module_ivalue.toObject(), mcu_);
+  m.set_min_operator_version(module->operator_version());
+  m.set_bytecode_version(module->bytecode_version());
+  return m;
 }
+
 namespace {
 void appendUpgraderFunctions(mobile::Function* function) {
 #ifndef DISABLE_UPGRADER
@@ -240,8 +244,6 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     function->append_constant(getIValue(i));
   }
 
-  std::unordered_set<std::string> unsupported_op_names;
-
   appendUpgraderFunctions(function.get());
   // 2. Decides if upgrader is needed
   const uint32_t operator_version = module_->operator_version();
@@ -254,19 +256,13 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
       num_args = op->num_args_serialized();
     }
 
-    auto op_found = function->append_operator(
+    function->append_operator(
         op->name()->str(), op->overload_name()->str(), num_args);
-
-    if (!op_found) {
-      unsupported_op_names.emplace(
-          op->name()->str() + "/" + op->overload_name()->str());
-    }
   }
 
-  TORCH_CHECK(
-      unsupported_op_names.empty(),
-      "Unsupported ops: ",
-      c10::Join(", ", unsupported_op_names));
+  if (should_load_operators_) {
+    function->initialize_operators(true);
+  }
 
   for (const auto i : *method->type_annotations()) {
     function->append_type(getOrCreateTypeAnnotations(i));
@@ -583,8 +579,16 @@ c10::Storage FlatbufferLoader::getStorage(uint32_t index) {
   if (!storage_loaded_[index]) {
     auto* storage = module_->storage_data()->GetMutableObject(index);
     size_t size = storage->data()->size();
-    void* ptr = static_cast<void*>(storage->mutable_data()->data());
-    at::DataPtr data(ptr, ptr, deleteNothing2, DeviceType::CPU);
+
+    at::DataPtr data;
+    if (should_copy_tensor_memory_) {
+      auto* allocator = at::GetCPUAllocator();
+      data = allocator->allocate(size);
+      memcpy(data.get(), storage->data()->data(), size);
+    } else {
+      void* ptr = static_cast<void*>(storage->mutable_data()->data());
+      data = at::DataPtr(ptr, ptr, deleteNothing2, DeviceType::CPU);
+    }
     storages_[index] =
         c10::Storage(c10::Storage::use_byte_size_t(), size, std::move(data));
     storage_loaded_[index] = true;
@@ -678,8 +682,11 @@ mobile::Module parse_and_initialize_mobile_module(
 
 mobile::Module initialize_mobile_module(
     mobile::serialization::Module* flatbuffer_module,
-    c10::optional<at::Device>) {
-  mobile::Module m = FlatbufferLoader().parseModule(flatbuffer_module);
+    c10::optional<at::Device>,
+    bool should_copy_tensor_memory) {
+  auto flatbufferLoader = FlatbufferLoader();
+  flatbufferLoader.setShouldCopyTensorMemory(should_copy_tensor_memory);
+  mobile::Module m = flatbufferLoader.parseModule(flatbuffer_module);
   return m;
 }
 
@@ -712,6 +719,14 @@ uint64_t get_bytecode_version(const std::string& filename) {
       "Format error");
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
   return flatbuffer_module->bytecode_version();
+}
+
+mobile::ModuleInfo get_module_info_from_flatbuffer(char* flatbuffer_content) {
+  auto* ff_module = mobile::serialization::GetMutableModule(flatbuffer_content);
+  FlatbufferLoader loader;
+  loader.setShouldLoadOperators(false);
+  mobile::Module m = loader.parseModule(ff_module);
+  return mobile::get_module_info(m);
 }
 
 } // namespace jit
