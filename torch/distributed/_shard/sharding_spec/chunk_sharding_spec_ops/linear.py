@@ -296,19 +296,25 @@ def _handle_row_wise_sharding_tensor(
     all_to_all_single(
         gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg
     )
-    gathered_input = gathered_input.transpose(0, -1)
 
-    # Perform local matmuls for all shards
-    results = []
+    # Reshape gathered_input appropriately for matmul
     shard_size = local_shard_t.size()[0]
-    for r in range(world_size):
-        inp = torch.narrow(gathered_input, -1, r * shard_size, shard_size)
-        results.append(
-            inp.matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias)
-        )
+    reshaped_inputs = [
+        torch.narrow(gathered_input, 0, r * shard_size, shard_size).transpose(0, -1)
+        for r in range(world_size)
+    ]
+    reshaped_input = torch.cat(reshaped_inputs)
+    if reshaped_input.dim() == 1:
+        reshaped_input = reshaped_input.view(-1, local_shard_t.size(0))
+
+    # Perform appropriate local matmul
+    if reshaped_input.dim() <= 2:
+        result = torch.addmm(_BiasTensorPartial.apply(world_size, bias), reshaped_input, local_shard_t)
+    else:
+        result = reshaped_input.matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias)
 
     # Return the partial local result.
-    return _PartialTensor(torch.cat(results), pg)
+    return _PartialTensor(result, pg)
 
 
 def _handle_row_wise_sharding_sharded_tensor(
