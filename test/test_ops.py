@@ -376,13 +376,15 @@ class TestCommon(TestCase):
                     if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
                         prims.utils.compare_tensor_meta(a, b)
 
-    def _ref_test_helper(self, ctx, device, dtype, op):
+    def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False):
         if dtype is torch.chalf:
             self.skipTest("Skipping chalf until it has more operator support")
 
         # NOTE: this test works by comparing the reference
         ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
+            if isinstance(sample.input, torch.Tensor) and sample.input.numel() == 0 and skip_zero_numel:
+                continue
             with ctx():
                 ref_result = op(sample.input, *sample.args, **sample.kwargs)
             torch_result = op.torch_opinfo(sample.input, *sample.args, **sample.kwargs)
@@ -491,6 +493,35 @@ class TestCommon(TestCase):
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
         # Direct calls to refs and prims are not translated
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyCUDA
+    @ops(python_ref_db)
+    @parametrize('executor', ['aten', 'nvfuser'])
+    def test_python_ref_executor(self, device, dtype, op, executor):
+        # TODO: Not all dtypes are supported with nvfuser
+        from torch._prims.utils import _torch_dtype_to_nvfuser_dtype_map
+        if executor == "nvfuser" and dtype not in _torch_dtype_to_nvfuser_dtype_map:
+            raise unittest.SkipTest(f"nvfuser doesn't support dtype {dtype}")
+
+        # nvFuser tests are rather slow so we only run int32 and float32 types
+        if executor == "nvfuser" and dtype not in [torch.int32, torch.float32]:
+            raise unittest.SkipTest("skipped for speed")
+
+        if executor == "nvfuser" and not op.supports_nvfuser:
+            raise unittest.SkipTest(f"{op.name} doesn't support nvfuser")
+
+        from torch._prims.executor import make_traced
+        from copy import copy
+        op = copy(op)
+        op.op = partial(make_traced(op.op), executor=executor)
+        self._ref_test_helper(
+            contextlib.nullcontext,
+            device,
+            dtype,
+            op,
+            skip_zero_numel=(executor == "nvfuser"),  # nvfuser doesn't support zero-sized tensors
+        )
 
     @skipMeta
     @onlyNativeDeviceTypes
