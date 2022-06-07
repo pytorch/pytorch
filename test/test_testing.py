@@ -27,7 +27,6 @@ from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_modules import modules, module_db
-from torch.testing._comparison import TensorLikePair
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -841,6 +840,8 @@ class TestAssertClose(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "unexpected exception"):
             torch.testing.assert_close(actual, expected)
+
+
 
 
 class TestAssertCloseMultiDevice(TestCase):
