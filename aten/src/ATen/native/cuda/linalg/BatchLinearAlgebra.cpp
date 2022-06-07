@@ -1920,7 +1920,7 @@ static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& piv
 #if !AT_MAGMA_ENABLED()
   TORCH_CHECK(
       false,
-      "Calling torch.lu on a CUDA tensor requires compiling ",
+      "Calling linalg.lu_factor on a CUDA tensor requires compiling ",
       "PyTorch with MAGMA. Please rebuild with MAGMA.");
 #else
   auto input_data = input.data_ptr<scalar_t>();

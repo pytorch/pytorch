@@ -1343,7 +1343,7 @@ bool _requires_fw_or_bw_grad(const Tensor& input) {
 // Below of the definitions of the functions operating on a batch that are going to be dispatched
 // in the main helper functions for the linear algebra operations
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // Solves a system of linear equations matmul(input, x) = other in-place
 // LAPACK/MAGMA error codes are saved in 'infos' tensor, they are not checked here
@@ -2073,6 +2073,17 @@ std::tuple<Tensor, Tensor> linalg_lu_factor(const Tensor& A, bool pivot) {
 
 // TODO Deprecate this function in favour of linalg_lu_factor_ex
 std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool) {
+   TORCH_WARN_ONCE(
+    "torch.lu is deprecated in favor of torch.linalg.lu_factor / torch.linalg.lu_factor_ex and will be ",
+    "removed in a future PyTorch release.\n",
+    "LU, pivots = torch.lu(A, compute_pivots)\n",
+    "should be replaced with\n",
+    "LU, pivots = torch.linalg.lu_factor(A, compute_pivots)\n",
+    "and\n",
+    "LU, pivots, info = torch.lu(A, compute_pivots, get_infos=True)\n",
+    "should be replaced with\n",
+    "LU, pivots, info = torch.linalg.lu_factor_ex(A, compute_pivots)"
+  );
   return at::linalg_lu_factor_ex(self, compute_pivots, false);
 }
 
