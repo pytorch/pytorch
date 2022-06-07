@@ -99,7 +99,7 @@ def dropout(
 
 
 # elu is implemented specially because it has an alpha argument
-@register_decomposition(torch.ops.aten.elu)
+# This cannot be used as a decomposition because the aten op takes in 2 extra kwargs
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -110,7 +110,7 @@ def elu(
     """
     Reference implementation of torch.nn.functional.elu
     """
-
+    import pdb; pdb.set_trace()
     if inplace:
         raise NotImplementedError
 
@@ -192,7 +192,6 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.selu
     """
-
     if inplace:
         raise NotImplementedError
 
