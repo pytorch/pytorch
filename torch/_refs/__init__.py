@@ -972,6 +972,7 @@ def _logical_not(a: TensorLikeType):
         a = a != 0
     return ~a
 
+
 logical_not = _make_elementwise_unary_reference(
     _logical_not,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
