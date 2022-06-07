@@ -1272,11 +1272,10 @@ def kl_div_backward(
     reduction: int = Reduction.MEAN.value,
     log_target: bool = False
 ) -> Tensor:
-    grad_expand = grad_output.expand_as(self)
     if not log_target:
         grad_input = torch.where(target > 0, -target * grad_output, 0)
     else:
-        grad_input = -target.exp() * grad_expand
-    if reduction == Reduction.MEAN:
+        grad_input = -target.exp() * grad_output
+    if reduction == Reduction.MEAN.value:
         return grad_input / self.numel()
     return grad_input
