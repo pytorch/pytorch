@@ -9,14 +9,10 @@ from operator import methodcaller
 import torch
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol, skipMeta)
-from torch.testing._internal.common_modules import module_db, modules
+from torch.testing._internal.common_modules import module_db, modules, TrainEvalMode
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck, skipIfMps,
-    parametrize)
+    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck, skipIfMps)
 from unittest.mock import patch, call
-
-# Decorator for parametrizing module tests across train / eval modes.
-parametrize_training = parametrize("training", [False, True], lambda t: 'train_mode' if t else 'eval_mode')
 
 
 class TestModule(TestCase):
@@ -46,7 +42,6 @@ class TestModule(TestCase):
 
     @skipIfMps  # the test doesn't work on MPS as double types are not supported
     @modules(module_db)
-    @parametrize_training
     def test_forward(self, device, dtype, module_info, training):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
@@ -86,7 +81,6 @@ class TestModule(TestCase):
     # Tests passing factory kwargs (e.g. device / dtype) during module instantiation.
     # They should be applied to any created parameters and buffers.
     @modules(module_db)
-    @parametrize_training
     def test_factory_kwargs(self, device, dtype, module_info, training):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
@@ -144,7 +138,6 @@ class TestModule(TestCase):
 
     @onlyCUDA
     @modules(module_db)
-    @parametrize_training
     def test_multiple_device_transfer(self, device, dtype, module_info, training):
         module_cls = module_info.module_cls
         module_inputs_device = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
@@ -201,7 +194,6 @@ class TestModule(TestCase):
 
 
     @modules(module_db)
-    @parametrize_training
     def test_repr(self, device, dtype, module_info, training):
         # Test module can be represented with repr and str without errors.
         module_cls = module_info.module_cls
@@ -219,7 +211,6 @@ class TestModule(TestCase):
 
     @skipIfMps
     @modules(module_db)
-    @parametrize_training
     def test_pickle(self, device, dtype, module_info, training):
         # Test that module can be pickled and unpickled.
         module_cls = module_info.module_cls
@@ -253,7 +244,6 @@ class TestModule(TestCase):
     @skipMeta
     @modules([module_info for module_info in module_db
               if 'inplace' in signature(module_info.module_cls).parameters])
-    @parametrize_training
     def test_check_inplace(self, device, dtype, module_info, training):
         # Check if the inplace variant of the module gives the same result as the out of place
         # variant.
@@ -335,7 +325,6 @@ class TestModule(TestCase):
 
     @skipIfMps
     @modules(module_db)
-    @parametrize_training
     def test_non_contiguous_tensors(self, device, dtype, module_info, training):
         # Check modules work with non-contiguous tensors
 
@@ -431,11 +420,11 @@ class TestModule(TestCase):
                 self.assertEqual(param_grad, default_param_grad)
 
 
-    def _test_gradients_helper(self, device, dtype, module_info, check):
+    def _test_gradients_helper(self, device, dtype, module_info, training, check):
         # Check gradients
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
-                                                       requires_grad=True, training=True)
+                                                       requires_grad=True, training=training)
         # === Set nondet tol for gradcheck to user-defined value if on CUDA and cudNN is enabled
         gradcheck_nondet_tol = 0.0
         if (torch.device(device).type == 'cuda' and torch.backends.cudnn.enabled):
@@ -449,6 +438,7 @@ class TestModule(TestCase):
             args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
             m = module_cls(*args, **kwargs)
             m.to(device).to(dtype)
+            m.train(training)
 
             params = tuple(m.parameters())
 
@@ -486,19 +476,18 @@ class TestModule(TestCase):
 
 
     @modules(module_db, allowed_dtypes=[torch.double])
-    def test_grad(self, device, dtype, module_info):
-        self._test_gradients_helper(device, dtype, module_info, gradcheck)
+    def test_grad(self, device, dtype, module_info, training):
+        self._test_gradients_helper(device, dtype, module_info, training, gradcheck)
 
     @modules([m for m in module_db if m.supports_gradgrad],
              allowed_dtypes=[torch.double])
-    def test_gradgrad(self, device, dtype, module_info):
-        self._test_gradients_helper(device, dtype, module_info, gradgradcheck)
+    def test_gradgrad(self, device, dtype, module_info, training):
+        self._test_gradients_helper(device, dtype, module_info, training, gradgradcheck)
 
     @onlyCUDA
     @toleranceOverride({torch.float32: tol(5e-2, 0),
                         torch.float64: tol(4e-4, 0)})
     @modules(module_db)
-    @parametrize_training
     def test_cpu_gpu_parity(self, device, dtype, module_info, training):
         # Test cpu and gpu results are the same
         module_cls = module_info.module_cls
@@ -573,7 +562,6 @@ class TestModule(TestCase):
 
     @skipIfMps
     @modules(module_db)
-    @parametrize_training
     def test_memory_format(self, device, dtype, module_info, training):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
@@ -666,6 +654,43 @@ class TestModule(TestCase):
                         # === Check mem format of output. ===
                         _check_out_mem_format(outputs, input_mem_format, module_mem_format)
 
+    # Test whether train and eval modes differ for each module. Use to verify
+    # that the ModuleInfo entry flag is correct.
+    @skipIfMps  # the test doesn't work on MPS as double types are not supported
+    @modules(module_db, train_eval_mode=TrainEvalMode.train_only)
+    def test_if_train_and_eval_modes_differ(self, device, dtype, module_info, training):
+        module_cls = module_info.module_cls
+        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                       requires_grad=False, training=training)
+
+        # Run forward inputs through to see if the training flag is accessed during forward.
+        for module_input in module_inputs:
+            if module_input.forward_input is None:
+                continue
+
+            with freeze_rng_state():
+                # === Instantiate the module. ===
+                args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+                m = module_cls(*args, **kwargs)
+                m.to(device).to(dtype)
+                m.train(training)
+
+                # Remove training attribute and see if forward still works.
+                delattr(m, 'training')
+
+                # === Do forward pass. ===
+                try:
+                    args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+                    m(*args, **kwargs)
+                except AttributeError as e:
+                    if "'training'" in str(e):
+                        self.assertTrue(module_info.train_and_eval_differ,
+                                        f"The ModuleInfo entry for {module_info.name} has "
+                                        "train_and_eval_differ=False, but the training mode was found to "
+                                        "affect the forward pass. Consider setting train_and_eval_differ=True "
+                                        "for this ModuleInfo entry.")
+                    else:
+                        raise
 
 instantiate_device_type_tests(TestModule, globals())
 
