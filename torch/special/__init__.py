@@ -20,6 +20,8 @@ __all__ = [
     'exp2',
     'expit',
     'expm1',
+    'exponential_integral_e1',
+    'exponential_integral_ei',
     'gammainc',
     'gammaincc',
     'gammaln',
@@ -1009,6 +1011,34 @@ Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
 Args:
     {input}
     n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+exponential_integral_e1 = _add_docstr(_special.special_exponential_integral_e1,
+                                      r"""
+exponential_integral_e1(input, *, out=None) -> Tensor
+
+Exponential integral :math:`\text{E1}\left(\text{input}\right)`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+exponential_integral_ei = _add_docstr(_special.special_exponential_integral_ei,
+                                      r"""
+exponential_integral_ei(input, *, out=None) -> Tensor
+
+Exponential integral :math:`\text{Ei}\left(\text{input}\right)`.
+
+""" + r"""
+Args:
+    {input}
 
 Keyword args:
     {out}

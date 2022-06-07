@@ -2178,6 +2178,12 @@ static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
 }
 
 template<typename T>
+static inline C10_HOST_DEVICE T exponential_integral_e1_forward(T x); // T exponential_integral_ei_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T exponential_integral_ei_forward(T x); // T exponential_integral_ei_forward(T x)
+
+template<typename T>
 static inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
     static const T PP[] = {
             +7.96936729297347051624e-04,
@@ -2833,6 +2839,121 @@ template<typename T, bool is_cuda=false>
 static inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, T n) {
     return chebyshev_polynomial_w_forward(x, static_cast<int64_t>(n));
 } // chebyshev_polynomial_w_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T exponential_integral_e1_forward(T x) {
+    if (x < T(0)) {
+        return -exponential_integral_ei_forward(-x);
+    }
+
+    if (x < T(1)) {
+        T p = T(1);
+        T q = T(0);
+        T r = T(0);
+
+        for (uint16_t index = 1; index < 1000; index++) {
+            p = p * (-x / index);
+
+            if (std::abs(p) < std::numeric_limits<T>::epsilon()) {
+                break;
+            }
+
+            if (p >= T(0)) {
+                q = q + (p / index);
+            } else {
+                r = r + (p / index);
+            }
+        }
+
+        return -q - r - T(0.5772156649015328606065120900824024L) - std::log(x);
+    }
+
+    if (x < T(100)) {
+        T p;
+        T q = x + T(1);
+        T r = T(1) / std::numeric_limits<T>::min();
+        T s = T(1) / q;
+        T t = s;
+
+        for (uint16_t index = 1; index <= 1000; index++) {
+            p = -T(index * index);
+            q = q + T(2);
+            s = T(1) / (p * s + q);
+            r = q + p / r;
+            t = t * (r * s);
+
+            if (std::abs(r * s - T(1)) < std::numeric_limits<T>::epsilon()) {
+                return t * std::exp(-x);
+            }
+        }
+    }
+
+    T p = T(1);
+    T q = T(1);
+    T r = T(0);
+
+    for (uint16_t index = 1; index < 1000; index++) {
+        T previous = p;
+
+        p = p * (-index / x);
+
+        if (std::abs(p) > std::abs(previous)) {
+            break;
+        }
+
+        if (p >= T(0)) {
+            q = q + p;
+        } else {
+            r = r + p;
+        }
+    }
+
+    return std::exp(-x) * (q + r) / x;
+} // T exponential_integral_e1_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T exponential_integral_ei_forward(T x) {
+    if (x < T(0)) {
+        return -exponential_integral_e1_forward(-x);
+    }
+
+    if (x < -std::log(std::numeric_limits<T>::epsilon())) {
+        T p = T(1);
+        T q = T(0);
+
+        for (uint16_t index = 1; index < 1000; index++) {
+            p = p * (x / index);
+            q = q + (p / index);
+
+            if (p < std::numeric_limits<T>::epsilon() * q) {
+                break;
+            }
+        }
+
+        return T(0.5772156649015328606065120900824024L) + q + std::log(x);
+    }
+
+    T p = T(1);
+    T q = T(1);
+
+    for (uint16_t index = 1; index < 1000; index++) {
+        T previous = p;
+
+        p = p * (index / x);
+
+        if (p < std::numeric_limits<T>::epsilon()) {
+            break;
+        }
+
+        if (p >= previous) {
+            break;
+        }
+
+        q = q + p;
+    }
+
+    return std::exp(x) * q / x;
+} // T exponential_integral_ei_forward(T x)
 
 template<typename T>
 static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {

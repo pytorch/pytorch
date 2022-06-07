@@ -1938,6 +1938,246 @@ const auto chebyshev_polynomial_w_string = jiterator_stringify(
     } // chebyshev_polynomial_w_forward(T x, T n)
 ); // chebyshev_polynomial_w_string
 
+const auto exponential_integral_e1_string = jiterator_stringify(
+    template<typename T>
+    T exponential_integral_ei_forward(T x); // T exponential_integral_ei_forward(T x)
+
+    template<typename T>
+    T exponential_integral_e1_forward(T x) {
+        if (x < T(0)) {
+            return -exponential_integral_ei_forward(-x);
+        }
+
+        if (x < T(1)) {
+            T p = T(1);
+            T q = T(0);
+            T r = T(0);
+
+            for (int16_t index = 1; index < 1000; index++) {
+                p = p * (-x / index);
+
+                if (abs(p) < T(1.11022302462515654042e-16)) {
+                    break;
+                }
+
+                if (p >= T(0)) {
+                    q = q + (p / index);
+                } else {
+                    r = r + (p / index);
+                }
+            }
+
+            return -q - r - T(0.5772156649015328606065120900824024L) - log(x);
+        }
+
+        if (x < T(100)) {
+            T p;
+            T q = x + T(1);
+            T r = T(1) / T(2.22507e-308);
+            T s = T(1) / q;
+            T t = s;
+
+            for (int16_t index = 1; index <= 1000; index++) {
+                p = -T(index * index);
+                q = q + T(2);
+                s = T(1) / (p * s + q);
+                r = q + p / r;
+                t = t * (r * s);
+
+                if (abs(r * s - T(1)) < T(1.11022302462515654042e-16)) {
+                    return t * exp(-x);
+                }
+            }
+        }
+
+        T p = T(1);
+        T q = T(1);
+        T r = T(0);
+
+        for (int16_t index = 1; index < 1000; index++) {
+            T previous = p;
+
+            p = p * (-index / x);
+
+            if (abs(p) > abs(previous)) {
+                break;
+            }
+
+            if (p >= T(0)) {
+                q = q + p;
+            } else {
+                r = r + p;
+            }
+        }
+
+        return exp(-x) * (q + r) / x;
+    } // T exponential_integral_e1_forward(T x)
+
+    template<typename T>
+    T exponential_integral_ei_forward(T x) {
+        if (x < T(0)) {
+            return -exponential_integral_e1_forward(-x);
+        }
+
+        if (x < -log(T(1.11022302462515654042e-16))) {
+            T p = T(1);
+            T q = T(0);
+
+            for (int16_t index = 1; index < 1000; index++) {
+                p = p * (x / index);
+                q = q + (p / index);
+
+                if (p < T(1.11022302462515654042e-16 * q)) {
+                    break;
+                }
+            }
+
+            return T(0.5772156649015328606065120900824024L) + q + log(x);
+        }
+
+        T p = T(1);
+        T q = T(1);
+
+        for (int16_t index = 1; index < 1000; index++) {
+            T previous = p;
+
+            p = p * (index / x);
+
+            if (p < T(1.11022302462515654042e-16)) {
+                break;
+            }
+
+            if (p >= previous) {
+                break;
+            }
+
+            q = q + p;
+        }
+
+        return exp(x) * q / x;
+    } // T exponential_integral_ei_forward(T x)
+); // exponential_integral_e1_string
+
+const auto exponential_integral_ei_string = jiterator_stringify(
+    template<typename T>
+    T exponential_integral_e1_forward(T x); // T exponential_integral_ei_forward(T x)
+
+    template<typename T>
+    T exponential_integral_ei_forward(T x) {
+        if (x < T(0)) {
+            return -exponential_integral_e1_forward(-x);
+        }
+
+        if (x < -log(T(1.11022302462515654042e-16))) {
+            T p = T(1);
+            T q = T(0);
+
+            for (int16_t index = 1; index < 1000; index++) {
+                p = p * (x / index);
+                q = q + (p / index);
+
+                if (p < T(1.11022302462515654042e-16) * q) {
+                    break;
+                }
+            }
+
+            return T(0.5772156649015328606065120900824024L) + q + log(x);
+        }
+
+        T p = T(1);
+        T q = T(1);
+
+        for (int16_t index = 1; index < 1000; index++) {
+            T previous = p;
+
+            p = p * (index / x);
+
+            if (p < T(1.11022302462515654042e-16)) {
+                break;
+            }
+
+            if (p >= previous) {
+                break;
+            }
+
+            q = q + p;
+        }
+
+        return exp(x) * q / x;
+    } // T exponential_integral_ei_forward(T x)
+
+    template<typename T>
+    T exponential_integral_e1_forward(T x) {
+        if (x < T(0)) {
+            return -exponential_integral_ei_forward(-x);
+        }
+
+        if (x < T(1)) {
+            T p = T(1);
+            T q = T(0);
+            T r = T(0);
+
+            for (int16_t index = 1; index < 1000; index++) {
+                p = p * (-x / index);
+
+                if (abs(p) < T(1.11022302462515654042e-16)) {
+                    break;
+                }
+
+                if (p >= T(0)) {
+                    q = q + (p / index);
+                } else {
+                    r = r + (p / index);
+                }
+            }
+
+            return -q - r - T(0.5772156649015328606065120900824024L) - log(x);
+        }
+
+        if (x < T(100)) {
+            T p;
+            T q = x + T(1);
+            T r = T(1) / T(2.22507e-308);
+            T s = T(1) / q;
+            T t = s;
+
+            for (int16_t index = 1; index <= 1000; index++) {
+                p = -T(index * index);
+                q = q + T(2);
+                s = T(1) / (p * s + q);
+                r = q + p / r;
+                t = t * (r * s);
+
+                if (abs(r * s - T(1)) < T(1.11022302462515654042e-16)) {
+                    return t * exp(-x);
+                }
+            }
+        }
+
+        T p = T(1);
+        T q = T(1);
+        T r = T(0);
+
+        for (int16_t index = 1; index < 1000; index++) {
+            T previous = p;
+
+            p = p * (-index / x);
+
+            if (abs(p) > abs(previous)) {
+                break;
+            }
+
+            if (p >= T(0)) {
+                q = q + p;
+            } else {
+                r = r + p;
+            }
+        }
+
+        return exp(-x) * (q + r) / x;
+    } // T exponential_integral_e1_forward(T x)
+); // exponential_integral_ei_string
+
 const auto hermite_polynomial_h_string = jiterator_stringify(
     template<typename T>
     T hermite_polynomial_h_forward(T x, int64_t n) {

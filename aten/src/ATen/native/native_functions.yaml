@@ -12606,6 +12606,32 @@
   python_module: special
   variants: function
 
+- func: special_exponential_integral_e1(Tensor x) -> Tensor
+  python_module: special
+  structured_delegate: special_exponential_integral_e1.out
+  variants: function
+
+- func: special_exponential_integral_e1.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_exponential_integral_e1_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_exponential_integral_ei(Tensor x) -> Tensor
+  python_module: special
+  structured_delegate: special_exponential_integral_ei.out
+  variants: function
+
+- func: special_exponential_integral_ei.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_exponential_integral_ei_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
 - func: special_hermite_polynomial_h(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special

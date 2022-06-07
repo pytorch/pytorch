@@ -2972,6 +2972,8 @@
     "exp2",
     "expit",
     "expm1",
+    "exponential_integral_e1",
+    "exponential_integral_ei",
     "gammainc",
     "gammaincc",
     "gammaln",

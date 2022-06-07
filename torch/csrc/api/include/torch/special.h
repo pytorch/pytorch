@@ -785,6 +785,28 @@ inline Tensor& chebyshev_polynomial_w_out(Tensor& output, const Tensor& x, const
   return torch::special_chebyshev_polynomial_w_out(output, x, n);
 }
 
+/// Exponential integral E1.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.exponential_integral_e1.
+inline Tensor exponential_integral_e1(const Tensor& x) {
+  return torch::special_exponential_integral_e1(x);
+}
+
+inline Tensor& exponential_integral_e1_out(Tensor& y, const Tensor& x) {
+  return torch::special_exponential_integral_e1_out(y, x);
+}
+
+/// Exponential integral Ei.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.exponential_integral_ei.
+inline Tensor exponential_integral_ei(const Tensor& x) {
+  return torch::special_exponential_integral_ei(x);
+}
+
+inline Tensor& exponential_integral_ei_out(Tensor& y, const Tensor& x) {
+  return torch::special_exponential_integral_ei_out(y, x);
+}
+
 /// Physicist’s Hermite polynomial.
 ///
 /// See https://pytorch.org/docs/master/special.html#torch.special.hermite_polynomial_h.
