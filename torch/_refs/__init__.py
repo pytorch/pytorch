@@ -710,6 +710,7 @@ def _make_elementwise_binary_reference(
 
 
 # Add has its own implementation because it has an alpha argument
+@register_decomposition(torch.ops.aten.add)
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
@@ -1149,6 +1150,7 @@ def where(
 #
 # Data Movement References
 #
+@register_decomposition(torch.ops.aten.clone)
 def clone(
     a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:
@@ -2008,14 +2010,16 @@ def rot90(
         return clone(a)
 
 
-def _check_stack_inputs(tensors: List[Tensor]):
+def _check_stack_inputs(tensors: TensorSequenceType) -> None:
     entry_shape = tensors[0].shape
     for i in range(1, len(tensors)):
-        assert tensors[i].shape == entry_shape, (f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0"
-                                                 f"and {tensors[i].shape} at entry {i}")
+        assert tensors[i].shape == entry_shape, (
+            f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0"
+            f"and {tensors[i].shape} at entry {i}"
+        )
 
 
-def _get_stack_inputs(tensors: List[Tensor], dim: int):
+def _get_stack_inputs(tensors: TensorSequenceType, dim: int):
     _check_stack_inputs(tensors)
     return [t.unsqueeze(dim) for t in tensors]
 
@@ -2160,7 +2164,7 @@ def hsplit(
     )
     dim = 0 if a.ndim == 1 else 1
     if isinstance(indices_or_sections, int):
-        split_size = indices_or_sections
+       split_size = indices_or_sections
         check(
             (split_size != 0 and a.shape[dim] % split_size == 0),
             lambda: (
@@ -2276,6 +2280,7 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
 swap_axes = transpose
 
 
+@register_decomposition(torch.ops.aten.unsqueeze)
 def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
     # Note that unsqueeze canonicalizes with rank + 1 because it allows
     # a new innermost dimension to be specified
@@ -2283,6 +2288,7 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
     return prims.expand_dims(a, (dim,))
 
 
+@register_decomposition(torch.ops.aten.view)
 def view(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=False)
 
