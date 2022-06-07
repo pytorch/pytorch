@@ -595,6 +595,18 @@ c10::optional<OperatorName> RecordFunction::operator_name() const {
       fn_);
 }
 
+c10::optional<c10::FunctionSchema> RecordFunction::operator_schema() const {
+  return c10::visit(
+      c10::overloaded(
+          [&](const std::string&) -> c10::optional<c10::FunctionSchema> {
+            return c10::nullopt;
+          },
+          [](const schema_ref_t schema) -> c10::optional<c10::FunctionSchema> {
+            return schema.get();
+          }),
+      fn_);
+}
+
 StepCallbacks getStepCallbacks(RecordScope scope) {
   return LocalCallbackManager::get().getActiveCallbacks(scope);
 }
@@ -703,6 +715,9 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
   fn_ = name;
   sequence_nr_ = sequence_nr;
 
+#ifndef NDEBUG
+    inputs_valid_ = true;
+#endif
   runStartCallbacks();
   invalidateInputs();
 }
@@ -711,6 +726,9 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   fn_ = std::move(name);
   sequence_nr_ = sequence_nr;
 
+#ifndef NDEBUG
+    inputs_valid_ = true;
+#endif
   runStartCallbacks();
   invalidateInputs();
 }
@@ -721,6 +739,9 @@ void RecordFunction::before(
   sequence_nr_ = sequence_nr;
   fn_ = schema;
 
+#ifndef NDEBUG
+    inputs_valid_ = true;
+#endif
   runStartCallbacks();
   invalidateInputs();
 }
