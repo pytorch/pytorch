@@ -842,20 +842,6 @@ class TestAssertClose(TestCase):
         with self.assertRaisesRegex(RuntimeError, "unexpected exception"):
             torch.testing.assert_close(actual, expected)
 
-    @unittest.skipIf(not torch.backends.mps.is_available(), reason="MPS is not available.")
-    @unittest.expectedFailure
-    def test_mps_compat(self):
-        # If this test is successful, that means that all operations in the comparison logic are supported natively on
-        # the MPS backend. Please remove this test as well as the compatibility logic in
-        # torch.testing._comparison.TensorLikePair._equalize_attributes
-        actual = torch.tensor(1.0, device="mps")
-        expected = actual.clone()
-
-        # We can't use assert_close or TensorLikePair.compare() directly, since that would hit the compatibility logic
-        # in torch.testing._comparison.TensorLikePair._equalize_attributes that we want to circumvent here
-        pair = TensorLikePair(actual, expected)
-        pair._compare_values(actual, expected)
-
 
 class TestAssertCloseMultiDevice(TestCase):
     @deviceCountAtLeast(1)
