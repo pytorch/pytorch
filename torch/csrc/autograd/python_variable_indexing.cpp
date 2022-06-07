@@ -142,10 +142,7 @@ static inline Variable applySlicing(
   int64_t size = PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
   int64_t dim = 0;
 
-  // TODO: nested tensor does not have a size (yet) so for now we represent its size as null
-  //       may need to be changed after we reach a better solution for nested tensor size
-  //       current logic is: for nested tensor, `self_sizes` is null
-  //                         for other tensors, `self_sizes` have normal value
+  // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
     TORCH_CHECK_INDEX(
       specified_dims <= (int64_t)self_sizes->size(),
@@ -155,10 +152,10 @@ static inline Variable applySlicing(
   Variable result = self;
   for(const auto i : c10::irange(size)) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
-    // TODO: nested tensor does not have a size (yet) so for now we represent its size as null
-    //       may need to be changed after we reach a better solution for nested tensor size
-    c10::optional<IntArrayRef> result_sizes = c10::nullopt;
-    if (! result.is_nested())  result_sizes = result.sizes();
+    // NOTE [nested tensor size for indexing]
+    // nested tensor does not have a size (yet) so for now we represent its size as null
+    // may need to be changed after we reach a better solution for nested tensor size
+    c10::optional<IntArrayRef> result_sizes = result.is_nested() ? c10::optional<IntArrayRef>(c10::nullopt) : c10::optional<IntArrayRef>(result.sizes());
     result = at::indexing::handleDimInMultiDimIndexing(
       /*prev_dim_result=*/result,
       /*original_tensor=*/self,
@@ -330,8 +327,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   if (specified_dims == -1) {
     return handle_torch_function_indexing(self, index);
   }
-  // TODO: nested tensor does not have a size (yet) so for now we represent its size as null
-  //       may need to be changed after we reach a better solution for nested tensor size
+  // See NOTE [nested tensor size for indexing]
   c10::optional<IntArrayRef> self_sizes = c10::nullopt;
   if (! self_.is_nested()) self_sizes = self_.sizes();
   Variable sliced = applySlicing(
