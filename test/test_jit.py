@@ -56,6 +56,7 @@ from jit.test_typing import TestTyping  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
 from jit.test_complex import TestComplex  # noqa: F401
 from jit.test_jit_utils import TestJitUtils  # noqa: F401
+from jit.test_schema_check import TestSchemaCheck  # noqa: F401
 from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
 from jit.test_types import TestTypesAndAnnotation  # noqa: F401
 from jit.test_misc import TestMisc  # noqa: F401
@@ -77,6 +78,7 @@ from jit.test_device_analysis import TestDeviceAnalysis  # noqa: F401
 from jit.test_dce import TestDCE  # noqa: F401
 from jit.test_sparse import TestSparse  # noqa: F401
 from jit.test_tensor_methods import TestTensorMethods  # noqa: F401
+from jit.test_dataclasses import TestDataclasses  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -16393,9 +16395,6 @@ for test in criterion_tests:
 
 if __name__ == '__main__':
     run_tests()
-    import test_jit_py3
     import jit.test_module_interface
-    suite = unittest.findTestCases(test_jit_py3)
-    unittest.TextTestRunner().run(suite)
     suite = unittest.findTestCases(jit.test_module_interface)
     unittest.TextTestRunner().run(suite)
