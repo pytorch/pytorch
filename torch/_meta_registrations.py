@@ -338,10 +338,10 @@ def meta_embedding_bag(
     sparse=False, per_sample_weights=None, include_last_offset=False, padding_idx=-1
 ):
     check(indices.dtype in (torch.long, torch.int), lambda: f"expected indices to be long or int, got {indices.dtype}")
-    check(offsets.dtype in (torch.long, torch.int), lambda: f"expected offsets to be long or int, got {indices.dtype}")
+    check(offsets.dtype in (torch.long, torch.int), lambda: f"expected offsets to be long or int, got {offsets.dtype}")
     check(
-        indices.dtype == offsets.dtype,
-        lambda: f"expected indices ({indices.dtype}) and offsets ({offsets.dtype}) to have same dtype"
+        utils.is_float_dtype(weight.dtype),
+        lambda: f"expected weight to be floating point type, got {weight.dtype}"
     )
 
     num_bags = offsets.size(0)
@@ -353,13 +353,7 @@ def meta_embedding_bag(
     MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
 
     def is_fast_path_index_select_scale(src, scale, output, padding_idx):
-        return (
-            (src.dtype == torch.float or src.dtype == torch.half)
-            and src.stride(1) == 1
-            and output.stride(1) == 1
-            and scale.stride(0) == 1
-            and padding_idx < 0
-        )
+        return is_fast_path_index_select(src, output, padding_idx) and scale.stride(0) == 1
 
     def is_fast_path_index_select(src, output, padding_idx):
         return (
