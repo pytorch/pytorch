@@ -4760,6 +4760,7 @@ def dot(g, self, other):
 
 @symbolic_helper.parse_args("v", "t", "t")
 def movedim(g, self, source, destination):
+    # This is a pythonic implementation mostly taken from aten/src/ATen/native/TensorShape.cpp::movedim
     source = source.view(-1)
     destination = destination.view(-1)
 
