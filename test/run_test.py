@@ -225,7 +225,6 @@ WINDOWS_BLOCKLIST = [
 ] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
-    "distributed/nn/jit/test_instantiator",
     "distributed/rpc/test_faulty_agent",
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/test_share_memory",
@@ -252,7 +251,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
-    "test_type_hints",
     "test_openmp",
 ]
 
