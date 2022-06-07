@@ -372,7 +372,6 @@ RE_NOT_IMPLEMENTED_MSG = re.compile(r"Could not run '([^']+)' with arguments ")
 meta_function_expected_failures = {
     torch.Tensor.item: {b8, bf16, c128, c64, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense
     torch.Tensor.to_sparse: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::to_sparse, aten::to_sparse.sparse_dim
-    torch.addbmm: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::addbmm, aten::addbmm.out
     torch.allclose: {bf16, f16, f32, f64},  # aten::_local_scalar_dense
     torch.angle: {c32, b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::angle, aten::angle.out
     torch.argwhere: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero
@@ -513,7 +512,6 @@ meta_function_device_expected_failures['cpu'] = {
 }
 
 meta_function_device_expected_failures['cuda'] = {
-    torch.addbmm: {f16},  # aten::addbmm, aten::addbmm.out
     torch.corrcoef: {bf16, f16},  # aten::_local_scalar_dense
     torch.cov: {f16},  # aten::_local_scalar_dense
     torch.diag: {bf16, f16},  # aten::diag.out
@@ -646,8 +644,6 @@ meta_dispatch_expected_failures = {
     aten._local_scalar_dense.default: {c64, i64, c128, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten._pdist_forward.default: {f64, f32},
     aten._unique2.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
-    aten.addbmm.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.addbmm.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.angle.default: {c32, i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.angle.out: {c32, i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.bincount.default: {i8, i64, i16, u8, i32},
@@ -772,8 +768,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten._fft_r2c.out: {f16},  # aten::_fft_r2c.out
     aten._unique2.default: {f16},  # aten::_unique2
     aten._use_cudnn_ctc_loss.default: {f32, f64},  # aten::_use_cudnn_ctc_loss
-    aten.addbmm.default: {f16},  # aten::addbmm
-    aten.addbmm.out: {f16},  # aten::addbmm.out
     aten.convolution.default: {f16, c32},
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
     aten.diag.default: {f16},  # aten::diag.out
