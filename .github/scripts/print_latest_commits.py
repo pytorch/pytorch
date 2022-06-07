@@ -4,6 +4,7 @@ from gitutils import _check_output
 
 import rockset  # type: ignore[import]
 import os
+import re
 
 class WorkflowCheck(NamedTuple):
     workflowName: str
@@ -37,6 +38,7 @@ def print_latest_commits(qlambda: Any, minutes: int = 30) -> None:
 
     for commit in commits:
         print_commit_status(commit, results)
+        print("isGreen:", isGreen(commit, results))
 
 def print_commit_status(commit: str, results: Dict[str, Any]) -> None:
     print(commit)
@@ -56,7 +58,21 @@ def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, A
             )._asdict())
     return workflow_checks
 
-def isGreen(results: List[Dict[str, Any]]) -> bool:
+def isGreen(commit: str, results: Dict[str, Any]) -> bool:
+    workflow_checks = get_commit_results(commit, results)
+
+    for check in workflow_checks:
+        regex = "^linux-binary+|^android-tests+|^windows-binary+"
+        if check['workflowName'] in ["pull", "trunk", "lint"] and check['conclusion'] != 'success':
+            if check['name'] == "pull / win-vs2019-cuda11.3-py3" and check['conclusion'] == 'skipped':
+                pass
+                # there are trunk checks that run the same tests, so this pull workflow check can be skipped
+            else:
+                return False
+        elif check['workflowName'] in ["periodic", "docker-release-builds"] and check['conclusion'] not in ["success", "skipped"]:
+            return False
+        elif re.search(regex, check['workflowName']) and check['conclusion'] != 'success':
+            return False
     return True
 
 def main() -> None:
