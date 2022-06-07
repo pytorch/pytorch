@@ -162,6 +162,37 @@ and implement it in the the corresponding shape_inference.cpp file.\n
         )
 
 
+# Some helper functions for the codegen.
+def get_ltc_helper_fns() -> str:
+    return """\
+at::Tensor to_meta(const at::Tensor& tensor) {
+  auto out = at::native::empty_strided_meta(tensor.sizes(), tensor.strides(), \
+/*dtype=*/c10::make_optional(tensor.scalar_type()), /*layout=*/c10::make_optional(tensor.layout()), \
+/*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+  // needs to handle wrapped numbers, so dtype promotion works properly.
+  if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+    out.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+  return out;
+}
+c10::optional<at::Tensor> to_meta(const c10::optional<at::Tensor>& tensor) {
+  if (tensor.has_value()) {
+    return to_meta(*tensor);
+  }
+  return c10::nullopt;
+}
+
+std::vector<at::Tensor> to_meta(const at::TensorList& t_list) {
+  std::vector<at::Tensor> outs;
+  outs.reserve(t_list.size());
+  for (const auto& i : c10::irange(t_list.size())) {
+    outs.push_back(to_meta(t_list[i]));
+  }
+  return outs;
+}
+"""
+
+
 class default_args:
     node_base: str = "Node"
     node_base_hdr: Optional[str] = None
@@ -456,6 +487,7 @@ def run_gen_lazy_tensor(
                     else []
                 )
             ],
+            "helper_fns": get_ltc_helper_fns(),
             "native_functions_include": "",
             "namespace_prologue": ns_helper.prologue,
             "namespace_epilogue": ns_helper.epilogue,

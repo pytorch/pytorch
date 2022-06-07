@@ -719,6 +719,8 @@ class TestViewOps(TestCase):
         self.assertTrue(s is t)
 
     @skipMeta
+    # self.is_view_of reports false positives for lazy
+    @onlyNativeDeviceTypes
     def test_contiguous_nonview(self, device):
         t = torch.ones(5, 5, device=device)
         nv = t.t().contiguous()
@@ -745,6 +747,8 @@ class TestViewOps(TestCase):
         self.assertEqual(t[1, 1], v[6])
 
     @skipMeta
+    # self.is_view_of reports false positives for lazy
+    @onlyNativeDeviceTypes
     def test_reshape_nonview(self, device):
         t = torch.ones(5, 5, device=device)
         nv = torch.reshape(t.t(), (25,))
@@ -1824,7 +1828,7 @@ class TestOldViewOps(TestCase):
         t.crow_indices()
         t.col_indices()
 
-instantiate_device_type_tests(TestViewOps, globals())
+instantiate_device_type_tests(TestViewOps, globals(), include_lazy=True)
 instantiate_device_type_tests(TestOldViewOps, globals())
 
 if __name__ == '__main__':

@@ -75,6 +75,21 @@ def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]
 
     if g.view_copy is None:
         return None
+    # We can make view_copy work in more cases by using reshape()
+    # when a normal view call would ordinarily fail.
+    # This also makes LTC more efficient, because they don't need to include
+    # clone() calls in their graph (which is normally needed by reshape).
+    if str(g.view_copy.func.name) == "view_copy":
+        return """\
+at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
+  if (!at::detail::computeStride(self.sizes(), self.strides(), size).has_value()) {
+    return self.reshape(size);
+  } else {
+    auto output = at::_ops::view::call(self, size);
+    return output.clone();
+  }
+}
+"""
     # view_copy is a native signature, since we're generating an at::native:: kernel
     view_copy_sig = NativeSignature(g.view_copy.func)
     # view is a dispatcher signature, since we're calling into the at::_ops API

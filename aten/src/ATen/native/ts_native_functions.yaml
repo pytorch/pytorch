@@ -28,11 +28,6 @@ full_codegen:
   - cat
   - clamp
   - clamp_min
-  # clone() *should* show up in the IR.
-  # For example, tracing through at::reshape() will insert a clone in cases where the output
-  # needs to be cloned first before constructing a view, when the input strides are incompatible.
-  # This clone needs to be there in order to faithfully re-execute the view later.
-  - clone
   - constant_pad_nd
   - convolution
   - convolution_backward
@@ -172,6 +167,7 @@ full_codegen:
   - diagonal_scatter
   - as_strided_scatter
 supported:
+  - clone
   - _copy_from
   - _copy_from_and_resize
   - empty.memory_format

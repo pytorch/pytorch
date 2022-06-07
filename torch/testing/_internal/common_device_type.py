@@ -486,6 +486,7 @@ class CUDATestBase(DeviceTypeTestBase):
         # Acquires the current device as the primary (test) device
         cls.primary_device = 'cuda:{0}'.format(torch.cuda.current_device())
 
+# See Note [Lazy Tensor tests in device agnostic testing]
 lazy_ts_backend_init = False
 class LazyTestBase(DeviceTypeTestBase):
     device_type = 'lazy'
@@ -527,6 +528,8 @@ def get_device_type_test_bases():
             test_bases.append(CPUTestBase)
     else:
         test_bases.append(CPUTestBase)
+#       See Note [Lazy Tensor tests in device agnostic testing]
+        test_bases.append(LazyTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
         # Disable MPS testing in generic device testing temporarily while we're
@@ -539,7 +542,7 @@ def get_device_type_test_bases():
 device_type_test_bases = get_device_type_test_bases()
 
 
-def filter_desired_device_types(device_type_test_bases, except_for=None, only_for=None):
+def filter_desired_device_types(device_type_test_bases, except_for=None, only_for=None, include_lazy=False):
     # device type cannot appear in both except_for and only_for
     intersect = set(except_for if except_for else []) & set(only_for if only_for else [])
     assert not intersect, f"device ({intersect}) appeared in both except_for and only_for"
@@ -550,6 +553,16 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
     if only_for:
         device_type_test_bases = filter(
             lambda x: x.device_type in only_for, device_type_test_bases)
+
+    # Note [Lazy Tensor tests in device agnostic testing]
+    # Right now, test_view_ops.py runs with LazyTensor.
+    # We don't want to opt every device-agnostic test into using the lazy device,
+    # because many of them will fail.
+    # So instead, the only way to opt a specific device-agnostic test file into
+    # lazy tensor testing is with include_lazy=True
+    if not include_lazy:
+        device_type_test_bases = filter(
+            lambda x: x.device_type not in ['lazy'], device_type_test_bases)
 
     return list(device_type_test_bases)
 
@@ -588,7 +601,7 @@ PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
 # See note "Generic Device Type Testing."
-def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -609,7 +622,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 
     # Filter out the device types based on user inputs
     desired_device_type_test_bases = filter_desired_device_types(device_type_test_bases,
-                                                                 except_for, only_for)
+                                                                 except_for, only_for, include_lazy)
 
     def split_if_not_empty(x: str):
         return x.split(",") if len(x) != 0 else []
@@ -622,7 +635,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     env_except_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, ''))
 
     desired_device_type_test_bases = filter_desired_device_types(desired_device_type_test_bases,
-                                                                 env_except_for, env_only_for)
+                                                                 env_except_for, env_only_for, include_lazy)
 
 
     # Creates device-specific test cases

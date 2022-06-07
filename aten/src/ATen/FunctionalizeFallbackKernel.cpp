@@ -173,8 +173,10 @@ at::Tensor lift_functionalize(const at::Tensor & self) {
   return at::functionalization::impl::to_functional_tensor(self);
 }
 
-bool device_opted_into_functionalization(c10::optional<c10::Device> d) {
-    return d.has_value() && (d->type() == c10::DeviceType::XLA || d->type() == c10::DeviceType::Lazy);
+bool device_opted_into_functionalization(c10::Device self_device, c10::optional<c10::Device> tgt_device) {
+    // If the target device is empty, then the output tensor should be on the same device as the input
+    auto real_tgt_device = tgt_device.has_value() ? tgt_device.value() : self_device;
+    return real_tgt_device.type() == c10::DeviceType::XLA || real_tgt_device.type() == c10::DeviceType::Lazy;
 }
 
 at::Tensor to_device_functionalize(const at::Tensor & self, at::Device device, at::ScalarType dtype, bool non_blocking, bool copy, c10::optional<at::MemoryFormat> memory_format) {
@@ -197,14 +199,14 @@ at::Tensor to_device_functionalize(const at::Tensor & self, at::Device device, a
   // then the functionalization pass should "end". We need to sync any updates on the input
   // tensor, but we shouldn't wrap the output.
   if (!c10::impl::tls_local_dispatch_key_set().included_.has(c10::DispatchKey::Functionalize)) {
-    if (!device_opted_into_functionalization(device)) {
+    if (!device_opted_into_functionalization(self.device(), device)) {
       return out;
     }
   }
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
-// note I only need this because the to.dtype_layout overload calls this, so we skip the op above.
+// note I only need this because the to.dtype/to.dtype_layout overload calls this, so we skip the op above.
 // We should probably get rid of this though.
 at::Tensor _to_copy_functionalize(
         const at::Tensor & self,
@@ -233,7 +235,7 @@ at::Tensor _to_copy_functionalize(
   // then the functionalization pass should "end". We need to sync any updates on the input
   // tensor, but we shouldn't wrap the output.
   if (!c10::impl::tls_local_dispatch_key_set().included_.has(c10::DispatchKey::Functionalize)) {
-    if (!device_opted_into_functionalization(device)) {
+    if (!device_opted_into_functionalization(self.device(), device)) {
       return out;
     }
   }

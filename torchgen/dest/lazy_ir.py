@@ -136,7 +136,7 @@ def convert_to_meta_tensors(sig: DispatcherSignature) -> Tuple[str, List[Binding
         if isinstance(arg.argument, Argument) and arg.argument.type.is_tensor_like():
             unwrapped_name = f"{arg.name}_meta"
             unwrapped_tensor_args.append(
-                f"auto {unwrapped_name} = at::native::to_meta({arg.name});"
+                f"auto {unwrapped_name} = to_meta({arg.name});"
             )
             context.append(arg.with_name(unwrapped_name))
         else:
@@ -473,7 +473,8 @@ class GenLazyNativeFuncDefinition:
         is_view_copy_op = "view_copy" in func.tags
         is_structured = func.structured or func.structured_delegate is not None
         if is_structured or is_view_copy_op:
-            meta_out = """std::vector<Shape> shapes{Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
+            meta_out = """
+std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
             if returns_length > 1:
 
                 def this_shape(i: int) -> str:

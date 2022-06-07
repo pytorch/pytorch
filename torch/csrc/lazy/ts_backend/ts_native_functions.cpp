@@ -45,6 +45,13 @@ c10::optional<torch::lazy::BackendDevice> GetLtcDevice(const c10::optional<c10::
 
 }  // namespace
 
+// clone is special in LT because we make it a no-op.
+// This should be safe to do, because every operator in the LT is functional.
+at::Tensor LazyNativeFunctions::clone(const at::Tensor & self, c10::optional<at::MemoryFormat> memory_format) {
+  auto self_lt = torch::lazy::TryGetLtcTensor(self);
+  return torch::lazy::CreateAtenFromLtcTensor(self_lt->Create(self_lt->GetIrValue(), self_lt->GetDevice()));
+}
+
 at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
                                            const at::Tensor& dst,
                                            bool non_blocking) {
