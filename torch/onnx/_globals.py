@@ -52,4 +52,5 @@ class _InternalGlobals:
             raise TypeError("in_onnx_export must be a boolean")
         self._in_onnx_export = value
 
+
 GLOBALS = _InternalGlobals()
