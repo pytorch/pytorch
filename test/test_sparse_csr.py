@@ -478,6 +478,7 @@ class TestSparseCompressed(TestCase):
                     continue
             expected = op(sample.input, **sample.kwargs)
             assert torch.is_tensor(expected)
+            # Use smallest non-trivial blocksize for the given input shape:
             blocksize = tuple(map(self._smallest_divisor, sample.input.shape[-2:]))
             if layout is torch.sparse_bsr:
                 sparse = sample.input.to_sparse_bsr(blocksize)
