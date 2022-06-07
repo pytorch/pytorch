@@ -323,7 +323,7 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     check(utils.is_float_dtype(x1.dtype), lambda: "cdist only supports floating-point dtypes, X1 got: {x1.dtype}")
     check(utils.is_float_dtype(x2.dtype), lambda: "cdist only supports floating-point dtypes, X2 got: {x2.dtype}")
     check(p >= 0, lambda: "cdist only supports non-negative p values")
-    check(mode >= 0 and mode <= 2, lambda: f"possible modes: 0, 1, 2, but was: {mode}")
+    check(compute_mode >= 0 and compute_mode <= 2, lambda: f"possible modes: 0, 1, 2, but was: {compute_mode}")
     r1 = x1.size(-2)
     r2 = x2.size(-2)
     batch_tensor1 = x1.shape[:-2]
