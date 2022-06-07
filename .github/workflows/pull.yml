@@ -274,7 +274,7 @@ jobs:
       build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
 
-   linux-focal-py3_7-gcc7-mobile-lightweight-dispatch-build:
+  linux-focal-py3_7-gcc7-mobile-lightweight-dispatch-build:
      name: linux-focal-py3.7-gcc7-mobile-lightweight-dispatch-build
      uses: ./.github/workflows/_linux-build.yml
      with:
