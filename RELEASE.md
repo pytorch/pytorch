@@ -56,7 +56,7 @@ Following Requirements needs to be met prior to final RC Cut:
 * All the trunk CI jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
   * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/relese%2F0.13)
-  * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/main)
+  * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/release%2F0.12)
   * [TorchText](https://hud.pytorch.org/hud/pytorch/text/main)
 
 ## Cutting release branches
