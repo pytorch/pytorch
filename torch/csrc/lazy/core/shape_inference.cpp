@@ -48,10 +48,13 @@
 #include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/TensorConversions.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Functions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/InferSize.h>
 #include <ATen/WrapDimUtils.h>
+#include <aten/src/ATen/ExpandUtils.h>
 #include <aten/src/ATen/native/ReduceOpsUtils.h>
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/api/include/torch/enum.h>
@@ -454,6 +457,25 @@ std::vector<Shape> compute_shape_slogdet(const at::Tensor & self) {
   // Sign and det outputs hold the same shape, dtype.
   return {Shape(self.scalar_type(), out_sizes),
           Shape(self.scalar_type(), out_sizes)};
+}
+
+std::vector<torch::lazy::Shape> compute_shape_logical_and(at::Tensor & self, const at::Tensor & other) {
+  TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
+  return {Shape(c10::ScalarType::Bool, at::infer_size(self.sizes(), other.sizes()))};
+}
+
+std::vector<torch::lazy::Shape> compute_shape_logical_not(at::Tensor & self) {
+  return {Shape(c10::ScalarType::Bool, self.sizes().vec())};
+}
+
+std::vector<torch::lazy::Shape> compute_shape_logical_or(at::Tensor & self, const at::Tensor & other) {
+  TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
+  return {Shape(c10::ScalarType::Bool, at::infer_size(self.sizes(), other.sizes()))};
+}
+
+std::vector<torch::lazy::Shape> compute_shape_logical_xor(at::Tensor & self, const at::Tensor & other) {
+  TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
+  return {Shape(c10::ScalarType::Bool, at::infer_size(self.sizes(), other.sizes()))};
 }
 
 std::vector<Shape> compute_shape_smooth_l1_loss_backward(

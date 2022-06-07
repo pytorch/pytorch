@@ -26,6 +26,13 @@ constexpr uint64_t storage_max() {
   return std::min(int64_max, size_max);
 }
 
+inline void raise_warning_for_complex_half(ScalarType dtype) {
+  if (dtype == kComplexHalf) {
+    TORCH_WARN_ONCE(
+        "ComplexHalf support is experimental and many operators don't support it yet.");
+  }
+}
+
 }  // namespace (anonymous)
 
 size_t computeStorageNbytesContiguous(
@@ -98,7 +105,7 @@ TensorBase empty_generic(
     ScalarType scalar_type,
     c10::optional<c10::MemoryFormat> memory_format_opt) {
   at::detail::check_size_nonnegative(size);
-
+  at::detail::raise_warning_for_complex_half(scalar_type);
   caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
   size_t size_bytes = computeStorageNbytesContiguous(size, dtype.itemsize());
   auto storage_impl = c10::make_intrusive<StorageImpl>(
@@ -132,7 +139,7 @@ TensorBase empty_strided_generic(
     c10::DispatchKeySet ks,
     ScalarType scalar_type) {
   at::detail::check_size_nonnegative(size);
-
+  at::detail::raise_warning_for_complex_half(scalar_type);
   caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
   size_t size_bytes = computeStorageNbytes(size, stride, dtype.itemsize());
   auto storage_impl = c10::make_intrusive<StorageImpl>(
