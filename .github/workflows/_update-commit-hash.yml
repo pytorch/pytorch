@@ -86,7 +86,7 @@ jobs:
               owner,
               repo,
               head: `${NEW_BRANCH_NAME}`,
-              base: '${{ inputs.branch }}',
+              base: 'master',
               body: [
                 'This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/master/.github/workflows/_update-commit-hash.yml).\n',
                 `Update the pinned ${{ inputs.repo-name }} hash.`
