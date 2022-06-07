@@ -62,7 +62,6 @@ inline int64_t getTimeUs() {
 } // namespace
 
 namespace python_tracer {
-using torch::profiler::impl::python_tracer::CallType;
 using torch::profiler::impl::python_tracer::PyTraceEvent;
 using torch::profiler::impl::python_tracer::PythonTracerBase;
 
@@ -406,17 +405,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       py_event_indices_.insert({py_events[i].get(), std::to_string(i)});
     }
 
-    ska::flat_hash_map<std::string, size_t> module_counter_;
-    ska::flat_hash_map<size_t, std::string> module_id_map_;
-    auto record_module_id = [&](python_tracer::PyTraceEvent* e) {
-      if (e->call_type_ == python_tracer::CallType::kPyModuleCall &&
-          module_id_map_.find(e->module_id_) == module_id_map_.end()) {
-        // We use the fact that operator[] will default initialize new keys.
-        module_id_map_[e->module_id_] =
-            std::to_string(module_counter_[e->name_]++);
-      }
-    };
-
     // Python events
     std::vector<python_tracer::Replay> py_replay;
     for (const auto& e : py_events) {
@@ -435,7 +423,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       while (replay_it != py_replay.end() && replay_it->t() <= t) {
         if (replay_it->enter_) {
           py_stack.push_back(replay_it->frame_);
-          record_module_id(replay_it->frame_);
         } else {
           TORCH_INTERNAL_ASSERT(py_stack.size());
           TORCH_INTERNAL_ASSERT(py_stack.back() == replay_it->frame_);
@@ -463,8 +450,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       op.addMetadata("Python id", py_event_indices_.at(e));
       op.addMetadata("Python parent id", py_event_indices_.at(e->parent_));
       op.addMetadata("Python thread", std::to_string(e->thread_id_));
-      if (e->call_type_ == python_tracer::CallType::kPyModuleCall) {
-        op.addMetadata("Python module id", module_id_map_.at(e->module_id_));
+      if (e->module_id_.has_value()) {
+        op.addMetadata("Python module id", *e->module_id_);
       }
 
       py_activities.push_back(op);
