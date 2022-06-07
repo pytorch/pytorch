@@ -213,7 +213,9 @@ private:
 
   OperatorName name_;
   c10::optional<AnnotatedSchema> schema_;
-  std::vector<at::Tag> tags_;
+  #ifndef C10_MOBILE
+    std::vector<at::Tag> tags_;
+  #endif
   std::array<KernelFunction, c10::num_runtime_entries> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
 
