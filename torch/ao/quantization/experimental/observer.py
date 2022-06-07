@@ -5,15 +5,13 @@ the values observed during calibration (PTQ) or training (QAT).
 
 import torch
 import itertools
-import math
 from torch.ao.quantization.observer import ObserverBase
 from typing import Tuple
-from torch.ao.quantization.utils import check_min_max_valid, calculate_qmin_qmax
 
 class NonUniformQuantizationObserverBase(ObserverBase):
-    min_val: torch.tensor
-    max_val: torch.tensor
-    level_indices: torch.tensor
+    min_val: torch.tensor([])
+    max_val: torch.tensor([])
+    level_indices: torch.tensor([])
     b: int
     k: int
     n: int
@@ -22,11 +20,11 @@ class NonUniformQuantizationObserverBase(ObserverBase):
 
     def __init__(
         self,
-        min_val = None,
-        max_val = None,
-        b = 0,
-        k = 0,
-        dtype = torch.quint8) -> None:
+        min_val=None,
+        max_val=None,
+        b=0,
+        k=0,
+            dtype=torch.quint8) -> None:
         super().__init__(dtype)
         self.min_val = min_val
         self.max_val = max_val
@@ -43,10 +41,15 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         max_val: Maximum values per channel
     Returns:
         gamma: gamma quantization parameter, defined to ensure that alpha is the maximum of the range
-        quantization_levels: non-uniform quantization levels, calculated according to APoT paper: (https://arxiv.org/pdf/1909.13144.pdf)
+        quantization_levels: non-uniform quantization levels, calculated according to APoT paper:
+        (https://arxiv.org/pdf/1909.13144.pdf)
         level_indices: int representation of quantization_levels
     """
-    def _calculate_qparams(self, min_val: torch.tensor, max_val: torch.tensor, signed: bool) -> Tuple[float, torch.tensor, torch.tensor]:
+    def _calculate_qparams(
+        self,
+        min_val: torch.tensor,
+        max_val: torch.tensor,
+            signed: bool) -> Tuple[float, torch.tensor, torch.tensor]:
         # compute alpha
         self.alpha = max_val
 
@@ -64,8 +67,8 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         for i in range(0, self.n):
             p_curr = torch.tensor([0])
 
-            for j in range(0, 2**(self.k-1) + 1):
-                curr_ele = 2**(-(i+j*self.n))
+            for j in range(0, 2 ** (self.k - 1) + 1):
+                curr_ele = 2 ** (- (i + j * self.n))
                 p_append = torch.tensor([curr_ele])
                 p_curr = torch.cat((p_curr, p_append))
                 # introduce signed numbers
@@ -109,10 +112,10 @@ class NonUniformQuantizationObserverBase(ObserverBase):
 class APoTObserver(NonUniformQuantizationObserverBase):
     def __init__(
         self,
-        min_val = torch.tensor([]),
-        max_val = torch.tensor([]),
-        b = 0,
-        k = 0) -> None:
+        min_val=torch.tensor([]),
+        max_val=torch.tensor([]),
+        b=0,
+            k=0) -> None:
         super(APoTObserver, self).__init__(min_val, max_val, b, k)
 
     def calculate_qparams(self, signed):
