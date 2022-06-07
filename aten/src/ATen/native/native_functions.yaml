@@ -2428,7 +2428,7 @@
 - func: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, int N, int C, int HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU, CUDA: native_group_norm
-    CompositeImplicitAutograd: math_group_norm
+    CompositeExplicitAutograd: math_group_norm
 
 - func: native_group_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int N, int C, int HxW, int group, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -2685,7 +2685,7 @@
   dispatch:
     CPU: layer_norm_cpu
     CUDA: layer_norm_cuda
-    CompositeImplicitAutograd: math_native_layer_norm
+    CompositeExplicitAutograd: math_native_layer_norm
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -2782,6 +2782,7 @@
   dispatch:
     CPU, Meta: linspace_out
     CUDA: linspace_cuda_out
+    MPS: linspace_out_mps
 
 - func: log(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -5342,6 +5343,7 @@
     SparseCsrCPU, SparseCsrCUDA: clone_sparse_compressed
     MkldnnCPU: mkldnn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
+    NestedTensorCPU, NestedTensorCUDA: clone_nested
 
 - func: positive(Tensor(a) self) -> Tensor(a)
   variants: function, method
@@ -11942,7 +11944,7 @@
   dispatch:
     CPU, CUDA: segment_reduce_kernel
 
-- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None, int axis=0) -> Tensor
+- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None, int axis=0, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: _segment_reduce_backward_kernel
@@ -12403,6 +12405,58 @@
   dispatch:
     CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: native_multi_head_attention
 
+- func: special_bessel_j0(Tensor self) -> Tensor
+  python_module: special
+  structured_delegate: special_bessel_j0.out
+  variants: function
+
+- func: special_bessel_j0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_bessel_j0_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_bessel_j1(Tensor self) -> Tensor
+  python_module: special
+  structured_delegate: special_bessel_j1.out
+  variants: function
+
+- func: special_bessel_j1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_bessel_j1_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_bessel_y0(Tensor self) -> Tensor
+  python_module: special
+  structured_delegate: special_bessel_y0.out
+  variants: function
+
+- func: special_bessel_y0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_bessel_y0_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_bessel_y1(Tensor self) -> Tensor
+  python_module: special
+  structured_delegate: special_bessel_y1.out
+  variants: function
+
+- func: special_bessel_y1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_bessel_y1_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
 - func: special_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
@@ -12473,6 +12527,80 @@
 - func: special_chebyshev_polynomial_u.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: special_chebyshev_polynomial_u_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_chebyshev_polynomial_v(Tensor x, Tensor n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  structured_delegate: special_chebyshev_polynomial_v.out
+  variants: function
+
+- func: special_chebyshev_polynomial_v.x_scalar(Scalar x, Tensor n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_chebyshev_polynomial_v.n_scalar(Tensor x, Scalar n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_chebyshev_polynomial_v.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_chebyshev_polynomial_v_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_chebyshev_polynomial_v.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_chebyshev_polynomial_v.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_chebyshev_polynomial_v_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_chebyshev_polynomial_w(Tensor x, Tensor n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  structured_delegate: special_chebyshev_polynomial_w.out
+  variants: function
+
+- func: special_chebyshev_polynomial_w.x_scalar(Scalar x, Tensor n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_chebyshev_polynomial_w.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_chebyshev_polynomial_w_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_chebyshev_polynomial_w.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_chebyshev_polynomial_w.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_chebyshev_polynomial_w_out
   device_check: NoCheck
   python_module: special
   variants: function
@@ -12584,6 +12712,243 @@
 - func: special_laguerre_polynomial_l.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: special_laguerre_polynomial_l_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_legendre_polynomial_p(Tensor x, Tensor n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  structured_delegate: special_legendre_polynomial_p.out
+  variants: function
+
+- func: special_legendre_polynomial_p.x_scalar(Scalar x, Tensor n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_legendre_polynomial_p.n_scalar(Tensor x, Scalar n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_legendre_polynomial_p.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_legendre_polynomial_p_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_legendre_polynomial_p.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_legendre_polynomial_p.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_legendre_polynomial_p_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_modified_bessel_i0(Tensor self) -> Tensor
+  python_module: special
+  structured_delegate: special_modified_bessel_i0.out
+  variants: function
+
+- func: special_modified_bessel_i0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_modified_bessel_i0_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_modified_bessel_i1(Tensor self) -> Tensor
+  python_module: special
+  structured_delegate: special_modified_bessel_i1.out
+  variants: function
+
+- func: special_modified_bessel_i1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_modified_bessel_i1_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_modified_bessel_k0(Tensor self) -> Tensor
+  python_module: special
+  structured_delegate: special_modified_bessel_k0.out
+  variants: function
+
+- func: special_modified_bessel_k0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_modified_bessel_k0_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_modified_bessel_k1(Tensor self) -> Tensor
+  python_module: special
+  structured_delegate: special_modified_bessel_k1.out
+  variants: function
+
+- func: special_modified_bessel_k1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_modified_bessel_k1_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  structured_delegate: special_shifted_chebyshev_polynomial_t.out
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_t.x_scalar(Scalar x, Tensor n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_t.n_scalar(Tensor x, Scalar n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_t.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_shifted_chebyshev_polynomial_t_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_t.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_t.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_t_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_u(Tensor x, Tensor n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  structured_delegate: special_shifted_chebyshev_polynomial_u.out
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_u.x_scalar(Scalar x, Tensor n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_u.n_scalar(Tensor x, Scalar n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_u.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_shifted_chebyshev_polynomial_u_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_u.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_u.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_u_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_v(Tensor x, Tensor n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  structured_delegate: special_shifted_chebyshev_polynomial_v.out
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_v.x_scalar(Scalar x, Tensor n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_v.n_scalar(Tensor x, Scalar n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_v.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_shifted_chebyshev_polynomial_v_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_v.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_v.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_v_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_w(Tensor x, Tensor n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  structured_delegate: special_shifted_chebyshev_polynomial_w.out
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_w.x_scalar(Scalar x, Tensor n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_w.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_shifted_chebyshev_polynomial_w_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_w.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_shifted_chebyshev_polynomial_w.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_w_out
   device_check: NoCheck
   python_module: special
   variants: function

@@ -1068,6 +1068,7 @@ class TestSparse(TestCase):
         # more sophisticated algos
         run_test((10, 100, 100))
 
+    @onlyCPU
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_index_select_parallelization(self, device, dtype, coalesced):
