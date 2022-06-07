@@ -169,8 +169,14 @@ const std::string jit_epilogue;
 const std::string jit_common_types = R"ESCAPE(
   #ifdef __HIPCC__
   #define FORCE_INLINE
+  // corresponds to aten/src/ATen/native/cuda/thread_constants.h
+  #define CUDA_OR_ROCM_NUM_THREADS 256
+  // corresponds to aten/src/ATen/cuda/detail/OffsetCalculator.cuh
+  #define MAX_DIMS 16
   #else
   #define FORCE_INLINE __forceinline__
+  #define CUDA_OR_ROCM_NUM_THREADS 128
+  #define MAX_DIMS 25
   #endif
   #define POS_INFINITY __int_as_float(0x7f800000)
   #define INFINITY POS_INFINITY
@@ -185,14 +191,7 @@ const std::string jit_common_types = R"ESCAPE(
   static_assert(sizeof(int64_t) == 8, "expected size does not match");
   static_assert(sizeof(uint32_t) == 4, "expected size does not match");
   static_assert(sizeof(int8_t) == 1, "expected size does not match");
-  )ESCAPE"
-// corresponds to aten/src/ATen/native/cuda/thread_constants.h
-#ifdef USE_ROCM
-  R"ESCAPE(constexpr int num_threads = 256;)ESCAPE"
-#else
-  R"ESCAPE(constexpr int num_threads = 128;)ESCAPE"
-#endif
-  R"ESCAPE(
+  constexpr int num_threads = CUDA_OR_ROCM_NUM_THREADS;
   constexpr int thread_work_size = 4; // TODO: make template substitution once we decide where those vars live
   constexpr int block_work_size = thread_work_size * num_threads;
   #ifdef __HIPCC__
@@ -608,7 +607,7 @@ const std::string offset_calc_template = R"ESCAPE(
       }
 
       #pragma unroll
-      for (int dim = 0; dim < 25; ++dim) {
+      for (int dim = 0; dim < MAX_DIMS; ++dim) {
       if (dim == dims) {
           break;
       }
@@ -627,9 +626,9 @@ const std::string offset_calc_template = R"ESCAPE(
   }
 
     int dims;
-    IntDivider sizes_[25];
+    IntDivider sizes_[MAX_DIMS];
     // NOTE: this approach will not support nInputs == 0
-    ${index_type} strides_[25][NARGS];
+    ${index_type} strides_[MAX_DIMS][NARGS];
   };
 
 
