@@ -487,11 +487,7 @@ class MPSGraphCacheCallback : public IMpsAllocatorCallback {
 public:
   MPSGraphCacheCallback() : graph_cache(MPSGraphCache::getInstance()) { }
 
-  void executeMPSAllocatorCallback(void* ptr, EventType event) override {
-    if (event == EventType::FREED || event == EventType::RELEASED) {
-      //graph_cache->FindAndRemoveViewEntry(ptr);
-    }
-  }
+  void executeMPSAllocatorCallback(void* ptr, EventType event) override { }
 private:
   MPSGraphCache* graph_cache;
 };
