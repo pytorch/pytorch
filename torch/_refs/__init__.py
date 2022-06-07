@@ -1661,6 +1661,7 @@ def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
     return prims.broadcast_in_dim(a, size, dims)
 
 
+@register_decomposition(torch.ops.aten.cat)
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("tensors",),
@@ -1781,6 +1782,7 @@ def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeTy
     return prims.slice_in_dim(a, start, start + length, axis=dim)
 
 
+@register_decomposition(torch.ops.aten.permute)
 def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     _permutation = utils.canonicalize_dims(a.ndim, dims)
     return prims.transpose(a, _permutation)
