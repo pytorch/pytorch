@@ -217,8 +217,9 @@ const AnnotatedKernel* OperatorEntry::getKernelForDispatchKey(DispatchKey dispat
 const std::vector<at::Tag>& OperatorEntry::getTags() const {
   #if defined C10_MOBILE
     TORCH_CHECK(false, "tags are not saved for Mobile");
+  #else
+    return tags_;
   #endif
-  return tags_;
 }
 
 std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTableEntryWithDebug(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const {
