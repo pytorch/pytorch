@@ -11,7 +11,9 @@
 
 namespace torch{
 namespace lazy {
-
+// Turn clang-format off, as we rely on the whole signature being on one line
+// for codegen.
+// clang-format off
 TORCH_API std::vector<torch::lazy::Shape> compute_shape__adaptive_avg_pool2d(const at::Tensor & self, at::IntArrayRef output_size);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape__adaptive_avg_pool2d_backward(const at::Tensor & grad_output, const at::Tensor & self);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_abs(const at::Tensor & self);
@@ -102,5 +104,6 @@ TORCH_API std::vector<torch::lazy::Shape> compute_shape_diagonal_scatter(const a
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_slice_scatter(const at::Tensor & self, const at::Tensor & src, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_slice_scatter(const at::Tensor & self, const at::Tensor & src, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_as_strided_scatter(const at::Tensor & self, const at::Tensor & src, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset);
+// clang-format on
 } // namespace lazy
 } // namespace torch
