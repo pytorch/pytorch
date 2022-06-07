@@ -115,7 +115,41 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
     axis = opset11.unsqueeze(g, axis, 0)
     const_1 = g.op("Constant", value_t=torch.tensor(1, dtype=torch.long))
 
-    if not symbolic_helper._is_split_static(indices_or_sections, _outputs):
+    if symbolic_helper._is_split_static(indices_or_sections, _outputs):
+        split_val = indices_or_sections.node()["value"]
+
+        if split_val.dim() > 0:
+            start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+            res = []
+            for i in range(_outputs - 1):
+                end = g.op("Gather", indices_or_sections, i, axis)
+                res.append(g.op("Slice", self, start, end, axis))
+                start = end
+
+            end = symbolic_helper._size_helper(g, self, axis)
+            res.append(g.op("Slice", self, start, end, axis))
+            return res
+
+        split_size = symbolic_helper._get_const(
+            indices_or_sections, "i", "indices_or_sections"
+        )
+
+        size = symbolic_helper._get_tensor_dim_size(self, dim)
+        if size is None:
+            if _outputs is not None:
+                size = split_size * _outputs
+            else:
+                raise RuntimeError("Unknown dimension size not supported")
+
+        min_split_size = size // split_size
+        num_splits_one_extra = size % split_size
+
+        splits = num_splits_one_extra * [min_split_size + 1]
+        leftover = (split_size - num_splits_one_extra) * [min_split_size]
+
+        splits = g.op("Constant", value_t=torch.tensor(splits + leftover, dtype=torch.long))
+        return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
+    else:
         if (
             symbolic_helper._is_tensor(indices_or_sections)
             and symbolic_helper._get_tensor_rank(indices_or_sections) == 1
@@ -200,40 +234,6 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
             if _outputs is None:
                 return g.op("SplitToSequence", self, splits, axis_i=dim)
             return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
-
-    split_val = indices_or_sections.node()["value"]
-
-    if split_val.dim() > 0:
-        start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
-        res = []
-        for i in range(_outputs - 1):
-            end = g.op("Gather", indices_or_sections, i, axis)
-            res.append(g.op("Slice", self, start, end, axis))
-            start = end
-
-        end = symbolic_helper._size_helper(g, self, axis)
-        res.append(g.op("Slice", self, start, end, axis))
-        return res
-
-    split_size = symbolic_helper._get_const(
-        indices_or_sections, "i", "indices_or_sections"
-    )
-
-    size = symbolic_helper._get_tensor_dim_size(self, dim)
-    if size is None:
-        if _outputs is not None:
-            size = split_size * _outputs
-        else:
-            raise RuntimeError("Unknown dimension size not supported")
-
-    min_split_size = size // split_size
-    num_splits_one_extra = size % split_size
-
-    splits = num_splits_one_extra * [min_split_size + 1]
-    leftover = (split_size - num_splits_one_extra) * [min_split_size]
-
-    splits = g.op("Constant", value_t=torch.tensor(splits + leftover, dtype=torch.long))
-    return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
 
 
 @symbolic_helper.parse_args("v", "i", "i")
