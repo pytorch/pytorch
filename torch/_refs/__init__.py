@@ -2007,11 +2007,32 @@ def rot90(
         return clone(a)
 
 
-# update to cat then view instead of unsqueezing each tensor
+def _check_stack_inputs(tensors: List[Tensor]):
+    entry_shape = tensors[0].shape
+    for i in range(1, len(tensors)):
+        assert tensors[i].shape == entry_shape, (f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0"
+                                                 f"and {tensors[i].shape} at entry {i}")
+
+
+def _get_stack_inputs(tensors: List[Tensor], dim: int):
+    _check_stack_inputs(tensors)
+    return [t.unsqueeze(dim) for t in tensors]
+
+
+@register_decomposition(torch.ops.aten.stack)
 @out_wrapper
 def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
-    tensors = tuple(unsqueeze(a, dim) for a in tensors)
-    return cat(tensors, dim)
+    assert len(tensors) > 0, "stack expects a non-empty TensorList"
+    wrapped_dim = utils.canonicalize_dim(tensors[0].ndim + 1, dim)
+    # Refs need sparse support to check other condition
+    if wrapped_dim < tensors[0].ndim:  # and not tensors[0].is_sparse:
+        _check_stack_inputs(tensors)
+        result_sizes = list(tensors[0].shape)
+        result_sizes.insert(wrapped_dim, len(tensors))
+        out = torch.cat(tensors, wrapped_dim)
+        return out.view(result_sizes)
+    else:
+        return torch.cat(_get_stack_inputs(tensors, wrapped_dim), dim)
 
 
 @out_wrapper
