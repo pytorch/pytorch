@@ -9596,6 +9596,8 @@ def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
         ((2, 3, 4), "mean"),
         ((2,), "none"),
         ((2,), "batchmean"),
+        ((2, 3), "batchmean"),
+        ((2, 3, 4), "batchmean"),
         ((2,), "sum"),
     ]
 

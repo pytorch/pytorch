@@ -2872,8 +2872,8 @@ def kl_div(
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
     reduced = torch.kl_div(expanded_input, expanded_target, reduction_enum, log_target=log_target)
 
-    if reduction == "batchmean" and input.dim() != 0:
-        reduced = reduced / input.size()[0]
+    if reduction == "batchmean" and expanded_input.dim() != 0:
+        reduced = reduced / expanded_input.size()[0]
 
     return reduced
 
