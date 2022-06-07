@@ -69,10 +69,14 @@ class modules(_TestParametrizer):
                 self.train_eval_mode == TrainEvalMode.train_and_eval):
             training_flags.append(True)
 
-        # If train and eval modes don't differ for the module, just use train mode.
-        if (module_info.train_and_eval_differ and (self.train_eval_mode == TrainEvalMode.eval_only or
-                                                   self.train_eval_mode == TrainEvalMode.train_and_eval)):
+        if (self.train_eval_mode == TrainEvalMode.eval_only or
+                self.train_eval_mode == TrainEvalMode.train_and_eval):
             training_flags.append(False)
+
+        # If train and eval modes don't differ for the module, don't bother using more than one.
+        if not module_info.train_and_eval_differ:
+            training_flags = training_flags[:1]
+
         return training_flags
 
     def _parametrize_test(self, test, generic_cls, device_cls):
