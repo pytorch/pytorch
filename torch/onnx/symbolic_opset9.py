@@ -5272,7 +5272,9 @@ class Prim:
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
     @staticmethod
-    def device(ctx: torch.onnx.SymbolicContext, g: _C.Graph, *inputs, **kwargs) -> None:
+    def device(
+        ctx: _exporter_states.SymbolicContext, g: _C.Graph, *inputs, **kwargs
+    ) -> None:
         output_type = ctx.cur_node.output().type()
         if isinstance(output_type, _C.DeviceObjType):
             return None
