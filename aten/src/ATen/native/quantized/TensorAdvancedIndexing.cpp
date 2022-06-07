@@ -90,11 +90,9 @@ Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<c10::opt
       "This also applies to advanced indexing e.g. tensor[indices] = tensor");
   }
 
-  if (!accumulate) {
-    auto masked_fill_dispatch = canDispatchToMaskedFill(self, indices, value);
-    if (std::get<0>(masked_fill_dispatch)) {
-      return self.masked_fill_(std::get<1>(masked_fill_dispatch), value.item());
-    }
+  auto masked_fill_dispatch = canDispatchToMaskedFill(self, indices, value);
+  if (std::get<0>(masked_fill_dispatch)) {
+    return self.masked_fill_(std::get<1>(masked_fill_dispatch), value.item());
   }
 
   auto value_ = value;
