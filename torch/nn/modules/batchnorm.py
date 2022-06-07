@@ -726,7 +726,7 @@ class SyncBatchNorm(_BatchNorm):
         need_sync = (bn_training and self.training)
         if need_sync:
             process_group = torch.distributed.group.WORLD
-            if self.process_group:
+            if self.process_group is not None:
                 process_group = self.process_group
             world_size = torch.distributed.get_world_size(process_group)
             need_sync = world_size > 1
