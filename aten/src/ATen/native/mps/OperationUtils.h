@@ -62,8 +62,7 @@ class Placeholder {
  public:
   Placeholder() : _placeholder(nullptr), _value(nullptr) {}
   Placeholder(MPSGraphTensor* mpsGraphTensor) : _placeholder(mpsGraphTensor), _value(nullptr) {}
-  Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape = nullptr,
-              bool check_view = false);
+  Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape = nullptr);
   MPSGraphTensor* getMPSGraphTensor() {
     return _placeholder;
   }
@@ -74,9 +73,22 @@ class Placeholder {
     return _value == nullptr;
   }
 
+  void allocateViewTensor(const at::Tensor& src)
+  {
+    assert (!_viewOutput.numel());
+    _viewOutput = at::native::empty_mps(
+                  src.sizes(),
+                  src.scalar_type(),
+                  c10::nullopt,
+                  kMPS,
+                  c10::nullopt,
+                  c10::nullopt);
+  }
+
  private:
   MPSGraphTensor* _placeholder;
   MPSGraphTensorData* _value;
+  Tensor _viewOutput;
 };
 
 void resize_tensor(Tensor* output);
