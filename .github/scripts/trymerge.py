@@ -383,6 +383,7 @@ def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Merge PR into default branch")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--on-green", action="store_true")
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--comment-id", type=int)
@@ -889,7 +890,7 @@ def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
 
-def merge(pr_num: int, repo: GitRepo, dry_run: bool = False, timeout_minutes: int = 400) -> None:
+def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False, timeout_minutes: int = 400) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     start_time = time.time()
@@ -900,12 +901,13 @@ def merge(pr_num: int, repo: GitRepo, dry_run: bool = False, timeout_minutes: in
         elapsed_time = current_time - start_time
 
 
+        print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
         try:
             return pr.merge_into(repo, dry_run=dry_run)
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
-            print(f"Merged failed due to: {ex}. Retrying in 60 seconds.")
+            print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 60 seconds.")
             time.sleep(60)
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
@@ -948,11 +950,16 @@ def main() -> None:
         gh_post_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
 
-    try:
-        merge(args.pr_num, repo, dry_run=args.dry_run)
-    except Exception as e:
-        handle_exception(e)
-
+    if args.on_green:
+        try:
+            merge_on_green(args.pr_num, repo, dry_run=args.dry_run)
+        except Exception as e:
+            handle_exception(e)
+    else:
+        try:
+            pr.merge_into(repo, dry_run=args.dry_run, force=args.force, comment_id=args.comment_id)
+        except Exception as e:
+            handle_exception(e)
 
 
 if __name__ == "__main__":
