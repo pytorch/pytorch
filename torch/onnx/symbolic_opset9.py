@@ -4904,7 +4904,7 @@ def lerp(g, self, end, weight):
             g.op(
                 "Mul",
                 diff,
-                g.op("Sub", g.op("Constant", value_t=torch.tensor(1)), weight),
+                g.op("Sub", g.op("Constant", value_t=torch.tensor(1.0)), weight),
             ),
         ),
     )
