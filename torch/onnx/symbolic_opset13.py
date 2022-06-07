@@ -122,7 +122,12 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
             start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
             res = []
             for i in range(_outputs - 1):
-                end = g.op("Gather", indices_or_sections, i, axis)
+                end = g.op(
+                    "Gather",
+                    indices_or_sections,
+                    g.op("Constant", value_t=torch.tensor([i], dtype=torch.long)),
+                    axis_i=0,
+                )
                 res.append(g.op("Slice", self, start, end, axis))
                 start = end
 
@@ -147,7 +152,9 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
         splits = num_splits_one_extra * [min_split_size + 1]
         leftover = (split_size - num_splits_one_extra) * [min_split_size]
 
-        splits = g.op("Constant", value_t=torch.tensor(splits + leftover, dtype=torch.long))
+        splits = g.op(
+            "Constant", value_t=torch.tensor(splits + leftover, dtype=torch.long)
+        )
         return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
     else:
         if (
