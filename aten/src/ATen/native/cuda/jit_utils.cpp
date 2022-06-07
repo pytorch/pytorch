@@ -168,13 +168,17 @@ const std::string jit_epilogue;
 
 const std::string jit_common_types = R"ESCAPE(
   #ifdef __HIPCC__
-  #define FORCE_INLINE
+  #ifndef __forceinline__
+  #define __forceinline__ inline __attribute__((always_inline))
+  // Map HIP_DYNAMIC_SHARED to "extern __shared__" for compatibility with old HIP applications
+  #define HIP_DYNAMIC_SHARED(type, var) extern __shared__ type var[];
+  #define HIP_DYNAMIC_SHARED_ATTRIBUTE
+  #endif
   // corresponds to aten/src/ATen/native/cuda/thread_constants.h
   #define CUDA_OR_ROCM_NUM_THREADS 256
   // corresponds to aten/src/ATen/cuda/detail/OffsetCalculator.cuh
   #define MAX_DIMS 16
   #else
-  #define FORCE_INLINE __forceinline__
   #define CUDA_OR_ROCM_NUM_THREADS 128
   #define MAX_DIMS 25
   #endif
@@ -599,7 +603,7 @@ const std::string offset_calc_template = R"ESCAPE(
   template<int NARGS>
   struct OffsetCalculator {
   OffsetCalculator() = default;
-  __device__ FORCE_INLINE Array<${index_type}, NARGS> get(${index_type} linear_idx) const {
+  __device__ __forceinline__ Array<${index_type}, NARGS> get(${index_type} linear_idx) const {
       Array<${index_type}, NARGS> offsets;
       #pragma unroll
       for (int arg = 0; arg < NARGS; ++arg) {
