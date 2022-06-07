@@ -202,6 +202,8 @@ supported:
   - logsumexp.out
 autograd:
   - max_pool3d
+  - native_group_norm
+  - native_layer_norm
 
 # Ops that don't have a native schema definitions and are dispatched within Lazy Tensor Core
 non_native:

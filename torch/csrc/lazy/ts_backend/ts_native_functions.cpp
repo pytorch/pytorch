@@ -437,6 +437,30 @@ at::Tensor & LazyNativeFunctions::logsumexp_out(const at::Tensor & self, at::Int
   return out;
 }
 
+// re-use the composite kernel from core, that way we don't need to provide a
+// backwards formula for native_layer_norm
+std::tuple<at::Tensor, at::Tensor, at::Tensor>
+XLANativeFunctions::native_layer_norm(const at::Tensor& input,
+                                      at::IntArrayRef normalized_shape,
+                                      const c10::optional<at::Tensor>& weight,
+                                      const c10::optional<at::Tensor>& bias,
+                                      double eps) {
+  return at::native::math_native_layer_norm(input, normalized_shape, weight,
+                                            bias, eps);
+}
+
+// re-use the composite kernel from core, that way we don't need to provide a
+// backwards formula for native_group_norm
+std::tuple<at::Tensor, at::Tensor, at::Tensor>
+XLANativeFunctions::native_group_norm(const at::Tensor& input,
+                                      const c10::optional<at::Tensor>& weight,
+                                      const c10::optional<at::Tensor>& bias,
+                                      int64_t N, int64_t C, int64_t HxW,
+                                      int64_t group, double eps) {
+  return at::native::math_group_norm(input, weight, bias, N, C, HxW, group,
+                                     eps);
+}
+
 void InitializeAtenBindings() {}
 
 }  // namespace lazy
