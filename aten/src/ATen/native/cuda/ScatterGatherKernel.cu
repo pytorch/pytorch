@@ -120,10 +120,10 @@ struct _cuda_scatter_gather_internal_kernel {
     TensorIterator& iter,
     int64_t index_size,
     int64_t index_stride,
-    IntArrayRef index_sizes,
-    IntArrayRef index_strides,
-    IntArrayRef src_sizes,
-    IntArrayRef src_strides,
+    const IntArrayRef& index_sizes,
+    const IntArrayRef& index_strides,
+    const IntArrayRef& src_sizes,
+    const IntArrayRef& src_strides,
     int64_t numel,  // Do not use `const` qualifier here as it may cause issue in cuda 11.6.x. See #75434, #75545
     const func_t& f,
     bool index_larger_than_src = false
