@@ -1243,14 +1243,13 @@ def is_iterable(obj):
     except TypeError:
         return False
 
-
-def is_iterable_of_tensors(iterable, include_empty=False):
-    """ Returns True if iterable is an iterable of tensors and False o.w.
+def is_iterable_of_dtype(iterable, dtype, include_empty=False):
+    """ Returns True if iterable is an iterable of cls and False o.w.
 
         If the iterable is empty, the return value is :attr:`include_empty`
     """
-    # Tensor itself is iterable so we check this first
-    if isinstance(iterable, torch.Tensor):
+    # cls itself is iterable so we check this first
+    if isinstance(iterable, dtype):
         return False
 
     try:
@@ -1258,7 +1257,7 @@ def is_iterable_of_tensors(iterable, include_empty=False):
             return include_empty
 
         for t in iter(iterable):
-            if not isinstance(t, torch.Tensor):
+            if not isinstance(t, dtype):
                 return False
 
     except TypeError as te:
@@ -1266,6 +1265,12 @@ def is_iterable_of_tensors(iterable, include_empty=False):
 
     return True
 
+def is_iterable_of_tensors(iterable, include_empty=False):
+    """ Returns True if iterable is an iterable of tensors and False o.w.
+
+        If the iterable is empty, the return value is :attr:`include_empty`
+    """
+    return is_iterable_of_dtype(iterable, torch.Tensor, include_empty)
 
 class CudaNonDefaultStream():
     def __enter__(self):
