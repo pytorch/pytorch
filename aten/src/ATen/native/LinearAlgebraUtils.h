@@ -291,7 +291,7 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
 
   TORCH_CHECK(A.size(-1) == A.size(-2),
               "A must be batches of square matrices, "
-              "but they are ", A.size(-1), " by ", A.size(-2), " matrices");
+              "but they are ", A.size(-2), " by ", A.size(-1), " matrices");
 
   TORCH_CHECK(A.size(-1) == self.size(-2),
               "Incompatible matrix sizes for ", name, ": each A "
@@ -305,7 +305,7 @@ static inline void squareCheckInputs(const Tensor& self, const char* const f_nam
   TORCH_CHECK(self.size(-1) == self.size(-2),
               f_name,
               ": A must be batches of square matrices, "
-              "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
+              "but they are ", self.size(-2), " by ", self.size(-1), " matrices");
 }
 
 static inline void checkFloatingOrComplex(const Tensor& t, const char* const f_name) {
