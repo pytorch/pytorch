@@ -216,6 +216,7 @@ jobs:
           python3 -mpip install boto3==1.16.34
           pip3 install typing-extensions==3.10 --user
           pip3 install -r requirements-flake8.txt --user
+          pip3 install rockset
           python3 -mpip install -r requirements.txt --user
           python3 -mpip install mypy==0.960 --user
           make setup_lint
