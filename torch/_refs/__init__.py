@@ -2386,9 +2386,8 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
         )
         value_type = utils.dtype_to_type(value.dtype)
 
-    if python_type is not bool:
-        # Any type can be converted to `bool` without overflow
-        # Probably a bug in this case?
+    if value_type is complex:
+        # only downcasting from complex to lower type is not allowed.
         check(
             utils.is_weakly_lesser_type(value_type, python_type),
             lambda: f"could not convert to type {python_type} without overflow",
