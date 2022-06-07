@@ -19879,6 +19879,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.hardtanh",
         torch_opinfo_name="nn.functional.hardtanh",
+        skips=(
+            # RuntimeError: Tracing expected 4 arguments but got 1 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
     ),
     PythonRefInfo(  # TODO: Port this to an UnaryOpInfo
         "_refs.nn.functional.gelu",
@@ -20372,6 +20376,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.hstack",
         torch_opinfo_name="hstack",
+        supports_nvfuser=False,
         skips=(
             # https://github.com/pytorch/pytorch/issues/78613
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
@@ -20470,6 +20475,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.vstack",
         torch_opinfo_name="vstack",
+        supports_nvfuser=False,
         skips=(
             # https://github.com/pytorch/pytorch/issues/78613
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
