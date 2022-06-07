@@ -2164,7 +2164,7 @@ def hsplit(
     )
     dim = 0 if a.ndim == 1 else 1
     if isinstance(indices_or_sections, int):
-       split_size = indices_or_sections
+        split_size = indices_or_sections
         check(
             (split_size != 0 and a.shape[dim] % split_size == 0),
             lambda: (
