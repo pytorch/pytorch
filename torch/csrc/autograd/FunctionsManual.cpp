@@ -1572,9 +1572,9 @@ Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, in
 
   if (reduction == at::Reduction::Mean) {
     if (!grad_target._is_zerotensor()) {
-      grad_target.div_(target.numel());
+      grad_target.div_(self.numel());
     } else {
-      grad_target.div(target.numel());
+      grad_target.div(self.numel());
     }
   }
 
