@@ -678,8 +678,11 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
       tensor_impl->set_storage_offset(*storage_offset);
     }
 
-    // TODO: r.toBool(10)/dispatch_strides is ignored since setting sym_sizes/sym_strides
-    // will set a different custom policy
+
+    const auto sizes_strides_policy = r.stringViewOptional(10);
+    if (sizes_strides_policy.has_value()) {
+      TORCH_CHECK(false, "Setting sizes_strides_policy isn't suppored for this overload")
+    }
   }
 
   tensor.set_requires_grad(r.toBool(9));
