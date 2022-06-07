@@ -11,10 +11,10 @@ from unittest import skipIf
 import torch
 from torch.package import PackageExporter, PackageImporter
 from torch.testing._internal.common_utils import (
-    run_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    run_tests,
 )
 
 try:

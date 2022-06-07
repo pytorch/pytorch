@@ -992,6 +992,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.bessel_y1: lambda input: -1,
         torch.special.chebyshev_polynomial_t: lambda input, n, out=None: -1,
         torch.special.chebyshev_polynomial_u: lambda input, n, out=None: -1,
+        torch.special.chebyshev_polynomial_v: lambda input, n, out=None: -1,
+        torch.special.chebyshev_polynomial_w: lambda input, n, out=None: -1,
         torch.special.digamma: lambda input: -1,
         torch.special.entr: lambda input: -1,
         torch.special.erf: lambda input: -1,
@@ -1011,6 +1013,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.i1: lambda input: -1,
         torch.special.i1e: lambda input: -1,
         torch.special.laguerre_polynomial_l: lambda input, n, out=None: -1,
+        torch.special.legendre_polynomial_p: lambda input, n, out=None: -1,
         torch.special.log1p: lambda input: -1,
         torch.special.log_ndtr: lambda input: -1,
         torch.special.log_softmax: lambda input, dim, dtype=None: -1,
@@ -1026,6 +1029,10 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.polygamma: lambda input, n, out=None: -1,
         torch.special.psi: lambda input: -1,
         torch.special.round: lambda input: -1,
+        torch.special.shifted_chebyshev_polynomial_t: lambda input, n, out=None: -1,
+        torch.special.shifted_chebyshev_polynomial_u: lambda input, n, out=None: -1,
+        torch.special.shifted_chebyshev_polynomial_v: lambda input, n, out=None: -1,
+        torch.special.shifted_chebyshev_polynomial_w: lambda input, n, out=None: -1,
         torch.special.sinc: lambda input: -1,
         torch.special.softmax: lambda input, dim, dtype=None: -1,
         torch.special.xlog1py: lambda input, other, out=None: -1,
@@ -1163,6 +1170,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.device.__get__: lambda self: -1,
         Tensor.dtype.__get__: lambda self: -1,
         Tensor.is_cuda.__get__: lambda self: -1,
+        Tensor.is_cpu.__get__: lambda self: -1,
         Tensor.is_xpu.__get__: lambda self: -1,
         Tensor.is_ipu.__get__: lambda self: -1,
         Tensor.is_leaf.__get__: lambda self: -1,
@@ -1747,6 +1755,9 @@ def is_tensor_like(inp):
 def _wrap_torch_function(f):
     @functools.wraps(f)
     def wrapped(self, *args, **kwargs):
+        if isinstance(f, classmethod):
+            raise RuntimeError("TorchFunctionMode's torch_function function " +
+                               "should be a normal method not a class method")
         inner = getattr(self, "inner", None)
 
         with enable_torch_function_mode(inner):
