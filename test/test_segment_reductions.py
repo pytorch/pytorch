@@ -478,7 +478,7 @@ class TestSegmentReductions(TestCase):
 
         # test for error on multi-D lengths
         nd_lengths = torch.tensor([[0, 3, 3, 0], [2, 3, 0, 0]], dtype=length_type)
-        nd_data = torch.arange(12).reshape(2, 6).float()
+        nd_data = torch.arange(12, dtype=torch.float, device=device).reshape(2, 6)
         with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
             torch.segment_reduce(nd_data, 'sum', lengths=nd_lengths, axis=1, unsafe=False)
 
