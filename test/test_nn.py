@@ -16,6 +16,9 @@ from functools import reduce, partial
 from operator import mul
 from collections import OrderedDict
 from tempfile import NamedTemporaryFile
+import sys
+import os
+import subprocess
 
 import torch
 
@@ -43,7 +46,8 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMps,\
     suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
-    parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype, IS_WINDOWS
+    parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype, IS_WINDOWS, \
+    slowTest
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
@@ -15088,6 +15092,71 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(inp.grad, torch.zeros_like(inp))
         self.assertEqual(unpool_out, torch.zeros_like(unpool_out))
 
+    @slowTest
+    @onlyNativeDeviceTypes
+    @skipCUDAIfRocm
+    @parametrize_test("module_name,module_size,output_size,test_index,should_error", [
+        subtest(('MaxUnpool2d', (2, 2), (1, 3, 4, 5), -1, True), name='case1'),
+        subtest(('MaxUnpool2d', (2, 2), (1, 3, 4, 5), 2 * 2 * 4 * 5, True), name='case2'),
+        subtest(('MaxUnpool2d', (2, 2), (1, 3, 4, 5), (2 * 2 * 4 * 5) - 1, False), name='case3'),
+        subtest(('MaxUnpool2d', (2, 3), (2, 1, 4, 2), 2 * 3 * 4 * 2, True), name='case4'),
+        subtest(('MaxUnpool2d', (2, 3), (2, 1, 4, 2), (2 * 3 * 4 * 2) - 1, False), name='case5'),
+
+        subtest(('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), -1, True), name='case6'),
+        subtest(('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), 2 * 2 * 2 * 3 * 4 * 5, True), name='case7'),
+        subtest(('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), (2 * 2 * 2 * 3 * 4 * 5) - 1, False), name='case8'),
+        subtest(('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), 2 * 2 * 2 * 3 * 4 * 1, True), name='case9'),
+        subtest(('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), (2 * 2 * 2 * 3 * 4 * 1) - 1, False), name='case10'),
+    ])
+    def test_MaxUnpool_index_errors(self, device, module_name, module_size, output_size, test_index, should_error):
+        # NOTE: CUDA tests need to be run in a subprocess because they cause device asserts
+        if torch.device(device).type == 'cuda':
+            error_msgs = {
+                'MaxUnpool2d': r'Assertion `maxind >= 0 && maxind < outputImageSize` failed',
+                'MaxUnpool3d': r'Assertion `index >= 0 && index < outputImageSize` failed'}
+
+            script = f'''
+import torch
+unpool = torch.nn.{module_name}({module_size}).to('{device}')
+output = torch.rand({output_size}, dtype=torch.float32, device='{device}')
+indices = torch.zeros({output_size}, dtype=torch.int64, device='{device}')
+indices.flatten()[0] = {test_index}
+unpool(output, indices)
+torch.cuda.synchronize()
+'''
+            p = subprocess.run(
+                [sys.executable, '-c', script],
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                capture_output=True,
+            )
+
+            output = str(p.stdout) + '\n' + str(p.stderr)
+
+            error_msg = error_msgs[module_name]
+
+            if should_error:
+                self.assertIn(
+                    error_msg,
+                    output,
+                    'The expected error was not found')
+            else:
+                self.assertNotIn(
+                    'Error',
+                    output,
+                    'Should not have produced an error')
+        else:
+            module_class = getattr(torch.nn, module_name)
+            unpool = module_class(module_size).to(device)
+            output = torch.rand(output_size, dtype=torch.float32, device=device)
+            indices = torch.zeros(output_size, dtype=torch.int64, device=device)
+            indices.flatten()[0] = test_index
+
+            if should_error:
+                with self.assertRaisesRegex(RuntimeError, r'Found an invalid max index:'):
+                    unpool(output, indices)
+            else:
+                unpool(output, indices)
+
     @onlyNativeDeviceTypes
     def test_AdaptiveMaxPool_zero_batch_dim(self, device):
         inp = torch.randn(0, 16, 50, device=device)
@@ -16475,6 +16544,40 @@ class TestNNDeviceType(NNTestCase):
     @dtypesIfCUDA(*((torch.float, torch.double, torch.bfloat16, torch.half)
                     if TEST_WITH_ROCM else (torch.float, torch.double, torch.half)))
     @dtypes(torch.float32)
+    def test_embedding_max_norm_backward(self, device, dtype):
+        # can't use gradcheck since in place renorm makes analytical gradients different from produced ones
+        weight = torch.randn((4, 4), device=device, dtype=dtype) * 2
+        weight.requires_grad_()
+        inp_list = [0, 1, 2, 2]
+        inp = torch.tensor(inp_list, device=device)
+        out = nn.functional.embedding(inp, weight, max_norm=1.).sum()
+        out.backward()
+
+        expected_grad = torch.tensor([[1., 1., 2., 0.]], device=device, dtype=dtype).transpose(0, 1).expand(4, 4)
+        self.assertEqual(weight.grad, expected_grad)
+
+    @dtypesIfCUDA(*((torch.float, torch.double, torch.bfloat16, torch.half)
+                    if TEST_WITH_ROCM else (torch.float, torch.double, torch.half)))
+    @dtypes(torch.float32)
+    def test_embedding_max_norm_fwd_AD(self, device, dtype):
+        if torch.device(device).type == 'xla':
+            self.skipTest("forward AD doesn't work on xla")
+
+        # can't use gradcheck since in place renorm makes analytical gradients different from produced ones
+        weight = torch.randn((4, 4), device=device, dtype=dtype) * 2
+        tangent = torch.ones((4, 4), device=device, dtype=dtype)
+        inp = torch.tensor([[0, 1], [2, 2]], device=device)
+        with torch.autograd.forward_ad.dual_level():
+            dual_weight = torch.autograd.forward_ad.make_dual(weight, tangent)
+            out = nn.functional.embedding(inp, dual_weight, max_norm=1.)
+            jvp = torch.autograd.forward_ad.unpack_dual(out).tangent
+
+        expected_grad = torch.ones((2, 2, 4), device=device, dtype=dtype)
+        self.assertEqual(jvp, expected_grad)
+
+    @dtypesIfCUDA(*((torch.float, torch.double, torch.bfloat16, torch.half)
+                    if TEST_WITH_ROCM else (torch.float, torch.double, torch.half)))
+    @dtypes(torch.float32)
     def test_embedding_padding_idx(self, device, dtype):
         embedding = nn.Embedding(10, 20, padding_idx=0).to(device, dtype)
         input = torch.tensor([[0, 2, 4, 5], [4, 3, 0, 9]], dtype=torch.long).to(device)
@@ -17195,10 +17298,17 @@ class TestNNDeviceType(NNTestCase):
         maxdiff1 = (ret.narrow(0, 1024, 1024) - conv(input_large.narrow(0, 1024, 1024))).abs_().max().item()
         maxdiff2 = (ret.narrow(0, 2048, 1024) - conv(input_large.narrow(0, 2048, 1024))).abs_().max().item()
         maxdiff3 = (ret.narrow(0, 3072, 1024) - conv(input_large.narrow(0, 3072, 1024))).abs_().max().item()
-        self.assertEqual(maxdiff0, 0)
-        self.assertEqual(maxdiff1, 0)
-        self.assertEqual(maxdiff2, 0)
-        self.assertEqual(maxdiff3, 0)
+        if self.device_type == 'cuda':
+            # cuDNN may use algorithms such as FFT that don't guarantee a diff of 0
+            self.assertEqual(maxdiff0, 0, atol=2e-3, rtol=1e-5)
+            self.assertEqual(maxdiff1, 0, atol=2e-3, rtol=1e-5)
+            self.assertEqual(maxdiff2, 0, atol=2e-3, rtol=1e-5)
+            self.assertEqual(maxdiff3, 0, atol=2e-3, rtol=1e-5)
+        else:
+            self.assertEqual(maxdiff0, 0)
+            self.assertEqual(maxdiff1, 0)
+            self.assertEqual(maxdiff2, 0)
+            self.assertEqual(maxdiff3, 0)
 
     @onlyCUDA
     @skipCUDAIfRocm
