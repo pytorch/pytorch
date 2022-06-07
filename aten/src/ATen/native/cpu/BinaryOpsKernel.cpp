@@ -844,13 +844,21 @@ void fmod_kernel(TensorIteratorBase& iter) {
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "fmod_cpu", [&]() {
-      cpu_kernel_vec(
+      // TODO: there's a bug in vectorized fmod
+      // See https://github.com/pytorch/pytorch/issues/79009
+      // cpu_kernel_vec(
+      //   iter,
+      //   [](scalar_t x, scalar_t d) -> scalar_t {
+      //     return std::fmod(x, d);
+      //   },
+      //   [](Vectorized<scalar_t> x, Vectorized<scalar_t> d) {
+      //     return x.fmod(d);
+      //   });
+      // TODO: Remove cpu_kernel and uncomment cpu_kernel_vec once the bug is fixed
+      cpu_kernel(
         iter,
         [](scalar_t x, scalar_t d) -> scalar_t {
           return std::fmod(x, d);
-        },
-        [](Vectorized<scalar_t> x, Vectorized<scalar_t> d) {
-          return x.fmod(d);
         });
     });
   }
