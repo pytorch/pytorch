@@ -104,9 +104,11 @@ def _sharding_worker_init_fn(worker_init_fn, worker_id):
     info = torch.utils.data.get_worker_info()
     total_workers = info.num_workers
     datapipe = info.dataset
+    # To distribute elements across distributed process evenly, we should shard data on distributed
+    # processes first then shard on worker processes
     if dist.is_available() and dist.is_initialized():
         total_workers *= dist.get_world_size()
-        global_worker_id = dist.get_rank() * info.num_workers + global_worker_id
+        global_worker_id = global_worker_id * dist.get_world_size() + dist.get_rank()
     torch.utils.data.graph_settings.apply_sharding(datapipe, total_workers, global_worker_id)
     if worker_init_fn is not None:
         worker_init_fn(worker_id)
