@@ -609,5 +609,21 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
   return buffer.slice(0, start, stop).view(shape);
 }
 
+Tensor clone_nested(
+    const Tensor& self,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
+  TORCH_CHECK(
+      memory_format == MemoryFormat::Preserve,
+      "clone_nested only supports memory format Preserve, but got ",
+      memory_format,
+      " instead.");
+  // TODO: The size doesn't necessarily need to be cloned, but it is more
+  // conservative. This is something we could revisit once we land a more
+  // efficient implementation of nested_size_tensor_.
+  return wrap_buffer(
+      get_buffer(self).clone(), get_nested_size_tensor(self).clone());
+}
+
 } // namespace native
 } // namespace at

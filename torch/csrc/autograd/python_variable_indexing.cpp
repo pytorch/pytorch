@@ -325,7 +325,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   variable_list variableIndices;
   int64_t specified_dims = count_specified_dimensions(holder.get());
   if (specified_dims == -1) {
-    return handle_torch_function_indexing(self, index);
+    return handle_torch_function_indexing(self, holder.get());
   }
   // See NOTE [nested tensor size for indexing]
   c10::optional<IntArrayRef> self_sizes = c10::nullopt;
