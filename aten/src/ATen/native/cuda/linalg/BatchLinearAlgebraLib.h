@@ -31,6 +31,10 @@
   constexpr bool use_cusolver_syevj_batched_ = false;
 #endif
 
+// From cuSOLVER doc: Jacobi method has quadratic convergence, so the accuracy is not proportional to number of sweeps.
+//   To guarantee certain accuracy, the user should configure tolerance only.
+// The current pytorch implementation sets gesvdj tolerance to epsilon of a C++ data type to target the best possible precision.
+constexpr int cusolver_gesvdj_max_sweeps = 400;
 
 namespace at {
 namespace native {
@@ -59,7 +63,8 @@ Tensor _inverse_helper_cuda_lib(const Tensor& self);
 Tensor& _linalg_inv_out_helper_cuda_lib(Tensor& result, Tensor& infos_getrf, Tensor& infos_getrs);
 
 // entrance of calculations of `svd` using cusolver gesvdj and gesvdjBatched
-void svd_cusolver(const Tensor& A, const bool full_matrices, const bool compute_uv, const Tensor& U, const Tensor& S, const Tensor& V, const Tensor& info);
+void svd_cusolver(const Tensor& A, const bool full_matrices, const bool compute_uv,
+  const c10::optional<c10::string_view>& driver, const Tensor& U, const Tensor& S, const Tensor& V, const Tensor& info);
 
 // entrance of calculations of `cholesky` using cusolver potrf and potrfBatched
 void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& info);

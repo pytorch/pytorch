@@ -334,6 +334,8 @@ Tensor internal_new_from_data(
   // torch.jit.trace will continue to trace out `.to()` instead of `.lift()`, since
   // changing it is BC-breaking.
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
+  // lift has no autograd implementation, so we need to make sure we don't try to dispatch to it.
+  at::AutoDispatchBelowADInplaceOrView guard;
   return tensor.lift();
 }
 
