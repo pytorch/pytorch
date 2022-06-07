@@ -6904,7 +6904,7 @@ def sample_inputs_linalg_lu(op_info, device, dtype, requires_grad=False, **kwarg
     make_arg = partial(make_fn, dtype=dtype, device=device, requires_grad=requires_grad)
 
     def out_fn(output):
-        if op_info.name in ("linalg.lu"):
+        if op_info.name == "linalg.lu":
             return output[1], output[2]
         else:
             return output

@@ -4213,7 +4213,7 @@ class TestLinalg(TestCase):
                 size_b = size_b[1:]
 
             if well_conditioned:
-                PLU = torch.lu_unpack(*torch.lu(make_randn(*size_a)))
+                PLU = torch.linalg.lu(make_randn(*size_a))
                 if uni:
                     # A = L from PLU
                     A = PLU[1].transpose(-2, -1).contiguous()
@@ -4900,15 +4900,6 @@ class TestLinalg(TestCase):
         self.assertEqual(torch.tensor(0., device=device), fn(torch.dot, (0,), (0,)))
         self.assertEqual(torch.tensor(0., device=device), fn(torch.dot, (0,), (0,), test_out=True))
 
-        if torch._C.has_lapack:
-            # lu
-            A_LU, pivots = fn(torch.lu, (0, 5, 5))
-            self.assertEqual([(0, 5, 5), (0, 5)], [A_LU.shape, pivots.shape])
-            A_LU, pivots = fn(torch.lu, (0, 0, 0))
-            self.assertEqual([(0, 0, 0), (0, 0)], [A_LU.shape, pivots.shape])
-            A_LU, pivots = fn(torch.lu, (2, 0, 0))
-            self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
-
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_and_complex_types_and(
@@ -5276,7 +5267,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.double)
     def test_lu_unpack_check_input(self, device, dtype):
         x = torch.rand(5, 5, 5, device=device, dtype=dtype)
-        lu_data, lu_pivots = torch.lu(x, pivot=True)
+        lu_data, lu_pivots = torch.linalg.lu_factor(x)
 
         with self.assertRaisesRegex(RuntimeError, "torch.int32 dtype"):
             torch.lu_unpack(lu_data, lu_pivots.long())
@@ -7163,7 +7154,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = make_A(*A_dims)
-        LU_data, LU_pivots, info = torch.lu(A, get_infos=True, pivot=pivot)
+        LU_data, LU_pivots, info = torch.linalg.lu_factor_ex(A)
         self.assertEqual(info, torch.zeros_like(info))
         return b, A, LU_data, LU_pivots
 
@@ -7207,7 +7198,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # Tests tensors with 0 elements
         b = torch.randn(3, 0, 3, dtype=dtype, device=device)
         A = torch.randn(3, 0, 0, dtype=dtype, device=device)
-        LU_data, LU_pivots = torch.lu(A)
+        LU_data, LU_pivots = torch.linalg.lu_factor(A)
         self.assertEqual(torch.empty_like(b), b.lu_solve(LU_data, LU_pivots))
 
         sub_test(True)
@@ -7242,7 +7233,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             A = make_A(*A_batch_dims, A_matrix_size, A_matrix_size)
             b = make_tensor(b_dims, dtype=dtype, device=device)
             x_exp = np.linalg.solve(A.cpu(), b.cpu())
-            LU_data, LU_pivots = torch.lu(A, pivot=pivot)
+            LU_data, LU_pivots = torch.linalg.lu_factor(A)
             x = torch.lu_solve(b, LU_data, LU_pivots)
             self.assertEqual(x, x_exp)
 
