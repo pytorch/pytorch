@@ -161,7 +161,7 @@ __all__ = [
     "any",
     "mean",
     "std_mean",
-    "std_var",
+    "var_mean",
     "sum",
     "prod",
     "var",
