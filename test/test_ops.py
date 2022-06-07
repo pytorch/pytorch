@@ -14,6 +14,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     all_types_and_complex_and,
 )
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.testing._internal.common_utils import (
     TestCase,
     is_iterable_of_tensors,
@@ -356,7 +357,7 @@ class TestCommon(TestCase):
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
-                return prims.utils.TensorMeta(x)
+                return FakeTensor.from_tensor(x)
             return x
 
         # TODO: iterate over requires_grad true/false
@@ -458,7 +459,7 @@ class TestCommon(TestCase):
 
             # TODO: consider adding some tolerance to this comparison
             msg = f"Reference result was farther ({ref_distance}) from the precise " \
-                  "computation than the torch result was ({torch_distance})!"
+                  f"computation than the torch result was ({torch_distance})!"
             self.assertTrue(ref_distance <= torch_distance, msg=msg)
 
         # Reports numerical accuracy discrepancies
@@ -506,7 +507,7 @@ class TestCommon(TestCase):
     def test_python_ref_errors(self, device, op):
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
-                return prims.utils.TensorMeta(x)
+                return FakeTensor.from_tensor(x)
             return x
 
         error_inputs = op.error_inputs(device)
