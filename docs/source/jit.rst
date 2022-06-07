@@ -874,6 +874,11 @@ now supported.
             b = 2
         return x, b
 
+Fusion Backends
+~~~~~~~~~~~~~~~
+There are a couple of fusion backends available to optimize TorchScript execution. The default is NNC, which can perform fusions for both CPU and GPU. Another alternative is NVFuser, which targets GPU fusion. See the  `NVFuser documentation <https://github.com/pytorch/pytorch/blob/release/1.12/torch/csrc/jit/codegen/cuda/README.md>`_ for more details on usage and debugging.
+
+
 References
 ~~~~~~~~~~
 .. toctree::

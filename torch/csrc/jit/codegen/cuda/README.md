@@ -1,36 +1,5 @@
 # NVFuser - A Fusion Code Generator for NVIDIA GPUs
-_NVFuser is integrated as a backend for TorchScript's Profiling Graph Executor_
-
-## Enabling NVFuser
-_NVFuser is not currently the default fuser for NVIDIA GPUs._
-
-**Fusions will only show up during the ~3rd iteration of execution, the exact number depends on profiling executor's optimization phases**
-
-### Enable by Context Manager
-
-```
-jit_model = torch.jit.script(model)
-
-with torch.jit.fuser("fuser2") :
-    for _ in range(5) :
-        outputs = jit_model(inputs)
-```
-
-### Enable by Specific Functions
-
-1. Disable cpu/gpu fusion for native/nnc fuser
-```
-torch._C._jit_override_can_fuse_on_cpu(False)
-torch._C._jit_override_can_fuse_on_gpu(False)
-```
-2. Disable nnc fuser
-```
-torch._C._jit_set_texpr_fuser_enabled(False)
-```
-3. Enable nvfuser
-```
-torch._C._jit_set_nvfuser_enabled(True)
-```
+_NVFuser is integrated as a backend for TorchScript's Profiling Graph Executor. NVFuser is the default fuser for NVIDIA GPUs._
 
 ## Simple knobs to change fusion behavior
 
