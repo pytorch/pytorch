@@ -11,7 +11,8 @@ import json
 import os
 from hashlib import sha256
 
-from trymerge import find_matching_merge_rule, gh_graphql, gh_get_team_members, GitHubPR, MergeRule, MandatoryChecksMissingError
+from trymerge import find_matching_merge_rule, gh_graphql, gh_get_team_members, \
+    GitHubPR, MergeRule, MandatoryChecksNotRunError, MandatoryChecksPendingError
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import cast, Any, List, Optional
 from unittest import TestCase, main, mock
@@ -54,21 +55,24 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
     return rc
 
 
-def mocked_read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
+def mocked_read_merge_rules(repo: Optional[GitRepo],
+                            org: str,
+                            project: str,
+                            required_check: str = "linux-docs / build-docs (cpp)") -> List[MergeRule]:
     mock_merge_rules = """
     [
-        {
+        {{
             "name": "mock with nonexistent check",
             "patterns": ["*"],
             "approved_by": [],
             "mandatory_checks_name": [
                 "Facebook CLA Check",
                 "Lint",
-                "nonexistent"
+                "{0}"
             ]
-        }
+        }}
     ]
-    """
+    """.format(required_check)
     rc = json.loads(mock_merge_rules, object_hook=lambda x: MergeRule(**x))
     return cast(List[MergeRule], rc)
 
@@ -172,12 +176,23 @@ class TestGitHubPR(TestCase):
     @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_pending_status_check(self, mocked_gql: Any, mocked_read_merge_rules: Any) -> None:
-        """ Tests that PR with nonexistent/pending status checks fails with the right reason.
+        """ Tests that PR with pending status checks fails with the right reason.
         """
-        pr = GitHubPR("pytorch", "pytorch", 76118)
+        pr = GitHubPR("pytorch", "pytorch", 78969)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        self.assertRaisesRegex(MandatoryChecksMissingError,
-                               ".*are pending/not yet run.*",
+        self.assertRaisesRegex(MandatoryChecksPendingError,
+                               ".* are pending for rule .*",
+                               lambda: find_matching_merge_rule(pr, repo))
+
+    @mock.patch('trymerge.read_merge_rules', return_value=mocked_read_merge_rules(GitRepo("", ""), "", "", "nonexistent"))
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_no_status_check(self, mocked_gql: Any, mocked_read_merge_rules: Any) -> None:
+        """ Tests that PR with nonexistent status checks fails with the right reason.
+        """
+        pr = GitHubPR("pytorch", "pytorch", 78969)
+        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+        self.assertRaisesRegex(MandatoryChecksNotRunError,
+                               ".*are not running for rule.*",
                                lambda: find_matching_merge_rule(pr, repo))
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)

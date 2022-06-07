@@ -718,7 +718,7 @@ class GitHubPR:
             gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
 
 
-class MandatoryChecksMissingError(Exception):
+class MandatoryChecksPendingError(Exception):
     pass
 
 class MandatoryChecksNotRunError(Exception):
@@ -833,20 +833,20 @@ def find_matching_merge_rule(pr: GitHubPR,
         elif len(not_run_checks) > 0:
             if reject_reason_score < 25000:
                 reject_reason_score = 25000
-                reject_reason = ("Refusing to merge as mandatory check(s)" +
+                reject_reason = ("Refusing to merge as mandatory check(s) " +
                                  f"{checks_to_str(not_run_checks)} are not running for rule {rule_name}.")
                 continue
         elif len(pending_checks) > 0:
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
                 reject_reason = f"Refusing to merge as mandatory check(s) {checks_to_str(pending_checks)}"
-                reject_reason += f" are pending/not yet run for rule {rule_name}"
+                reject_reason += f" are pending for rule {rule_name}"
             continue
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
         return rule
     if reject_reason_score == 20000:
-        raise MandatoryChecksMissingError(reject_reason)
+        raise MandatoryChecksPendingError(reject_reason)
     if reject_reason_score == 25000:
         raise MandatoryChecksNotRunError(reject_reason)
     raise RuntimeError(reject_reason)
@@ -917,7 +917,7 @@ def merge(pr_num: int, repo: GitRepo,
         pr = GitHubPR(org, project, pr_num)
         try:
             return pr.merge_into(repo, force=force, dry_run=dry_run, comment_id=comment_id)
-        except MandatoryChecksMissingError as ex:
+        except MandatoryChecksPendingError as ex:
             last_exception = str(ex)
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 60 seconds.")
             time.sleep(60)
