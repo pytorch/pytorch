@@ -8,7 +8,7 @@ import torch._lazy.ts_backend
 import torch._lazy.metrics as metrics
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 import os
-from unittest import skipIf
+import unittest
 
 torch._lazy.ts_backend.init()
 torch._lazy.config.set_reuse_ir(True)
@@ -16,7 +16,7 @@ torch._lazy.config.set_reuse_ir(True)
 def get_test_device():
     return 'cuda' if 'LTC_TS_CUDA' in os.environ else 'cpu'
 
-skipIf(IS_WINDOWS, "To be fixed")
+unittest.skipIf(IS_WINDOWS, "To be fixed")
 class TestLazyReuseIr(TestCase):
     def testAdd(self):
         device = get_test_device()
