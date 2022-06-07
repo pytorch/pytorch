@@ -6,10 +6,10 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/native/quantized/affine_quantizer.h>
-#include <ATen/native/quantized/fake_quant_affine.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
+#include <ATen/native/quantized/FakeQuantAffine.h>
 #include <ATen/native/quantized/IndexKernel.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
@@ -3600,8 +3600,9 @@ void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
   });
 }
 
+// This function expects quantized_val input to already be quantized
 template <typename scalar_t, typename mask_t>
-void cpu_masked_fill_kernel_quantized_cpu(TensorIterator& iter, float value, double scale, int zero_point) {
+void cpu_masked_fill_kernel_quantized_cpu(TensorIterator& iter, scalar_t quantized_val) {
   auto is_mask_bool = std::is_same<mask_t, bool>::value;
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     char* dst = data[0];
@@ -3612,7 +3613,7 @@ void cpu_masked_fill_kernel_quantized_cpu(TensorIterator& iter, float value, dou
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
       }
       if (mask_value) {
-        *(scalar_t*)(dst + strides[0] * i) = quantize_val<scalar_t>(scale, zero_point, value);
+        *(scalar_t*)(dst + strides[0] * i) = quantized_val;
       }
     }
   };
@@ -3621,12 +3622,13 @@ void cpu_masked_fill_kernel_quantized_cpu(TensorIterator& iter, float value, dou
 
 void masked_fill_kernel_quantized_cpu(TensorIterator& iter, const Scalar& value, double scale, int zero_point) {
   AT_DISPATCH_QINT_TYPES(iter.dtype(), "masked_fill", [&] {
-    float scalar_val = value.to<float>();
+    float float_val = value.to<float>();
+    auto quantized_val = quantize_val<scalar_t>(scale, zero_point, float_val);
     auto mask_dtype = iter.input_dtype(0);
     if (mask_dtype == ScalarType::Bool) {
-      cpu_masked_fill_kernel_quantized_cpu<scalar_t, bool>(iter, scalar_val, scale, zero_point);
+      cpu_masked_fill_kernel_quantized_cpu<scalar_t, bool>(iter, quantized_val);
     } else {
-      cpu_masked_fill_kernel_quantized_cpu<scalar_t, unsigned char>(iter, scalar_val, scale, zero_point);
+      cpu_masked_fill_kernel_quantized_cpu<scalar_t, unsigned char>(iter, quantized_val);
     }
   });
 }
