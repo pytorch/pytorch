@@ -193,6 +193,8 @@ TORCH_API at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar);
 TORCH_API c10::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
     c10::SymIntArrayRef ar);
 
-std::ostream& operator<<(std::ostream& out, const c10::SymIntArrayRef& list);
+inline std::ostream& operator<<(std::ostream& out, const c10::SymIntArrayRef& list) {
+  return out << list.wrapped_symint_array_ref;
+}
 
 } // namespace c10

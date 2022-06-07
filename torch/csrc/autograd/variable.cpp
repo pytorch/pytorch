@@ -655,9 +655,9 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
         fn->set_next_edges(
             torch::autograd::collect_next_edges(view_info.base_));
         fn->add_input_metadata(
-            view_info.base_.options(),
-            self.sizes(), // Note: sizes(), not base_.sizes(), is intentional
-            self.unsafeGetTensorImpl()->is_python_dispatch());
+          view_info.base_.options(),
+          self.sym_sizes(), // Note: sizes(), not base_.sizes(), is intentional
+          self.unsafeGetTensorImpl()->is_python_dispatch());
         diff_view_meta->grad_fn_ = std::move(fn);
       }
       diff_view_meta->set_attr_version(current_version);

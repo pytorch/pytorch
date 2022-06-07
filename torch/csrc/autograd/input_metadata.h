@@ -10,6 +10,9 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/util/variant.h>
+#include <c10/util/DimVector.h>
+#include <c10/core/SymIntArrayRef.h>
+#include <c10/util/SmallVector.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -23,7 +26,8 @@
 namespace torch {
 namespace autograd {
 
-using MetadataShape = c10::variant<at::DimVector, at::Tensor>;
+using SymIntSmallVec = c10::SmallVector<c10::SymInt, c10::kDimVectorStaticSize>;
+using MetadataShape = c10::variant<SymIntSmallVec, at::Tensor>;
 
 /**
  * Records TensorOptions, shape of the tensor, whether or not the Python
@@ -81,7 +85,7 @@ struct InputMetadata {
     TORCH_CHECK(
         !is_nested_tensor(),
         "Zeros is not currently supported for nested tensors.")
-    return at::zeros(shape_as_dim_vector(), options_);
+    return at::zeros(c10::asIntArrayRefSlow(shape_as_dim_vector()), options_);
   }
 
   bool is_same_shape(const at::Tensor& grad) const {
@@ -92,7 +96,7 @@ struct InputMetadata {
       return at::native::get_nested_size_tensor(grad).is_same_size(
           shape_as_tensor());
     }
-    return grad.sizes().equals(shape_as_dim_vector());
+    return grad.sizes().equals(c10::asIntArrayRefSlow(shape_as_dim_vector()));
   }
   bool is_expandable_to_shape(const at::Tensor& grad) const {
     // Currently NestedTensors are not expandable. If this support is added then
@@ -102,7 +106,7 @@ struct InputMetadata {
         "Both grad and InputMetadata need to be either nested or non nested tensors.")
     return grad.is_nested()
         ? false
-        : at::is_expandable_to(shape_as_dim_vector(), grad.sizes());
+        : at::is_expandable_to(c10::asIntArrayRefSlow(shape_as_dim_vector()), grad.sizes());
   }
 
   at::Tensor reduce_grad(at::Tensor& grad) const {
@@ -110,7 +114,7 @@ struct InputMetadata {
     // true For nested tensors this always returns False, so this check
     // shouldn't fail
     TORCH_INTERNAL_ASSERT(!grad.is_nested() && !is_nested_tensor())
-    return at::sum_to(std::move(grad), shape_as_dim_vector());
+    return at::sum_to(std::move(grad), c10::asIntArrayRefSlow(shape_as_dim_vector()));
   }
 
   std::stringstream incompatible_shape_error_message(
@@ -127,7 +131,7 @@ struct InputMetadata {
     if (is_nested_tensor()) {
       ss << shape_as_tensor();
     } else {
-      ss << shape_as_dim_vector();
+      ss << c10::asIntArrayRefSlow(shape_as_dim_vector());
     }
     return ss;
   }
@@ -141,12 +145,14 @@ struct InputMetadata {
       auto nested_size = at::native::get_nested_size_tensor(input);
       return MetadataShape{c10::in_place_type<at::Tensor>, nested_size};
     }
-    return MetadataShape{c10::in_place_type<at::DimVector>, input.sizes()};
+    return MetadataShape{c10::in_place_type<SymIntSmallVec>, input.sym_sizes()};
   }
 
-  at::DimVector shape_as_dim_vector() const {
-    return c10::get<at::DimVector>(shape_);
+  c10::SymIntArrayRef shape_as_dim_vector() const {
+    const auto& dim_shape = c10::get<SymIntSmallVec>(shape_);
+   return c10::SymIntArrayRef(dim_shape.data(), dim_shape.size());
   }
+
   at::Tensor shape_as_tensor() const {
     return c10::get<at::Tensor>(shape_);
   }
