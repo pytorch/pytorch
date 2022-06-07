@@ -293,7 +293,7 @@ def _wrap_tensor_meta(f):
             and not isinstance(t, FakeTensor)
             and not t.device.type == "meta"
         ):
-            return FakeTensor.from_tensor(t)
+            return FakeTensor.from_tensor(t, utils.get_prim_fake_mode())
         else:
             return t
 
@@ -303,17 +303,6 @@ def _wrap_tensor_meta(f):
         return f(*wrapped_args, **wrapped_kwargs)
 
     return wrapper
-
-
-@contextlib.contextmanager
-def _DispatchBelowAutograd():
-    # TODO: AutogradOther
-    old = torch._C._dispatch_tls_is_dispatch_key_excluded("AutogradFunctionality")
-    torch._C._dispatch_tls_set_dispatch_key_excluded("AutogradFunctionality", True)
-    try:
-        yield
-    finally:
-        torch._C._dispatch_tls_set_dispatch_key_excluded("AutogradFunctionality", old)
 
 
 def _make_prim(
@@ -339,12 +328,19 @@ def _make_prim(
         meta(*args, **kwargs)
         return impl_aten(*args, **kwargs)
 
+    # Right now prims don't support autograd (we can and should add an
+    # argument that provides an implementation for backward here.)  Because we
+    # don't have derivative formulas, we must setup a custom autograd function
+    # that raises an error if backwards is invoked
     class BackwardsNotSupported(torch.autograd.Function):
         @staticmethod
         def forward(ctx, args_spec, *flat_args):
             args, kwargs = tree_unflatten(flat_args, args_spec)  # type: ignore[arg-type]
-            with _DispatchBelowAutograd():
+            g = torch._C._AutoDispatchBelowAutograd()
+            try:
                 return _prim(*args, **kwargs)
+            finally:
+                del g
 
         @staticmethod
         def backward(ctx, *args):
