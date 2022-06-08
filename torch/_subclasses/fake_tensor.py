@@ -13,6 +13,12 @@ import functools
 import itertools
 
 aten = torch.ops.aten
+prims = torch.ops.prims
+
+
+class ComplexInputException(Exception):
+    pass
+
 
 _device_not_kwarg_ops = (
     aten._resize_output_.default,
@@ -45,6 +51,7 @@ _like_tensor_constructors = (
     aten.randint_like.low_dtype,
     aten.randn_like.default,
     aten.zeros_like.default,
+    aten.new_empty.default,
 )
 
 @functools.lru_cache(None)
@@ -85,6 +92,9 @@ class FakeTensorConverter(object):
         if maybe_memo is not None:
             return maybe_memo
         existing_device = t.device
+        # not yet supported in metatensors
+        if t.is_complex():
+            raise ComplexInputException
         out = FakeTensor(fake_mode, self.meta_converter(t), existing_device)
         self.tensor_memo[t] = out
         return out
@@ -118,7 +128,8 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
 
     return impl_decorator
 
-@register_op_impl(lambda func: _is_tensor_constructor(func) or func in _like_tensor_constructors)
+@register_op_impl(lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors)
+                  and "prims::" not in func._schema.name)
 def contructors(fake_mode, func, *args, **kwargs):
     assert func not in _non_kwarg_device_constructors
     _, new_kwargs = normalize_function(
@@ -168,6 +179,12 @@ def to_copy(fake_mode, func, *args, **kwargs):
             fake_mode, torch.ops.aten._to_copy(input, **new_kwargs), out_device
         )
 
+# TODO: dont know why this is being dispatched to __torch__function__
+# Dont default to common device handling since this doesnt take in/return tensor
+# TODO: update typo of minium
+@register_op_impl(lambda func: func in (prims.maximum_value.default, prims.minium_value.default))
+def func(fake_mode, func, *args, **kwargs):
+    return func(*args, **kwargs)
 
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
