@@ -8,7 +8,6 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
-#include <ATen/native/nested/NestedTensorMath.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
 
@@ -143,16 +142,6 @@ inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
 
 inline const at::Tensor& get_nested_size_tensor(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_nested_size_tensor();
-}
-
-at::Tensor NestedTensor_clone(const at::Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format){
-   TORCH_CHECK(
-      !optional_memory_format.has_value(),
-      "unsupported memory format option ",
-      optional_memory_format.value());
-    auto cloned_buffer = get_buffer(self).clone();
-    auto cloned_nested_size= get_nested_size_tensor(self).clone();
-    return wrap_buffer(cloned_buffer, cloned_nested_size);
 }
 
 // CPU only!

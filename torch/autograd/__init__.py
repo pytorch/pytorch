@@ -47,8 +47,9 @@ def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor
     new_grads: List[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
         if isinstance(grad, torch.Tensor):
-            if not torch.has_same_shape(out, grad):
-                out_shape, grad_shape = _calculate_shape(out, grad, is_grads_batched)
+            first_grad = grad if not is_grads_batched else grad[0]
+            if not torch.has_same_shape(out, first_grad):
+                out_shape, grad_shape = _calculate_shape(out, first_grad, is_grads_batched)
                 if is_grads_batched:
                     raise RuntimeError("If `is_grads_batched=True`, we interpret the first "
                                        "dimension of each grad_output as the batch dimension. "

@@ -691,27 +691,27 @@ void validate_outputs(
       // AT_ERROR(format_error(ss.str()));
       continue;
     }
-
-    if (metadata.is_nested_tensor()) {
-      if (!grad.nested_size_tensor().equal(metadata.nested_shape())) {
-        std::stringstream ss;
-        ss << "invalid gradient at index " << i << " - got ";
-        ss << grad.nested_size_tensor()
-           << " but expected nested size compatible with ";
-        ss << metadata.nested_shape();
-        AT_ERROR(format_error(ss.str()));
+    if (!metadata.is_same_shape(grad)) {
+      if (!metadata.is_nested_tensor() &&
+          at::is_expandable_to(metadata.shape(), grad.sizes())) {
+        grad = at::sum_to(std::move(grad), metadata.shape());
       }
-
-    } else {
-      if (!grad.sizes().equals(metadata.shape())) {
-        if (!at::is_expandable_to(metadata.shape(), grad.sizes())) {
+      // Incompatible sizes for metadata and grad
+      else {
+        if (metadata.is_nested_tensor()) {
+          std::stringstream ss;
+          ss << "invalid gradient at index " << i << " - got ";
+          ss << grad.nested_size_tensor()
+             << " but expected nested size compatible with ";
+          ss << metadata.nested_shape();
+          AT_ERROR(format_error(ss.str()));
+        } else {
           std::stringstream ss;
           ss << "invalid gradient at index " << i << " - got ";
           ss << grad.sizes() << " but expected shape compatible with ";
           ss << metadata.shape();
           AT_ERROR(format_error(ss.str()));
         }
-        grad = at::sum_to(std::move(grad), metadata.shape());
       }
     }
     bool input_is_complex = isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));

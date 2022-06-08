@@ -119,6 +119,14 @@ struct InputMetadata {
     return c10::optional<const at::Tensor> {};
   }
 
+  bool is_same_shape(const at::Tensor& grad) const {
+    if (is_nested_tensor()) {
+      return grad.nested_size_tensor().equal(nested_shape());
+    } else {
+      return grad.sizes().equals(shape());
+    }
+  }
+
 private:
   const at::TensorOptions options_;
   at::DimVector shape_;
