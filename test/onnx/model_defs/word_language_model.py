@@ -66,7 +66,7 @@ class RNNModel(nn.Module):
         if isinstance(h, torch.Tensor):
             return h.detach()
         else:
-            return tuple(RNNModel.repackage_hidden(v) for v in h)
+            return tuple([RNNModel.repackage_hidden(v) for v in h])
 
     def init_weights(self):
         initrange = 0.1
