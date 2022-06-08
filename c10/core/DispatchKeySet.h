@@ -504,6 +504,7 @@ class DispatchKeySet final {
     using iterator_category = std::input_iterator_tag;
     using value_type = DispatchKey;
     using difference_type = ptrdiff_t;
+    using reference = DispatchKey&;
     // final mask value should mask out the entire keyset
     static const uint8_t end_iter_mask_val =
         num_backends + num_functionality_keys;
