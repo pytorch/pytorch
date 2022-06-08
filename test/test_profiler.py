@@ -19,7 +19,7 @@ import torch.nn as nn
 import torch.optim
 import torch.utils.data
 import torch.utils.data.datapipes as dp
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_ROCM, IS_WINDOWS,
     TEST_WITH_CROSSREF, TemporaryFileName, TemporaryDirectoryName)
@@ -1305,7 +1305,7 @@ class TestProfiler(TestCase):
         )
 
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
-    @unittest.skipIf(TEST_CUDA, "CUDA invokes extra Python functions.")
+    @unittest.skipIf(torch.has_cuda, "CUDA invokes extra Python functions.")
     @IcicleNode.test
     def test_profiler_experimental_tree_with_memory_and_stack(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
@@ -1334,7 +1334,7 @@ class TestProfiler(TestCase):
         )
 
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
-    @unittest.skipIf(TEST_CUDA, "CUDA invokes extra Python functions.")
+    @unittest.skipIf(torch.has_cuda, "CUDA invokes extra Python functions.")
     @IcicleNode.test
     def test_profiler_experimental_tree_with_stack_and_modules(self):
         class MyModule(torch.nn.Module):
