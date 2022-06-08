@@ -2,7 +2,7 @@ import contextlib
 from typing import Iterator, Set
 import functools
 
-from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init
+from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init, _restore_mode
 from torch._C import _get_torch_dispatch_mode, _set_torch_dispatch_mode
 from dataclasses import dataclass
 
@@ -151,26 +151,29 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
     def __enter__(self):
         old = _get_torch_dispatch_mode()
         if hasattr(self, "inner"):
-            assert hasattr(self, "ancestors")
-            if old is not None and old not in self.ancestors:
-                raise RuntimeError(f"{self} has already been used as a mode and is not valid in the current state, " +
-                                   "because the current mode is not its ancestor. Please use a fresh version")
+            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version")
         else:
             self.inner = old
             if old is None:
                 self.ancestors = set()
             else:
                 self.ancestors = self.inner.ancestors.union({self.inner})
-        self.prev = old
         _set_torch_dispatch_mode(self)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        _set_torch_dispatch_mode(self.prev)
+        _set_torch_dispatch_mode(self.inner)
+
+    def restore(self):
+        return restore(self)
 
     @classmethod
     def push(cls, *args, **kwargs):
         return push_torch_dispatch_mode(functools.partial(cls, *args, **kwargs))
 
+
+@contextlib.contextmanager
+def restore(mode: TorchDispatchMode):
+    return _restore_mode(mode, mode_info=TorchDispatchModeInfo())
 
 class BaseTorchDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
