@@ -3632,6 +3632,10 @@ def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
                                      requires_grad=requires_grad))),)
 
 
+def error_inputs_trace(op, device):
+    yield ErrorInput(SampleInput(make_tensor((3, 4, 5), dtype=torch.float32, device=device)), error_regex="expected a matrix")
+
+
 def sample_inputs_renorm(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     cases = (((S, S, S), (2, 1, 0.5)),
@@ -4300,7 +4304,6 @@ def error_inputs_embedding(op_info, device, **kwargs):
 def error_inputs_t(op_info, device, **kwargs):
     yield ErrorInput(
         SampleInput(torch.randn(2, 3, 4, 5, device=device)),
-        error_type=RuntimeError,
         error_regex="expects a tensor with <= 2",
     )
 
@@ -17437,6 +17440,7 @@ op_db: List[OpInfo] = [
     OpInfo('trace',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           error_inputs_func=error_inputs_trace,
            supports_inplace_autograd=False,
            supports_out=False,
            supports_forward_ad=True,
@@ -20445,7 +20449,7 @@ python_ref_db = [
         "_refs.trace",
         torch_opinfo_name="trace",
         decorators=(
-            # torch.diag is currently not supported by either refs or meta funcs
+            # TODO: torch.diag is currently not supported by either refs or meta funcs
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
         ),

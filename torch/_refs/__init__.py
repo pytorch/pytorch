@@ -969,7 +969,7 @@ logical_and = _make_elementwise_binary_reference(
 
 def _logical_not(a: TensorLikeType):
     if not utils.is_boolean_dtype(a.dtype):
-        a = a != 0
+        return a == 0
     return ~a
 
 
@@ -2436,7 +2436,9 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
 
 @register_decomposition(torch.ops.aten.trace)
 def trace(self: TensorLikeType) -> TensorLikeType:
-    return torch.sum(torch.diag(self))
+    if self.ndim != 2:
+        raise RuntimeError(f"expected a matrix, but got tensor with dim {self.ndim}")
+    return torch.sum(torch.diag(self, 0))
 
 
 import torch._refs.nn.functional
