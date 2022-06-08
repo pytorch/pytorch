@@ -15,6 +15,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
 )
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.utils._python_dispatch import enable_torch_dispatch_mode
 
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -370,7 +371,8 @@ class TestCommon(TestCase):
             result = op(sample.input, *sample.args, **sample.kwargs)
 
             meta_sample = sample.transform(_to_tensormeta)
-            meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
+            with enable_torch_dispatch_mode(mode):
+                meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
 
             if isinstance(result, torch.Tensor):
                 prims.utils.compare_tensor_meta(result, meta_result)
