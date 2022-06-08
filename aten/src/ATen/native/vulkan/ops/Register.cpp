@@ -47,6 +47,7 @@ TORCH_LIBRARY(vulkan, m) {
                 std::get<6>(state),
                 std::get<7>(state));
           });
+  // To maintain backwards compatibility.
   m.class_<TransposeConv2dOpContext>("TransposeConv2dOpContext")
       .def_pickle(
           // __getstate__
@@ -108,11 +109,19 @@ TORCH_LIBRARY(vulkan_prepack, m) {
       "vulkan_prepack::conv2d_clamp_run(Tensor X, "
       "__torch__.torch.classes.vulkan.Conv2dOpContext W_prepack) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
+      "vulkan_prepack::create_conv2d_transpose_clamp_context(Tensor W, Tensor? B, int[2] stride, "
+      "int[2] padding, int[2] output_padding, int[2] dilation, int groups, "
+      "Scalar? output_min=None, Scalar? output_max=None) "
+      "-> __torch__.torch.classes.vulkan.VulkanOpContext"));
+  m.def(TORCH_SELECTIVE_SCHEMA( // Backwards compatibility
       "vulkan_prepack::conv2d_transpose_clamp_prepack(Tensor W, Tensor? B, int[2] stride, "
       "int[2] padding, int[2] output_padding, int[2] dilation, int groups, "
       "Scalar? output_min=None, Scalar? output_max=None) "
       "-> __torch__.torch.classes.vulkan.TransposeConv2dOpContext"));
   m.def(TORCH_SELECTIVE_SCHEMA(
+      "vulkan_prepack::run_conv2d_transpose_clamp_context(Tensor X, "
+      "__torch__.torch.classes.vulkan.VulkanOpContext W_prepack) -> Tensor Y"));
+  m.def(TORCH_SELECTIVE_SCHEMA( // Backwards compatibility
       "vulkan_prepack::conv2d_transpose_clamp_run(Tensor X, "
       "__torch__.torch.classes.vulkan.TransposeConv2dOpContext W_prepack) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
@@ -157,6 +166,7 @@ TORCH_LIBRARY(vulkan_prepack, m) {
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_clamp_prepack"), TORCH_FN(conv2d_clamp_prepack));
+  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::create_conv2d_transpose_clamp_context"), TORCH_FN(create_conv2d_transpose_clamp_context));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_transpose_clamp_prepack"), TORCH_FN(conv2d_transpose_clamp_prepack));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::create_linear_context"), TORCH_FN(create_linear_context));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::linear_prepack"), TORCH_FN(linear_prepack)); // Backwards compatibility
@@ -166,6 +176,7 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_clamp_run"), TORCH_FN(conv2d_clamp_run));
+  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::run_conv2d_transpose_clamp_context"), TORCH_FN(run_conv2d_transpose_clamp_context));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_transpose_clamp_run"), TORCH_FN(conv2d_transpose_clamp_run));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::run_linear_context"), TORCH_FN(run_linear_context));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::linear_run"), TORCH_FN(linear_run)); // Backwards compatibility
@@ -184,15 +195,18 @@ Tensor convolution(
     const IntArrayRef output_padding,
     const int64_t groups) {
   if (transposed) {
-    return TransposeConv2dOpContext::create(
+    VulkanOpContext vulkan_context = conv2d_transpose_context_create(
         weight,
         bias,
         stride,
         padding,
         output_padding,
         dilation,
-        groups
-    ).run(input);
+        groups);
+    return conv2d_transpose_context_run(
+      input,
+      vulkan_context.get_packed(),
+      vulkan_context.get_unpacked());
   }
   return Conv2dOpContext::create(
       weight,
