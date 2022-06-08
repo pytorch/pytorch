@@ -106,3 +106,7 @@ function clone_pytorch_xla() {
     popd
   fi
 }
+
+function install_torchdynamo() {
+  pip_install --user "git+https://github.com/pytorch/torchdynamo.git@$(cat .github/torchdynamo_commit_hash.txt)"
+}
