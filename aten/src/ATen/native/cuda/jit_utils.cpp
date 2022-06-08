@@ -947,8 +947,8 @@ std::string generate_code(
   std::stringstream load_vectorized_inputs;
   for (const auto i : c10::irange(nInputs)) {
     auto i_string = std::to_string(i);
-    load_vectorized_inputs << "const auto vec" << i_string << " = load_vector(input"
-                           << i_string << ", thread_idx);\n";
+    load_vectorized_inputs << "const auto vec" << i_string << " = load_vector<vec_size>("
+                           << "input" << i_string << ", thread_idx);\n";
     load_vectorized_inputs << "#pragma unroll\n";
     load_vectorized_inputs << "for (int j=0; j < vec_size; j++){\n";
     load_vectorized_inputs << "  arg" << i_string << "[vec_size * i + j] = vec" << i_string << ".val[j];\n";
