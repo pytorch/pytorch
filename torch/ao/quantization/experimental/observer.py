@@ -6,11 +6,12 @@ the values observed during calibration (PTQ) or training (QAT).
 import torch
 import itertools
 from torch.ao.quantization.observer import ObserverBase
+from typing import Tuple
 
 class NonUniformQuantizationObserverBase(ObserverBase):
-    min_val: torch.tensor([])
-    max_val: torch.tensor([])
-    level_indices: torch.tensor([])
+    min_val: torch.tensor
+    max_val: torch.tensor
+    level_indices: torch.tensor
     b: int
     k: int
     n: int
@@ -21,8 +22,8 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         self,
         min_val=None,
         max_val=None,
-        b=0,
-        k=0,
+        b=None,
+        k=None,
             dtype=torch.quint8) -> None:
         super().__init__(dtype)
         self.min_val = min_val
@@ -30,19 +31,20 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         self.level_indices = torch.tensor([])
         self.b = b
         self.k = k
-        self.n = 0
+        self.n = None
         self.alpha = 0.0
         self.gamma = 0.0
 
     r""" Calculates nonuniform quantization parameters given min and max value tensors.
+    Parameters calculated according to APoT paper: https://arxiv.org/pdf/1909.13144.pdf
     Args:
-        min_val: Minimum values per channel
-        max_val: Maximum values per channel
+        min_val: minimum values per channel
+        max_val: maximum values per channel
+        signed: specifies whether to include signed values in quantization level calculations
     Returns:
         gamma: gamma quantization parameter, defined to ensure that alpha is the maximum of the range
-        quantization_levels: non-uniform quantization levels, calculated according to APoT paper:
-        (https://arxiv.org/pdf/1909.13144.pdf)
-        level_indices: int representation of quantization_levels
+        quantization_levels: non-uniform quantization levels
+        level_indices: int representation of quantization_levels indices
     """
     def _calculate_qparams(
         self,
@@ -52,12 +54,12 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         # compute alpha
         self.alpha = max_val
 
-        # compute n and store as member variable
-        if self.k:
-            self.n = self.b // self.k
+        # check for valid inputs of b, k
+        assert(self.k and self.k != 0)
+        assert(self.b % self.k == 0)
 
-        if self.n == 0:
-            return (0.0, torch.tensor([]), torch.tensor([]))
+        # compute n and store as member variable
+        self.n = self.b // self.k
 
         # store a tensor of subtensors (all levels)
         p_all = []
@@ -85,7 +87,7 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         # loop through all tensors, add element at index 1 for each tensor
         p_sum = 0
         for tens in p_all:
-            p_sum += tens[1]
+            p_sum += float(tens[1])
 
         # assign gamma
         self.gamma = self.alpha / p_sum
@@ -93,16 +95,16 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         # calculate cartesian product
         cartesian_product = list(itertools.product(*p_all))
 
-        quantization_levels = []
+        quantization_levels_list = []
 
         # calculate sum of each row
         for row in cartesian_product:
             sum = 0
             for ele in row:
                 sum += ele
-            quantization_levels.append(sum)
+            quantization_levels_list.append(sum)
 
-        quantization_levels = [self.gamma * ele for ele in quantization_levels]
+        quantization_levels = [self.gamma * ele for ele in quantization_levels_list]
         quantization_levels = torch.tensor(quantization_levels)
         quantization_levels, level_indices = quantization_levels.sort()
 

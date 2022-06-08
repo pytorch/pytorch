@@ -8,15 +8,12 @@ class TestNonUniformObserver(unittest.TestCase):
     def test_calculate_qparams(self):
         """
         Test case 1
-        Assume default parameters for b, k, n (empty observer)
+        Test that error is thrown when k == 0
         """
         obs1 = APoTObserver()
 
-        obs1_result = obs1.calculate_qparams(signed=False)
-
-        self.assertEqual(obs1_result[0], 0.0)
-        self.assertTrue(torch.equal(obs1_result[1], torch.tensor([])))
-        self.assertTrue(torch.equal(obs1_result[2], torch.tensor([])))
+        with self.assertRaises(AssertionError):
+            obs1_result = obs1.calculate_qparams(signed=False)
 
         """
         Test case 2
