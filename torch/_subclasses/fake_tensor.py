@@ -18,6 +18,9 @@ aten = torch.ops.aten
 class ComplexInputException(Exception):
     pass
 
+class SparseInputException(Exception):
+    pass
+
 
 _device_not_kwarg_ops = (
     aten._resize_output_.default,
@@ -98,6 +101,9 @@ class FakeTensorConverter(object):
         # not yet supported in metatensors
         if t.is_complex():
             raise ComplexInputException
+        if t.is_sparse:
+            raise SparseInputException
+
         out = FakeTensor(fake_mode, self.meta_converter(t), existing_device)
         self.tensor_memo[t] = out
         return out

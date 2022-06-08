@@ -382,6 +382,8 @@ class TestCommon(TestCase):
                     meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
             except torch._subclasses.fake_tensor.ComplexInputException:
                 continue
+            except torch._subclasses.fake_tensor.SparseInputException:
+                continue
 
             if isinstance(result, torch.Tensor):
                 prims.utils.compare_tensor_meta(result, meta_result)
@@ -1488,6 +1490,7 @@ fake_skips = (
     "nanquantile",  # quantile() q values must be in the range [0, 1]
     "nn.functional.ctc_loss",  # The tensor has a non-zero number of elements, but its data is not allocated yet
     "nn.functional.embedding_bag",  # sometimes errors
+    "nn.functional.nll_loss",  # sometimes errors
     "nn.functional.max_pool1d",  # The tensor has a non-zero number of elements
     "to_sparse",  # Could not run 'aten::to_sparse' with arguments from the 'Meta' backend
     "tensor_split",  # The tensor has a non-zero number of elements, but its data is not allocated yet
@@ -1528,6 +1531,8 @@ class TestFakeTensorNonErroring(TestCase):
                     self.assertTrue(fake_output)
 
             except torch._subclasses.fake_tensor.ComplexInputException:
+                pass
+            except torch._subclasses.fake_tensor.SparseInputException:
                 pass
 
 
