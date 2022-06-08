@@ -395,10 +395,8 @@ int extractShardId(const std::string& name) {
   // metadata.
   auto pos = name.rfind(kShard);
   if (pos != std::string::npos) {
-    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    int left_pos = pos + kShard.length();
-    int right_pos = left_pos;
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+    std::size_t left_pos = pos + kShard.length();
+    std::size_t right_pos = left_pos;
     while (right_pos < name.length() && isdigit(name[right_pos])) {
       right_pos++;
     }

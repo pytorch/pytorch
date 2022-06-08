@@ -122,7 +122,7 @@ class TORCH_API PyTorchStreamReader final {
   std::string archive_name_;
   std::string archive_name_plus_slash_;
   std::shared_ptr<ReadAdapterInterface> in_;
-  int64_t version_;
+  uint64_t version_;
   std::mutex reader_lock_;
 };
 

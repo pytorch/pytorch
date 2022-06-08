@@ -88,8 +88,7 @@ Y:
       auto ends = helper.GetRepeatedArgument<int>("ends", vector<int>());
       vector<int> dst_sizes(data.dims_size());
 
-      for (int i = 0; i < data.dims_size(); ++i) {
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+      for (std::size_t i = 0; i < data.dims_size(); ++i) {
         if (i >= starts.size()) {
           dst_sizes[i] = data.dims(i);
           continue;

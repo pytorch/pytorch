@@ -28,8 +28,7 @@ OPERATOR_SCHEMA(Transpose)
 
         CAFFE_ENFORCE(valid_axes, "Axes argument passed in had invalid values");
         CAFFE_ENFORCE(
-            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-            axes.size() == tensor_size,
+            axes.size() == static_cast<std::size_t>(tensor_size),
             "Axes argument passed in had the incorrect size");
 
         // NOLINTNEXTLINE(modernize-loop-convert)

@@ -71,6 +71,12 @@ class Range {
   Iter end_;
 };
 
+std::size_t unsigned_numel(Tensor const& tensor) {
+  std::int64_t numel = tensor.numel();
+  assert(numel >= 0);
+  return static_cast<std::size_t>(numel);
+}
+
 /**
  * Return a mutable Range pointing to a portion of the tensor's data field.
  *
@@ -84,7 +90,7 @@ Range<T*> GetMutableTensorDataRange(
     size_t numElements) {
   CAFFE_ENFORCE(
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      start + numElements <= tensor.numel(),
+      start + numElements <= unsigned_numel(tensor),
       "Requested invalid mutable tensor range [",
       start,
       ", ",
@@ -101,7 +107,7 @@ c10::ArrayRef<T> GetTensorDataRange(
     size_t numElements) {
   CAFFE_ENFORCE(
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      start + numElements <= tensor.numel(),
+      start + numElements <= unsigned_numel(tensor),
       "Requested invalid tensor range [",
       start,
       ", ",

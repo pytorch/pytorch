@@ -48,6 +48,12 @@ def define_targets(rules):
     )
 
     rules.cc_library(
+        name = "ssize",
+        hdrs = ["ssize.h"],
+        visibility = ["//visibility:public"],
+    )
+
+    rules.cc_library(
         name = "typeid",
         srcs = ["typeid.cpp"],
         hdrs = ["typeid.h"],

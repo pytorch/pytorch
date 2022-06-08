@@ -43,8 +43,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
              output->raw_mutable_data(input.dtype()))[0] != nullptr);
     if (output_initialized) {
       CAFFE_ENFORCE_EQ(output->dim(), input.dim());
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      for (size_t i = 1; i < input.dim(); ++i) {
+      for (std::int64_t i = 1; i < input.dim(); ++i) {
         CAFFE_ENFORCE_EQ(output->size(i), input.size(i));
       }
     }
@@ -80,7 +79,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
     }
 
     auto num_to_copy = std::min<int32_t>(num_entries, numToCollect_);
-    auto output_batch_size = output_initialized ? output->size(0) : 0;
+    auto output_batch_size = output_initialized ? output->size(0) : std::size_t{0};
     auto output_num =
         std::min<size_t>(numToCollect_, output_batch_size + num_to_copy);
 

@@ -1,5 +1,7 @@
 #include "caffe2/operators/flexible_top_k.h"
 
+#include <c10/util/ssize.h>
+
 #include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
@@ -74,7 +76,7 @@ bool FlexibleTopKOp<T, Context>::RunOnDevice() {
     for (int64_t j = 0; j < linear_shape[1]; ++j) {
       const T value = input_data[i * linear_shape[1] + j];
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      if (PQ.size() < k_ || value > PQ.top().first) {
+      if (c10::ssize(PQ) < k_ || value > PQ.top().first) {
         PQ.push(std::make_pair(value, j));
       }
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)

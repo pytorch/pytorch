@@ -1,5 +1,7 @@
 #include "caffe2/operators/concat_split_op.h"
 
+#include <c10/util/ssize.h>
+
 namespace caffe2 {
 namespace {
 std::pair<std::vector<DeviceOption>, std::vector<DeviceOption>> splitOpDevInfer(
@@ -62,8 +64,7 @@ vector<TensorShape> TensorInferenceForSplit(
       return ret_invalid_shape();
     }
     split.resize(output_size, input_channels / output_size);
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  } else if (split.size() != output_size) {
+  } else if (c10::ssize(split) != output_size) {
     LOG(WARNING) << "`split` size (" << split.size()
                  << ") should be equal to output size (" << output_size << ")";
     return ret_invalid_shape();
@@ -322,8 +323,8 @@ OpSchema::Cost CostInferenceForConcat(
     }
   }
   uint64_t nElemRead = 0;
-  // NOLINTNEXTLINE(modernize-loop-convert,clang-diagnostic-sign-compare)
-  for (int i = 0; i < in.size(); ++i) {
+  // NOLINTNEXTLINE(modernize-loop-convert)
+  for (std::size_t i = 0; i < in.size(); ++i) {
     nElemRead += nElemFromDim(in[i]);
   }
   int size = 1;
@@ -374,8 +375,7 @@ vector<TensorShape> TensorInferenceForConcat(
   vector<int> split_shape(1, in.size());
   vector<int> out_shape(in[0].dims().begin(), in[0].dims().end());
   if (add_axis) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 1; i < in.size(); ++i) {
+    for (std::size_t i = 1; i < in.size(); ++i) {
       CAFFE_ENFORCE_EQ(
           in[0].dims().size(),
           in[i].dims().size(),
@@ -395,8 +395,7 @@ vector<TensorShape> TensorInferenceForConcat(
     }
     out_shape.insert(out_shape.begin() + canonical_axis, in.size());
   } else {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 1; i < in.size(); ++i) {
+    for (std::size_t i = 1; i < in.size(); ++i) {
       CAFFE_ENFORCE(
           in[0].dims_size() == in[i].dims_size() ||
               (canonical_axis == in[0].dims_size() - 1 &&
@@ -423,8 +422,7 @@ vector<TensorShape> TensorInferenceForConcat(
       }
     }
 
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 1; i < in.size(); ++i) {
+    for (std::size_t i = 1; i < in.size(); ++i) {
       out_shape[canonical_axis] += in[i].dims(canonical_axis);
     }
   }

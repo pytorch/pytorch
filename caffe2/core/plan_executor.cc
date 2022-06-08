@@ -558,7 +558,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
         std::atomic<int> next_substep{0};
         std::condition_variable cv;
         std::mutex exception_mutex; // protects done
-        int done{0};
+        uint done{0};
         auto worker = [&]() {
           ScopeExitGuard on_exit([&] {
             std::lock_guard<std::mutex> guard(exception_mutex);
