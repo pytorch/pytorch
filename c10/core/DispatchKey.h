@@ -478,6 +478,7 @@ enum class DispatchKey : uint16_t {
   SparseCsrHPU,
   SparseCsrVE,
   SparseCsrLazy,
+  SparseCsrMeta,
   SparseCsrPrivateUse1,
   SparseCsrPrivateUse2,
   SparseCsrPrivateUse3,
@@ -550,6 +551,7 @@ enum class DispatchKey : uint16_t {
   AutocastHPU,
   AutocastVE,
   AutocastLazy,
+  AutocastMeta,
   // Here are some reserved pre-autograd keys for user-defined backends, see
   // Note [Private use DispatchKey]
   AutocastPrivateUse1,
