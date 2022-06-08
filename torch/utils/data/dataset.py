@@ -324,7 +324,7 @@ def random_split(dataset: Dataset[T], lengths_or_frac: Sequence[Union[int, float
         if remainder > 0:
             lengths.append(remainder)
     else:
-        lengths = lengths_or_frac
+        lengths = lengths_or_frac  # type: ignore[assignment]
     # Cannot verify that dataset is Sized
     if sum(lengths) != len(dataset):    # type: ignore[arg-type]
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
