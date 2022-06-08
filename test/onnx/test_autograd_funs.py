@@ -58,6 +58,22 @@ class TestAutogradFuns(unittest.TestCase):
         input = torch.ones(1, 5)
         run_model_test(self, model, input_args=(input,))
 
+    def test_partial_output(self):
+        class PartialOut(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                ctx.save_for_backward(input)
+                values, indices = torch.topk(input, 3)
+                return values
+
+        class Caller(torch.nn.Module):
+            def forward(self, input):
+                return PartialOut.apply(input)
+
+        model = Caller()
+        input = torch.ones(1, 5)
+        run_model_test(self, model, input_args=(input,))
+
     def test_nested_autograd(self):
         class Child(torch.autograd.Function):
             @staticmethod

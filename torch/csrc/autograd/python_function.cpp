@@ -610,7 +610,6 @@ static void _append_subgraph(
   }
   // Find node position in graph, all subsequent nodes after are added to subgraph
   auto it = std::find(graph->nodes().begin(), graph->nodes().end(), node);
-  std::vector<Value*> tuple_outputs;
   // Skip TupleUnpack node if created
   if (!unpack_output) {
     it++;

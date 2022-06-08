@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
 #include <torch/csrc/jit/passes/onnx/onnx_log.h>
+#include <torch/csrc/jit/passes/onnx/pattern_conversion/autograd_function_process.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>

@@ -365,17 +365,18 @@ void NodeToONNX(
     }
   };
 
-  // Inline the prim::PythonOp subgraph nodes and append them to the onnx graph
+  // Inline the prim::PythonOp sub-block nodes and append them to the onnx graph
   auto inlineAutograd = [&](Node* PythonOpNode) {
-    auto subgraph = PythonOpNode->g(attr::Subgraph);
-    for (const auto i : c10::irange(PythonOpNode->inputs().size())) {
-      env[subgraph->inputs()[i]] = env[PythonOpNode->inputs()[i]];
-    }
-    for (auto* node : subgraph->nodes()) {
-      NodeToONNX(node, new_block, operator_export_type, env);
-    }
-    for (const auto i : c10::irange(PythonOpNode->outputs().size())) {
-      env[PythonOpNode->outputs()[i]] = env[subgraph->outputs()[i]];
+    for (auto subblock : PythonOpNode->blocks()) {
+      for (const auto i : c10::irange(PythonOpNode->inputs().size())) {
+        env[subblock->inputs()[i]] = env[PythonOpNode->inputs()[i]];
+      }
+      for (auto* node : subblock->nodes()) {
+        NodeToONNX(node, new_block, operator_export_type, env);
+      }
+      for (const auto i : c10::irange(PythonOpNode->outputs().size())) {
+        env[PythonOpNode->outputs()[i]] = env[subblock->outputs()[i]];
+      }
     }
   };
 
