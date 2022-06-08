@@ -50,6 +50,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 def _sharded_tensor_gather(
         self,
+        device,
         dst=0,
         out=None,
 ):
@@ -83,20 +84,22 @@ def _sharded_tensor_gather(
 
 
     if rank == dst:
-        gather_list = [torch.empty((max_rank_size,), device=out.device) for _ in range(world_size)]
+        gather_list = [torch.empty((max_rank_size,), device=device) for _ in range(world_size)]
     else:
         gather_list = None
 
-    # FIXME is a rank allowed to not have any data?
     with torch.no_grad():
-        # XXX we can fastpath this to torch.cat if max_rank_size == rank_sizes[rank]
-        data = torch.empty(max_rank_size, device=self.local_shards()[0].tensor.device)
-        for shard in self.local_shards():
-            for placement in local_shards_placement:
-                if placement[0] == shard.metadata:
-                    src = shard.tensor.flatten()
-                    data[placement[1]: placement[1] + src.numel()].copy_(src)
-                    break
+        if len(self.local_shards()) == 0:
+            data = torch.empty(0, device=device)
+        else:
+            # XXX we can fastpath this to torch.cat if max_rank_size == rank_sizes[rank]
+            data = torch.empty(max_rank_size, device=self.local_shards()[0].tensor.device)
+            for shard in self.local_shards():
+                for placement in local_shards_placement:
+                    if placement[0] == shard.metadata:
+                        src = shard.tensor.flatten()
+                        data[placement[1]: placement[1] + src.numel()].copy_(src)
+                        break
 
     dist.gather(
         tensor=data,
@@ -266,9 +269,11 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         dist.broadcast_object_list(paths)
         return paths[0]
 
-    def load_tensor(self, tensor: ShardedTensor) -> torch.Tensor:
-        res = torch.zeros(tensor.shape, device="cuda:0") if dist.get_rank() == 0 else None
-        _sharded_tensor_gather(tensor, out=res)
+    def load_tensor(self, tensor: ShardedTensor, dst: int = 0) -> torch.Tensor:
+        # FIXME: this may be other device?
+        device = "cuda:0"
+        res = torch.zeros(tensor.shape, device=device) if dist.get_rank() == dst else None
+        _sharded_tensor_gather(tensor, device=device, dst=dst, out=res)
         return cast(Tensor, res)
 
     @with_comms(init_rpc=False)
@@ -436,6 +441,46 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         if dist.get_rank() == 0:
             self.assertTrue(torch.allclose(store_tensor, load_tensor))
 
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    def test_load_tensor_not_exists_on_coordinator(self) -> None:
+        path = self.get_file_path()
+        self.assertEqual(self.world_size, dist.get_world_size())
+
+        # pyre-fixme [28]: Unexpected keyword argument `dim` to call `dist._sharding_spec.api.ChunkShardingSpec.__init__`.
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:1/cuda:0",
+            ],
+        )
+
+        if dist.get_rank() == 0:
+            shutil.rmtree(path, ignore_errors=True)
+            os.makedirs(path)
+
+        model_to_save = MyShardedModel3(spec).cuda(dist.get_rank())
+        model_to_save._register_state_dict_hook(state_dict_hook)
+        state_dict_to_save = model_to_save.state_dict()
+
+        fs_writer = FileSystemWriter(path=path)
+        save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
+
+        model_to_load = MyShardedModel3(spec).cuda(dist.get_rank())
+        model_to_load._register_state_dict_hook(state_dict_hook)
+        state_dict_to_load_to = model_to_load.state_dict()
+
+        fs_reader = FileSystemReader(path=path)
+
+        load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
+
+        # We can't use torch.allclose since each ST has a different sharding spec
+        store_tensor = self.load_tensor(model_to_save.sharded_tensor, dst=1)
+        load_tensor = self.load_tensor(model_to_load.sharded_tensor, dst=1)
+
+        if dist.get_rank() == 1:
+            self.assertTrue(torch.allclose(store_tensor, load_tensor))
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)

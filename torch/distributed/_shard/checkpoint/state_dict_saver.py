@@ -86,6 +86,40 @@ def _prepare(
 
     return (metadata, bytes_write_requests, tensor_write_requests)
 
+def _merge_and_check_metadata(
+    all_metadata: List[Metadata],
+    coordinator_rank: int,
+):
+    """
+    Merge the metadata from all ranks and check if the
+    metadata matches across ranks.
+
+    Args:
+        all_metadata (List[Metadata]): Metadata collected from all ranks
+        coordinator_rank (int): Rank to use to coordinate the checkpoint
+
+    Returns:
+        metadata: The merged metadata
+    """
+    metadata = all_metadata[coordinator_rank]
+    unmatched_metadata = []
+    for rank in range(len(all_metadata)):
+        if rank == coordinator_rank:
+            continue
+        for fqn, md in all_metadata[rank].state_dict_metadata.items():
+            if fqn not in metadata.state_dict_metadata:
+                metadata.state_dict_metadata[fqn] = md
+            else:
+                # TODO: Add better checking.
+                coordinator_md = metadata.state_dict_metadata[fqn]
+                if type(md) is not type(coordinator_md):
+                    unmatched_metadata.append(fqn)
+
+    if len(unmatched_metadata) > 0:
+        raise {"unmatched metadata": unmatched_metadata}
+
+    return metadata
+
 def save_state_dict(
     state_dict: Dict[str, Any],
     storage_writer: StorageWriter,
@@ -141,6 +175,7 @@ def save_state_dict(
         is the user's responsibility to ensure that this is set so that each rank
         has an individual GPU, via ``torch.cuda.set_device()``
     """
+    world_size = dist.get_world_size(process_group)
     is_coordinator = no_dist or dist.get_rank(process_group) == coordinator_rank
 
     exceptions: List[Optional[BaseException]] = [None]
@@ -178,9 +213,17 @@ def save_state_dict(
         rank_write_error = e
 
     all_errors: List[Optional[BaseException]]
+    all_metadata: List[Optional[Metadata]]
     # collect all write errors
     if not no_dist:
-        all_errors = [None] * dist.get_world_size(process_group)
+        all_metadata = [None] * world_size
+        dist.gather_object(
+            obj=metadata,
+            object_gather_list=all_metadata if is_coordinator else None,
+            dst=coordinator_rank
+        )
+
+        all_errors = [None] * world_size
         dist.gather_object(
             obj=rank_write_error,
             object_gather_list=all_errors if is_coordinator else None,
@@ -197,6 +240,7 @@ def save_state_dict(
             message = "Failed to write data"
         else:
             try:
+                metadata = _merge_and_check_metadata(all_metadata, coordinator_rank)
                 storage_writer.finish(metadata=metadata)
             except BaseException as e:
                 all_errors[coordinator_rank] = e
