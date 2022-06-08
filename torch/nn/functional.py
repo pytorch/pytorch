@@ -2780,7 +2780,20 @@ def gaussian_nll_loss(
     # Clamp for stability
     var = var.clone()
     with torch.no_grad():
-        var.clamp_(min=eps)
+        # For Composite Compliance,
+        # In Forward AD, if `var` is a CCT but its tangent isn't,
+        # using inplace clamp doesn't work because we end up writing
+        # the CCT in-place to the tangent.
+        #
+        # NOTE: torch.no_grad doesn't affect Forward AD
+        # See: https://github.com/pytorch/pytorch/issues/78961
+        # Checking if a Tensor has tangent is a workaround,
+        # as there isn't a public API to check if we are 
+        # in Forward AD mode.
+        if torch.autograd.forward_ad.unpack_dual(var).tangent is None:
+            var.clamp_(min=eps)
+        else:
+            var = var.clamp(min=eps)
 
     # Calculate the loss
     loss = 0.5 * (torch.log(var) + (input - target)**2 / var)
