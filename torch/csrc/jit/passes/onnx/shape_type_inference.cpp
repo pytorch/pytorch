@@ -1994,8 +1994,8 @@ void ONNXShapeTypeInference(
           case ::c10::onnx::Shape:
           case ::c10::onnx::Gather: {
             auto* schema_registry = onnx::OpSchemaRegistry::Instance();
-            // Only enable enable_data_propagation=true
-            onnx::ShapeInferenceOptions options{false, false, true};
+            onnx::ShapeInferenceOptions options{/*check_type=*/false,
+              /*error_mode=*/false, /*enable_data_propagation=*/true};
             onnx::shape_inference::InferShapes(*model_proto, schema_registry, options, &inferred_shape_data);
             break;
           }
