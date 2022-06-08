@@ -334,7 +334,14 @@ cc_library(
         ":aten_native_xnnpack",
         ":aten_src_ATen_config",
     ] + generated_cpu_cpp + aten_ufunc_generated_cpu_sources("aten/src/ATen/{}"),
-    copts = ATEN_COPTS,
+    copts = ATEN_COPTS + [
+        # Dispatcher codegen unconditionally adds resize_out() and
+        # check_inplace() to an anonymous namespace in its generated
+        # files, even if that file doesn't use it. Consider moving
+        # these declarations and definitions to a library rather than
+        # duplicating them.
+        "-Wno-error=unused-function",
+    ],
     data = if_cuda(
         [":libcaffe2_nvrtc.so"],
         [],
@@ -1621,6 +1628,12 @@ TORCH_COPTS = COMMON_COPTS + [
     "-fvisibility-inlines-hidden",
     "-fno-math-errno ",
     "-fno-trapping-math",
+    # Dispatcher codegen unconditionally adds resize_out() and
+    # check_inplace() to an anonymous namespace in its generated
+    # files, even if that file doesn't use it. Consider moving
+    # these declarations and definitions to a library rather than
+    # duplicating them.
+    "-Wno-error=unused-function",
 ]
 
 cu_library(
