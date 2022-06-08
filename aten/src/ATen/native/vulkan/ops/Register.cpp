@@ -66,6 +66,7 @@ TORCH_LIBRARY(vulkan, m) {
                 std::get<7>(state),
                 std::get<8>(state));
           });
+  // To maintain backwards compatibility.
   m.class_<LinearOpContext>("LinearOpContext")
       .def_pickle(
           // __getstate__
@@ -114,9 +115,15 @@ TORCH_LIBRARY(vulkan_prepack, m) {
       "vulkan_prepack::conv2d_transpose_clamp_run(Tensor X, "
       "__torch__.torch.classes.vulkan.TransposeConv2dOpContext W_prepack) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
+      "vulkan_prepack::create_linear_context(Tensor W, Tensor? B) "
+      "-> __torch__.torch.classes.vulkan.VulkanOpContext"));
+  m.def(TORCH_SELECTIVE_SCHEMA( // Backwards compatibility
       "vulkan_prepack::linear_prepack(Tensor W, Tensor? B) "
       "-> __torch__.torch.classes.vulkan.LinearOpContext"));
   m.def(TORCH_SELECTIVE_SCHEMA(
+      "vulkan_prepack::run_linear_context(Tensor X, "
+      "__torch__.torch.classes.vulkan.VulkanOpContext BW_prepack) -> Tensor Y"));
+  m.def(TORCH_SELECTIVE_SCHEMA( // Backwards compatibility
       "vulkan_prepack::linear_run(Tensor X, "
       "__torch__.torch.classes.vulkan.LinearOpContext BW_prepack) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
@@ -137,14 +144,16 @@ TORCH_LIBRARY(vulkan_prepack, m) {
 TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_clamp_prepack"), TORCH_FN(conv2d_clamp_prepack));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_transpose_clamp_prepack"), TORCH_FN(conv2d_transpose_clamp_prepack));
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::linear_prepack"), TORCH_FN(linear_prepack));
+  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::create_linear_context"), TORCH_FN(create_linear_context));
+  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::linear_prepack"), TORCH_FN(linear_prepack)); // Backwards compatibility
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::gru_prepack"), TORCH_FN(gru_prepack));
 }
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_clamp_run"), TORCH_FN(conv2d_clamp_run));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_transpose_clamp_run"), TORCH_FN(conv2d_transpose_clamp_run));
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::linear_run"), TORCH_FN(linear_run));
+  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::run_linear_context"), TORCH_FN(run_linear_context));
+  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::linear_run"), TORCH_FN(linear_run)); // Backwards compatibility
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::gru_run"), TORCH_FN(gru_run));
 }
 
