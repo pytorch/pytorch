@@ -15,6 +15,7 @@ import itertools
 from torch._six import inf
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, TestCase, download_file, TEST_WITH_UBSAN
+from torch.testing._comparison import TensorLikePair
 import torch.backends.mps
 from torch.distributions import Uniform
 
@@ -4439,6 +4440,19 @@ class TestNoRegression(TestCase):
 
         with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
             torch.testing.assert_close(a, nan)
+
+    @unittest.expectedFailure
+    def test_mps_compat(self):
+        # If this test is successful, that means that all operations in the comparison logic are supported natively on
+        # the MPS backend. Please remove this test as well as the compatibility logic in
+        # torch.testing._comparison.TensorLikePair._equalize_attributes
+        actual = torch.tensor(1.0, device="mps")
+        expected = actual.clone()
+
+        # We can't use assert_close or TensorLikePair.compare() directly, since that would hit the compatibility logic
+        # in torch.testing._comparison.TensorLikePair._equalize_attributes that we want to circumvent here
+        pair = TensorLikePair(actual, expected)
+        pair._compare_values(actual, expected)
 
     def test_double_error(self):
         with self.assertRaisesRegex(TypeError, "the MPS framework doesn't support float64"):

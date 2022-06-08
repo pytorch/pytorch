@@ -685,6 +685,13 @@ class TensorLikePair(Pair):
         Returns:
             (Tuple[Tensor, Tensor]): Equalized tensors.
         """
+        # The comparison logic uses operators currently not supported by the MPS backends.
+        #  See https://github.com/pytorch/pytorch/issues/77144 for details.
+        # TODO: Remove this conversion as soon as all operations are supported natively by the MPS backend
+        if actual.is_mps or expected.is_mps:  # type: ignore[attr-defined]
+            actual = actual.cpu()
+            expected = expected.cpu()
+
         if actual.device != expected.device:
             actual = actual.cpu()
             expected = expected.cpu()
@@ -1046,15 +1053,6 @@ def assert_equal(
     """
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
-
-    # TODO: the Tensor compare uses bunch of operations which is currently not
-    # supported by MPS. We will remove this move to CPU after all the
-    # support is added. https://github.com/pytorch/pytorch/issues/77144
-    if isinstance(actual, torch.Tensor) and (actual.is_mps):
-        actual = actual.to('cpu')
-
-    if isinstance(expected, torch.Tensor) and (expected.is_mps):
-        expected = expected.to('cpu')
 
     try:
         pairs = originate_pairs(
