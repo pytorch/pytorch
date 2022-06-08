@@ -13,6 +13,7 @@ import functools
 import itertools
 
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 
 class ComplexInputException(Exception):
@@ -133,10 +134,8 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
 
     return impl_decorator
 
-
-@register_op_impl(
-    lambda func: _is_tensor_constructor(func) or func in _like_tensor_constructors
-)
+@register_op_impl(lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors)
+                  and "prims::" not in func._schema.name)
 def contructors(fake_mode, func, *args, **kwargs):
     assert func not in _non_kwarg_device_constructors
     _, new_kwargs = normalize_function(
@@ -192,6 +191,12 @@ def to_copy(fake_mode, func, *args, **kwargs):
             fake_mode, torch.ops.aten._to_copy(input, **new_kwargs), out_device
         )
 
+# TODO: dont know why this is being dispatched to __torch__function__
+# Dont default to common device handling since this doesnt take in/return tensor
+# TODO: update typo of minium
+@register_op_impl(lambda func: func in (prims.maximum_value.default, prims.minium_value.default))
+def func(fake_mode, func, *args, **kwargs):
+    return func(*args, **kwargs)
 
 @register_op_impl(torch.ops.aten.clone.default)
 def clone(fake_mode, func, input, memory_format=None):
@@ -234,6 +239,10 @@ class FakeTensor(torch.Tensor):
     # TODO: resolve error in default __repr__
     def __repr__(self):
         return f"FakeTensor({self.fake_device}, {self.size()}, {self.dtype})"
+
+    @property
+    def device(self):
+        return self.fake_device
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -334,6 +343,8 @@ class FakeTensorMode(TorchDispatchMode):
         # the `Meta` device because all computation within the kernels should
         # behave as if the Tensors are on meta devices. Kernels should allocate
         # new tensors on meta devices, and checks like `is_meta` should return true.
+        # within python refs, we always return the real device by defining
+        # the device property
         self.in_kernel_invocation = False
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -392,15 +403,9 @@ class FakeTensorMode(TorchDispatchMode):
                 if run_impl_check(func):
                     return op_impl(self, func, *args, **kwargs)
 
-            try:
-                # we need to return meta() for device within C++ kernels otherwise
-                # a issues occur such as is_meta() checks returning False and kernels
-                # attempting to do actual compute / accessing storages.
 
-                # TODO: cleaner way of ignoring python funcs - maybe always
-                # return fake_device from python `.device` access
-                if "prims::" not in func._schema.name:
-                    self.in_kernel_invocation = True
+            self.in_kernel_invocation = True
+            try:
                 r = func(*args, **kwargs)
             except NotImplementedError as not_implemented_error:
                 if not self.allow_cpu_fallback:
