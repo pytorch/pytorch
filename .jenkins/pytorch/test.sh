@@ -539,7 +539,7 @@ test_vec256() {
 }
 
 test_dynamo() {
-  pushd torchdynamo
+  pushd ../torchdynamo
   pytest tests
   popd
 }
