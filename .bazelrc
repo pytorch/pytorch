@@ -31,6 +31,11 @@ build --copt=-isystem --copt=bazel-out/k8-fastbuild-cpu-only/bin
 # rules_cuda configuration
 build:cpu-only --@rules_cuda//cuda:enable_cuda=False
 
-build:cpu-only                       \
-    --cxxopt=-Werror=unused-function \
-    --cxxopt=-Werror=type-limits
+# We add additional warnings to our CPU build and not our GPU build
+# because the GPU build is set up as a C++ toolchain using nvcc. The
+# nvcc compiler does not know how to handle some of the C++ warning
+# flags and has fatal errors if it gets them. By only setting them on
+# the C++ builds, we cover most of our repo and avoid those issues.
+build:cpu-only                   \
+    --cxxopt=-Werror=type-limits \
+    --cxxopt=-Werror=unused-function
