@@ -105,7 +105,6 @@ _SKIP_PYTHON_BINDINGS = [
     "_sparse_sub.*",
     "_sparse_dense_add_out",
     "index",
-    "index_out",
     "unique_dim_consecutive",
     "_cumsum.*",
     "_cumprod.*",
