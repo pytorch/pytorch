@@ -391,7 +391,7 @@ static inline Tensor handleDimInMultiDimIndexing(
       index.slice().step(),
       /*disable_slice_optimization=*/disable_slice_optimization,
       original_tensor_device,
-      *prev_dim_result_sizes);
+      prev_dim_result_sizes);
     (*dim_ptr)++;
     return result;
   } else if (index.is_ellipsis()) {

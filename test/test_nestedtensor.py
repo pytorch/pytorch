@@ -371,16 +371,8 @@ class TestNestedTensorDeviceType(TestCase):
         # single index: only support integer in the batch dimension
         self.assertEqual(nt[0], x0)
         self.assertEqual(nt[-1], x1)
-        self.assertRaisesRegex(
-            IndexError,
-            "index 2 is out of bounds for nested tensor dimension 0 with size 2",
-            lambda: nt[2]
-        )
-        self.assertRaisesRegex(
-            IndexError,
-            "index -3 is out of bounds for nested tensor dimension 0 with size 2",
-            lambda: nt[-3]
-        )
+        self.assertRaises(IndexError, lambda: nt[2])
+        self.assertRaises(IndexError, lambda: nt[-3])
         self.assertRaises(NotImplementedError, lambda: nt[:])
         self.assertRaises(NotImplementedError, lambda: nt[None])
         self.assertRaises(NotImplementedError, lambda: nt[...])
@@ -389,11 +381,7 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt[0, 0, 0], x0[0, 0])
         self.assertEqual(nt[0, 1, :], x0[1, :])
         self.assertEqual(nt[1, ...], x1)
-        self.assertRaisesRegex(
-            IndexError,
-            "index 4 is out of bounds for dimension 1 with size 3",
-            lambda: nt[1, 4, 2]
-        )
+        self.assertRaises(IndexError, lambda: nt[1, 4, 2])
         self.assertRaises(NotImplementedError, lambda: nt[:, 1, 1])
         # make sure indexing returns a view
         nt[0].fill_(100.0)
