@@ -426,7 +426,7 @@
 
 - name: _neg_view(Tensor(a) self) -> Tensor(a)
   self: grad.neg()
-  result: self_t.neg()
+  result: self_t._neg_view()
 
 - name: _conj_physical(Tensor self) -> Tensor
   self: grad.conj_physical()
@@ -2746,7 +2746,7 @@
   output_differentiability: [False]
 
 - name: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
-  data: _segment_reduce_backward(grad, result, data, reduce, lengths)
+  data: _segment_reduce_backward(grad, result, data, reduce, lengths, axis, initial)
 
 - name: _pin_memory(Tensor self, Device? device=None) -> Tensor
   self: grad
