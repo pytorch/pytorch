@@ -453,9 +453,6 @@ class TestSparseCompressed(TestCase):
         if layout is torch.sparse_bsc:
             self.skipTest(f"test requires conversion from Strided layout to {layout} layout")
 
-        if layout is torch.sparse_bsr and dtype is torch.bool:
-            self.skipTest("{op.name}: add_out_dense_sparse_cuda not implemented for Bool")
-
         samples = list(op.sample_inputs(device, dtype))
 
         # Fail early to prevent silent success with this test
