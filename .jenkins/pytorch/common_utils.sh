@@ -112,9 +112,11 @@ function install_torchdynamo() {
 }
 
 function checkout_install_torchdynamo() {
+  pushd ..
   git clone https://github.com/pytorch/torchdynamo
   pushd torchdynamo
   git checkout "$(cat ../.github/ci_commit_pins/torchdynamo.txt)"
   time python setup.py install
+  popd
   popd
 }
