@@ -67,6 +67,7 @@ jobs:
         run: .github/scripts/parse_ref.py
 
       - name: Test
+        id: test
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -137,10 +138,16 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
+          # save container name for later step
+          echo "CONTAINER_NAME=${container_name}" >> "$GITHUB_ENV"
           # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
           docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
+
+      - name: Save test results
+        if: always()
+        run: |
           # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
-          docker exec -t "${container_name}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
+          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
 
       - name: Get workflow job id
         id: get-job-id
@@ -151,7 +158,7 @@ jobs:
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
-        if: always()
+        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
@@ -181,8 +188,6 @@ jobs:
           python3 -m pip install boto3==1.19.12
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
-      - name: Teardown Linux
-        uses: ./.github/actions/teardown-linux
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
         if: always()
-        with:
-          skip-wait-ssh: true

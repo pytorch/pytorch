@@ -122,7 +122,7 @@ Tensor masked_softmax(
   if (query.is_nested() && !attn_mask) {
     // TODO: maybe we could do better than generating a mask every time?
 
-    attn_mask = NestedTensor_to_mask(query, 2);
+    attn_mask = NestedTensor_to_mask(query, 2, attn_scores.size(2));
     // TODO: CPU path does not support transformer mask yet.
     if (attn_scores.is_cpu()) {
       attn_mask = attn_mask->view({-1, 1, 1, attn_scores.sizes()[3]});
@@ -232,7 +232,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
     const Tensor& qkv_bias,
     const int64_t num_head) {
   auto qkv_ = qkv.is_nested()
-    ? c10::MaybeOwned<Tensor>::owned((NestedTensor_to_padded_tensor(qkv, 0)))
+    ? c10::MaybeOwned<Tensor>::owned(qkv.to_padded_tensor(0))
     : c10::MaybeOwned<Tensor>::borrowed(qkv);
   auto B = qkv_->size(0);
   auto T = qkv_->size(1);

@@ -99,6 +99,14 @@ function checkout_install_torchvision() {
 
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
-    git clone --recursive https://github.com/pytorch/xla.git
+    git clone --recursive --quiet https://github.com/pytorch/xla.git
+    pushd xla
+    # pin the xla hash so that we don't get broken by changes to xla
+    git checkout "$(cat ../.github/xla_commit_hash.txt)"
+    popd
   fi
+}
+
+function install_torchdynamo() {
+  pip_install --user "git+https://github.com/pytorch/torchdynamo.git@$(cat .github/torchdynamo_commit_hash.txt)"
 }

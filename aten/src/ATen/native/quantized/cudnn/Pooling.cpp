@@ -14,6 +14,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/TensorIterator.h>
+#include <c10/core/QScheme.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/library.h>
@@ -23,7 +24,7 @@
 namespace at {
 namespace native {
 namespace {
-// TODO: This function is the same as that of qpool.cpp. We should refactor this into quantized directory
+// TODO: This function is the same as that of Pooling.cpp. We should refactor this into quantized directory
 // so that we don't need to duplicate the function
 void check_maxpool2d_params(
     IntArrayRef kernel_size,
@@ -39,6 +40,31 @@ void check_maxpool2d_params(
   TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
               "Expected 1d or 2d dilation, got ", dilation.size());
 }
+}
+
+// The current implementation of quantized cuda adaptive average pooling uses the following:
+// dequant -> fp32 adaptive average pooling -> quant. This is the same numerically as
+// quantized adaptive average pooling. This is not the ideal implementation, as we desire to
+// operate on the quantized values directly.
+// However, we are currently blocked on this as we are waiting for cudnn's 8.5.0 release, which is anticipated
+// to support adaptive average pooling. When that support is made available, we will use it directly. TODO
+Tensor adaptive_avg_pool2d_quantized_cuda(
+    const at::Tensor& input,
+    IntArrayRef output_size) {
+// TODO: renable these cudnn preprocessors like quantized_max_pool2d_cudnn below when we implement this function with cudnn
+#ifdef USE_CUDA
+// #if AT_CUDNN_ENABLED()
+// #if HAS_CUDNN_V8()
+    // TODO: limit this to per tensor quantized tensors for now, though should be easy to adapt
+    // to per channel quantized tensors
+    TORCH_CHECK(input.qscheme() == at::kPerTensorAffine, "adaptive_avg_pool2d_quantized_cuda oonly supports per tensor quantized tensors");
+    auto input_fp32 = at::dequantize(input);
+    auto result_fp32 = at::adaptive_avg_pool2d(input_fp32, output_size);
+    return at::quantize_per_tensor(result_fp32, input.q_scale(), input.q_zero_point(), input.scalar_type());
+#else // USE_CUDA
+  AT_ERROR("at::native::adaptive_avg_pool2d_quantized_cuda: ATen not compiled with USE_CUDA support");
+  return Tensor{}; // never reached, placates the compiler
+#endif
 }
 
 // Currently we support 4D and 3D input (qx) tensors, the latter of which is supported for
@@ -163,7 +189,6 @@ Tensor quantized_max_pool2d_cudnn(
       stride[0], // vertical stride
       stride[1])); // horizontal stride
 
-  auto dataType = getCudnnDataType(input);
   float one{1};
   float zero{0.0};
   TensorDescriptor xDesc;
@@ -175,10 +200,10 @@ Tensor quantized_max_pool2d_cudnn(
                       poolingDesc,
                       &one,
                       xDesc.desc(),
-                      reinterpret_cast<int8_t*>(input.data_ptr()),
+                      input.data_ptr<int8_t>(),
                       &zero,
                       yDesc.desc(),
-                      reinterpret_cast<int8_t*>(qy.data_ptr()));
+                      qy.data_ptr<int8_t>());
 
   // recall we casted our input and output to 4D if qx was 3D, so we recast it back to 3D prior to returning
   return (ndim == 3 ? qy.view(std::vector<int64_t>(output_shape.begin() + 1, output_shape.end())) : qy);

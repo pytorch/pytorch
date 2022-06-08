@@ -4,7 +4,6 @@
 #include <c10/core/SafePyObject.h>
 #include <c10/util/DeadlockDetection.h>
 #include <c10/util/irange.h>
-#include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -25,19 +24,21 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/tensor_memoryformats.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 #include <torch/library.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/autograd/python_mode.h>
 
 
 #include <ATen/ATen.h>
-#include <pybind11/pybind11.h>
 
 #include <structmember.h>
 #include <cstdint>
@@ -51,6 +52,116 @@
 using namespace at;
 using namespace torch;
 using namespace torch::autograd;
+
+std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(const c10::OperatorHandle& op, const std::vector<c10::IValue>& arguments) {
+  TORCH_CHECK(PyGILState_Check(), "GIL must be held before you call parseIValuesToPyArgsKwargs");
+  const auto& schema = op.schema();
+  py::dict kwargs;
+  // About all the pointers:
+  //
+  // f(int x, int y = 0, *, int z = 0)
+  //                                  ^- arguments.size()
+  //                        ^- kwarg_only_start
+  //          ^- positional_default_start
+  //   ^- 0
+
+  // Find the split point between kwarg-only and regular.  Since most functions
+  // don't have kwarg-only arguments, it is more efficient to scan from the
+  // right (but ideally, this would just be precomputed in FunctionSchema
+  // itself).  (NB: minus one in the loop is because we're testing if the
+  // *next* argument is kwarg-only before we advance the starting index)
+  int64_t kwarg_only_start = arguments.size();
+  for (; kwarg_only_start > 0; kwarg_only_start--) {
+    const auto& arg = schema.arguments()[kwarg_only_start - 1];
+    if (!arg.kwarg_only()) {
+      break;
+    }
+  }
+
+  // Find the first positional argument that isn't defaulted
+  auto is_default = [&](int64_t idx) -> bool {
+    const auto& arg = schema.arguments()[idx];
+    if (!arg.default_value().has_value()) {
+      return false;
+    }
+    const auto& default_ivalue = *arg.default_value();
+    const auto& ivalue = arguments[idx];
+    if (default_ivalue != ivalue) {
+      return false;
+    }
+    return true;
+  };
+
+  int64_t positional_default_start = kwarg_only_start;
+  for (; positional_default_start > 0; positional_default_start--) {
+    if (!is_default(positional_default_start - 1)) {
+      break;
+    }
+  }
+
+  auto args = py::reinterpret_steal<py::object>(PyTuple_New(positional_default_start));
+
+  auto schemaAwareToPyObject = [&](int64_t idx) -> py::object {
+    const auto& arg = schema.arguments()[idx];
+    auto match = [&](c10::TypeKind kind) {
+      const auto& t = arg.real_type();
+      if (t->kind() == kind) return true;
+      if (auto opt_t = t->cast<c10::OptionalType>()) {
+        if (opt_t->getElementType()->kind() == kind) return true;
+      }
+      return false;
+    };
+    if (arguments[idx].isNone()) {
+      return py::none();
+    } else if (match(c10::ScalarTypeType::Kind)) {
+      auto* obj = getTHPDtype(static_cast<c10::ScalarType>(arguments[idx].toInt()));
+      return py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(obj));
+    } else if (match(c10::LayoutType::Kind)) {
+      auto* obj = getTHPLayout(static_cast<c10::Layout>(arguments[idx].toInt()));
+      return py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(obj));
+    } else if (match(c10::MemoryFormatType::Kind)) {
+      return torch::utils::getTHPMemoryFormat(static_cast<c10::MemoryFormat>(arguments[idx].toInt()));
+    } else {
+      return torch::jit::toPyObject(arguments[idx]);
+    }
+  };
+
+  // Populate positional arguments
+  for (const auto idx : c10::irange(positional_default_start)) {
+    PyTuple_SET_ITEM(args.ptr(), idx, schemaAwareToPyObject(idx).release().ptr());
+  }
+
+  // Populate keyword arguments
+  for (const auto idx : c10::irange(kwarg_only_start, arguments.size())) {
+    // But don't populate default keyword arguments
+    if (is_default(idx)) continue;
+    const auto& arg = schema.arguments()[idx];
+    kwargs[py::cast(arg.name())] = schemaAwareToPyObject(idx);
+  }
+  return std::make_pair(std::move(args), std::move(kwargs));
+}
+
+void pushPyOutToStack(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    py::object out,
+    const char* msg) {
+  TORCH_CHECK(PyGILState_Check(), "GIL must be held before you call pushPyOutToStack");
+  auto schema_returns = op.schema().returns();
+  const auto num_returns = schema_returns.size();
+  if (num_returns == 0) {
+    // Check that we got a None return from Python. Anything else is an error.
+    TORCH_CHECK(out.is(py::none()), "Expected ", msg, " for ", op.operator_name(),
+                " to return None but it returned something else instead.");
+  } else if (num_returns == 1) {
+    torch::jit::push(stack, torch::jit::toIValue(out.ptr(), schema_returns[0].type()));
+  } else {
+    auto outs = py::cast<py::sequence>(out);
+    for (const auto idx : c10::irange(outs.size())) {
+      torch::jit::push(stack, torch::jit::toIValue(outs[idx].ptr(), schema_returns[idx].type()));
+    }
+  }
+}
 
 namespace {
 
@@ -104,6 +215,9 @@ void concrete_dispatch_fn(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
     const std::shared_ptr<SafePyObject>& type);
+bool concrete_is_contiguous_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
+c10::Device concrete_device_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
+int64_t concrete_dim_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
 
 class PyInterpreterHolder {
  public:
@@ -112,7 +226,10 @@ class PyInterpreterHolder {
             &concrete_name_fn,
             &concrete_decref_fn,
             &concrete_detach_fn,
-            &concrete_dispatch_fn)) {}
+            &concrete_dispatch_fn,
+            &concrete_is_contiguous_fn,
+            &concrete_device_fn,
+            &concrete_dim_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -126,13 +243,27 @@ class PyInterpreterHolder {
 };
 PyInterpreterHolder self_interpreter;
 
+c10::TensorImpl::SizesStridesPolicy parseSizesStridesPolicyArgument(
+    c10::string_view arg) {
+  if (arg == "strides") {
+    return c10::TensorImpl::SizesStridesPolicy::CustomStrides;
+  }
+
+  if (arg == "sizes") {
+    return c10::TensorImpl::SizesStridesPolicy::CustomSizes;
+  }
+
+  TORCH_CHECK_VALUE(
+      false,
+      "Unknown sizes_strides_policy: ",
+      arg,
+      "; expected 'strides' or 'sizes'");
+}
 } // anonymous namespace
 
 c10::impl::PyInterpreter* getPyInterpreter() {
   return self_interpreter.get();
 }
-
-namespace py = pybind11;
 
 PyObject *THPVariableClass = nullptr;
 
@@ -150,12 +281,12 @@ static const char* VOLATILE_WARNING =
 
 static bool check_has_torch_dispatch(PyObject *obj) {
   PyTypeObject *tp = Py_TYPE(obj);
+  if (THPVariable_CheckTypeExact(tp)) {
+    return false;
+  }
   py::object attr = PyObject_FastGetAttrString(obj, "__torch_dispatch__");
-  return (
-    !THPVariable_CheckTypeExact(tp) &&
-    // TODO: test if Python key is disabled
-    attr.ptr() != nullptr &&
-    attr.ptr() != torch::disabled_torch_dispatch_impl()
+  return (attr.ptr() != nullptr &&
+          attr.ptr() != torch::disabled_torch_dispatch_impl()
   );
 }
 
@@ -426,9 +557,9 @@ static PyObject* THPVariable_as_subclass(PyObject* _self, PyObject* args, PyObje
 static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False)",
+    "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False)",
   });
-  ParsedArgs<3> parsed_args{};
+  ParsedArgs<5> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
@@ -447,6 +578,14 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   // ```
   data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
   data.set_requires_grad(r.toBool(2));
+  const auto sizes_strides_policy = r.stringViewOptional(3);
+  if (sizes_strides_policy.has_value()) {
+    data.unsafeGetTensorImpl()->set_sizes_strides_policy(
+        parseSizesStridesPolicyArgument(*sizes_strides_policy));
+  }
+  if (r.toBool(4)) {
+    data.unsafeGetTensorImpl()->set_custom_device(true);
+  }
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       std::move(data),
@@ -459,9 +598,12 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   // NB: pin_memory doesn't actually do anything
   // TODO: strides variant?
   static PythonArgParser parser({
-    "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+      "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, "
+      "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
+      "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
+      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False)",
   });
-  ParsedArgs<10> parsed_args{};
+  ParsedArgs<12> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
@@ -500,6 +642,15 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
         .options(options)
         .make_tensor();
   data.set_requires_grad(r.toBool(9));
+
+  const auto sizes_strides_policy = r.stringViewOptional(10);
+  if (sizes_strides_policy.has_value()) {
+    data.unsafeGetTensorImpl()->set_sizes_strides_policy(
+        parseSizesStridesPolicyArgument(*sizes_strides_policy));
+  }
+  if (r.toBool(11)) {
+    data.unsafeGetTensorImpl()->set_custom_device(true);
+  }
 
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
@@ -945,6 +1096,17 @@ PyObject *THPVariable_get_shape(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_is_cpu(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "is_cpu");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_cpu());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_is_cuda(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -1009,14 +1171,14 @@ PyObject *THPVariable_is_mkldnn(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPVariable_is_mlc(THPVariable *self, void *unused)
+PyObject *THPVariable_is_mps(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject *)self)) {
-    return handle_torch_function_getter(self, "is_mlc");
+    return handle_torch_function_getter(self, "is_mps");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return torch::autograd::utils::wrap(self_.is_mlc());
+  return torch::autograd::utils::wrap(self_.is_mps());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1194,12 +1356,13 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"name", (getter)THPVariable_get_name, nullptr, nullptr, nullptr},
   {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
   {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
+  {"is_cpu", (getter)THPVariable_is_cpu, nullptr, nullptr, nullptr},
   {"is_xpu", (getter)THPVariable_is_xpu, nullptr, nullptr, nullptr},
   {"is_ipu", (getter)THPVariable_is_ipu, nullptr, nullptr, nullptr},
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
   {"is_sparse_csr", (getter)THPVariable_is_sparse_csr, nullptr, nullptr, nullptr},
   {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
-  {"is_mlc", (getter)THPVariable_is_mlc, nullptr, nullptr, nullptr},
+  {"is_mps", (getter)THPVariable_is_mps, nullptr, nullptr, nullptr},
   {"is_ort", (getter)THPVariable_is_ort, nullptr, nullptr, nullptr},
   {"is_vulkan", (getter)THPVariable_is_vulkan, nullptr, nullptr, nullptr},
   {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
@@ -1738,10 +1901,38 @@ bool isPythonTensor(const Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
 }
 
+
+py::object torchDispatchFromTensorImpl(const c10::TensorImpl* self, const char* func_name, PyObject* torch_api_function, const char* module_name) {
+  TORCH_CHECK(PyGILState_Check(), "GIL must be held before you call parseIValuesToPyArgsKwargs");
+
+  // Setup the arguments expected for the detach call
+  std::vector<py::handle> overloaded_args;
+  // TODO: there should be a shorter way to spell this
+  // TODO: fix the constness of target
+  Tensor self_t = Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
+  auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
+  TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
+  append_overloaded_tensor(&overloaded_args, self_p.ptr());
+  auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
+  PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
+
+  py::dict kwargs;
+
+  return py::reinterpret_steal<py::object>(
+      handle_torch_function_no_python_arg_parser(
+          overloaded_args,
+          args.ptr(),
+          kwargs.ptr(),
+          func_name,
+          torch_api_function,
+          module_name,
+          TorchFunctionName::TorchDispatch));
+}
+
 // NOTE [dispatch_fn's type argument]
-// `type` is nullable and represents the PythonMode going on.
-// Right now we only support a single PythonMode, but in the future we could
-// change this to a stack of PythonModes.
+// `type` is nullable and represents the TorchDispatchMode going on.
+// Right now we only support a single TorchDispatchMode, but in the future we could
+// change this to a stack of TorchDispatchModes.
 //
 // If `type` isn't null, then we consider the type for dispatch by prepending
 // it to the overloaded_args list. `handle_torch_funciton_no_python_arg_parser`
@@ -1752,8 +1943,6 @@ void concrete_dispatch_fn(
     torch::jit::Stack* stack,
     const std::shared_ptr<SafePyObject>& type) {
   const auto& schema = op.schema();
-  const auto num_returns = schema.returns().size();
-
   const auto num_arguments = schema.arguments().size();
   auto arguments = torch::jit::pop(*stack, num_arguments);
 
@@ -1777,9 +1966,6 @@ void concrete_dispatch_fn(
   py::gil_scoped_acquire g;
 
   std::vector<py::handle> overloaded_args;
-  // For now, overloads get coalesced.  Might be easier for users if they get
-  // overload resolution but is more complicated (need to expose separate
-  // functions per overload)
   py::handle torch_api_function = py::module::import("torch").attr("ops").attr(ns).attr(func_name);
   py::handle torch_api_function_overload;
   if (overload_name == "") {
@@ -1788,51 +1974,6 @@ void concrete_dispatch_fn(
     torch_api_function_overload = torch_api_function.attr(overload_name.c_str());
   }
   std::string module_name_str = "torch.ops." + ns_str;
-
-  // About all the pointers:
-  //
-  // f(int x, int y = 0, *, int z = 0)
-  //                                  ^- arguments.size()
-  //                        ^- kwarg_only_start
-  //          ^- positional_default_start
-  //   ^- 0
-
-  // Find the split point between kwarg-only and regular.  Since most functions
-  // don't have kwarg-only arguments, it is more efficient to scan from the
-  // right (but ideally, this would just be precomputed in FunctionSchema
-  // itself).  (NB: minus one in the loop is because we're testing if the
-  // *next* argument is kwarg-only before we advance the starting index)
-  int64_t kwarg_only_start = arguments.size();
-  for (; kwarg_only_start > 0; kwarg_only_start--) {
-    const auto& arg = schema.arguments()[kwarg_only_start - 1];
-    if (!arg.kwarg_only()) {
-      break;
-    }
-  }
-
-  // Find the first positional argument that isn't defaulted
-  auto is_default = [&](int64_t idx) -> bool {
-    const auto& arg = schema.arguments()[idx];
-    if (!arg.default_value().has_value()) {
-      return false;
-    }
-    const auto& default_ivalue = *arg.default_value();
-    const auto& ivalue = arguments[idx];
-    if (default_ivalue != ivalue) {
-      return false;
-    }
-    return true;
-  };
-
-  int64_t positional_default_start = kwarg_only_start;
-  for (; positional_default_start > 0; positional_default_start--) {
-    if (!is_default(positional_default_start - 1)) {
-      break;
-    }
-  }
-
-  auto args = py::reinterpret_steal<py::object>(PyTuple_New(positional_default_start));
-  py::dict kwargs;
 
   if (type) {
     append_overloaded_type(&overloaded_args, type->ptr(getPyInterpreter()));
@@ -1860,78 +2001,103 @@ void concrete_dispatch_fn(
     }
   }
 
-  // Populate positional arguments
-  for (const auto idx : c10::irange(positional_default_start)) {
-    PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(arguments[idx])).release().ptr());
-  }
+  auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
+  auto args = std::move(args_kwargs.first);
+  auto kwargs = std::move(args_kwargs.second);
 
-  // Populate keyword arguments
-  for (const auto idx : c10::irange(kwarg_only_start, arguments.size())) {
-    // But don't populate default keyword arguments
-    if (is_default(idx)) continue;
-    const auto& arg = schema.arguments()[idx];
-    kwargs[py::cast(arg.name())] = torch::jit::toPyObject(std::move(arguments[idx]));
-  }
-
-  auto out = py::reinterpret_steal<py::object>(
-      handle_torch_function_no_python_arg_parser(
-          overloaded_args,
-          args.ptr(),
-          kwargs.ptr(),
-          func_name,
-          torch_api_function_overload.ptr(),
-          module_name_str.c_str(),
-          TorchFunctionName::TorchDispatch));
-
-  if (num_returns == 0) {
-    // Check that we got a None return from Python. Anything else is an error.
-    TORCH_CHECK(out.is(py::none()), "Expected __torch_dispatch__ for ", op.operator_name(),
-                " to return None but it returned something else instead.");
-  } else if (num_returns == 1) {
-    torch::jit::push(stack, torch::jit::toIValue(out.ptr(), op.schema().returns()[0].type()));
-  } else {
-    auto outs = py::cast<py::sequence>(out);
-    for (const auto idx : c10::irange(outs.size())) {
-      torch::jit::push(stack, torch::jit::toIValue(outs[idx].ptr(), op.schema().returns()[idx].type()));
-    }
-  }
+  PyObject* obj = handle_torch_function_no_python_arg_parser(
+                    overloaded_args,
+                    args.ptr(),
+                    kwargs.ptr(),
+                    func_name,
+                    torch_api_function_overload.ptr(),
+                    module_name_str.c_str(),
+                    TorchFunctionName::TorchDispatch);
+  pushPyOutToStack(op, stack, py::reinterpret_steal<py::object>(obj), "__torch_dispatch__");
 }
 
 c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
 
-  // Setup the arguments expected for the detach call
-  std::vector<py::handle> overloaded_args;
-  // TODO: there should be a shorter way to spell this
-  // TODO: fix the constness of target
-  Tensor self_t = Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
-  auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
-  TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
-  append_overloaded_tensor(&overloaded_args, self_p.ptr());
-  auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
-  PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
-
-  py::dict kwargs;
-
-  auto out = py::reinterpret_steal<py::object>(
-      handle_torch_function_no_python_arg_parser(
-          overloaded_args,
-          args.ptr(),
-          kwargs.ptr(),
-          "detach",
-          py::module::import("torch")
-              .attr("ops")
-              .attr("aten")
-              .attr("detach")
-              .attr("default")
-              .ptr(),
-          "torch.ops.aten",
-          TorchFunctionName::TorchDispatch));
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "detach",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("detach")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
 
   TORCH_CHECK(THPVariable_Check(out.ptr()), "detach returned invalid type ", py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())), ", expected Tensor");
   const Tensor& res_t = THPVariable_Unpack(out.ptr());
   return res_t.getIntrusivePtr();
+}
+
+bool concrete_is_contiguous_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "is_contiguous",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("is_contiguous")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  TORCH_CHECK(PyBool_Check(out.ptr()), "is_contiguous returned invalid type ", py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())), ", expected bool");
+
+  return PyObject_IsTrue(out.ptr());
+}
+
+int64_t concrete_dim_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "dim",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("dim")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  TORCH_CHECK(
+      PyLong_Check(out.ptr()),
+      "dim returned invalid type ",
+      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
+      ", expected int");
+
+  return THPUtils_unpackLong(out.ptr());
+}
+
+c10::Device concrete_device_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "device",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("prim")
+          .attr("device")
+          .attr("default")
+          .ptr(),
+      "torch.ops.prim");
+
+  return toDevice(out.ptr());
 }
 
 } // anonymous namespace

@@ -17,7 +17,7 @@
 
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
-#include <ATen/core/SymIntArrayRef.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <ATen/core/TensorAccessor.h>
 
 namespace c10 {
@@ -221,7 +221,7 @@ class TORCH_API TensorBase {
     return impl_->sizes();
   }
   c10::SymIntArrayRef sym_sizes() const {
-    return c10::SymIntArrayRef(reinterpret_cast<const SymInt*>(sizes().data()), sizes().size());
+    return impl_->sym_sizes();
   }
   IntArrayRef strides() const {
     return impl_->strides();
@@ -433,10 +433,10 @@ class TORCH_API TensorBase {
     return impl_->is_mkldnn();
   }
 
-  /// Returns if a `Tensor` is mlc tensor.
-  bool is_mlc() const {
+  /// Returns if a `Tensor` is mps tensor.
+  bool is_mps() const {
     // NB: this is not a native function to avoid dispatching overhead.
-    return impl_->is_mlc();
+    return impl_->is_mps();
   }
 
   /// Returns if a `Tensor` is ort tensor.

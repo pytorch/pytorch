@@ -12,10 +12,13 @@ except ImportError:
     from yaml import SafeLoader as YamlLoader  # type: ignore[misc]
 
 NATIVE_FUNCTIONS_PATH = "aten/src/ATen/native/native_functions.yaml"
+TAGS_PATH = "aten/src/ATen/native/tags.yaml"
 
 
 def generate_code(
+    gen_dir: pathlib.Path,
     native_functions_path: Optional[str] = None,
+    tags_path: Optional[str] = None,
     install_dir: Optional[str] = None,
     subset: Optional[str] = None,
     disable_autograd: bool = False,
@@ -28,8 +31,8 @@ def generate_code(
 
     # Build ATen based Variable classes
     if install_dir is None:
-        install_dir = "torch/csrc"
-        python_install_dir = "torch/testing/_internal/generated"
+        install_dir = os.fspath(gen_dir / "torch/csrc")
+        python_install_dir = os.fspath(gen_dir / "torch/testing/_internal/generated")
     else:
         python_install_dir = install_dir
     autograd_gen_dir = os.path.join(install_dir, "autograd", "generated")
@@ -40,6 +43,7 @@ def generate_code(
     if subset == "pybindings" or not subset:
         gen_autograd_python(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
+            tags_path or TAGS_PATH,
             autograd_gen_dir,
             autograd_dir,
         )
@@ -51,6 +55,7 @@ def generate_code(
 
         gen_autograd(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
+            tags_path or TAGS_PATH,
             autograd_gen_dir,
             autograd_dir,
             disable_autograd=disable_autograd,
@@ -60,6 +65,7 @@ def generate_code(
     if subset == "python" or not subset:
         gen_annotated(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
+            tags_path or TAGS_PATH,
             python_install_dir,
             autograd_dir,
         )
@@ -122,7 +128,20 @@ def get_selector(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Autogenerate code")
     parser.add_argument("--native-functions-path")
-    parser.add_argument("--install_dir")
+    parser.add_argument("--tags-path")
+    parser.add_argument(
+        "--gen-dir",
+        type=pathlib.Path,
+        default=pathlib.Path("."),
+        help="Root directory where to install files. Defaults to the current working directory.",
+    )
+    parser.add_argument(
+        "--install_dir",
+        help=(
+            "Deprecated. Use --gen-dir instead. The semantics are different, do not change "
+            "blindly."
+        ),
+    )
     parser.add_argument(
         "--subset",
         help='Subset of source files to generate. Can be "libtorch" or "pybindings". Generates both when omitted.',
@@ -160,7 +179,9 @@ def main() -> None:
     options = parser.parse_args()
 
     generate_code(
+        options.gen_dir,
         options.native_functions_path,
+        options.tags_path,
         options.install_dir,
         options.subset,
         options.disable_autograd,
@@ -176,9 +197,8 @@ def main() -> None:
         ts_backend_yaml = os.path.join(aten_path, "native/ts_native_functions.yaml")
         ts_native_functions = "torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
         ts_node_base = "torch/csrc/lazy/ts_backend/ts_node.h"
-        if options.install_dir is None:
-            options.install_dir = "torch/csrc"
-        lazy_install_dir = os.path.join(options.install_dir, "lazy/generated")
+        install_dir = options.install_dir or os.fspath(options.gen_dir / "torch/csrc")
+        lazy_install_dir = os.path.join(install_dir, "lazy/generated")
         os.makedirs(lazy_install_dir, exist_ok=True)
 
         assert os.path.isfile(

@@ -19,10 +19,10 @@
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
-#include <torch/csrc/autograd/python_mode.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/profiler/execution_graph_observer.h>
 #include <c10/core/ScalarType.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 
@@ -171,7 +171,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("ORT", c10::DeviceType::ORT)
       .value("XLA", c10::DeviceType::XLA)
       .value("Lazy", c10::DeviceType::Lazy)
-      .value("MLC", c10::DeviceType::MLC)
+      .value("MPS", c10::DeviceType::MPS)
       .value("HPU", c10::DeviceType::HPU)
       .value("Meta", c10::DeviceType::Meta)
       .value("Vulkan", c10::DeviceType::Vulkan)
@@ -270,9 +270,24 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         return e.nBytes();
       });
 
+  {
+    using torch::profiler::impl::Result;
+    py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
+        .def("name", &Result::name)
+        .def_property_readonly(
+            "id",
+            [](const Result& r) {
+              return reinterpret_cast<intptr_t>(r.shared_from_this().get());
+            })
+        .def_property_readonly(
+            "parent", [](const Result& r) { return r.parent_.lock(); })
+        .def_readonly("children", &Result::children_);
+  }
+
   py::class_<ProfilerResult>(m, "_ProfilerResult")
     .def("trace_start_us", &ProfilerResult::trace_start_us)
     .def("events", &ProfilerResult::events)
+    .def("experimental_event_tree", &ProfilerResult::event_tree)
 #ifdef USE_KINETO
     .def("save", &ProfilerResult::save)
 #endif // USE_KINETO
@@ -289,6 +304,12 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_kineto_step", profilerStep);  // Only if `USE_KINETO` is set
   m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
 
+  // PyTorch profiler execution graph internal interface.
+  m.def("_add_execution_graph_observer", &torch::profiler::impl::addExecutionGraphObserver, py::arg("output_file_name"));
+  m.def("_remove_execution_graph_observer", &torch::profiler::impl::removeExecutionGraphObserver);
+  m.def("_enable_execution_graph_observer", &torch::profiler::impl::enableExecutionGraphObserver);
+  m.def("_disable_execution_graph_observer", &torch::profiler::impl::disableExecutionGraphObserver);
+
   // NOTICE: These record functions are not torch operators and may not show up
   // in TorchScript tracing, FX transforms, or operator serialization. For these
   // use cases, please use `torch.profiler.record_function`.
@@ -304,7 +325,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         for (const auto& arg : args) {
             iv_inputs.push_back(torch::jit::toTypeInferredIValue(arg));
         }
-        rec->before(name, iv_inputs);
+        rec->before(name, c10::ArrayRef<const c10::IValue>(iv_inputs.data(), iv_inputs.size()));
       } else {
         rec->before(name);
       }
@@ -603,17 +624,29 @@ static PyObject * python_exit_dual_level(PyObject* _unused, PyObject* args, PyOb
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * enter_python_mode(PyObject* _unused, PyObject* arg) {
+static PyObject* set_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  PythonMode::enter(arg);
+  if (arg == Py_None) {
+    at::impl::TorchDispatchModeTLS::set_state(nullptr);
+  } else {
+    Py_INCREF(arg);
+    at::impl::TorchDispatchModeTLS::set_state(
+        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * exit_python_mode(PyObject* _unused, PyObject* arg) {
+static PyObject* get_torch_dispatch_mode(PyObject* _unused, PyObject* _unused2) {
   HANDLE_TH_ERRORS
-  PythonMode::exit();
-  Py_RETURN_NONE;
+  const auto& mode = at::impl::TorchDispatchModeTLS::get_state();
+  if (!mode) {
+    Py_RETURN_NONE;
+  } else {
+    auto* r = mode->ptr(getPyInterpreter());
+    Py_INCREF(r);
+    return r;
+  }
   END_HANDLE_TH_ERRORS
 }
 
@@ -664,8 +697,8 @@ static PyMethodDef methods[] = { // NOLINT
   {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
   {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
   {"_exit_dual_level", castPyCFunctionWithKeywords(python_exit_dual_level), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"_enter_python_mode", enter_python_mode, METH_O, nullptr},
-  {"_exit_python_mode", exit_python_mode, METH_NOARGS, nullptr},
+  {"_set_torch_dispatch_mode", set_torch_dispatch_mode, METH_O, nullptr},
+  {"_get_torch_dispatch_mode", get_torch_dispatch_mode, METH_NOARGS, nullptr},
   {"_set_torch_function_mode", set_torch_function_mode, METH_O, nullptr},
   {"_get_torch_function_mode", get_torch_function_mode, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
