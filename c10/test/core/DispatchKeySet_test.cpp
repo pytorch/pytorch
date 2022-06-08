@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <algorithm>
+#include <numeric>
 #include <unordered_set>
 
 #include <c10/core/DispatchKeySet.h>
@@ -366,7 +366,8 @@ TEST(DispatchKeySet, IteratorCrossProduct) {
 
 TEST(DispatchKeySet, IteratorFull) {
   DispatchKeySet full_set(DispatchKeySet::FULL);
-  auto count = std::accumulate(full_set.begin(), full_set.end(), std::uint16_t{0});
+  auto count =
+      std::accumulate(full_set.begin(), full_set.end(), std::uint16_t{0});
 
   // Total # of runtime entries includes an entry for DispatchKey::Undefined,
   // which is not included when iterating through the DispatchKeySet.
