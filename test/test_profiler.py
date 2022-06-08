@@ -1,25 +1,21 @@
 # Owner(s): ["oncall: profiler"]
 
 import collections
-import functools
 import gc
 import io
 import json
 import os
-import re
 import tempfile
 import textwrap
 import typing
 import unittest
-
-import expecttest
 
 import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
 import torch.utils.data.datapipes as dp
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_ROCM, IS_WINDOWS,
     TEST_WITH_CROSSREF, TemporaryFileName, TemporaryDirectoryName)
@@ -102,32 +98,10 @@ class IcicleNode:
     OP_TEMPLATE = "[ {}]"
     PAD_LENGTH = len(OP_TEMPLATE.format(""))
 
-    @staticmethod
-    def test(f):
-        """Mark unit test that will be using IcicleNode to test traces.
-
-        This decorator serves two purposes. First, it provides a method name
-        that `format` can use to tell where the test runner (which is
-        environment specific) ends and the unit test begins. Second, it runs
-        the test with replicates and allows `assertTreesMatch` to adjust
-        based on which replicate is running.
-        """
-
-        @functools.wraps(f)
-        def begin_unit_test_marker(self, replicates=5):
-            try:
-                for i in range(replicates):
-                    self.icicle_replicate = i
-                    return f(self)
-            finally:
-                delattr(self, "icicle_replicate")
-        return begin_unit_test_marker
-
     @classmethod
     def format(cls, profiler, indent: int = 0):
         tree = profiler.kineto_results.experimental_event_tree()
         lines = cls.cat([cls(i).materialize() for i in tree])
-        lines = lines[min([i + 1 for i, l in enumerate(lines) if "begin_unit_test_marker" in l] or [0]):]
         out = "\n".join([textwrap.indent(l.rstrip(), " " * indent) for l in lines])
         return f"{out}\n{' ' * indent}"
 
@@ -140,34 +114,6 @@ class IcicleNode:
         inputs = [[j.ljust(w) for j in i] for i, w in zip(inputs, widths)]
         return [join_str.join(i) for i in zip(*inputs)]
 
-    @staticmethod
-    def fmt_name(name: str) -> str:
-        # torch::autograd::Node relies on c10::demangle to generate names, and
-        # Windows demangles to include `struct` in the name.
-        if IS_WINDOWS:
-            name = name.replace('struct torch::autograd::AccumulateGrad', 'torch::autograd::AccumulateGrad')
-
-        match = re.match(r"(.*)\.py\(([0-9]+)\): (.*)$", name)
-        if match:
-            filename, lineno, fn = match.groups()
-
-            # This test can appear as `test/test_profiler.py` depending on
-            # where it is run from.
-            if filename.endswith(os.path.splitext(__file__)[0]):
-                filename = os.path.split(os.path.splitext(__file__)[0])[1]
-
-            # We test against a string literal, so all paths have to look like POSIX paths.
-            filename = filename.replace(os.sep, "/")
-
-            # We don't want to have to update this test every time PyTorch changes.
-            lineno = lineno if os.path.split(filename.strip())[1] == "test_profiler" else "..."
-            return f"{filename}.py({lineno}): {fn}"
-
-        return re.sub(
-            "object at 0x[0-9a-fA-F]+>",
-            "object at 0xXXXXXXXXXXXX>",
-            name)
-
     def __init__(self, event) -> None:
         self.width = 0
         self.children : typing.List[IcicleNode] = []
@@ -175,7 +121,13 @@ class IcicleNode:
             self.children.append(IcicleNode(child))
             self.width += self.children[-1].width
 
-        self.name = self.fmt_name(event.name() + " ")
+        self.name = f"{event.name()} "
+
+        # torch::autograd::Node relies on c10::demangle to generate names, and
+        # Windows demangles to include `struct` in the name.
+        if IS_WINDOWS:
+            self.name = self.name.replace('struct torch::autograd::AccumulateGrad', 'torch::autograd::AccumulateGrad')
+
         self.width = max(self.width, len(self.name) + self.PAD_LENGTH)
 
     def materialize(self) -> typing.List[str]:
@@ -1158,64 +1110,6 @@ class TestProfiler(TestCase):
         with profile():
             self.assertEqual(profiler_type(), ActiveProfilerType.KINETO)
 
-    def assertTreesMatch(self, actual: str, expected: str):
-        # Warning: Here be dragons
-        #   Different platforms will have subtly different behavior for Python
-        #   tracing. Observed differences include:
-        #     1) Windows symbolicates names differently from posix
-        #     2) The profile callback for c_call does not fire for Tensor.__pow__
-        #        on certain platforms. This is not caused by the function tracer,
-        #        but by cPython itself.
-        #
-        # The purpose of these unit tests is to ensure that the profiler is
-        # doing reasonable things. When these platform dependent variations occur
-        # simply coerce them into a platform independent form. If you made a
-        # change in the codebase which changes the trace produced, simply use
-        # EXPECTTEST_ACCEPT=1 to update the tests to reflect the new structure.
-
-        replicate = getattr(self, "icicle_replicate", None)
-        self.assertIsNotNone(replicate, "Please annotate test with `@IcicleNode.test`")
-
-        def split(line):
-            open_count = 0
-            buffer = []
-            results = []
-            for i, char in enumerate(line):
-                buffer.append(char)
-                if char == "[":
-                    open_count += 1
-                elif char == "]":
-                    open_count -= 1
-                    if not open_count:
-                        results.append(re.sub(r"\s-*]$", " ]", "".join(buffer)))
-                        buffer.clear()
-            return results
-
-        # Best effort attempt to provide a human comprehensible summary of the
-        # difference between actual and expected.
-        if actual != expected and (not expecttest.ACCEPT or replicate > 0):
-            print(f"Replicate: {replicate}")
-            actual_lines = actual.splitlines(False)
-            expected_lines = expected.splitlines(False)
-            print(f"Lines: {len(actual_lines)} vs. {len(expected_lines)}")
-            for line_a, line_e in zip(actual_lines, expected_lines):
-                split_a, split_e = split(line_a), split(line_e)
-                if " ".join(split_a) != " ".join(split_e):
-                    print(f"  Ops: {len(split_a)} vs. {len(split_e)}")
-                    for a, e in zip(split_a, split_e):
-                        if a != e:
-                            print(f"    {a}\n    {e}\n")
-
-        # The profiler should produce deterministic results and should return
-        # to a clean state after each run. As a result, only the first
-        # replicate is allowed to update `expected`. If subsequent runs do not
-        # match it is a bug in the profiler.
-        if replicate:
-            self.assertEqual(actual, expected)
-        else:
-            self.assertExpectedInline(actual, expected, skip=1)
-
-    @IcicleNode.test
     def test_profiler_experimental_tree(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with profile() as p:
@@ -1224,7 +1118,7 @@ class TestProfiler(TestCase):
             loss = (y - z) ** 2
             loss.backward()
 
-        self.assertTreesMatch(
+        self.assertExpectedInline(
             IcicleNode.format(p.profiler, 12),
             """\
             [ aten::add ][ aten::ones ----------------][ aten::sub ][ aten::pow --------------------][ aten::ones_like -------------------][ autograd::engine::evaluate_function: PowBackward0 ----------------------------------------------][ autograd::engine::evaluate_function: SubBackward0 ][ autograd::engine::evaluate_function: AddBackward0 ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ]
@@ -1237,7 +1131,6 @@ class TestProfiler(TestCase):
             """  # noqa: B950
         )
 
-    @IcicleNode.test
     def test_profiler_experimental_tree_with_record_function(self):
         with profile() as p:
             with torch.autograd.profiler.record_function("Top level Annotation"):
@@ -1255,7 +1148,7 @@ class TestProfiler(TestCase):
         # NB: The `aten::zeros` before the record function annotations are due to
         # `at::cpp_custom_type_hack`. When we switch to `torch::CustomClassHolder`
         # they will disappear.
-        self.assertTreesMatch(
+        self.assertExpectedInline(
             IcicleNode.format(p.profiler, 12),
             """\
             [ aten::zeros ---------------][ Top level Annotation ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------]
@@ -1268,7 +1161,6 @@ class TestProfiler(TestCase):
             """  # noqa: B950
         )
 
-    @IcicleNode.test
     def test_profiler_experimental_tree_with_memory(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with profile(profile_memory=True) as p:
@@ -1277,7 +1169,7 @@ class TestProfiler(TestCase):
             loss = (y - z) ** 2
             loss.backward()
 
-        self.assertTreesMatch(
+        self.assertExpectedInline(
             IcicleNode.format(p.profiler, 12),
             """\
             [ aten::add ][ aten::ones ----------------][ aten::sub ][ aten::pow --------------------------------][ aten::ones_like -------------------][ autograd::engine::evaluate_function: PowBackward0 ----------------------------------------------------------------------------------------------------------------------------------------------][ autograd::engine::evaluate_function: SubBackward0 ][ autograd::engine::evaluate_function: AddBackward0 ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ][ [memory] ]
