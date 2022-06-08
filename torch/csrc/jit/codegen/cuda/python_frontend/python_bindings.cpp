@@ -2,6 +2,7 @@
 
 #ifdef USE_CUDA
 #include <c10/util/ArrayRef.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -50,7 +51,7 @@ class FusionDefinitionContextManager {
   // Context Manager Methods
   FusionDefinitionContextManager* enter() {
     prev_fusion_ = FusionGuard::getCurFusion();
-    FusionGuard::setCurFusion(fusion_owner_->fusionPtr());
+    FusionGuard::setCurFusion(fusionPtr());
     return this;
   }
 
@@ -60,10 +61,14 @@ class FusionDefinitionContextManager {
   }
 
   void addInput(torch::jit::fuser::cuda::Val* input) {
-    fusion_owner_->fusionPtr()->addInput(input);
+    fusionPtr()->addInput(input);
   }
   void addOutput(torch::jit::fuser::cuda::Val* output) {
-    fusion_owner_->fusionPtr()->addOutput(output);
+    fusionPtr()->addOutput(output);
+  }
+
+  Fusion* fusionPtr() {
+    return fusion_owner_->fusionPtr();
   }
 
   // An Empty namespace to add arith ops
@@ -117,10 +122,26 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def("print_kernel", [](PythonFusionOwner& self) { self.printKernel(); });
 
   // Bindings to Types required for Tensor/Scalar Creation
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<TensorView>(nvfuser, "TensorView");
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<torch::jit::fuser::cuda::Val>(nvfuser, "Val");
+  py::class_<TensorView>(nvfuser, "TensorView")
+      .def(
+          "__str__",
+          [](TensorView& self) -> std::string {
+            std::stringstream ss;
+            TORCH_CHECK(
+                self.getDataType().has_value(),
+                "TensorView does not have DataType?");
+            ss << self.getDataType().value();
+            return self.toString() + " DataType: " + ss.str() +
+                " Contiguity: " + self.domain()->getContiguityString();
+          },
+          py::return_value_policy::reference);
+  py::class_<torch::jit::fuser::cuda::Val>(nvfuser, "Val")
+      .def(
+          "__str__",
+          [](torch::jit::fuser::cuda::Val& self) -> std::string {
+            return self.toString();
+          },
+          py::return_value_policy::reference);
 
   // C++ Side of Context Manager used to mimic the FusionGuard as a way
   // to programatically distinguish code used to define the Fusion instead
@@ -156,9 +177,10 @@ void initNvFuserPythonBindings(PyObject* module) {
           [](FusionDefinitionContextManager& self, TensorView* output) {
             self.addOutput(output);
           })
-      .def_static(
+      .def(
           "define_tensor",
-          [](size_t ndims,
+          [](FusionDefinitionContextManager& self,
+             size_t ndims,
              torch::jit::fuser::cuda::DataType dtype =
                  torch::jit::fuser::cuda::DataType::Float) -> TensorView* {
             return TensorViewBuilder()
@@ -170,27 +192,76 @@ void initNvFuserPythonBindings(PyObject* module) {
           py::arg("ndims"),
           py::arg("dtype") = torch::jit::fuser::cuda::DataType::Float,
           py::return_value_policy::reference)
-      .def_static(
+      .def(
+          "define_tensor",
+          [](FusionDefinitionContextManager& self,
+             std::vector<int> sizes,
+             std::vector<int> strides,
+             torch::jit::fuser::cuda::DataType dtype =
+                 torch::jit::fuser::cuda::DataType::Float) -> TensorView* {
+            TORCH_CHECK(
+                sizes.size() == strides.size(),
+                "The number of sizes does not match the number of strides.",
+                sizes.size(),
+                strides.size());
+
+            std::vector<IterDomain*> domain_sizes;
+            for (const auto i : c10::irange(sizes.size())) {
+              if (sizes[i] == 1) {
+                domain_sizes.push_back(IrBuilder::create<IterDomain>(
+                    self.fusionPtr()->zeroVal(),
+                    self.fusionPtr()->oneVal(),
+                    ParallelType::Serial,
+                    IterType::BroadcastWithStride));
+              } else {
+                domain_sizes.push_back(IrBuilder::create<IterDomain>(
+                    self.fusionPtr()->zeroVal(), IrBuilder::create<Int>()));
+              }
+            }
+
+            std::vector<bool> contig_info(strides.size(), false);
+            for (int i = contig_info.size() - 1; i >= 0; --i) {
+              if (i == static_cast<int>(contig_info.size() - 1)) {
+                contig_info[i] = (strides[i] == 1);
+              } else {
+                contig_info[i] =
+                    (strides[i] == (strides[i + 1] * sizes[i + 1]));
+              }
+            }
+
+            return IrBuilder::create<TensorView>(
+                IrBuilder::create<TensorDomain>(domain_sizes, contig_info),
+                dtype);
+          },
+          py::arg("sizes"),
+          py::arg("strides"),
+          py::arg("dtype") = torch::jit::fuser::cuda::DataType::Float,
+          py::return_value_policy::reference)
+      .def(
           "define_constant",
-          [](double val) -> torch::jit::fuser::cuda::Val* {
+          [](FusionDefinitionContextManager& self,
+             double val) -> torch::jit::fuser::cuda::Val* {
             return IrBuilder::create<Double>(val);
           },
           py::return_value_policy::reference)
-      .def_static(
+      .def(
           "define_constant",
-          [](bool val) -> torch::jit::fuser::cuda::Val* {
+          [](FusionDefinitionContextManager& self,
+             bool val) -> torch::jit::fuser::cuda::Val* {
             return IrBuilder::create<Bool>(val);
           },
           py::return_value_policy::reference)
-      .def_static(
+      .def(
           "define_constant",
-          [](int64_t val) -> torch::jit::fuser::cuda::Val* {
+          [](FusionDefinitionContextManager& self,
+             int64_t val) -> torch::jit::fuser::cuda::Val* {
             return IrBuilder::create<Int>(val);
           },
           py::return_value_policy::reference)
-      .def_static(
+      .def(
           "define_scalar",
-          [](torch::jit::fuser::cuda::DataType dtype =
+          [](FusionDefinitionContextManager& self,
+             torch::jit::fuser::cuda::DataType dtype =
                  torch::jit::fuser::cuda::DataType::Double)
               -> torch::jit::fuser::cuda::Val* {
             if (dtype == torch::jit::fuser::cuda::DataType::Double) {
@@ -241,7 +312,7 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_UNARY_OP("log1p", log1p)
   NVFUSER_PYTHON_BINDING_UNARY_OP("log2", log2)
   NVFUSER_PYTHON_BINDING_UNARY_OP("neg", neg)
-  NVFUSER_PYTHON_BINDING_UNARY_OP("not_op", notOp)
+  NVFUSER_PYTHON_BINDING_UNARY_OP("bitwise_not", bitwise_not)
   NVFUSER_PYTHON_BINDING_UNARY_OP("relu", relu)
   NVFUSER_PYTHON_BINDING_UNARY_OP("rand_like", randlike)
   NVFUSER_PYTHON_BINDING_UNARY_OP("reciprocal", reciprocal)
@@ -256,6 +327,12 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_UNARY_OP("tan", tan)
   NVFUSER_PYTHON_BINDING_UNARY_OP("tanh", tanh)
   NVFUSER_PYTHON_BINDING_UNARY_OP("trunc", trunc)
+  NVFUSER_PYTHON_BINDING_UNARY_OP("isfinite", isfinite)
+  NVFUSER_PYTHON_BINDING_UNARY_OP("isinf", isinf)
+  NVFUSER_PYTHON_BINDING_UNARY_OP("isnan", isnan)
+  NVFUSER_PYTHON_BINDING_UNARY_OP("isneginf", isneginf)
+  NVFUSER_PYTHON_BINDING_UNARY_OP("isposinf", isposinf)
+  NVFUSER_PYTHON_BINDING_UNARY_OP("isreal", isreal)
 #undef NVFUSER_PYTHON_BINDING_UNARY_OP
 
 #define NVFUSER_PYTHON_BINDING_BINARY_OP(op_str, op_name)                    \
@@ -282,24 +359,25 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::return_value_policy::reference);
 
   NVFUSER_PYTHON_BINDING_BINARY_OP("add", add)
-  NVFUSER_PYTHON_BINDING_BINARY_OP("and_op", andOp)
+  NVFUSER_PYTHON_BINDING_BINARY_OP("atan2", atan2)
   NVFUSER_PYTHON_BINDING_BINARY_OP("div", div)
-  NVFUSER_PYTHON_BINDING_BINARY_OP("eq", eq)
   NVFUSER_PYTHON_BINDING_BINARY_OP("fmod", fmod)
+  NVFUSER_PYTHON_BINDING_BINARY_OP("mul", mul)
+  NVFUSER_PYTHON_BINDING_BINARY_OP("pow", pow)
+  NVFUSER_PYTHON_BINDING_BINARY_OP("remainder", remainder)
+  NVFUSER_PYTHON_BINDING_BINARY_OP("sub", sub)
+  NVFUSER_PYTHON_BINDING_BINARY_OP("mod", mod)
+  NVFUSER_PYTHON_BINDING_BINARY_OP("eq", eq)
   NVFUSER_PYTHON_BINDING_BINARY_OP("ge", ge)
   NVFUSER_PYTHON_BINDING_BINARY_OP("gt", gt)
   NVFUSER_PYTHON_BINDING_BINARY_OP("le", le)
   NVFUSER_PYTHON_BINDING_BINARY_OP("lt", lt)
-  NVFUSER_PYTHON_BINDING_BINARY_OP("lshift", lshift)
-  NVFUSER_PYTHON_BINDING_BINARY_OP("mod", mod)
-  NVFUSER_PYTHON_BINDING_BINARY_OP("mul", mul)
   NVFUSER_PYTHON_BINDING_BINARY_OP("ne", ne)
-  NVFUSER_PYTHON_BINDING_BINARY_OP("or_op", orOp)
-  NVFUSER_PYTHON_BINDING_BINARY_OP("pow", pow)
-  NVFUSER_PYTHON_BINDING_BINARY_OP("remainder", remainder)
-  NVFUSER_PYTHON_BINDING_BINARY_OP("rshift", rshift)
-  NVFUSER_PYTHON_BINDING_BINARY_OP("sub", sub)
-  NVFUSER_PYTHON_BINDING_BINARY_OP("xor_op", xorOp)
+  NVFUSER_PYTHON_BINDING_BINARY_OP("bitwise_and", bitwise_and)
+  NVFUSER_PYTHON_BINDING_BINARY_OP("bitwise_or", bitwise_or)
+  NVFUSER_PYTHON_BINDING_BINARY_OP("bitwise_xor", bitwise_xor)
+  NVFUSER_PYTHON_BINDING_BINARY_OP("bitwise_left_shift", bitwise_left_shift)
+  NVFUSER_PYTHON_BINDING_BINARY_OP("bitwise_right_shift", bitwise_left_shift)
 #undef NVFUSER_PYTHON_BINDING_BINARY_OP
 
 #define NVFUSER_PYTHON_BINDING_TERNARY_OP(op_str, op_name)                   \
@@ -493,10 +571,44 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def_static(
       "sum", &torch::jit::fuser::cuda::sum, py::return_value_policy::reference);
 
-  // Broadcast operation
+  // Broadcast operations
   nvf_ops.def_static(
       "broadcast",
       &torch::jit::fuser::cuda::broadcast,
+      py::return_value_policy::reference);
+  // TODO: We don't have a way to realize a tensor if the operation creates
+  // the output of a fusion.
+  nvf_ops.def_static(
+      "broadcast_in_dim",
+      [](TensorView* input,
+         std::vector<int>& output_shape,
+         std::vector<int>& broadcast_dims) -> TensorView* {
+        TORCH_CHECK(
+            output_shape.size() >= input->nDims(),
+            "The new shape is expected to be greater-then-or-equal to the input",
+            output_shape.size(),
+            input->nDims());
+        TORCH_CHECK(
+            input->nDims() == broadcast_dims.size(),
+            "The broadcast dimensions should match the input dimensions.",
+            input->nDims(),
+            broadcast_dims.size());
+
+        std::vector<bool> is_broadcast_dim(output_shape.size(), true);
+        for (const auto idx : c10::irange(broadcast_dims.size())) {
+          if (idx > 0) {
+            TORCH_CHECK(
+                broadcast_dims[idx - 1] < broadcast_dims[idx],
+                "Broadcast dimension is not greater than the previous value.");
+          }
+          TORCH_CHECK(
+              broadcast_dims[idx] < static_cast<int>(output_shape.size()),
+              "Invalid broadcast_dims value.");
+          is_broadcast_dim.at(broadcast_dims[idx]) = false;
+        }
+
+        return torch::jit::fuser::cuda::broadcast(input, is_broadcast_dim);
+      },
       py::return_value_policy::reference);
 
   // Cast Operations

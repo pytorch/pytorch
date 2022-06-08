@@ -8,6 +8,33 @@
 namespace at {
 namespace native {
 
+inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
+  if (sizes.dim() == 0) {
+    return std::vector<int64_t>();
+  }
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sizes.dim() == 2);
+  std::vector<int64_t> result(1, sizes.sizes()[0]);
+  if (sizes.dim() > 0) {
+    size_t nested_dim = result.size();
+    int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
+    result.resize(nested_dim + sizes.sizes()[1]);
+    int64_t sizes_size_0 = sizes.sizes()[0];
+    int64_t sizes_size_1 = sizes.sizes()[1];
+    for (const auto i : c10::irange(sizes_size_1)) {
+      result[nested_dim + i] = sizes_ptr[i];
+    }
+    for (const auto j : c10::irange(sizes_size_1)) {
+      for (const auto i : c10::irange(sizes_size_0)) {
+        if (result[nested_dim + j] &&
+            (result[nested_dim + j] != sizes_ptr[i * sizes.size(1) + j])) {
+          result[nested_dim + j] = -1;
+        }
+      }
+    }
+  }
+  return result;
+}
+
 NestedTensorImpl::NestedTensorImpl(
     at::Tensor buffer,
     at::Tensor nested_size_tensor)
@@ -17,7 +44,9 @@ NestedTensorImpl::NestedTensorImpl(
           buffer.dtype(),
           buffer.device()),
       buffer_(std::move(buffer)),
-      nested_size_tensor_(std::move(nested_size_tensor)) {
+      nested_size_tensor_(std::move(nested_size_tensor)),
+      opt_sizes_(construct_opt_sizes(nested_size_tensor_))
+{
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
       "in the near future.");
@@ -29,7 +58,7 @@ NestedTensorImpl::NestedTensorImpl(
   key_set_ =
       key_set_ - c10::DispatchKeySet({c10::DispatchKey::ADInplaceOrView});
   refresh_dim();
-  set_sizes_customization_policy(CustomizableMethodPolicy::NotSupported);
+  set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
 
 void NestedTensorImpl::refresh_dim() {
@@ -38,8 +67,26 @@ void NestedTensorImpl::refresh_dim() {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dim() == my_dim);
 }
 
+int64_t NestedTensorImpl::dim_custom() const {
+  return dim_default();
+}
+int64_t NestedTensorImpl::numel_custom() const {
+  TORCH_CHECK(false, "numel is disabled.");
+}
+bool NestedTensorImpl::is_contiguous_custom(MemoryFormat) const {
+  TORCH_CHECK(false, "is_contiguous is disabled.");
+}
+IntArrayRef NestedTensorImpl::sizes_custom() const {
+  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
+}
+
+IntArrayRef NestedTensorImpl::strides_custom() const {
+  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");
+}
+
 const char* NestedTensorImpl::tensorimpl_type_name() const {
   return "NestedTensorImpl";
 }
+
 } // namespace native
 } // namespace at

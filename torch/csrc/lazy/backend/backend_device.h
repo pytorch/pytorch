@@ -42,8 +42,6 @@ class TORCH_API BackendDevice {
   bool operator!=(const BackendDevice& other) const { return compare(other) != 0; }
   bool operator<(const BackendDevice& rhs) const { return compare(rhs) < 0; }
 
-  bool has_index() const { return ordinal_ >= 0; }
-
   std::string toString() const;
 
  private:
@@ -64,6 +62,7 @@ TORCH_API c10::Device backendDeviceToAtenDevice(const BackendDevice& device);
 // input is not a lazy tensor.
 TORCH_API c10::optional<BackendDevice> GetBackendDevice(const at::TensorList tensors);
 TORCH_API c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor);
+TORCH_API c10::optional<BackendDevice> GetBackendDevice(const c10::optional<c10::Device> device);
 
 // For variadic template.
 TORCH_API c10::optional<BackendDevice> GetBackendDevice();

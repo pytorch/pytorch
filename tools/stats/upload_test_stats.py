@@ -24,18 +24,19 @@ def parse_xml_report(
     report: Path, workflow_id: int, workflow_run_attempt: int
 ) -> List[Dict[str, Any]]:
     """Convert a test report xml file into a JSON-serializable list of test cases."""
+    print(f"Parsing test report: {report}")
     # [Job id in artifacts]
     # Retrieve the job id from the report path. In our GHA workflows, we append
     # the job id to the end of the report name, so `report` looks like:
     #     unzipped-test-reports-foo_5596745227/test/test-reports/foo/TEST-foo.xml
     # and we want to get `5596745227` out of it.
     job_id = int(report.parts[0].rpartition("_")[2])
+    print(f"Found job id: {job_id}")
 
-    print(f"Parsing test report: {report}, job id: {job_id}")
     root = ET.parse(report)
 
     test_cases = []
-    for test_case in root.findall("testcase"):
+    for test_case in root.iter("testcase"):
         case = process_xml_element(test_case)
         case["workflow_id"] = workflow_id
         case["workflow_run_attempt"] = workflow_run_attempt
@@ -133,7 +134,10 @@ def download_and_extract_artifact(
         if atom.startswith("runattempt"):
             found_run_attempt = int(atom[len("runattempt") :])
             if workflow_run_attempt != found_run_attempt:
-                print(f"Skipping {artifact_name} as it is an invalid run attempt.")
+                print(
+                    f"Skipping {artifact_name} as it is an invalid run attempt. "
+                    f"Expected {workflow_run_attempt}, found {found_run_attempt}."
+                )
 
     print(f"Downloading and extracting {artifact_name}")
 
@@ -151,12 +155,19 @@ def download_and_extract_s3_reports(
         Prefix=f"pytorch/pytorch/{workflow_run_id}/{workflow_run_attempt}/artifact/test-reports"
     )
 
+    found_one = False
     for obj in objs:
+        found_one = True
         p = Path(Path(obj.key).name)
         print(f"Downloading and extracting {p}")
         with open(p, "wb") as f:
             f.write(obj.get()["Body"].read())
         unzip(p)
+
+    if not found_one:
+        raise RuntimeError(
+            "Didn't find any test reports in s3, there is probably a bug!"
+        )
 
 
 if __name__ == "__main__":
@@ -168,6 +179,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--workflow-run-attempt",
+        type=int,
         required=True,
         help="which retry of the workflow this is",
     )

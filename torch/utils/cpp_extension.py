@@ -17,7 +17,7 @@ import torch._appdirs
 from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
-from .hipify.hipify_python import get_hip_file_path, GeneratedFileCleaner
+from .hipify.hipify_python import GeneratedFileCleaner
 from typing import List, Optional, Union, Tuple
 from torch.torch_version import TorchVersion
 
@@ -455,6 +455,9 @@ class BuildExtension(build_ext, object):
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
 
+            if 'nvcc_dlink' in extension.extra_compile_args:
+                assert self.use_ninja, f"With dlink=True, ninja is required to build cuda extension {extension.name}."
+
         # Register .cu, .cuh and .hip as valid source extensions.
         self.compiler.src_extensions += ['.cu', '.cuh', '.hip']
         # Save the original _compile method for later.
@@ -583,6 +586,10 @@ class BuildExtension(build_ext, object):
                 cuda_cflags = [shlex.quote(f) for f in cuda_cflags]
                 cuda_post_cflags = [shlex.quote(f) for f in cuda_post_cflags]
 
+            if isinstance(extra_postargs, dict) and 'nvcc_dlink' in extra_postargs:
+                cuda_dlink_post_cflags = unix_cuda_flags(extra_postargs['nvcc_dlink'])
+            else:
+                cuda_dlink_post_cflags = None
             _write_ninja_file_and_compile_objects(
                 sources=sources,
                 objects=objects,
@@ -590,6 +597,7 @@ class BuildExtension(build_ext, object):
                 post_cflags=[shlex.quote(f) for f in post_cflags],
                 cuda_cflags=cuda_cflags,
                 cuda_post_cflags=cuda_post_cflags,
+                cuda_dlink_post_cflags=cuda_dlink_post_cflags,
                 build_directory=output_dir,
                 verbose=True,
                 with_cuda=with_cuda)
@@ -734,6 +742,10 @@ class BuildExtension(build_ext, object):
             if with_cuda:
                 cuda_cflags = _nt_quote_args(cuda_cflags)
                 cuda_post_cflags = _nt_quote_args(cuda_post_cflags)
+            if isinstance(extra_postargs, dict) and 'nvcc_dlink' in extra_postargs:
+                cuda_dlink_post_cflags = win_cuda_flags(extra_postargs['nvcc_dlink'])
+            else:
+                cuda_dlink_post_cflags = None
 
             _write_ninja_file_and_compile_objects(
                 sources=sources,
@@ -742,6 +754,7 @@ class BuildExtension(build_ext, object):
                 post_cflags=post_cflags,
                 cuda_cflags=cuda_cflags,
                 cuda_post_cflags=cuda_post_cflags,
+                cuda_dlink_post_cflags=cuda_dlink_post_cflags,
                 build_directory=output_dir,
                 verbose=True,
                 with_cuda=with_cuda)
@@ -978,6 +991,31 @@ def CUDAExtension(name, sources, *args, **kwargs):
     Currently open issue for nvcc bug: https://github.com/pytorch/pytorch/issues/69460
     Complete workaround code example: https://github.com/facebookresearch/pytorch3d/commit/cb170ac024a949f1f9614ffe6af1c38d972f7d48
 
+    Relocatable device code linking:
+
+    If you want to reference device symbols across compilation units (across object files),
+    the object files need to be built with `relocatable device code` (-rdc=true or -dc).
+    An exception to this rule is "dynamic parallelism" (nested kernel launches)  which is not used a lot anymore.
+    `Relocatable device code` is less optimized so it needs to be used only on object files that need it.
+    Using `-dlto` (Device Link Time Optimization) at the device code compilation step and `dlink` step
+    help reduce the protentional perf degradation of `-rdc`.
+    Note that it needs to be used at both steps to be useful.
+
+    If you have `rdc` objects you need to have an extra `-dlink` (device linking) step before the CPU symbol linking step.
+    There is also a case where `-dlink` is used without `-rdc`:
+    when an extension is linked against a static lib containing rdc-compiled objects
+    like the [NVSHMEM library](https://developer.nvidia.com/nvshmem).
+
+    Note: Ninja is required to build a CUDA Extension with RDC linking.
+
+    Example:
+        >>> CUDAExtension(
+                    name='cuda_extension',
+                    sources=['extension.cpp', 'extension_kernel.cu'],
+                    dlink=True,
+                    dlink_libraries=["dlink_lib"],
+                    extra_compile_args={'cxx': ['-g'],
+                                        'nvcc': ['-O2', '-rdc=true']})
     '''
     library_dirs = kwargs.get('library_dirs', [])
     library_dirs += library_paths(cuda=True)
@@ -1010,16 +1048,19 @@ def CUDAExtension(name, sources, *args, **kwargs):
         hipify_result = hipify_python.hipify(
             project_directory=build_dir,
             output_directory=build_dir,
-            includes=[os.path.join(os.path.relpath(include_dir, build_dir), '*') for include_dir in include_dirs] if include_dirs else ['*'],
+            header_include_dirs=include_dirs,
+            includes=[os.path.join(build_dir, '*')],  # limit scope to build_dir only
             extra_files=[os.path.abspath(s) for s in sources],
             show_detailed=True,
             is_pytorch_extension=True,
+            hipify_extra_files_only=True,  # don't hipify everything in includes path
         )
 
         hipified_sources = set()
         for source in sources:
             s_abs = os.path.abspath(source)
-            hipified_sources.add(hipify_result[s_abs]["hipified_path"] if s_abs in hipify_result else s_abs)
+            hipified_sources.add(hipify_result[s_abs]["hipified_path"] if (s_abs in hipify_result and
+                                 hipify_result[s_abs]["hipified_path"] is not None) else s_abs)
 
         sources = list(hipified_sources)
 
@@ -1027,6 +1068,23 @@ def CUDAExtension(name, sources, *args, **kwargs):
     kwargs['include_dirs'] = include_dirs
 
     kwargs['language'] = 'c++'
+
+    dlink_libraries = kwargs.get('dlink_libraries', [])
+    dlink = kwargs.get('dlink', False) or dlink_libraries
+    if dlink:
+        extra_compile_args = kwargs.get('extra_compile_args', {})
+
+        extra_compile_args_dlink = extra_compile_args.get('nvcc_dlink', [])
+        extra_compile_args_dlink += ['-dlink']
+        extra_compile_args_dlink += [f'-L{x}' for x in library_dirs]
+        extra_compile_args_dlink += [f'-l{x}' for x in dlink_libraries]
+
+        if (torch.version.cuda is not None) and packaging.version.parse(torch.version.cuda) >= packaging.version.parse('11.2'):
+            extra_compile_args_dlink += ['-dlto']   # Device Link Time Optimization started from cuda 11.2
+
+        extra_compile_args['nvcc_dlink'] = extra_compile_args_dlink
+
+        kwargs['extra_compile_args'] = extra_compile_args
 
     return setuptools.Extension(name, sources, *args, **kwargs)
 
@@ -1400,15 +1458,25 @@ def _jit_compile(name,
             try:
                 with GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
                     if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
-                        hipify_python.hipify(
+                        hipify_result = hipify_python.hipify(
                             project_directory=build_directory,
                             output_directory=build_directory,
-                            includes=os.path.join(build_directory, '*'),
+                            header_include_dirs=(extra_include_paths if extra_include_paths is not None else []),
                             extra_files=[os.path.abspath(s) for s in sources],
+                            ignores=[_join_rocm_home('*'), os.path.join(_TORCH_PATH, '*')],  # no need to hipify ROCm or PyTorch headers
                             show_detailed=verbose,
+                            show_progress=verbose,
                             is_pytorch_extension=True,
                             clean_ctx=clean_ctx
                         )
+
+                        hipified_sources = set()
+                        for source in sources:
+                            s_abs = os.path.abspath(source)
+                            hipified_sources.add(hipify_result[s_abs]["hipified_path"] if s_abs in hipify_result else s_abs)
+
+                        sources = list(hipified_sources)
+
                     _write_ninja_file_and_build_library(
                         name=name,
                         sources=sources,
@@ -1444,6 +1512,7 @@ def _write_ninja_file_and_compile_objects(
         post_cflags,
         cuda_cflags,
         cuda_post_cflags,
+        cuda_dlink_post_cflags,
         build_directory: str,
         verbose: bool,
         with_cuda: Optional[bool]) -> None:
@@ -1464,6 +1533,7 @@ def _write_ninja_file_and_compile_objects(
         post_cflags=post_cflags,
         cuda_cflags=cuda_cflags,
         cuda_post_cflags=cuda_post_cflags,
+        cuda_dlink_post_cflags=cuda_dlink_post_cflags,
         sources=sources,
         objects=objects,
         ldflags=None,
@@ -1827,6 +1897,7 @@ def _import_module_from_library(module_name, path, is_python_module):
     if is_python_module:
         # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
         spec = importlib.util.spec_from_file_location(module_name, filepath)
+        assert spec is not None
         module = importlib.util.module_from_spec(spec)
         assert isinstance(spec.loader, importlib.abc.Loader)
         spec.loader.exec_module(module)
@@ -1904,10 +1975,6 @@ def _write_ninja_file_to_build_library(path,
         cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
         cuda_flags += extra_cuda_cflags
         cuda_flags += _get_rocm_arch_flags(cuda_flags)
-        sources = [s if not _is_cuda_file(s) else
-                   os.path.abspath(os.path.join(
-                       path, get_hip_file_path(os.path.relpath(s, path), is_pytorch_extension=True)))
-                   for s in sources]
     elif with_cuda:
         cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags()
         if IS_WINDOWS:
@@ -1956,6 +2023,7 @@ def _write_ninja_file_to_build_library(path,
         post_cflags=None,
         cuda_cflags=cuda_flags,
         cuda_post_cflags=None,
+        cuda_dlink_post_cflags=None,
         sources=sources,
         objects=objects,
         ldflags=ldflags,
@@ -1968,6 +2036,7 @@ def _write_ninja_file(path,
                       post_cflags,
                       cuda_cflags,
                       cuda_post_cflags,
+                      cuda_dlink_post_cflags,
                       sources,
                       objects,
                       ldflags,
@@ -1997,6 +2066,7 @@ def _write_ninja_file(path,
     post_cflags = sanitize_flags(post_cflags)
     cuda_cflags = sanitize_flags(cuda_cflags)
     cuda_post_cflags = sanitize_flags(cuda_post_cflags)
+    cuda_dlink_post_cflags = sanitize_flags(cuda_dlink_post_cflags)
     ldflags = sanitize_flags(ldflags)
 
     # Sanity checks...
@@ -2011,18 +2081,21 @@ def _write_ninja_file(path,
     # Version 1.3 is required for the `deps` directive.
     config = ['ninja_required_version = 1.3']
     config.append(f'cxx = {compiler}')
-    if with_cuda:
+    if with_cuda or cuda_dlink_post_cflags:
         if IS_HIP_EXTENSION:
             nvcc = _join_rocm_home('bin', 'hipcc')
         else:
             nvcc = _join_cuda_home('bin', 'nvcc')
         config.append(f'nvcc = {nvcc}')
 
+    if IS_HIP_EXTENSION:
+        post_cflags = COMMON_HIP_FLAGS + post_cflags
     flags = [f'cflags = {" ".join(cflags)}']
     flags.append(f'post_cflags = {" ".join(post_cflags)}')
     if with_cuda:
         flags.append(f'cuda_cflags = {" ".join(cuda_cflags)}')
         flags.append(f'cuda_post_cflags = {" ".join(cuda_post_cflags)}')
+    flags.append(f'cuda_dlink_post_cflags = {" ".join(cuda_dlink_post_cflags)}')
     flags.append(f'ldflags = {" ".join(ldflags)}')
 
     # Turn into absolute paths so we can emit them into the ninja build
@@ -2072,6 +2145,15 @@ def _write_ninja_file(path,
         object_file = object_file.replace(" ", "$ ")
         build.append(f'build {object_file}: {rule} {source_file}')
 
+    if cuda_dlink_post_cflags:
+        devlink_out = os.path.join(os.path.dirname(objects[0]), 'dlink.o')
+        devlink_rule = ['rule cuda_devlink']
+        devlink_rule.append('  command = $nvcc $in -o $out $cuda_dlink_post_cflags')
+        devlink = [f'build {devlink_out}: cuda_devlink {" ".join(objects)}']
+        objects += [devlink_out]
+    else:
+        devlink_rule, devlink = [], []
+
     if library_target is not None:
         link_rule = ['rule link']
         if IS_WINDOWS:
@@ -2095,7 +2177,7 @@ def _write_ninja_file(path,
     blocks = [config, flags, compile_rule]
     if with_cuda:
         blocks.append(cuda_compile_rule)
-    blocks += [link_rule, build, link, default]
+    blocks += [devlink_rule, link_rule, build, devlink, link, default]
     with open(path, 'w') as build_file:
         for block in blocks:
             lines = '\n'.join(block)

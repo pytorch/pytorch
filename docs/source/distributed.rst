@@ -629,7 +629,7 @@ The following error message is produced on rank 0, allowing the user to determin
 ``TORCH_DISTRIBUTED_DEBUG``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Next, the environment variable ``TORCH_DISTRIBUTED_DEBUG``  can be used to trigger additional useful logging and collective synchronization checks to ensure all ranks
+With ``TORCH_CPP_LOG_LEVEL=INFO``, the environment variable ``TORCH_DISTRIBUTED_DEBUG``  can be used to trigger additional useful logging and collective synchronization checks to ensure all ranks
 are synchronized appropriately. ``TORCH_DISTRIBUTED_DEBUG`` can be set to either ``OFF`` (default), ``INFO``, or ``DETAIL`` depending on the debugging level
 required. Please note that the most verbose option, ``DETAIL`` may impact the application performance and thus should only be used when debugging issues.
 
@@ -678,6 +678,7 @@ include data such as forward time, backward time, gradient communication time, e
     if __name__ == "__main__":
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "29501"
+        os.environ["TORCH_CPP_LOG_LEVEL"]="INFO"
         os.environ[
             "TORCH_DISTRIBUTED_DEBUG"
         ] = "DETAIL"  # set to DETAIL for runtime logging.
@@ -778,6 +779,7 @@ application crashes, rather than a hang or uninformative error message. As an ex
     if __name__ == "__main__":
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "29501"
+        os.environ["TORCH_CPP_LOG_LEVEL"]="INFO"
         os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
         mp.spawn(worker, nprocs=2, args=())
 

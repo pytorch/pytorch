@@ -102,7 +102,7 @@ def get_S3_object_from_bucket(bucket_name: str, object: str) -> Any:
 
 def case_status(case: Version1Case) -> Status:
     for k in {"errored", "failed", "skipped"}:
-        if case[k]:  # type: ignore[misc]
+        if case[k]:  # type: ignore[literal-required]
             return cast(Status, k)
     return None
 

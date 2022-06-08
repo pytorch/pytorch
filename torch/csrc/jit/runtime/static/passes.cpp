@@ -125,7 +125,6 @@ void CastedBatchOneHotLengths(std::shared_ptr<torch::jit::Graph>& graph) {
 
 C10_UNUSED
 void ConcatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
-  // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f):
         %y0 : Tensor = aten::stack(%a, %b)
@@ -140,6 +139,36 @@ void ConcatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
         return (%res))IR";
   SubgraphRewriter fuse;
   fuse.RegisterRewritePattern(pattern, fused_pattern);
+
+  // this pattern found in several models has a redundant second `flatten`
+  std::string pattern_broadcast = R"IR(
+    graph(%a, %b, %c, %d, %e, %indices):
+        %y0 : Tensor = fb::broadcast_stack(%a, %b)
+        %y1 : Tensor = aten::transpose(%y0, %b, %c)
+        %y2 : Tensor = aten::matmul(%y0, %y1)
+        %y3 : Tensor = aten::flatten(%y2, %b, %e)
+        %y4 : Tensor = aten::flatten(%y3, %d, %d)
+        %res : Tensor = aten::index_select(%y4, %b, %indices)
+        return (%res))IR";
+  std::string fused_pattern_broadcast = R"IR(
+    graph(%a, %b, %c, %d, %e, %indices):
+        %res : Tensor = fb::broadcast_concat_batch_matmul_batch_gather(%indices, %a)
+        return (%res))IR";
+  fuse.RegisterRewritePattern(pattern_broadcast, fused_pattern_broadcast);
+
+  std::string pattern_broadcast2 = R"IR(
+    graph(%a, %b, %c, %d, %indices):
+        %y0 : Tensor = fb::broadcast_stack(%a, %b)
+        %y1 : Tensor = aten::transpose(%y0, %b, %c)
+        %y2 : Tensor = aten::matmul(%y0, %y1)
+        %y3 : Tensor = aten::flatten(%y2, %b, %d)
+        %res : Tensor = aten::index_select(%y3, %b, %indices)
+        return (%res))IR";
+  std::string fused_pattern_broadcast2 = R"IR(
+    graph(%a, %b, %c, %d, %indices):
+        %res : Tensor = fb::broadcast_concat_batch_matmul_batch_gather(%indices, %a)
+        return (%res))IR";
+  fuse.RegisterRewritePattern(pattern_broadcast2, fused_pattern_broadcast2);
   fuse.runOnGraph(graph);
 }
 
@@ -426,6 +455,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::embedding_bag.padding_idx(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights, bool include_last_offset, int? padding_idx) -> (Tensor, Tensor, Tensor)",
       c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::clamp_nan_to_num(Tensor input, Scalar? min, Scalar? max, float? nan, float? posinf, float? posinf) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -634,25 +666,17 @@ void ReplaceWithMaybeCopy(
 #endif
 }
 
-void ReplaceWithCopy(
+void ReplaceWithCopyImpl(
     std::shared_ptr<Graph>& graph,
+    const FastMap<c10::Symbol, c10::Symbol>& supported,
+    const std::vector<std::pair<c10::FunctionSchema, c10::Symbol>>&
+        supported_schema,
+    const std::function<bool(Node*)>& f_extra_checks,
     bool outputs_are_immutable) {
   AliasDb db(graph);
-  const FastMap<c10::Symbol, c10::Symbol> supported = {
-#ifdef FBCODE_CAFFE2
-      OP_PAIR("aten::permute", "static_runtime::permute_copy"),
-      OP_PAIR("fb::expand_dims", "static_runtime::expand_dims_copy"),
-#endif
-      OP_PAIR("aten::narrow", "aten::narrow_copy"),
-      OP_PAIR("aten::reshape", "static_runtime::reshape_copy"),
-      OP_PAIR("aten::flatten", "static_runtime::flatten_copy")};
 
-  static const std::array<std::pair<c10::FunctionSchema, c10::Symbol>, 1>
-      supported_schema = {
-          {{torch::schema("aten::dequantize.self(Tensor self) -> Tensor"),
-            fromQualString("static_runtime::dequantize_copy")}}};
-
-  auto match_schema = [](const Node* node, c10::Symbol& out_matched_symbol) {
+  auto match_schema = [&supported_schema](
+                          const Node* node, c10::Symbol& out_matched_symbol) {
     for (auto& schema : supported_schema) {
       if (node->matches(schema.first)) {
         out_matched_symbol = schema.second;
@@ -700,11 +724,14 @@ void ReplaceWithCopy(
     if (!outputs_are_immutable && db.mayContainAlias(out, graph->outputs())) {
       continue;
     }
+    if (!f_extra_checks(n)) {
+      continue;
+    }
     auto* new_node = graph->create(new_symbol, n->outputs().size());
     for (auto* input : n->inputs()) {
       new_node->addInput(input);
     }
-    replacement.emplace_back(std::make_pair(n, new_node));
+    replacement.emplace_back(n, new_node);
   }
 
   for (const auto& p : replacement) {
@@ -720,6 +747,56 @@ void ReplaceWithCopy(
   AliasDb db2(graph);
   torch::jit::Lint(&db2);
 #endif
+}
+
+// replace aten::permute with copy version only when it's followed by
+// reshape/flatten. It's only enabled when ReplaceWithCopy is off.
+void ReplacePermuteWithCopy(
+    std::shared_ptr<Graph>& graph,
+    bool outputs_are_immutable) {
+  AliasDb db(graph);
+  const FastMap<c10::Symbol, c10::Symbol> supported = {
+#ifdef FBCODE_CAFFE2
+      OP_PAIR("aten::permute", "static_runtime::permute_copy"),
+#endif
+  };
+  auto f_extra_checks = [](Node* n) {
+    Value* out = n->output();
+    Node* next_node = out->uses()[0].user;
+    if (next_node->kind() != aten::reshape ||
+        next_node->kind() != aten::flatten) {
+      return true;
+    }
+    return false;
+  };
+  ReplaceWithCopyImpl(
+      graph, supported, {}, f_extra_checks, outputs_are_immutable);
+}
+
+void ReplaceWithCopy(
+    std::shared_ptr<Graph>& graph,
+    bool outputs_are_immutable) {
+  AliasDb db(graph);
+  const FastMap<c10::Symbol, c10::Symbol> supported = {
+#ifdef FBCODE_CAFFE2
+      OP_PAIR("aten::permute", "static_runtime::permute_copy"),
+      OP_PAIR("fb::expand_dims", "static_runtime::expand_dims_copy"),
+#endif
+      OP_PAIR("aten::narrow", "aten::narrow_copy"),
+      OP_PAIR("aten::reshape", "static_runtime::reshape_copy"),
+      OP_PAIR("aten::flatten", "static_runtime::flatten_copy")};
+
+  static const std::vector<std::pair<c10::FunctionSchema, c10::Symbol>>
+      supported_schema = {
+          {{torch::schema("aten::dequantize.self(Tensor self) -> Tensor"),
+            fromQualString("static_runtime::dequantize_copy")}}};
+
+  ReplaceWithCopyImpl(
+      graph,
+      supported,
+      supported_schema,
+      [](Node* n) { return true; },
+      outputs_are_immutable);
 }
 
 void EliminateTrivialEquallySplit(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -795,9 +872,6 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       OP_PAIR("fb::equally_split", "static_runtime::fused_equally_split"),
       OP_PAIR(
           "fb::sigrid_transforms", "static_runtime::fused_sigrid_transforms"),
-      OP_PAIR(
-          "static_runtime::variadic_grouped_accessor_op",
-          "static_runtime::fused_variadic_grouped_accessor_op"),
       OP_PAIR(
           "static_runtime::variadic_grouped_accessor_op_v2",
           "static_runtime::fused_variadic_grouped_accessor_op_v2"),
@@ -943,12 +1017,6 @@ void RemoveImmutableInputDictLookups(
 }
 
 void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
-  // Migration to v2 is still in progress. For now, SR will support
-  // both versions of this op.
-  UseVariadicOp(
-      graph,
-      fromQualString("grouped_accessor::grouped_accessor_op"),
-      fromQualString("static_runtime::variadic_grouped_accessor_op"));
   UseVariadicOp(
       graph,
       fromQualString("grouped_accessor::grouped_accessor_op_v2"),
@@ -1044,31 +1112,41 @@ void ForceNonEmptyOutputs(Graph& graph) {
   }
 }
 
-void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph) {
-  auto input_is_constant_list =
-      [](Node* node, size_t input_idx, const c10::List<int64_t>& expected) {
-        auto input_opt = toIValue(node->input(input_idx));
-        if (!input_opt.has_value() || !input_opt->isIntList()) {
-          return false;
-        }
-        return input_opt->toIntList() == expected;
-      };
+namespace {
 
+bool inputIsConstantList(
+    Node* node,
+    size_t input_idx,
+    const c10::List<int64_t>& expected) {
+  auto input_opt = toIValue(node->input(input_idx));
+  if (!input_opt.has_value() || !input_opt->isIntList()) {
+    return false;
+  }
+  return input_opt->toIntList() == expected;
+}
+
+bool inputIsConstantInt(Node* node, size_t input_idx, int64_t expected) {
+  auto input_opt = toIValue(node->input(input_idx));
+  if (!input_opt.has_value() || !input_opt->isInt()) {
+    return false;
+  }
+  return input_opt->toInt() == expected;
+}
+
+void eliminatePermuteOpsSumPattern(std::shared_ptr<Graph>& graph) {
   // SubgraphRewriter can't pattern-match on constants, so we use this
   // extra filter to make sure the values of the `dim` arguments are
   // correct.
   auto dims_are_valid_constants =
-      [&input_is_constant_list](
-          const Match& match,
-          const std::unordered_map<std::string, Value*>& vmap) {
+      [](const Match& match,
+         const std::unordered_map<std::string, Value*>& vmap) {
         // Get the nodes in the real graph from the nodes in the template
         // pattern graph
         const auto& node_map = match.nodes_map;
         auto* sum_node = node_map.at(vmap.at("c")->node());
         auto* permute_node = node_map.at(vmap.at("b")->node());
-        return input_is_constant_list(sum_node, 1, c10::List<int64_t>{-1}) &&
-            input_is_constant_list(
-                   permute_node, 1, c10::List<int64_t>{0, 2, 1});
+        return inputIsConstantList(sum_node, 1, c10::List<int64_t>{-1}) &&
+            inputIsConstantList(permute_node, 1, c10::List<int64_t>{0, 2, 1});
       };
 
   const auto pattern = R"IR(
@@ -1086,6 +1164,48 @@ void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter fuse;
   fuse.RegisterRewritePattern(pattern, fused_pattern);
   fuse.runOnGraph(graph, dims_are_valid_constants);
+}
+
+void eliminatePermuteOpsSoftmaxPattern(std::shared_ptr<Graph>& graph) {
+  const auto pattern = R"IR(
+    graph(%a, %permute_dim_1, %permute_dim_2, %softmax_dim, %softmax_dtype):
+        %b = aten::permute(%a, %permute_dim_1)
+        %c = aten::softmax(%b, %softmax_dim, %softmax_dtype)
+        %d = aten::permute(%c, %permute_dim_2)
+        return (%d)
+  )IR";
+
+  const auto fused_pattern = R"IR(
+    graph(%a, %permute_dim_1, %permute_dim_2, %softmax_dim, %softmax_dtype):
+        %new_softmax_dim: int = prim::Constant[value=1]()
+        %e = aten::softmax(%a, %new_softmax_dim, %softmax_dtype)
+        return (%e)
+  )IR";
+
+  // Check that permute_dim is (0, 2, 1) and softmax_dim is 2
+  auto dims_are_valid_constants =
+      [](const Match& match,
+         const std::unordered_map<std::string, Value*>& vmap) {
+        const auto& node_map = match.nodes_map;
+        auto* permute_node_1 = node_map.at(vmap.at("b")->node());
+        auto* permute_node_2 = node_map.at(vmap.at("d")->node());
+        auto* softmax_node = node_map.at(vmap.at("c")->node());
+        return inputIsConstantInt(softmax_node, 1, 2) &&
+            inputIsConstantList(
+                   permute_node_1, 1, c10::List<int64_t>{0, 2, 1}) &&
+            inputIsConstantList(permute_node_2, 1, c10::List<int64_t>{0, 2, 1});
+      };
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph, dims_are_valid_constants);
+}
+
+} // namespace
+
+void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph) {
+  eliminatePermuteOpsSumPattern(graph);
+  eliminatePermuteOpsSoftmaxPattern(graph);
 }
 
 namespace {
@@ -1190,6 +1310,83 @@ C10_UNUSED void RemoveUnnecessaryEmbeddingBagOutputs(
         return (%y2, %y1, %y0))IR";
   fuse.RegisterRewritePattern(pattern2, transformed_pattern2);
   fuse.runOnGraph(graph);
+}
+
+namespace {
+bool isNoOpSlice(Node* node) {
+  DCHECK(node->kind() == aten::slice);
+  auto step = toIValue(node->input(3));
+  if (!step.has_value() || step->toInt() != 1) {
+    return false;
+  }
+  auto start = toIValue(node->input(1));
+  if (!start.has_value() || (start->isInt() && start->toInt() != 0)) {
+    return false;
+  }
+  auto end = toIValue(node->input(2));
+  // Could also look at list length, but most models that have this pattern are
+  // just doing list[0:], so it's not needed for now.
+  return end.has_value() && end->isNone();
+}
+} // namespace
+
+void EliminateNoOpSlice(std::shared_ptr<Graph>& graph) {
+  DepthFirstGraphNodeIterator it(graph);
+  auto schema = torch::schema(
+      "aten::slice.t(t[] l, int? start=None, int? end=None, int step=1) -> t[]");
+  Node* node = nullptr;
+  std::vector<Node*> to_delete;
+  while ((node = it.next()) != nullptr) {
+    if (!node->matches(schema) || !isNoOpSlice(node)) {
+      continue;
+    }
+
+    node->output()->replaceAllUsesWith(node->input(0));
+    to_delete.push_back(node);
+  }
+  for (auto* node : to_delete) {
+    node->destroy();
+  }
+}
+
+void FuseClampNaNToNum(std::shared_ptr<Graph>& graph) {
+#ifdef FBCODE_CAFFE2
+  std::string pattern = R"IR(
+    graph(%input, %clamp_min: Scalar?, %clamp_max: Scalar?, %nan, %posinf, %neginf):
+        %x : Tensor = aten::clamp(%input, %clamp_min, %clamp_max)
+        %y : Tensor = aten::nan_to_num(%x, %nan, %posinf, %neginf)
+        return (%y))IR";
+
+  std::string fused_pattern = R"IR(
+    graph(%input, %clamp_min: Scalar?, %clamp_max: Scalar?, %nan, %posinf, %neginf):
+        %x : Tensor = static_runtime::clamp_nan_to_num(%input, %clamp_min, %clamp_max, %nan, %posinf, %neginf)
+        return (%x))IR";
+
+  auto isConstantAndNotNone = [](Value* value) {
+    auto ival_opt = toIValue(value);
+    if (!ival_opt.has_value()) {
+      return false;
+    }
+    auto scalar_opt = ival_opt->toOptional<at::Scalar>();
+    return scalar_opt.has_value();
+  };
+
+  auto clampValuesAreConstant =
+      [&isConstantAndNotNone](
+          const Match& match,
+          const std::unordered_map<std::string, Value*>& vmap) {
+        // Get the nodes in the real graph from the nodes in the template
+        // pattern graph
+        const auto& node_map = match.nodes_map;
+        auto* clamp_node = node_map.at(vmap.at("x")->node());
+        return isConstantAndNotNone(clamp_node->input(1)) &&
+            isConstantAndNotNone(clamp_node->input(2));
+      };
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph, clampValuesAreConstant);
+#endif
 }
 
 } // namespace jit
