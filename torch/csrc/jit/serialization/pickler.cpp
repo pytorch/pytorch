@@ -596,7 +596,7 @@ void Pickler::pushDict(const IValue& ivalue) {
 
   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
 
-  static_assert(std::is_unsigned<decltype(dict.size())>::value);
+  static_assert(std::is_unsigned<decltype(dict.size())>::value, "Expected size to be non-negative.");
   push<PickleOpCode>(PickleOpCode::MARK);
 
   // Sort the dict for deterministic keys
