@@ -859,13 +859,9 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
     case BackendComponent::XPUBit:
       return autocast_xpu_ks;
     case BackendComponent::CUDABit:
+      return autocast_cuda_ks;
     case BackendComponent::XLABit:
-      return autocast_cuda_ks | autograd_cpu_ks_ | autograd_cuda_ks_ |
-          autograd_hip_ks_ | autograd_xla_ks_ | autograd_mps_ks_ |
-          autograd_ipu_ks_ | autograd_xpu_ks_ | autocast_cpu_ks |
-          autocast_cuda_ks | autocast_hip_ks | autocast_xla_ks |
-          autocast_mps_ks | autocast_ipu_ks | autocast_hpu_ks | autocast_ve_ks |
-          autocast_lazy_ks | autocast_xpu_ks;
+      return autocast_xla_ks;
     default:
       return DispatchKeySet();
   }
