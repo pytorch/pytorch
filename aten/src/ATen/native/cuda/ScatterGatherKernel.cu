@@ -154,7 +154,7 @@ struct _cuda_scatter_gather_internal_kernel {
 
     _launch_scatter_gather_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
   }
-}
+}; // struct _cuda_scatter_gather_internal_kernel
 
 template <typename scalar_t>
 struct _cuda_scatter_large_index_internal_kernel {
