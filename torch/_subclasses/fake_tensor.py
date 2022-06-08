@@ -114,7 +114,6 @@ class FakeTensorConverter(object):
         else:
             return self.from_meta_and_device(fake_mode, t, device)
 
-
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
 # Because the device is `meta`, meta tensors do not model device propagation.
@@ -229,7 +228,8 @@ class FakeTensor(torch.Tensor):
 # memory should not significantly incraese.
 
 class FakeTensorMode(TorchDispatchMode):
-    def __init__(self):
+    def __init__(self, allow_cpu_fallback=True):
+        self.allow_cpu_fallback = allow_cpu_fallback
         self.fake_tensor_converter = FakeTensorConverter()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -318,7 +318,12 @@ class FakeTensorMode(TorchDispatchMode):
             if func in (prims.maximum_value.default, prims.minium_value.default):
                 return func(*args, **kwargs)
 
-            r = func(*args, **kwargs)
+            try:
+                r = func(*args, **kwargs)
+            except NotImplementedError as not_implemented_error:
+                if not self.allow_cpu_fallback:
+                    raise not_implemented_error
+                r = run_cpu_fallback(func, args, kwargs, not_implemented_error)
 
             # TODO: handle non-kwarg devices
             assert func not in _device_not_kwarg_ops, f"NYI: {func}"
@@ -344,3 +349,37 @@ class FakeTensorMode(TorchDispatchMode):
     def from_tensor(self, tensor):
         with no_dispatch():
             return self.fake_tensor_converter(self, tensor)
+
+
+def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
+    with no_dispatch():
+        def to_cpu(e):
+            if isinstance(e, FakeTensor):
+                return torch.zeros_like(e, device="cpu")
+            return e
+        try:
+            args = tree_map(to_cpu, args)
+            kwargs = tree_map(to_cpu, kwargs)
+            r = func(*args , **kwargs)
+        except Exception as new_exception:
+            raise orig_not_implemented_exception from new_exception
+
+        tensor_impls = set()
+        storages = set()
+
+        for e in tree_flatten((args, kwargs))[0]:
+            if isinstance(e, torch.Tensor):
+                tensor_impls.add(e)
+                storages.add(e.storage()._cdata)
+
+        # TODO: also check metadata change on inputs
+        # proper aliasing/metadata relationship between outputs and inputs will
+        # not be set up, bc of conversion to cpu, error on reused impls
+        for e in tree_flatten(r)[0]:
+            if e in tensor_impls or (isinstance(e, torch.Tensor) and e.storage()._cdata in storages):
+                raise orig_not_implemented_exception
+
+    # we're only converting these to MetaTensors now, not Fake Tensors,
+    # and the cpu inputs should be temporary. just convert outputs to meta
+    # and continue
+    return tree_map(MetaConverter(), r)
