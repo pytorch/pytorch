@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 
-from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init
+from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init, _restore_mode
 
 __all__ = [
     "get_ignored_functions",
@@ -662,6 +662,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.linalg.lu: lambda input, pivot=True, out=None: -1,
         torch.linalg.lu_factor: lambda input, pivot=True, out=None: -1,
         torch.linalg.lu_factor_ex: lambda input, pivot=True, check_errors=False, out=None: -1,
+        torch.linalg.lu_solve: lambda LU, pivots, B, left=True, adjoint=False, out=None: -1,
         torch.linalg.matmul: lambda input, other, out=None: -1,  # alias for torch.matmul
         torch.matrix_power: lambda input, n: -1,
         torch.linalg.matrix_power: lambda input, n, out=None: -1,
@@ -992,6 +993,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.bessel_y1: lambda input: -1,
         torch.special.chebyshev_polynomial_t: lambda input, n, out=None: -1,
         torch.special.chebyshev_polynomial_u: lambda input, n, out=None: -1,
+        torch.special.chebyshev_polynomial_v: lambda input, n, out=None: -1,
+        torch.special.chebyshev_polynomial_w: lambda input, n, out=None: -1,
         torch.special.digamma: lambda input: -1,
         torch.special.entr: lambda input: -1,
         torch.special.erf: lambda input: -1,
@@ -1011,6 +1014,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.i1: lambda input: -1,
         torch.special.i1e: lambda input: -1,
         torch.special.laguerre_polynomial_l: lambda input, n, out=None: -1,
+        torch.special.legendre_polynomial_p: lambda input, n, out=None: -1,
         torch.special.log1p: lambda input: -1,
         torch.special.log_ndtr: lambda input: -1,
         torch.special.log_softmax: lambda input, dim, dtype=None: -1,
@@ -1026,6 +1030,10 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.polygamma: lambda input, n, out=None: -1,
         torch.special.psi: lambda input: -1,
         torch.special.round: lambda input: -1,
+        torch.special.shifted_chebyshev_polynomial_t: lambda input, n, out=None: -1,
+        torch.special.shifted_chebyshev_polynomial_u: lambda input, n, out=None: -1,
+        torch.special.shifted_chebyshev_polynomial_v: lambda input, n, out=None: -1,
+        torch.special.shifted_chebyshev_polynomial_w: lambda input, n, out=None: -1,
         torch.special.sinc: lambda input: -1,
         torch.special.softmax: lambda input, dim, dtype=None: -1,
         torch.special.xlog1py: lambda input, other, out=None: -1,
@@ -1163,6 +1171,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.device.__get__: lambda self: -1,
         Tensor.dtype.__get__: lambda self: -1,
         Tensor.is_cuda.__get__: lambda self: -1,
+        Tensor.is_cpu.__get__: lambda self: -1,
         Tensor.is_xpu.__get__: lambda self: -1,
         Tensor.is_ipu.__get__: lambda self: -1,
         Tensor.is_leaf.__get__: lambda self: -1,
@@ -1833,27 +1842,29 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
     def __enter__(self):
         old = _get_torch_function_mode()
         if hasattr(self, "inner"):
-            if old is not None and old not in self.ancestors:
-                raise RuntimeError(f"{self} has already been used as a mode and is not valid in the current state, " +
-                                   "because the current mode is not its ancestor. Please use a fresh version")
+            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version")
         else:
             self.inner = old
             if old is None:
-                self.ancestors = {self.inner}
+                self.ancestors = set()
             else:
-                self.inner = old
-                if not hasattr(self, "ancestors"):
-                    self.ancestors = set()
                 self.ancestors = self.inner.ancestors.union({self.inner})
-        self.prev = old
         _set_torch_function_mode(self)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        _set_torch_function_mode(self.prev)
+        _set_torch_function_mode(self.inner)
+
+    def restore(self):
+        return restore(self)
 
     @classmethod
     def push(cls, *args, **kwargs):
         return push_torch_function_mode(functools.partial(cls, *args, **kwargs))
+
+
+@contextlib.contextmanager
+def restore(mode: TorchFunctionMode):
+    return _restore_mode(mode, mode_info=_TorchFunctionModeInfo())
 
 
 class BaseTorchFunctionMode(TorchFunctionMode):

@@ -1081,7 +1081,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
         x = A()
         with x:
-            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode"):
+            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
                 with x:
                     pass
 
@@ -1096,7 +1096,31 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             with A():
                 x + x
 
-    def test_reenable_ancestor_mode(self):
+    def test_error_with_ancestor(self):
+        x = LoggingTensorMode()
+        with x:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
+            with x:
+                pass
+
+    def test_restore_errors(self):
+        with self.assertRaisesRegex(RuntimeError, "does not have any ancestors. Use the standard version instead"):
+            with LoggingTensorMode().restore():
+                pass
+
+        x = LoggingTensorMode()
+        with LoggingTensorMode():
+            with x:
+                pass
+
+        with LoggingTensorMode():  # a different mode instance than the one above
+            with self.assertRaisesRegex(RuntimeError, "the current mode is not its ancestor"):
+                with x.restore():
+                    pass
+
+    def test_restore_ancestor_mode(self):
         x = LoggingTensorMode()
         y = LoggingTensorMode()
         with x:
@@ -1104,12 +1128,12 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 pass
 
         z = LoggingTensorMode()
-        with y:
+        with y.restore():
             with z:
                 pass
 
-        with x:
-            with z:
+        with x.restore():
+            with z.restore():
                 pass
 
     def test_find_outermost_mode(self):
@@ -1124,10 +1148,16 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
         self.assertEqual(find_outermost_mode([x, y]), y)
 
         z = LoggingTensorMode()
-        with y:
+        with y.restore():
             with z:
                 pass
+
         self.assertEqual(find_outermost_mode([z, x]), z)
+        i = LoggingTensorMode()
+
+        with self.assertRaisesRegex(RuntimeError, "doesn't have ancestors set so the ordering with other modes"):
+            find_outermost_mode([i, x, y, z])
+
         k = LoggingTensorMode()
         with k:
             pass
@@ -1150,14 +1180,17 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             with y:
                 pass
 
-        with x:
+        with x.restore():
             with z:
                 pass
+
+        i = LoggingTensorMode()
 
         self.assertTrue(all_same_mode_scope([x, y], y))
         self.assertTrue(all_same_mode_scope([x, z], z))
         self.assertFalse(all_same_mode_scope([x, y, z], y))
         self.assertFalse(all_same_mode_scope([x, y, z], z))
+        self.assertFalse(all_same_mode_scope([x, y, i], y))
 
         no_ancestor = LoggingTensorMode()
         self.assertFalse(all_same_mode_scope([x, y, z], no_ancestor))
@@ -1557,6 +1590,14 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             t = DimImplementedTensor(torch.randn(3, 3), use_wrapper_subclass)
             self.assertEqual(t.dim(), 2)
 
+    def test_maybe_tuple_bug(self):
+        class T(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, *args, **kwargs):
+                pass
+        a = torch.rand(3)
+
+        a[[T(), T()]]
 
 if __name__ == '__main__':
     run_tests()
