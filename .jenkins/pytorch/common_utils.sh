@@ -105,15 +105,17 @@ function clone_pytorch_xla() {
   fi
 }
 
+TORCHDYNAMO_COMMIT="$(cat .github/ci_commit_pins/torchdynamo.txt)"
+
 function install_torchdynamo() {
-  pip_install --user "git+https://github.com/pytorch/torchdynamo.git@$(cat .github/ci_commit_pins/torchdynamo.txt)"
+  pip_install --user "git+https://github.com/pytorch/torchdynamo.git@$TORCHDYNAMO_COMMIT"
 }
 
 function checkout_install_torchdynamo() {
   pushd ..
   git clone https://github.com/pytorch/torchdynamo
   pushd torchdynamo
-  git checkout "$(cat ../.github/torchdynamo_commit_hash.txt)"
+  git checkout "$TORCHDYNAMO_COMMIT"
   time python setup.py install
   popd
   popd
