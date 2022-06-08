@@ -59,8 +59,6 @@ def _detect_per_channel(model: GraphModule) -> Tuple[str, Dict[str, Any]]:
 
         Args:
             module: The current module that is being checked to see if it is per_channel qunatizable
-
-        Returns void
         """
         # get the fully qualified name and check if in list of modules to include and list of modules to ignore
         fqn = module_to_fqn(model, module)
