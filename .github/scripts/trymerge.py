@@ -388,7 +388,8 @@ def parse_args() -> Any:
     parser.add_argument("--comment-id", type=int)
     parser.add_argument("--reason", type=str)
     parser.add_argument("pr_num", type=int)
-    return parser.parse_args()
+    test = parser.parse_args()
+    return test
 
 def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -> bool:
     if comment_id is None:
