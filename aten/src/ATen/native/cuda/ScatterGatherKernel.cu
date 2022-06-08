@@ -219,8 +219,7 @@ struct _cuda_scatter_large_index_internal_kernel {
         index_idx %= src_shape_device[d];
         src_offset += src_strides_device[d] * index_idx;
       }
-
-      src_offset = src_offset * 4;
+      src_offset *= 4;
 
       f(
         (scalar_t*)(self_ptr + offsets[0]),
