@@ -471,8 +471,8 @@ struct cuda_scatter_gather_base_kernel {
     auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
 
     if (!index_larger_than_src_in_scatter) {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-        at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half, at::ScalarType::BFloat16,
         iter.dtype(),
         "cuda_scatter_gather_base_kernel_func", [&] {
           using dtype = typename std::conditional<cast_to_opaque,
@@ -485,8 +485,8 @@ struct cuda_scatter_gather_base_kernel {
       );
     }
     else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-        at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half, at::ScalarType::BFloat16,
         iter.dtype(),
         "cuda_scatter_gather_base_kernel_func", [&] {
           using dtype = typename std::conditional<cast_to_opaque,
