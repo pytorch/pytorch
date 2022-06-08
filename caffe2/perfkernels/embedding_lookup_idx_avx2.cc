@@ -19,7 +19,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
     const int* indices,
     const int* offsets,
     const float* weights,
-    const float* scale_bias,
+    const float* /* scale_bias */,
     bool normalize_by_lengths,
     float* out) {
   const int prefdist_T0 = 16;
@@ -467,7 +467,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
     const int64_t* indices,
     const int64_t* offsets,
     const float* weights,
-    const float* scale_bias,
+    const float* /* scale_bias */,
     bool normalize_by_lengths,
     float* out) {
   const int64_t prefdist_T0 = 16;
@@ -904,7 +904,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
     const int* indices,
     const int* offsets,
     const float* weights,
-    const float* scale_bias,
+    const float* /* scale_bias */,
     bool normalize_by_lengths,
     float* out) {
   const int prefdist_T0 = 16;
@@ -1473,7 +1473,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
     const int64_t* indices,
     const int64_t* offsets,
     const float* weights,
-    const float* scale_bias,
+    const float* /* scale_bias */,
     bool normalize_by_lengths,
     float* out) {
   const int64_t prefdist_T0 = 16;
