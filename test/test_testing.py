@@ -9,6 +9,7 @@ import itertools
 import math
 import os
 import re
+import subprocess
 import sys
 import unittest.mock
 from typing import Any, Callable, Iterator, List, Tuple
@@ -1801,6 +1802,15 @@ class TestImports(TestCase):
                 except Exception as e:
                     raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
+
+    def test_no_warning_on_import(self) -> None:
+        out = subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", "import torch"],
+            stderr=subprocess.STDOUT,
+            # On Windows, opening the subprocess with the default CWD makes `import torch`
+            # fail, so just set CWD to this script's directory
+            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+        self.assertEquals(out, "")
 
 
 if __name__ == '__main__':

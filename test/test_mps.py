@@ -4358,6 +4358,7 @@ class TestRNNMPS(TestCase):
         self.assertEqual(cpu_weight_grad, mps_weight_grad)
 
 class TestFallbackWarning(TestCase):
+    # TODO: Remove once test_testing.py is running on MPS devices
     def test_no_warning_on_import(self):
         out = subprocess.check_output(
             [sys.executable, "-W", "all", "-c", "import torch"],
