@@ -159,6 +159,7 @@ SparseTensor spdiags_sparse_cpu(
         Layout::SparseCsr,
         ") are supported");
   }
+  validate_spdiags_offsets_cpu(offsets, shape[0], shape[1]);
 
   SparseTensor result_coo = _spdiags_sparse_cpu_coo(diagonals, offsets, shape);
   if (layout) {
