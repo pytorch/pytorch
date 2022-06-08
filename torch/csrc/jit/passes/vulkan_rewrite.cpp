@@ -89,9 +89,9 @@ void insertPrePackedGruOp(std::shared_ptr<Graph>& graph) {
         return (%y.1, %hn.1) )";
   std::string prepacked_ops_pattern = R"(
       graph(%input.1, %hx.1, %params_cpu:Tensor[], %has_biases:bool, %num_layers:int, %dropout:float, %train:bool, %bidirectional:bool, %batch_first:bool):
-        %packed_weights_biases = vulkan_prepack::gru_prepack(
+        %packed_weights_biases = vulkan_prepack::create_gru_context(
             %params_cpu, %has_biases, %num_layers, %dropout, %train, %bidirectional, %batch_first)
-        %y.1 : Tensor, %hn.1 : Tensor = vulkan_prepack::gru_run(%input.1, %hx.1, %packed_weights_biases)
+        %y.1 : Tensor, %hn.1 : Tensor = vulkan_prepack::run_gru_context(%input.1, %hx.1, %packed_weights_biases)
         return (%y.1, %hn.1) )";
 
   SubgraphRewriter gru_rewriter;
