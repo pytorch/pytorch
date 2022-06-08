@@ -79,7 +79,6 @@ def softplus_backward(out_grad: Tensor, x: Tensor, beta: float, threshold: float
     z = (x * beta).exp()
     return torch.where((x * beta) > threshold, out_grad, out_grad * z / (z + 1.0))
 
-
 @register_decomposition(aten.elu)
 @pw_cast_for_opmath
 def elu(
@@ -182,24 +181,6 @@ def leaky_relu_backward(
     grad_output: Tensor, self: Tensor, negative_slope: float, self_is_result: bool
 ):
     return torch.where(self > 0, grad_output, grad_output * negative_slope)
-
-
-
-@register_decomposition(aten.gelu)
-@pw_cast_for_opmath
-def gelu(self: Tensor, approximate: str = 'none') -> Tensor:
-    M_SQRT2 = 1.41421356237309504880
-    M_SQRT1_2 = 0.70710678118654752440
-    M_2_SQRTPI = 1.12837916709551257390
-    if approximate == 'tanh':
-        kBeta = M_SQRT2 * M_2_SQRTPI * 0.5
-        kKappa = 0.044715
-        x_cube = self * self * self
-        inner = kBeta * (self + kKappa * x_cube)
-        return 0.5 * self * (1 + torch.tanh(inner))
-    else:
-        kAlpha = M_SQRT1_2
-        return self * 0.5 * (1 + torch.erf(self * kAlpha))
 
 
 @register_decomposition(aten.gelu_backward)
