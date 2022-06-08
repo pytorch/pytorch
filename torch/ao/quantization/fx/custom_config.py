@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Dict, List, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.quant_type import QuantType, quant_type_from_str, quant_type_to_str
@@ -27,8 +27,8 @@ PRESERVED_ATTRIBUTES_DICT_KEY = "preserved_attributes"
 
 @dataclass
 class StandaloneModuleConfigEntry:
-    # qconfig_dict for the prepare function called in the submodule,
-    # None means use qconfig from parent qconfig_dict
+    # qconfig_mapping for the prepare function called in the submodule,
+    # None means use qconfig from parent qconfig_mapping
     qconfig_mapping: Optional[QConfigMapping]
     example_inputs: Tuple[Any, ...]
     prepare_custom_config: Optional[PrepareCustomConfig]

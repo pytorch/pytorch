@@ -268,17 +268,17 @@ def is_pattern_dtype_config_supported_by_backend(
 def get_standalone_module_configs(
     node: Node,
     modules: Dict[str, torch.nn.Module],
-    parent_prepare_custom_config: PrepareCustomConfig,
+    prepare_custom_config: PrepareCustomConfig,
     parent_qconfig: QConfigAny,
     parent_backend_config_dict: Optional[Dict[str, Any]],
-) -> Tuple[QConfigMapping, Tuple[Any, ...], PrepareCustomConfig, Dict[str, Any]]:
+) -> Tuple[QConfigMapping, Tuple[Any, ...], PrepareCustomConfig, Optional[Dict[str, Any]]]:
     """
     Returns the standalone module QConfigMapping and PrepareCustomConfig
     for `node`, assuming that the module pointed to by `node` is
     a standalone modules.
     """
     module_name = str(node.target)
-    module_type = type(modules[standalone_module_name])  # type: ignore[index]
+    module_type = type(modules[module_name])  # type: ignore[index]
     # name config has precedence over type config
     config_entry = StandaloneModuleConfigEntry(None, (), None, None)
     config_entry = prepare_custom_config.standalone_module_classes.get(module_type, config_entry)

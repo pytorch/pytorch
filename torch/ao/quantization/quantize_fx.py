@@ -119,7 +119,7 @@ class ScopeContextManager(object):
 
 class QuantizationTracer(Tracer):
     def __init__(
-        self, skipped_module_names: List[str], skipped_module_classes: List[Type]
+        self, skipped_module_names: List[str], skipped_module_classes: List[Callable]
     ):
         super().__init__()
         self.skipped_module_names = skipped_module_names
@@ -220,7 +220,7 @@ forward graph of the parent module,
         skipped_module_classes += get_custom_module_class_keys(prepare_custom_config.float_to_observed_mapping)
 
     preserved_attributes = prepare_custom_config.preserved_attributes
-    tracer = QuantizationTracer(skipped_module_names, skipped_module_classes)
+    tracer = QuantizationTracer(skipped_module_names, skipped_module_classes)  # type: ignore[arg-type]
     graph_module = GraphModule(model, tracer.trace(model))
     for attr_name in preserved_attributes:
         setattr(graph_module, attr_name, getattr(model, attr_name))

@@ -77,7 +77,7 @@ def find_matches(
         root_node_getter_mapping: Dict[Pattern, Callable],
         qconfig_map: Dict[str, QConfigAny],
         standalone_module_names: List[str] = None,
-        standalone_module_classes: List[Callable] = None,
+        standalone_module_classes: List[Type] = None,
         custom_module_classes: List[Any] = None) -> Dict[str, MatchResult]:
     """
     Matches the nodes in the input graph to quantization patterns, and
