@@ -20,6 +20,7 @@ PT_BACKEND_HEADERS = [
     "CPU",
     "CUDA",
     "CompositeExplicitAutograd",
+    "CompositeExplicitAutogradNonFunctional",
     "CompositeImplicitAutograd",
     "Meta",
 ]

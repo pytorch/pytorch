@@ -64,7 +64,7 @@ static bool is_constant_index(int ntensor, const int64_t* strides) {
 }
 
 template <typename scalar_t, typename func_t>
-void cpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride,
+void cpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride,
                       const func_t& f, bool serial_execution=false)
 {
   int ntensor = iter.ntensors();
@@ -102,7 +102,7 @@ void cpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   }
 }
 
-void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+void index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
     iter.dtype(), "index_cpu", [&] {
     cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
