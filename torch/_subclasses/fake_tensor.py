@@ -13,7 +13,6 @@ import functools
 import itertools
 
 aten = torch.ops.aten
-prims = torch.ops.prims
 
 
 class ComplexInputException(Exception):
@@ -128,8 +127,7 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
 
     return impl_decorator
 
-@register_op_impl(lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors)
-                  and "prims::" not in func._schema.name)
+@register_op_impl(lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors))
 def contructors(fake_mode, func, *args, **kwargs):
     assert func not in _non_kwarg_device_constructors
     _, new_kwargs = normalize_function(
@@ -178,13 +176,6 @@ def to_copy(fake_mode, func, *args, **kwargs):
         return FakeTensor(
             fake_mode, torch.ops.aten._to_copy(input, **new_kwargs), out_device
         )
-
-# TODO: dont know why this is being dispatched to __torch__function__
-# Dont default to common device handling since this doesnt take in/return tensor
-# TODO: update typo of minium
-@register_op_impl(lambda func: func in (prims.maximum_value.default, prims.minium_value.default))
-def func(fake_mode, func, *args, **kwargs):
-    return func(*args, **kwargs)
 
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
@@ -306,6 +297,12 @@ class FakeTensorMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
+
+        # prims already wrap FakeTensor inputs to FakeTensor outputs
+        # and do device logic, we dont need do anything but run them
+        if "prims::" in func._schema.name:
+            with no_dispatch():
+                return func(*args, **kwargs)
 
         # TODO: apply as no_dispatch decorator
         with no_dispatch():
