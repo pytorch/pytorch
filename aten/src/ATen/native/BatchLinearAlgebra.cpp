@@ -2406,13 +2406,13 @@ TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
 
   // Split QR into Q (unless compute_q == false) and R
   if (QR.is_alias_of(R)) {
-    // Compy QR into Q
+    // Copy QR into Q
     if (compute_q) {
       Q.slice(-1, 0, n).copy_(QR.slice(-1, 0, m));
     }
     R.triu_();
   } else {
-    // Compy QR into R
+    // Copy QR into R
     at::triu_out(const_cast<Tensor&>(R), QR.slice(-2, 0, n));
   }
 

@@ -11837,9 +11837,9 @@
 - func: linalg_qr(Tensor A, str mode='reduced') -> (Tensor Q, Tensor R)
   python_module: linalg
   variants: function
-  structured_delegate: linalg_qr.Q
+  structured_delegate: linalg_qr.out
 
-- func: linalg_qr.Q(Tensor A, str mode='reduced', *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
+- func: linalg_qr.out(Tensor A, str mode='reduced', *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
   python_module: linalg
   structured: True
   dispatch:

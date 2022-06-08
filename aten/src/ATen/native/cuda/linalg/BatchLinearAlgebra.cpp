@@ -159,11 +159,6 @@ void magmaGeqrf(
     magma_int_t m, magma_int_t n, scalar_t* dA, magma_int_t ldda,
     scalar_t* tau, scalar_t* dT, magma_int_t* info, bool is_v2);
 
-template<class scalar_t>
-void magmaOrgqr(
-    magma_int_t m, magma_int_t n, magma_int_t k, scalar_t* dA,
-    magma_int_t ldda, scalar_t* tau, scalar_t* dT, magma_int_t nb, magma_int_t* info);
-
 template<class scalar_t, class value_t=scalar_t>
 void magmaSyevd(
     magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, scalar_t* dA, magma_int_t ldda,
@@ -846,74 +841,6 @@ void magmaGeqrf<c10::complex<float>>(
         reinterpret_cast<magmaFloatComplex*>(tau),
         info);
   }
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaOrgqr<double>(
-    magma_int_t m, magma_int_t n, magma_int_t k, double* dA, magma_int_t ldda,
-    double* tau, double* dT, magma_int_t nb, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_dorgqr_gpu(m, n, k, dA, ldda, tau, dT, nb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaOrgqr<float>(
-    magma_int_t m, magma_int_t n, magma_int_t k, float* dA, magma_int_t ldda,
-    float* tau, float* dT, magma_int_t nb, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_sorgqr_gpu(m, n, k, dA, ldda, tau, dT, nb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template <>
-void magmaOrgqr<c10::complex<double>>(
-    magma_int_t m,
-    magma_int_t n,
-    magma_int_t k,
-    c10::complex<double>* dA,
-    magma_int_t ldda,
-    c10::complex<double>* tau,
-    c10::complex<double>* dT,
-    magma_int_t nb,
-    magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_zungqr_gpu(
-      m,
-      n,
-      k,
-      reinterpret_cast<magmaDoubleComplex*>(dA),
-      ldda,
-      reinterpret_cast<magmaDoubleComplex*>(tau),
-      reinterpret_cast<magmaDoubleComplex*>(dT),
-      nb,
-      info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template <>
-void magmaOrgqr<c10::complex<float>>(
-    magma_int_t m,
-    magma_int_t n,
-    magma_int_t k,
-    c10::complex<float>* dA,
-    magma_int_t ldda,
-    c10::complex<float>* tau,
-    c10::complex<float>* dT,
-    magma_int_t nb,
-    magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_cungqr_gpu(
-    m,
-    n,
-    k,
-    reinterpret_cast<magmaFloatComplex*>(dA),
-    ldda,
-    reinterpret_cast<magmaFloatComplex*>(tau),
-    reinterpret_cast<magmaFloatComplex*>(dT),
-    nb,
-    info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -2229,6 +2156,8 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
 #ifdef CUDART_VERSION
   auto geqrf_cusolver_backend = [](const Tensor& input, const Tensor& tau) {
     #if defined(USE_CUSOLVER)
+      // For the benchmarks see
+      // https://github.com/pytorch/pytorch/pull/56253#discussion_r622851107
       if (input.size(-2) <= 256 && batchCount(input) >= std::max<int64_t>(2, input.size(-2) / 16)) {
         return geqrf_batched_cublas(input, tau);
       } else {
@@ -2240,6 +2169,15 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
 
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
+  // TODO Investigate whether the following magma bug is still occuring.
+  // It may be the case that geqrf followed by orgqr is wrong for the magma backend
+  // geqrf_magma currently uses geqrf2_gpu
+  //
+  // We require to perform ?geqrf_gpu again due to this bug in MAGMA:
+  // - ?geqrf_gpu allows fast computation of Q via ?orgqr_gpu, but doesn't give R properly.
+  // - ?geqrf2_gpu gives correct R, but doesn't allow computation of Q via ?orgqr_gpu
+  // Refer to the below link for more details:
+  // http://icl.cs.utk.edu/magma/forum/viewtopic.php?f=2&t=1015&p=2800&hilit=geqrf_gpu#p2800
     case at::LinalgBackend::Magma:
       return geqrf_magma(input, tau);
     case at::LinalgBackend::Cusolver:
