@@ -1,7 +1,3 @@
-/*
-The contents of this file are used in ATen/native/TensorAdvancedIndexing.cpp and ATen/native/quantized/TensorAdvancedIndexing.cpp
-*/
-
 #pragma once
 #include <ATen/ATen.h>
 #include <ATen/native/IndexingUtils.h>

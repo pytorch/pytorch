@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 from torch._prims import utils
 from torch._prims.utils import check
-from torch._prims.wrappers import out_wrapper_multi
+from torch._prims.wrappers import out_wrapper_multi, out_wrapper
 
 from typing import List, Optional
 
@@ -39,10 +39,8 @@ def meta_min(self):
 
 def squareCheckInputs(self, f_name):
     assert self.dim() >= 2, f"{f_name}: The input tensor must have at least 2 dimensions."
-    # TODO: I think the error message has the -2 and -1 swapped.  If you fix
-    # it fix the C++ squareCheckInputs too
     assert self.size(-1) == self.size(-2), \
-        f"{f_name}: A must be batches of square matrices, but they are {self.size(-1)} by {self.size(-2)} matrices"
+        f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
 
 def checkUplo(uplo: str):
     uplo_uppercase = uplo.upper()
@@ -284,3 +282,50 @@ def meta_linalg_cholesky_ex(input, upper=False, check_errors=False):
 
 torch.library.impl(meta_lib, "linalg_cholesky_ex")(meta_linalg_cholesky_ex)
 torch.library.impl(meta_lib, "linalg_cholesky_ex.L")(meta_linalg_cholesky_ex)
+
+@out_wrapper
+def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
+    dim1 = batch1.size(1)
+    dim2 = batch2.size(2)
+    self = self.expand((dim1, dim2))
+    check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
+    check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
+    check(
+        batch1.size(0) == batch2.size(0),
+        lambda: f"batch1 and batch2 must have same number of batches, got {batch1.size(0)} and {batch2.size(0)}"
+    )
+    check(
+        batch1.size(2) == batch2.size(1),
+        lambda: (
+            f"Incompatible matrix sizes for bmm ({batch1.size(1)}x{batch1.size(2)} "
+            f"and {batch2.size(1)}x{batch2.size(2)})"
+        )
+    )
+    check(
+        self.size(0) == dim1 and self.size(1) == dim2,
+        lambda: "self tensor does not match matmul output shape"
+    )
+    return self.new_empty(self.size())
+
+torch.library.impl(meta_lib, "addbmm")(meta_addbmm)
+torch.library.impl(meta_lib, "addbmm.out")(meta_addbmm)
+
+@torch.library.impl(meta_lib, "_cdist_forward")
+def meta_cdist_forward(x1, x2, p, compute_mode):
+    check(x1.dim() >= 2, lambda: f"cdist only supports at least 2D tensors, X1 got: {x1.dim()}D")
+    check(x2.dim() >= 2, lambda: f"cdist only supports at least 2D tensors, X2 got: {x2.dim()}D")
+    check(
+        x1.size(-1) == x2.size(-1),
+        lambda: f"X1 and X2 must have the same number of columns. X1: {x1.size(-1)} X2: {x2.size(-1)}"
+    )
+    check(utils.is_float_dtype(x1.dtype), lambda: "cdist only supports floating-point dtypes, X1 got: {x1.dtype}")
+    check(utils.is_float_dtype(x2.dtype), lambda: "cdist only supports floating-point dtypes, X2 got: {x2.dtype}")
+    check(p >= 0, lambda: "cdist only supports non-negative p values")
+    check(compute_mode >= 0 and compute_mode <= 2, lambda: f"possible modes: 0, 1, 2, but was: {compute_mode}")
+    r1 = x1.size(-2)
+    r2 = x2.size(-2)
+    batch_tensor1 = x1.shape[:-2]
+    batch_tensor2 = x2.shape[:-2]
+    output_shape = list(torch.broadcast_shapes(batch_tensor1, batch_tensor2))
+    output_shape.extend([r1, r2])
+    return x1.new_empty(output_shape)
