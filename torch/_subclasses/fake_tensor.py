@@ -397,7 +397,8 @@ class FakeTensorMode(TorchDispatchMode):
                 # a issues occur such as is_meta() checks returning False and kernels
                 # attempting to do actual compute / accessing storages.
 
-                # TODO: cleaner way of ignoring python funcs
+                # TODO: cleaner way of ignoring python funcs - maybe always 
+                # return fake_device from python `.device` access
                 if "prims::" not in func._schema.name:
                     self.in_kernel_invocation = True
                 r = func(*args, **kwargs)

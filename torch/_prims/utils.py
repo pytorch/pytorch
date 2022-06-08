@@ -62,6 +62,7 @@ TensorLike = torch.Tensor
 TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 
+
 # In order to keep things like aliasing relationships and storage
 # consistent wrt/meta tensors, FakeTensors own a FakeTensorMode
 # which caches conversions to Meta Tensors. We would like to use
@@ -69,8 +70,7 @@ TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 # We store a weakref, so that when all previous FakeTensors are
 # the present mode will also deallocate. FakeTensorMode holds onto
 # tensors that are converted to Meta so we don't want to persist it
-# longer than necessary.
-
+# longer than necessary.x
 prim_fake_mode_ref = None
 
 
@@ -124,7 +124,10 @@ def TensorMeta(
     if isinstance(device, str):
         device = torch.device(device)
 
-    mode = get_prim_fake_mode()
+    if isinstance(tensorlike, FakeTensor):
+        mode = tensorlike.fake_mode
+    else:
+        mode = get_prim_fake_mode()
 
     return FakeTensor(
         mode, torch.empty_strided(shape, strides, dtype=dtype, device="meta"), device
