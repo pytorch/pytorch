@@ -2256,8 +2256,11 @@ the output has the same batch dimensions.
         :func:`torch.linalg.lu_solve` solves a system of linear equations given the output of this
         function provided the input matrix was square and invertible.
 
+        :func:`torch.lu_unpack` unpacks the tensors returned by :func:`~lu_factor` into the three
+        matrices `P, L, U` that form the decomposition.
+
         :func:`torch.linalg.lu` computes the LU decomposition with partial pivoting of a possibly
-        non-square matrix.
+        non-square matrix. It is a composition of :func:`~lu_factor` and :func:`torch.lu_unpack`.
 
         :func:`torch.linalg.solve` solves a system of linear equations. It is a composition
         of :func:`~lu_factor` and :func:`~lu_solve`.
