@@ -104,6 +104,7 @@ class TestOptionalOutput(unittest.TestCase):
             input_names=["y"],
         )
 
+@common_utils.instantiate_parametrized_tests
 
 class TestONNXExport(common_utils.TestCase):
     def test_fuse_addmm(self):
@@ -453,8 +454,6 @@ class TestONNXExport(common_utils.TestCase):
         for node in graph.nodes():
             self.assertTrue(node.sourceRange())
 
-
-common_utils.instantiate_parametrized_tests(TestOptionalOutput)
 
 if __name__ == "__main__":
     unittest.main()
