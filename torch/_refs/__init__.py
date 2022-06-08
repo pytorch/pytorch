@@ -2436,7 +2436,9 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
 
 @register_decomposition(torch.ops.aten.trace)
 def trace(self: TensorLikeType) -> TensorLikeType:
-    utils.check(self.ndim == 2, lambda : "expected a matrix, but got tensor with dim {self.ndim}")
+    utils.check(
+        self.ndim == 2, lambda: "expected a matrix, but got tensor with dim {self.ndim}"
+    )
     return torch.sum(torch.diag(self, 0))
 
 
