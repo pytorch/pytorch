@@ -749,7 +749,9 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
            use_relu=st.booleans(),
            eps=st.sampled_from([1e-5, 1e-4, 1e-3]),
            momentum=st.sampled_from([0.1, 0.2, 0.3]),
-           freeze_bn=st.booleans())
+           freeze_bn=st.booleans(),
+           zero_gamma=st.booleans(),
+           has_bias=st.booleans())
     def test_conv_bn_relu(
             self,
             batch_size,
@@ -769,7 +771,9 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             use_relu,
             eps,
             momentum,
-            freeze_bn
+            freeze_bn,
+            zero_gamma,
+            has_bias,
     ):
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
@@ -783,7 +787,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             (pad_h, pad_w),
             (dilation_h, dilation_w),
             groups,
-            False,  # No bias
+            has_bias,
             padding_mode
         ).to(dtype=torch.double)
         bn_op = BatchNorm2d(output_channels, eps, momentum).to(dtype=torch.double)
@@ -798,13 +802,17 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             (pad_h, pad_w),
             (dilation_h, dilation_w),
             groups,
-            None,  # bias
+            has_bias,
             padding_mode,
             eps,
             momentum,
             freeze_bn=True,
             qconfig=default_qat_qconfig
         ).to(dtype=torch.double)
+
+        if zero_gamma:
+            torch.nn.init.zeros_(qat_op.bn.weight)
+
         qat_op.apply(torch.ao.quantization.disable_fake_quant)
         if freeze_bn:
             qat_op.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
@@ -814,6 +822,8 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         # align inputs and internal parameters
         input = torch.randn(batch_size, input_channels, height, width, dtype=torch.double, requires_grad=True)
         conv_op.weight = torch.nn.Parameter(qat_op.weight.detach())
+        if has_bias:
+            conv_op.bias = torch.nn.Parameter(qat_op.bias.detach())
         bn_op.running_mean = qat_op.bn.running_mean.clone()
         bn_op.running_var = qat_op.bn.running_var.clone()
         bn_op.weight = torch.nn.Parameter(qat_op.bn.weight.detach())
@@ -865,6 +875,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             running_var_actual = qat_op.bn.running_var
             num_batches_tracked_actual = qat_op.bn.num_batches_tracked
             precision = 1e-10
+
             self.assertEqual(input_grad_ref, input_grad_actual, atol=precision, rtol=0)
             self.assertEqual(weight_grad_ref, weight_grad_actual, atol=precision, rtol=0)
             self.assertEqual(gamma_grad_ref, gamma_grad_actual, atol=precision, rtol=0)
@@ -873,156 +884,6 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             self.assertEqual(running_mean_ref, running_mean_actual, atol=precision, rtol=0)
             self.assertEqual(running_var_ref, running_var_actual, atol=precision, rtol=0)
 
-    @given(batch_size=st.integers(2, 4),
-           input_channels_per_group=st.sampled_from([2, 3, 4]),
-           height=st.integers(5, 10),
-           width=st.integers(5, 10),
-           output_channels_per_group=st.sampled_from([2, 3]),
-           groups=st.integers(1, 3),
-           kernel_h=st.integers(1, 3),
-           kernel_w=st.integers(1, 3),
-           stride_h=st.integers(1, 2),
-           stride_w=st.integers(1, 2),
-           pad_h=st.integers(0, 2),
-           pad_w=st.integers(0, 2),
-           dilation=st.integers(1, 1),
-           padding_mode=st.sampled_from(['zeros', 'circular']),
-           eps=st.sampled_from([1e-5, 1e-4, 1e-3]),
-           momentum=st.sampled_from([0.1, 0.2, 0.3]),
-           freeze_bn=st.booleans(),
-           bias=st.booleans())
-    def test_conv_bn_folded_vs_unfolded(
-            self,
-            batch_size,
-            input_channels_per_group,
-            height,
-            width,
-            output_channels_per_group,
-            groups,
-            kernel_h,
-            kernel_w,
-            stride_h,
-            stride_w,
-            pad_h,
-            pad_w,
-            dilation,
-            padding_mode,
-            eps,
-            momentum,
-            freeze_bn,
-            bias,
-    ):
-        input_channels = input_channels_per_group * groups
-        output_channels = output_channels_per_group * groups
-        dilation_h = dilation_w = dilation
-
-        qat_op = ConvBn2d(
-            input_channels,
-            output_channels,
-            (kernel_h, kernel_w),
-            (stride_h, stride_w),
-            (pad_h, pad_w),
-            (dilation_h, dilation_w),
-            groups,
-            bias,  # bias
-            padding_mode,
-            eps,
-            momentum,
-            freeze_bn=freeze_bn,
-            qconfig=default_qat_qconfig
-        ).to(dtype=torch.double)
-
-        qat_ref_op = _ReferenceConvBn2d(
-            input_channels,
-            output_channels,
-            (kernel_h, kernel_w),
-            (stride_h, stride_w),
-            (pad_h, pad_w),
-            (dilation_h, dilation_w),
-            groups,
-            bias,  # bias
-            padding_mode,
-            eps,
-            momentum,
-            freeze_bn=freeze_bn,
-            qconfig=default_qat_qconfig
-        ).to(dtype=torch.double)
-
-        qat_op.apply(torch.ao.quantization.disable_fake_quant)
-        qat_ref_op.apply(torch.ao.quantization.disable_fake_quant)
-
-        # align inputs and internal parameters
-        qat_ref_op.weight = torch.nn.Parameter(qat_op.weight.detach().clone())
-        qat_ref_op.running_mean = qat_op.bn.running_mean.clone()
-        qat_ref_op.running_var = qat_op.bn.running_var.clone()
-        qat_ref_op.gamma = torch.nn.Parameter(qat_op.bn.weight.detach().clone())
-        qat_ref_op.beta = torch.nn.Parameter(qat_op.bn.bias.detach().clone())
-        if qat_op.bias is not None:
-            qat_ref_op.bias = torch.nn.Parameter(qat_op.bias.detach().clone())
-
-        lr = 0.01
-        qat_op_optim = torch.optim.SGD(qat_op.parameters(), lr=lr)
-        qat_ref_op_optim = torch.optim.SGD(qat_ref_op.parameters(), lr=lr)
-
-        for i in range(5):
-
-            # make sure that calling model.train() does not override the
-            # bn freeze setting
-            qat_op.train()
-            qat_ref_op.train()
-
-            qat_op_optim.zero_grad()
-            qat_ref_op_optim.zero_grad()
-
-            input = torch.randn(batch_size, input_channels, height, width, dtype=torch.double, requires_grad=True)
-            input_clone = input.clone().detach().requires_grad_()
-
-            if i > 2:
-                qat_op.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
-                qat_ref_op.freeze_bn_stats()
-
-            if i > 3:
-                qat_op.apply(torch.ao.quantization.disable_observer)
-                qat_ref_op.apply(torch.ao.quantization.disable_observer)
-
-            result_ref = qat_ref_op(input)
-            result_actual = qat_op(input_clone)
-            self.assertEqual(result_ref, result_actual)
-
-            # backward
-            dout = torch.randn(result_ref.size(), dtype=torch.double) + 10.0
-
-            loss = (result_ref - dout).sum()
-            loss.backward()
-            input_grad_ref = input.grad.cpu()
-            weight_grad_ref = qat_ref_op.weight.grad.cpu()
-            gamma_grad_ref = qat_ref_op.gamma.grad.cpu()
-            beta_grad_ref = qat_ref_op.beta.grad.cpu()
-            running_mean_ref = qat_ref_op.running_mean
-            running_var_ref = qat_ref_op.running_var
-            num_batches_tracked_ref = qat_ref_op.num_batches_tracked
-
-            loss = (result_actual - dout).sum()
-            loss.backward()
-            input_grad_actual = input_clone.grad.cpu()
-            weight_grad_actual = qat_op.weight.grad.cpu()
-            gamma_grad_actual = qat_op.bn.weight.grad.cpu()
-            beta_grad_actual = qat_op.bn.bias.grad.cpu()
-            running_mean_actual = qat_op.bn.running_mean
-            running_var_actual = qat_op.bn.running_var
-            num_batches_tracked_actual = qat_op.bn.num_batches_tracked
-
-            precision = 1e-5
-            self.assertEqual(input_grad_ref, input_grad_actual, atol=precision, rtol=0)
-            self.assertEqual(weight_grad_ref, weight_grad_actual, atol=precision, rtol=0)
-            self.assertEqual(gamma_grad_ref, gamma_grad_actual, atol=precision, rtol=0)
-            self.assertEqual(beta_grad_ref, beta_grad_actual, atol=precision, rtol=0)
-            self.assertEqual(num_batches_tracked_ref, num_batches_tracked_actual, atol=precision, rtol=0)
-            self.assertEqual(running_mean_ref, running_mean_actual, atol=precision, rtol=0)
-            self.assertEqual(running_var_ref, running_var_actual, atol=precision, rtol=0)
-
-            qat_op_optim.step()
-            qat_ref_op_optim.step()
 
     @override_qengines
     def test_linear_bn_numerics(self):
