@@ -222,6 +222,7 @@ class FakeTensor(torch.Tensor):
         # elem does not need to be recorded, because FakeTensor *is a* elem
         assert elem.device.type == "meta"
         device = device if isinstance(device, torch.device) else torch.device(device)
+        assert device.type != "meta"
         self.fake_device = device
         self.fake_mode = fake_mode
 
@@ -391,8 +392,14 @@ class FakeTensorMode(TorchDispatchMode):
                 if run_impl_check(func):
                     return op_impl(self, func, *args, **kwargs)
 
-            self.in_kernel_invocation = True
             try:
+                # we need to return meta() for device within C++ kernels otherwise
+                # a issues occur such as is_meta() checks returning False and kernels
+                # attempting to do actual compute / accessing storages.
+
+                # TODO: cleaner way of ignoring python funcs
+                if "prims::" not in func._schema.name:
+                    self.in_kernel_invocation = True
                 r = func(*args, **kwargs)
             except NotImplementedError as not_implemented_error:
                 if not self.allow_cpu_fallback:

@@ -192,6 +192,17 @@ class FakeTensorConverterTest(TestCase):
             y = torch.empty(2, 2, device="cpu")
         self.assertRaises(Exception, lambda: x, y)
 
+    def test_no_ref_cycle(self):
+        x = torch.rand([4])
+        mode = torch._prims.utils.get_prim_fake_mode()
+        y = mode.from_tensor(x)
+        assert mode is torch._prims.utils.get_prim_fake_mode()
+        self.assertEqual(len(mode.fake_tensor_converter.tensor_memo), 1)
+        del mode
+        del y
+        new_mode = torch._prims.utils.get_prim_fake_mode()
+        self.assertEqual(len(new_mode.fake_tensor_converter.tensor_memo), 0)
+
 
 class FakeTensorOperatorInvariants(TestCase):
     @staticmethod

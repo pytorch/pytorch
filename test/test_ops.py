@@ -361,11 +361,12 @@ class TestCommon(TestCase):
         if dtype is torch.chalf:
             self.skipTest("Skipping chalf until it has more operator support")
 
-        mode = FakeTensorMode()
+        mode = torch._prims.utils.get_prim_fake_mode()
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
-                return FakeTensor.from_tensor(x, mode)
+                out = FakeTensor.from_tensor(x, mode)
+                return out
             return x
 
         # TODO: iterate over requires_grad true/false
@@ -513,7 +514,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_python_ref_errors(self, device, op):
-        mode = FakeTensorMode()
+        mode = torch._prims.utils.get_prim_fake_mode()
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
