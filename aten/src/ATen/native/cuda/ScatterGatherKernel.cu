@@ -136,8 +136,6 @@ struct _cuda_scatter_gather_internal_kernel {
     char* src_ptr = (char*)iter.data_ptr(1);
     char* index_ptr = (char*)iter.data_ptr(2);
 
-    auto ndim = iter.ndim();
-
     auto offset_calc = make_offset_calculator<3>(iter);
     auto loop = [=]C10_DEVICE(int i) {
       auto offsets = offset_calc.get(i);
