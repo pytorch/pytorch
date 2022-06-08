@@ -472,7 +472,7 @@ enum class DispatchKey : uint16_t {
   SparseCsrCUDA,
   SparseCsrHIP,
   SparseCsrXLA,
-  SparseCsrMLC,
+  SparseCsrMPS,
   SparseCsrIPU,
   SparseCsrXPU,
   SparseCsrHPU,
@@ -482,7 +482,6 @@ enum class DispatchKey : uint16_t {
   SparseCsrPrivateUse2,
   SparseCsrPrivateUse3,
   EndOfSparseCsrBackends = SparseCsrPrivateUse3,
->>>>>>> eeb8b4ce92 (free up 3 dispatch keys: make autocast + SparseCSR per-backend keys)
 
   // ~~~~~~~~~~~~~~ "NestedTensor" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~
   // //
@@ -507,7 +506,7 @@ enum class DispatchKey : uint16_t {
   NestedTensorPrivateUse1,
   NestedTensorPrivateUse2,
   NestedTensorPrivateUse3,
-  EndOfNestedTensorBackends = _NestedTensorPrivateUse3,
+  EndOfNestedTensorBackends = NestedTensorPrivateUse3,
 
   // ~~~~~~~~~~~~~~ "Autograd" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~ //
   // keys starting with an _ are not currently used,
@@ -545,7 +544,7 @@ enum class DispatchKey : uint16_t {
   AutocastCUDA,
   AutocastHIP,
   AutocastXLA,
-  AutocastMLC,
+  AutocastMPS,
   AutocastIPU,
   AutocastXPU,
   AutocastHPU,

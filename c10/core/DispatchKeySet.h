@@ -818,7 +818,7 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   constexpr auto autograd_cuda_ks_ = DispatchKeySet(DispatchKey::AutogradCUDA);
   constexpr auto autograd_hip_ks_ = DispatchKeySet(DispatchKey::AutogradHIP);
   constexpr auto autograd_xla_ks_ = DispatchKeySet(DispatchKey::AutogradXLA);
-  constexpr auto autograd_mlc_ks_ = DispatchKeySet(DispatchKey::AutogradMLC);
+  constexpr auto autograd_mps_ks_ = DispatchKeySet(DispatchKey::AutogradMPS);
   constexpr auto autograd_ipu_ks_ = DispatchKeySet(DispatchKey::AutogradIPU);
   constexpr auto autograd_xpu_ks_ = DispatchKeySet(DispatchKey::AutogradXPU);
 
@@ -826,7 +826,7 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   constexpr auto autocast_cuda_ks = DispatchKeySet(DispatchKey::AutocastCUDA);
   constexpr auto autocast_hip_ks = DispatchKeySet(DispatchKey::AutocastHIP);
   constexpr auto autocast_xla_ks = DispatchKeySet(DispatchKey::AutocastXLA);
-  constexpr auto autocast_mlc_ks = DispatchKeySet(DispatchKey::AutocastMLC);
+  constexpr auto autocast_mps_ks = DispatchKeySet(DispatchKey::AutocastMPS);
   constexpr auto autocast_ipu_ks = DispatchKeySet(DispatchKey::AutocastIPU);
   constexpr auto autocast_hpu_ks = DispatchKeySet(DispatchKey::AutocastHPU);
   constexpr auto autocast_ve_ks = DispatchKeySet(DispatchKey::AutocastVE);
@@ -841,10 +841,10 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
     case BackendComponent::CUDABit:
     case BackendComponent::XLABit:
       return autocast_cuda_ks | autograd_cpu_ks_ | autograd_cuda_ks_ |
-          autograd_hip_ks_ | autograd_xla_ks_ | autograd_mlc_ks_ |
+          autograd_hip_ks_ | autograd_xla_ks_ | autograd_mps_ks_ |
           autograd_ipu_ks_ | autograd_xpu_ks_ | autocast_cpu_ks |
           autocast_cuda_ks | autocast_hip_ks | autocast_xla_ks |
-          autocast_mlc_ks | autocast_ipu_ks | autocast_hpu_ks | autocast_ve_ks |
+          autocast_mps_ks | autocast_ipu_ks | autocast_hpu_ks | autocast_ve_ks |
           autocast_lazy_ks | autocast_xpu_ks;
     default:
       return DispatchKeySet();

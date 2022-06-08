@@ -90,8 +90,8 @@ const char* toString(DispatchKey t) {
       return "QuantizedXLA";
     case DispatchKey::QuantizedLazy:
       return "QuantizedLazy";
-    case DispatchKey::QuantizedMLC:
-      return "QuantizedMLC";
+    case DispatchKey::QuantizedMPS:
+      return "QuantizedMPS";
     case DispatchKey::QuantizedHPU:
       return "QuantizedHPU";
     case DispatchKey::QuantizedPrivateUse1:
@@ -122,8 +122,8 @@ const char* toString(DispatchKey t) {
       return "SparseXLA";
     case DispatchKey::SparseLazy:
       return "SparseLazy";
-    case DispatchKey::SparseMLC:
-      return "SparseMLC";
+    case DispatchKey::SparseMPS:
+      return "SparseMPS";
     case DispatchKey::SparseHPU:
       return "SparseHPU";
     case DispatchKey::SparsePrivateUse1:
@@ -149,8 +149,8 @@ const char* toString(DispatchKey t) {
       return "SparseCsrXLA";
     case DispatchKey::SparseCsrLazy:
       return "SparseCsrLazy";
-    case DispatchKey::SparseCsrMLC:
-      return "SparseCsrMLC";
+    case DispatchKey::SparseCsrMPS:
+      return "SparseCsrMPS";
     case DispatchKey::SparseCsrHPU:
       return "SparseCsrHPU";
     case DispatchKey::SparseCsrPrivateUse1:
@@ -178,8 +178,8 @@ const char* toString(DispatchKey t) {
       return "NestedTensorXLA";
     case DispatchKey::NestedTensorLazy:
       return "NestedTensorLazy";
-    case DispatchKey::NestedTensorMLC:
-      return "NestedTensorMLC";
+    case DispatchKey::NestedTensorMPS:
+      return "NestedTensorMPS";
     case DispatchKey::NestedTensorHPU:
       return "NestedTensorHPU";
     case DispatchKey::NestedTensorPrivateUse1:
@@ -260,8 +260,8 @@ const char* toString(DispatchKey t) {
       return "AutocastXLA";
     case DispatchKey::AutocastLazy:
       return "AutocastLazy";
-    case DispatchKey::AutocastMLC:
-      return "AutocastMLC";
+    case DispatchKey::AutocastMPS:
+      return "AutocastMPS";
     case DispatchKey::AutocastHPU:
       return "AutocastHPU";
     case DispatchKey::AutocastVE:
