@@ -3,7 +3,9 @@
 import math
 import numbers
 import operator
+import pickle
 import sys
+import tempfile
 import unittest
 from typing import Callable, Dict, Union, List, Optional
 from types import BuiltinFunctionType
@@ -26,6 +28,7 @@ from torch.fx.experimental.partitioner_utils import (
 )
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
+import torch.fx.experimental.meta_tracer
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.operator_schemas import (
@@ -119,7 +122,7 @@ class TestFXExperimental(JitTestCase):
         assert len(serialized_graph1["weights"]) == 4
         assert len(serialized_graph1["modules"]) == 0
         assert len(serialized_graph2["nodes"]) == 6
-        assert len(serialized_graph2["weights"]) == 4
+        assert len(serialized_graph2["weights"]) == 1
         assert len(serialized_graph2["modules"]) == 1
         assert serialized_graph1["weights"]["linear.weight"]["shape"] == "[4, 4]"
         assert serialized_graph1["weights"]["linear.weight"]["dtype"] == "torch.float32"
@@ -666,6 +669,37 @@ class TestFXExperimental(JitTestCase):
 
         # Confirm that the output is correct
         self.assertEqual(traced(3, 3), m(3, 3))
+
+    def test_meta_tracer(self):
+        class MetaTracerTestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(num_embeddings=42, embedding_dim=16)
+                self.layernorm = torch.nn.LayerNorm(16)
+
+            def forward(self, x):
+                emb = self.emb(x)
+                emb = emb + torch.arange(emb.shape[-1], dtype=torch.float, device=emb.device)
+                lol = self.layernorm(emb)
+                return torch.relu(lol) if lol.shape[0] < 30 else torch.sigmoid(lol)
+
+        mttm = MetaTracerTestModule()
+        for BS in [15, 35]:
+            x = torch.zeros(BS, dtype=torch.long).random_(42)
+            meta_args = {'x' : x.to(device='meta')}
+            gm = torch.fx.experimental.meta_tracer.symbolic_trace(mttm, meta_args=meta_args)
+            torch.testing.assert_close(gm(x), mttm(x))
+
+            # Test serialization/deserialization
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                with open(f'{tmp_dir}/meta_module.pkl', 'wb') as f:
+                    pickle.dump(gm, f)
+
+                with open(f'{tmp_dir}/meta_module.pkl', 'rb') as f:
+                    loaded = pickle.load(f)
+
+                torch.testing.assert_close(loaded(x), mttm(x))
+
 
     def test_call_to_assert_with_msg(self):
         class M(torch.nn.Module):
@@ -1518,105 +1552,6 @@ class TestNormalizeOperators(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
-        # Sorted and one entry on each line to minimize merge conflicts.
-        op_skip = {
-            # See: https://github.com/pytorch/pytorch/issues/64997
-            "as_strided",
-            "block_diag",
-            "broadcast_tensors",
-            "cartesian_prod",
-            "contiguous",
-            "einsum",
-            "expand",
-            "expand_as",
-            "fill_",
-            "T",   # Implemented with a lambda
-            "H",   # Implemented with a lambda
-            "mT",  # Implemented with a lambda
-            "mH",  # Implemented with a lambda
-            "gradient",
-            "histogramdd",
-            "igamma",
-            "igammac",
-            "index_put",
-            "linalg_pinv_singular",  # Implemented with a lambda (only the singular variant)
-            "nn.functional.conv2d",
-            "nn.functional.dropout",
-            "nn.functional.dropout2d",
-            "nn.functional.embedding",  # Implemented with a lambda
-            "nn.functional.embedding_bag",  # Implemented with a lambda
-            "nn.functional.rrelu",  # Implemented with a lambda
-            "nn.functional.feature_alpha_dropout",  # Implemented with a lambda
-            "nonzero",
-            "polygamma",
-            "special.polygamma",
-            "repeat",
-            "reshape_as",
-            "resize_",
-            "resize_as_",
-            "special.zeta",
-            "sum_to_size",
-            "to_sparse",
-            "unique",
-            "unique_consecutive",
-            "view",
-            "view_as",
-            "unfold",
-            "where",
-            "zero_",
-            'bfloat16',
-            'bool',
-            'byte',
-            'char',
-            'double',
-            'float',
-            'half',
-            'int',
-            'long',
-            'short',
-            'empty_like',
-            'ones_like',
-            'randn_like',
-            'zeros_like',
-            'full_like',
-            'rand_like',
-            'randint_like',
-            'new_ones',
-            'new_empty',
-            'new_zeros',
-            'new_full',
-            'normal',
-            'multinomial',
-            'bernoulli',
-            "__getitem__",
-            "__radd__",
-            "__rsub__",
-            "__rmul__",
-            "__rdiv__",
-            "__rmod__",
-            "__rpow__",
-            '__rand__',
-            '__ror__',
-            '__rxor__',
-            "__rmatmul__",
-            "atleast_1d",
-            "atleast_2d",
-            "atleast_3d",
-            "svd_lowrank",  # implemented with a lambda
-            "pca_lowrank",  # implemented with a lambda
-            "column_stack",
-        }
-
-        # Unsupported input types
-        if op.name in op_skip:
-            return
-
-        if op.formatted_name in op_skip:
-            return
-
-        if op.name.startswith('_masked.'):
-            return
-
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -1718,6 +1653,40 @@ class TestModule(torch.nn.Module):
             test_out = traced(*param_values)
             self.assertEqual(test_out, ref_out)
 
+    def test_normalize_quantized_eb(self):
+        target = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
+        args = (
+            torch.empty((2, 3), dtype=torch.uint8),
+            torch.empty((2,), dtype=torch.int64),
+            torch.empty((2,), dtype=torch.int64),
+        )
+        norm_args_and_kwargs = normalize_function(
+            target, args, normalize_to_only_use_kwargs=True
+        )
+        self.assertTrue(norm_args_and_kwargs is not None)
+        self.assertEqual(
+            set(norm_args_and_kwargs.kwargs.keys()),
+            {
+                "weight",
+                "indices",
+                "offsets",
+                "scale_grad_by_freq",
+                "mode",
+                "pruned_weights",
+                "per_sample_weights",
+                "compressed_indices_mapping",
+                "include_last_offset",
+            },
+        )
+        self.assertEqual(norm_args_and_kwargs.args, tuple())
+
+    def test_normalize_args_op_overload(self):
+        for target in [torch.ops.aten.resize_as_.default, torch.ops.aten.resize_as_]:
+            inp1 = torch.rand([1])
+            inp2 = torch.rand([4])
+            args, kwargs = normalize_function(target, (inp1,), {"the_template": inp2}, normalize_to_only_use_kwargs=True)
+            self.assertIs(kwargs["input"], inp1)
+            self.assertIs(kwargs["the_template"], inp2)
 
 instantiate_device_type_tests(TestNormalizeOperators, globals())
 

@@ -13,7 +13,7 @@ import inspect
 import copy
 import pickle
 import warnings
-from typing import Any, Dict, List, Tuple, Union, Callable
+from typing import Any, Dict, List, Set, Tuple, Union, Callable
 
 
 import torch
@@ -44,7 +44,6 @@ from torch.jit._monkeytype_config import (
     JitTypeTraceStore
 )
 from torch._classes import classes
-from torch.package._zip_file_torchscript import TorchScriptPackageZipFileWriter, TorchScriptPackageZipFileReader
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
 
@@ -76,7 +75,7 @@ Attribute.__doc__ = """
     This method is a pass-through function that returns `value`, mostly
     used to indicate to the TorchScript compiler that the left-hand side
     expression is a class instance attribute with type of `type`. Note that
-    `torch.jit.Attribute` should only be used in `__init__` method of `nn.Module`
+    `torch.jit.Attribute` should only be used in `__init__` method of `jit.ScriptModule`
     subclasses.
 
     Though TorchScript can infer correct type for most Python expressions, there are some cases where
@@ -96,9 +95,9 @@ Attribute.__doc__ = """
         import torch
         from typing import Dict
 
-        class AttributeModule(torch.nn.Module):
+        class AttributeModule(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super(AttributeModule, self).__init__()
                 self.foo = torch.jit.Attribute(0.1, float)
 
                 # we should be able to use self.foo as a float here
@@ -112,6 +111,27 @@ Attribute.__doc__ = """
         # m will contain two attributes
         # 1. foo of type float
         # 2. names_ages of type Dict[str, int]
+
+    .. testcleanup::
+
+        del AttributeModule
+        del m
+
+    Note: it's now preferred to instead use type annotations instead of `torch.jit.Annotate`:
+
+    .. testcode::
+
+        import torch
+        from typing import Dict
+
+        class AttributeModule(torch.nn.Module):
+            names: Dict[str, int]
+
+            def __init__(self):
+                super(AttributeModule, self).__init__()
+                self.names = {}
+
+        m = AttributeModule()
 
     .. testcleanup::
 
@@ -250,7 +270,7 @@ class ScriptMeta(type):
         for base in reversed(bases):
             for k, v in getattr(base, "_methods", {}).items():
                 cls._methods[k] = v
-            base_constants = getattr(base, "_constants_set", set())
+            base_constants: Set = getattr(base, "_constants_set", set())
             cls._constants_set = cls._constants_set.union(base_constants)
 
         # find all the script methods of the current class
@@ -343,21 +363,15 @@ def unpackage_script_module(importer: PackageImporter, script_module_id: str) ->
     Called by ``torch.package.PackageImporter``'s Pickler's ``persistent_load`` function.
     Performs work of loading and returning a ScriptModule from a ``torch.package`` archive.
     """
-
-    if not isinstance(importer.zip_reader, TorchScriptPackageZipFileReader):
-        raise RuntimeError(
-            f"Loading ScriptObjects from a PackageImporter must be done using a TorchScriptPackageZipFileReader"
-            f"not an object of type {type(importer.zip_reader)}"
-        )
-    if importer.zip_reader.is_directory():
+    if not isinstance(importer.zip_reader, torch._C.PyTorchFileReader):
         raise RuntimeError(
             "Loading ScriptObjects from a PackageImporter created from a "
-            f"directory is not supported. Use a package archive file instead. is of type {type(importer.zip_reader)}"
+            "directory is not supported. Use a package archive file instead."
         )
     cu = torch._C.CompilationUnit()
     cpp_module = torch._C._import_ir_module_from_package(
         cu,
-        importer.zip_reader.zip_reader,  # type: ignore[arg-type]
+        importer.zip_reader,
         importer.storage_context,
         validate_map_location(importer.last_map_location),
         script_module_id,
@@ -424,7 +438,7 @@ if _enabled:
                 return super(RecursiveScriptClass, self).__getattr__(attr)  # type: ignore[misc]
 
             if attr in self._props:
-                return self._props[attr].fget()
+                return self._props[attr].fget()  # type: ignore[call-arg, misc]
 
             return getattr(self._c, attr)
 
@@ -433,7 +447,7 @@ if _enabled:
                 return super(RecursiveScriptClass, self).__setattr__(attr, value)
 
             if attr in self._props:
-                return self._props[attr].fset(value)
+                return self._props[attr].fset(value)  # type: ignore[call-arg, misc]
 
             setattr(self._c, attr, value)
 
@@ -542,10 +556,8 @@ if _enabled:
             Returns method to load the ScriptModule from a ``torch.package.PackageImporter``'s
             Pickler's ``persistent_load`` function.
             """
-            assert isinstance(exporter.zip_file, TorchScriptPackageZipFileWriter)
-            script_module_serializer = exporter.zip_file.script_module_serializer
             script_module_id = exporter.get_unique_id()
-            script_module_serializer.serialize(self._c, int(script_module_id))
+            exporter.script_module_serializer.serialize(self._c, int(script_module_id))
             return (unpackage_script_module, (script_module_id,))
 
     class RecursiveScriptModule(ScriptModule):
@@ -902,7 +914,6 @@ if _enabled:
         "double",
         "half",
         "state_dict",
-        "_state_dict_impl",
         "_save_to_state_dict",
         "load_state_dict",
         "_load_from_state_dict",
@@ -1315,7 +1326,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         qualified_name = _qualified_name(obj)
         # this is a decorated fn, and we need to the underlying fn and its rcb
         if hasattr(obj, "__script_if_tracing_wrapper"):
-            obj = obj.__original_fn
+            obj = obj.__original_fn  # type: ignore[union-attr]
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
 
         # some functions are explicitly marked as not supported in script mode

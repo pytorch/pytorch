@@ -32,7 +32,7 @@ struct TORCH_API UnknownQuantizer : public Quantizer {
   Tensor dequantize(const Tensor& qtensor) override;
   Tensor& dequantize_out(Tensor& rtensor, const Tensor& qtensor) override;
   QScheme qscheme() const override;
-  bool equalTo(QuantizerPtr other) override;
+  bool equalTo(QuantizerPtr other) const override;
 };
 
 /**
@@ -97,7 +97,7 @@ struct TORCH_API PerTensorAffineQuantizer : public AffineQuantizer {
     return zero_point_;
   }
 
-  bool equalTo(QuantizerPtr other) override {
+  bool equalTo(QuantizerPtr other) const override {
     if (!other.get() || other->qscheme() != kPerTensorAffine) {
       return false;
     }
@@ -156,7 +156,7 @@ struct TORCH_API PerChannelAffineQuantizer : public AffineQuantizer {
   Tensor dequantize(const Tensor& qtensor) override;
   Tensor& dequantize_out(Tensor& rtensor, const Tensor& qtensor) override;
 
-  bool equalTo(QuantizerPtr other) override {
+  bool equalTo(QuantizerPtr other) const override {
     if (!other.get() || other->qscheme() != kPerChannelAffine) {
       return false;
     }
@@ -207,7 +207,7 @@ struct TORCH_API PerChannelAffineFloatQParamsQuantizer : public PerChannelAffine
   Tensor dequantize(const Tensor& qtensor) override;
   Tensor& dequantize_out(Tensor& rtensor, const Tensor& qtensor) override;
 
-  bool equalTo(QuantizerPtr other) override {
+  bool equalTo(QuantizerPtr other) const override {
     if (!other.get() || other->qscheme() != kPerChannelAffineFloatQParams) {
       return false;
     }

@@ -25,18 +25,19 @@ jobs:
       matrix:
         include:
           - docker-image-name: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
-          - docker-image-name: pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7
+          - docker-image-name: pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9
+          - docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
           - docker-image-name: pytorch-linux-bionic-py3.7-clang9
-          - docker-image-name: pytorch-linux-bionic-rocm4.5-py3.7
           - docker-image-name: pytorch-linux-bionic-rocm5.0-py3.7
+          - docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7
           - docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
           - docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
           - docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
           - docker-image-name: pytorch-linux-xenial-py3-clang5-asan
           - docker-image-name: pytorch-linux-xenial-py3-clang7-asan
           - docker-image-name: pytorch-linux-xenial-py3-clang7-onnx
-          - docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
           - docker-image-name: pytorch-linux-xenial-py3.7-gcc7
+          - docker-image-name: pytorch-linux-focal-py3.7-gcc7
     env:
       DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}
     steps:
@@ -61,6 +62,7 @@ jobs:
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
+          force_push: true
 
       - name: Pull docker image
         uses: ./.github/actions/pull-docker-image

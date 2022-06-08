@@ -14,7 +14,7 @@ from fx2trt_oss.fx.utils import LowerPrecision
 from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.passes import shape_prop
 from torch.testing._internal.common_utils import TestCase
-
+import time
 
 def fetch_attr(mod, target):
     """
@@ -43,7 +43,7 @@ class TRTTestCase(TestCase):
         super().setUp()
         torch.manual_seed(3)
 
-    def run_test(self, mod, inputs, expected_ops, unexpected_ops, interpreter, rtol, atol):
+    def run_test(self, mod, inputs, expected_ops, unexpected_ops, interpreter, rtol, atol, precision=LowerPrecision.FP32):
         with torch.no_grad():
             cuda_inputs = []
             for i in inputs:
@@ -54,8 +54,10 @@ class TRTTestCase(TestCase):
                 self.assert_has_op(mod, expected_ops)
             if unexpected_ops:
                 self.assert_unexpected_op(mod, unexpected_ops)
-
-            interpreter_result = interpreter.run(lower_precision=LowerPrecision.FP32)
+            start = time.perf_counter()
+            interpreter_result = interpreter.run(lower_precision=precision)
+            sec = time.perf_counter() - start
+            print("Interpreter run time(s):", sec)
             trt_mod = TRTModule(
                 interpreter_result.engine,
                 interpreter_result.input_names,
@@ -63,13 +65,23 @@ class TRTTestCase(TestCase):
             )
 
             ref_outputs = mod(*inputs)
+
+            torch.cuda.synchronize()
+            start_event = torch.cuda.Event(enable_timing=True)
+            end_event = torch.cuda.Event(enable_timing=True)
+            start_event.record()
             outputs = trt_mod(*cuda_inputs)
+            end_event.record()
+            torch.cuda.synchronize()
+            print("TRT run time(s)=", (start_event.elapsed_time(end_event) * 1.0e-3))
 
             if isinstance(outputs, torch.Tensor):
                 ref_outputs = [ref_outputs]
                 outputs = [outputs]
-
             for out, ref in zip(outputs, ref_outputs):
+                if not isinstance(ref, torch.Tensor):
+                    ref = torch.tensor([ref])
+                ref = ref.cpu()  # to_dtype test has cases with gpu output
                 torch.testing.assert_allclose(out.cpu(), ref, rtol=rtol, atol=atol)
 
     def run_test_custom_compare_results(
@@ -192,8 +204,10 @@ class AccTestCase(TRTTestCase):
         apply_passes=None,
         test_explicit_batch_dim=True,
         test_implicit_batch_dim=True,
+        test_explicit_precision=False,
         rtol=1e-03,
         atol=1e-03,
+        precision=LowerPrecision.FP32,
     ):
         mod.eval()
         mod = acc_tracer.trace(mod, inputs)
@@ -204,13 +218,23 @@ class AccTestCase(TRTTestCase):
 
         if test_implicit_batch_dim:
             interp = TRTInterpreter(mod, InputTensorSpec.from_tensors(inputs))
-            super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol)
+            super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol, precision)
 
         if test_explicit_batch_dim:
             interp = TRTInterpreter(
                 mod, InputTensorSpec.from_tensors(inputs), explicit_batch_dimension=True
             )
+            super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol, precision)
+
+        if test_explicit_precision:
+            interp = TRTInterpreter(mod, InputTensorSpec.from_tensors(inputs), explicit_precision=test_explicit_precision)
             super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol)
+
+            interp = TRTInterpreter(
+                mod, InputTensorSpec.from_tensors(inputs), explicit_batch_dimension=True, explicit_precision=test_explicit_precision
+            )
+            super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol, precision)
+
 
     def run_test_with_assert_error(
         self,

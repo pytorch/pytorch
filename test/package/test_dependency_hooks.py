@@ -2,12 +2,7 @@
 
 from io import BytesIO
 
-from torch.package import (
-    PackageExporter,
-)
-from torch.package.package_exporter_no_torch import (
-    PackageExporter as PackageExporterNoTorch,
-)
+from torch.package import PackageExporter
 from torch.testing._internal.common_utils import run_tests
 
 try:
@@ -23,10 +18,6 @@ class TestDependencyHooks(PackageTestCase):
     - register_extern_hook()
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.PackageExporter = PackageExporter
-
     def test_single_hook(self):
         buffer = BytesIO()
 
@@ -35,7 +26,7 @@ class TestDependencyHooks(PackageTestCase):
         def my_extern_hook(package_exporter, module_name):
             my_externs.add(module_name)
 
-        with self.PackageExporter(buffer) as exporter:
+        with PackageExporter(buffer) as exporter:
             exporter.extern(["package_a.subpackage", "module_a"])
             exporter.register_extern_hook(my_extern_hook)
             exporter.save_source_string("foo", "import module_a")
@@ -54,7 +45,7 @@ class TestDependencyHooks(PackageTestCase):
         def my_extern_hook2(package_exporter, module_name):
             my_externs.remove(module_name)
 
-        with self.PackageExporter(buffer) as exporter:
+        with PackageExporter(buffer) as exporter:
             exporter.extern(["package_a.subpackage", "module_a"])
             exporter.register_extern_hook(my_extern_hook)
             exporter.register_extern_hook(my_extern_hook2)
@@ -74,7 +65,7 @@ class TestDependencyHooks(PackageTestCase):
         def my_mock_hook2(package_exporter, module_name):
             my_mocks.remove(module_name)
 
-        with self.PackageExporter(buffer) as exporter:
+        with PackageExporter(buffer) as exporter:
             exporter.mock(["package_a.subpackage", "module_a"])
             exporter.register_mock_hook(my_mock_hook)
             exporter.register_mock_hook(my_mock_hook2)
@@ -94,7 +85,7 @@ class TestDependencyHooks(PackageTestCase):
         def my_extern_hook2(package_exporter, module_name):
             my_externs2.add(module_name)
 
-        with self.PackageExporter(buffer) as exporter:
+        with PackageExporter(buffer) as exporter:
             exporter.extern(["package_a.subpackage", "module_a"])
             handle = exporter.register_extern_hook(my_extern_hook)
             exporter.register_extern_hook(my_extern_hook2)
@@ -116,7 +107,7 @@ class TestDependencyHooks(PackageTestCase):
         def my_mock_hook(package_exporter, module_name):
             my_mocks.add(module_name)
 
-        with self.PackageExporter(buffer) as exporter:
+        with PackageExporter(buffer) as exporter:
             exporter.extern("module_a")
             exporter.mock("package_a")
             exporter.register_extern_hook(my_extern_hook)
@@ -125,12 +116,6 @@ class TestDependencyHooks(PackageTestCase):
 
         self.assertEqual(my_externs, set(["module_a"]))
         self.assertEqual(my_mocks, set(["package_a"]))
-
-
-class TestDependencyHooksNoTorch(TestDependencyHooks):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.PackageExporter = PackageExporterNoTorch
 
 
 if __name__ == "__main__":

@@ -63,6 +63,7 @@
 #include <torch/csrc/utils/six.h>
 #include <torch/csrc/autograd/variable.h>
 
+#include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/core/Tensor.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
@@ -79,7 +80,7 @@ namespace torch {
 enum class ParameterType {
   TENSOR, SCALAR, INT64, SYM_INT, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
   BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STREAM, STRING,
-  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST, SCALAR_LIST
+  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST, SCALAR_LIST, SYM_INT_LIST
 };
 
 struct FunctionParameter;
@@ -167,6 +168,7 @@ struct PythonArgs {
   template<int N>
   inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
+  inline std::vector<c10::SymInt> symintlist(int i);
   inline c10::OptionalArray<int64_t> intlistOptional(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline c10::optional<at::Generator> generator(int i);
@@ -272,7 +274,8 @@ inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
 }
 
 inline bool PythonArgs::has_torch_function(){
-  return !this->signature.overloaded_args.empty();
+  return !this->signature.overloaded_args.empty() ||
+       at::impl::PythonTorchFunctionTLS::get_mode();
 }
 
 inline std::string PythonArgs::get_func_name(){
@@ -384,6 +387,11 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
 
 inline std::vector<int64_t> PythonArgs::intlist(int i) {
   return intlistWithDefault(i, signature.params[i].default_intlist);
+}
+
+inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
+  auto intlist = intlistWithDefault(i, signature.params[i].default_intlist);
+  return c10::fmap(intlist, [](int64_t n) {return c10::SymInt(n); });
 }
 
 inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<int64_t> default_intlist) {
@@ -507,21 +515,25 @@ inline c10::optional<at::Layout> PythonArgs::layoutOptional(int i) {
   return layout(i);
 }
 
+inline at::Device toDevice(PyObject * obj) {
+  if (THPDevice_Check(obj)) {
+    const auto device = reinterpret_cast<THPDevice*>(obj);
+    return device->device;
+  }
+  if (THPUtils_checkLong(obj)) {
+    const auto device_index = THPUtils_unpackLong(obj);
+    TORCH_CHECK(device_index >= 0, "Device index must not be negative");
+    return at::Device(DeviceType::CUDA, device_index);
+  }
+  const std::string &device_str = THPUtils_unpackString(obj);
+  return at::Device(device_str);
+}
+
 inline at::Device PythonArgs::device(int i) {
   if (!args[i]) {
     return at::Device(backendToDeviceType(dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())));
   }
-  if (THPDevice_Check(args[i])) {
-    const auto device = reinterpret_cast<THPDevice*>(args[i]);
-    return device->device;
-  }
-  if (THPUtils_checkLong(args[i])) {
-    const auto device_index = THPUtils_unpackLong(args[i]);
-    TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(DeviceType::CUDA, device_index);
-  }
-  const std::string &device_str = THPUtils_unpackString(args[i]);
-  return at::Device(device_str);
+  return toDevice(args[i]);
 }
 
 inline at::Device PythonArgs::deviceWithDefault(int i, const at::Device& default_device) {
@@ -629,7 +641,9 @@ inline int64_t PythonArgs::toInt64(int i) {
 }
 
 inline c10::SymInt PythonArgs::toSymInt(int i) {
-  if (!args[i]) return signature.params[i].default_int;
+  if (!args[i]) {
+    return c10::SymInt(signature.params[i].default_int);
+  }
   if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
     auto & var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
@@ -788,16 +802,26 @@ inline PyObject* PythonArgs::pyobject(int i) {
  *
  */
 // Used for Tensor methods with arguments.
-auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*;
+auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name, const char* func_name_override = nullptr) -> PyObject*;
 
 // Used for functions which needs to parse python args.
-auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*;
+auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name, const char* func_name_override = nullptr) -> PyObject*;
 
 // Used for functions that have no argument parsing.
 auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args=nullptr, PyObject* kwargs=nullptr, PyObject* torch_api=THPVariableClass, const std::string& module_name="torch.Tensor") -> PyObject*;
 
 // Used for functions created in C++, e.g., C++ custom op, which doesn't use PythonArgParser to get overloaded_args.
-auto TORCH_API handle_torch_function_no_python_arg_parser(at::ArrayRef<py::handle> overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name, const char* torch_function_name = "__torch_function__") -> PyObject*;
+enum class TorchFunctionName { TorchFunction, TorchDispatch };
+
+auto TORCH_API handle_torch_function_no_python_arg_parser(
+    at::ArrayRef<py::handle> overloaded_args,
+    PyObject* args,
+    PyObject* kwargs,
+    const char* func_name,
+    PyObject* torch_api_function,
+    const char* module_name,
+    TorchFunctionName torch_function_name = TorchFunctionName::TorchFunction)
+    -> PyObject*;
 
 // Used for getters of Tensor properties
 auto handle_torch_function_getter(THPVariable* self, const std::string& property_name) -> PyObject*;

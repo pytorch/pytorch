@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/native/vulkan/api/api.h>
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <c10/util/irange.h>
 
 // TODO: These functions should move to a common place.
@@ -167,7 +169,20 @@ inline std::vector<c10::IValue> callOpByName(
 
 namespace {
 
-TEST(VulkanAPITest, adaptive_avg_pool2d) {
+class VulkanAPITest : public ::testing::Test {
+public:
+#if defined (__ANDROID__)  // to avoid `Undefined symbols for architecture arm64` error
+    static void SetUpTestSuite() {
+      at::native::vulkan::api::context()->querypool().enable();
+    }
+
+    static void TearDownTestSuite() {
+      at::native::vulkan::api::context()->querypool().disable(false);
+    }
+#endif
+};
+
+TEST_F(VulkanAPITest, adaptive_avg_pool2d) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -185,7 +200,7 @@ TEST(VulkanAPITest, adaptive_avg_pool2d) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, add) {
+TEST_F(VulkanAPITest, add) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -207,7 +222,7 @@ TEST(VulkanAPITest, add) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, add_broadcast0) {
+TEST_F(VulkanAPITest, add_broadcast0) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -229,7 +244,7 @@ TEST(VulkanAPITest, add_broadcast0) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, add_broadcast1) {
+TEST_F(VulkanAPITest, add_broadcast1) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -251,7 +266,7 @@ TEST(VulkanAPITest, add_broadcast1) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, add_broadcast2) {
+TEST_F(VulkanAPITest, add_broadcast2) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -273,7 +288,7 @@ TEST(VulkanAPITest, add_broadcast2) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, add_) {
+TEST_F(VulkanAPITest, add_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -295,7 +310,7 @@ TEST(VulkanAPITest, add_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, add_broadcast0_) {
+TEST_F(VulkanAPITest, add_broadcast0_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -317,7 +332,7 @@ TEST(VulkanAPITest, add_broadcast0_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, add_broadcast1_) {
+TEST_F(VulkanAPITest, add_broadcast1_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -339,7 +354,7 @@ TEST(VulkanAPITest, add_broadcast1_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, add_scalar) {
+TEST_F(VulkanAPITest, add_scalar) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -360,7 +375,7 @@ TEST(VulkanAPITest, add_scalar) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, add_scalar_) {
+TEST_F(VulkanAPITest, add_scalar_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -381,7 +396,7 @@ TEST(VulkanAPITest, add_scalar_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, addmm) {
+TEST_F(VulkanAPITest, addmm) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -405,7 +420,7 @@ TEST(VulkanAPITest, addmm) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, addmm_expand) {
+TEST_F(VulkanAPITest, addmm_expand) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -429,7 +444,7 @@ TEST(VulkanAPITest, addmm_expand) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, avg_pool2d) {
+TEST_F(VulkanAPITest, avg_pool2d) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -446,7 +461,7 @@ TEST(VulkanAPITest, avg_pool2d) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, clamp) {
+TEST_F(VulkanAPITest, clamp) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -468,7 +483,7 @@ TEST(VulkanAPITest, clamp) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, clamp_) {
+TEST_F(VulkanAPITest, clamp_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -490,7 +505,7 @@ TEST(VulkanAPITest, clamp_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, conv2d) {
+TEST_F(VulkanAPITest, conv2d) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -563,7 +578,7 @@ TEST(VulkanAPITest, conv2d) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, conv2d_dw) {
+TEST_F(VulkanAPITest, conv2d_dw) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -635,7 +650,7 @@ TEST(VulkanAPITest, conv2d_dw) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, conv2d_pw) {
+TEST_F(VulkanAPITest, conv2d_pw) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -707,7 +722,7 @@ TEST(VulkanAPITest, conv2d_pw) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, conv2d_winograd) {
+TEST_F(VulkanAPITest, conv2d_winograd) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -779,7 +794,7 @@ TEST(VulkanAPITest, conv2d_winograd) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, copy) {
+TEST_F(VulkanAPITest, copy) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -795,7 +810,37 @@ TEST(VulkanAPITest, copy) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, div) {
+TEST_F(VulkanAPITest, cumsum) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+  c10::InferenceMode mode;
+
+  const auto in_cpu = at::rand({1, 17, 37, 49}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  // 0 do nothing
+  // 1 frame
+  // not implemented
+
+  // 2 height
+  const auto out_cpu2 = at::cumsum(in_cpu, 2);
+  const auto out_vulkan2 = at::cumsum(in_cpu.vulkan(), 2);
+  const auto check2 = almostEqual(out_cpu2, out_vulkan2.cpu());
+  if (!check2) {
+    showRtol(out_cpu2, out_vulkan2.cpu());
+  }
+  ASSERT_TRUE(check2);
+
+  // 3 width
+  const auto out_cpu3 = at::cumsum(in_cpu, 3);
+  const auto out_vulkan3 = at::cumsum(in_cpu.vulkan(), 3);
+  const auto check3 = almostEqual(out_cpu3, out_vulkan3.cpu());
+  if (!check3) {
+    showRtol(out_cpu3, out_vulkan3.cpu());
+  }
+  ASSERT_TRUE(check3);
+}
+
+TEST_F(VulkanAPITest, div) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -817,7 +862,7 @@ TEST(VulkanAPITest, div) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, div_broadcast0) {
+TEST_F(VulkanAPITest, div_broadcast0) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -839,7 +884,7 @@ TEST(VulkanAPITest, div_broadcast0) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, div_broadcast1) {
+TEST_F(VulkanAPITest, div_broadcast1) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -861,7 +906,7 @@ TEST(VulkanAPITest, div_broadcast1) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, div_broadcast2) {
+TEST_F(VulkanAPITest, div_broadcast2) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -883,7 +928,7 @@ TEST(VulkanAPITest, div_broadcast2) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, div_) {
+TEST_F(VulkanAPITest, div_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -905,7 +950,7 @@ TEST(VulkanAPITest, div_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, div_broadcast0_) {
+TEST_F(VulkanAPITest, div_broadcast0_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -927,7 +972,7 @@ TEST(VulkanAPITest, div_broadcast0_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, div_broadcast1_) {
+TEST_F(VulkanAPITest, div_broadcast1_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -949,7 +994,7 @@ TEST(VulkanAPITest, div_broadcast1_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, div_scalar) {
+TEST_F(VulkanAPITest, div_scalar) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -970,7 +1015,7 @@ TEST(VulkanAPITest, div_scalar) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, div_scalar_) {
+TEST_F(VulkanAPITest, div_scalar_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -991,7 +1036,7 @@ TEST(VulkanAPITest, div_scalar_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, empty) {
+TEST_F(VulkanAPITest, empty) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -999,7 +1044,7 @@ TEST(VulkanAPITest, empty) {
   ASSERT_NO_THROW(at::empty({1, 17, 41, 53}, at::device(at::kVulkan).dtype(at::kFloat)));
 }
 
-TEST(VulkanAPITest, hardsigmoid) {
+TEST_F(VulkanAPITest, hardsigmoid) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1018,7 +1063,7 @@ TEST(VulkanAPITest, hardsigmoid) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, hardsigmoid_) {
+TEST_F(VulkanAPITest, hardsigmoid_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1037,7 +1082,7 @@ TEST(VulkanAPITest, hardsigmoid_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, hardshrink) {
+TEST_F(VulkanAPITest, hardshrink) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1059,7 +1104,7 @@ TEST(VulkanAPITest, hardshrink) {
   }
 }
 
-TEST(VulkanAPITest, hardshrink_) {
+TEST_F(VulkanAPITest, hardshrink_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1080,7 +1125,7 @@ TEST(VulkanAPITest, hardshrink_) {
   }
 }
 
-TEST(VulkanAPITest, leaky_relu) {
+TEST_F(VulkanAPITest, leaky_relu) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1102,7 +1147,7 @@ TEST(VulkanAPITest, leaky_relu) {
   }
 }
 
-TEST(VulkanAPITest, leaky_relu_) {
+TEST_F(VulkanAPITest, leaky_relu_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1123,7 +1168,205 @@ TEST(VulkanAPITest, leaky_relu_) {
   }
 }
 
-TEST(VulkanAPITest, hardswish) {
+TEST_F(VulkanAPITest, lerp) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto w_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto w_vulkan = w_cpu.vulkan();
+
+  const auto c_cpu = at::lerp(a_cpu, b_cpu, w_cpu);
+  const auto c_vulkan = at::lerp(a_vulkan, b_vulkan, w_vulkan);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, lerp_broadcast0) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a_cpu = at::rand({3, 5, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({3, 5, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto w_cpu = at::rand({3, 5, 1, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto w_vulkan = w_cpu.vulkan();
+
+  const auto c_cpu = at::lerp(a_cpu, b_cpu, w_cpu);
+  const auto c_vulkan = at::lerp(a_vulkan, b_vulkan, w_vulkan);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, lerp_broadcast1) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a_cpu = at::rand({3, 4, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({4, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto w_cpu = at::rand({4, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto w_vulkan = w_cpu.vulkan();
+
+  const auto c_cpu = at::lerp(a_cpu, b_cpu, w_cpu);
+  const auto c_vulkan = at::lerp(a_vulkan, b_vulkan, w_vulkan);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, lerp_) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto w_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto w_vulkan = w_cpu.vulkan();
+
+  a_cpu.lerp_(b_cpu, w_cpu);
+  a_vulkan.lerp_(b_vulkan, w_vulkan);
+
+  const auto check = almostEqual(a_cpu, a_vulkan.cpu());
+  if (!check) {
+    showRtol(a_cpu, a_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, lerp_broadcast0_) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  auto a_cpu = at::rand({3, 5, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({3, 5, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto w_cpu = at::rand({3, 5, 1, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto w_vulkan = w_cpu.vulkan();
+
+  a_cpu.lerp_(b_cpu, w_cpu);
+  a_vulkan.lerp_(b_vulkan, w_vulkan);
+
+  const auto check = almostEqual(a_cpu, a_vulkan.cpu());
+  if (!check) {
+    showRtol(a_cpu, a_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, lerp_broadcast1_) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  auto a_cpu = at::rand({3, 4, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({4, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto w_cpu = at::rand({4, 179, 221}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto w_vulkan = w_cpu.vulkan();
+
+  a_cpu.lerp_(b_cpu, w_cpu);
+  a_vulkan.lerp_(b_vulkan, w_vulkan);
+
+  const auto check = almostEqual(a_cpu, a_vulkan.cpu());
+  if (!check) {
+    showRtol(a_cpu, a_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, lerp_scalar) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a_cpu = at::rand({13, 23, 59, 73}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({13, 23, 59, 73}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const float w_scalar = 3.1415f;
+
+  const auto c_cpu = at::lerp(a_cpu, b_cpu, w_scalar);
+  const auto c_vulkan = at::lerp(a_vulkan, b_vulkan, w_scalar);
+
+  const auto check = almostEqual(c_cpu, c_vulkan.cpu());
+  if (!check) {
+    showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, lerp_scalar_) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  auto a_cpu = at::rand({47, 2, 23, 97}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({47, 2, 23, 97}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const float w_scalar = 3.1415f;
+
+  a_cpu.lerp_(b_cpu, w_scalar);
+  a_vulkan.lerp_(b_vulkan, w_scalar);
+
+  const auto check = almostEqual(a_cpu, a_vulkan.cpu());
+  if (!check) {
+    showRtol(a_cpu, a_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, hardswish) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1142,7 +1385,7 @@ TEST(VulkanAPITest, hardswish) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, hardswish_) {
+TEST_F(VulkanAPITest, hardswish_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1161,7 +1404,7 @@ TEST(VulkanAPITest, hardswish_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, max_pool2d) {
+TEST_F(VulkanAPITest, max_pool2d) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1179,7 +1422,7 @@ TEST(VulkanAPITest, max_pool2d) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, mean) {
+TEST_F(VulkanAPITest, mean) {
   const auto in_cpu = at::rand({17, 3, 79, 53}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::mean(in_cpu, {-1, -2}, true);
 
@@ -1194,7 +1437,7 @@ TEST(VulkanAPITest, mean) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, mean2d) {
+TEST_F(VulkanAPITest, mean2d) {
   const auto in_cpu = at::rand({11, 7, 173, 37}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::mean(in_cpu, {-1, -2}, false);
 
@@ -1209,7 +1452,7 @@ TEST(VulkanAPITest, mean2d) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, mm) {
+TEST_F(VulkanAPITest, mm) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1229,7 +1472,7 @@ TEST(VulkanAPITest, mm) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, mul) {
+TEST_F(VulkanAPITest, mul) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1251,7 +1494,7 @@ TEST(VulkanAPITest, mul) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, mul_broadcast0) {
+TEST_F(VulkanAPITest, mul_broadcast0) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1273,7 +1516,7 @@ TEST(VulkanAPITest, mul_broadcast0) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, mul_broadcast1) {
+TEST_F(VulkanAPITest, mul_broadcast1) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1295,7 +1538,7 @@ TEST(VulkanAPITest, mul_broadcast1) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, mul_broadcast2) {
+TEST_F(VulkanAPITest, mul_broadcast2) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1317,7 +1560,7 @@ TEST(VulkanAPITest, mul_broadcast2) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, mul_) {
+TEST_F(VulkanAPITest, mul_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1339,7 +1582,7 @@ TEST(VulkanAPITest, mul_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, mul_broadcast0_) {
+TEST_F(VulkanAPITest, mul_broadcast0_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1361,7 +1604,7 @@ TEST(VulkanAPITest, mul_broadcast0_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, mul_broadcast1_) {
+TEST_F(VulkanAPITest, mul_broadcast1_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1383,7 +1626,7 @@ TEST(VulkanAPITest, mul_broadcast1_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, mul_scalar) {
+TEST_F(VulkanAPITest, mul_scalar) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1404,7 +1647,7 @@ TEST(VulkanAPITest, mul_scalar) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, mul_scalar_) {
+TEST_F(VulkanAPITest, mul_scalar_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1425,7 +1668,7 @@ TEST(VulkanAPITest, mul_scalar_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, reflection_pad2d) {
+TEST_F(VulkanAPITest, reflection_pad2d) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1444,7 +1687,7 @@ TEST(VulkanAPITest, reflection_pad2d) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, reshape) {
+TEST_F(VulkanAPITest, reshape) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1466,7 +1709,7 @@ TEST(VulkanAPITest, reshape) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, reshape_) {
+TEST_F(VulkanAPITest, reshape_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1488,7 +1731,7 @@ TEST(VulkanAPITest, reshape_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, sigmoid) {
+TEST_F(VulkanAPITest, sigmoid) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1507,7 +1750,7 @@ TEST(VulkanAPITest, sigmoid) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, sigmoid_) {
+TEST_F(VulkanAPITest, sigmoid_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1526,7 +1769,7 @@ TEST(VulkanAPITest, sigmoid_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, softmax) {
+TEST_F(VulkanAPITest, softmax) {
   at::Tensor test_in[] = {
     at::rand({1, 196, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
     at::rand({1, 197, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
@@ -1549,7 +1792,7 @@ TEST(VulkanAPITest, softmax) {
   }
 }
 
-TEST(VulkanAPITest, log_softmax) {
+TEST_F(VulkanAPITest, log_softmax) {
   at::Tensor test_in[] = {
     at::rand({1, 196, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
     at::rand({1, 197, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
@@ -1572,7 +1815,7 @@ TEST(VulkanAPITest, log_softmax) {
   }
 }
 
-TEST(VulkanAPITest, tanh) {
+TEST_F(VulkanAPITest, tanh) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1591,7 +1834,7 @@ TEST(VulkanAPITest, tanh) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, tanh_) {
+TEST_F(VulkanAPITest, tanh_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1610,7 +1853,7 @@ TEST(VulkanAPITest, tanh_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, sub) {
+TEST_F(VulkanAPITest, sub) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1632,7 +1875,7 @@ TEST(VulkanAPITest, sub) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, sub_broadcast0) {
+TEST_F(VulkanAPITest, sub_broadcast0) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1654,7 +1897,7 @@ TEST(VulkanAPITest, sub_broadcast0) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, sub_broadcast1) {
+TEST_F(VulkanAPITest, sub_broadcast1) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1676,7 +1919,7 @@ TEST(VulkanAPITest, sub_broadcast1) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, sub_broadcast2) {
+TEST_F(VulkanAPITest, sub_broadcast2) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1698,7 +1941,7 @@ TEST(VulkanAPITest, sub_broadcast2) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, sub_) {
+TEST_F(VulkanAPITest, sub_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1720,7 +1963,7 @@ TEST(VulkanAPITest, sub_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, sub_broadcast0_) {
+TEST_F(VulkanAPITest, sub_broadcast0_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1742,7 +1985,7 @@ TEST(VulkanAPITest, sub_broadcast0_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, sub_broadcast1_) {
+TEST_F(VulkanAPITest, sub_broadcast1_) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1764,7 +2007,7 @@ TEST(VulkanAPITest, sub_broadcast1_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, transposed_conv2d) {
+TEST_F(VulkanAPITest, transposed_conv2d) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -1844,7 +2087,7 @@ TEST(VulkanAPITest, transposed_conv2d) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, upsample_nearest2d) {
+TEST_F(VulkanAPITest, upsample_nearest2d) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -1864,7 +2107,7 @@ TEST(VulkanAPITest, upsample_nearest2d) {
 }
 
 #if !defined(__APPLE__)
-TEST(VulkanAPITest, cat_dim1_samefeature_success) {
+TEST_F(VulkanAPITest, cat_dim1_samefeature_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -1888,7 +2131,7 @@ TEST(VulkanAPITest, cat_dim1_samefeature_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, cat_dim1_difffeature_success) {
+TEST_F(VulkanAPITest, cat_dim1_difffeature_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -1912,7 +2155,7 @@ TEST(VulkanAPITest, cat_dim1_difffeature_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, cat_dim1_texture2d_success) {
+TEST_F(VulkanAPITest, cat_dim1_texture2d_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -1937,7 +2180,7 @@ TEST(VulkanAPITest, cat_dim1_texture2d_success) {
 }
 #endif /* !defined(__APPLE__) */
 
-TEST(VulkanAPITest, cat_dim1_singledepth_success) {
+TEST_F(VulkanAPITest, cat_dim1_singledepth_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -1961,7 +2204,7 @@ TEST(VulkanAPITest, cat_dim1_singledepth_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, cat_dim1_singletensor_success) {
+TEST_F(VulkanAPITest, cat_dim1_singletensor_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -1983,7 +2226,7 @@ TEST(VulkanAPITest, cat_dim1_singletensor_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, cat_dim1_twotensors_success) {
+TEST_F(VulkanAPITest, cat_dim1_twotensors_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2006,7 +2249,7 @@ TEST(VulkanAPITest, cat_dim1_twotensors_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, cat_dim1_bat1_mult4ch_success) {
+TEST_F(VulkanAPITest, cat_dim1_bat1_mult4ch_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2030,7 +2273,7 @@ TEST(VulkanAPITest, cat_dim1_bat1_mult4ch_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, cat_dim1_bat2_mult4ch_success) {
+TEST_F(VulkanAPITest, cat_dim1_bat2_mult4ch_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2054,7 +2297,7 @@ TEST(VulkanAPITest, cat_dim1_bat2_mult4ch_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, cat_dim1_mult4ch_mixed_success) {
+TEST_F(VulkanAPITest, cat_dim1_mult4ch_mixed_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2078,7 +2321,7 @@ TEST(VulkanAPITest, cat_dim1_mult4ch_mixed_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, cat_dim1_mult4ch_nonmult4ch_success) {
+TEST_F(VulkanAPITest, cat_dim1_mult4ch_nonmult4ch_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2103,7 +2346,7 @@ TEST(VulkanAPITest, cat_dim1_mult4ch_nonmult4ch_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, cat_dim2_sameheight_success) {
+TEST_F(VulkanAPITest, cat_dim2_sameheight_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2127,7 +2370,7 @@ TEST(VulkanAPITest, cat_dim2_sameheight_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, cat_dim2_diffheight_success) {
+TEST_F(VulkanAPITest, cat_dim2_diffheight_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2151,7 +2394,7 @@ TEST(VulkanAPITest, cat_dim2_diffheight_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, cat_dim2_singledepth_success) {
+TEST_F(VulkanAPITest, cat_dim2_singledepth_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2175,7 +2418,7 @@ TEST(VulkanAPITest, cat_dim2_singledepth_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, cat_dim2_invalidinputs_exceptions) {
+TEST_F(VulkanAPITest, cat_dim2_invalidinputs_exceptions) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2224,7 +2467,7 @@ TEST(VulkanAPITest, cat_dim2_invalidinputs_exceptions) {
   }
 }
 
-TEST(VulkanAPITest, permute_2d_success) {
+TEST_F(VulkanAPITest, permute_2d_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2246,7 +2489,7 @@ TEST(VulkanAPITest, permute_2d_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, permute_3d_success) {
+TEST_F(VulkanAPITest, permute_3d_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2273,7 +2516,7 @@ TEST(VulkanAPITest, permute_3d_success) {
   }
 }
 
-TEST(VulkanAPITest, permute_4d_success) {
+TEST_F(VulkanAPITest, permute_4d_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2300,7 +2543,7 @@ TEST(VulkanAPITest, permute_4d_success) {
   }
 }
 
-TEST(VulkanAPITest, permute_4dmclaren_success) {
+TEST_F(VulkanAPITest, permute_4dmclaren_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2322,7 +2565,7 @@ TEST(VulkanAPITest, permute_4dmclaren_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, permute_4dbig_success) {
+TEST_F(VulkanAPITest, permute_4dbig_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2349,7 +2592,7 @@ TEST(VulkanAPITest, permute_4dbig_success) {
   }
 }
 
-TEST(VulkanAPITest, permute_negativedims_success) {
+TEST_F(VulkanAPITest, permute_negativedims_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2371,7 +2614,7 @@ TEST(VulkanAPITest, permute_negativedims_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, permute_1d_nochange) {
+TEST_F(VulkanAPITest, permute_1d_nochange) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2393,7 +2636,7 @@ TEST(VulkanAPITest, permute_1d_nochange) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, permute_sameDims_nochange) {
+TEST_F(VulkanAPITest, permute_sameDims_nochange) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2415,7 +2658,7 @@ TEST(VulkanAPITest, permute_sameDims_nochange) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, permute_invalidinputs_exceptions) {
+TEST_F(VulkanAPITest, permute_invalidinputs_exceptions) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2475,7 +2718,7 @@ TEST(VulkanAPITest, permute_invalidinputs_exceptions) {
   }, ::c10::Error);
 }
 
-TEST(VulkanAPITest, slice_width_success) {
+TEST_F(VulkanAPITest, slice_width_success) {
   // Arrange
   std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
     {3, {2, 3, 40, 50}},  // 4D tensors with dim=width
@@ -2488,7 +2731,7 @@ TEST(VulkanAPITest, slice_width_success) {
   slice_tests(dim2sizes);
 }
 
-TEST(VulkanAPITest, slice_height_success) {
+TEST_F(VulkanAPITest, slice_height_success) {
   // Arrange
   std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
     {2, {2, 3, 40, 50}},  // 4D tensors with dim=height
@@ -2501,7 +2744,7 @@ TEST(VulkanAPITest, slice_height_success) {
   slice_tests(dim2sizes);
 }
 
-TEST(VulkanAPITest, slice_feature_success) {
+TEST_F(VulkanAPITest, slice_feature_success) {
   // Arrange
   std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
     {1, {2, 40, 13, 14}}, // 4D tensors with dim=feature(channel)
@@ -2513,7 +2756,7 @@ TEST(VulkanAPITest, slice_feature_success) {
   slice_tests(dim2sizes);
 }
 
-TEST(VulkanAPITest, slice_batch_success) {
+TEST_F(VulkanAPITest, slice_batch_success) {
   // Arrange
   std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
     {0, {40, 3, 13, 14}}, // 4D tensors with dim=batch
@@ -2524,7 +2767,7 @@ TEST(VulkanAPITest, slice_batch_success) {
   slice_tests(dim2sizes);
 }
 
-TEST(VulkanAPITest, slice_invalidinputs_exceptions) {
+TEST_F(VulkanAPITest, slice_invalidinputs_exceptions) {
   // Act: slice step must be positive
   EXPECT_THROW({
     slice_test({2, 3, 4, 5}, 3, 0, 3, 0);
@@ -2541,7 +2784,7 @@ TEST(VulkanAPITest, slice_invalidinputs_exceptions) {
   }, ::c10::Error);
 }
 
-TEST(VulkanAPITest, clone_success) {
+TEST_F(VulkanAPITest, clone_success) {
   // Arrange
   std::multimap<c10::optional<c10::MemoryFormat>, std::vector<int64_t>> mem2sizes {
     {c10::MemoryFormat::Preserve, {2, 3, 5, 161}},    // 4D tensors with MemoryFormat::Preserve
@@ -2564,7 +2807,7 @@ TEST(VulkanAPITest, clone_success) {
   }
 }
 
-TEST(VulkanAPITest, clone_invalidinputs_exceptions) {
+TEST_F(VulkanAPITest, clone_invalidinputs_exceptions) {
   // Act: Vulkan supports Preserve and Contiguous memory foramts
   EXPECT_THROW({
     clone_test({2, 3, 5, 161}, c10::MemoryFormat::ChannelsLast);
@@ -2812,7 +3055,7 @@ class MobileNetV2 final : public OpsList {
   }
 };
 
-TEST(VulkanAPITest, mobilenetv2) {
+TEST_F(VulkanAPITest, mobilenetv2) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -2831,7 +3074,7 @@ TEST(VulkanAPITest, mobilenetv2) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, gru_mclareninputs_success) {
+TEST_F(VulkanAPITest, gru_mclareninputs_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2895,7 +3138,7 @@ TEST(VulkanAPITest, gru_mclareninputs_success) {
   ASSERT_TRUE(check_hidden);
 }
 
-TEST(VulkanAPITest, gru_invalidinputs_exceptions) {
+TEST_F(VulkanAPITest, gru_invalidinputs_exceptions) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -2989,7 +3232,7 @@ TEST(VulkanAPITest, gru_invalidinputs_exceptions) {
   }, ::c10::Error);
 }
 
-TEST(VulkanAPITest, gru_prepack_success) {
+TEST_F(VulkanAPITest, gru_prepack_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -3059,7 +3302,7 @@ TEST(VulkanAPITest, gru_prepack_success) {
   ASSERT_TRUE(check_hidden);
 }
 
-TEST(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
+TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -3184,6 +3427,266 @@ TEST(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
         has_biases, num_layers, 1.0, train, bidirectional, batch_first);
   }, ::c10::Error);
 }
+
+TEST_F(VulkanAPITest, lstm_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const int input_size = 5;
+  const int hidden_size = 7;
+  const int num_layers = 4;
+  const int L = 1;
+  const int N = 1;
+  const double lstm_dropout = .0;
+  const bool has_biases = true;
+  const bool train = false;
+  const bool bidirectional = false;
+  const bool batch_first = true;
+  const auto in_cpu = at::rand({N, L, input_size}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto h0_cpu = at::rand({num_layers, N, hidden_size}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto c0_cpu = at::rand({num_layers, N, hidden_size}, at::device(at::kCPU).dtype(at::kFloat));
+
+  c10::List<at::Tensor> weight_ih_l; // shape (4 * hidden_size, input_size)
+  c10::List<at::Tensor> weight_hh_l; // shape (4 * hidden_size, hidden_size)
+  c10::List<at::Tensor> bias_ih_l;   // shape (4 * hidden_size)
+  c10::List<at::Tensor> bias_hh_l;   // shape (4 * hidden_size)
+  for (int l = 0; l < num_layers; ++l) {
+    if (l == 0) {
+      weight_ih_l.emplace_back(at::rand({4 * hidden_size, input_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    } else {
+      weight_ih_l.emplace_back(at::rand({4 * hidden_size, hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    }
+    weight_hh_l.emplace_back(at::rand({4 * hidden_size, hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_ih_l.emplace_back(at::rand({4 * hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_hh_l.emplace_back(at::rand({4 * hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+  }
+
+  // put this guard here to run inference inststead of training
+  // to avoid the following error:
+  //     C++ exception with description "0INTERNAL ASSERT FAILED at "xplat/caffe2/aten/src/ATen/core/boxing/KernelFunction.cpp":31, please report a bug to PyTorch. aten::gru.input has kernels registered to both CompositeImplicitAutograd and a backend mapped to AutogradOther. This makes the backend kernel unreachable; the dispatcher will always prefer the CompositeImplicitAutograd lowering (see Note [Ambiguity in AutogradOther kernel]). If you want to override CompositeImplicitAutograd, please open an issue to request a dedicated Autograd dispatch key for the backend.
+  //     If you only want to run inference instead of training, add `c10::InferenceMode mode;` before model.forward(). Note this guard is only available in C++ but not Python at present.
+  c10::InferenceMode mode;
+
+  // Act
+  const auto out_cpu = at::lstm(in_cpu, {h0_cpu, c0_cpu},
+      { weight_ih_l[0], weight_hh_l[0], bias_ih_l[0], bias_hh_l[0],
+        weight_ih_l[1], weight_hh_l[1], bias_ih_l[1], bias_hh_l[1],
+        weight_ih_l[2], weight_hh_l[2], bias_ih_l[2], bias_hh_l[2],
+        weight_ih_l[3], weight_hh_l[3], bias_ih_l[3], bias_hh_l[3] },
+      has_biases, num_layers, lstm_dropout, train, bidirectional, batch_first);
+
+  // weights/biases should be always on CPU.
+  const auto out_vulkan = at::lstm(in_cpu.vulkan(), {h0_cpu.vulkan(), c0_cpu.vulkan()},
+      { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+        weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1),
+        weight_ih_l.get(2), weight_hh_l.get(2), bias_ih_l.get(2), bias_hh_l.get(2),
+        weight_ih_l.get(3), weight_hh_l.get(3), bias_ih_l.get(3), bias_hh_l.get(3) },
+      has_biases, num_layers, lstm_dropout, train, bidirectional, batch_first);
+
+  auto cpu_output = std::get<0>(out_cpu);
+  auto cpu_hidden = std::get<1>(out_cpu);
+  auto cpu_cell = std::get<2>(out_cpu);
+  auto vulkan_output = std::get<0>(out_vulkan);
+  auto vulkan_hidden = std::get<1>(out_vulkan);
+  auto vulkan_cell = std::get<2>(out_vulkan);
+
+  // Assert
+  const auto check_output = almostEqual(cpu_output, vulkan_output.cpu());
+  if (!check_output) {
+    showRtol(cpu_output, vulkan_output.cpu());
+  }
+  ASSERT_TRUE(check_output);
+
+  const auto check_hidden = almostEqual(cpu_hidden, vulkan_hidden.cpu());
+  if (!check_hidden) {
+    showRtol(cpu_hidden, vulkan_hidden.cpu());
+  }
+  ASSERT_TRUE(check_hidden);
+
+  const auto check_cell = almostEqual(cpu_cell, vulkan_cell.cpu());
+  if (!check_cell) {
+    showRtol(cpu_cell, vulkan_cell.cpu());
+  }
+  ASSERT_TRUE(check_cell);
+}
+
+TEST_F(VulkanAPITest, lstm_mclareninputs_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const int input_size = 384;
+  const int hidden_size = 384;
+  const int num_layers = 2;
+  const int L = 1;
+  const int N = 1;
+  const double lstm_dropout = .0;
+  const bool has_biases = true;
+  const bool train = false;
+  const bool bidirectional = false;
+  const bool batch_first = true;
+  const auto in_cpu = at::rand({N, L, input_size}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto h0_cpu = at::rand({num_layers, N, hidden_size}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto c0_cpu = at::rand({num_layers, N, hidden_size}, at::device(at::kCPU).dtype(at::kFloat));
+
+  c10::List<at::Tensor> weight_ih_l; // shape (4 * hidden_size, input_size)
+  c10::List<at::Tensor> weight_hh_l; // shape (4 * hidden_size, hidden_size)
+  c10::List<at::Tensor> bias_ih_l;   // shape (4 * hidden_size)
+  c10::List<at::Tensor> bias_hh_l;   // shape (4 * hidden_size)
+  for (int l = 0; l < num_layers; ++l) {
+    if (l == 0) {
+      weight_ih_l.emplace_back(at::rand({4 * hidden_size, input_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    } else {
+      weight_ih_l.emplace_back(at::rand({4 * hidden_size, hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    }
+    weight_hh_l.emplace_back(at::rand({4 * hidden_size, hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_ih_l.emplace_back(at::rand({4 * hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_hh_l.emplace_back(at::rand({4 * hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+  }
+
+  // put this guard here to run inference inststead of training
+  // to avoid the following error:
+  //     C++ exception with description "0INTERNAL ASSERT FAILED at "xplat/caffe2/aten/src/ATen/core/boxing/KernelFunction.cpp":31, please report a bug to PyTorch. aten::gru.input has kernels registered to both CompositeImplicitAutograd and a backend mapped to AutogradOther. This makes the backend kernel unreachable; the dispatcher will always prefer the CompositeImplicitAutograd lowering (see Note [Ambiguity in AutogradOther kernel]). If you want to override CompositeImplicitAutograd, please open an issue to request a dedicated Autograd dispatch key for the backend.
+  //     If you only want to run inference instead of training, add `c10::InferenceMode mode;` before model.forward(). Note this guard is only available in C++ but not Python at present.
+  c10::InferenceMode mode;
+
+  // Act
+  const auto out_cpu = at::lstm(in_cpu, {h0_cpu, c0_cpu},
+      { weight_ih_l[0], weight_hh_l[0], bias_ih_l[0], bias_hh_l[0],
+        weight_ih_l[1], weight_hh_l[1], bias_ih_l[1], bias_hh_l[1] },
+      has_biases, num_layers, lstm_dropout, train, bidirectional, batch_first);
+
+  // weights/biases should be always on CPU.
+  const auto out_vulkan = at::lstm(in_cpu.vulkan(), {h0_cpu.vulkan(), c0_cpu.vulkan()},
+      { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+        weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      has_biases, num_layers, lstm_dropout, train, bidirectional, batch_first);
+
+  auto cpu_output = std::get<0>(out_cpu);
+  auto cpu_hidden = std::get<1>(out_cpu);
+  auto cpu_cell = std::get<2>(out_cpu);
+  auto vulkan_output = std::get<0>(out_vulkan);
+  auto vulkan_hidden = std::get<1>(out_vulkan);
+  auto vulkan_cell = std::get<2>(out_vulkan);
+
+  // Assert
+  const auto check_output = almostEqual(cpu_output, vulkan_output.cpu());
+  if (!check_output) {
+    showRtol(cpu_output, vulkan_output.cpu());
+  }
+  ASSERT_TRUE(check_output);
+
+  const auto check_hidden = almostEqual(cpu_hidden, vulkan_hidden.cpu());
+  if (!check_hidden) {
+    showRtol(cpu_hidden, vulkan_hidden.cpu());
+  }
+  ASSERT_TRUE(check_hidden);
+
+  const auto check_cell = almostEqual(cpu_cell, vulkan_cell.cpu());
+  if (!check_cell) {
+    showRtol(cpu_cell, vulkan_cell.cpu());
+  }
+  ASSERT_TRUE(check_cell);
+}
+
+
+#if defined (__ANDROID__)  // to avoid `Undefined symbols for architecture arm64` error
+TEST_F(VulkanAPITest, profiling_invalideinputs_exceptions) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Act: The device doesn't support for timestamps on all graphics and compute queues.
+  EXPECT_THROW({
+    const bool is_timestamps_supported_ = false;
+    const float timestamp_period = 1.f;
+    at::native::vulkan::api::QueryPool querypool(at::native::vulkan::api::context()->gpu().device, is_timestamps_supported_, timestamp_period);
+    querypool.enable();
+  }, ::c10::Error);
+
+  // Act: The query pool already exists.
+  EXPECT_THROW({
+    auto context = at::native::vulkan::api::context();
+    at::native::vulkan::api::QueryPool querypool(
+        context->gpu().device,
+        context->gpu().adapter->timestamp_compute_and_graphics(),
+        context->gpu().adapter->timestamp_period());
+    querypool.enable();
+    querypool.enable(); // already enabled
+  }, ::c10::Error);
+
+  // Act: The query index cannot exceed Configuration::kMaxQueryCount.
+  EXPECT_THROW({
+    auto context = at::native::vulkan::api::context();
+    at::native::vulkan::api::QueryPool querypool(
+        context->gpu().device,
+        context->gpu().adapter->timestamp_compute_and_graphics(),
+        context->gpu().adapter->timestamp_period());
+    querypool.enable();
+    for (uint32_t i = 0u; i < at::native::vulkan::api::QueryPool::Configuration::kMaxQueryCount + 1u; ++i) {
+      at::native::vulkan::api::Command::Buffer& command_buffer = context->command().pool.stream();
+      {
+        at::native::vulkan::api::OpProfiler profiler(command_buffer, querypool, "test");
+      }
+      context->command().pool.submit(context->gpu().queue, command_buffer);
+    }
+  }, ::c10::Error);
+}
+
+// NOTE: Keep the following test at the end of file
+//       so that it can print out the op execution time for all prior tests
+TEST_F(VulkanAPITest, profiling_result_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  auto is_enabled = at::native::vulkan::api::context()->querypool().is_enabled();
+  if (is_enabled) {
+    auto perf_info = at::native::vulkan::api::context()->querypool().disable(false);
+    std::cout
+        << "-----------------------------------------------------------------------------------------" << std::endl
+        << "Query Name                                  Execution             Start               End" << std::endl
+        << "-----------------------------------------------------------------------------------------" << std::endl;
+    for (size_t i = 0; i < perf_info.size(); i++) {
+      std::cout << std::left << std::setw(35) << perf_info[i].query_name.c_str()
+        << std::right << std::setw(15) << perf_info[i].execution_time_us << " us"
+        << std::setw(15) << perf_info[i].start_time_us << " us"
+        << std::setw(15) << perf_info[i].end_time_us << " us" << std::left << std::endl;
+    }
+  }
+  at::native::vulkan::api::context()->querypool().enable();
+  const auto in_cpu1 = at::rand({2, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({2, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({2, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 1);
+  out_vulkan.cpu();  // to make sure all GPU operations are done
+
+  // Act
+  auto perf_info = at::native::vulkan::api::context()->querypool().disable(true);
+  for (size_t i = 0; i < perf_info.size(); i++) {
+    std::cout << std::left << std::setw(35) << perf_info[i].query_name.c_str()
+      << std::right << std::setw(15) << perf_info[i].execution_time_us << " us"
+      << std::setw(15) << perf_info[i].start_time_us << " us"
+      << std::setw(15) << perf_info[i].end_time_us << " us" << std::left << std::endl;
+  }
+
+  // Assert
+  ASSERT_TRUE(perf_info.size() == 5u);
+  ASSERT_TRUE(perf_info[0].query_name == "aten::_cat (cat_feature_mult4ch)");
+
+  if (is_enabled) {
+    at::native::vulkan::api::context()->querypool().enable();
+  }
+}
+#endif
 
 } // namespace
 

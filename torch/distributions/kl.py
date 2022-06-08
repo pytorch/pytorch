@@ -822,4 +822,5 @@ def _add_kl_info():
         rows.append("* :class:`~torch.distributions.{}` and :class:`~torch.distributions.{}`"
                     .format(p.__name__, q.__name__))
     kl_info = '\n\t'.join(rows)
-    kl_divergence.__doc__ += kl_info  # type: ignore[operator]
+    if kl_divergence.__doc__:
+        kl_divergence.__doc__ += kl_info  # type: ignore[operator]

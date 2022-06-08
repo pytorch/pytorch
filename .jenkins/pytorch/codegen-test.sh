@@ -26,7 +26,8 @@ set -x
 rm -rf "$OUT"
 
 # aten codegen
-python -m tools.codegen.gen \
+python -m torchgen.gen \
+  -s aten/src/ATen \
   -d "$OUT"/torch/share/ATen
 
 # torch codegen
@@ -38,6 +39,7 @@ mkdir -p "$OUT"/pyi/torch/_C
 mkdir -p "$OUT"/pyi/torch/nn
 python -m tools.pyi.gen_pyi \
   --native-functions-path aten/src/ATen/native/native_functions.yaml \
+  --tags-path aten/src/ATen/native/tags.yaml \
   --deprecated-functions-path tools/autograd/deprecated.yaml \
   --out "$OUT"/pyi
 
@@ -45,6 +47,7 @@ python -m tools.pyi.gen_pyi \
 python -m tools.autograd.gen_autograd \
   "$OUT"/torch/share/ATen/Declarations.yaml \
   aten/src/ATen/native/native_functions.yaml \
+  aten/src/ATen/native/tags.yaml \
   "$OUT"/autograd \
   tools/autograd
 
@@ -52,5 +55,6 @@ python -m tools.autograd.gen_autograd \
 mkdir -p "$OUT"/annotated_fn_args
 python -m tools.autograd.gen_annotated_fn_args \
   aten/src/ATen/native/native_functions.yaml \
+  aten/src/ATen/native/tags.yaml \
   "$OUT"/annotated_fn_args \
   tools/autograd

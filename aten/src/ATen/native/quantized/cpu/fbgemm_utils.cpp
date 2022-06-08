@@ -1,10 +1,10 @@
 #include <ATen/ATen.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/conv_serialization.h>
-#include <ATen/native/quantized/cpu/embedding_packed_params.h>
+#include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/native/quantized/cpu/onednn_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
@@ -554,9 +554,9 @@ int register_embedding_params() {
 
 namespace {
 
-static auto conv2d_params = register_conv_params<2>();
-static auto conv3d_params = register_conv_params<3>();
-static auto linear_params = register_linear_params();
-static auto embedding_params = register_embedding_params();
+static C10_UNUSED auto conv2d_params = register_conv_params<2>();
+static C10_UNUSED auto conv3d_params = register_conv_params<3>();
+static C10_UNUSED auto linear_params = register_linear_params();
+static C10_UNUSED auto embedding_params = register_embedding_params();
 
 } // namespace

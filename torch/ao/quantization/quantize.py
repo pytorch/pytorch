@@ -53,7 +53,7 @@ def _propagate_qconfig_helper(module, qconfig_dict,
         None, module is modified inplace with qconfig attached
     """
 
-    module_qconfig = qconfig_dict.get(type(module), qconfig_parent)
+    module_qconfig = qconfig_dict.get(type_before_parametrizations(module), qconfig_parent)
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
     module_qconfig = getattr(module, 'qconfig', module_qconfig)
 
@@ -553,7 +553,7 @@ def _convert(
         # both fused modules and observed custom modules are
         # swapped as one unit
         if not isinstance(mod, _FusedModule) and \
-           type(mod) not in custom_module_class_mapping:
+           type_before_parametrizations(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
                      is_reference, convert_custom_config_dict)
         reassign[name] = swap_module(mod, mapping, custom_module_class_mapping)
@@ -577,11 +577,11 @@ def swap_module(mod, mapping, custom_module_class_mapping):
     new_mod = mod
     if hasattr(mod, 'qconfig') and mod.qconfig is not None:
         swapped = False
-        if type(mod) in custom_module_class_mapping:
-            new_mod = custom_module_class_mapping[type(mod)].from_observed(mod)
+        if type_before_parametrizations(mod) in custom_module_class_mapping:
+            new_mod = custom_module_class_mapping[type_before_parametrizations(mod)].from_observed(mod)
             swapped = True
-        elif type(mod) in mapping:
-            qmod = mapping[type(mod)]
+        elif type_before_parametrizations(mod) in mapping:
+            qmod = mapping[type_before_parametrizations(mod)]
             if hasattr(qmod, '_IS_REFERENCE') and qmod._IS_REFERENCE:
                 assert mod.qconfig is not None
                 weight_post_process = mod.qconfig.weight()

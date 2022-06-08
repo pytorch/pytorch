@@ -35,6 +35,7 @@ aten/src/ATen/cuda/CUDAConfig.h
 benchmarks/.data
 caffe2/cpp_test/
 dist/
+docs/build/
 docs/cpp/src
 docs/src/**/*
 docs/cpp/build
@@ -70,7 +71,7 @@ torch/return_types.pyi
 torch/nn/functional.pyi
 torch/utils/data/datapipes/datapipe.pyi
 torch/csrc/autograd/generated/*
-torch/csrc/lazy/generated/*
+torch/csrc/lazy/generated/*.[!m]*
 # Listed manually because some files in this directory are not generated
 torch/testing/_internal/generated/annotated_fn_args.py
 torch/testing/_internal/data/*.pt
@@ -120,6 +121,10 @@ torch/version.py
 env
 .circleci/scripts/COMMIT_MSG
 scripts/release_notes/*.json
+
+# These files get copied over on invoking setup.py
+torchgen/packaged/*
+!torchgen/packaged/README.md
 
 # IPython notebook checkpoints
 .ipynb_checkpoints
@@ -311,10 +316,20 @@ bazel-*
 *.zip
 
 # core dump files
-core.*
+**/core.[1-9]*
 
 # Generated if you use the pre-commit script for clang-tidy
 pr.diff
 
 # coverage files
 */**/.coverage.*
+
+# buck generated files
+.buckd/
+.lsp-buck-out/
+.lsp.buckd/
+buck-out/
+
+# Downloaded libraries
+third_party/ruy/
+third_party/glog/
