@@ -402,14 +402,22 @@ class TORCH_CUDA_CU_API TensorView : public Val {
       const std::vector<int>& axes,
       const std::vector<TensorView*>& tvs);
 
-  // Create a TensorView before the original tensor. A common use case is to
-  // write results into shared memory or registers before moving to global
-  // memory. Analogous to TVM Cache_Write
-  TensorView* cacheBefore();
+  //! Create a TensorView before the original tensor. A common use case is to
+  //! write results into shared memory or registers before moving to global
+  //! memory. Analogous to TVM Cache_Write
+  //!
+  //! @param cache_op: memory operator to use for the inserted op between
+  //!   the the data tensor and the cache tensor
+  TensorView* cacheBefore(
+      c10::optional<LoadStoreOpType> cache_op = c10::nullopt);
 
-  // Create a TensorView after the original tensor. A common use case is to
-  // read tensor into shared memory or registers. Analogous to TVM Cache_Read
-  TensorView* cacheAfter();
+  //! Create a TensorView after the original tensor. A common use case is to
+  //! read tensor into shared memory or registers. Analogous to TVM Cache_Read
+  //!
+  //! @param cache_op: memory operator to use for the inserted op between
+  //!   the the data tensor and the cache tensor
+  TensorView* cacheAfter(
+      c10::optional<LoadStoreOpType> cache_op = c10::nullopt);
 
   // For a fusion output with other uses, we want to avoid writing to global
   // memory and then reading the output again. We write to global memory
@@ -437,17 +445,6 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   bool isDoubleBuffered() const {
     return is_double_buffered_;
   }
-
-  //! Fill in mma options in scheduling time.
-  //!  Each mma op in Fusion IR must be configured once before lowering.
-  //!  Mma options are configuration parameters used in lowering to mma
-  //!  instrinsics, mainly the type of mma macro to use and input data layout
-  //!  etc.
-  //!
-  //! TODO: This step will very likely be removed in a follow up PR. All of
-  //!  the options configured here could actually be inferred from fusion IR
-  //!  once we are feature complete.
-  void configureMma(MmaOptions options);
 
   //! Transforms the innermost iterdomains according to the given mma swizzle,
   //!  this should be used on the tvs that are either inputs/outputs of an
