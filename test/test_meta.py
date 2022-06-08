@@ -743,6 +743,7 @@ meta_dispatch_expected_failures = {
 
 # these sometimes pass and sometimes fail
 meta_dispatch_skips = {
+    aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32},  # at::nonzero doesn't have a Meta function
     aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.aminmax.default: {i64, u8, b8, f32, i8, f64, i16, i32},
     aten.cummax.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
