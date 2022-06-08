@@ -759,7 +759,7 @@
   device_guard: False
   tags: inplace_view
   dispatch:
-    ZeroTensor, CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: as_strided_
+    CompositeExplicitAutogradNonFunctional: as_strided_
 
 - func: asin(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -4961,7 +4961,7 @@
     CPU: _unique2_cpu
     CUDA: _unique2_cuda
 
-- func: _unsafe_view(Tensor self, int[] size) -> Tensor
+- func: _unsafe_view(Tensor(a) self, int[] size) -> Tensor(a)
   dispatch:
     CompositeExplicitAutograd: _unsafe_view
 
@@ -12055,6 +12055,12 @@
     CompositeExplicitAutogradNonFunctional: transpose_copy_int
   tags: view_copy
 
+- func: _unsafe_view_copy(Tensor self, int[] size) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _unsafe_view_copy
+  tags: view_copy
+
 - func: unsqueeze_copy(Tensor self, int dim) -> Tensor
   variants: function
   dispatch:
@@ -12269,6 +12275,12 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: transpose_copy_int_out
+
+
+- func: _unsafe_view_copy.out(Tensor self, int[] size, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _unsafe_view_copy_out
 
 
 - func: unsqueeze_copy.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
