@@ -1491,6 +1491,8 @@ fake_skips = (
     "nn.functional.max_pool1d",  # The tensor has a non-zero number of elements
     "to_sparse",  # Could not run 'aten::to_sparse' with arguments from the 'Meta' backend
     "tensor_split",  # The tensor has a non-zero number of elements, but its data is not allocated yet
+    "repeat_interleave",  # cannot repeat_interleave a meta tensor without output_size
+    "segment_reduce",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
 )
 
 
@@ -1520,6 +1522,11 @@ class TestFakeTensorNonErroring(TestCase):
 
                 with enable_torch_dispatch_mode(mode):
                     res = op(input, *args, **kwargs)
+
+                for arg in tree_flatten(res)[0]:
+                    fake_output = (not isinstance(arg, torch.Tensor)) or isinstance(arg, FakeTensor)
+                    self.assertTrue(fake_output)
+
             except torch._subclasses.fake_tensor.ComplexInputException:
                 pass
 

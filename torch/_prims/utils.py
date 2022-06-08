@@ -129,9 +129,14 @@ def TensorMeta(
     else:
         mode = get_prim_fake_mode()
 
-    return FakeTensor(
-        mode, torch.empty_strided(shape, strides, dtype=dtype, device="meta"), device
-    )
+    if device.type == "meta":
+        return torch.empty_strided(shape, strides, dtype=dtype, device="meta")
+    else:
+        return FakeTensor(
+            mode,
+            torch.empty_strided(shape, strides, dtype=dtype, device="meta"),
+            device,
+        )
 
 
 # TODO: look at using torch.testing.assert_close instead with an option

@@ -191,13 +191,6 @@ def to_copy(fake_mode, func, *args, **kwargs):
             fake_mode, torch.ops.aten._to_copy(input, **new_kwargs), out_device
         )
 
-# TODO: dont know why this is being dispatched to __torch__function__
-# Dont default to common device handling since this doesnt take in/return tensor
-# TODO: update typo of minium
-@register_op_impl(lambda func: func in (prims.maximum_value.default, prims.minium_value.default))
-def func(fake_mode, func, *args, **kwargs):
-    return func(*args, **kwargs)
-
 @register_op_impl(torch.ops.aten.clone.default)
 def clone(fake_mode, func, input, memory_format=None):
     out_device = input.device
@@ -239,10 +232,6 @@ class FakeTensor(torch.Tensor):
     # TODO: resolve error in default __repr__
     def __repr__(self):
         return f"FakeTensor({self.fake_device}, {self.size()}, {self.dtype})"
-
-    @property
-    def device(self):
-        return self.fake_device
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -356,6 +345,12 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
+
+        # prims already wrap FakeTensor inputs to FakeTensor outputs
+        # and do device logic, we dont need do anything but run them
+        if "prims::" in func._schema.name:
+            with no_dispatch():
+                return func(*args, **kwargs)
 
         with no_dispatch():
             # TODO: apply as no_dispatch decorator
