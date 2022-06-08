@@ -6,6 +6,22 @@ namespace at {
 namespace native {
 
 template <typename OPS>
+inline Tensor apply_reduction(
+    const Tensor& output,
+    at::Reduction::Reduction reduction) {
+  switch (reduction) {
+    case at::Reduction::Mean:
+      return OPS::mean(output);
+    case at::Reduction::Sum:
+      return OPS::sum(output);
+    case at::Reduction::None:
+      return output;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Invalid reduction: ", (int64_t) reduction);
+  }
+}
+
+template <typename OPS>
 Tensor& soft_margin_loss_out(
     const Tensor& input,
     const Tensor& target,
@@ -19,25 +35,12 @@ Tensor& soft_margin_loss_out(
   OPS::add_(output, 1.);
   OPS::log_(output);
 
-  if (reduction != Reduction::None) {
-    Tensor tmp;
-    switch (reduction) {
-      case Reduction::Mean:
-        tmp = OPS::mean(output);
-        break;
-      case Reduction::Sum:
-        tmp = OPS::sum(output);
-        break;
-      default:
-        tmp = output;
-        break;
-    }
-
-    if (!tmp.is_same(output)) {
-      OPS::resize_(output, {});
-      OPS::copy_(output, tmp);
-    }
+  auto tmp = apply_reduction<OPS>(output, reduction);
+  if (!tmp.is_same(output)) {
+    OPS::resize_(output, {});
+    OPS::copy_(output, tmp);
   }
+
   return output;
 }
 
