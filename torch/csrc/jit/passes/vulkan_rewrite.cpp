@@ -29,9 +29,9 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
   std::string prepacked_ops_pattern = R"(
     graph(%input, %weight, %bias):
         %weight_t = aten::t(%weight)
-        %packed_weight_bias = vulkan_prepack::linear_prepack(
+        %packed_weight_bias = vulkan_prepack::create_linear_context(
             %weight_t, %bias)
-        %res = vulkan_prepack::linear_run(%input, %packed_weight_bias)
+        %res = vulkan_prepack::run_linear_context(%input, %packed_weight_bias)
         return (%res))";
 
   SubgraphRewriter linear_rewriter;
@@ -212,7 +212,7 @@ void vulkanFoldPrePackingOps(script::Module& m) {
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::conv2d_clamp_prepack")) ||
         (n->kind() ==
-         Symbol::fromQualString("vulkan_prepack::linear_prepack")) ||
+         Symbol::fromQualString("vulkan_prepack::create_linear_context")) ||
         (n->kind() ==
          Symbol::fromQualString(
              "vulkan_prepack::conv2d_transpose_clamp_prepack")));
