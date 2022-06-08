@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 from torch._prims import utils
 from torch._prims.utils import check
-from torch._prims.wrappers import out_wrapper_multi
+from torch._prims.wrappers import out_wrapper_multi, out_wrapper
 
 from typing import List, Optional
 
@@ -39,10 +39,8 @@ def meta_min(self):
 
 def squareCheckInputs(self, f_name):
     assert self.dim() >= 2, f"{f_name}: The input tensor must have at least 2 dimensions."
-    # TODO: I think the error message has the -2 and -1 swapped.  If you fix
-    # it fix the C++ squareCheckInputs too
     assert self.size(-1) == self.size(-2), \
-        f"{f_name}: A must be batches of square matrices, but they are {self.size(-1)} by {self.size(-2)} matrices"
+        f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
 
 def checkUplo(uplo: str):
     uplo_uppercase = uplo.upper()
@@ -66,7 +64,7 @@ def meta_pad2d(self, padding):
     check(
         (self.ndim == 3 and valid_dims)
         or (self.ndim == 4 and valid_dims and self.size(3) != 0),
-        f"3D or 4D (batch mode) tensor expected for input, but got: {self}"
+        lambda: f"3D or 4D (batch mode) tensor expected for input, but got: {self}"
     )
     if self.ndim == 4:
         nbatch, nplane, input_h, input_w = self.shape
@@ -88,7 +86,7 @@ def meta_pad2d(self, padding):
 def meta_dot(self, tensor):
     check(
         self.dim() == 1 and tensor.dim() == 1,
-        f"1D tensors expected, but got {self.dim()}D and {tensor.dim()}D tensors"
+        lambda: f"1D tensors expected, but got {self.dim()}D and {tensor.dim()}D tensors"
     )
     return self.new_empty(())
 
@@ -119,12 +117,12 @@ def meta_bernoulli(self, *, generator=None, out):
 
 @torch.library.impl(meta_lib, "_adaptive_avg_pool2d")
 def meta_adaptive_avg_pool2d(self, output_size):
-    check(self.ndim == 3 or self.ndim == 4, f"Expected 3D or 4D tensor, but got {self.shape}")
+    check(self.ndim == 3 or self.ndim == 4, lambda: f"Expected 3D or 4D tensor, but got {self.shape}")
     return self.new_empty(self.shape[:-2] + tuple(output_size))
 
 @torch.library.impl(meta_lib, "_adaptive_avg_pool3d")
 def meta_adaptive_avg_pool3d(self, output_size):
-    check(self.ndim == 4 or self.ndim == 5, f"Expected 4D or 5D tensor, but got {self.shape}")
+    check(self.ndim == 4 or self.ndim == 5, lambda: f"Expected 4D or 5D tensor, but got {self.shape}")
     return self.new_empty(self.shape[:-3] + tuple(output_size))
 
 @torch.library.impl(meta_lib, "repeat_interleave.Tensor")
@@ -193,7 +191,7 @@ def meta_index_Tensor(self, indices):
                 )
                 for j in range(index.ndim):
                     check(
-                        index[j] <= self.shape[k + j],
+                        index.shape[j] == self.shape[k + j],
                         lambda: f"The shape of the mask {index.shape} at index {i} "
                                 f"does not match the shape of the indexed tensor {self.shape} at index {k + j}",
                         IndexError
@@ -284,3 +282,30 @@ def meta_linalg_cholesky_ex(input, upper=False, check_errors=False):
 
 torch.library.impl(meta_lib, "linalg_cholesky_ex")(meta_linalg_cholesky_ex)
 torch.library.impl(meta_lib, "linalg_cholesky_ex.L")(meta_linalg_cholesky_ex)
+
+@out_wrapper
+def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
+    dim1 = batch1.size(1)
+    dim2 = batch2.size(2)
+    self = self.expand((dim1, dim2))
+    check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
+    check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
+    check(
+        batch1.size(0) == batch2.size(0),
+        lambda: f"batch1 and batch2 must have same number of batches, got {batch1.size(0)} and {batch2.size(0)}"
+    )
+    check(
+        batch1.size(2) == batch2.size(1),
+        lambda: (
+            f"Incompatible matrix sizes for bmm ({batch1.size(1)}x{batch1.size(2)} "
+            f"and {batch2.size(1)}x{batch2.size(2)})"
+        )
+    )
+    check(
+        self.size(0) == dim1 and self.size(1) == dim2,
+        lambda: "self tensor does not match matmul output shape"
+    )
+    return self.new_empty(self.size())
+
+torch.library.impl(meta_lib, "addbmm")(meta_addbmm)
+torch.library.impl(meta_lib, "addbmm.out")(meta_addbmm)

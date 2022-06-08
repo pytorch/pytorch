@@ -14,6 +14,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     all_types_and_complex_and,
 )
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.testing._internal.common_utils import (
     TestCase,
     is_iterable_of_tensors,
@@ -24,6 +25,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     noncontiguous_like,
     TEST_WITH_ASAN,
+    TEST_WITH_UBSAN,
     IS_WINDOWS,
     IS_FBCODE,
     first_sample,
@@ -356,7 +358,7 @@ class TestCommon(TestCase):
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
-                return prims.utils.TensorMeta(x)
+                return FakeTensor.from_tensor(x)
             return x
 
         # TODO: iterate over requires_grad true/false
@@ -458,7 +460,7 @@ class TestCommon(TestCase):
 
             # TODO: consider adding some tolerance to this comparison
             msg = f"Reference result was farther ({ref_distance}) from the precise " \
-                  "computation than the torch result was ({torch_distance})!"
+                  f"computation than the torch result was ({torch_distance})!"
             self.assertTrue(ref_distance <= torch_distance, msg=msg)
 
         # Reports numerical accuracy discrepancies
@@ -506,7 +508,7 @@ class TestCommon(TestCase):
     def test_python_ref_errors(self, device, op):
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
-                return prims.utils.TensorMeta(x)
+                return FakeTensor.from_tensor(x)
             return x
 
         error_inputs = op.error_inputs(device)
@@ -1118,6 +1120,31 @@ class TestCommon(TestCase):
             # `chalf` input -> `half` output
             # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
+
+    @ops(op_db, allowed_dtypes=(torch.bool,))
+    @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
+    def test_non_standard_bool_values(self, device, dtype, op):
+        # Test boolean values other than 0x00 and 0x01 (gh-54789)
+        def convert_boolean_tensors(x):
+            if not isinstance(x, torch.Tensor) or x.dtype != torch.bool:
+                return x
+
+            # Map False -> 0 and True -> Random value in [2, 255]
+            true_vals = torch.randint(2, 255, x.shape, dtype=torch.uint8, device=x.device)
+            false_vals = torch.zeros((), dtype=torch.uint8, device=x.device)
+            x_int = torch.where(x, true_vals, false_vals)
+
+            ret = x_int.view(torch.bool)
+            self.assertEqual(ret, x)
+            return ret
+
+        for sample in op.sample_inputs(device, dtype):
+            expect = op(sample.input, *sample.args, **sample.kwargs)
+
+            transformed = sample.transform(convert_boolean_tensors)
+            actual = op(transformed.input, *transformed.args, **transformed.kwargs)
+
+            self.assertEqual(expect, actual)
 
 
 class TestCompositeCompliance(TestCase):
