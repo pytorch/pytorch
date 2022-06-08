@@ -279,8 +279,23 @@ Tensor nested_tensor(
     flat_tensors.push_back(list[i].reshape(-1).contiguous());
     sizes.push_back(tensor(c10::IntArrayRef(list[i].sizes())));
   }
+  //  Check if any input requires grad
+  const bool all_requires_grad =
+      std::all_of(list.begin(), list.end(), [](const at::Tensor& input) {
+        return input.requires_grad();
+      });
+  const bool any_requires_grad =
+      std::any_of(list.begin(), list.end(), [](const at::Tensor& input) {
+        return input.requires_grad();
+      });
+  // Should we check the difference between std:: any and std::all, this adds
+  // overhead to the creation but we can error out
+  TORCH_CHECK(all_requires_grad == any_requires_grad,
+  "Input tensor lists are required to be uniform with respect to requiring grad.")
 
+  // requires_grad option takes precedence from the input options
   TensorOptions options = flat_tensors[0].options().merge_in(options_);
+  options.requires_grad(all_requires_grad);
 
   return wrap_buffer(
       at::cat(flat_tensors).to(options), at::native::stack(sizes));

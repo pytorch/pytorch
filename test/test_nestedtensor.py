@@ -447,39 +447,62 @@ class TestNestedTensorDeviceType(TestCase):
             nt1.clone(memory_format=torch.channels_last)
 
 class TestNestedTensorAutograd(TestCase):
-    def _create_nested_tensor_from_list(self, requires_grad=False):
-        return torch.nested_tensor([torch.randn(1, 2, requires_grad=requires_grad),
-                                    torch.randn(7, 8, requires_grad=requires_grad)])
+    def _tensor_list(self, requires_grad=False):
+        return [torch.randn(1, 2, requires_grad=requires_grad),
+                torch.randn(7, 8, requires_grad=requires_grad)]
 
-    def _create_nested_tensor_from_mask(self, requires_grad=False):
+    def _data_and_mask(self, requires_grad=False):
         data = torch.randn(2, 3, 4, requires_grad=requires_grad)
         mask = torch.ones_like(data[:, :, 0]).bool()
-        return torch._nested_tensor_from_mask(data, mask)
+        return data, mask
 
     def test_requires_grad(self):
-        nt = self._create_nested_tensor_from_list()
+        nt = torch.nested_tensor(self._tensor_list())
         nt.requires_grad_()
         assert nt.requires_grad
 
     def test_requires_grad_from_mask(self):
-        nt = self._create_nested_tensor_from_mask()
+        nt = torch._nested_tensor_from_mask(*self._data_and_mask())
         nt.requires_grad_()
         assert nt.requires_grad
 
     def test_requires_grad_pass_through_from_mask(self):
-        nt = self._create_nested_tensor_from_mask(True)
+        nt =  torch._nested_tensor_from_mask(*self._data_and_mask(True))
         assert nt.requires_grad
 
+    def test_requires_grad_pass_through_from_mask(self):
+        nt = torch.nested_tensor(self._tensor_list(True))
+        assert nt.requires_grad
+
+    def test_grad_passed_through_nested_tensor_facotry(self):
+        tensor_list = self._tensor_list(True)
+        data, mask  = self._data_and_mask(True)
+
+        nt_tensor_list = torch.nested_tensor(tensor_list)
+        nt_tensor_mask = torch._nested_tensor_from_mask(data, mask)
+
+        nt_tensor_list_upward_grad = nt_tensor_list.clone()
+        nt_tensor_mask_upward_grad = nt_tensor_mask.clone()
+
+        nt_tensor_list.backward(nt_tensor_list_upward_grad)
+        nt_tensor_mask.backward(nt_tensor_mask_upward_grad)
+
+        # grad should equal the tensor because the upward grad is a cloned from the input
+        for tensor in tensor_list:
+            assert torch.allclose(tensor, tensor.grad)
+
+        assert torch.allclose(data, data.grad)
+
     def test_backward_for_add_op(self):
-        nt_1 = self._create_nested_tensor_from_mask()
-        nt_2 = self._create_nested_tensor_from_mask()
+        nt_1 = torch.nested_tensor(self._tensor_list())
+        nt_2 = torch.nested_tensor(self._tensor_list())
 
         nt_1.requires_grad_()
         c = nt_1 + nt_2
 
         assert nt_1.requires_grad
         assert c.requires_grad
-        upward_grad = self._create_nested_tensor_from_mask()
+        upward_grad = torch.nested_tensor(self._tensor_list())
         c.backward(upward_grad)
 
         #  Grad check doesn't work with nested yet.

@@ -2666,6 +2666,9 @@
   self: grad.reshape(self.sizes())
 
 # Nested Tensor Functions
+- name: nested_tensor(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  list: "grad.defined()? at::native::NestedTensor_unbind(grad) : std::vector<Tensor>(list.size())"
+
 - name: _nested_tensor_from_mask(Tensor t, Tensor mask) -> Tensor
   t: _nested_tensor_from_mask_backward(grad, t)
   mask: non_differentiable
