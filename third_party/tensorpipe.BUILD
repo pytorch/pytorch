@@ -152,6 +152,7 @@ cc_library(
     ],
     copts = [
         "-std=c++14",
+        "-Wno-error=unused-variable",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -169,6 +170,7 @@ cc_library(
     ],
     copts = [
         "-std=c++14",
+        "-Wno-error=unused-variable",
     ],
     visibility = ["//visibility:public"],
     deps = [

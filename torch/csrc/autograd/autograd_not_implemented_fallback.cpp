@@ -218,7 +218,6 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
   const auto num_arguments = arguments.size();
   const auto num_returns = returns.size();
   const auto stack_start = stack->size() - num_arguments;
-  bool any_is_inplace = false;
 
   at::Tensor aliased_input;
 
@@ -251,8 +250,6 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
         const c10::IValue& aliased_input_iv = (*stack)[stack_start + i]; // get a reference to an ivalue on the stack
         TORCH_CHECK(aliased_input_iv.isTensor());
         aliased_input = aliased_input_iv.toTensor();  // TODO: Can we avoid saving this tensor and incurring the refcount bump?
-      } else {
-        any_is_inplace = true;
       }
     }
   }

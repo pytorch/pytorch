@@ -34,4 +34,5 @@ build:cpu-only --@rules_cuda//cuda:enable_cuda=False
 build:cpu-only                                  \
     --cxxopt=-Werror=missing-field-initializers \
     --cxxopt=-Werror=unused-function            \
-    --cxxopt=-Werror=type-limits
+    --cxxopt=-Werror=type-limits                \
+    --cxxopt=-Werror=unused-variable
