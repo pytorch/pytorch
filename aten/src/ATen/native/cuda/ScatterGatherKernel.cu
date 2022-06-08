@@ -253,11 +253,11 @@ struct cuda_scatter_gather_base_kernel {
     auto src_strides = src.strides();
     auto src_strides_vec = ensure_nonempty_vec(src_strides.vec());
 
-    bool index_larger_than_src = false;
+    bool index_larger_than_src_in_scatter = false;
     if (is_scatter_like) {
       for (int i = 0; i < ndim; i++) {
         if (index_sizes[i] > src_sizes[i]) {
-          index_larger_than_src = true;
+          index_larger_than_src_in_scatter = true;
           break;
         }
       }
@@ -273,7 +273,7 @@ struct cuda_scatter_gather_base_kernel {
         restride_dim(self, dim, index_sizes_vec)
       : self.as_strided(index_sizes_vec, self_strides_vec);
     auto src_restrided = is_scatter_like ?
-        src.as_strided(index_sizes_vec, index_larger_than_src ? std::vector<int64_t> (ndim, 0) : src_strides_vec)
+        src.as_strided(index_sizes_vec, index_larger_than_src_in_scatter ? std::vector<int64_t> (ndim, 0) : src_strides_vec)
       : restride_dim(src, dim, index_sizes_vec);
 
     auto iter = TensorIteratorConfig()
@@ -294,7 +294,7 @@ struct cuda_scatter_gather_base_kernel {
     auto index_size = is_scatter_like ? self_dim_size : src_dim_size;
     auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
 
-    if (!is_scatter_like || !index_larger_than_src) {
+    if (!is_scatter_like || !index_larger_than_src_in_scatter) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
         iter.dtype(),
@@ -341,11 +341,11 @@ struct cuda_scatter_gather_base_kernel {
     auto src_strides = src.strides();
     auto src_strides_vec = ensure_nonempty_vec(src_strides.vec());
 
-    bool index_larger_than_src = false;
+    bool index_larger_than_src_in_scatter = false;
     if (is_scatter_like) {
       for (int i = 0; i < ndim; i++) {
         if (index_sizes[i] > src_sizes[i]) {
-          index_larger_than_src = true;
+          index_larger_than_src_in_scatter = true;
           break;
         }
       }
@@ -361,7 +361,7 @@ struct cuda_scatter_gather_base_kernel {
         restride_dim(self, dim, index_sizes_vec)
       : self.as_strided(index_sizes_vec, self_strides_vec);
     auto src_restrided = is_scatter_like ?
-        src.as_strided(index_sizes_vec, index_larger_than_src ? std::vector<int64_t> (ndim, 0) : src_strides_vec)
+        src.as_strided(index_sizes_vec, index_larger_than_src_in_scatter ? std::vector<int64_t> (ndim, 0) : src_strides_vec)
       : restride_dim(src, dim, index_sizes_vec);
 
     auto iter = TensorIteratorConfig()
@@ -382,7 +382,7 @@ struct cuda_scatter_gather_base_kernel {
     auto index_size = is_scatter_like ? self_dim_size : src_dim_size;
     auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
 
-    if (!is_scatter_like || !index_larger_than_src) {
+    if (!is_scatter_like || !index_larger_than_src_in_scatter) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
         iter.dtype(),
@@ -430,11 +430,11 @@ struct cuda_scatter_gather_base_kernel {
     auto src_strides = src.strides();
     auto src_strides_vec = ensure_nonempty_vec(src_strides.vec());
 
-    bool index_larger_than_src = false;
+    bool index_larger_than_src_in_scatter = false;
     if (is_scatter_like) {
       for (int i = 0; i < ndim; i++) {
         if (index_sizes[i] > src_sizes[i]) {
-          index_larger_than_src = true;
+          index_larger_than_src_in_scatter = true;
           break;
         }
       }
@@ -450,7 +450,7 @@ struct cuda_scatter_gather_base_kernel {
         restride_dim(self, dim, index_sizes_vec)
       : self.as_strided(index_sizes_vec, self_strides_vec);
     auto src_restrided = is_scatter_like ?
-        src.as_strided(index_sizes_vec, index_larger_than_src ? std::vector<int64_t> (ndim, 0) : src_strides_vec)
+        src.as_strided(index_sizes_vec, index_larger_than_src_in_scatter ? std::vector<int64_t> (ndim, 0) : src_strides_vec)
       : restride_dim(src, dim, index_sizes_vec);
 
     auto iter = TensorIteratorConfig()
@@ -471,7 +471,7 @@ struct cuda_scatter_gather_base_kernel {
     auto index_size = is_scatter_like ? self_dim_size : src_dim_size;
     auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
 
-    if (!is_scatter_like || !index_larger_than_src) {
+    if (!is_scatter_like || !index_larger_than_src_in_scatter) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
         iter.dtype(),
