@@ -14,6 +14,6 @@ std::ptrdiff_t ssize(Container const& container) {
   return static_cast<std::ptrdiff_t>(size);
 }
 
-}  // namespace c10
+} // namespace c10
 
-#endif  // CAFFE2_C10_UTIL_SSIZE_H
+#endif // CAFFE2_C10_UTIL_SSIZE_H
