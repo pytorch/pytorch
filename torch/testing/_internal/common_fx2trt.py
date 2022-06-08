@@ -1,16 +1,16 @@
 import unittest
 from typing import Callable, List, Tuple
 
-import fx2trt_oss.tracer.acc_tracer.acc_tracer as acc_tracer
+import torch_tensorrt.fx.tracer.acc_tracer.acc_tracer as acc_tracer
 import torch
 import torch.fx
-from fx2trt_oss.fx import (
+from torch_tensorrt.fx import (
     TRTInterpreter,
     InputTensorSpec,
     TRTModule,
 )
-from fx2trt_oss.fx.passes.pass_utils import chain_passes
-from fx2trt_oss.fx.utils import LowerPrecision
+from torch_tensorrt.fx.passes.pass_utils import chain_passes
+from torch_tensorrt.fx.utils import LowerPrecision
 from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.passes import shape_prop
 from torch.testing._internal.common_utils import TestCase
