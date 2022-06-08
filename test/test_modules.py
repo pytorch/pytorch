@@ -326,6 +326,16 @@ class TestModule(TestCase):
     @skipIfMps
     @modules(module_db)
     def test_non_contiguous_tensors(self, device, dtype, module_info, training):
+        # TODO: RNN / GRU / LSTM don't support backwards on eval mode for cuDNN; skip this in a
+        # nicer way for eval mode only.
+        # See https://github.com/pytorch/pytorch/issues/79161
+        rnn_modules = set([torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM])
+        if (module_info.module_cls in rnn_modules
+                and not training
+                and 'cuda' in device
+                and torch.backends.cudnn.enabled):
+            return
+
         # Check modules work with non-contiguous tensors
 
         module_cls = module_info.module_cls
@@ -668,29 +678,28 @@ class TestModule(TestCase):
             if module_input.forward_input is None:
                 continue
 
-            with freeze_rng_state():
-                # === Instantiate the module. ===
-                args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
-                m = module_cls(*args, **kwargs)
-                m.to(device).to(dtype)
-                m.train(training)
+            # === Instantiate the module. ===
+            args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            m = module_cls(*args, **kwargs)
+            m.to(device).to(dtype)
+            m.train(training)
 
-                # Remove training attribute and see if forward still works.
-                delattr(m, 'training')
+            # Remove training attribute and see if forward still works.
+            delattr(m, 'training')
 
-                # === Do forward pass. ===
-                try:
-                    args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
-                    m(*args, **kwargs)
-                except AttributeError as e:
-                    if "'training'" in str(e):
-                        self.assertTrue(module_info.train_and_eval_differ,
-                                        f"The ModuleInfo entry for {module_info.name} has "
-                                        "train_and_eval_differ=False, but the training mode was found to "
-                                        "affect the forward pass. Consider setting train_and_eval_differ=True "
-                                        "for this ModuleInfo entry.")
-                    else:
-                        raise
+            # === Do forward pass. ===
+            try:
+                args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+                m(*args, **kwargs)
+            except AttributeError as e:
+                if "'training'" in str(e):
+                    self.assertTrue(module_info.train_and_eval_differ,
+                                    f"The ModuleInfo entry for {module_info.name} has "
+                                    "train_and_eval_differ=False, but the training mode was found to "
+                                    "affect the forward pass. Consider setting train_and_eval_differ=True "
+                                    "for this ModuleInfo entry.")
+                else:
+                    raise e
 
 instantiate_device_type_tests(TestModule, globals())
 
