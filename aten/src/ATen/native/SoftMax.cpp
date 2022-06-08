@@ -337,13 +337,7 @@ TORCH_IMPL_FUNC(log_softmax_cpu_out)
   if (input_.ndimension() > 0 && dim_ == input_.ndimension() - 1) {
     log_softmax_lastdim_kernel(kCPU, output, input_);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        at::ScalarType::BFloat16, input_.scalar_type(), "log_softmax", [&] {
-          host_softmax<
-              scalar_t,
-              true /* LogSoftMax */,
-              false /* MaskedSoftMax */>(output, input_, dim_);
-        });
+    log_softmax_kernel(kCPU, output, input_, dim_);
   }
 }
 
