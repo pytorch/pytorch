@@ -18,7 +18,7 @@ from .graph_module import (
     is_observed_standalone_module,
 )
 
-from typing import Any, Dict, List, Callable, Optional, Tuple, Set
+from typing import Any, Dict, List, Callable, Optional, Tuple, Type, Set
 
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
                     QConfigAny]
