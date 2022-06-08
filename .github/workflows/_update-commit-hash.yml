@@ -62,15 +62,15 @@ jobs:
         run: |
           set -x
           pushd ${{ inputs.repo-name }}
-          git rev-parse ${{ inputs.branch }} > ../.github/${{ inputs.repo-name }}_commit_hash.txt
+          git rev-parse ${{ inputs.branch }} > ../.github/ci_commit_pins/${{ inputs.repo-name }}.txt
           popd
 
-          if [[ $(git diff --exit-code .github/${{ inputs.repo-name }}_commit_hash.txt) ]]; then
+          if [[ $(git diff --exit-code .github/ci_commit_pins/${{ inputs.repo-name }}.txt) ]]; then
             git config --global user.email "pytorchmergebot@users.noreply.github.com"
             git config --global user.name "PyTorch MergeBot"
 
             git checkout -b "${BRANCH_NAME}"
-            git add .github/${{ inputs.repo-name }}_commit_hash.txt
+            git add .github/ci_commit_pins/${{ inputs.repo-name }}.txt
             git commit -m "update ${{ inputs.repo-name }} commit hash"
             git push --set-upstream origin "${BRANCH_NAME}" -f
           else
