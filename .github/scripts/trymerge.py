@@ -580,7 +580,12 @@ class GitHubPR:
 
     def get_authors(self) -> Dict[str, str]:
         rc = {}
-        for idx in range(self.get_commit_count()):
+        # TODO: replace with  `self.get_commit_count()` when GraphQL pagination can be used
+        # to fetch all commits, see https://gist.github.com/malfet/4f35321b0c9315bcd7116c7b54d83372
+        # and https://support.github.com/ticket/enterprise/1642/1659119
+        if self.get_commit_count() <= 250:
+            assert len(self._fetch_authors()) == self.get_commit_count()
+        for idx in range(len(self._fetch_authors())):
             rc[self.get_committer_login(idx)] = self.get_committer_author(idx)
 
         return rc
@@ -901,12 +906,13 @@ def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False, timeout_mi
         elapsed_time = current_time - start_time
 
 
+        print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
         try:
             return pr.merge_into(repo, dry_run=dry_run)
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
-            print(f"Merged failed due to: {ex}. Retrying in 60 seconds.")
+            print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 60 seconds.")
             time.sleep(60)
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
@@ -929,6 +935,10 @@ def main() -> None:
         gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
+
+    msg = f"@pytorchbot successfully started a {'revert' if args.revert else 'merge'} job."
+    msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
+    gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
 
     if args.revert:
         try:
