@@ -3,7 +3,7 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/ops/Common.h>
-#include <ATen/native/vulkan/ops/Mm.h>
+#include <ATen/native/vulkan/ops/VulkanOpContext.h>
 #include <torch/library.h>
 
 namespace at {
@@ -41,7 +41,7 @@ class GruOpContext final : public torch::jit::CustomClassHolder {
 
  private:
   struct {
-    std::vector<LinearOpContext> linear_op_contexts;  // {{ op context for b_ir, w_ir, op context for b_hr, w_hr,
+    std::vector<c10::intrusive_ptr<VulkanOpContext>> linear_op_contexts;  // {{ op context for b_ir, w_ir, op context for b_hr, w_hr,
                                                       //    op context for b_iz, w_iz, op context for b_hz, w_hz,
                                                       //    op context for b_in, w_in, op context for b_hn, w_hn,}, ...}
     bool has_biases{};
