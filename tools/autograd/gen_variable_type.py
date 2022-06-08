@@ -505,8 +505,6 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     "dequantize_self",
     # lift() should never actually be called with a requires_grad=True tensor,
     "lift",
-    # Nested Tensors accessing their impl
-    "nested_size_tensor",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {

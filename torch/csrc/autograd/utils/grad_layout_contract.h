@@ -39,7 +39,7 @@ inline bool obeys_layout_contract(const at::Tensor& grad, const at::Tensor& vari
     return true;
   } else if (variable.is_nested()) {
     // TODO: Nested Tensor does not have an implementation of detach. The current implementation
-    // of nested tensor likely does obey the gradient contract and should return true, but this would likely change int
+    // of nested tensor likely does obey the gradient contract and should return true, but this would likely change in
     // the future
     return false;
   } else {
