@@ -34,7 +34,7 @@ def is_activation_post_process(module):
 
 
 def _propagate_qconfig_helper(module, qconfig_dict,
-                              qconfig_parent=None, prefix='', prepare_custom_config=None):
+                              qconfig_parent=None, prefix='', prepare_custom_config_dict=None):
     r"""This is a helper function for `propagate_qconfig_`
 
     Args:
@@ -46,8 +46,8 @@ def _propagate_qconfig_helper(module, qconfig_dict,
                        module
         prefix: corresponding prefix of the current module, used as key in
                 qconfig_dict
-        prepare_custom_config: configuration for custom handling of modules
-                               see docs for :func:`~torch.ao.quantization.prepare_fx`
+        prepare_custom_config_dict: dictionary for custom handling of modules
+                                    see docs for :func:`~torch.ao.quantization.prepare_fx`
 
     Return:
         None, module is modified inplace with qconfig attached
@@ -65,15 +65,15 @@ def _propagate_qconfig_helper(module, qconfig_dict,
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
         #  do no not propagate qconfig to child if child is non traceable
-        if prepare_custom_config is None or not (
-            name in prepare_custom_config.non_traceable_module_names
-            or type(child) in prepare_custom_config.non_traceable_module_classes
+        if prepare_custom_config_dict is None or not (
+            name in prepare_custom_config_dict.get("non_traceable_module_name", [])
+            or type(child) in prepare_custom_config_dict.get("non_traceable_module_class", [])
         ):
             _propagate_qconfig_helper(
                 child, qconfig_dict, qconfig_with_device_check, module_prefix
             )
 
-def propagate_qconfig_(module, qconfig_dict=None, prepare_custom_config=None):
+def propagate_qconfig_(module, qconfig_dict=None, prepare_custom_config_dict=None):
     r"""Propagate qconfig through the module hierarchy and assign `qconfig`
     attribute on each leaf module
 
@@ -91,9 +91,9 @@ def propagate_qconfig_(module, qconfig_dict=None, prepare_custom_config=None):
     """
     if qconfig_dict is None:
         qconfig_dict = {}
-    if prepare_custom_config is None:
-        prepare_custom_config = PrepareCustomConfig()
-    _propagate_qconfig_helper(module, qconfig_dict, prepare_custom_config=prepare_custom_config)
+    if prepare_custom_config_dict is None:
+        prepare_custom_config_dict = {}
+    _propagate_qconfig_helper(module, qconfig_dict, prepare_custom_config_dict=prepare_custom_config_dict)
 
 def _observer_forward_hook(self, input, output):
     r"""Forward hook that calls observer on the output

@@ -26,7 +26,6 @@ from ..qconfig_mapping_utils import (
 from .qconfig_utils import (
     generate_qconfig_map,
     update_qconfig_for_fusion,
-    get_standalone_module_configs,
 )
 
 from .quantization_patterns import (
@@ -96,6 +95,7 @@ from .backend_config_utils import (
 
 from .custom_config import (
     PrepareCustomConfig,
+    StandaloneModuleConfigEntry,
 )
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
@@ -127,7 +127,6 @@ __all__ = [
     "node_arg_is_bias",
     "node_arg_is_weight",
     "prepare",
-    "prepare_get_standalone_module_configs",
     "propagate_dtypes_for_known_nodes",
     "qat_swap_modules",
     "remove_output_observer",
@@ -266,35 +265,30 @@ def is_pattern_dtype_config_supported_by_backend(
             return True
     return False
 
-def prepare_get_standalone_module_configs(
+def get_standalone_module_configs(
     node: Node,
     modules: Dict[str, torch.nn.Module],
-    prepare_custom_config: PrepareCustomConfig,
+    parent_prepare_custom_config: PrepareCustomConfig,
     parent_qconfig: QConfigAny,
     parent_backend_config_dict: Optional[Dict[str, Any]],
-) -> Tuple[Dict[str, Any], Tuple[Any], Dict[str, Any], Dict[str, Any]]:
+) -> Tuple[QConfigMapping, Tuple[Any, ...], PrepareCustomConfig, Dict[str, Any]]:
     """
-    Returns the standalone module qconfig_dict and prepare_config_dict
+    Returns the standalone module QConfigMapping and PrepareCustomConfig
     for `node`, assuming that the module pointed to by `node` is
     a standalone modules.
     """
-    standalone_module_name = str(node.target)
-    standalone_module_type = type(modules[standalone_module_name])  # type: ignore[index]
-    sm_qconfig_dict, sm_example_inputs, sm_prepare_config_dict, \
-        sm_backend_config_dict = get_standalone_module_configs(
-            standalone_module_name,
-            standalone_module_type,
-            prepare_custom_config)
+    module_name = str(node.target)
+    module_type = type(modules[standalone_module_name])  # type: ignore[index]
+    # name config has precedence over type config
+    config_entry = StandaloneModuleConfigEntry(None, (), None, None)
+    config_entry = prepare_custom_config.standalone_module_classes.get(module_type, config_entry)
+    config_entry = prepare_custom_config.standalone_module_names.get(module_name, config_entry)
     # fallback to use parent module's qconfig if user didn't specify qconfig dict
-    if sm_qconfig_dict is None:
-        sm_qconfig_dict = {"": parent_qconfig}
-    if sm_prepare_config_dict is None:
-        sm_prepare_config_dict = {}
-    # TODO: sm_backend_config_dict can fallback to use parent's backend_config_dict
-    # as well, this can be added later
-    if sm_backend_config_dict is None:
-        sm_backend_config_dict = parent_backend_config_dict
-    return sm_qconfig_dict, sm_example_inputs, sm_prepare_config_dict, sm_backend_config_dict
+    qconfig_mapping = config_entry.qconfig_mapping or QConfigMapping().set_global(parent_qconfig)
+    example_inputs = config_entry.example_inputs
+    prepare_custom_config = config_entry.prepare_custom_config or PrepareCustomConfig()
+    backend_config_dict = config_entry.backend_config_dict or parent_backend_config_dict
+    return (qconfig_mapping, example_inputs, prepare_custom_config, backend_config_dict)
 
 def qat_swap_modules(
         root: torch.nn.Module,
@@ -573,12 +567,11 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
 
     else:
         # custom flow for standalone modules
-        _sm_qconfig_dict, _, sm_prepare_config_dict, _sm_backend_config_dict = \
-            prepare_get_standalone_module_configs(
+        _, _, sm_prepare_custom_config, _ = \
+            get_standalone_module_configs(
                 node, modules, prepare_custom_config, qconfig, backend_config_dict)
+        sm_input_quantized_idxs = sm_prepare_custom_config.input_quantized_indexes
 
-        sm_input_quantized_idxs = \
-            sm_prepare_config_dict.get('input_quantized_idxs', [])
         # for args, this is set to the index of the current arg
         # for kwargs, this is left at None
         cur_input_idx = None
@@ -1344,8 +1337,8 @@ def run_prepare_fx_on_standalone_modules(
         elif not qhandler.is_standalone_module():
             continue
 
-        sm_qconfig_dict, sm_example_inputs, sm_prepare_config_dict, \
-            sm_backend_config_dict = prepare_get_standalone_module_configs(
+        sm_qconfig_mapping, sm_example_inputs, sm_prepare_custom_config, \
+            sm_backend_config_dict = get_standalone_module_configs(
                 root_node, modules, prepare_custom_config, qconfig, backend_config_dict)
 
         standalone_module = modules[root_node.target]
@@ -1354,13 +1347,12 @@ def run_prepare_fx_on_standalone_modules(
         observed_standalone_module = \
             prepare(
                 standalone_module,
-                sm_qconfig_dict,
+                sm_qconfig_mapping,
                 is_qat,
                 example_inputs=sm_example_inputs,
-                prepare_custom_config=sm_prepare_config_dict,
+                prepare_custom_config=sm_prepare_custom_config,
                 backend_config_dict=sm_backend_config_dict)
-        preserved_attributes = \
-            set(sm_prepare_config_dict.get("preserved_attributes", []))
+        preserved_attributes = set(sm_prepare_custom_config.preserved_attributes)
         observed_standalone_module = ObservedStandaloneGraphModule(
             observed_standalone_module, observed_standalone_module.graph,
             preserved_attributes)
@@ -1394,7 +1386,7 @@ def prepare(
         node_name_to_scope: Dict[str, Tuple[str, type]],
         example_inputs: Tuple[Any, ...],
         prepare_custom_config: Union[PrepareCustomConfig, Dict[str, Any], None] = None,
-        equalization_config: Optional[QConfigMapping] = None,
+        equalization_config: Union[QConfigMapping, Dict[str, Any], None] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None,
         is_standalone_module: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
@@ -1487,7 +1479,7 @@ def prepare(
     update_qconfig_for_fusion(model, equalization_config)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_mapping)
     # TODO: support regex as well
-    propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config)
+    propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config.to_dict())
 
     if is_qat:
         module_to_qat_module = get_module_to_qat_module(backend_config_dict)
@@ -1509,11 +1501,9 @@ def prepare(
     qconfig_map = generate_qconfig_map(model, modules, model.graph, qconfig_mapping, node_name_to_scope)
 
     # match the patterns that will get quantized
-    standalone_module_name_configs = prepare_custom_config.standalone_module_name_configs
-    standalone_module_class_configs = prepare_custom_config.standalone_module_class_configs
+    standalone_module_names = list(prepare_custom_config.standalone_module_names.keys())
+    standalone_module_classes = list(prepare_custom_config.standalone_module_classes.keys())
 
-    standalone_module_names = [config[0] for config in standalone_module_name_configs]
-    standalone_module_classes = [config[0] for config in standalone_module_class_configs]
     custom_module_classes = get_custom_module_class_keys(prepare_custom_config.float_to_observed_mapping)
     matches = find_matches(
         model.graph, modules, patterns, root_node_getter_mapping, qconfig_map,

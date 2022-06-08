@@ -1,4 +1,5 @@
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+import warnings
 
 import torch
 from torch.fx import GraphModule
@@ -118,7 +119,7 @@ class ScopeContextManager(object):
 
 class QuantizationTracer(Tracer):
     def __init__(
-        self, skipped_module_names: List[str], skipped_module_classes: List[Callable]
+        self, skipped_module_names: List[str], skipped_module_classes: List[Type]
     ):
         super().__init__()
         self.skipped_module_names = skipped_module_names
@@ -199,6 +200,12 @@ forward graph of the parent module,
     if equalization_config is None:
         equalization_config = QConfigMapping()
 
+    if isinstance(prepare_custom_config, Dict):
+        warnings.warn(
+            "Passing a prepare_custom_config_dict to prepare is deprecated and will not be supported "
+            "in a future version. Please pass in a PrepareCustomConfig instead.")
+        prepare_custom_config = PrepareCustomConfig.from_dict(prepare_custom_config)
+
     skipped_module_names = prepare_custom_config.non_traceable_module_names
     skipped_module_classes = prepare_custom_config.non_traceable_module_classes
 
@@ -208,8 +215,8 @@ forward graph of the parent module,
     # symbolically trace the model
     if not is_standalone_module:
         # standalone module and custom module config are applied in top level module
-        skipped_module_names += [c.module_name for c in prepare_custom_config.standalone_module_name_configs]
-        skipped_module_classes += [c.module_class for c in prepare_custom_config.standalone_module_class_configs]
+        skipped_module_names += list(prepare_custom_config.standalone_module_names.keys())
+        skipped_module_classes += list(prepare_custom_config.standalone_module_classes.keys())
         skipped_module_classes += get_custom_module_class_keys(prepare_custom_config.float_to_observed_mapping)
 
     preserved_attributes = prepare_custom_config.preserved_attributes
@@ -310,6 +317,15 @@ def fuse_fx(
         m = fuse_fx(m)
 
     """
+    if fuse_custom_config is None:
+        fuse_custom_config = FuseCustomConfig()
+
+    if isinstance(fuse_custom_config, Dict):
+        warnings.warn(
+            "Passing a fuse_custom_config_dict to fuse is deprecated and will not be supported "
+            "in a future version. Please pass in a FuseCustomConfig instead.")
+        fuse_custom_config = FuseCustomConfig.from_dict(fuse_custom_config)
+
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
     graph_module = torch.fx.symbolic_trace(model)
     preserved_attributes: Set[str] = set()
@@ -516,6 +532,12 @@ def _convert_fx(
     """
     if convert_custom_config is None:
         convert_custom_config = ConvertCustomConfig()
+
+    if isinstance(convert_custom_config, Dict):
+        warnings.warn(
+            "Passing a convert_custom_config_dict to convert is deprecated and will not be supported "
+            "in a future version. Please pass in a ConvertCustomConfig instead.")
+        convert_custom_config = ConvertCustomConfig.from_dict(convert_custom_config)
 
     _check_is_graph_module(graph_module)
 

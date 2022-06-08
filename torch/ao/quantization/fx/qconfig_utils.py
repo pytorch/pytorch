@@ -35,7 +35,6 @@ __all__ = [
     "check_is_valid_config_dict",
     "compare_prepare_convert_qconfig_mappings",
     "generate_qconfig_map",
-    "get_standalone_module_configs",
     "is_qconfig_supported_by_dtype_configs",
     "maybe_adjust_qconfig_for_module_name_object_type_order",
     "update_qconfig_for_fusion",
@@ -256,19 +255,3 @@ def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[
         if is_match:
             return True
     return False
-
-# TODO: rename this file to config_utils
-def get_standalone_module_configs(
-        module_name: str,
-        module_type: Callable,
-        custom_config_dict: Dict[str, Any]):
-    standalone_module_name_configs = \
-        custom_config_dict.get("standalone_module_name", [])
-    standalone_module_class_configs = \
-        custom_config_dict.get("standalone_module_class", [])
-    class_config_map = {x[0]: (x[1], x[2], x[3], x[4]) for x in standalone_module_class_configs}
-    name_config_map = {x[0]: (x[1], x[2], x[3], x[4]) for x in standalone_module_name_configs}
-    config = class_config_map.get(module_type, (None, None, None, None))
-    # name config has precedence over type config
-    config = name_config_map.get(module_name, config)
-    return config

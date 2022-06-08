@@ -1,16 +1,15 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, List, Type
+from typing import Any, Dict, List, Type
 
 from torch.ao.quantization import QConfigMapping
-from torch.ao.quantization.quant_type import QuantType, quant_type_from_str
+from torch.ao.quantization.quant_type import QuantType, quant_type_from_str, quant_type_to_str
 
 
 __all__ = [
     "ConvertCustomConfig",
     "PrepareCustomConfig",
-    "StandaloneModuleNameConfigEntry",
-    "StandaloneModuleClassConfigEntry",
+    "StandaloneModuleConfigEntry",
 ]
 
 
@@ -27,26 +26,14 @@ PRESERVED_ATTRIBUTES_DICT_KEY = "preserved_attributes"
 
 
 @dataclass
-class StandaloneModuleNameConfigEntry:
-    module_name: str
+class StandaloneModuleConfigEntry:
     # qconfig_dict for the prepare function called in the submodule,
     # None means use qconfig from parent qconfig_dict
-    qconfig_mapping: QConfigMapping
-    prepare_custom_config: PrepareCustomConfig
+    qconfig_mapping: Optional[QConfigMapping]
+    example_inputs: Tuple[Any, ...]
+    prepare_custom_config: Optional[PrepareCustomConfig]
     # TODO: replace this with BackendConfig
-    backend_config_dict: Dict[str, Any]
-
-
-@dataclass
-class StandaloneModuleClassConfigEntry:
-    module_class: Type
-    # qconfig_dict for the prepare function called in the submodule,
-    # None means use qconfig from parent qconfig_dict
-    # TODO: replace this with QConfigMapping
-    qconfig_mapping: QConfigMapping
-    prepare_custom_config: PrepareCustomConfig
-    # TODO: replace this with BackendConfig
-    backend_config_dict: Dict[str, Any]
+    backend_config_dict: Optional[Dict[str, Any]]
 
 
 class PrepareCustomConfig:
@@ -55,8 +42,8 @@ class PrepareCustomConfig:
     """
 
     def __init__(self):
-        self.standalone_module_name_configs: List[StandaloneModuleNameConfigEntry] = []
-        self.standalone_module_class_configs: List[StandaloneModuleClassConfigEntry] = []
+        self.standalone_module_names: Dict[str, StandaloneModuleConfigEntry] = {}
+        self.standalone_module_classes: Dict[Type, StandaloneModuleConfigEntry] = {}
         self.float_to_observed_mapping: Dict[QuantType, Dict[Type, Type]] = {}
         self.non_traceable_module_names: List[str] = []
         self.non_traceable_module_classes: List[Type] = []
@@ -68,28 +55,28 @@ class PrepareCustomConfig:
             self,
             module_name: str,
             qconfig_mapping: QConfigMapping,
+            example_inputs: Tuple[Any, ...],
             prepare_custom_config: PrepareCustomConfig,
-            backend_config: Dict[str, Any]) -> PrepareCustomConfig:
+            backend_config_dict: Dict[str, Any]) -> PrepareCustomConfig:
         """
         TODO: write this
         """
-        self.standalone_module_name_configs.append(
-            StandaloneModuleNameConfigEntry(
-                module_name, qconfig_mapping, prepare_custom_config, backend_config_dict))
+        self.standalone_module_names[module_name] = \
+            StandaloneModuleConfigEntry(qconfig_mapping, example_inputs, prepare_custom_config, backend_config_dict)
         return self
 
     def set_standalone_module_class(
             self,
-            module_class: str,
+            module_class: Type,
             qconfig_mapping: QConfigMapping,
+            example_inputs: Tuple[Any, ...],
             prepare_custom_config: PrepareCustomConfig,
-            backend_config: Dict[str, Any]) -> PrepareCustomConfig:
+            backend_config_dict: Dict[str, Any]) -> PrepareCustomConfig:
         """
         TODO: write this
         """
-        self.standalone_module_class_configs.append(
-            StandaloneModuleClassConfigEntry(
-                module_class, qconfig_mapping, prepare_custom_config, backend_config_dict))
+        self.standalone_module_classes[module_class] = \
+            StandaloneModuleConfigEntry(qconfig_mapping, example_inputs, prepare_custom_config, backend_config_dict)
         return self
 
     def set_float_to_observed_mapping(
@@ -152,7 +139,7 @@ class PrepareCustomConfig:
             """
             if isinstance(obj, QConfigMapping):
                 return obj
-            if isinstance(obj, Dict[str, Any]):
+            if isinstance(obj, Dict):
                 return QConfigMapping.from_dict(obj)
             raise ValueError("Expected QConfigMapping in prepare_custom_config_dict[\"%s\"], got '%s'" %
                              (dict_key, type(obj)))
@@ -163,22 +150,24 @@ class PrepareCustomConfig:
             """
             if isinstance(obj, PrepareCustomConfig):
                 return obj
-            if isinstance(obj, Dict[str, Any]):
+            if isinstance(obj, Dict):
                 return PrepareCustomConfig.from_dict(obj)
             raise ValueError("Expected PrepareCustomConfig in prepare_custom_config_dict[\"%s\"], got '%s'" %
                              (dict_key, type(obj)))
 
         conf = cls()
-        for (module_name, qconfig_dict, prepare_custom_config_dict, backend_config_dict) in\
+        for (module_name, qconfig_dict, example_inputs, prepare_custom_config_dict, backend_config_dict) in\
                 prepare_custom_config_dict.get(STANDALONE_MODULE_NAME_DICT_KEY, []):
             qconfig_mapping = _get_qconfig_mapping(qconfig_dict, STANDALONE_MODULE_NAME_DICT_KEY)
             prepare_custom_config = _get_prepare_custom_config(prepare_custom_config_dict, STANDALONE_MODULE_NAME_DICT_KEY)
-            conf.set_standalone_module_name(module_name, qconfig_mapping, prepare_custom_config, backend_config_dict)
-        for (module_class, qconfig_dict, prepare_custom_config_dict, backend_config_dict) in\
+            conf.set_standalone_module_name(
+                module_name, qconfig_mapping, example_inputs, prepare_custom_config, backend_config_dict)
+        for (module_class, qconfig_dict, example_inputs, prepare_custom_config_dict, backend_config_dict) in\
                 prepare_custom_config_dict.get(STANDALONE_MODULE_CLASS_DICT_KEY, []):
             qconfig_mapping = _get_qconfig_mapping(qconfig_dict, STANDALONE_MODULE_CLASS_DICT_KEY)
             prepare_custom_config = _get_prepare_custom_config(prepare_custom_config_dict, STANDALONE_MODULE_CLASS_DICT_KEY)
-            conf.set_standalone_module_class(module_class, qconfig_mapping, prepare_custom_config, backend_config_dict)
+            conf.set_standalone_module_class(
+                module_class, qconfig_mapping, example_inputs, prepare_custom_config, backend_config_dict)
         for quant_type_name, custom_module_mapping in prepare_custom_config_dict.get(FLOAT_TO_OBSERVED_DICT_KEY, {}):
             quant_type = quant_type_from_str(quant_type_name)
             for float_class, observed_class in custom_module_mapping.items():
@@ -189,6 +178,39 @@ class PrepareCustomConfig:
         conf.set_output_quantized_indexes(prepare_custom_config_dict.get(OUTPUT_QUANTIZED_INDEXES_DICT_KEY, []))
         conf.set_preserved_attributes(prepare_custom_config_dict.get(PRESERVED_ATTRIBUTES_DICT_KEY, []))
         return conf
+
+    # TODO: remove this
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        TODO: write this
+        """
+        def _make_tuple(key: Any, e: StandaloneModuleConfigEntry):
+            return (key, e.qconfig_mapping, e.example_inputs, e.prepare_custom_config, e.backend_config_dict)
+
+        d: Dict[str, Any] = {}
+        for module_name, sm_config_entry in self.standalone_module_names.items():
+            if STANDALONE_MODULE_NAME_DICT_KEY not in d:
+                d[STANDALONE_MODULE_NAME_DICT_KEY] = []
+            d[STANDALONE_MODULE_NAME_DICT_KEY].append(_make_tuple(module_name, sm_config_entry))
+        for module_class, sm_config_entry in self.standalone_module_classes.items():
+            if STANDALONE_MODULE_CLASS_DICT_KEY not in d:
+                d[STANDALONE_MODULE_CLASS_DICT_KEY] = []
+            d[STANDALONE_MODULE_CLASS_DICT_KEY].append(_make_tuple(module_class, sm_config_entry))
+        for quant_type, float_to_observed_mapping in self.float_to_observed_mapping.items():
+            if FLOAT_TO_OBSERVED_DICT_KEY not in d:
+                d[FLOAT_TO_OBSERVED_DICT_KEY] = {}
+            d[FLOAT_TO_OBSERVED_DICT_KEY][quant_type_to_str(quant_type)] = float_to_observed_mapping
+        if len(self.non_traceable_module_names) > 0:
+            d[NON_TRACEABLE_MODULE_NAME_DICT_KEY] = self.non_traceable_module_names
+        if len(self.non_traceable_module_classes) > 0:
+            d[NON_TRACEABLE_MODULE_CLASS_DICT_KEY] = self.non_traceable_module_classes
+        if len(self.input_quantized_indexes) > 0:
+            d[INPUT_QUANTIZED_INDEXES_DICT_KEY] = self.input_quantized_indexes
+        if len(self.output_quantized_indexes) > 0:
+            d[OUTPUT_QUANTIZED_INDEXES_DICT_KEY] = self.output_quantized_indexes
+        if len(self.preserved_attributes) > 0:
+            d[PRESERVED_ATTRIBUTES_DICT_KEY] = self.preserved_attributes
+        return d
 
 
 class ConvertCustomConfig:

@@ -26,6 +26,7 @@ from .custom_config import FuseCustomConfig
 from .fusion_patterns import *  # noqa: F401,F403
 
 from typing import Callable, Tuple, Dict, Any, Optional, List
+import warnings
 
 from torch.ao.quantization.quantization_types import Pattern, NodePattern
 
@@ -43,7 +44,6 @@ def fuse(
             "Passing a fuse_custom_config_dict to fuse is deprecated and will not be supported "
             "in a future version. Please pass in a FuseCustomConfig instead.")
         fuse_custom_config = FuseCustomConfig.from_dict(fuse_custom_config)
-    assert(isinstance(fuse_custom_config, FuseCustomConfig))
 
     input_root = model
     input_graph = model.graph
