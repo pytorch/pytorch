@@ -19312,6 +19312,12 @@ op_db: List[OpInfo] = [
         check_batched_grad=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        skips=(
+            # RuntimeError: input->type()->kind() == TypeKind::OptionalType
+            # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
+            # please report a bug to PyTorch.
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
+        ),
     ),
     OpInfo(
         "diagflat",
