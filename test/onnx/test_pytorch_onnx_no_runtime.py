@@ -64,6 +64,7 @@ def export_to_onnx(
     return onnx_model
 
 
+@common_utils.instantiate_parametrized_tests
 class TestOptionalOutput(unittest.TestCase):
     # TODO: Move these tests to test_pytorch_onnx_onnxruntime once
     # ONNX Runtime 1.11 is released and supports opset 16.
@@ -574,8 +575,6 @@ class TestONNXExport(common_utils.TestCase):
 
         self._helper_test_to_(cast_device_cpu_string)
 
-
-common_utils.instantiate_parametrized_tests(TestOptionalOutput)
 
 if __name__ == "__main__":
     unittest.main()

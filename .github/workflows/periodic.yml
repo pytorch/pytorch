@@ -6,7 +6,6 @@ on:
   push:
     tags:
       - ciflow/periodic/*
-      - ciflow/all/*
   workflow_dispatch:
 
 concurrency:

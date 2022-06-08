@@ -713,6 +713,54 @@ std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<
   return grad_inputs;
 }
 
+std::vector<Tensor> block_diag_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, const std::vector<ScalarType> &dtypes) {
+  std::vector<Tensor> grad_inputs(sizes.size());
+  if (!grad.defined()) {
+    return grad_inputs;
+  }
+  Tensor real_view_of_grad;
+  bool grad_is_complex = grad.is_complex();
+  if (grad_is_complex) {
+    real_view_of_grad = at::real(grad);
+  }
+
+  int64_t cur_dim0 = 0;
+  int64_t cur_dim1 = 0;
+
+  for (const auto i : c10::irange(sizes.size())) {
+    // R -> C
+    Tensor grad_val = (!at::isComplexType(dtypes[i]) && grad_is_complex) ? real_view_of_grad : grad;
+
+    auto& shape = sizes[i];
+    // If input was empty tensor, gradInput should be empty tensor.
+    if (shape.size() == 1 && shape[0] == 0) {
+      grad_inputs[i] = at::zeros({0}, grad_val.options());
+      continue;
+    }
+    // 0d case
+    auto dim0 = 1;
+    auto dim1 = 1;
+    // 2d case
+    if (shape.size() == 2) {
+      dim0 = shape[0];
+      dim1 = shape[1];
+    // 1d case
+    } else if (shape.size() == 1) {
+      dim1 = shape[0];
+    }
+    auto slice = grad_val.slice(0, cur_dim0, cur_dim0 + dim0).slice(1, cur_dim1, cur_dim1 + dim1);
+    if (shape.size() == 1) {
+      slice = slice.squeeze(-1);
+    } else if (shape.size() == 0) {
+      slice = slice.squeeze(-1).squeeze(-1);
+    }
+    grad_inputs[i] = slice;
+    cur_dim0 += dim0;
+    cur_dim1 += dim1;
+  }
+  return grad_inputs;
+}
+
 Tensor clamp_backward(const Tensor & grad, const Tensor &self, const optional<Scalar> & min, const optional<Scalar> & max) {
   // clamp: gradients not defined on min and max, so we return the subgradient 1 for these cases.
   if (max && min) {
@@ -1720,8 +1768,6 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   }
   if (reduction == at::Reduction::Mean) {
     return ggO / input.numel();
-  } else if (reduction == at::Reduction::Sum) {
-    return ggO.sum();
   }
   return ggO;
 }
@@ -1742,9 +1788,7 @@ Tensor l1_loss_double_backward(const Tensor & grad, const Tensor & grad_output, 
 Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
   auto output = at::l1_loss_backward(grad.conj(), input, target, at::Reduction::None);
   if (reduction == at::Reduction::Mean) {
-    return output.mean();
-  } else if (reduction == at::Reduction::Sum) {
-    return output.sum();
+    output /= input.numel();
   }
   return handle_r_to_c(grad_output, output);
 }
@@ -1760,14 +1804,6 @@ Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input,
     grad_input /= input.numel();
   }
   return grad_input;
-}
-
-Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction, double beta) {
-  if (reduction == at::Reduction::None) {
-    return smooth_l1_loss_backward(grad, input, target, reduction, beta);
-  }
-  auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, reduction, beta);
-  return (r * grad).sum();
 }
 
 Tensor huber_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, double delta) {
@@ -1793,14 +1829,6 @@ Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, int64
     grad_input /= input.numel();
   }
   return grad_input;
-}
-
-Tensor mse_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
-  if (reduction == at::Reduction::None) {
-    return mse_loss_backward(grad, input, target, reduction);
-  }
-  auto r = mse_loss_backward(ones_like(grad_output), input, target, reduction);
-  return (r * grad).sum();
 }
 
 Tensor soft_margin_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
@@ -2502,6 +2530,56 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
       }
       return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
   }
+}
+
+Tensor prelu_backward_self_jvp(
+    const Tensor& x,
+    const Tensor& w,
+    const Tensor& dw,
+    const Tensor& g,
+    const Tensor& dg
+) {
+  const auto ndim = x.dim();
+  auto as_nd = [ndim](const Tensor& t) {
+    std::vector<int64_t> sizes(ndim, 1), strides(ndim, 0);
+    if (ndim >= 2) {
+      sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
+      strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
+      return t.as_strided(sizes, strides);
+    }
+    return t.as_strided(sizes, strides);
+  };
+  auto w_ = as_nd(w);
+  auto dw_ = as_nd(dw);
+  return at::where(x >= 0, dg, dg * w_ + g * dw_);
+}
+
+Tensor prelu_backward_weight_jvp(
+    const Tensor& w,
+    const Tensor& x,
+    const Tensor& dx,
+    const Tensor& g,
+    const Tensor& dg
+) {
+  const auto dw_full = at::where(x >= 0, at::zeros({}, x.options()), g * dx + dg * x);
+
+  const auto ndim = x.dim();
+  std::vector<int64_t> reduction_dims;
+  reduction_dims.reserve(ndim);
+  // we always reduce over the 0th dim.
+  reduction_dims.push_back(0);
+  if (ndim >= 2) {
+    // reduce over the 1th dim if w is a 0-dim tensor
+    if (!w.dim()) {
+      reduction_dims.push_back(1);
+    }
+    // reduce over dims which are >= 2.
+    for (int64_t i = 2; i < ndim; ++i) {
+      reduction_dims.push_back(i);
+    }
+  }
+  const auto dw = dw_full.sum(reduction_dims);
+  return dw;
 }
 
 Tensor gelu_double_backward(
@@ -4724,102 +4802,113 @@ Tensor i1e_backward(
 // L_grad = L^{-H} U_grad U^H
 // After inserting U_grad and L_grad into (!!!) we get the value for LU_grad.
 
-std::tuple<Tensor, Tensor> lu_solve_backward(
-  const Tensor& grad,
+Tensor linalg_lu_solve_LU(
+  const Tensor& gX,
+  const Tensor& LU,
+  const Tensor& pivots,
   const Tensor& X,
-  const Tensor& LU_data,
-  const Tensor& LU_pivots,
-  const std::array<bool, 2>& grad_input_mask) {
+  const bool left,
+  const bool adjoint) {
+  // From linalg_lu_solve_jvp we have that:
+  // left = True, adjoint = True: A^HX = B
+  // left = True, adjoint = False: AX = B
+  // left = False, adjoint = True: AX^H = B^H
+  // left = False, adjoint = False: A^HX^H = B^H
+  // let op_1(A) = A^H or op_1(A) = A according to the list above
+  // same with op_2(X) and op_3(B)
+  // We have that letting S = lu_solve(LU, pivots, dB, left, adjoint)
+  // the JVP formula reads
+  // if left != adjoint:
+  //   dX = op_2(-U^{-1}(dU + L^{-1}dL U)op_2(X)) + S
+  // else:
+  //   dX = op_2(op_1(-op_3(X)^H P(LdUU^{-1} + dL)L^{-1} P^T)) + S
+  // So computing the adjoint of this operation we get that, using an auxiliary variable gR
+  // if left != adjoint:
+  //   gR = U^{-H}op_2(-gX)op_2(X)^H
+  //   gU = gR.triu()
+  //   gL = (L^{-H} gR U^H).tril(-1)
+  // else:
+  //   gR = -P^T op_3(X)op_1(op_2(gX))PL^{-H}
+  //   gL = gR.tril(-1)
+  //   gU = (L^H gR U^{-H}).triu()
+  // gLU = gL + gU
+
   at::NoTF32Guard disable_tf32;
-  const bool B_requires_grad = grad_input_mask[0];
-  const bool LU_data_requires_grad = grad_input_mask[1];
-  if (!grad.defined() || (!B_requires_grad && !LU_data_requires_grad)) {
-    return std::make_tuple(Tensor{}, Tensor{});
-  }
-
-  // TODO If just B requires grad, the following formula is better:
-  //const auto trans = grad.is_complex() ? TransposeType::ConjTranspose : TransposeType::Transpose;
-  //const Tensor B_grad = at::_lu_solve_trans(grad, LU_data, LU_pivots, trans);
-  //return std::make_pair(B_grad, Tensor{});
-  //
-  // We'll be able to use it once we ahve migradet lu_solve to linalg and has an `adjoint` flag.
-  // This formula avoids the instantiation of P explicitly and may have better numerical properties
-
-  const Tensor X_H = X.mH();
   Tensor P, L, U;
-  if (B_requires_grad) {
-      std::tie(P, L, U) = at::lu_unpack(LU_data, LU_pivots);
+  std::tie(P, L, U) = at::lu_unpack(LU, pivots, /*unpack_data=*/true, /*unpack_pivots=*/left == adjoint);
+  // TODO Optimise the order of the operations to avoid operating on large tensors unnecessarily
+  //      The logic should be: if n < k == left then multiply the gX and X first (as it's done now)
+  //      Otherwise multiply them last
+  if (left != adjoint) {
+    // gR = U^{-H}op_2(-gX)op_2(X)^H
+    auto gR = at::linalg_solve_triangular(U.mH(), -(left ? gX : gX.mH()).matmul(left ? X.mH() : X), /*upper*/false);
+    // gL = (L^{-H} gR U^H).tril(-1)
+    auto gL = at::linalg_solve_triangular(L.mH(), gR.matmul(U.mH()), /*upper*/true, /*left*/true, /*unitriangular*/true).tril(-1);;
+    return gL + gR.triu();
   } else {
-    std::tie(std::ignore, L, U) = at::lu_unpack(LU_data, LU_pivots,
-                                                /*unpack_data=*/true,
-                                                /*unpack_pivots=*/false);
-  }
-  const Tensor U_H = U.mH();
-  const Tensor L_H = L.mH();
-
-  if (B_requires_grad) {
-      // Y = U^{-H}X_grad
-      const Tensor Y = at::linalg_solve_triangular(U_H, grad, /*upper=*/false);
-      // Z = L^{-H}U^{-H}X_grad
-      const Tensor Z = at::linalg_solve_triangular(L_H, Y,
-                                                   /*upper=*/true,
-                                                   /*left=*/true,
-                                                   /*unitriangular=*/true);
-      const Tensor B_grad = P.matmul(Z);
-      Tensor LU_data_grad;
-      if (LU_data_requires_grad) {
-        const Tensor U_grad = Y.matmul(X_H);
-        const Tensor L_grad = Z.matmul(X_H).matmul(U_H);
-        LU_data_grad = -(L_grad.tril(-1) + U_grad.triu());
-      }
-      return std::make_pair(B_grad, LU_data_grad);
-  } else {
-    // Since when nothing needs to be computed was handled at the start, here we have
-    // the case when just LU_data requires grad
-
-    // U^{-H}X_grad X^H
-    const Tensor U_grad = at::linalg_solve_triangular(U_H, grad.matmul(X_H), /*upper=*/false);
-    // L^{-H}U^{-H}X_grad X^H U^H
-    const Tensor L_grad = at::linalg_solve_triangular(L_H, U_grad.matmul(U_H),
-                                                      /*upper=*/true,
-                                                      /*left=*/true,
-                                                      /*unitriangular=*/true);
-
-    // LU_data_grad = L_grad * 1_L + U_grad * 1_U
-    const Tensor LU_data_grad = -(L_grad.tril(-1) + U_grad.triu());
-    return std::make_pair(Tensor{}, LU_data_grad);
+    // gR = -P^T op_3(X)op_1(op_2(gX))P
+    auto gR = -P.mT().matmul(left ? X : X.mH()).matmul(left ? gX.mH() : gX).matmul(P);
+    // gR = gR L^{-H}
+    gR = at::linalg_solve_triangular(L.mH(), gR, /*upper*/true, /*left*/false, /*unitriangular*/true);
+    // gU = (L^H gR U^{-H}).triu()
+    auto gU = at::linalg_solve_triangular(U.mH(), L.mH().matmul(gR), /*upper*/false, /*left*/false).triu();
+    return gR.tril(-1) + gU;
   }
 }
 
-Tensor lu_solve_jvp(
+Tensor linalg_lu_solve_jvp(
   const Tensor& X,
-  const Tensor& LU_data,
-  const Tensor& dLU_data,
+  const Tensor& LU,
+  const Tensor& pivots,
+  const Tensor& dLU,
   const Tensor& dB,
-  const Tensor& LU_pivots
-) {
+  const bool left,
+  const bool adjoint) {
+  // We write the derivation in terms of some adjoint operations, as otherwise we would need to
+  // write down 4 different proofs with 4 different implementations and it'd be painful to derive
+  // and maintain
+  // Below, we just use that X -> X^H is linear, so it commutes with the derivative
+  // The derivation follows by differentiating op_1(PLU)op_2(X) = op_3(B)
+
+  // left = True, adjoint = True: A^HX = B
+  // left = True, adjoint = False: AX = B
+  // left = False, adjoint = True: AX^H = B^H
+  // left = False, adjoint = False: A^HX^H = B^H
+  // let op_1(A) = A^H or op_1(A) = A according to the list above
+  // same with op_2(X) and op_3(B)
+  // We have that letting S = lu_solve(LU, pivots, dB, left, adjoint)
+  // the JVP formula reads
+  // dX = op_2(op_1(-U^{-1}(dUU^{-1} + L^{-1}dL)L^{-1} P^T)op_3(B)) + S
+
   at::NoTF32Guard disable_tf32;
-  Tensor L, U, dL, dU;
-  std::tie(std::ignore, L, U) = at::lu_unpack(LU_data, LU_pivots, /*unpack_data=*/true, /*unpack_pivots=*/false);
-  dL = dLU_data.tril(-1);
-  dU = dLU_data.triu();
-  auto dA = dL.matmul(U) + L.matmul(dU);
-  return generic_solve_jvp(
-    [&](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
-      // We exploit the structure in the computation of A^{-1} dA, where the permutation matrix P such that A = P L U
-      // cancels itself. Because of that we use lu_solve with the identity permutation input.
-      // The identity permutation pivots are 1-based because of the Fortran-like LAPACK interfaces.
-      // More details on the permutation matrix canceling note:
-      // as part of forward AD we need to compute A^{-1} dA.
-      // Since A = P L U and P is locally constant for full-rank matrices, we get
-      // dA = P d(L U), A^{-1} = (L U)^{-1} P^T, so
-      // A^{-1} dA = (L U)^{-1} d(L U), which is lu_solve with
-      // the pivots set to the identity permutation
-      auto identity_pivots = at::arange(1, LU_data.size(-1) + 1, LU_pivots.options()).expand(LU_pivots.sizes());
-      return at::lu_solve(dB, A, LU_pivots) - at::lu_solve(dA_contrib, A, identity_pivots);
-    },
-    X, /*A=*/LU_data, dA, dB
-  );
+  auto S = at::linalg_lu_solve(LU, pivots, dB, left, adjoint);
+  if (left != adjoint) {
+    // We see that when left != adjoint, op_1(A) = A, and we can substitute A^{-1}op_3(B) by op_2(X)
+    // dX = op_2(-U^{-1}(dU + L^{-1}dL U)op_2(X)) + S
+    // Let R = -U^{-1}(dU + L^{-1}dL U)
+    auto R = at::linalg_solve_triangular(LU, dLU.tril(-1), /*upper*/false, /*left*/true, /*unitriangular*/true);
+    auto U = LU.triu();
+    R = -at::linalg_solve_triangular(U, dLU.triu() + R.matmul(U), /*upper*/true);
+    // dX = op_2(R op_2(X)) + S
+    return (left ? R.matmul(X) : X.matmul(R.mH())) + S;
+  } else {
+    // We see that when left == adjoint, op_1(A) = A^H
+    // dX = op_2(op_1(-op_3(B)^H U^{-1}(dUU^{-1} + L^{-1}dL)L^{-1} P^T)) + S
+    // Now, note that whenever adjoint == left, we have that
+    // op_3(B)^H A^{-1} = op_3(X)^H
+    // We can then rewrite the formula above in terms of X as
+    // dX = op_2(op_1(-op_3(X)^H P(LdUU^{-1} + dL)L^{-1} P^T)) + S
+    Tensor P, L, U;
+    std::tie(P, L, U) = at::lu_unpack(LU, pivots);
+    // Compute V = op_3(X)^H
+    auto V = left ? X.mH() : X;
+    // Compute the inner parens LdUU^{-1} + dL
+    auto R = at::linalg_solve_triangular(U, L.matmul(dLU.triu()), /*upper*/true, /*left*/false) + dLU.tril(-1);
+    // dX = op_2(op_1(-op_3(X)^H PRL^{-1} P^T)) + S
+    R = at::linalg_solve_triangular(L, -V.matmul(P).matmul(R), /*upper*/false, /*left*/false, /*unitriangular*/true).matmul(P.mT());
+    // dX = op_2(R^H) + S
+    return (left ? R.mH() : R) + S;
+  }
 }
 
 Tensor lu_unpack_backward(
@@ -4885,6 +4974,28 @@ Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
     }
 
     out_fw_grad = at::cat(fw_grads, dim);
+  }
+
+  return out_fw_grad;
+}
+
+Tensor block_diag_jvp(at::TensorList tensors) {
+  Tensor out_fw_grad;
+
+  auto any_defined = false;
+  for (const auto& t: tensors) {
+    any_defined |= isFwGradDefined(t);
+  }
+
+  if (any_defined) {
+    std::vector<Tensor> fw_grads;
+    fw_grads.reserve(tensors.size());
+
+    for (const auto& t: tensors) {
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
+    }
+
+    out_fw_grad = at::block_diag(fw_grads);
   }
 
   return out_fw_grad;
