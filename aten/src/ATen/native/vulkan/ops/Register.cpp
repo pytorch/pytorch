@@ -5,6 +5,7 @@
 #include <ATen/native/vulkan/ops/Gru.h>
 #include <ATen/native/vulkan/ops/TransposeConvolution2d.h>
 #include <ATen/native/vulkan/ops/Mm.h>
+#include <ATen/native/vulkan/ops/VulkanOpContext.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
@@ -15,6 +16,19 @@ namespace ops {
 namespace {
 
 TORCH_LIBRARY(vulkan, m) {
+  m.class_<VulkanOpContext>("VulkanOpContext")
+      .def_pickle(
+          // __getstate__
+          [](const c10::intrusive_ptr<VulkanOpContext>& context) {
+            return context->get_state();
+          },
+          // __setstate__
+          [](VulkanOpContext::State state) {
+            return c10::make_intrusive<VulkanOpContext>(
+              VulkanOpContext::create(
+                std::get<0>(state),
+                std::get<1>(state)));
+          });
   m.class_<Conv2dOpContext>("Conv2dOpContext")
       .def_pickle(
           // __getstate__
