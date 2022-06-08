@@ -6,6 +6,7 @@
 #include <c10/core/Stream.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <ATen/NestedTensorImpl.h>
+#include <ATen/native/nested/NestedTensorMath.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/DimVector.h>
 
@@ -121,7 +122,7 @@ struct InputMetadata {
 
   bool is_same_shape(const at::Tensor& grad) const {
     if (is_nested_tensor()) {
-      return grad.nested_size_tensor().equal(nested_shape());
+      return at::native::get_nested_size_tensor(grad).equal(nested_shape());
     } else {
       return grad.sizes().equals(shape());
     }

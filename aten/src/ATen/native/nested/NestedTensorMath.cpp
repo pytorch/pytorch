@@ -107,15 +107,11 @@ inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_buffer();
 }
 
-inline at::Tensor get_nested_size_tensor(const at::Tensor& tensor) {
-  return get_nested_tensor_impl(tensor)->get_nested_size_tensor();
-}
-
 std::vector<at::Tensor> nested_size(const Tensor& self) {
   return get_nested_size_tensor(self).unbind();
 }
 
-bool has_same_shape(const Tensor& self, const Tensor& other) {
+bool _has_same_shape(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       self.is_nested() == other.is_nested(),
       "Expected both self and other to be either nested or not nested tensors.",

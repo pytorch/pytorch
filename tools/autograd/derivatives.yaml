@@ -2667,12 +2667,8 @@
   self: grad.reshape(self.sizes())
 
 # Nested Tensor Functions
-- name:  nested_size_tensor(Tensor self) -> Tensor
-  self: non_differentiable
-
 - name: _nested_tensor_from_mask(Tensor t, Tensor mask) -> Tensor
   t, mask: non_differentiable
-
 
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor

@@ -1076,7 +1076,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_make_dual", _make_dual_batching_rule);
   m.impl("_has_same_storage_numel", _has_same_storage_numel_batching_rule);
   m.impl("is_same_size", native::is_same_size);
-  m.impl("has_same_shape", native::is_same_size);
+  m.impl("_has_same_shape", native::is_same_size);
   m.impl("_new_zeros_with_same_feature_meta", _new_zeros_with_same_feature_meta_batching_rule);
 
   m.impl("sum.dim_IntList", sum_batching_rule);

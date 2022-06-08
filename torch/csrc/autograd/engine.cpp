@@ -12,6 +12,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/nested/NestedTensorMath.h>
 
 #include <c10/util/Exception.h>
 #include <c10/core/Stream.h>
@@ -701,7 +702,7 @@ void validate_outputs(
         if (metadata.is_nested_tensor()) {
           std::stringstream ss;
           ss << "invalid gradient at index " << i << " - got ";
-          ss << grad.nested_size_tensor()
+          ss << at::native::get_nested_size_tensor(grad)
              << " but expected nested size compatible with ";
           ss << metadata.nested_shape();
           AT_ERROR(format_error(ss.str()));

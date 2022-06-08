@@ -26,16 +26,18 @@ from .. import _vmap_internals
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
 _OptionalTensor = Optional[torch.Tensor]
-_NtSize = Union[Tuple[torch.Tensor], List[torch.Tensor]]
-_ShapeorNestedShape = Union[_NtSize, _size]
+_ShapeorNestedShape = Union[_size, Sequence[_size]]
+
 
 def _calculate_shape(output: torch.Tensor, grad: torch.Tensor,
                      is_grads_batched: bool) -> Tuple[_ShapeorNestedShape, _ShapeorNestedShape]:
     if output.is_nested:
         if is_grads_batched:
             raise RuntimeError("Batched grads are not supported with Nested Tensor.")
-        grad_shape = grad.nested_size()
-        out_shape = output.nested_size()
+
+        out_shape = [tensor.size() for tensor in output.unbind()]
+        grad_shape = [tensor.size() for tensor in grad.unbind()]
+
         return out_shape, grad_shape
 
     reg_out_shape = output.shape
@@ -48,7 +50,7 @@ def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor
     for out, grad in zip(outputs, grads):
         if isinstance(grad, torch.Tensor):
             first_grad = grad if not is_grads_batched else grad[0]
-            if not torch.has_same_shape(out, first_grad):
+            if not torch._has_same_shape(out, first_grad):
                 out_shape, grad_shape = _calculate_shape(out, first_grad, is_grads_batched)
                 if is_grads_batched:
                     raise RuntimeError("If `is_grads_batched=True`, we interpret the first "
