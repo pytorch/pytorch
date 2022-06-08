@@ -19,6 +19,20 @@ namespace cuda {
 
 namespace {
 
+TensorView* maybe_broadcast_inner_to_rank(TensorView* t, size_t rank) {
+  size_t t_rank = TensorDomain::noReductions(t->getMaybeRFactorDomain()).size();
+
+  // broadcast inner on inp to match rank with other.
+  if (t_rank < rank) {
+    const int num_bcast = static_cast<int>(rank - t_rank);
+    std::vector<bool> inner_bcast_dims(rank, false);
+    std::fill(
+        inner_bcast_dims.begin(), inner_bcast_dims.begin() + num_bcast, true);
+    t = broadcast(t, inner_bcast_dims);
+  }
+  return t;
+}
+
 Val* simplifiedInt(Val* val) {
   TORCH_INTERNAL_ASSERT(
       val->isConstInt(), "Expecting Const Int's only in this routine.");
@@ -210,17 +224,7 @@ std::vector<Val*> maybeBroadcast(const std::vector<Val*>& vals) {
   for (const auto i : c10::irange(vals.size())) {
     if (vals[i]->getValType().value() == ValType::TensorView) {
       auto tv = vals[i]->as<TensorView>();
-      size_t tv_dims =
-          TensorDomain::noReductions(tv->getMaybeRFactorDomain()).size();
-      if (tv_dims < n_dims) {
-        std::vector<bool> bcast_flags(n_dims, false);
-        for (const auto j : c10::irange(n_dims - tv_dims)) {
-          bcast_flags[j] = true;
-        }
-        out_vals[i] = broadcast(tv, bcast_flags);
-      } else {
-        out_vals[i] = vals[i];
-      }
+      out_vals[i] = maybe_broadcast_inner_to_rank(tv, n_dims);
     } else {
       out_vals[i] = vals[i];
     }
@@ -857,7 +861,6 @@ TensorView* reductionOp(
     for (auto axis : uint_axes) {
       is_broadcast.at(axis) = true;
     }
-
     out = broadcast(out, is_broadcast);
   }
   return out;
@@ -975,11 +978,14 @@ TensorView* expand(TensorView* inp, const std::vector<Val*>& expanded_sizes) {
   auto inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
 
   TORCH_CHECK(
-      expanded_sizes.size() == inp_domain.size(),
-      "Invalid expand, number of sizes provided is expected to be ",
+      expanded_sizes.size() >= inp_domain.size(),
+      "Invalid expand, number of sizes provided is expected to be at least ",
       inp_domain.size(),
       " but received ",
       expanded_sizes.size());
+
+  inp = maybe_broadcast_inner_to_rank(inp, expanded_sizes.size());
+  inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
 
   std::vector<Val*> maybe_expanded_sizes;
   maybe_expanded_sizes.resize(inp_domain.size(), nullptr);
@@ -1048,11 +1054,14 @@ TensorView* expand_as(TensorView* inp, TensorView* other) {
       TensorDomain::noReductions(other->getMaybeRFactorDomain());
 
   TORCH_CHECK(
-      inp_domain.size() == other_domain.size(),
-      "Invalid expand_as, dimensions of inp don't match dimensions of other, expected other to be ",
+      inp_domain.size() <= other_domain.size(),
+      "Invalid expand_as, dimensions of inp is higher than dimensions of other, expected other to be at least ",
       inp_domain.size(),
       " but received ",
       other_domain.size());
+
+  inp = maybe_broadcast_inner_to_rank(inp, other_domain.size());
+  inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
 
   std::vector<IterDomain*> out_domain;
   std::vector<Val*> maybe_expanded_sizes;

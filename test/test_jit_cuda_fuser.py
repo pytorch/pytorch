@@ -4854,6 +4854,33 @@ class TestCudaFuser(JitTestCase):
         t2_jit = torch.jit.script(t2)
         self._run_helper(t2_jit, t2, x0, x1, x2, check_stride=True)
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_expand(self):
+        device = "cuda"
+        x = torch.randn(3, 5, device=device)
+        y = torch.randn(4, 2, 3, 5, device=device)
+
+        def t(x, y):
+            with torch.jit.strict_fusion():
+                x = x.relu()
+                o0 = x.expand(2, 3, 5)
+                o1 = x.expand_as(y)
+            return o0, o1
+
+        t_jit = torch.jit.script(t)
+        self._run_helper(t_jit, t, x, y, check_stride=True)
+
+        def t2(x, y):
+            o0 = x.expand(2, 3, 5)
+            o1 = x.expand_as(y)
+            x.add_(1)
+            return o0, o1
+
+        t2_jit = torch.jit.script(t2)
+        self._run_helper(t2_jit, t2, x, y, check_stride=True, num_fusion=0)
+
 
 class TestPassManagerCudaFuser(JitTestCase):
     def setUp(self):

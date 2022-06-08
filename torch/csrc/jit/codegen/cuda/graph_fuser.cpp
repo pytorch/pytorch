@@ -2110,7 +2110,9 @@ void decomposeLinearOps(Block* block) {
 // Replace 'operation' with 'operation_copy' to guard alias operations.
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
-  static std::unordered_map<Symbol, Symbol> alias_to_copy_mapping;
+  static std::unordered_map<Symbol, Symbol> alias_to_copy_mapping(
+      {{aten::expand, prim::expand_copy},
+       {aten::expand_as, prim::expand_as_copy}});
   // TODO: revert disabled aten::view
   //    ({{aten::view, prim::view_copy},
   //     {aten::reshape, prim::reshape_copy},
@@ -2160,7 +2162,9 @@ void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
 // e.g., Any non-fused alias operation including within the prim::FallbackGraph
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void revertAliasCopyOps(std::shared_ptr<Graph>& graph, Block* block) {
-  static std::unordered_map<Symbol, Symbol> copy_to_alias_mapping;
+  static std::unordered_map<Symbol, Symbol> copy_to_alias_mapping(
+      {{prim::expand_copy, aten::expand},
+       {prim::expand_as_copy, aten::expand_as}});
   // TODO: revert disabled aten::view
   //    ({{prim::view_copy, aten::view},
   //     {prim::flatten_copy, aten::flatten},
