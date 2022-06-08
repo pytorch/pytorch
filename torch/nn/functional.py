@@ -2788,7 +2788,7 @@ def gaussian_nll_loss(
         # NOTE: torch.no_grad doesn't affect Forward AD
         # See: https://github.com/pytorch/pytorch/issues/78961
         # Checking if a Tensor has tangent is a workaround,
-        # as there isn't a public API to check if we are 
+        # as there isn't a public API to check if we are
         # in Forward AD mode.
         if torch.autograd.forward_ad.unpack_dual(var).tangent is None:
             var.clamp_(min=eps)
