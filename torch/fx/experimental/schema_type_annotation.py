@@ -104,8 +104,16 @@ class AnnotateTypesWithSchema(Transformer):
         """
         assert callable(target)
         try:
-            sig = inspect.signature(target)
+            from typing import get_type_hints, Optional, Tuple, Union, List, Dict, Any  # noqa: F401
+            from torch import Tensor  # noqa: F401
+            from torch.nn.common_types import (  # noqa: F401
+                _size_any_t, _size_1_t, _size_2_t, _size_3_t, _size_4_t, _size_5_t, _size_6_t,
+                _size_any_opt_t, _size_2_opt_t, _size_3_opt_t,
+                _ratio_2_t, _ratio_3_t, _ratio_any_t,
+                _tensor_list_t, _maybe_indices_t
+            )
+            class_annotations = get_type_hints(target, globalns=globals(), localns=locals())
         except (ValueError, TypeError):
             return None
 
-        return sig.return_annotation if sig.return_annotation is not inspect.Signature.empty else None
+        return class_annotations.get("return")
