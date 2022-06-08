@@ -227,7 +227,7 @@ class _TestONNXRuntime:
         input_names=None,
         output_names=None,
         fixed_batch_size=False,
-        training=None,
+        training=torch.onnx.TrainingMode.EVAL,
         remained_onnx_input_idx=None,
         verbose=False,
     ):
