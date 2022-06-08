@@ -14,7 +14,7 @@ Follow these steps if you want to run the test locally.
 USE_COREML_DELEGATE=1 IOS_PLATFORM=SIMULATOR ./scripts/build_ios.sh
 ```
 
-3. Generate on-the-fly test models 
+3. Generate on-the-fly test models
 ```
 python test/mobile/model_test/gen_test_model.py ios-test
 ```
@@ -47,5 +47,5 @@ cd ios/TestApp/benchmark; python coreml_backend.py
 ## Debug Test Failures
 Make sure all models are generated. See https://github.com/pytorch/pytorch/tree/master/test/mobile/model_test to learn more.
 
-There's no debug information in simulator test (project TestAppTests). You can copy the failed test code to 
+There's no debug information in simulator test (project TestAppTests). You can copy the failed test code to
 TestApp/TestApp/ViewController.mm and debug in the main TestApp.
