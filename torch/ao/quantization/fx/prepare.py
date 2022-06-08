@@ -5,6 +5,7 @@ import warnings
 from torch.fx import (
     GraphModule,
 )
+from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.graph import (
     Graph,
     Node,
@@ -1474,6 +1475,11 @@ def prepare(
 
     root_node_getter_mapping = \
         get_fusion_pattern_to_root_node_getter(backend_config_dict)
+
+    # normalize the arguments of module/functions to be kwargs in positional order
+    # this depends on operator_schema from torchscript, we may want to replace
+    # this with something more robust by using real example_inputs in the future
+    model = NormalizeArgs(model).transform()
 
     update_qconfig_for_fusion(model, qconfig_mapping)
     update_qconfig_for_fusion(model, equalization_config)

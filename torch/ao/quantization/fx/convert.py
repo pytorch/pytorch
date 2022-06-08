@@ -670,19 +670,22 @@ def convert(
             with graph.inserting_before(node):
                 input_node = node.args[0]
                 inputs = [input_node]
+                quantize_node_kwargs = {}
                 for key, value in qparams.items():
                     # TODO: we can add the information of whether a value needs to
                     # be registered as an attribute in qparams dict itself
+                    # remove the prefix and suffix to get the keyword for quantize operator
+                    arg_keyword = key[1:-1]
                     if key in ['_scale_', '_zero_point_']:
                         # For scale and zero_point values we register them as buffers in the root module.
                         # TODO: maybe need more complex attr name here
                         qparam_node = create_getattr_from_value(model, graph, module_path + prefix + key, value)
-                        inputs.append(qparam_node)
+                        quantize_node_kwargs[arg_keyword] = qparam_node
                     else:
                         # for qparams that are not scale/zero_point (like axis, dtype) we store them as literals in the graph.
-                        inputs.append(value)
+                        quantize_node_kwargs[arg_keyword] = value
 
-                quantized_node = graph.create_node(node_type, quantize_op, tuple(inputs), {})
+                quantized_node = graph.create_node(node_type, quantize_op, tuple(inputs), quantize_node_kwargs)
                 dequantized_node = graph.call_method("dequantize", args=(quantized_node,))
                 node.replace_all_uses_with(dequantized_node)
                 graph.erase_node(node)

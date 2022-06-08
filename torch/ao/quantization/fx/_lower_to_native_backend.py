@@ -1,5 +1,6 @@
 import torch
 from torch.fx import map_arg, Node
+from torch.fx.node import Argument
 from torch.fx.graph import Graph
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,6 +11,7 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.quantized._reference as nnqr
 from torch.nn.quantized.modules.utils import WeightedQuantizedModule
+from torch.ao.quantization.utils import _normalize_kwargs
 from .graph_module import QuantizedGraphModule
 from .utils import (
     collect_producer_nodes,
@@ -197,6 +199,13 @@ def should_skip_lowering(op: torch.fx.node.Node, qconfig_map: Dict[str, QConfigA
     a single dtype, so it is OK for now.
     """
     return op.name in qconfig_map and qconfig_map[op.name] is None
+
+def get_all_args_as_positional_args(node: Node) -> List[Argument]:
+    """ Get a list of args and kwargs
+    """
+    all_args = list(node.args)
+    all_args.extend(list(node.kwargs.values()))
+    return all_args
 
 # Mapping from reference module class to the replacement static quantized module class for lowering
 STATIC_LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[WeightedQuantizedModule]] = {
@@ -445,11 +454,12 @@ def _match_static_pattern(
     # Match dequantize node(s). Both of the following conditions must pass:
     # (1) All `torch.fx.Node`s at the matching indices must be a dequantize node
     # (2) There must be at least one dequantize node
+    all_pos_args = get_all_args_as_positional_args(ref_node)
     matched_dequantize = False
     for i in dequantize_node_arg_indices:
-        assert i < len(ref_node.args),\
+        assert i < len(all_pos_args),\
             "Dequantize index %s exceeded reference node's arg length %s" % (i, len(ref_node.args))
-        arg = ref_node.args[i]
+        arg = all_pos_args[i]
         if is_dequantize_node(arg):
             matched_dequantize = True
         elif isinstance(arg, Node):
@@ -608,8 +618,10 @@ def _lower_static_weighted_ref_functional(
         if q_node is None:
             continue
         assert(func_node is not None)
-        (_, output_scale_node, output_zp_node, _) = q_node.args
-        (input_dq_node, weight_dq_node, *remaining_func_args) = func_node.args
+        q_node_all_args = get_all_args_as_positional_args(q_node)
+        (_, output_scale_node, output_zp_node, _) = q_node_all_args
+        func_node_all_pos_args = get_all_args_as_positional_args(func_node)
+        (input_dq_node, weight_dq_node, *remaining_func_args) = func_node_all_pos_args
         assert(isinstance(output_zp_node, Node))
         assert(isinstance(input_dq_node, Node))
         assert(isinstance(weight_dq_node, Node))
@@ -625,7 +637,8 @@ def _lower_static_weighted_ref_functional(
         # Conv prepack args: (quantized weights[, bias, stride, padding, dilation, groups])
         prepack_args = [quantized_weight] + remaining_func_args
         if func_node.target == F.linear:
-            weight_dtype = quantized_weight.args[-1]
+            all_quantized_weight_args = get_all_args_as_positional_args(quantized_weight)
+            weight_dtype = all_quantized_weight_args[-1]
             prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
         elif func_node.target in CONV_FUNCTIONAL_OPS:
             prepack_op = get_qconv_prepack_op(func_node.target)  # type: ignore[arg-type]
@@ -644,6 +657,7 @@ def _lower_static_weighted_ref_functional(
         (q_func, q_relu_func) = STATIC_LOWER_FUNCTIONAL_MAP[func_node.target]  # type: ignore[index]
         func_node.target = q_relu_func if relu_node is not None else q_func
         func_node.args = (input_dq_node.args[0], packed_weight, output_scale_node, output_zp_node)
+        func_node.kwargs = {}
         q_node.replace_all_uses_with(func_node)
         # Move func_node after output_zp_node in the graph
         output_zp_node.append(func_node)
