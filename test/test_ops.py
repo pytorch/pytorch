@@ -15,6 +15,8 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
 )
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.utils._python_dispatch import enable_torch_dispatch_mode
+
 from torch.testing._internal.common_utils import (
     TestCase,
     is_iterable_of_tensors,
@@ -357,9 +359,11 @@ class TestCommon(TestCase):
         if dtype is torch.chalf:
             self.skipTest("Skipping chalf until it has more operator support")
 
+        mode = torch._prims.utils.get_prim_fake_mode()
+
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
-                return FakeTensor.from_tensor(x)
+                return FakeTensor.from_tensor(x, mode)
             return x
 
         # TODO: iterate over requires_grad true/false
@@ -368,7 +372,11 @@ class TestCommon(TestCase):
             result = op(sample.input, *sample.args, **sample.kwargs)
 
             meta_sample = sample.transform(_to_tensormeta)
-            meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
+            try:
+                with enable_torch_dispatch_mode(mode):
+                    meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
+            except torch._subclasses.fake_tensor.ComplexInputException:
+                continue
 
             if isinstance(result, torch.Tensor):
                 prims.utils.compare_tensor_meta(result, meta_result)
@@ -539,9 +547,11 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_python_ref_errors(self, device, op):
+        mode = torch._prims.utils.get_prim_fake_mode()
+
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
-                return FakeTensor.from_tensor(x)
+                return FakeTensor.from_tensor(x, mode)
             return x
 
         error_inputs = op.error_inputs(device)
