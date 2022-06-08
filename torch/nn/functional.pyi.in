@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from torch import Tensor
 from torch.types import _size, _dtype
 from typing import Any, Optional, Tuple, Dict, List, Callable, Sequence, Union
