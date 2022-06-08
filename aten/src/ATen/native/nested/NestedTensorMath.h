@@ -16,9 +16,6 @@ TORCH_API std::vector<int64_t> NestedTensor_get_max_size(const NestedTensorImpl&
 
 TORCH_API Tensor NestedTensor_to_padded_tensor_generic(const Tensor& t, double padding, OptionalIntArrayRef output_size);
 
-int64_t NestedTensor_size_int(const Tensor& self, int64_t d);
-std::vector<at::Tensor> nested_size(const Tensor& self);
-at::Tensor NestedTensor_nested_size_tensor(const Tensor& self);
 
 } // namespace native
 } // namespace at

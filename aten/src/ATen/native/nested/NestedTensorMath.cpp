@@ -13,41 +13,8 @@
 
 namespace at {
 namespace native {
-
-int64_t NestedTensor_size_int(const Tensor& self, int64_t d) {
-  const auto* nt_indices = get_nested_tensor_impl(self);
-  const auto opt_size_d = nt_indices->opt_size(d);
-  TORCH_CHECK(opt_size_d, "Irregular dimension ", d, " does not have a size.");
-  return *opt_size_d;
-}
-
-at::Tensor NestedTensor_nested_size_tensor(const Tensor& self){
-  const auto* nt_indices = get_nested_tensor_impl(self);
-  return nt_indices->get_nested_size_tensor();
-}
-
-std::vector<at::Tensor> nested_size(const Tensor& self) {
-  return NestedTensor_nested_size_tensor(self).unbind();
-}
-
-bool has_same_shape(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(
-      self.is_nested() == other.is_nested(),
-      "Expected both self and other to be nested or not nested. ",
-      "Self is_nested: ",
-      self.is_nested(),
-      ". Other is_nested: ",
-      other.is_nested(),
-      ".")
-  if (self.is_nested()) {
-    auto self_nt_size = NestedTensor_nested_size_tensor(self);
-    auto other_nt_size = NestedTensor_nested_size_tensor(other);
-    return at::equal(self_nt_size, other_nt_size);
-  }
-  return self.sizes() == other.sizes();
-}
-
 namespace {
+
 template <typename Func>
 Tensor map_nt(const Tensor& nt, Func f) {
   auto* nt_impl = get_nested_tensor_impl(nt);
@@ -140,8 +107,28 @@ inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_buffer();
 }
 
-inline const at::Tensor& get_nested_size_tensor(const at::Tensor& tensor) {
+inline at::Tensor get_nested_size_tensor(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_nested_size_tensor();
+}
+
+std::vector<at::Tensor> nested_size(const Tensor& self) {
+  return get_nested_size_tensor(self).unbind();
+}
+
+bool has_same_shape(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(
+      self.is_nested() == other.is_nested(),
+      "Expected both self and other to be either nested or not nested tensors.",
+      "Self ", self.is_nested()? "is " : "is not ",
+      "nested. While Other ",
+      other.is_nested()? "is " : "is not ",
+      "nested.")
+  if (self.is_nested()) {
+    const auto self_nt_size = get_nested_size_tensor(self);
+    const auto other_nt_size = get_nested_size_tensor(other);
+    return at::equal(self_nt_size, other_nt_size);
+  }
+  return self.sizes() == other.sizes();
 }
 
 // CPU only!
@@ -156,7 +143,7 @@ std::vector<at::Tensor> NestedTensor_unbind(
       "got dimension ",
       dim,
       " instead.");
-  auto esizes = get_nested_size_tensor(self);
+  const auto esizes = get_nested_size_tensor(self);
   std::vector<at::Tensor> result_tensors;
   if (esizes.dim() == 0) {
     return result_tensors;
