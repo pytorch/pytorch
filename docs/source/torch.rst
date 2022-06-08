@@ -96,6 +96,7 @@ Indexing, Slicing, Joining, Mutating Ops
     hstack
     index_add
     index_copy
+    index_reduce
     index_select
     masked_select
     movedim
@@ -222,6 +223,8 @@ Parallelism
     set_num_threads
     get_num_interop_threads
     set_num_interop_threads
+
+.. _torch-rst-local-disable-grad:
 
 Locally disabling gradient computation
 --------------------------------------

@@ -109,6 +109,7 @@ class TestFSDPIgnoredModules(FSDPTest):
             wrapped_model.run_backward(loss)
             optim.step()
 
+    @skip_if_lt_x_gpu(2)
     def test_ignored_modules_invalid(self):
         """Tests that passing an FSDP module as an ignored module or the
         top-level module itself errors."""
@@ -120,9 +121,9 @@ class TestFSDPIgnoredModules(FSDPTest):
             msg="`ignored_modules` should not include FSDP modules",
         ):
             FSDP(model, ignored_modules=[model.layer1])
-        with self.assertRaises(
-            ValueError,
-            msg="Trying to ignore the top-level module passed into the FSDP "
+        with self.assertWarnsRegex(
+            expected_warning=UserWarning,
+            expected_regex="Trying to ignore the top-level module passed into the FSDP "
             "constructor itself will result in all parameters being ignored "
             "and is not supported",
         ):

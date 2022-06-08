@@ -113,7 +113,7 @@ TORCH_META_FUNC(gather)
   // For more details, see: https://github.com/pytorch/pytorch/pull/63312#discussion_r694794832
   // and https://github.com/pytorch/pytorch/issues/63837
   bool check_result = result.defined();
-  set_output(index.sizes(), self.options());
+  set_output_raw_strided(0, index.sizes(), {}, self.options());
   if (check_result) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
@@ -152,7 +152,7 @@ void scatter_meta_impl(
     }
   }
 
-  meta.set_output(self.sizes(), self.options());
+  meta.set_output_raw_strided(0, self.sizes(), {}, self.options());
   if (reduce.has_value()) {
     // Check if we have a valid reduce operator.
     get_operator_enum(reduce.value(), use_new_options);
@@ -215,7 +215,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
   // For more details, see: https://github.com/pytorch/pytorch/pull/63312#discussion_r694794832
   // and https://github.com/pytorch/pytorch/issues/63837
   bool check_result = result.defined();
-  set_output(self.sizes(), self.options());
+  set_output_raw_strided(0, self.sizes(), {}, self.options());
   if (check_result) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, index);
@@ -288,7 +288,7 @@ void index_func_meta_impl(
 
   auto& result = meta.maybe_get_output(0);
   bool is_defined = result.defined();
-  meta.set_output(self.sizes(), self.options());
+  meta.set_output_raw_strided(0, self.sizes(), {}, self.options());
   if (is_defined) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, index);
@@ -298,7 +298,7 @@ void index_func_meta_impl(
   // A hack to run TensorIterator checks in the meta function.
   // See comment: https://github.com/pytorch/pytorch/pull/65993#discussion_r760307417
   // TODO: (@krshrimali) Try inheriting from TensorIteratorBase instead.
-  if (result.device() == kMeta) {
+  if (result.device() == kMeta && result.dim() > 0) {
     auto selfSlice = result.select(dim, 0);
     auto sourceSlice = source.select(dim, 0);
     auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
@@ -312,7 +312,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
   return TORCH_PRECOMPUTE_STRUCT(index_add)().set_dim(dim);
 }
 
-TORCH_PRECOMPUTE_META_FUNC(_index_reduce)
+TORCH_PRECOMPUTE_META_FUNC(index_reduce)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
@@ -321,10 +321,10 @@ TORCH_PRECOMPUTE_META_FUNC(_index_reduce)
  bool include_self) {
   (void)include_self;
   TORCH_CHECK(reduce == "prod" || reduce == "mean" || reduce == "amax" || reduce == "amin",
-              "_index_reduce(): Expected reduce to be one of prod, mean, amax or amin but got ", reduce, ".");
+              "index_reduce(): Expected reduce to be one of prod, mean, amax or amin but got ", reduce, ".");
   dim = maybe_wrap_dim(dim, self.dim());
-  index_func_meta_impl(*this, self, dim, index, source, "_index_reduce");
-  return TORCH_PRECOMPUTE_STRUCT(_index_reduce)().set_dim(dim);
+  index_func_meta_impl(*this, self, dim, index, source, "index_reduce");
+  return TORCH_PRECOMPUTE_STRUCT(index_reduce)().set_dim(dim);
 }
 
 } // namespace meta
@@ -888,7 +888,7 @@ void index_reduce_func_impl(
   const Tensor& source,
   bool include_self,
   const Tensor& result,
-  const INDEX_OP& op) {
+  const SCATTER_GATHER_OP& op) {
   if (!result.is_same(self)) result.copy_(self);
   if (!include_self) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -896,14 +896,14 @@ void index_reduce_func_impl(
       self.scalar_type(), "index_reduce_func_exclude_input_init", [&] {
       scalar_t init_val;
       switch (op) {
-        case INDEX_OP::PROD:
+        case SCATTER_GATHER_OP::REDUCE_MULTIPLY:
           init_val = (scalar_t)1;
           break;
-        case INDEX_OP::MAXIMUM:
+        case SCATTER_GATHER_OP::REDUCE_MAXIMUM:
           init_val = std::numeric_limits<scalar_t>::has_infinity ? -std::numeric_limits<scalar_t>::infinity()
                      : std::numeric_limits<scalar_t>::lowest();
           break;
-        case INDEX_OP::MINIMUM:
+        case SCATTER_GATHER_OP::REDUCE_MINIMUM:
           init_val = std::numeric_limits<scalar_t>::has_infinity ? std::numeric_limits<scalar_t>::infinity()
                      : std::numeric_limits<scalar_t>::max();
           break;
@@ -950,13 +950,13 @@ void index_reduce_func_impl(
         iter.unsafe_replace_operand(2, source_data);
 
         switch (op) {
-          case INDEX_OP::PROD :
+          case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
             mul_stub(iter.device_type(), iter);
             break;
-          case INDEX_OP::MINIMUM :
+          case SCATTER_GATHER_OP::REDUCE_MINIMUM :
             minimum_stub(iter.device_type(), iter);
             break;
-          case INDEX_OP::MAXIMUM :
+          case SCATTER_GATHER_OP::REDUCE_MAXIMUM :
             maximum_stub(iter.device_type(), iter);
             break;
           default :
@@ -966,7 +966,7 @@ void index_reduce_func_impl(
       }
     });
 
-    if (op == INDEX_OP::MEAN) {
+    if (op == SCATTER_GATHER_OP::REDUCE_MEAN) {
       auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
       counts.index_add_(dim, index, at::ones_like(source));
       counts.masked_fill_(counts == 0, 1);
@@ -997,19 +997,19 @@ void index_reduce_func_impl(
             scalar_t *count_ip;
             scalar_t val;
             switch (op) {
-              case INDEX_OP::MEAN :
+              case SCATTER_GATHER_OP::REDUCE_MEAN :
                 *self_ip += *(source_ptr + i * source_stride);
                 count_ip = counts_ptr + self_i * counts_stride;
                 *count_ip += 1;
                 break;
-              case INDEX_OP::PROD :
+              case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
                 *self_ip *= *(source_ptr + i * source_stride);
                 break;
-              case INDEX_OP::MINIMUM :
+              case SCATTER_GATHER_OP::REDUCE_MINIMUM :
                 val = *(source_ptr + i * source_stride);
                 *self_ip = at::_isnan<scalar_t>(val) ? val : std::min(*self_ip, val);
                 break;
-              case INDEX_OP::MAXIMUM :
+              case SCATTER_GATHER_OP::REDUCE_MAXIMUM :
                 val = *(source_ptr + i * source_stride);
                 *self_ip = at::_isnan<scalar_t>(val) ? val : std::max(*self_ip, val);
                 break;
@@ -1019,14 +1019,14 @@ void index_reduce_func_impl(
         }
       });
     });
-    if (op == INDEX_OP::MEAN) {
+    if (op == SCATTER_GATHER_OP::REDUCE_MEAN) {
       counts.masked_fill_(counts == 0, 1);
       result.div_(counts);
     }
   }
 }
 
-TORCH_IMPL_FUNC(_index_reduce_cpu_out)
+TORCH_IMPL_FUNC(index_reduce_cpu_out)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
@@ -1035,19 +1035,7 @@ TORCH_IMPL_FUNC(_index_reduce_cpu_out)
  bool include_input,
  const Tensor& result) {
   TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
-
-  INDEX_OP op;
-  if (reduce == "prod") {
-    op = INDEX_OP::PROD;
-  } else if (reduce == "mean") {
-    op = INDEX_OP::MEAN;
-  } else if (reduce == "amax") {
-    op = INDEX_OP::MAXIMUM;
-  } else if (reduce == "amin") {
-    op = INDEX_OP::MINIMUM;
-  } else {
-    TORCH_CHECK(false, "reduce argument must be either prod, mean, amax or amin, got ", reduce, ".");
-  }
+  auto op = meta::get_operator_enum(reduce, true);
   index_reduce_func_impl(self, dim, index, source, include_input, result, op);
 }
 
@@ -1151,7 +1139,18 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
   auto index_contig = index.contiguous();
 
   if (self.dim() > 1) {
-    if (numel == 0 || self.numel() == 0) {
+    if (numel == 0) {
+      return result;
+    }
+    if (self.numel() == 0) {
+      auto src_indexing_axis_dim = self.size(dim);
+      TORCH_CHECK(src_indexing_axis_dim > 0,
+                  "index_select(): self indexing axis dim should be positive");
+      AT_DISPATCH_INDEX_TYPES(
+      index_contig.scalar_type(), "index_select_empty_self_bound_check", [&]() {
+        const auto* idxs = index_contig.data_ptr<index_t>();
+        check_indexarray_range<index_t>(idxs, numel, src_indexing_axis_dim);
+      });
       return result;
     }
 
@@ -1290,7 +1289,12 @@ Tensor index_select_quantized_cpu_(const Tensor & self, int64_t dim, const Tenso
 }
 
 Tensor index_select_backward(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
-  return at::zeros(self_sizes, grad.options()).index_add_(dim, index, grad);
+  // for composite compliance, use out-of-place variant of
+  // `index_add` if index tensor is a Tensor Subclass.
+  if (isTensorSubclassLike(index)) {
+    return grad.new_zeros(self_sizes, grad.options()).index_add(dim, index, grad);
+  }
+  return grad.new_zeros(self_sizes, grad.options()).index_add_(dim, index, grad);
 }
 
 Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Scalar& source) {
@@ -1843,17 +1847,20 @@ Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& in
     if (self.ndimension() == 0) return at::_sparse_coo_tensor_unsafe(at::empty({0,grad.numel()}, index.options()), grad, self.sizes());
     if (grad.ndimension() == 0) return at::_sparse_coo_tensor_unsafe(index.view({1,1}), grad, self.sizes());
     Tensor sparse_ind = at::empty({self.ndimension(), grad.numel()}, self.options().dtype(at::kLong));
-    int64_t n_above = grad.numel();
-    int64_t n_below = 1;
-    if (dim < 0) dim += self.ndimension();
-    for (const auto i : c10::irange(self.ndimension())) {
-        n_above /= grad.size(i);
-        if (i == dim) {
-            sparse_ind[i] = index.reshape(-1);
-        } else {
-            sparse_ind[i] = at::arange(grad.size(i),self.options().dtype(at::kLong)).unsqueeze(1).expand({grad.size(i), n_above}).reshape(-1).repeat(n_below);
-        }
-        n_below *= grad.size(i);
+    int64_t grad_numel = grad.numel();
+    if (grad_numel > 0) {
+      int64_t n_above = grad_numel;
+      int64_t n_below = 1;
+      if (dim < 0) dim += self.ndimension();
+      for (const auto i : c10::irange(self.ndimension())) {
+          n_above /= grad.size(i);
+          if (i == dim) {
+              sparse_ind[i] = index.reshape(-1);
+          } else {
+              sparse_ind[i] = at::arange(grad.size(i),self.options().dtype(at::kLong)).unsqueeze(1).expand({grad.size(i), n_above}).reshape(-1).repeat(n_below);
+          }
+          n_below *= grad.size(i);
+      }
     }
     return at::_sparse_coo_tensor_unsafe(sparse_ind, grad.reshape(-1), self.sizes());
 }
@@ -1871,7 +1878,7 @@ int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
     int64_t i = 0;
     for (; i + (ilp_factor - 1) < n; i += ilp_factor) {
       c10::ForcedUnroll<ilp_factor>{}([&](int k) {
-        const auto& val = *reinterpret_cast<const scalar_t*>(ptr + k * stride);
+        const auto& val = c10::load<scalar_t>(ptr + k * stride);
         if (val != scalar_t(0)) {
           ++nonzero[k];
         }
@@ -1879,7 +1886,7 @@ int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
       ptr += ilp_factor * stride;
     }
     for (; i < n; ++i) {
-      const auto& val = *reinterpret_cast<const scalar_t*>(ptr);
+      const auto& val = c10::load<scalar_t>(ptr);
       if (val != scalar_t(0)) {
         ++nonzero[0];
       }
@@ -2018,7 +2025,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
           const char* ptr = data[0] + i * strides[1];
           for (const auto j : c10::irange(n1)) {
             (void)j; //Suppress unused variable warning
-            const auto& val = *reinterpret_cast<const scalar_t*>(ptr);
+            const auto& val = c10::load<scalar_t>(ptr);
             // If nonzero, write index
             if (val != scalar_t(0)) {
               for (const auto k : c10::irange(ndim)) {

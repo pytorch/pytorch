@@ -29,7 +29,6 @@ from torch.fx.experimental.partitioner_utils import (
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 import torch.fx.experimental.meta_tracer
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.operator_schemas import (
@@ -123,7 +122,7 @@ class TestFXExperimental(JitTestCase):
         assert len(serialized_graph1["weights"]) == 4
         assert len(serialized_graph1["modules"]) == 0
         assert len(serialized_graph2["nodes"]) == 6
-        assert len(serialized_graph2["weights"]) == 4
+        assert len(serialized_graph2["weights"]) == 1
         assert len(serialized_graph2["modules"]) == 1
         assert serialized_graph1["weights"]["linear.weight"]["shape"] == "[4, 4]"
         assert serialized_graph1["weights"]["linear.weight"]["dtype"] == "torch.float32"
@@ -701,14 +700,6 @@ class TestFXExperimental(JitTestCase):
 
                 torch.testing.assert_close(loaded(x), mttm(x))
 
-    def test_proxy_tensor(self):
-        def f(x):
-            val = x.cos().cos().sum()
-            return torch.autograd.grad(val, x)
-
-        traced_graph = make_fx(f)(torch.randn(3, requires_grad=True))
-        inp = torch.randn(3, requires_grad=True)
-        torch.testing.assert_close(traced_graph(inp), f(inp))
 
     def test_call_to_assert_with_msg(self):
         class M(torch.nn.Module):

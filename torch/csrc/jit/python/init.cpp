@@ -146,10 +146,34 @@ void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   auto jit = m.def_submodule("_jit");
 
-  py::register_exception<JITException>(m, "JITException");
+  static py::exception<JITException> exc(m, "JITException");
+
+  py::register_exception_translator([](std::exception_ptr p) {
+    try {
+      if (p) {
+        std::rethrow_exception(p);
+      }
+    } catch (const JITException& e) {
+      // special handling of JITException, to set its python class name and msg
+      py::gil_scoped_acquire acquire;
+      const auto& className = e.getPythonClassName();
+      const auto& originalMsg = e.getOriginalMsg();
+      JITException::setCaughtOriginalMsg(originalMsg.value_or(""));
+      JITException::setCaughtPythonClassName(className.value_or(""));
+      exc(e.what());
+    }
+  });
+
+  m.def(
+      "_get_caught_jit_exception_class_name",
+      JITException::getCaughtPythonClassName);
+  m.def(
+      "_get_caught_jit_exception_original_msg",
+      JITException::getCaughtOriginalMsg);
 
   py::class_<python::IODescriptor> iodescriptor(
-      m, "IODescriptor"); // NOLINT(bugprone-unused-raii)
+      m,
+      "IODescriptor"); // NOLINT(bugprone-unused-raii)
 
   m.def("_jit_init", loadPythonClasses)
       .def(
@@ -639,6 +663,17 @@ void initJITBindings(PyObject* module) {
       .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
 #endif
       .def(
+          "_jit_set_tracer_state_warn",
+          [](bool new_warn) {
+            jit::tracer::getTracerStateWarnMode() = new_warn;
+          })
+      .def(
+          "_jit_get_tracer_state_warn",
+          []() {
+            bool current_tracer_warn = jit::tracer::getTracerStateWarnMode();
+            return current_tracer_warn;
+          })
+      .def(
           "_jit_set_nvfuser_skip_node_kind",
           // Args:
           //     `op_name`: Symbol of op;
@@ -787,6 +822,12 @@ void initJITBindings(PyObject* module) {
               std::cerr << "ERROR: only `stdout` and `stderr`"
                         << "are supported as output options" << std::endl;
             }
+          })
+      .def(
+          "_storage_id",
+          [](const at::Tensor& ten) -> int64_t {
+            return reinterpret_cast<int64_t>(
+                ten.storage().unsafeGetStorageImpl());
           })
       .def(
           "_jit_try_infer_type",
@@ -1448,6 +1489,8 @@ void initJITBindings(PyObject* module) {
           [](Argument& self) -> py::bool_ {
             return self.default_value().has_value();
           })
+      .def_property_readonly(
+          "is_out", [](Argument& self) { return self.is_out(); })
       .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
         return self.kwarg_only();
       });

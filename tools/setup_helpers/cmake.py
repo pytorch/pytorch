@@ -135,14 +135,14 @@ class CMake:
         cmake3_version = CMake._get_version(which("cmake3"))
         cmake_version = CMake._get_version(which("cmake"))
 
-        _cmake_min_version = LooseVersion("3.10.0")
+        _cmake_min_version = LooseVersion("3.13.0")
         if all(
             (
                 ver is None or ver < _cmake_min_version
                 for ver in [cmake_version, cmake3_version]
             )
         ):
-            raise RuntimeError("no cmake or cmake3 with version >= 3.10.0 found")
+            raise RuntimeError("no cmake or cmake3 with version >= 3.13.0 found")
 
         if cmake3_version is None:
             cmake_command = "cmake"
@@ -282,6 +282,7 @@ class CMake:
                 var: var
                 for var in (
                     "BLAS",
+                    "WITH_BLAS",
                     "BUILDING_WITH_TORCH_LIBS",
                     "CUDA_HOST_COMILER",
                     "CUDA_NVCC_EXECUTABLE",
@@ -306,6 +307,7 @@ class CMake:
                     "WERROR",
                     "OPENSSL_ROOT_DIR",
                     "STATIC_DISPATCH_BACKEND",
+                    "SELECTED_OP_LIST",
                 )
             }
         )
@@ -336,7 +338,6 @@ class CMake:
                 key = low_priority_aliases[var]
                 if key not in build_options:
                     build_options[key] = val
-
         # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
         py_lib_path = sysconfig.get_path("purelib")
         cmake_prefix_path = build_options.get("CMAKE_PREFIX_PATH", None)

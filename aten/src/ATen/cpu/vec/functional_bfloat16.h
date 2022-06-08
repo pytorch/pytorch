@@ -75,7 +75,7 @@ inline BFloat16 reduce_all(const Op& vec_fun, const BFloat16* data, int64_t size
     }
   }
   acc_fvec0 = vec_fun(acc_fvec0, acc_fvec1);
-  return vec_reduce_all<float>(vec_fun, acc_fvec0, fVec::size());
+  return vec_reduce_all<float>(vec_fun, acc_fvec0);
 }
 
 template <typename scalar_t = BFloat16, typename Op1, typename Op2>
@@ -131,8 +131,8 @@ inline std::pair<BFloat16, BFloat16> reduce2_all(const Op1& vec_fun1, const Op2&
   acc1_fvec0 = vec_fun1(acc1_fvec0, acc1_fvec1);
   acc2_fvec0 = vec_fun2(acc2_fvec0, acc2_fvec1);
   return std::pair<BFloat16, BFloat16>(
-      vec_reduce_all<float>(vec_fun1, acc1_fvec0, fVec::size()),
-      vec_reduce_all<float>(vec_fun2, acc2_fvec0, fVec::size()));
+      vec_reduce_all<float>(vec_fun1, acc1_fvec0),
+      vec_reduce_all<float>(vec_fun2, acc2_fvec0));
 }
 
 template <typename scalar_t = BFloat16, typename MapOp, typename ReduceOp>
@@ -187,7 +187,7 @@ inline BFloat16 map_reduce_all(
     }
   }
   acc_fvec0 = red_fun(acc_fvec0, acc_fvec1);
-  return vec_reduce_all<float>(red_fun, acc_fvec0, fVec::size());
+  return vec_reduce_all<float>(red_fun, acc_fvec0);
 }
 
 template <typename scalar_t = BFloat16, typename MapOp, typename ReduceOp>
@@ -255,7 +255,7 @@ inline BFloat16 map2_reduce_all(
     }
   }
   acc_fvec0 = red_fun(acc_fvec0, acc_fvec1);
-  return vec_reduce_all<float>(red_fun, acc_fvec0, fVec::size());
+  return vec_reduce_all<float>(red_fun, acc_fvec0);
 }
 
 template <typename scalar_t = BFloat16, typename MapOp, typename ReduceOp>
@@ -336,7 +336,7 @@ inline BFloat16 map3_reduce_all(
     }
   }
   acc_fvec0 = red_fun(acc_fvec0, acc_fvec1);
-  return vec_reduce_all<float>(red_fun, acc_fvec0, fVec::size());
+  return vec_reduce_all<float>(red_fun, acc_fvec0);
 }
 
 template <typename scalar_t = BFloat16, typename Op>

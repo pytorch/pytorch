@@ -29,6 +29,7 @@ from torch.futures import Future
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     captured_output,
+    tp_transports,
 )
 from torch.testing._internal.common_utils import (
     IS_MACOS,
@@ -36,6 +37,7 @@ from torch.testing._internal.common_utils import (
     sandcastle_skip_if,
     get_cycles_per_ms,
 )
+
 from torch.testing._internal.dist_utils import (
     dist_init,
     get_function_event,
@@ -4377,13 +4379,17 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # Wait for all init to complete.
         dist.barrier()
 
+        # Use a different file name for the next initialization
+        new_backend_options = self.rpc_backend_options
+        new_backend_options.init_method += "init_2"
+
         # Ensure rpc initialization works again.
         rpc.init_rpc(
             name=worker_name(self.rank),
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
-            rpc_backend_options=self.rpc_backend_options,
+            rpc_backend_options=new_backend_options,
         )
 
         # Verify RPCs work after re-init.
@@ -4392,191 +4398,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         rpc.rpc_sync(dst, foo_add, args=())
 
         rpc.shutdown()
-
-    # Test init_rpc without world_size argument
-    @dist_init(setup_rpc=False)
-    def test_init_rpc_without_world_size(self):
-        rpc.init_rpc(
-            name=worker_name(self.rank),
-            backend=self.rpc_backend,
-            rank=self.rank,
-            rpc_backend_options=self.rpc_backend_options,
-        )
-        rpc.shutdown()
-
-    # Dynamic RPC new ranks communicate with existing ranks
-    @dist_init(setup_rpc=False)
-    def test_without_world_size_new_rank_can_communicated_with_existing_rank(self):
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
-
-        if self.rank == 0:
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-
-        # Rank 0 will be initialized with RPC after this barrier
-        dist.barrier()
-
-        if self.rank != 0:
-            # Newly joined ranks will be able to communicate with rank 0, since that was created first
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-            result = rpc.rpc_sync(worker_name(0), torch.add, args=(torch.tensor(1), torch.tensor(1)))
-            self.assertEqual(torch.add(torch.tensor(1), torch.tensor(1)), result)
-
-        # Barrier to ensure that all rpc_sync calls are finished
-        dist.barrier()
-        rpc.shutdown()
-
-    # Dynamic RPC existing ranks can communicate with new ranks
-    @dist_init(setup_rpc=False)
-    def test_without_world_size_existing_rank_can_communicate_with_new_rank(self):
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
-
-        if self.rank == 0:
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-
-        # Rank 0 will be initialized with RPC after this barrier
-        dist.barrier()
-
-        # Rest of ranks join after barrier
-        if self.rank != 0:
-            # Newly joined ranks will be able to communicate with rank 0, since that was created first
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-
-        dist.barrier()
-        if self.rank == 0:
-            for i in range(1, self.world_size):
-                result = rpc.rpc_sync(worker_name(i), torch.add, args=(torch.tensor(1), torch.tensor(1)))
-                self.assertEqual(torch.add(torch.tensor(1), torch.tensor(1)), result)
-
-        # Barrier to ensure that all rpc_sync calls are finished
-        dist.barrier()
-        rpc.shutdown()
-
-    # Dynamic RPC existing ranks can communicate with new ranks using CUDA rpc
-    @skip_if_lt_x_gpu(2)
-    @dist_init(setup_rpc=False)
-    def test_without_world_size_existing_rank_can_communicate_with_new_rank_cuda(self):
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
-
-        if self.rank == 0:
-            options = self.rpc_backend_options
-            for i in range(1, self.world_size):
-                dst = worker_name(i)
-                options.set_device_map(dst, {1: 0})
-                options.set_device_map(dst, {0: 1})
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                rpc_backend_options=options,
-            )
-
-        # Rank 0 will be initialized with RPC after this barrier
-        dist.barrier()
-
-        # Rest of ranks join after barrier
-        if self.rank != 0:
-            # Newly joined ranks will be able to communicate with rank 0, since that was created first
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-
-        dist.barrier()
-        if self.rank == 0:
-            for i in range(1, self.world_size):
-                x = torch.ones(2)
-                result_on_device_0 = rpc.rpc_sync(worker_name(i), torch.add, args=(x.to(0), 1))
-                result_on_device_1 = rpc.rpc_sync(worker_name(i), torch.add, args=(x.to(1), 1))
-                self.assertEqual(torch.add(torch.ones(2), 1), result_on_device_0)
-                self.assertEqual(torch.device('cuda:0'), result_on_device_0.device)
-                self.assertEqual(torch.add(torch.ones(2), 1), result_on_device_1)
-                self.assertEqual(torch.device('cuda:1'), result_on_device_1.device)
-
-        # Barrier to ensure that all rpc_sync calls are finished
-        dist.barrier()
-        rpc.shutdown()
-
-    @dist_init(setup_rpc=False)
-    def test_init_rpc_without_world_size_without_rank(self):
-        # default initialization uses file init
-        with self.assertRaisesRegex(ValueError, "rank parameter missing"):
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-
-        # env init
-        with self.assertRaisesRegex(ValueError, "environment variable RANK expected"):
-            rpc_backend_options = rpc.TensorPipeRpcBackendOptions(init_method="env://")
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rpc_backend_options=rpc_backend_options,
-            )
-
-        # tcp init
-        with self.assertRaisesRegex(ValueError, "rank parameter missing"):
-            rpc_backend_options = rpc.TensorPipeRpcBackendOptions(init_method="tcp://127.0.0.1:23456")
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rpc_backend_options=rpc_backend_options,
-            )
-
-    @dist_init(setup_rpc=False)
-    def test_init_dynamic_and_static_rpc_group(self):
-        # Initialize a static rpc group with size = self.world_size - 1
-        dist.init_process_group(
-            backend='gloo',
-            init_method=self.file_init_method,
-            rank=self.rank,
-            world_size=self.world_size)
-
-        world_size_minus_one = self.world_size - 1
-        if self.rank < world_size_minus_one:
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                world_size=world_size_minus_one,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-
-        dist.barrier()
-
-        # Attempt to add an additional dynamic group member
-        if self.rank == world_size_minus_one:
-            with self.assertRaisesRegex(RuntimeError, "RPC group mixes statically and dynamically\
- initialized members which is not supported."):
-                rpc.init_rpc(
-                    name=worker_name(self.rank),
-                    backend=self.rpc_backend,
-                    rank=self.rank,
-                    rpc_backend_options=self.rpc_backend_options,
-                )
 
     def test_wrong_types(self):
         with self.assertRaisesRegex(
@@ -4723,71 +4544,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     @dist_init
     def test_my_parameter_server(self):
         self._my_parameter_server(False)
-
-    @staticmethod
-    def _meta_tensor_method(tensors, device_types, sizes, numels, dtypes, strides, return_rrefs):
-        tensors = [t.to_here() if isinstance(t, torch._C._distributed_rpc.PyRRef) else t for t in tensors]
-        for tensor, device_type, size, numel, dtype, stride in zip(tensors, device_types, sizes, numels, dtypes,
-                                                                   strides):
-            assert tensor.device.type == device_type, f"{tensor.device.type} vs {device_type}"
-            assert tensor.size() == size, f"{tensor.size} vs {size}"
-            assert tensor.numel() == numel, f"{tensor.numel()} vs {numel}"
-            assert tensor.dtype == dtype, f"{tensor.dtype} vs {dtype}"
-            assert tensor.stride() == stride, f"{tensor.stride()} vs {stride}"
-        return [RRef(t) if return_rrefs else t for t in tensors]
-
-    def _test_meta_tensor(self, to, tensors, device_types, sizes, numels, dtypes, strides, return_rrefs):
-        returned_tensors = rpc.rpc_sync(to, RpcTest._meta_tensor_method,
-                                        args=(tensors, device_types, sizes, numels, dtypes, strides, return_rrefs))
-        returned_tensors = [t.to_here() if isinstance(t, torch._C._distributed_rpc.PyRRef) else t for t in
-                            returned_tensors]
-        for tensor, device_type, size, numel, dtype, stride in zip(returned_tensors, device_types, sizes, numels,
-                                                                   dtypes, strides):
-            assert isinstance(tensor, torch.Tensor), f"{type(tensor)}"
-            self.assertEqual(tensor.device.type, device_type)
-            self.assertEqual(tensor.size(), size)
-            self.assertEqual(tensor.numel(), numel)
-            self.assertEqual(tensor.dtype, dtype)
-            self.assertEqual(tensor.stride(), stride)
-
-    @dist_init
-    def test_meta_one_tensor(self):
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        for return_rrefs in [False, True]:
-            self._test_meta_tensor(dst_rank,
-                                   [torch.ones(42, device='meta')], ['meta'],
-                                   [torch.Size((42,))], [42],
-                                   [torch.float], [(1,)],
-                                   return_rrefs=return_rrefs)
-
-    @dist_init
-    def test_meta_one_tensor_rref(self):
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        for return_rrefs in [False, True]:
-            self._test_meta_tensor(dst_rank,
-                                   [RRef(torch.ones(6, 7, device='meta', dtype=torch.int))], ['meta'],
-                                   [torch.Size((6, 7))], [42],
-                                   [torch.int], [(7, 1)],
-                                   return_rrefs=return_rrefs)
-
-    @dist_init
-    def test_meta_multiple_tensors(self):
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        for return_rrefs in [False, True]:
-            self._test_meta_tensor(dst_rank,
-                                   [torch.empty(42, device='meta'),
-                                    torch.empty(6, 7, device='cpu', dtype=torch.bool),
-                                    RRef(torch.empty(2, 21, device='meta', dtype=torch.int)),
-                                    RRef(torch.empty(3, 14, device='cpu', dtype=torch.long))],
-                                   ['meta', 'cpu', 'meta', 'cpu'],
-                                   [torch.Size((42,)), torch.Size((6, 7)), torch.Size((2, 21)), torch.Size((3, 14))],
-                                   [42, 42, 42, 42],
-                                   [torch.float, torch.bool, torch.int, torch.long],
-                                   [(1,), (7, 1), (21, 1), (14, 1)],
-                                   return_rrefs=return_rrefs)
 
 
 class CudaRpcTest(RpcAgentTestFixture):
@@ -5159,7 +4915,8 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     def test_infer_backend_from_options(self):
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
-            init_method=self.init_method
+            init_method=self.init_method,
+            _transports=tp_transports()
         )
 
         rpc.init_rpc(
@@ -5178,7 +4935,8 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
         NUM_THREADS = 27
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
             init_method=self.rpc_backend_options.init_method,
-            num_worker_threads=NUM_THREADS
+            num_worker_threads=NUM_THREADS,
+            _transports=tp_transports(),
         )
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -5201,7 +4959,8 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
             init_method=self.rpc_backend_options.init_method,
             num_worker_threads=self.rpc_backend_options.num_worker_threads,
-            rpc_timeout=timeout
+            rpc_timeout=timeout,
+            _transports=tp_transports(),
         )
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -5499,6 +5258,191 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_my_parameter_server_sparse(self):
         self._my_parameter_server(True)
 
+    # Test init_rpc without world_size argument
+    @dist_init(setup_rpc=False)
+    def test_dynamic_rpc_init_rpc(self):
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+        rpc.shutdown()
+
+    # Dynamic RPC new ranks communicate with existing ranks
+    @dist_init(setup_rpc=False)
+    def test_dynamic_rpc_new_rank_can_communicated_with_existing_rank(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+
+        if self.rank == 0:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        # Rank 0 will be initialized with RPC after this barrier
+        dist.barrier()
+
+        if self.rank != 0:
+            # Newly joined ranks will be able to communicate with rank 0, since that was created first
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+            result = rpc.rpc_sync(worker_name(0), torch.add, args=(torch.tensor(1), torch.tensor(1)))
+            self.assertEqual(torch.add(torch.tensor(1), torch.tensor(1)), result)
+
+        # Barrier to ensure that all rpc_sync calls are finished
+        dist.barrier()
+        rpc.shutdown()
+
+    # Dynamic RPC existing ranks can communicate with new ranks
+    @dist_init(setup_rpc=False)
+    def test_dynamic_rpc_existing_rank_can_communicate_with_new_rank(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+
+        if self.rank == 0:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        # Rank 0 will be initialized with RPC after this barrier
+        dist.barrier()
+
+        # Rest of ranks join after barrier
+        if self.rank != 0:
+            # Newly joined ranks will be able to communicate with rank 0, since that was created first
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        dist.barrier()
+        if self.rank == 0:
+            for i in range(1, self.world_size):
+                result = rpc.rpc_sync(worker_name(i), torch.add, args=(torch.tensor(1), torch.tensor(1)))
+                self.assertEqual(torch.add(torch.tensor(1), torch.tensor(1)), result)
+
+        # Barrier to ensure that all rpc_sync calls are finished
+        dist.barrier()
+        rpc.shutdown()
+
+    # Dynamic RPC existing ranks can communicate with new ranks using CUDA rpc
+    @skip_if_lt_x_gpu(2)
+    @dist_init(setup_rpc=False)
+    def test_dynamic_rpc_existing_rank_can_communicate_with_new_rank_cuda(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+
+        if self.rank == 0:
+            options = self.rpc_backend_options
+            for i in range(1, self.world_size):
+                dst = worker_name(i)
+                options.set_device_map(dst, {1: 0})
+                options.set_device_map(dst, {0: 1})
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=options,
+            )
+
+        # Rank 0 will be initialized with RPC after this barrier
+        dist.barrier()
+
+        # Rest of ranks join after barrier
+        if self.rank != 0:
+            # Newly joined ranks will be able to communicate with rank 0, since that was created first
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        dist.barrier()
+        if self.rank == 0:
+            for i in range(1, self.world_size):
+                x = torch.ones(2)
+                result_on_device_0 = rpc.rpc_sync(worker_name(i), torch.add, args=(x.to(0), 1))
+                result_on_device_1 = rpc.rpc_sync(worker_name(i), torch.add, args=(x.to(1), 1))
+                self.assertEqual(torch.add(torch.ones(2), 1), result_on_device_0)
+                self.assertEqual(torch.device('cuda:0'), result_on_device_0.device)
+                self.assertEqual(torch.add(torch.ones(2), 1), result_on_device_1)
+                self.assertEqual(torch.device('cuda:1'), result_on_device_1.device)
+
+        # Barrier to ensure that all rpc_sync calls are finished
+        dist.barrier()
+        rpc.shutdown()
+
+    @dist_init(setup_rpc=False)
+    def test_dynamic_rpc_init_rpc_without_rank(self):
+        # default initialization uses file init
+        with self.assertRaisesRegex(ValueError, "rank parameter missing"):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        # env init
+        with self.assertRaisesRegex(ValueError, "environment variable RANK expected"):
+            rpc_backend_options = rpc.TensorPipeRpcBackendOptions(init_method="env://")
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rpc_backend_options=rpc_backend_options,
+            )
+
+        # tcp init
+        with self.assertRaisesRegex(ValueError, "rank parameter missing"):
+            rpc_backend_options = rpc.TensorPipeRpcBackendOptions(init_method="tcp://127.0.0.1:23456")
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rpc_backend_options=rpc_backend_options,
+            )
+
+    @dist_init(setup_rpc=False)
+    def test_dynamic_and_static_init_rpc_together(self):
+        # Initialize a static rpc group with size = self.world_size - 1
+        dist.init_process_group(
+            backend='gloo',
+            init_method=self.file_init_method,
+            rank=self.rank,
+            world_size=self.world_size)
+
+        world_size_minus_one = self.world_size - 1
+        if self.rank < world_size_minus_one:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=world_size_minus_one,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        dist.barrier()
+
+        # Attempt to add an additional dynamic group member
+        if self.rank == world_size_minus_one:
+            # Expect error message to be thrown
+            with self.assertRaisesRegex(RuntimeError, "RPC group mixes statically and dynamically\
+ initialized members which is not supported."):
+                rpc.init_rpc(
+                    name=worker_name(self.rank),
+                    backend=self.rpc_backend,
+                    rank=self.rank,
+                    rpc_backend_options=self.rpc_backend_options,
+                )
 
 class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
@@ -5954,7 +5898,8 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
                 init_method=options.init_method,
                 num_worker_threads=options.num_worker_threads,
-                device_maps={dst: {0: 1, 1: 0}}
+                device_maps={dst: {0: 1, 1: 0}},
+                _transports=tp_transports()
             )
         )
 
