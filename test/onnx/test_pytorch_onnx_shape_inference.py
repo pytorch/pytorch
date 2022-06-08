@@ -205,6 +205,25 @@ class TestONNXShapeInference(unittest.TestCase):
         constant = self.insert_tensor_constant(g, torch.ones(6, dtype=torch.long))
         none = g.op("prim::Constant").setType(torch.NoneType.get())
         pad = g.op("Pad", input, constant, none, mode_s="constant")
+        self.run_test(g, pad.node(), expect_tensor("Float", shape=(5, 322, 102)))
+
+    def test_pad_with_dynamic_input_shape(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.float).with_sizes([3, None, None]))
+        constant = self.insert_tensor_constant(g, torch.ones(6, dtype=torch.long))
+        none = g.op("prim::Constant").setType(torch.NoneType.get())
+        pad = g.op("Pad", input, constant, none, mode_s="constant")
+        self.run_test(g, pad.node(), expect_tensor("Float", shape=(5, None, None)))
+
+    def test_pad_with_dynamic_pad_size(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.float).with_sizes([3, 320, 100]))
+        pad_size = g.addInput()
+        pad_size.setType(pad_size.type().with_dtype(torch.long).with_sizes([6]))
+        none = g.op("prim::Constant").setType(torch.NoneType.get())
+        pad = g.op("Pad", input, pad_size, none, mode_s="constant")
         self.run_test(g, pad.node(), expect_tensor("Float", shape=(None, None, None)))
 
     def test_resize(self):
