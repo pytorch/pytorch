@@ -352,6 +352,21 @@ def meta_embedding_bag(
     output = weight.new_empty(num_bags, weight.size(1))
     MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
 
+    if per_sample_weights is not None:
+        check(mode == MODE_SUM, lambda: "embedding_bag: per_sample_weights only supported with mode='sum'")
+        check(
+            per_sample_weights.dtype == weight.dtype,
+            lambda: f"expected weight ({weight.dtype}) and per_sample_weights ({per_sample_weights.dtype}) to have same dtype"
+        )
+        check(per_sample_weights.ndim == 1, lambda: f"expected per_sample_weights to be 1D tensor, got {per_sample_weights.ndim}D")
+        check(
+            per_sample_weights.numel() == indices.numel(),
+            lambda: (
+                f"expected per_sample_weights.numel() ({per_sample_weights.numel()} "
+                f"to be the same as indices.numel() ({indices.numel()})"
+            )
+        )
+
     def is_fast_path_index_select_scale(src, scale, output, padding_idx):
         return is_fast_path_index_select(src, output, padding_idx) and scale.stride(0) == 1
 
