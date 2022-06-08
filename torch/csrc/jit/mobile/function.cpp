@@ -211,9 +211,10 @@ c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
           out_args.push_back(stack.back());
           stack.pop_back();
         }
+        // DO NOT SUBMIT, this is very risky code
         size_t start_index = num_specified_args.value() - out_args.size();
         TORCH_CHECK(
-            start_index >= 0,
+            num_specified_args.value() >= out_args.size(),
             "The number of output arguments is: ",
             out_args.size(),
             ", which is more then the number of specified arguments: ",

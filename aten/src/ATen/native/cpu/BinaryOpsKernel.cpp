@@ -12,6 +12,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/copysign.h>
 
 namespace at {
@@ -133,7 +134,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_floor_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         TORCH_CHECK(b != 0, "ZeroDivisionError");
-        if ((a < 0) != (b < 0)) {
+        if (c10::is_negative(a) != c10::is_negative(b)) {
           // Subtracts one from the results of truncation division if the
           // divisor and dividend have different sign(bit)s and the remainder of
           // the division is nonzero
@@ -198,7 +199,7 @@ void remainder_kernel(TensorIteratorBase& iter) {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         TORCH_CHECK(b != 0, "ZeroDivisionError");
         scalar_t r = a % b;
-        if ((r != 0) && ((r < 0) != (b < 0))) {
+        if ((r != 0) && (c10::is_negative(r) != c10::is_negative(b))) {
           r += b;
         }
         return r;
