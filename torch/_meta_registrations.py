@@ -169,7 +169,10 @@ def meta_linalg_qr_helper(input, mode):
     R.transpose_(-2, -1)
     return (Q, R)
 
-@torch.library.impl(meta_lib, "index.Tensor")
+# Leaving this function around because a python implementation
+# of indexing shape inference is useful,
+# but not registering it to the dispatcher because we already
+# get shape inference through structured kernels
 def meta_index_Tensor(self, indices):
     check(indices, lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
