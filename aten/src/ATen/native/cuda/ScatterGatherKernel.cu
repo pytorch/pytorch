@@ -218,7 +218,7 @@ struct _cuda_scatter_large_index_internal_kernel {
 
     _launch_scatter_gather_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
   }
-}; // struct _cuda_scatter_fill_internal_kernel
+}; // struct _cuda_scatter_large_index_internal_kernel
 
 template <bool is_scatter_like = true, bool cast_to_opaque = true>
 struct cuda_scatter_gather_base_kernel {
