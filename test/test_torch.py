@@ -8183,17 +8183,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # TODO: add torch.* tests when we have proper namespacing on ATen functions
             # test_namespace(torch)
 
-    def test_generated_out_op_variants(self):
-        inputs = [torch.ones(2), torch.ones(2)]
-        outputs = [torch.empty(0), torch.empty(0)]
-        scalars = [1.0, 1.0]
-
-        expected_outs = torch.ops.aten._foreach_add.functional(inputs, scalars)
-        torch.ops.aten._foreach_add.out(inputs, scalars, outputs)
-
-        for out, expected_out in zip(outputs, expected_outs):
-            self.assertEquals(out, expected_out)
-
     # FIXME: deprecate torch.Tensor constructor
     def test_tensor_ctor_scalar(self):
         x = torch.Tensor(torch.tensor(1.0))
