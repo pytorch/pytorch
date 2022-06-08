@@ -151,7 +151,7 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
     def __enter__(self):
         old = _get_torch_dispatch_mode()
         if hasattr(self, "inner"):
-            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version")
+            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version or use restore")
         else:
             self.inner = old
             if old is None:
