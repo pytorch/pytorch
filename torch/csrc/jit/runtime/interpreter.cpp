@@ -164,7 +164,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void enterFrame(const Code& code, size_t base_pointer) {
-    frames.emplace_back(Frame{code.pImpl, 0, base_pointer, c10::nullopt, /*record_function=*/nullptr, /*symbols2dims=*/{{}}});
+    frames.emplace_back(Frame{
+        code.pImpl,
+        0,
+        base_pointer,
+        c10::nullopt,
+        /*record_function=*/nullptr,
+        /*symbols2dims=*/{{}}});
     registers.resize(registers.size() + code.pImpl->register_size_);
   }
 

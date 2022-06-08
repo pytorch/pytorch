@@ -782,7 +782,10 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   std::unordered_map<std::string, OperatorInfo> model_ops;
   model_ops["aten::add.Scalar"] = OperatorInfo{2};
   auto model_info = ModelCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, /*type_table=*/{}, /*operator_version=*/0};
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      model_ops,
+      /*type_table=*/{},
+      /*operator_version=*/0};
   std::unordered_map<std::string, OperatorInfo> runtime_ops;
   runtime_ops["aten::add.Int"] = OperatorInfo{2};
   auto runtime_info = RuntimeCompatibilityInfo{
