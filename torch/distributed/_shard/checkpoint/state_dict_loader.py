@@ -21,6 +21,7 @@ from .metadata import (
     TensorStorageMetadata,
 )
 from .resharding import (
+    _prepare_tensor_read,
     _prepare_sharded_tensor_read,
     _shards_get_overlap_region_wrt_saved_tensor
 )
@@ -39,8 +40,8 @@ def _reshard_and_prepare_read_request(
     tensor_read_requests = []
     bytes_read_requests = []
     for fqn, obj in state_dict.items():
+        md = metadata_from_storage.state_dict_metadata[fqn]
         if isinstance(obj, ShardedTensor):
-            md = metadata_from_storage.state_dict_metadata[fqn]
             if isinstance(md, ShardedTensorStorageMetadata):
                 tensor_read_requests += _prepare_sharded_tensor_read(md, obj)
             else:
@@ -50,7 +51,6 @@ def _reshard_and_prepare_read_request(
                 )
         elif isinstance(obj, torch.Tensor):
             tensor = obj.detach()
-            md = metadata_from_storage.state_dict_metadata[fqn]
             if isinstance(md, TensorStorageMetadata):
                 rr = TensorReadRequest(
                     tensor=tensor,
@@ -60,13 +60,14 @@ def _reshard_and_prepare_read_request(
                 )
 
                 tensor_read_requests.append(rr)
+            elif isinstance(md, ShardedTensorStorageMetadata):
+                tensor_read_requests += _prepare_tensor_read(md, obj)
             else:
                 raise ValueError(
                     f"Invalid checkpoint metadata for {fqn}, " +
                     f"expected TensorStorageMetadata but found {type(md)}"
                 )
         else:
-            md = metadata_from_storage.state_dict_metadata[fqn]
             # This is actually hard to handle correctly
             # If the value is not a tensor but any random obj,
             # we cannot just write whatever memory it points to inplace
