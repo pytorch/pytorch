@@ -133,7 +133,6 @@ from .levy import Levy
 from .lkj_cholesky import LKJCholesky
 from .log_logistic import LogLogistic
 from .log_normal import LogNormal
-from .log_normal import LogNormal
 from .logarithmic import Logarithmic
 from .logistic import Logistic
 from .logistic_normal import LogisticNormal
@@ -144,7 +143,6 @@ from .mixture_same_family import MixtureSameFamily
 from .multinomial import Multinomial
 from .multivariate_hypergeometric import MultivariateHypergeometric
 from .multivariate_laplace import MultivariateLaplace
-from .multivariate_normal import MultivariateNormal
 from .multivariate_normal import MultivariateNormal
 from .multivariate_t import MultivariateT
 from .nakagami import Nakagami
