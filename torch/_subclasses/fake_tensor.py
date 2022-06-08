@@ -13,7 +13,6 @@ import functools
 import itertools
 
 aten = torch.ops.aten
-prims = torch.ops.prims
 
 
 class ComplexInputException(Exception):
@@ -134,8 +133,7 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
 
     return impl_decorator
 
-@register_op_impl(lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors)
-                  and "prims::" not in func._schema.name)
+@register_op_impl(lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors))
 def contructors(fake_mode, func, *args, **kwargs):
     assert func not in _non_kwarg_device_constructors
     _, new_kwargs = normalize_function(
