@@ -2243,6 +2243,15 @@ class DistributedDataParallelTest(
                         ),
                     )
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_channels_last_contig(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        tensor = torch.ones((2, 16, 768, 1152), dtype=torch.float32, device=device).to(memory_format=torch.channels_last)
+        process_group.broadcast([tensor]).wait()
+
 
 
 class NcclErrorHandlingTest(MultiProcessTestCase):
