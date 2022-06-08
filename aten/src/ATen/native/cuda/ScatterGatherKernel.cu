@@ -183,7 +183,7 @@ struct _cuda_scatter_large_index_internal_kernel {
     char* src_ptr = (char*)iter.data_ptr(1);
     char* index_ptr = (char*)iter.data_ptr(2);
 
-    auto ndim = iter.ndim();
+    int ndim = iter.ndim();
     int64_t index_shape_host[ndim], index_strides_host[ndim], src_shape_host[ndim], src_strides_host[ndim];
     int64_t *index_shape_device, *index_strides_device, *src_shape_device, *src_strides_device;
     cudaMalloc((void**)&index_shape_device, ndim * sizeof(int64_t));
@@ -212,7 +212,7 @@ struct _cuda_scatter_large_index_internal_kernel {
       auto original_index_offset = offsets[2] / 8;
       decltype(original_index_offset) src_offset = 0;
       int64_t index_idx;
-      for (auto d = ndim - 1; d >= 0; d--) {
+      for (int d = ndim - 1; d >= 0; d--) {
         index_idx = (original_index_offset / index_strides_device[d]) % index_shape_device[d];
         original_index_offset -= index_idx * index_strides_device[d];
 
