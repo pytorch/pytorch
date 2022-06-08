@@ -39,7 +39,6 @@ static Tensor & masked_fill_impl_quantized_cpu(Tensor & self, const Tensor & mas
 }
 }
 
-// not sure why there are 2 consecutive underscores here (I'm just copying the naming convention from the fp version)
 Tensor & masked_fill__quantized_cpu(Tensor& self, const Tensor & mask, const Scalar& value) {
   TORCH_CHECK(self.qscheme() == c10::kPerTensorAffine, "masked_fill__quantized_cpu for quantized tensors is currently only supported for per tensor quantized tensors");
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
