@@ -28,7 +28,9 @@ __all__ = [
     "hardsigmoid",
     "hinge_embedding_loss",
     "margin_ranking_loss",
+    "leaky_relu",
     "mish",
+    "rrelu",
     "selu",
     "softplus",
     "softsign",
@@ -181,6 +183,25 @@ def mish(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
         raise NotImplementedError
 
     return refs.mul(a, refs.tanh(refs.nn.functional.softplus(a)))
+
+
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def rrelu(a: TensorLikeType,
+          lower: float = 1. / 8.,
+          upper: float = 1. / 3.,
+          inplace: bool = False) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.rrelu
+    """
+
+    if inplace:
+        raise NotImplementedError
+
+    rhs = refs.uniform(a.shape, low=lower, high=upper, dtype=a.dtype, device=a.device),
+    return refs.where(refs.ge(a, 0), a, rhs)
 
 
 @elementwise_type_promotion_wrapper(

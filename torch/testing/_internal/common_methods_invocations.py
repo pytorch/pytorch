@@ -14265,8 +14265,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo(
         'nn.functional.softsign',
         ref=lambda x: x / (np.abs(x) + 1),
-        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_autograd=True,
@@ -19466,6 +19465,10 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.mish",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.rrelu",
+        torch_opinfo_name="nn.functional.rrelu",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.selu",
         torch_opinfo_name="nn.functional.selu",
     ),
@@ -19476,6 +19479,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.softsign",
         torch_opinfo_name="nn.functional.softsign",
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.tanhshrink",
         torch_opinfo_name="nn.functional.tanhshrink",
