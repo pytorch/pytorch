@@ -209,8 +209,8 @@ struct _cuda_scatter_large_index_internal_kernel {
       CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
         && "index out of bounds");
 
-      int64_t src_offset = 0;
       auto original_index_offset = offsets[2] / 8;
+      decltype(original_index_offset) src_offset = 0;
       int64_t index_idx;
       for (auto d = ndim - 1; d >= 0; d--) {
         index_idx = (original_index_offset / index_strides_device[d]) % index_shape_device[d];
