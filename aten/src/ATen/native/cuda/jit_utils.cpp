@@ -560,29 +560,23 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
     scalar_t val[vec_size];
   };
 
-  template <typename scalar_t>
-  struct LoadVector {
-    using vec_t = aligned_vector<scalar_t, ${vec_size}>;
-    static __device__ vec_t load(const scalar_t *base_ptr, uint32_t offset) {
-      auto *from = reinterpret_cast<const vec_t *>(base_ptr);
-      return from[offset];
-    }
-  };
+  template <int vec_size, typename scalar_t>
+  __device__ aligned_vector<scalar_t, vec_size> load_vector(const scalar_t *base_ptr, uint32_t offset) {
+    using vec_t = aligned_vector<scalar_t, vec_size>;
+    auto *from = reinterpret_cast<const vec_t *>(base_ptr);
+    return from[offset];
+  }
 
-  template <>
-  struct LoadVector<bool> {
-    using vec_t = aligned_vector<bool, ${vec_size}>;
-    static __device__ vec_t load(const bool *base_ptr, uint32_t offset) {
-      // See NOTE [Loading boolean values]
-      auto tmp = LoadVector<uint8_t>::load(
-          reinterpret_cast<const uint8_t*>(base_ptr), offset);
-      vec_t ret;
-      for (int i = 0; i < ${vec_size}; ++i) {
-        ret.val[i] = bool(tmp.val[i]);
-      }
-      return ret;
+  template <int vec_size>
+  __device__ aligned_vector<bool, vec_size> load_vector(const bool *base_ptr, uint32_t offset) {
+    // See NOTE [Loading boolean values]
+    auto tmp = load_vector<vec_size>(reinterpret_cast<const uint8_t*>(base_ptr), offset);
+    aligned_vector<bool, vec_size> ret;
+    for (int i = 0; i < vec_size; ++i) {
+      ret.val[i] = bool(tmp.val[i]);
     }
-  };
+    return ret;
+  }
 
   ${functor}
 
@@ -953,7 +947,7 @@ std::string generate_code(
   std::stringstream load_vectorized_inputs;
   for (const auto i : c10::irange(nInputs)) {
     auto i_string = std::to_string(i);
-    load_vectorized_inputs << "const auto vec" << i_string << " = LoadVector<scalar_t>::load(input"
+    load_vectorized_inputs << "const auto vec" << i_string << " = load_vector(input"
                            << i_string << ", thread_idx);\n";
     load_vectorized_inputs << "#pragma unroll\n";
     load_vectorized_inputs << "for (int j=0; j < vec_size; j++){\n";

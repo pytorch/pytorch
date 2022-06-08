@@ -532,7 +532,7 @@ struct ReduceOp {
     }
 
     while (idx * input_vec_size + input_vec_size - 1 < end) {
-      const auto values_vec = memory::LoadVector<scalar_t>::load<input_vec_size>(data, idx);
+      const auto values_vec = memory::load_vector<input_vec_size>(data, idx);
       #pragma unroll
       for (index_t i = 0; i < input_vec_size; i++) {
         value_list[i] = ops.reduce(value_list[i], values_vec.val[i], shift + idx * input_vec_size + i);
@@ -584,7 +584,7 @@ struct ReduceOp {
       #pragma unroll
       for (index_t i = 0; i < vt0; i++) {
         const auto offset = calc(idx + i * stride) / output_vec_size;
-        values[i] = memory::LoadVector<scalar_t>::load<output_vec_size>(data_, offset);
+        values[i] = memory::load_vector<output_vec_size>(data_, offset);
       }
       #pragma unroll
       for (index_t i = 0; i < vt0; i++) {
@@ -604,7 +604,7 @@ struct ReduceOp {
         break;
       }
       const auto offset = calc(idx) / output_vec_size;
-      values[i] = memory::LoadVector<scalar_t>::load<output_vec_size>(data_, offset);
+      values[i] = memory::load_vector<output_vec_size>(data_, offset);
       idx += stride;
     }
     idx = idx_;

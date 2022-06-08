@@ -5343,6 +5343,7 @@
     SparseCsrCPU, SparseCsrCUDA: clone_sparse_compressed
     MkldnnCPU: mkldnn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
+    NestedTensorCPU, NestedTensorCUDA: clone_nested
 
 - func: positive(Tensor(a) self) -> Tensor(a)
   variants: function, method
@@ -11943,7 +11944,7 @@
   dispatch:
     CPU, CUDA: segment_reduce_kernel
 
-- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None, int axis=0) -> Tensor
+- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None, int axis=0, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: _segment_reduce_backward_kernel
