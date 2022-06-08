@@ -7,8 +7,9 @@ import functools
 import pprint
 import pickle
 import collections
+import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfCrossRef
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -1117,7 +1118,7 @@ class TestTorchFunctionWarning(TestCase):
                 # Function that handles torch_function in C++
                 torch.abs(a)
 
-@skipIfCrossRef
+@unittest.skipIf(TEST_WITH_CROSSREF, "not run with crossref")
 class TestTorchFunctionMode(TestCase):
     def test_basic(self):
         class A(TorchFunctionMode):
@@ -1294,7 +1295,7 @@ class TestTorchFunctionMode(TestCase):
             with A("layer2"):
                 torch.empty([])
 
-        self.assertEquals(out, ["layer2", "layer1"])
+        self.assertEqual(out, ["layer2", "layer1"])
 
     def test_error_using_same_mode(self):
         class A(TorchFunctionMode):
@@ -1302,7 +1303,7 @@ class TestTorchFunctionMode(TestCase):
 
         x = A()
         with x:
-            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode"):
+            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
                 with x:
                     pass
 
@@ -1317,7 +1318,38 @@ class TestTorchFunctionMode(TestCase):
             with A():
                 x + x
 
-    def test_reenable_ancestor_mode(self):
+    def test_error_with_ancestor(self):
+        class A(TorchFunctionMode):
+            pass
+
+        x = A()
+        with x:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
+            with x:
+                pass
+
+    def test_restore_errors(self):
+        class A(TorchFunctionMode):
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "does not have any ancestors. Use the standard version instead"):
+            with A().restore():
+                pass
+
+        x = A()
+        with A():
+            with x:
+                pass
+
+        with A():  # a different mode instance than the one above
+            with self.assertRaisesRegex(RuntimeError, "the current mode is not its ancestor"):
+                with x.restore():
+                    pass
+
+
+    def test_restore_ancestor_mode(self):
         class A(TorchFunctionMode):
             pass
 
@@ -1328,12 +1360,12 @@ class TestTorchFunctionMode(TestCase):
                 pass
 
         z = A()
-        with y:
+        with y.restore():
             with z:
                 pass
 
-        with x:
-            with z:
+        with x.restore():
+            with z.restore():
                 pass
 
     def test_reentrant_mode_idiom(self):
@@ -1440,7 +1472,26 @@ class TestTorchFunctionMode(TestCase):
         self.assertIs(type(r), B)
         self.assertEqual(called, 2)
 
+    def test_disable_subclass_not_mode(self):
+        called = False
 
+        class A(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                nonlocal called
+                if kwargs is None:
+                    kwargs = {}
+                called = True
+                return func(*args, **kwargs)
+
+        class B(torch.Tensor):
+            pass
+
+        x = B(torch.randn(5))
+        with torch.overrides.push_torch_function_mode(A):
+            with torch._C.DisableTorchFunction():
+                self.assertNotIsInstance(torch.sum(x), B)
+
+        self.assertTrue(called)
 
 
 if __name__ == '__main__':

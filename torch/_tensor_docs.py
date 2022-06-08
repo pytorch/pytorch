@@ -2841,11 +2841,26 @@ See :func:`torch.numel`
 
 add_docstr_all('numpy',
                r"""
-numpy() -> numpy.ndarray
+numpy(*, force=False) -> numpy.ndarray
 
-Returns :attr:`self` tensor as a NumPy :class:`ndarray`. This tensor and the
-returned :class:`ndarray` share the same underlying storage. Changes to
-:attr:`self` tensor will be reflected in the :class:`ndarray` and vice versa.
+Returns the tensor as a NumPy :class:`ndarray`.
+
+If :attr:`force` is ``False`` (the default), the conversion
+is performed only if the tensor is on the CPU, does not require grad,
+does not have its conjugate bit set, and is a dtype and layout that
+NumPy supports. The returned ndarray and the tensor will share their
+storage, so changes to the tensor will be reflected in the ndarray
+and vice versa.
+
+If :attr:`force` is ``True`` this is equivalent to
+calling ``t.detach().cpu().resolve_conj().resolve_neg().numpy()``.
+If the tensor isn't on the CPU or the conjugate or negative bit is set,
+the tensor won't share its storage with the returned ndarray.
+Setting :attr:`force` to ``True`` can be a useful shorthand.
+
+Args:
+    force (bool): if ``True``, the ndarray may be a copy of the tensor
+               instead of always sharing memory, defaults to ``False``.
 """)
 
 add_docstr_all('orgqr',
@@ -5060,6 +5075,11 @@ Tensors may not have two named dimensions with the same name.
 add_docstr_all('is_cuda',
                r"""
 Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
+""")
+
+add_docstr_all('is_cpu',
+               r"""
+Is ``True`` if the Tensor is stored on the CPU, ``False`` otherwise.
 """)
 
 add_docstr_all('is_ipu',
