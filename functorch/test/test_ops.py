@@ -27,6 +27,7 @@ from common_utils import (
     opsToleranceOverride,
     check_vmap_fallback,
 )
+import unittest
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
@@ -693,6 +694,9 @@ class TestOperators(TestCase):
         # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
         xfail('tensor_split'),
 
+        # https://github.com/pytorch/functorch/issues/859
+        xfail('__getitem__'),
+
         # Causing multiple forward mode AD issues, needs investigation
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
@@ -712,7 +716,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d'),
         xfail('nn.functional.max_unpool3d'),
 
-        xfail('nn.functional.embedding'),  # embedding_renorm_ does not support fwd AD
         xfail('put'),  # calls put_ during vmap with only vmaps over other, not self
     })
     def test_vmapjvp(self, device, dtype, op):
@@ -758,6 +761,8 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm', device_type='cpu'),
         xfail('nn.functional.hinge_embedding_loss', device_type='cpu'),
 
+        # https://github.com/pytorch/functorch/issues/857
+        skip('nn.functional.embedding', ''),
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('nn.functional.binary_cross_entropy_with_logits', ''),
         xfail('linalg.householder_product'),
@@ -785,9 +790,11 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d'),
         xfail('nn.functional.max_unpool3d'),
 
-        xfail('nn.functional.embedding'),  # embedding_renorm_ does not support fwd AD
         xfail('put'),  # calls put_ during vmap with only vmaps over other, not self
         xfail('nn.functional.prelu'),  # Call Tensor.as_strided
+
+        # https://github.com/pytorch/functorch/issues/859
+        xfail('__getitem__'),
     }
 
     @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
@@ -872,6 +879,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('nn.functional.binary_cross_entropy_with_logits', ''),
         xfail('nn.functional.max_unpool1d', 'grad'),
+        xfail('nn.functional.embedding', ''),
         xfail('lu_unpack'),
         xfail('nn.functional.glu'),
         xfail('nn.functional.bilinear'),  # trilinear doesn't have batching rule
@@ -1149,20 +1157,17 @@ class TestOperators(TestCase):
         xfail('nansum', ''),
         xfail('nn.functional.batch_norm', ''),
         xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
-        xfail('nn.functional.embedding', ''),
+        xfail('nn.functional.embedding'),
         xfail('nn.functional.embedding', 'functorch'),
         xfail('nn.functional.embedding_bag', ''),
         xfail('nn.functional.grid_sample', ''),
         xfail('nn.functional.hardsigmoid', ''),
-        xfail('nn.functional.hardswish', ''),
         xfail('nn.functional.huber_loss', ''),
         xfail('nn.functional.instance_norm', ''),
         xfail('nn.functional.logsigmoid', ''),
         xfail('nn.functional.pad', 'circular'),
-        xfail('nn.functional.prelu', ''),
         xfail('nn.functional.softmin', ''),
         xfail('nn.functional.softmin', 'with_dtype'),
-        xfail('nn.functional.softplus', ''),
         xfail('renorm', ''),
         xfail('std_mean', ''),
         xfail('symeig', ''),
@@ -1181,7 +1186,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.pdist', ''),
         xfail('scatter_reduce', 'sum'),
         xfail('nn.functional.multi_margin_loss', ''),
-        xfail('nn.functional.smooth_l1_loss', ''),
         xfail('scatter_reduce', 'mean'),
         xfail('scatter_reduce', 'prod'),
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
@@ -1248,8 +1252,6 @@ class TestOperators(TestCase):
             # in slower tests.
             FUNCTORCH_HAS_FORMULA_BUT_NOT_PYTORCH = {
                 'nn.functional.nll_loss',
-                'nn.functional.l1_loss',
-                'nn.functional.mse_loss',
                 'softmax',
                 'log_softmax',
                 'nn.functional.cross_entropy',
@@ -1322,6 +1324,8 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(torch.nn.functional.l1_loss, (cotangents, input, target))
 
+    # ("https://github.com/pytorch/functorch/issues/858")
+    @unittest.expectedFailure
     def test_extremal_numerics_mse_loss(self, device):
         N, C, H, W = 3, 4, 5, 6
         shapes = ((N, C), (N, C, H), (N, C, H, W))
