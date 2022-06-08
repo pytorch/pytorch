@@ -70,10 +70,10 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   std::string prepacked_ops_conv2d_transpose_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %output_padding:int[], %groups:int):
         %output_min_max : None = prim::Constant()
-        %packed_weight_bias = vulkan_prepack::conv2d_transpose_clamp_prepack(
+        %packed_weight_bias = vulkan_prepack::create_conv2d_transpose_clamp_context(
             %weight, %bias, %stride, %padding, %output_padding, %dilation, %groups,
             %output_min_max, %output_min_max)
-        %res = vulkan_prepack::conv2d_transpose_clamp_run(%input, %packed_weight_bias)
+        %res = vulkan_prepack::run_conv2d_transpose_clamp_context(%input, %packed_weight_bias)
         return (%res) )";
 
   SubgraphRewriter transpose_rewriter;
@@ -215,7 +215,7 @@ void vulkanFoldPrePackingOps(script::Module& m) {
          Symbol::fromQualString("vulkan_prepack::create_linear_context")) ||
         (n->kind() ==
          Symbol::fromQualString(
-             "vulkan_prepack::conv2d_transpose_clamp_prepack")));
+             "vulkan_prepack::create_conv2d_transpose_clamp_context")));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
