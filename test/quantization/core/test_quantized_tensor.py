@@ -984,6 +984,62 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(q_filled.q_per_channel_scales(), scales)
             self.assertEqual(q_filled.q_per_channel_zero_points(), zero_points)
 
+    # adapted from test_qtensor_fill_per_tensor
+    def test_qtensor_masked_fill(self):
+        numel = 10
+        scale = 0.5
+        zero_point = 10
+
+        ones = torch.ones(numel).to(torch.float)
+
+        types = [torch.qint8, torch.quint8, torch.qint32]
+        fills = [-1, 1, 2**32]  # positive, negative, overflow
+
+        device = 'cpu'
+        ones = ones.to(device)
+        for qtype, fill_with in itertools.product(types, fills):
+            q_filled = torch._empty_affine_quantized(
+                [numel], scale=scale, zero_point=zero_point, device=device,
+                dtype=qtype)
+            q_filled.fill_(fill_with)
+            q_masked_fill = torch._empty_affine_quantized(
+                [numel], scale=scale, zero_point=zero_point, device=device,
+                dtype=qtype)
+            # mask fill the whole tensor, equivalent to calling plain vanilla fill
+            mask = torch.tensor(True)
+            torch.tensor(fill_with)
+            q_masked_fill.masked_fill_(mask, fill_with)
+            int_repr = torch.quantize_per_tensor(ones * fill_with, scale,
+                                                 zero_point, qtype)
+            fill_with = int_repr.dequantize()
+            int_repr = int_repr.int_repr()
+
+            self.assertEqual(q_filled, q_masked_fill)
+            self.assertEqual(q_masked_fill.int_repr(), int_repr)
+            self.assertEqual(q_masked_fill.dequantize(), fill_with)
+            # Make sure the scale and zero_point don't change
+            self.assertEqual(q_masked_fill.q_scale(), scale)
+            self.assertEqual(q_masked_fill.q_zero_point(), zero_point)
+
+        # the above loop does the same test as test_qtensor_fill
+        # now we will check masked_fill for subset of indices
+        mask = torch.randint(0, 2, (numel, ))
+        mask = mask.bool()
+        x = torch.rand(numel)
+        qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=qtype)
+        for qtype, fill_with in itertools.product(types, fills):
+            q_masked_fill = qx.clone()
+            q_masked_fill.masked_fill_(mask, fill_with)
+            ref = qx.clone()
+            for i in range(numel):
+                if mask[i]:
+                    # this assignment doesn't end up calling masked_fill, allowing us to compare the different implementations
+                    ref[i] = fill_with
+
+            self.assertEqual(q_masked_fill, ref)
+            self.assertEqual(q_masked_fill.int_repr(), ref.int_repr())
+            self.assertEqual(q_masked_fill.dequantize(), ref.dequantize())
+
     @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
     def test_qtensor_index_select_cuda(self):
         self._test_qtensor_index_select('cuda')

@@ -8,6 +8,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/quantized/FakeQuantAffine.h>
+#include <ATen/native/quantized/IndexKernel.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
@@ -3597,10 +3598,41 @@ void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
         rdata[i] = (static_cast<float>(qvalue) - zero_point) * scale;
       }
   });
-
 }
 
-} // namespace
+// This function expects quantized_val input to already be quantized
+template <typename scalar_t, typename mask_t>
+void cpu_masked_fill_kernel_quantized_cpu(TensorIterator& iter, scalar_t quantized_val) {
+  auto is_mask_bool = std::is_same<mask_t, bool>::value;
+  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+    char* dst = data[0];
+    char* mask = data[1];
+    for (const auto i : c10::irange(n)) {
+      mask_t mask_value = *(mask_t*)(mask + strides[1] * i);
+      if (!is_mask_bool) {
+        TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
+      }
+      if (mask_value) {
+        *(scalar_t*)(dst + strides[0] * i) = quantized_val;
+      }
+    }
+  };
+  iter.for_each(loop);
+}
+
+void masked_fill_kernel_quantized_cpu(TensorIterator& iter, const Scalar& value, double scale, int zero_point) {
+  AT_DISPATCH_QINT_TYPES(iter.dtype(), "masked_fill", [&] {
+    float float_val = value.to<float>();
+    auto quantized_val = quantize_val<scalar_t>(scale, zero_point, float_val);
+    auto mask_dtype = iter.input_dtype(0);
+    if (mask_dtype == ScalarType::Bool) {
+      cpu_masked_fill_kernel_quantized_cpu<scalar_t, bool>(iter, quantized_val);
+    } else {
+      cpu_masked_fill_kernel_quantized_cpu<scalar_t, unsigned char>(iter, quantized_val);
+    }
+  });
+}
+} // anonymous namespace
 
 // Some quantization tests are flaky on Windows with AVX512. If --continue-through-error
 // is used, only one fails. But if the failing test is skipped, another one fails.
@@ -3651,6 +3683,7 @@ REGISTER_NO_AVX512_DISPATCH(quantized_normalize_stub);
 REGISTER_NO_AVX512_DISPATCH(qupsample_bilinear2d_nhwc_stub);
 REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
 REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
+REGISTER_NO_AVX512_DISPATCH(masked_fill_kernel_quantized_stub);
 #else
 REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
                   &dequantize_tensor_per_channel_affine_cpu);
@@ -3715,6 +3748,9 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(
     dequantize_tensor_per_tensor_affine_sub_byte_stub,
     &dequantize_tensor_per_tensor_affine_sub_byte_cpu);
+REGISTER_DISPATCH(
+    masked_fill_kernel_quantized_stub,
+    &masked_fill_kernel_quantized_cpu);
 #endif // CPU_CAPABILITY_AVX512 && _WIN32
 
 } // namespace native
