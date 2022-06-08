@@ -53,6 +53,7 @@ include_patterns = [
     'test/cpp/tensorexpr/**/*.cpp',
 ]
 exclude_patterns = [
+    'c10/util/strong_type.h',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
 ]
 init_command = [
