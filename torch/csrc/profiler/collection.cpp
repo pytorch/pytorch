@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <queue>
 
-#include <fmt/format.h>
-
 #include <ATen/record_function.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/flat_hash_map.h>
@@ -140,12 +138,10 @@ struct NoOpPythonTracer : public PythonTracerBase {
     static NoOpPythonTracer singleton_;
     return singleton_;
   }
-  void start(RecordQueue*) override {}
+  void start() override {}
   void stop() override {}
   void clear() override {}
-  std::vector<std::shared_ptr<Result>> getEvents(
-      std::function<time_t(approx_time_t)>,
-      std::vector<CompressedEvent>&) override {
+  std::vector<std::unique_ptr<PyTraceEvent>> getEvents() override {
     return {};
   }
   ~NoOpPythonTracer() = default;
@@ -166,12 +162,7 @@ PythonTracerBase& PythonTracerBase::get() {
 
 #define OUT_T(method_name) decltype(std::declval<Result>().method_name())
 #define DEFINE_VISITOR(                                                 \
-    method_name,                                                        \
-    torch_op_field,                                                     \
-    backend_field,                                                      \
-    allocation_field,                                                   \
-    py_field,                                                           \
-    py_c_field)                                                         \
+    method_name, torch_op_field, backend_field, allocation_field)       \
   OUT_T(method_name) Result::method_name() const {                      \
     using out_t = OUT_T(method_name);                                   \
     return c10::visit(                                                  \
@@ -187,29 +178,9 @@ PythonTracerBase& PythonTracerBase::get() {
             [&](const ExtraFields<EventType::Allocation>& e) -> out_t { \
               (void)e;                                                  \
               return allocation_field;                                  \
-            },                                                          \
-            [&](const ExtraFields<EventType::PyCall>& e) -> out_t {     \
-              (void)e;                                                  \
-              return py_field;                                          \
-            },                                                          \
-            [&](const ExtraFields<EventType::PyCCall>& e) -> out_t {    \
-              (void)e;                                                  \
-              return py_c_field;                                        \
             }),                                                         \
         extra_fields_);                                                 \
   }
-
-std::string toString(const ExtraFields<EventType::PyCall>& e) {
-  if (e.module_.has_value()) {
-    return fmt::format(
-        "nn.Module: {}_{}", e.module_->cls_name_.str(), e.module_->id_);
-  }
-  return fmt::format(
-      "{}({}): {}",
-      e.callsite_.filename_.str(),
-      e.callsite_.line_no_,
-      e.callsite_.funcname_.str());
-}
 
 using torch::profiler::impl::kineto::KinetoActivityType;
 namespace {
@@ -220,42 +191,20 @@ KinetoActivityType scopeToType(at::RecordScope scope) {
 }
 } // namespace
 
-DEFINE_VISITOR(
-    name,
-    e.name_,
-    e.name_,
-    "[memory]",
-    toString(e),
-    e.function_name_.str());
+DEFINE_VISITOR(name, e.name_, e.name_, "[memory]");
 DEFINE_VISITOR(
     kinetoType,
     scopeToType(e.scope_),
     scopeToType(e.scope_),
-    KinetoActivityType::CPU_INSTANT_EVENT,
-    KinetoActivityType::PYTHON_FUNCTION,
-    KinetoActivityType::PYTHON_FUNCTION);
-DEFINE_VISITOR(correlationID, e.correlation_id_, 0, 0, 0, 0);
-DEFINE_VISITOR(
-    endTimeNS,
-    e.end_time_ns_,
-    e.end_time_us_ * 1000,
-    start_time_ns_,
-    e.end_time_ns_,
-    e.end_time_ns_);
-DEFINE_VISITOR(
-    endTID,
-    e.end_tid_,
-    start_tid_,
-    start_tid_,
-    start_tid_,
-    start_tid_);
+    KinetoActivityType::CPU_INSTANT_EVENT);
+DEFINE_VISITOR(correlationID, e.correlation_id_, 0, 0);
+DEFINE_VISITOR(endTimeNS, e.end_time_ns_, e.end_time_us_ * 1000, start_time_ns_);
+DEFINE_VISITOR(endTID, e.end_tid_, start_tid_, start_tid_);
 DEFINE_VISITOR(
     deviceType,
     c10::DeviceType::CPU,
     c10::DeviceType::CPU,
-    e.device_type_,
-    c10::DeviceType::CPU,
-    c10::DeviceType::CPU);
+    e.device_type_);
 #undef DEFINE_VISITOR
 #undef OUT_T
 
@@ -313,18 +262,8 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   return out;
 }
 
-RecordQueue::RecordQueue(
-    const ProfilerConfig& config,
-    std::set<ActivityType> activities)
-    : id_(++queue_id_), config_{config}, activities_{activities} {
-  if (tracePython()) {
-    python_tracer::PythonTracerBase::get().start(this);
-  }
-}
-
-bool RecordQueue::tracePython() const {
-  return config_.with_stack && activities_.count(ActivityType::CPU);
-}
+RecordQueue::RecordQueue(const ProfilerConfig& config)
+    : id_(++queue_id_), config_{config} {}
 
 ThreadLocalSubqueue* RecordQueue::getSubqueue() {
   // In the most common case, a thread will want to write to the same sub-queue
@@ -349,12 +288,6 @@ ThreadLocalSubqueue* RecordQueue::getSubqueue() {
 
   sub_queue_cache_ = SubQueueThreadCache{id_, it->second.get()};
   return it->second.get();
-}
-
-void RecordQueue::stop() {
-  if (tracePython()) {
-    python_tracer::PythonTracerBase::get().stop();
-  }
 }
 
 namespace {
@@ -500,7 +433,6 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
         : time_converter(t);
   };
   std::vector<std::shared_ptr<Result>> out;
-  std::vector<python_tracer::CompressedEvent> python_enters;
   for (auto& subqueue_it : sub_queues_) {
     auto& queue = *subqueue_it.second;
     for (auto& i : queue.backend_events_) {
@@ -550,19 +482,6 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
           /*extra_fields_=*/std::move(i)));
     }
     queue.allocations_.clear();
-
-    for (auto& i : queue.py_calls_) {
-      python_enters.push_back(
-          {i.first, queue.tid(), queue.kineto_info(), converter(i.second)});
-    }
-  }
-
-  if (tracePython()) {
-    auto& tracer = python_tracer::PythonTracerBase::get();
-    for (auto i : tracer.getEvents(converter, python_enters)) {
-      out.push_back(i);
-    }
-    tracer.clear();
   }
 
   build_tree(out);
