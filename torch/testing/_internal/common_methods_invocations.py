@@ -16831,7 +16831,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # RuntimeError: "index_select" not implemented for 'ComplexHalf'
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                            dtypes=(torch.float, torch.cfloat)),
+                            dtypes=(torch.float, torch.cfloat), device_type='cpu'),
                # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
                             device_type='cpu'),
