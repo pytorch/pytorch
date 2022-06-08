@@ -66,14 +66,6 @@ class FakeTensorTest(TestCase):
 
         self.assertTrue(isinstance(y, FakeTensor))
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_non_kwarg_device(self):
-        x = FakeTensor.from_tensor(torch.rand([16, 1], device="cpu"))
-        y = x.to(torch.device("cpu"))
-        self.assertIs(x, y)
-        z = x.to(torch.device("cuda"))
-        self.assertEqual(z.device.type, "cuda")
-
     def test_fake_mode_error(self):
         x = torch.rand([4, 4])
 
@@ -81,15 +73,6 @@ class FakeTensorTest(TestCase):
             with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
                 y = x[0]
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_like_constructor(self):
-        x = FakeTensor.from_tensor(torch.rand([4, 4]))
-        y = torch.ones_like(x)
-        self.assertTrue(isinstance(y, FakeTensor))
-        self.assertEqual(y.device.type, "cpu")
-        z = torch.ones_like(x, device="cuda")
-        self.assertTrue(isinstance(z, FakeTensor))
-        self.assertEqual(z.device.type, "cuda")
 
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
@@ -124,16 +107,13 @@ class FakeTensorOperatorInvariants(TestCase):
         assert namespace == "aten"
         return getattr(getattr(torch.ops.aten, name), overload)
 
-    @staticmethod
-    def get_all_aten_schemas():
+    def test_non_kwarg_only_device(self):
+
         for schema in torch._C._jit_get_all_schemas():
             namespace = schema.name.split("::")[0]
             if namespace != "aten":
                 continue
-            yield schema
 
-    def test_non_kwarg_only_device(self):
-        for schema in self.get_all_aten_schemas():
             ten_type = torch._C.TensorType.get()
             if not any(
                 contains_type(arg.type, ten_type)
@@ -152,7 +132,11 @@ class FakeTensorOperatorInvariants(TestCase):
                 )
 
     def test_tensor_constructors_all_have_kwarg_device(self):
-        for schema in self.get_all_aten_schemas():
+        for schema in torch._C._jit_get_all_schemas():
+            namespace = schema.name.split("::")[0]
+            if namespace != "aten":
+                continue
+
             op = self.get_aten_op(schema)
             if not torch._subclasses.fake_tensor._is_tensor_constructor(op):
                 continue
@@ -167,11 +151,6 @@ class FakeTensorOperatorInvariants(TestCase):
                 has_kwarg_device or op == torch.ops.aten._list_to_tensor.default
             )
 
-    def test_like_ops(self):
-        for schema in self.get_all_aten_schemas():
-            if "_like" == schema.name[-5:]:
-                op = self.get_aten_op(schema)
-                self.assertTrue(op in torch._subclasses.fake_tensor._like_tensor_constructors)
 
 if __name__ == "__main__":
     run_tests()
