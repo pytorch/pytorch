@@ -1026,6 +1026,28 @@ class TestCudaFuser(JitTestCase):
             def jit_rshift(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
                 return torch.bitwise_right_shift(x, y) >> z
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_binary_bitwise(self):
+        dtypes = [torch.bool, torch.int32, torch.int64]
+
+        for dtype1, dtype2, dtype3 in itertools.product(dtypes, repeat=3):
+            def jit_and(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+                return torch.bitwise_and(x, y) & z
+
+            def jit_or(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+                return torch.bitwise_or(x, y) | z
+
+            def jit_xor(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+                return torch.bitwise_xor(x, y) ^ z
+
+            def jit_lshift(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+                return torch.bitwise_left_shift(x, y) << z
+
+            def jit_rshift(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+                return torch.bitwise_right_shift(x, y) >> z
+
             for jit_func in [jit_and, jit_or, jit_xor, jit_lshift, jit_rshift]:
                 if torch.bool in {dtype1, dtype2, dtype3} and jit_func in {jit_lshift, jit_rshift}:
                     continue
@@ -2228,7 +2250,7 @@ class TestCudaFuser(JitTestCase):
             self.assertEqual(o.stride(), jit_o.stride())
         except Exception as e:
             warnings.warn(
-                "permutation propagatoin is broken, proper support should come after nvfuser permutation scheduler update")
+                "permutation propagation is broken, proper support should come after nvfuser permutation scheduler update")
         self.assertGraphContains(t_jit.graph_for(x, bias), FUSION_GUARD)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
