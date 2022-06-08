@@ -161,6 +161,12 @@ test_jit_hooks() {
   assert_git_not_dirty
 }
 
+test_dynamo() {
+  pushd torchdynamo
+  pytest tests
+  popd
+}
+
 if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
   test_python_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
@@ -171,9 +177,11 @@ if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
     test_custom_backend
   fi
 else
+  checkout_install_torchdynamo
   test_python_all
   test_libtorch
   test_custom_script_ops
   test_jit_hooks
   test_custom_backend
+  test_dynamo
 fi

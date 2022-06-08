@@ -110,3 +110,11 @@ function clone_pytorch_xla() {
 function install_torchdynamo() {
   pip_install --user "git+https://github.com/pytorch/torchdynamo.git@$(cat .github/torchdynamo_commit_hash.txt)"
 }
+
+function checkout_install_torchdynamo() {
+  git clone https://github.com/pytorch/torchdynamo
+  pushd torchdynamo
+  git checkout "$(cat .github/torchdynamo_commit_hash.txt)"
+  time python setup.py install
+  popd
+}
