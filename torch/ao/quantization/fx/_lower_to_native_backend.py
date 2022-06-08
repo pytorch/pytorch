@@ -11,7 +11,6 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.quantized._reference as nnqr
 from torch.nn.quantized.modules.utils import WeightedQuantizedModule
-from torch.ao.quantization.utils import _normalize_kwargs
 from .graph_module import QuantizedGraphModule
 from .utils import (
     collect_producer_nodes,
