@@ -15271,18 +15271,6 @@ op_db: List[OpInfo] = [
                                     device_type='cpu', dtypes=[torch.int8]),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
-                       # RuntimeError: "nonzero_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_consistency',
-                                    dtypes=(torch.chalf,)),
-                       # RuntimeError: "nonzero_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
-                                    dtypes=(torch.chalf,)),
-                       # RuntimeError: "nonzero_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
-                                    dtypes=(torch.chalf,)),
-                       # RuntimeError: "add_out_op2_sparse_csr" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_zero_to_zero_correspondence_unary',
-                                    dtypes=(torch.chalf,)),
                    )),
     UnaryUfuncInfo('sign',
                    ref=reference_sign,
@@ -15604,18 +15592,6 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
-                       # RuntimeError: "nonzero_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_consistency',
-                                    dtypes=(torch.chalf,)),
-                       # RuntimeError: "nonzero_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
-                                    dtypes=(torch.chalf,)),
-                       # RuntimeError: "nonzero_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
-                                    dtypes=(torch.chalf,)),
-                       # RuntimeError: "add_out_op2_sparse_csr" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_zero_to_zero_correspondence_unary',
-                                    dtypes=(torch.chalf,)),
                    ),
                    # tan(j * pi/2 * odd_number) is nan
                    reference_numerics_filter=NumericsFilter(
