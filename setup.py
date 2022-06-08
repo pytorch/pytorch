@@ -462,13 +462,13 @@ class build_ext(setuptools.command.build_ext.build_ext):
             target_lib = os.path.join(self.build_lib, 'torch', 'lib', omp_lib_name)
             self.copy_file(source_lib, target_lib)
             report('--Copying libomp to: '+target_lib + ' from '+ source_lib)
-            report(subprocess.check_call(['install_name_tool', '-id', '@rpath/libiomp5.dylib', target_lib]))
+            # report(subprocess.check_call(['install_name_tool', '-id', '@rpath/libiomp5.dylib', target_lib]))
             break
 
         # Delete rpath from those libs
-        for rpath in rpaths:
-            for lib in [libtorch_cpu_path]:
-                subprocess.check_call(['install_name_tool', '-delete_rpath', rpath, lib])
+       # for rpath in rpaths:
+       #     for lib in [libtorch_cpu_path]:
+       #         subprocess.check_call(['install_name_tool', '-delete_rpath', rpath, lib])
 
     def run(self):
         # Report build options. This is run after the build completes so # `CMakeCache.txt` exists and we can get an
