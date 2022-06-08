@@ -89,7 +89,9 @@ namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
-c10::ShapeSymbol ONNXDimToShapeSymbol(const onnx::TensorShapeProto_Dimension& dim, SymbolDimMap& symbol_dim_map){
+c10::ShapeSymbol ONNXDimToShapeSymbol(
+    const onnx::TensorShapeProto_Dimension& dim,
+    SymbolDimMap& symbol_dim_map) {
   if (dim.has_dim_value()) {
     return c10::ShapeSymbol::fromStaticSize(dim.dim_value());
   }
@@ -106,7 +108,8 @@ c10::ShapeSymbol ONNXDimToShapeSymbol(const onnx::TensorShapeProto_Dimension& di
   }
   if (!sym) {
     sym = c10::ShapeSymbol::newSymbol();
-    // If dim.dim_param() is empty, no need to keep track because there won't be duplicates.
+    // If dim.dim_param() is empty, no need to keep track
+    // because there won't be duplicates.
     symbol_dim_map[sym.value()] = dim.dim_param();
   }
   return sym.value();
@@ -131,7 +134,8 @@ TensorTypePtr TorchTensorTypeFromONNX(
     const auto& onnx_shape = onnx_tensor_type.shape();
 
     for (const auto i : c10::irange(onnx_shape.dim_size())) {
-      sizes.emplace_back(ONNXDimToShapeSymbol(onnx_shape.dim(i), symbol_dim_map));
+      sizes.emplace_back(
+          ONNXDimToShapeSymbol(onnx_shape.dim(i), symbol_dim_map));
     }
     v_type = TensorType::create(scalar_type, at::kCPU, sizes.size(), {});
     v_type = v_type->withSymbolicShapes(c10::SymbolicShape(sizes));
@@ -1763,7 +1767,8 @@ void UpdateOutputTypeByONNXProto(
       [&](const onnx::ValueInfoProto& v_info) {
         for (size_t i = 0; i < n->outputs().size(); ++i) {
           if (clone_node->output(i)->debugName() == v_info.name()) {
-            UpdateTorchValueByOnnxValueInfo(n->output(i), v_info, symbol_dim_map);
+            UpdateTorchValueByOnnxValueInfo(
+                n->output(i), v_info, symbol_dim_map);
           }
         }
       };
@@ -1925,8 +1930,8 @@ void ONNXShapeTypeInference(
     Node* n,
     const ParamMap& params_dict,
     int opset_version) {
-  std::unordered_map<std::string, std::string> torch_to_onnx_input_name;
-  std::unordered_map<std::string, std::string> torch_to_onnx_output_name;
+  std::unordered_map<std::string, std::string> torch_to_onnx_input;
+  std::unordered_map<std::string, std::string> torch_to_onnx_output;
   auto& original_shape_data = ConstantValueMap::GetInferredShapeData();
   ShapeDataMap inferred_shape_data;
   auto& symbol_dim_map = ConstantValueMap::GetSymbolDimMap();
@@ -1945,18 +1950,22 @@ void ONNXShapeTypeInference(
     for (auto output : clone_node->outputs()) {
       n_graph->registerOutput(output);
     }
-    // Map original PyTorch graph's i/o name to temporal ONNX graph's i/o name for shape inference
+    // Map original PyTorch graph's i/o name 
+    // to temporal ONNX graph's i/o name for shape inference
     for (size_t i = 0; i < clone_node->inputs().size(); ++i) {
-      torch_to_onnx_input_name[n->input(i)->debugName()] = clone_node->input(i)->debugName();
+      torch_to_onnx_input[n->input(i)->debugName()] =
+          clone_node->input(i)->debugName();
     }
 
     for (size_t i = 0; i < clone_node->outputs().size(); ++i) {
-      torch_to_onnx_output_name[n->output(i)->debugName()] = clone_node->output(i)->debugName();
+      torch_to_onnx_output[n->output(i)->debugName()] =
+          clone_node->output(i)->debugName();
     }
-    // Make inferred_shape_data use name from temporal ONNX graph instead of original PyTorch graph
+    // Make inferred_shape_data use name from temporal ONNX graph
+    // instead of original PyTorch graph
     for (const auto& gs_data: original_shape_data) {
-      const auto onnx_output_name = torch_to_onnx_input_name.find(gs_data.first);
-      if (onnx_output_name != torch_to_onnx_input_name.end()) {
+      const auto onnx_output_name = torch_to_onnx_input.find(gs_data.first);
+      if (onnx_output_name != torch_to_onnx_input.end()) {
         inferred_shape_data[onnx_output_name->second] = gs_data.second;
       }
     }
@@ -1972,7 +1981,8 @@ void ONNXShapeTypeInference(
       //       The conversion here is incomplete for these ops.
       //       e.g: ListConstruct, ListUnpack, etc.
       std::shared_ptr<onnx::ModelProto> model_proto;
-      ConvertGraphToONNXProto(n_graph, model_proto, symbol_dim_map, opset_version);
+      ConvertGraphToONNXProto(
+          n_graph, model_proto, symbol_dim_map, opset_version);
       GRAPH_DEBUG(
           "ONNX graph to run shape inference: ", prettyPrint(*model_proto));
 
@@ -1983,9 +1993,12 @@ void ONNXShapeTypeInference(
           case ::c10::onnx::Shape:
           case ::c10::onnx::Gather: {
             auto* schema_registry = onnx::OpSchemaRegistry::Instance();
-            onnx::ShapeInferenceOptions options{/*check_type=*/false,
-              /*error_mode=*/false, /*enable_data_propagation=*/true};
-            onnx::shape_inference::InferShapes(*model_proto, schema_registry, options, &inferred_shape_data);
+            onnx::ShapeInferenceOptions options{
+                /*check_type=*/false,
+                /*error_mode=*/false,
+                /*enable_data_propagation=*/true};
+            onnx::shape_inference::InferShapes(
+                *model_proto, schema_registry, options, &inferred_shape_data);
             break;
           }
           default: {
@@ -1993,7 +2006,8 @@ void ONNXShapeTypeInference(
             break;
           }
         }
-        UpdateOutputTypeByONNXProto(n, clone_node, *model_proto, symbol_dim_map);
+        UpdateOutputTypeByONNXProto(
+            n, clone_node, *model_proto, symbol_dim_map);
       } catch (std::runtime_error& ex) {
         // TODO: include this as warning once we have a more consolidated
         // warning system.
@@ -2020,19 +2034,22 @@ void ONNXShapeTypeInference(
 
   SpecialPostProcess(n);
   // Get data propagation result from ONNX shape inference
-  for (const auto& output: n->outputs()) {
-    const auto inferred_shape_pair = inferred_shape_data.find(torch_to_onnx_output_name[output->debugName()]);
+  for (const auto& output : n->outputs()) {
+    const auto inferred_shape_pair = inferred_shape_data.find(
+        torch_to_onnx_output[output->debugName()]);
     if (inferred_shape_pair != inferred_shape_data.end()) {
       const auto& inferred_shape = inferred_shape_pair->second;
       int rank = inferred_shape.dim_size();
       std::vector<::c10::ShapeSymbol> final_shape(rank);
       for (int i = 0; i < rank; ++i) {
-        final_shape[i] = ONNXDimToShapeSymbol(inferred_shape.dim(i), symbol_dim_map);
+        final_shape[i] =
+            ONNXDimToShapeSymbol(inferred_shape.dim(i), symbol_dim_map);
       }
       c10::SymbolicShape shape_value(final_shape);
       // Store data propagation result into shapeValueMap
       ConstantValueMap::SetShapeValue(output->debugName(), shape_value);
-      // Use original name in PyTorch graph instead of temporary name in intermediate ONNX graph
+      // Use original name in PyTorch graph instead of
+      // temporary name in intermediate ONNX graph
       // Add this back to original_shape_data
       original_shape_data[output->debugName()] = inferred_shape;
     }

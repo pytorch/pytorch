@@ -1,6 +1,6 @@
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/passes/onnx/constant_map.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/onnx/constant_map.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <iostream>
 #include <sstream>
@@ -205,7 +205,7 @@ c10::optional<c10::SymbolicShape> ConstantValueMap::GetShapeValue(
   return ConstantValueMap::getInstance().shapeValueMap[tensorName];
 }
 
-// Gets the inferred inferredShapeData which is obtained by ONNX data propagation
+// Gets the inferredShapeData which is obtained by ONNX data propagation
 ShapeDataMap& ConstantValueMap::GetInferredShapeData() {
   return ConstantValueMap::getInstance().inferredShapeData;
 }
@@ -322,7 +322,7 @@ void ConstantValueMap::PrintMaps() {
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().inferredShapeData) {
     std::cout << "(node " << x.first << ": ";
-    for (const auto& dim: x.second.dim()) {
+    for (const auto& dim : x.second.dim()) {
       if (dim.has_dim_param()) {
         std::cout << dim.dim_param() << " ";
       } else {

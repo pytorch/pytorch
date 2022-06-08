@@ -1,15 +1,16 @@
 #pragma once
 
+#include <onnx/shape_inference/implementation.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/serialization/export.h>
 #include <mutex>
 #include <unordered_map>
-#include <onnx/shape_inference/implementation.h>
-#include <torch/csrc/jit/serialization/export.h>
 
 namespace torch {
 namespace jit {
 
-using ShapeDataMap = std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto>;
+using ShapeDataMap =
+std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto>;
 
 class ConstantValueMap {
  public:
@@ -88,7 +89,8 @@ class ConstantValueMap {
   // from a node. shapeValueMap stores the value of the tensor from a node when
   // this tensor represents a shape.
   std::unordered_map<std::string, c10::SymbolicShape> shapeValueMap;
-  // Stores earlier data propagation results so that they are accessible during future node-level shape inference.
+  // Stores earlier data propagation results so that they are accessible
+  // during future node-level shape inference.
   ShapeDataMap inferredShapeData;
   SymbolDimMap symbolDimMap;
 };
