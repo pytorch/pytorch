@@ -14,7 +14,8 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     all_types_and_complex_and,
 )
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor
+
 from torch.testing._internal.common_utils import (
     TestCase,
     is_iterable_of_tensors,
@@ -356,7 +357,7 @@ class TestCommon(TestCase):
         if dtype is torch.chalf:
             self.skipTest("Skipping chalf until it has more operator support")
 
-        mode = FakeTensorMode()
+        mode = torch._prims.utils.get_prim_fake_mode()
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
@@ -508,7 +509,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_python_ref_errors(self, device, op):
-        mode = FakeTensorMode()
+        mode = torch._prims.utils.get_prim_fake_mode()
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
