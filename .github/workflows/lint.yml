@@ -216,12 +216,11 @@ jobs:
           python3 -mpip install boto3==1.16.34
           pip3 install typing-extensions==3.10 --user
           pip3 install -r requirements-flake8.txt --user
+          python3 -mpip install rockset==0.8.10 --user
           python3 -mpip install -r requirements.txt --user
           python3 -mpip install mypy==0.960 --user
           make setup_lint
       - name: Test tools
-        env:
-          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
         run: |
           python3 -m unittest discover -vs tools/test -p 'test_*.py'
           python3 -m unittest discover -vs .github/scripts -p 'test_*.py'

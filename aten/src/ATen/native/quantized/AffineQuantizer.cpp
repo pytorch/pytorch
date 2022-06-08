@@ -1,4 +1,4 @@
-#include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
 #include <cfenv>
 
 #ifdef USE_FBGEMM

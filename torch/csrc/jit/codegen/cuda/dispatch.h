@@ -74,6 +74,7 @@ class TernaryOp;
 class ReductionOp;
 class GroupedReductionOp;
 class WelfordOp;
+class LoadStoreOp;
 class MmaOp;
 class BroadcastOp;
 class TransposeOp;
@@ -93,6 +94,7 @@ class TensorIndex;
 class Allocate;
 class BlockSync;
 class GridSync;
+class CpAsyncWait;
 class ForLoop;
 class IfThenElse;
 class GridReduction;
@@ -136,6 +138,7 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const ReductionOp* stmt);
   virtual void handle(const GroupedReductionOp* stmt);
   virtual void handle(const WelfordOp* stmt);
+  virtual void handle(const LoadStoreOp* stmt);
   virtual void handle(const MmaOp* stmt);
   virtual void handle(const BroadcastOp* stmt);
 
@@ -150,6 +153,7 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const kir::Allocate*);
   virtual void handle(const kir::BlockSync*);
   virtual void handle(const kir::GridSync*);
+  virtual void handle(const kir::CpAsyncWait*);
   virtual void handle(const kir::InitMagicZero*);
   virtual void handle(const kir::UpdateMagicZero*);
   virtual void handle(const kir::ForLoop*);
@@ -191,6 +195,7 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(ReductionOp* stmt);
   virtual void handle(GroupedReductionOp* stmt);
   virtual void handle(WelfordOp* stmt);
+  virtual void handle(LoadStoreOp* stmt);
   virtual void handle(MmaOp* stmt);
   virtual void handle(BroadcastOp* stmt);
 
@@ -205,6 +210,7 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(kir::Allocate* stmt);
   virtual void handle(kir::BlockSync* stmt);
   virtual void handle(kir::GridSync* stmt);
+  virtual void handle(kir::CpAsyncWait* stmt);
   virtual void handle(kir::InitMagicZero* stmt);
   virtual void handle(kir::UpdateMagicZero* stmt);
   virtual void handle(kir::ForLoop* stmt);
@@ -287,6 +293,7 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual void mutate(ReductionOp*);
   virtual void mutate(GroupedReductionOp*);
   virtual void mutate(WelfordOp*);
+  virtual void mutate(LoadStoreOp*);
   virtual void mutate(MmaOp*);
   virtual void mutate(BroadcastOp*);
 
@@ -301,6 +308,7 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual void mutate(kir::Allocate*);
   virtual void mutate(kir::BlockSync*);
   virtual void mutate(kir::GridSync*);
+  virtual void mutate(kir::CpAsyncWait*);
   virtual void mutate(kir::InitMagicZero*);
   virtual void mutate(kir::UpdateMagicZero*);
   virtual void mutate(kir::ForLoop*);
