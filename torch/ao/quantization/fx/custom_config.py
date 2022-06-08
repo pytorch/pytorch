@@ -3,11 +3,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 from torch.ao.quantization import QConfigMapping
-from torch.ao.quantization.quant_type import QuantType, quant_type_from_str, quant_type_to_str
+from torch.ao.quantization.quant_type import QuantType, _quant_type_from_str, quant_type_to_str
 
 
 __all__ = [
     "ConvertCustomConfig",
+    "FuseCustomConfig",
     "PrepareCustomConfig",
     "StandaloneModuleConfigEntry",
 ]
@@ -169,7 +170,7 @@ class PrepareCustomConfig:
             conf.set_standalone_module_class(
                 module_class, qconfig_mapping, example_inputs, prepare_custom_config, backend_config_dict)
         for quant_type_name, custom_module_mapping in prepare_custom_config_dict.get(FLOAT_TO_OBSERVED_DICT_KEY, {}):
-            quant_type = quant_type_from_str(quant_type_name)
+            quant_type = _quant_type_from_str(quant_type_name)
             for float_class, observed_class in custom_module_mapping.items():
                 conf.set_float_to_observed_mapping(float_class, observed_class, quant_type)
         conf.set_non_traceable_module_names(prepare_custom_config_dict.get(NON_TRACEABLE_MODULE_NAME_DICT_KEY, []))
@@ -250,7 +251,7 @@ class ConvertCustomConfig:
         """
         conf = cls()
         for quant_type_name, custom_module_mapping in convert_custom_config_dict.get(OBSERVED_TO_QUANTIZED_DICT_KEY, {}):
-            quant_type = quant_type_from_str(quant_type_name)
+            quant_type = _quant_type_from_str(quant_type_name)
             for observed_class, quantized_class in custom_module_mapping.items():
                 conf.set_observed_to_quantized_mapping(observed_class, quantized_class, quant_type)
         conf.set_preserved_attributes(convert_custom_config_dict.get(PRESERVED_ATTRIBUTES_DICT_KEY, []))

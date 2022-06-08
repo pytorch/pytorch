@@ -8,6 +8,13 @@ from typing import Any, Callable, Dict, Optional, Union, List
 from .custom_config import FuseCustomConfig
 from .match_utils import MatchAllNode
 
+
+__all__ = [
+    "DefaultFuseHandler",
+    "FuseHandler",
+]
+
+
 # ----------------------------
 # Fusion Pattern Registrations
 # ----------------------------

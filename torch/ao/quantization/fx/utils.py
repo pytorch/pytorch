@@ -17,6 +17,39 @@ from collections import namedtuple
 import operator
 import warnings
 
+# TODO: revisit this list. Many helper methods shouldn't be public
+__all__ = [
+    "all_node_args_except_first",
+    "all_node_args_have_no_tensors",
+    "assert_and_get_unique_device",
+    "BIAS_INDEX_DICT",
+    "collect_producer_nodes",
+    "create_getattr_from_value",
+    "create_node_from_old_node_preserve_meta",
+    "create_qparam_nodes",
+    "EMPTY_ARG_DICT",
+    "get_custom_module_class_keys",
+    "get_linear_prepack_op_for_dtype",
+    "get_new_attr_name_with_prefix",
+    "get_non_observable_arg_indexes_and_types",
+    "get_per_tensor_qparams",
+    "get_qconv_op",
+    "get_qconv_prepack_op",
+    "get_quantize_node_info",
+    "graph_module_from_producer_nodes",
+    "graph_pretty_str",
+    "is_get_tensor_info_node",
+    "maybe_get_next_module",
+    "NodeInfo",
+    "node_return_type_is_int",
+    "NON_OBSERVABLE_ARG_DICT",
+    "NON_QUANTIZABLE_WEIGHT_OPS",
+    "quantize_node",
+    "return_arg_list",
+    "WEIGHT_INDEX_DICT",
+]
+
+
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
     torch.nn.functional.conv1d : [1],

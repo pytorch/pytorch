@@ -2,6 +2,7 @@ import enum
 
 __all__ = [
     "QuantType",
+    "quant_type_to_str",
 ]
 
 # Quantization type (dynamic quantization, static quantization).
@@ -19,10 +20,11 @@ _quant_type_to_str = {
     QuantType.WEIGHT_ONLY: "weight_only",
 }
 
+# TODO: make this private
 def quant_type_to_str(quant_type: QuantType) -> str:
     return _quant_type_to_str[quant_type]
 
-def quant_type_from_str(name: str) -> QuantType:
+def _quant_type_from_str(name: str) -> QuantType:
     for quant_type, s in _quant_type_to_str.items():
         if name == s:
             return quant_type

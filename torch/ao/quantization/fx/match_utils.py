@@ -20,6 +20,14 @@ from .graph_module import (
 
 from typing import Any, Dict, List, Callable, Optional, Tuple, Type, Set
 
+
+# TODO: revisit this list. Many helper methods shouldn't be public
+__all__ = [
+    "is_match",
+    "find_matches",
+]
+
+
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
                     QConfigAny]
 

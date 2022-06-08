@@ -110,6 +110,7 @@ __all__ = [
     "get_arg_target_dtype_as_input_to_node",
     "get_arg_target_dtype_as_output",
     "get_target_activation_dtype_for_node",
+    "get_standalone_module_configs",
     "insert_observer",
     "insert_observers_for_model",
     "is_activation_post_process_node",

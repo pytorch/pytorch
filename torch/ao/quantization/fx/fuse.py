@@ -25,10 +25,16 @@ from .custom_config import FuseCustomConfig
 
 from .fusion_patterns import *  # noqa: F401,F403
 
-from typing import Callable, Tuple, Dict, Any, Optional, List
+from typing import Any, Callable, Dict, Optional, List, Tuple, Union
 import warnings
 
 from torch.ao.quantization.quantization_types import Pattern, NodePattern
+
+
+__all__ = [
+    "fuse",
+]
+
 
 def fuse(
     model: GraphModule,
