@@ -7,8 +7,9 @@ import functools
 import pprint
 import pickle
 import collections
+import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfCrossRef
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -1117,7 +1118,7 @@ class TestTorchFunctionWarning(TestCase):
                 # Function that handles torch_function in C++
                 torch.abs(a)
 
-@skipIfCrossRef
+@unittest.skipIf(TEST_WITH_CROSSREF, "not run with crossref")
 class TestTorchFunctionMode(TestCase):
     def test_basic(self):
         class A(TorchFunctionMode):
@@ -1294,7 +1295,7 @@ class TestTorchFunctionMode(TestCase):
             with A("layer2"):
                 torch.empty([])
 
-        self.assertEquals(out, ["layer2", "layer1"])
+        self.assertEqual(out, ["layer2", "layer1"])
 
     def test_error_using_same_mode(self):
         class A(TorchFunctionMode):
@@ -1421,7 +1422,26 @@ class TestTorchFunctionMode(TestCase):
         self.assertIs(type(r), B)
         self.assertEqual(called, 2)
 
+    def test_disable_subclass_not_mode(self):
+        called = False
 
+        class A(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                nonlocal called
+                if kwargs is None:
+                    kwargs = {}
+                called = True
+                return func(*args, **kwargs)
+
+        class B(torch.Tensor):
+            pass
+
+        x = B(torch.randn(5))
+        with torch.overrides.push_torch_function_mode(A):
+            with torch._C.DisableTorchFunction():
+                self.assertNotIsInstance(torch.sum(x), B)
+
+        self.assertTrue(called)
 
 
 if __name__ == '__main__':
