@@ -23,6 +23,11 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 
+import torchdynamo
+import torchdynamo.config
+torchdynamo.config.debug = True
+# torchdynamo.config.trace = True
+
 import itertools
 import functools
 from functools import partial
@@ -405,7 +410,13 @@ class TestDecomp(TestCase):
                 do_relative_check = test_dtype in [torch.float16, torch.bfloat16]
                 real_out_unflat = func(*args, **kwargs)
                 real_out, _ = tree_flatten(real_out_unflat)
-                decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+
+                # Force a new frame so decomposition gets inlined in
+                @torchdynamo.optimize("eager", nopython=False)
+                def run_decomp():
+                    return decomposition(*args, **kwargs)
+
+                decomp_out, _ = tree_flatten(run_decomp())
                 assert len(real_out) == len(decomp_out)
 
                 if do_relative_check:
