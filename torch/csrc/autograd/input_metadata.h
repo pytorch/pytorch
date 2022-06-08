@@ -9,6 +9,8 @@
 #include <ATen/native/nested/NestedTensorMath.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/DimVector.h>
+#include <c10/util/Optional.h>
+#include <ATen/ExpandUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -62,7 +64,7 @@ struct InputMetadata {
       bool is_tensor_subclass)
       : options_{options},
         shape_{shape},
-        nested_shape_(c10::optional<const at::Tensor>{}),
+        nested_shape_(c10::nullopt),
         is_tensor_subclass_{is_tensor_subclass} {
     auto device_ = options.device();
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
@@ -117,15 +119,41 @@ struct InputMetadata {
       auto nested_impl = at::native::get_nested_tensor_impl(t);
       return nested_impl->get_nested_size_tensor();
     }
-    return c10::optional<const at::Tensor> {};
+    return c10::nullopt;
   }
 
   bool is_same_shape(const at::Tensor& grad) const {
+    TORCH_CHECK(
+        is_nested_tensor() == grad.is_nested(),
+        "Metadata and grad both need to be not nested or nested tensors.")
     if (is_nested_tensor()) {
       return at::native::get_nested_size_tensor(grad).equal(nested_shape());
     } else {
       return grad.sizes().equals(shape());
     }
+  }
+  bool is_expandable_to_shape(const at::Tensor& grad) const{
+    // TODO: Currently NestedTensors are not expandable.
+    return is_nested_tensor()? false: at::is_expandable_to(shape(), grad.sizes());
+  }
+
+  std::stringstream incompatible_shape_error_message(
+      const size_t index,
+      const at::Tensor& grad) const {
+    std::stringstream ss;
+    ss << "invalid gradient at index " << index << " - got ";
+    if (grad.is_nested()) {
+      ss << at::native::get_nested_size_tensor(grad);
+    } else {
+      ss << grad.sizes();
+    }
+    ss << " but expected shape compatible with ";
+    if (is_nested_tensor()) {
+      ss << nested_shape();
+    } else {
+      ss << shape();
+    }
+    return ss;
   }
 
 private:
