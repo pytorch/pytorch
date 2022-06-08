@@ -492,8 +492,6 @@ TORCH_LIBRARY_IMPL(_, FT_DYNAMIC_LAYER_BACK_MODE_KEY, m) {
 TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   JVP_DECOMP(nll_loss_backward);
   JVP_DECOMP(nll_loss2d_backward);
-  JVP_DECOMP(mse_loss_backward);
-  JVP_DECOMP(l1_loss_backward);
   JVP_DECOMP(_log_softmax_backward_data);
   JVP_DECOMP(_softmax_backward_data);
   OP_DECOMPOSE(log_sigmoid);
