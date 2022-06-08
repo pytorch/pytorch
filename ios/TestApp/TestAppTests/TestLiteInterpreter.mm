@@ -14,7 +14,6 @@
 - (void)testCoreML {
   NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"model_coreml"
                                                                          ofType:@"ptl"];
-  XCTAssertNotNil(modelPath, @"model_coreml.ptl not found. Run coreml_backend.py in ios/TestApp/benchmark to generate it.");
   auto module = torch::jit::_load_for_mobile(modelPath.UTF8String);
   c10::InferenceMode mode;
   auto input = torch::ones({1, 3, 224, 224}, at::kFloat);
@@ -22,21 +21,17 @@
   XCTAssertTrue(outputTensor.numel() == 1000);
 }
 
-- (void)testModel:(NSString*)modelName {
-  NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:modelName
-                                                                         ofType:@"ptl"];
-  XCTAssertNotNil(modelPath, @"Model not found. See https://github.com/pytorch/pytorch/tree/master/test/mobile/model_test#diagnose-failed-test.");
-  [self runModel:modelPath];
-
-  // model generated on the fly
-  NSString* onTheFlyModelName = [NSString stringWithFormat:@"%@_temp", modelName]];
-  NSString* onTheFlyModelPath = [[NSBundle bundleForClass:[self class]] pathForResource:onTheFlyModelName
-                                                                         ofType:@"ptl"];
-  XCTAssertNotNil(onTheFlyModelPath, @"On-the-fly model not found. Follow https://github.com/pytorch/pytorch/tree/master/test/mobile/model_test#diagnose-failed-test to generate them and run the setup script again.");
-  [self runModel:onTheFlyModelPath];
+- (void)testModel:(NSString*)filename {
+  // model generated using the current pytorch revision
+  [self runModel:[NSString stringWithFormat:@"%@_temp", filename]];
+  // model generated using older pyotrch revision
+  [self runModel:filename];
 }
 
-- (void)runModel:(NSString*)modelPath {
+- (void)runModel:(NSString*)filename {
+  NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:filename
+                                                                         ofType:@"ptl"];
+  XCTAssertNotNil(modelPath);
   c10::InferenceMode mode;
   auto module = torch::jit::_load_for_mobile(modelPath.UTF8String);
   auto has_bundled_input = module.find_method("get_all_bundled_inputs");
