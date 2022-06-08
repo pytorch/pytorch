@@ -1,4 +1,4 @@
-name: Run MPS tets
+name: Run MPS tests
 on:
   pull_request:
   workflow_dispatch:
