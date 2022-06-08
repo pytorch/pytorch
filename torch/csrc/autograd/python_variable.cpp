@@ -32,6 +32,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
+#include <torch/csrc/utils/torch_dispatch_mode.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
 #include <torch/library.h>
@@ -565,6 +566,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   if (!PyType_Check(cls)) {
     throw torch::TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
+  torch_dispatch_mode::StashTorchDispatchModeGuard td_g;
   auto data =
       r.tensor(1).detach(); // creates a fresh Tensor (DEFINITELY_UNINITIALIZED)
   // We set `data`'s `allow_tensor_metadata_change` to true here, because we want to

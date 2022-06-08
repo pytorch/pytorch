@@ -1075,6 +1075,13 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
         self.assertIsInstance(y, ModeTensor)
         self.assertIsInstance(z, ModeTensor)
 
+        with Mode():
+            with Mode():
+                y = x + x
+                z = y + y
+        self.assertIsInstance(y, ModeTensor)
+        self.assertIsInstance(z, ModeTensor)
+
     def test_error_using_same_mode(self):
         class A(TorchDispatchMode):
             pass
