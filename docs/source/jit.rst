@@ -876,7 +876,7 @@ now supported.
 
 Fusion Backends
 ~~~~~~~~~~~~~~~
-There are a couple of fusion backends available to optimize TorchScript execution. The default is NNC, which can perform fusions for both CPU and GPU. Another alternative is NVFuser, which targets GPU fusion. See the  `NVFuser documentation <https://github.com/pytorch/pytorch/blob/release/1.12/torch/csrc/jit/codegen/cuda/README.md>`_ for more details on usage and debugging.
+There are a couple of fusion backends available to optimize TorchScript execution. The default fuser on CPUs is NNC, which can perform fusions for both CPUs and GPUs. The default fuser on GPUs is NVFuser, which supports a wider range of operators and has demonstrated generated kernels with improved throughput. See the  `NVFuser documentation <https://github.com/pytorch/pytorch/blob/release/1.12/torch/csrc/jit/codegen/cuda/README.md>`_ for more details on usage and debugging.
 
 
 References
