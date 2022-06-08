@@ -29,6 +29,9 @@ def torch_to_refs_map():
     ]
     r: Dict[Any, Any] = {
         torch.Tensor.__invert__: torch._refs.bitwise_not,
+        torch.Tensor.__xor__: torch._refs.bitwise_xor,
+        torch.Tensor.__and__: torch._refs.bitwise_and,
+        torch.Tensor.__or__: torch._refs.bitwise_or,
     }
     for mod_torch, mod_refs in modules:
         for s in mod_refs.__all__:  # type: ignore[attr-defined]
