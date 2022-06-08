@@ -28,7 +28,8 @@ from torch.autograd.profiler import profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
     kineto_available, profile, record_function, supported_activities,
-    DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver
+    DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
+    utils
 )
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
@@ -1372,6 +1373,18 @@ class TestProfiler(TestCase):
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 [ aten::as_strided ]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           [ aten::as_strided ]
             """  # noqa: B950
         )
+        
+    def test_profiler_experimental_tree_compute_metrics(self):
+        t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
+        with profile() as p:
+            z = torch.add(t1, t2)
+            y = torch.ones(1)
+            loss = (y - z) ** 2
+            loss.backward()
+
+        metrics = utils.compute_event_metrics(p)
+        tree = p.profiler.kineto_results.experimental_event_tree()
+        self.assertEqual(metrics[utils.EventKey(tree[0])].self_time_ns, tree[0].duration_time_ns - sum([child.duration_time_ns for child in tree[0].children]))
 
 if __name__ == '__main__':
     run_tests()
