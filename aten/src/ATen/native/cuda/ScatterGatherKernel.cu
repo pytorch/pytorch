@@ -293,7 +293,7 @@ struct cuda_scatter_gather_base_kernel {
     auto index_size = is_scatter_like ? self_dim_size : src_dim_size;
     auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
 
-    if (!is_scatter_like || !index_larger_than_src_in_scatter) {
+    if (!index_larger_than_src_in_scatter) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
         iter.dtype(),
@@ -381,7 +381,7 @@ struct cuda_scatter_gather_base_kernel {
     auto index_size = is_scatter_like ? self_dim_size : src_dim_size;
     auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
 
-    if (!is_scatter_like || !index_larger_than_src_in_scatter) {
+    if (!index_larger_than_src_in_scatter) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
         iter.dtype(),
@@ -470,7 +470,7 @@ struct cuda_scatter_gather_base_kernel {
     auto index_size = is_scatter_like ? self_dim_size : src_dim_size;
     auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
 
-    if (!is_scatter_like || !index_larger_than_src_in_scatter) {
+    if (!index_larger_than_src_in_scatter) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
         iter.dtype(),
