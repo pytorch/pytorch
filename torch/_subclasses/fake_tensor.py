@@ -377,7 +377,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
-        
+
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
         if "prims::" in func._schema.name:
