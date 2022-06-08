@@ -822,16 +822,16 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   constexpr auto autograd_ipu_ks_ = DispatchKeySet(DispatchKey::AutogradIPU);
   constexpr auto autograd_xpu_ks_ = DispatchKeySet(DispatchKey::AutogradXPU);
 
-  constexpr auto autocast_cpu_ks = DispatchKeySet(DispatchKey::AutocastCPU);
-  constexpr auto autocast_cuda_ks = DispatchKeySet(DispatchKey::AutocastCUDA);
-  constexpr auto autocast_hip_ks = DispatchKeySet(DispatchKey::AutocastHIP);
-  constexpr auto autocast_xla_ks = DispatchKeySet(DispatchKey::AutocastXLA);
-  constexpr auto autocast_mps_ks = DispatchKeySet(DispatchKey::AutocastMPS);
-  constexpr auto autocast_ipu_ks = DispatchKeySet(DispatchKey::AutocastIPU);
-  constexpr auto autocast_hpu_ks = DispatchKeySet(DispatchKey::AutocastHPU);
-  constexpr auto autocast_ve_ks = DispatchKeySet(DispatchKey::AutocastVE);
-  constexpr auto autocast_lazy_ks = DispatchKeySet(DispatchKey::AutocastLazy);
-  constexpr auto autocast_xpu_ks = DispatchKeySet(DispatchKey::AutocastXPU);
+  constexpr auto autocast_cpu_ks = DispatchKeySet(DispatchKey::AutocastFunctionality) | DispatchKeySet(BackendComponent::CPUBit);
+  constexpr auto autocast_cuda_ks = DispatchKeySet(DispatchKey::AutocastFunctionality) | DispatchKeySet(BackendComponent::CUDABit);
+  constexpr auto autocast_hip_ks = DispatchKeySet(DispatchKey::AutocastFunctionality) | DispatchKeySet(BackendComponent::HIPBit);
+  constexpr auto autocast_xla_ks = DispatchKeySet(DispatchKey::AutocastFunctionality) | DispatchKeySet(BackendComponent::XLABit);
+  constexpr auto autocast_mps_ks = DispatchKeySet(DispatchKey::AutocastFunctionality) | DispatchKeySet(BackendComponent::MPSBit);
+  constexpr auto autocast_ipu_ks = DispatchKeySet(DispatchKey::AutocastFunctionality) | DispatchKeySet(BackendComponent::IPUBit);
+  constexpr auto autocast_hpu_ks = DispatchKeySet(DispatchKey::AutocastFunctionality) | DispatchKeySet(BackendComponent::HPUBit);
+  constexpr auto autocast_ve_ks = DispatchKeySet(DispatchKey::AutocastFunctionality) | DispatchKeySet(BackendComponent::VEBit);
+  constexpr auto autocast_lazy_ks = DispatchKeySet(DispatchKey::AutocastFunctionality) | DispatchKeySet(BackendComponent::LazyBit);
+  constexpr auto autocast_xpu_ks = DispatchKeySet(DispatchKey::AutocastFunctionality) | DispatchKeySet(BackendComponent::XPUBit);
 
   switch (t) {
     case BackendComponent::CPUBit:
