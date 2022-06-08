@@ -1179,7 +1179,8 @@ void initJITBindings(PyObject* module) {
       .def(
           "get_pyobj",
           [](std::shared_ptr<c10::SymbolicIntNode> a) -> py::object {
-            if (auto psn = std::dynamic_pointer_cast<PythonSymbolicIntNode>(a)) {
+            if (auto psn =
+                    std::dynamic_pointer_cast<PythonSymbolicIntNode>(a)) {
               return py::reinterpret_borrow<py::object>(psn->getPyObj());
             }
             return py::none();
