@@ -1,4 +1,4 @@
-from typing import Optional, Any
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -10,6 +10,7 @@ from ._functions import SyncBatchNorm as sync_batch_norm
 from .lazy import LazyModuleMixin
 from .module import Module
 
+from torch._C._distributed_c10d import ProcessGroup
 
 class _NormBase(Module):
     """Common base of _InstanceNorm and _BatchNorm"""
@@ -654,7 +655,7 @@ class SyncBatchNorm(_BatchNorm):
         momentum: float = 0.1,
         affine: bool = True,
         track_running_stats: bool = True,
-        process_group: Optional[Any] = None,
+        process_group: Optional[ProcessGroup] = None,
         device=None,
         dtype=None
     ) -> None:
