@@ -81,11 +81,9 @@ function install_monkeytype {
   pip_install MonkeyType
 }
 
-TORCHVISION_COMMIT=8a2dc6f22ac4389ccba8859aa1e1cb14f1ee53db
+TORCHVISION_COMMIT="$(cat .github/ci_commit_pins/vision.txt)"
 
 function install_torchvision() {
-  # Check out torch/vision at Jun 11 2020 commit
-  # This hash must match one in .jenkins/caffe2/test.sh
   pip_install --user "git+https://github.com/pytorch/vision.git@$TORCHVISION_COMMIT"
 }
 
