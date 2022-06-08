@@ -290,6 +290,20 @@ void OptOutMutator::mutate(MmaOp* mma) {
       IrBuilder::create<MmaOp>(container, out, in_a, in_b, init, options);
 }
 
+void OptOutMutator::mutate(LoadStoreOp* ldst) {
+  Val* out = maybeMutated(ldst->out());
+  Val* in = maybeMutated(ldst->in());
+  auto op_type = ldst->opType();
+
+  if (out->sameAs(ldst->out()) && in->sameAs(ldst->in())) {
+    return;
+  }
+
+  auto container = ldst->container();
+  container->removeExpr(ldst);
+  IrBuilder::create<LoadStoreOp>(container, op_type, out, in);
+}
+
 void OptOutMutator::mutate(BroadcastOp* bop) {
   Val* out = maybeMutated(bop->out());
   Val* in = maybeMutated(bop->in());
@@ -419,6 +433,9 @@ void OptOutMutator::mutate(kir::BlockSync*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::GridSync*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::CpAsyncWait*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::InitMagicZero*) {

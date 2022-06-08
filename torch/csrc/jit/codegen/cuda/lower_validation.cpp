@@ -561,7 +561,8 @@ void validateAndCollectVectorizeInfo(Fusion* fusion) {
           tv->definition() == nullptr ||
               (tv->definition()->isA<UnaryOp>() &&
                tv->definition()->as<UnaryOp>()->getUnaryOpType() ==
-                   UnaryOpType::Set),
+                   UnaryOpType::Set) ||
+              tv->definition()->isA<LoadStoreOp>(),
           "Vectorized accesses cannot be inline with computation, they are only supported with a Set operation.",
           "TensorView: ",
           tv);
@@ -868,6 +869,11 @@ namespace {
 //! Utility to make sure targeted gpu capability is
 //!  higher than provided major.minor.
 void validateMinimumArch(int major, int minor) {
+  // Skip checking arch if disabled.
+  if (isDisabled(DisableOption::ArchCheck)) {
+    return;
+  }
+
   auto prop = at::cuda::getCurrentDeviceProperties();
   TORCH_INTERNAL_ASSERT(prop->major >= major);
   if (prop->major == major) {
@@ -929,6 +935,84 @@ void validateMmaTensors(MmaOp* mma) {
   validate_operand_ids(mma->inB()->as<TensorView>());
 }
 
+//! Note and TODO:
+//!   Currently relying on ldmatrix to
+//!     obtain the correct data layout for turing/ampere
+//!     mma's.
+//!   This restriction will eventually not
+//!    be necessary once the scatter swizzle is ready.
+void validateTuringMmaInput(TensorView* tv) {
+  // Pattern matching here to make sure LDMatrix is the right format.
+  //  Format is done through swizzling in the scheduling and
+  //  we check that swizzling to make sure it's correctly setup for LDMatrix.
+  //  We could in theory support patterns LDMatrix doesn't support,
+  //  but that would also mean the MMA isn't supported and
+  //  so we would have to lower to something completely different.
+
+  // MemCpy async is a more generic utility that we can use.
+  // Currently only allowed input paths are:
+  //  ldmatrix -> mma or
+  //  ldmatrix -> broadcast -> mma
+  // We actually wouldn't want too much flexibility here since
+  //  this path is very perf critical. But the check itself
+  //  can be made cleaner once we have the correct swizzle
+  //  labeling.
+  // The most generic support would involve build out to
+  //  support any pointwise ops that does not change the
+  //  datalayout.
+  auto tv_def = tv->definition();
+  TORCH_INTERNAL_ASSERT(tv_def);
+  if (tv_def->isA<BroadcastOp>()) {
+    tv_def = tv_def->input(0)->definition();
+  }
+  TORCH_INTERNAL_ASSERT(tv_def);
+  TORCH_INTERNAL_ASSERT(ir_utils::isLdMatrixOp(tv_def));
+}
+
+// Output of ldmatrix is swizzled with the mma format, so it
+//  currently should not be fused with any pointwise ops. This
+//  check is to protect against these cases.
+// This would also not be needed once scatter swizzle ready, should
+//  just become a swizzle format check if we wanted to fuse ldmatrix
+//  with any op other than mma.
+void validateLdMatrixOutput(TensorView* tv) {
+  const auto& out_uses = tv->fusion()->unordered_uses(tv);
+  if (out_uses.empty()) {
+    return;
+  }
+  // TODO: restricting to single use pipelines for now which
+  //  is true to matmul mainloop. This Could be relaxed to
+  //  support more complex mma usage.
+  TORCH_INTERNAL_ASSERT(out_uses.size() == 1);
+  auto out_use = *(out_uses.begin());
+
+  if (out_use->isA<BroadcastOp>()) {
+    validateLdMatrixOutput(out_use->output(0)->as<TensorView>());
+    return;
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      out_use->isA<MmaOp>(),
+      "validateLdMatrixOutput: currently only supports single mma use for ldmatrix",
+      out_use);
+}
+
+// Checks that the memory ops are supported on the targeted GPU
+void validateArchMemoryOp(LoadStoreOp* ldst) {
+  switch (ldst->opType()) {
+    case LoadStoreOpType::LdMatrix:
+    case LoadStoreOpType::LdMatrixTranspose:
+      validateMinimumArch(7, 5);
+      validateLdMatrixOutput(ldst->out()->as<TensorView>());
+      return;
+    case LoadStoreOpType::CpAsync:
+      validateMinimumArch(8, 0);
+      return;
+    default:
+      return;
+  }
+}
+
 } // namespace
 
 //! Validate data format and GPU arch compatibility of scheduled
@@ -944,10 +1028,29 @@ void validateMma(Fusion* fusion) {
         case MmaOptions::MacroType::Volta_16_16_4:
           validateMinimumArch(7, 0);
           break;
+        case MmaOptions::MacroType::Turing_16_8_16:
+          validateMinimumArch(7, 5);
+
+          // Check that operands come from ldmatrix, can be
+          //  relaxed once swizzles can be labeled on iterdomains.
+          validateTuringMmaInput(mma->inA()->as<TensorView>());
+          validateTuringMmaInput(mma->inB()->as<TensorView>());
+          break;
+        case MmaOptions::MacroType::Ampere_16_8_16:
+          validateMinimumArch(8, 0);
+
+          // Check that operands come from ldmatrix, can be
+          //  relaxed once swizzles can be labeled on iterdomains.
+          validateTuringMmaInput(mma->inA()->as<TensorView>());
+          validateTuringMmaInput(mma->inB()->as<TensorView>());
+          break;
         default:
           TORCH_INTERNAL_ASSERT(false, "validate mma: unsupported macro");
           break;
       }
+    }
+    if (auto ldst = dynamic_cast<LoadStoreOp*>(expr)) {
+      validateArchMemoryOp(ldst);
     }
   }
 }

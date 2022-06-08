@@ -157,6 +157,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   struct GlobalBuffers {
     std::vector<at::Tensor> buffers;
     std::vector<bool> zero_init;
+    at::Tensor profile_buffer;
   };
 
   static std::string kernelNamespace() {

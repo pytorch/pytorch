@@ -440,7 +440,14 @@ void UnswitchPredicate::predicateOn(Expr* tv_expr) {
   }
 
   const auto gpu_lower = GpuLower::current();
-  if (gpu_lower->predicateElimination().canOmitPredicate(tv_expr)) {
+
+  // FIXME:
+  //   Needed to keep the predicate of cp.async initialization to get the
+  //   inverted predicate,
+  // see [Predicate Inversion for CpAsync]. In a follow up both this part and
+  // the [Predicate Inversion for CpAsync] should be cleaned up together.
+  if (gpu_lower->predicateElimination().canOmitPredicate(tv_expr) &&
+      !ir_utils::isCpAsyncInit(tv_expr)) {
     addParallelizedDomainPredicates(tv_expr);
     return;
   }
