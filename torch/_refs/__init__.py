@@ -2050,6 +2050,7 @@ def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
         out = torch.cat(tensors, wrapped_dim)
         return out.view(result_sizes)
 
+    # If dim == tensors[0].ndim, view cannot efficiently handle it
     return torch.cat([t.unsqueeze(wrapped_dim) for t in tensors], dim)
 
 
