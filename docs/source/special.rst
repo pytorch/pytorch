@@ -12,32 +12,36 @@ The torch.special module, modeled after SciPy's `special <https://docs.scipy.org
 Functions
 -----------------------
 
+.. autofunction:: bessel_j0
+.. autofunction:: bessel_j1
+.. autofunction:: bessel_y0
+.. autofunction:: bessel_y1
+.. autofunction:: digamma
 .. autofunction:: entr
 .. autofunction:: erf
 .. autofunction:: erfc
 .. autofunction:: erfcx
 .. autofunction:: erfinv
+.. autofunction:: exp2
 .. autofunction:: expit
 .. autofunction:: expm1
-.. autofunction:: exp2
-.. autofunction:: gammaln
 .. autofunction:: gammainc
 .. autofunction:: gammaincc
-.. autofunction:: polygamma
-.. autofunction:: digamma
-.. autofunction:: psi
+.. autofunction:: gammaln
 .. autofunction:: i0
 .. autofunction:: i0e
 .. autofunction:: i1
 .. autofunction:: i1e
+.. autofunction:: log1p
+.. autofunction:: log_ndtr
+.. autofunction:: log_softmax
 .. autofunction:: logit
 .. autofunction:: logsumexp
-.. autofunction:: log1p
-.. autofunction:: log_softmax
 .. autofunction:: multigammaln
 .. autofunction:: ndtr
 .. autofunction:: ndtri
-.. autofunction:: log_ndtr
+.. autofunction:: polygamma
+.. autofunction:: psi
 .. autofunction:: round
 .. autofunction:: sinc
 .. autofunction:: softmax
