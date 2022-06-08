@@ -33,7 +33,7 @@ constexpr auto kNumUnaryIsOps = 6;
 
 constexpr auto kNumBinaryFloatOps = 3;
 constexpr auto kNumBinaryComparisonOps = 12;
-constexpr auto kNumBinaryCastOps = 14;
+constexpr auto kNumBinaryCastOps = 19;
 
 constexpr auto kNumBinaryOpsWithAlpha = 6;
 constexpr auto kNumLerpOps = 2;
@@ -1003,10 +1003,15 @@ class IrParser {
         "aten::pow(Scalar self, Tensor exponent) -> Tensor",
         "aten::remainder(Tensor self, Tensor other) -> Tensor",
         "aten::fmod(Tensor self, Tensor other) -> Tensor",
+        "aten::bitwise_and(Tensor self, Tensor other) -> Tensor",
         "aten::__and__(Tensor self, Tensor other) -> Tensor",
+        "aten::bitwise_or(Tensor self, Tensor other) -> Tensor",
         "aten::__or__(Tensor self, Tensor other) -> Tensor",
+        "aten::bitwise_xor(Tensor self, Tensor other) -> Tensor",
         "aten::__xor__(Tensor self, Tensor other) -> Tensor",
+        "aten::bitwise_left_shift(Tensor self, Tensor other) -> Tensor",
         "aten::__lshift__(Tensor self, Tensor other) -> Tensor",
+        "aten::bitwise_right_shift(Tensor self, Tensor other) -> Tensor",
         "aten::__rshift__(Tensor self, Tensor other) -> Tensor"};
     for (auto signature : BinaryCastOp) {
       auto ptr_op = getOperatorForLiteral(signature);
@@ -1020,10 +1025,15 @@ class IrParser {
                  {aten::pow, BinaryOpType::Pow},
                  {aten::remainder, BinaryOpType::Remainder},
                  {aten::fmod, BinaryOpType::Fmod},
+                 {aten::bitwise_and, BinaryOpType::And},
                  {aten::__and__, BinaryOpType::And},
+                 {aten::bitwise_or, BinaryOpType::Or},
                  {aten::__or__, BinaryOpType::Or},
+                 {aten::bitwise_xor, BinaryOpType::Xor},
                  {aten::__xor__, BinaryOpType::Xor},
+                 {aten::bitwise_left_shift, BinaryOpType::Lshift},
                  {aten::__lshift__, BinaryOpType::Lshift},
+                 {aten::bitwise_right_shift, BinaryOpType::Rshift},
                  {aten::__rshift__, BinaryOpType::Rshift}});
 
             MemoryFormat format;

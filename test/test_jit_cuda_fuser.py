@@ -1008,48 +1008,37 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_binary_bitwise(self):
-        def jit_or(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
-            return (x & y) | z
+        dtypes = [torch.bool, torch.int32, torch.int64]
 
-        def jit_xor(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
-            return (x & y) ^ z
+        for dtype1, dtype2, dtype3 in itertools.product(dtypes, repeat=3):
+            def jit_and(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+                return torch.bitwise_and(x, y) & z
 
-        def jit_lshift(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
-            return (x & y) << z
+            def jit_or(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+                return torch.bitwise_or(x, y) | z
 
-        def jit_rshift(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
-            return (x & y) >> z
+            def jit_xor(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+                return torch.bitwise_xor(x, y) ^ z
 
-        for jit_func in [jit_or, jit_xor, jit_lshift, jit_rshift]:
-            x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda").mul(5).to(torch.long)
-            y = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda").mul(5).to(torch.long)
-            z = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda").mul(2).to(torch.long)
+            def jit_lshift(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+                return torch.bitwise_left_shift(x, y) << z
 
-            jitted = torch.jit.script(jit_func)
-            jit_o = jitted(x, y, z)
-            jit_o = jitted(x, y, z)
-            o = jit_func(x, y, z)
-            self.assertEqual(o, jit_o)
-            self.assertGraphContains(jitted.graph_for(x, y, z), FUSION_GUARD)
+            def jit_rshift(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+                return torch.bitwise_right_shift(x, y) >> z
 
-        # We shouldn't need this redefinition of the function, but otherwise it won't recompile for a new type
-        def jit_or(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
-            return (x & y) | z
+            for jit_func in [jit_and, jit_or, jit_xor, jit_lshift, jit_rshift]:
+                if torch.bool in {dtype1, dtype2, dtype3} and jit_func in {jit_lshift, jit_rshift}:
+                    continue
+                x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda").mul(5).to(dtype1)
+                y = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda").mul(5).to(dtype2)
+                z = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda").mul(2).to(dtype3)
 
-        def jit_xor(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
-            return (x & y) ^ z
-
-        for jit_func in [jit_or, jit_xor]:
-            x = torch.rand(4, 2, dtype=torch.float, device="cuda").round().to(torch.bool)
-            y = torch.rand(4, 2, dtype=torch.float, device="cuda").round().to(torch.bool)
-            z = torch.rand(4, 2, dtype=torch.float, device="cuda").round().to(torch.bool)
-
-            jitted = torch.jit.script(jit_func)
-            jit_o = jitted(x, y, z)
-            jit_o = jitted(x, y, z)
-            o = jit_func(x, y, z)
-            self.assertEqual(o, jit_o)
-            self.assertGraphContains(jitted.graph_for(x, y, z), FUSION_GUARD)
+                jitted = torch.jit.script(jit_func)
+                jit_o = jitted(x, y, z)
+                jit_o = jitted(x, y, z)
+                o = jit_func(x, y, z)
+                self.assertEqual(o, jit_o)
+                self.assertGraphContains(jitted.graph_for(x, y, z), FUSION_GUARD)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
