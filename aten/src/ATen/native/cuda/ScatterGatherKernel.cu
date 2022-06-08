@@ -163,9 +163,9 @@ struct _cuda_scatter_large_index_internal_kernel {
     TensorIterator& iter,
     int64_t index_size,
     int64_t index_stride,
-    const IntArrayRef index_sizes,
+    const IntArrayRef index_shape,
     const IntArrayRef index_strides,
-    const IntArrayRef src_sizes,
+    const IntArrayRef src_shape,
     const IntArrayRef src_strides,
     int64_t numel,  // Do not use `const` qualifier here as it may cause issue in cuda 11.6.x. See #75434, #75545
     const func_t& f
@@ -173,7 +173,7 @@ struct _cuda_scatter_large_index_internal_kernel {
     if (!iter.can_use_32bit_indexing()) {
       for (auto& sub_iter : iter.with_32bit_indexing()) {
         _cuda_scatter_large_index_internal_kernel<scalar_t>()(
-          sub_iter, index_size, index_stride, index_sizes, index_strides, src_sizes, src_strides, numel, f
+          sub_iter, index_size, index_stride, index_shape, index_strides, src_shape, src_strides, numel, f
         );
       }
       return;
@@ -197,10 +197,10 @@ struct _cuda_scatter_large_index_internal_kernel {
       auto original_index_offset = offsets[2] / 8;
       uint32_t index_idx;
       for (auto d = ndim - 1; d >= 0; d--) {
-        index_idx = (original_index_offset / index_strides[d]) % index_sizes[d];
+        index_idx = (original_index_offset / index_strides[d]) % index_shape[d];
         original_index_offset -= index_idx * index_strides[d];
 
-        index_idx %= src_sizes[d];
+        index_idx %= src_shape[d];
         src_offset += src_strides[d] * index_idx;
       }
 
