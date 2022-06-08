@@ -333,6 +333,7 @@ def get_aten_generated_files(enabled_backends):
         "RegisterBackendSelect.cpp",
         "RegisterCompositeImplicitAutograd.cpp",
         "RegisterCompositeExplicitAutograd.cpp",
+        "RegisterCompositeExplicitAutogradNonFunctional.cpp",
         "CompositeViewCopyKernels.cpp",
         "RegisterSchema.cpp",
         "Declarations.yaml",
@@ -353,6 +354,8 @@ def get_aten_generated_files(enabled_backends):
         "CompositeImplicitAutogradFunctions_inl.h",
         "CompositeExplicitAutogradFunctions.h",
         "CompositeExplicitAutogradFunctions_inl.h",
+        "CompositeExplicitAutogradNonFunctionalFunctions.h",
+        "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
         "core/ATenOpList.cpp",
         "core/TensorBody.h",
         "core/TensorMethods.cpp",
@@ -522,7 +525,7 @@ def get_aten_derived_type_src_rules(aten_rule_name, enabled_backends):
 def get_aten_selective_cpp_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, f)
-        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
+        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
     ] + get_aten_derived_type_src_rules(aten_rule_name, enabled_backends)
 
 def get_aten_derived_type_srcs(enabled_backends):
