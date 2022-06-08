@@ -1950,7 +1950,8 @@ void ONNXShapeTypeInference(
     for (auto output : clone_node->outputs()) {
       n_graph->registerOutput(output);
     }
-    // Map original PyTorch graph's i/o name 
+
+    // Map original PyTorch graph's i/o name
     // to temporal ONNX graph's i/o name for shape inference
     for (size_t i = 0; i < clone_node->inputs().size(); ++i) {
       torch_to_onnx_input[n->input(i)->debugName()] =
@@ -1963,7 +1964,7 @@ void ONNXShapeTypeInference(
     }
     // Make inferred_shape_data use name from temporal ONNX graph
     // instead of original PyTorch graph
-    for (const auto& gs_data: original_shape_data) {
+    for (const auto& gs_data : original_shape_data) {
       const auto onnx_output_name = torch_to_onnx_input.find(gs_data.first);
       if (onnx_output_name != torch_to_onnx_input.end()) {
         inferred_shape_data[onnx_output_name->second] = gs_data.second;
@@ -2035,8 +2036,8 @@ void ONNXShapeTypeInference(
   SpecialPostProcess(n);
   // Get data propagation result from ONNX shape inference
   for (const auto& output : n->outputs()) {
-    const auto inferred_shape_pair = inferred_shape_data.find(
-        torch_to_onnx_output[output->debugName()]);
+    const auto inferred_shape_pair =
+        inferred_shape_data.find(torch_to_onnx_output[output->debugName()]);
     if (inferred_shape_pair != inferred_shape_data.end()) {
       const auto& inferred_shape = inferred_shape_pair->second;
       int rank = inferred_shape.dim_size();

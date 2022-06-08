@@ -10,7 +10,7 @@ namespace torch {
 namespace jit {
 
 using ShapeDataMap =
-std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto>;
+    std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto>;
 
 class ConstantValueMap {
  public:
