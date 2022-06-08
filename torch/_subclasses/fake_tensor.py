@@ -13,6 +13,12 @@ import functools
 import itertools
 
 aten = torch.ops.aten
+prims = torch.ops.prims
+
+
+class ComplexInputException(Exception):
+    pass
+
 
 _device_not_kwarg_ops = (
     aten._resize_output_.default,
@@ -45,6 +51,7 @@ _like_tensor_constructors = (
     aten.randint_like.low_dtype,
     aten.randn_like.default,
     aten.zeros_like.default,
+    aten.new_empty.default,
 )
 
 @functools.lru_cache(None)
@@ -85,6 +92,9 @@ class FakeTensorConverter(object):
         if maybe_memo is not None:
             return maybe_memo
         existing_device = t.device
+        # not yet supported in metatensors
+        if t.is_complex():
+            raise ComplexInputException
         out = FakeTensor(fake_mode, self.meta_converter(t), existing_device)
         self.tensor_memo[t] = out
         return out
@@ -267,7 +277,9 @@ class FakeTensorMode(TorchDispatchMode):
                         self, torch.ops.aten._to_copy(input, **new_kwargs), out_device
                     )
 
-            if _is_tensor_constructor(func) or func in _like_tensor_constructors:
+            # TODO: cleaner prims support
+            if (_is_tensor_constructor(func) or func in _like_tensor_constructors) \
+                    and "prims::" not in func._schema.name:
                 assert func not in _non_kwarg_device_constructors
                 _, new_kwargs = normalize_function(
                     func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -293,6 +305,12 @@ class FakeTensorMode(TorchDispatchMode):
                 new_kwargs["device"] = torch.device("meta")
                 r = func(*args, **new_kwargs)
                 return converter(self, r, out_device)
+
+            # TODO: dont know why this is being dispatched to __torch__function__
+            # Dont default to common device handling since this doesnt take in/return tensor
+            # TODO: update typo of minium
+            if func in (prims.maximum_value.default, prims.minium_value.default):
+                return func(*args, **kwargs)
 
             r = func(*args, **kwargs)
 
