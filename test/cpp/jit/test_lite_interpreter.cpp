@@ -782,7 +782,7 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   std::unordered_map<std::string, OperatorInfo> model_ops;
   model_ops["aten::add.Scalar"] = OperatorInfo{2};
   auto model_info = ModelCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops};
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, /*type_table=*/{}, /*operator_version=*/0};
   std::unordered_map<std::string, OperatorInfo> runtime_ops;
   runtime_ops["aten::add.Int"] = OperatorInfo{2};
   auto runtime_info = RuntimeCompatibilityInfo{
@@ -790,7 +790,8 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
           caffe2::serialize::kMinSupportedBytecodeVersion,
           caffe2::serialize::kMaxSupportedBytecodeVersion),
       runtime_ops,
-      _get_mobile_supported_types()};
+      _get_mobile_supported_types(),
+      /*min_max_supported_opperator_versions=*/{0, 0}};
 
   auto result = is_compatible(runtime_info, model_info);
   AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
@@ -806,7 +807,8 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
           caffe2::serialize::kMinSupportedBytecodeVersion,
           caffe2::serialize::kMaxSupportedBytecodeVersion),
       runtime_ops,
-      _get_mobile_supported_types()};
+      _get_mobile_supported_types(),
+      /*min_max_supported_opperator_versions=*/{0, 0}};
   model_info.bytecode_version =
       caffe2::serialize::kMaxSupportedBytecodeVersion + 1;
 
@@ -821,7 +823,8 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
           caffe2::serialize::kMinSupportedBytecodeVersion,
           caffe2::serialize::kMaxSupportedBytecodeVersion),
       runtime_ops,
-      _get_mobile_supported_types()};
+      _get_mobile_supported_types(),
+      /*min_max_supported_opperator_versions=*/{0, 0}};
   model_info.bytecode_version =
       caffe2::serialize::kMinSupportedBytecodeVersion - 1;
 

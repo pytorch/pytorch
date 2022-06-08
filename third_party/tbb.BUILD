@@ -52,6 +52,7 @@ cc_library(
         "-D__TBB_SOURCE_DIRECTLY_INCLUDED=1",
         "-fno-sanitize=vptr",
         "-fno-sanitize=thread",
+        "-Wno-missing-field-initializers",
     ],
     defines = [
         # TBB Cannot detect the standard library version when using clang with libstdc++.
