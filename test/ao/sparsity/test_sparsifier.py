@@ -34,9 +34,9 @@ class ImplementedSparsifier(BaseSparsifier):
     def __init__(self, **kwargs):
         super().__init__(defaults=kwargs)
 
-    def update_mask(self, layer, **kwargs):
-        layer.parametrizations.weight[0].mask[0] = 0
-        linear_state = self.state['linear']
+    def update_mask(self, module, **kwargs):
+        module.parametrizations.weight[0].mask[0] = 0
+        linear_state = self.state['linear.weight']
         linear_state['step_count'] = linear_state.get('step_count', 0) + 1
 
 
@@ -48,15 +48,15 @@ class TestBaseSparsifier(TestCase):
         model = Model()
         sparsifier = ImplementedSparsifier(test=3)
         sparsifier.prepare(model, config=None)
-        assert len(sparsifier.module_groups) == 3
+        assert len(sparsifier.tensor_groups) == 3
         sparsifier.step()
         # Can instantiate the model with configs
         sparsifier = ImplementedSparsifier(test=3)
         sparsifier.prepare(model, [model.linear])
-        assert len(sparsifier.module_groups) == 1
-        assert sparsifier.module_groups[0]['fqn'] == 'linear'
-        assert 'test' in sparsifier.module_groups[0]
-        assert sparsifier.module_groups[0]['test'] == 3
+        assert len(sparsifier.tensor_groups) == 1
+        assert sparsifier.tensor_groups[0]['module_fqn'] == 'linear'
+        assert 'test' in sparsifier.tensor_groups[0]
+        assert sparsifier.tensor_groups[0]['test'] == 3
 
     def test_prepare_config(self):
         model = Model()
@@ -66,17 +66,17 @@ class TestBaseSparsifier(TestCase):
         assert not hasattr(model.linear, 'parametrizations')
         assert not hasattr(model.head, 'parametrizations')
         sparsifier.prepare(model, config=[
-            {'fqn': 'seq.0', 'test': 42},
+            {'module_fqn': 'seq.0', 'test': 42},
             # No 'linear' to make sure it will be skipped in the sparsification
-            {'module': model.head, 'fqn': 'head'}
+            {'module': model.head, 'module_fqn': 'head'}
         ])
-        assert len(sparsifier.module_groups) == 2
+        assert len(sparsifier.tensor_groups) == 2
         # Check if default argument is not assigned if explicit
-        assert sparsifier.module_groups[0]['fqn'] == 'seq.0'
-        assert sparsifier.module_groups[0]['test'] == 42
+        assert sparsifier.tensor_groups[0]['module_fqn'] == 'seq.0'
+        assert sparsifier.tensor_groups[0]['test'] == 42
         # Check if FQN and module are pointing to the same location
-        assert sparsifier.module_groups[1]['fqn'] == 'head'
-        assert sparsifier.module_groups[1]['module'] == model.head
+        assert sparsifier.tensor_groups[1]['module_fqn'] == 'head'
+        assert sparsifier.tensor_groups[1]['module'] == model.head
         # Check if parameterizations are attached
         assert hasattr(model.seq[0], 'parametrizations')
         assert not hasattr(model.linear, 'parametrizations')
@@ -103,14 +103,12 @@ class TestBaseSparsifier(TestCase):
 
         # Check the expected keys in the state_dict
         assert 'state' in state_dict
-        assert 'linear' in state_dict['state']
-        assert 'step_count' in state_dict['state']['linear']
-        assert state_dict['state']['linear']['step_count'] == 3
-
-        assert 'module_groups' in state_dict
-        assert 'test' in state_dict['module_groups'][0]
-        assert 'fqn' in state_dict['module_groups'][0]
-        assert state_dict['module_groups'][0]['fqn'] == 'linear'
+        assert 'step_count' in state_dict['state']['linear.weight']
+        assert state_dict['state']['linear.weight']['step_count'] == 3
+        assert 'tensor_groups' in state_dict
+        assert 'test' in state_dict['tensor_groups'][0]
+        assert 'tensor_fqn' in state_dict['tensor_groups'][0]
+        assert state_dict['tensor_groups'][0]['tensor_fqn'] == 'linear.weight'
 
         # Check loading static_dict creates an equivalent model
         model1 = Model()
@@ -120,11 +118,11 @@ class TestBaseSparsifier(TestCase):
         assert sparsifier0.state != sparsifier1.state
 
         # Make sure the masks are different in the beginning
-        for mg in sparsifier0.module_groups:
-            if mg['fqn'] == 'linear':
+        for mg in sparsifier0.tensor_groups:
+            if mg['tensor_fqn'] == 'linear.weight':
                 mask0 = mg['module'].parametrizations.weight[0].mask
-        for mg in sparsifier1.module_groups:
-            if mg['fqn'] == 'linear':
+        for mg in sparsifier1.tensor_groups:
+            if mg['tensor_fqn'] == 'linear.weight':
                 mask1 = mg['module'].parametrizations.weight[0].mask
         self.assertNotEqual(mask0, mask1)
 
@@ -134,10 +132,10 @@ class TestBaseSparsifier(TestCase):
         assert sparsifier0.state == sparsifier1.state
 
         # Make sure the masks (and all dicts) are the same after loading
-        assert len(sparsifier0.module_groups) == len(sparsifier1.module_groups)
-        for idx in range(len(sparsifier0.module_groups)):
-            mg0 = sparsifier0.module_groups[idx]
-            mg1 = sparsifier1.module_groups[idx]
+        assert len(sparsifier0.tensor_groups) == len(sparsifier1.tensor_groups)
+        for idx in range(len(sparsifier0.tensor_groups)):
+            mg0 = sparsifier0.tensor_groups[idx]
+            mg1 = sparsifier1.tensor_groups[idx]
             for key in mg0.keys():
                 assert key in mg1
                 if key == 'module':
@@ -222,23 +220,23 @@ class TestWeightNormSparsifier(TestCase):
         model = Model()
         sparsifier = WeightNormSparsifier()
         sparsifier.prepare(model, config=None)
-        for g in sparsifier.module_groups:
+        for g in sparsifier.tensor_groups:
             assert isinstance(g['module'], nn.Linear)
-            # The module_groups are unordered
-            assert g['fqn'] in ('seq.0', 'linear', 'head')
+            # The tensor_groups are unordered
+            assert g['module_fqn'] in ('seq.0', 'linear', 'head')
 
     def test_step(self):
         model = Model()
         sparsifier = WeightNormSparsifier(sparsity_level=0.5)
         sparsifier.prepare(model, config=[model.linear])
-        for g in sparsifier.module_groups:
+        for g in sparsifier.tensor_groups:
             # Before step
             module = g['module']
             assert (1.0 - module.parametrizations['weight'][0].mask.mean()) == 0  # checking sparsity level is 0
         sparsifier.enable_mask_update = True
         sparsifier.step()
         self.assertAlmostEqual(model.linear.parametrizations['weight'][0].mask.mean().item(), 0.5, places=2)
-        for g in sparsifier.module_groups:
+        for g in sparsifier.tensor_groups:
             # After step
             module = g['module']
             assert (1.0 - module.parametrizations['weight'][0].mask.mean()) > 0  # checking sparsity level has increased
@@ -247,7 +245,7 @@ class TestWeightNormSparsifier(TestCase):
         for _ in range(iters_before_collapse):
             model.linear.weight.data = torch.randn(model.linear.weight.shape)
             sparsifier.step()
-        for g in sparsifier.module_groups:
+        for g in sparsifier.tensor_groups:
             # After step
             module = g['module']
             assert (1.0 - module.parametrizations['weight'][0].mask.mean()) > 0  # checking sparsity level did not collapse
@@ -262,7 +260,7 @@ class TestWeightNormSparsifier(TestCase):
         # make sure the sparsity level is approximately 50%
         self.assertAlmostEqual(model.linear.parametrizations['weight'][0].mask.mean().item(), 0.5, places=2)
         # Make sure each block has exactly 50% zeros
-        module = sparsifier.module_groups[0]['module']
+        module = sparsifier.tensor_groups[0]['module']
         mask = module.parametrizations['weight'][0].mask
         for row in mask:
             for idx in range(0, len(row), 4):
@@ -275,7 +273,7 @@ class TestWeightNormSparsifier(TestCase):
         model = Model()
         sparsifier = WeightNormSparsifier()
         sparsifier.prepare(model, config=None)
-        for g in sparsifier.module_groups:
+        for g in sparsifier.tensor_groups:
             module = g['module']
             # Check mask exists
             assert hasattr(module.parametrizations['weight'][0], 'mask')
@@ -288,7 +286,7 @@ class TestWeightNormSparsifier(TestCase):
         sparsifier = WeightNormSparsifier()
         sparsifier.prepare(model, config=None)
         sparsifier.squash_mask()
-        for g in sparsifier.module_groups:
+        for g in sparsifier.tensor_groups:
             module = g['module']
             assert not is_parametrized(module, 'weight')
             assert not hasattr(module, 'mask')
@@ -318,7 +316,7 @@ class TestWeightNormSparsifier(TestCase):
             layer.weight = nn.Parameter(torch.ones(12, 12))
             model.add_module(layer_name, layer)
             config = {
-                'fqn': layer_name,
+                'module_fqn': layer_name,
                 'sparsity_level': sl,
                 'sparse_block_shape': sbs,
                 'zeros_per_block': zpb

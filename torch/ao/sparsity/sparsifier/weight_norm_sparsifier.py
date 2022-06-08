@@ -52,7 +52,7 @@ class WeightNormSparsifier(BaseSparsifier):
         }
         super().__init__(defaults=defaults)
 
-    def update_mask(self, layer, sparsity_level, sparse_block_shape,
+    def update_mask(self, module, tensor_name, sparsity_level, sparse_block_shape,
                     zeros_per_block, **kwargs):
         values_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
         if zeros_per_block > values_per_block:
@@ -62,13 +62,13 @@ class WeightNormSparsifier(BaseSparsifier):
             raise ValueError("Number of zeros per block should be positive.")
 
         # TODO: Add support for multiple parametrizations for the same weight
-        mask = layer.parametrizations.weight[0].mask
+        mask = getattr(module.parametrizations, tensor_name)[0].mask
         if sparsity_level <= 0 or zeros_per_block == 0:
             mask.data = torch.ones_like(mask)
         elif sparsity_level >= 1.0 and (zeros_per_block == values_per_block):
             mask.data = torch.zeros_like(mask)
         else:
-            ww = layer.weight * layer.weight
+            ww = getattr(module, tensor_name)**2
             ww_reshaped = ww.reshape(1, *ww.shape)
             ww_pool = F.avg_pool2d(ww_reshaped, kernel_size=sparse_block_shape,
                                    stride=sparse_block_shape, ceil_mode=True)
@@ -80,11 +80,11 @@ class WeightNormSparsifier(BaseSparsifier):
             rows *= sparse_block_shape[0]
             cols *= sparse_block_shape[1]
 
-            new_mask = torch.ones(ww.shape, device=layer.weight.device)
+            new_mask = torch.ones(ww.shape, device=getattr(module, tensor_name).device)
             for row, col in zip(rows, cols):
                 submask = new_mask[row:row + sparse_block_shape[0],
                                    col:col + sparse_block_shape[1]]
-                subweight = layer.weight[row:row + sparse_block_shape[0],
+                subweight = getattr(module, tensor_name)[row:row + sparse_block_shape[0],
                                          col:col + sparse_block_shape[1]]
                 self._update_block(submask, subweight,
                                    zeros_per_block, values_per_block)
