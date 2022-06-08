@@ -3552,7 +3552,7 @@ class TestSparse(TestCase):
             # forward rotation of upper diagonals
             yield (make_diags((3, 8)), make_offsets([1, 2, 3]), (4, 4))
             # rotation exausts input space to read from
-            yield (make_diags((2, 3)), make_offsets([2, 3]), (2, 2))
+            yield (make_diags((2, 3)), make_offsets([2, 1]), (3, 3))
             # Simple cases repeated with special output format
             yield (make_diags((1, 5)), make_offsets([0]), (5, 5), torch.sparse_csc)
             yield (make_diags((3, 3)), make_offsets([-1, 0, 1]), (4, 4), torch.sparse_csr)
