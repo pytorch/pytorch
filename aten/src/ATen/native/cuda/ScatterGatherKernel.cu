@@ -247,7 +247,6 @@ struct cuda_scatter_gather_base_kernel {
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
     auto index_strides = index.strides();
-    auto index_strides_vec = ensure_nonempty_vec(index_strides.vec());
     auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
@@ -336,7 +335,6 @@ struct cuda_scatter_gather_base_kernel {
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
     auto index_strides = index.strides();
-    auto index_strides_vec = ensure_nonempty_vec(index_strides.vec());
     auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
@@ -426,7 +424,6 @@ struct cuda_scatter_gather_base_kernel {
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
     auto index_strides = index.strides();
-    auto index_strides_vec = ensure_nonempty_vec(index_strides.vec());
     auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
