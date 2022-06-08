@@ -156,6 +156,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "clone",
     "block_diag",
     "diag_embed",
+    "diagonal_scatter",
     "repeat",
     "expand",
     "flip",
