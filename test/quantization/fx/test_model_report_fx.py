@@ -13,6 +13,8 @@ from torch.nn.intrinsic.modules.fused import ConvReLU2d, LinearReLU
 from torch.testing._internal.common_quantization import (
     ConvModel,
     QuantizationTestCase,
+    skipIfNoFBGEMM,
+    skipIfNoQNNPACK,
     TwoLayerLinearModel,
 )
 
