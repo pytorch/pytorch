@@ -2746,7 +2746,7 @@ class TestQuantizedOps(TestCase):
                 # Prepare
                 lstm.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                 lstm_prepared = torch.ao.quantization.prepare(
-                    lstm, prepare_custom_config=custom_module_config)
+                    lstm, prepare_custom_config_dict=custom_module_config)
                 self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
                 self.assertEqual(num_layers, len(lstm_prepared[0].layers))
 
@@ -2756,7 +2756,7 @@ class TestQuantizedOps(TestCase):
 
                 # Quantize
                 lstm_quantized = torch.ao.quantization.convert(
-                    lstm_prepared, convert_custom_config=custom_module_config)
+                    lstm_prepared, convert_custom_config_dict=custom_module_config)
                 qy = lstm_quantized(qx)
 
                 snr = _snr(y, qy)
@@ -2863,7 +2863,7 @@ class TestQuantizedOps(TestCase):
                     else:
                         mha.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                     mha_prepared = torch.ao.quantization.prepare(
-                        mha, prepare_custom_config=custom_module_config)
+                        mha, prepare_custom_config_dict=custom_module_config)
 
                     # Calibrate
                     y = mha_prepared(*fp_data)
@@ -2875,7 +2875,7 @@ class TestQuantizedOps(TestCase):
                     # Quantize
                     mha_quantized = torch.ao.quantization.convert(
                         mha_prepared,
-                        convert_custom_config=custom_module_config)
+                        convert_custom_config_dict=custom_module_config)
                     qy = mha_quantized(*q_data)
 
                     # Reference result
