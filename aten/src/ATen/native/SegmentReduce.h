@@ -1,13 +1,15 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
+#include <c10/core/Scalar.h>
 #include <c10/util/Optional.h>
 
 namespace at {
+class Tensor;
+
 namespace native {
 
-enum SegmentReductionType { MAX, MEAN, MIN, SUM };
+enum SegmentReductionType { MAX, MEAN, MIN, SUM, PROD};
 
 using segment_reduce_fn = Tensor (*)(
     SegmentReductionType,
@@ -23,7 +25,8 @@ using segment_reduce_backward_fn = Tensor (*)(
     const Tensor&,
     SegmentReductionType,
     const Tensor&,
-    int64_t);
+    int64_t,
+    const c10::optional<Scalar>&);
 DECLARE_DISPATCH(segment_reduce_backward_fn, _segment_reduce_backward_stub);
 
 } // namespace native

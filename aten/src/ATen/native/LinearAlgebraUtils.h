@@ -3,10 +3,12 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <c10/util/Exception.h>
+#include <c10/util/strides.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TransposeType.h>
 #include <limits>
 #include <type_traits>
 #include <sstream>
@@ -25,23 +27,6 @@
 
 namespace at { namespace native {
 
-// Used as an interface between the different BLAS-like libraries
-enum class TransposeType {
-  NoTranspose,
-  Transpose,
-  ConjTranspose,
-};
-
-// Transforms TransposeType into the BLAS / LAPACK format
-static char to_blas(TransposeType trans) {
-  switch (trans) {
-    case TransposeType::Transpose: return 'T';
-    case TransposeType::NoTranspose: return 'N';
-    case TransposeType::ConjTranspose: return 'C';
-  }
-  TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
-}
-
 static inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor) {
   if (tensor.is_conj()) {
     return c10::MaybeOwned<Tensor>::owned(tensor.resolve_conj());
@@ -50,44 +35,21 @@ static inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor)
   }
 }
 
-template<class Vec>
-static inline Vec contiguous_strides_template(const IntArrayRef sizes, const bool f_contig=false) {
-  static_assert(std::is_same<IntArrayRef::value_type, typename Vec::value_type>::value,
-                "Incompatible integral type of sizes and strides");
-  // f_contig chooses between the strides of a batch of Fortran (F-contiguous) and C-contiguous matrices
-  using Int = IntArrayRef::value_type;
-  constexpr auto one = Int{1};
-  const auto n = sizes.size();
-  if (n == 0) {
-    return Vec{};
-  } else if (n == 1) {
-    // Use initializer-list to initialize the vector
-    return Vec{one};
-  }
-  // Now we have a matrix or batch of matrices
-  auto strides = Vec(n);
-  const auto last_idx = n - 1;
-  const auto snd_last_idx = n - 2;
-  // We'll fill the first two strides afterwards, otherwise the first step
-  // in the for loop is wrong
-  strides[snd_last_idx] = std::max<int64_t>(sizes[last_idx], one);
-  for (int i = snd_last_idx - 1; i >= 0; --i) {
-    strides[i] = strides[i + 1] * std::max(sizes[i + 1], one);
-  }
-  strides[last_idx] = f_contig ? std::max(sizes[snd_last_idx], one) : one;
-  if (f_contig) {
-    // We filled the wrong stride before so we correct it
-    strides[snd_last_idx] = one;
+static inline DimVector batched_matrix_contiguous_strides(
+    const IntArrayRef sizes,
+    const bool f_contig = false) {
+  // f_contig chooses between the strides of a batch of Fortran (F-contiguous)
+  // and C-contiguous matrices
+  auto strides = c10::contiguous_strides(sizes);
+  auto dim = strides.size();
+
+  if (f_contig && dim >= 2) {
+    // Fix the strides of the last two dimensions, so that we return
+    // C-contiguous batches of F-contiguous matrices.
+    strides[dim - 1] = std::max(sizes[dim - 2], static_cast<int64_t>(1));
+    strides[dim - 2] = 1;
   }
   return strides;
-}
-
-static inline DimVector contiguous_strides(const IntArrayRef sizes, const bool f_contig=false) {
-  return contiguous_strides_template<DimVector>(sizes, f_contig);
-}
-
-static inline std::vector<int64_t> contiguous_strides_vec(const IntArrayRef sizes, const bool f_contig=false) {
-  return contiguous_strides_template<std::vector<int64_t>>(sizes, f_contig);
 }
 
 /*
@@ -131,13 +93,13 @@ static inline c10::MaybeOwned<Tensor> borrow_else_clone(const bool cond, const T
  *  broadcasted shape.
  */
 static inline Tensor copyBatchedColumnMajor(const Tensor& src, int64_t nrows = -1,
-    c10::optional<IntArrayRef> desired_batch_sizes = c10::nullopt) {
+    at::OptionalIntArrayRef desired_batch_sizes = c10::nullopt) {
   nrows = (nrows == -1) ? src.size(-2) : nrows;
   auto copy_sizes = desired_batch_sizes.has_value()
     ? desired_batch_sizes.value().vec()
     : IntArrayRef(src.sizes().data(), src.dim() - 2).vec();
   copy_sizes.insert(copy_sizes.end(), {nrows, src.size(-1)});
-  const auto copy_strides = contiguous_strides(copy_sizes, /*f-contig*/true);
+  const auto copy_strides = batched_matrix_contiguous_strides(copy_sizes, /*f-contig*/true);
   auto copy = at::empty_strided(copy_sizes, copy_strides, src.options());
   copy.narrow(-2, 0, src.size(-2)).copy_(src);
   return copy;
@@ -159,6 +121,53 @@ static inline int64_t batchCount(const Tensor& batched_matrices) {
 static inline int64_t matrixStride(const Tensor& batched_matrices) {
   return batched_matrices.size(-1) * batched_matrices.size(-2);
 }
+
+static inline void checkIsMatrix(const Tensor& t,
+                                 const char* const f_name,
+                                 const char* const t_name) {
+  TORCH_CHECK(t.dim() >= 2, f_name, ": Expected ", t_name,
+                            " to be a tensor of at least 2 dimensions.");
+}
+
+static inline void checkIsSquareMatrix(const Tensor& t,
+                                       const char* const f_name,
+                                       const char* const t_name) {
+  checkIsMatrix(t, f_name, t_name);
+  TORCH_CHECK(t.size(-1) == t.size(-2),
+              f_name, ": Expected ", t_name,
+              " to be a square matrix or batch of square matrices. "
+              "Got matrices of size (", t.size(-2), ", ", t.size(-1), ").");
+}
+
+static inline void checkInputsSolver(const Tensor& A,
+                                     const Tensor& B,
+                                     const bool left,
+                                     const char* const f_name) {
+  checkIsSquareMatrix(A, f_name, "A");
+  checkIsMatrix(B, f_name, "B");
+  TORCH_CHECK(left ? A.size(-2) == B.size(-2) : A.size(-1) == B.size(-1),
+              f_name, ": Incompatible shapes of A and B for the equation ",
+              left ? "AX = B" : "XA = B",
+              " (", A.size(-2), "x", A.size(-1), " and ", B.size(-2), "x", B.size(-1), ")");
+}
+
+static inline bool is_row_or_column_contiguous(const Tensor& t) {
+  // This could be made more general, similar to how it's checked in matmul, which would allow to
+  // ellide the copy with strides such as (6, 12, 1, 3) or (3, 1, 9), but this is quite tricky.
+  // We choose to be conservative for simplicity
+  return t.is_contiguous() || t.transpose(-2, -1).is_contiguous();
+}
+
+static inline TransposeType to_transpose_type(const bool contig, const bool conj) {
+  if (conj) {
+    if (contig) { TORCH_INTERNAL_ASSERT(false, "Invalid transpose type"); }
+    else {        return TransposeType::ConjTranspose; }
+  } else {
+    if (contig) { return TransposeType::NoTranspose; }
+    else {        return TransposeType::Transpose; }
+  }
+}
+
 
 // This function is designed to be used with linear algebra methods that minimize
 // L(ax - b) = 0, where L is generally the identity map (`solve`, for example)
@@ -213,7 +222,7 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
   auto a_broadcasts_over_b = (a_batch_sizes != b_batch_sizes);
   Tensor a_buffer, a_was_accessed, a_buffer_3d;
   std::function<void(int64_t)> check_if_copy_needed_for_a
-    = [](int64_t a_curr_linear_batch_idx){};
+    = [](int64_t /*a_curr_linear_batch_idx*/){};
   if (a_broadcasts_over_b) {
     a_buffer = at::empty_strided(a.sizes(), a.strides(), a.options())
       .copy_(a);
@@ -282,7 +291,7 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
 
   TORCH_CHECK(A.size(-1) == A.size(-2),
               "A must be batches of square matrices, "
-              "but they are ", A.size(-1), " by ", A.size(-2), " matrices");
+              "but they are ", A.size(-2), " by ", A.size(-1), " matrices");
 
   TORCH_CHECK(A.size(-1) == self.size(-2),
               "Incompatible matrix sizes for ", name, ": each A "
@@ -296,7 +305,7 @@ static inline void squareCheckInputs(const Tensor& self, const char* const f_nam
   TORCH_CHECK(self.size(-1) == self.size(-2),
               f_name,
               ": A must be batches of square matrices, "
-              "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
+              "but they are ", self.size(-2), " by ", self.size(-1), " matrices");
 }
 
 static inline void checkFloatingOrComplex(const Tensor& t, const char* const f_name) {
@@ -467,14 +476,14 @@ static inline std::tuple<bool, bool> _parse_qr_mode(c10::string_view mode) {
 }
 
 // Function to compute sizes, strides and the extra columns for the Q matrix in the QR Decomposition
-static inline std::tuple<std::vector<int64_t>,
-                         std::vector<int64_t>,
-                         int64_t> _compute_geometry_for_Q(const Tensor& input, bool reduced) {
+static inline std::tuple<DimVector, DimVector, int64_t> _compute_geometry_for_Q(
+    const Tensor& input,
+    bool reduced) {
   int64_t m = input.size(-2), n = input.size(-1);
   int64_t n_columns_q;
 
   // We need to compute the required size of Q based on the `reduced` option
-  auto q_sizes = input.sizes().vec();
+  DimVector q_sizes(input.sizes());
   if (!reduced && m > n) {
     q_sizes[input.dim() - 1] = m;
     n_columns_q = m;
@@ -482,7 +491,7 @@ static inline std::tuple<std::vector<int64_t>,
     q_sizes[input.dim() - 1] = n;
     n_columns_q = std::min(m, n);
   }
-  auto q_strides = contiguous_strides_vec(q_sizes, /*f-contig*/true);
+  auto q_strides = batched_matrix_contiguous_strides(q_sizes, /*f-contig*/true);
   return std::make_tuple(q_sizes, q_strides, n_columns_q);
 }
 
@@ -623,11 +632,49 @@ static inline bool linalg_solve_is_vector_rhs(const Tensor& input, const Tensor&
   return vector_case;
 }
 
+/*
+  Computes linear indices for a tensor with original_shape to access its elements like it was a materialized broadcast tensor.
+*/
+static inline Tensor get_linear_indices(int64_t numel, IntArrayRef original_shape, IntArrayRef broadcast_shape) {
+  TensorOptions options = at::TensorOptions().dtype(at::kLong).device(at::kCPU);
+  return at::arange(numel, options).view(original_shape).broadcast_to(broadcast_shape).contiguous();
+}
+
+class BroadcastLinearIndices {
+ private:
+  Tensor linear_indices_;
+  bool is_broadcasting_;
+
+ public:
+  BroadcastLinearIndices(
+      int64_t numel,
+      IntArrayRef original_shape,
+      IntArrayRef broadcast_shape) {
+    // The assumption is that the broadcast_shape is a materialized broadcast
+    // shape of the original_shape. We need to compute the linear indices
+    // compatible with the original_shape to access the elements in the original
+    // tensor corresponding to the broadcast tensor.
+    is_broadcasting_ = !original_shape.equals(broadcast_shape);
+    if (is_broadcasting_) {
+      linear_indices_ =
+          get_linear_indices(numel, original_shape, broadcast_shape);
+    }
+  }
+  int64_t operator()(int64_t broadcast_linear_index) {
+    return is_broadcasting_
+        ? linear_indices_.data_ptr<int64_t>()[broadcast_linear_index]
+        : broadcast_linear_index;
+  }
+};
+
 static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim >= 2);
+  if (ndim > 3) {
+    return input.transpose(-2, -1).is_contiguous();
+  }
   auto leading_dimension = input_strides[ndim - 1];
   auto rows = input_sizes[ndim - 2];
   bool batch_stride_compatible = true;
@@ -645,7 +692,10 @@ static inline bool is_blas_compatible_row_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim >= 2);
+  if (ndim > 3) {
+    return input.is_contiguous();
+  }
   auto leading_dimension = input_strides[ndim - 2];
   auto cols = input_sizes[ndim - 1];
   bool batch_stride_compatible = true;

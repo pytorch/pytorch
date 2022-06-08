@@ -18,6 +18,14 @@ def ne(a : ${Scalar}, b : Tensor) -> Tensor:
   return b != a
 def eq(a : ${Scalar}, b : Tensor) -> Tensor:
   return b == a
+def sub(a : ${Scalar}, b : Tensor) -> Tensor:
+  return torch.neg(b) + a
+def div(a : ${Scalar}, b : Tensor) -> Tensor:
+  return torch.reciprocal(b) * a
+)SCRIPT");
+
+auto scalar_operators_no_complex_source = at::jit::CodeTemplate(
+    R"SCRIPT(
 def lt(a : ${Scalar}, b : Tensor) -> Tensor:
   return b > a
 def le(a : ${Scalar}, b : Tensor) -> Tensor:
@@ -26,10 +34,6 @@ def gt(a : ${Scalar}, b : Tensor) -> Tensor:
   return b < a
 def ge(a : ${Scalar}, b : Tensor) -> Tensor:
   return b <= a
-def sub(a : ${Scalar}, b : Tensor) -> Tensor:
-  return torch.neg(b) + a
-def div(a : ${Scalar}, b : Tensor) -> Tensor:
-  return torch.reciprocal(b) * a
 )SCRIPT");
 
 auto _ntuple_ops = at::jit::CodeTemplate(
@@ -212,10 +216,16 @@ struct BuiltinFunctionRegistry {
   }
 
   void loadBuiltinFunctions() {
-    for (auto scalar : {"float", "int"}) {
+    for (auto scalar : {"float", "int", "complex"}) {
       at::jit::TemplateEnv env;
       env.s("Scalar", scalar);
       loadSource(scalar_operators_source.format(env), "aten");
+    }
+
+    for (auto scalar : {"float", "int"}) {
+      at::jit::TemplateEnv env;
+      env.s("Scalar", scalar);
+      loadSource(scalar_operators_no_complex_source.format(env), "aten");
     }
 
     using str_pair = std::pair<std::string, std::string>;

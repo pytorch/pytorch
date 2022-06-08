@@ -14,6 +14,8 @@ from .utils import (
     get_torch_function_hook_type,
     get_module_hook_type,
     OpQuantizeabilityType,
+    AutoQuantizationStateModuleDict,
+    get_fqn_valid_for_module_dict_key,
 )
 from .model_utils import (
     pack_weights_for_functionals,
@@ -23,6 +25,7 @@ from .model_utils import (
 )
 from . import auto_trace_rewriter
 from torch.ao.quantization import is_activation_post_process
+from torch.ao.quantization.qconfig_mapping import QConfigMapping
 
 logger = logging.getLogger('auto_trace')
 logging.basicConfig(level=logging.DEBUG)
@@ -36,7 +39,7 @@ enable_logging = False
 
 def add_auto_observation(
     model : torch.nn.Module,
-    qconfig_dict: Dict[str, Any],
+    qconfig_mapping: QConfigMapping,
     example_inputs: Tuple[Any],
     input_dtypes: Any = (torch.float,),  # must be same structure as model inputs
     prepare_custom_config_dict: Dict[str, Any] = None,
@@ -350,6 +353,8 @@ def add_auto_observation(
                             for _, child_child in child.named_modules():
                                 leaves.add(child_child)
 
+                    self._fqn_to_auto_quant_state_map = AutoQuantizationStateModuleDict()
+
                     for fqn, v in named_modules:
 
                         # fqn is the global FQN, i.e. 'foo.bar.baz'
@@ -366,13 +371,38 @@ def add_auto_observation(
                         if v is self:
                             # for the top level module only, specify input
                             # and output dtypes
-                            v._auto_quant_state = AutoQuantizationState(
-                                qconfig_dict, fqn,
+                            auto_quant_state = AutoQuantizationState(
+                                qconfig_mapping, fqn,
                                 input_dtypes, output_dtypes)
-                            pass
                         else:
-                            v._auto_quant_state = AutoQuantizationState(
-                                qconfig_dict, fqn)
+                            auto_quant_state = AutoQuantizationState(
+                                qconfig_mapping, fqn)
+
+                        # The code below registers the auto_quant_state object
+                        # of the child in the module hierarchy of the parent,
+                        # and adds the auto_quant_state object to the child
+                        # with a raw __setattr__, without registering it in
+                        # the module hierarchy of the child.
+                        # This is solving the problem of both storing extra state
+                        # (observers) as well as not modifying the meaning of user
+                        # code in child modules which iterates over all module
+                        # children.
+                        #
+                        # This narrows down the issue of dynamically adding
+                        # children to only affect the top level module and not
+                        # the children.
+
+                        # On the parent, register this module in the FQN map
+                        fqn_to_use_for_key = \
+                            get_fqn_valid_for_module_dict_key(fqn)
+                        self._fqn_to_auto_quant_state_map[fqn_to_use_for_key] = \
+                            auto_quant_state
+                        # On the child, manually set the attribute without
+                        # going through the `torch.nn.Module.__setattr__`
+                        # function, to prevent this object from appearing in
+                        # the child's module hierarchy.
+                        object.__setattr__(
+                            v, '_auto_quant_state', auto_quant_state)
 
                 global_op_idx[0] = 0
 
@@ -688,6 +718,6 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 # checking the fix into `torch.nn.Sequential` to avoid the patch.
 def _nn_sequential_patched_forward(cls, input):
     for module in cls:
-        if not isinstance(module, AutoQuantizationState):
+        if not isinstance(module, AutoQuantizationStateModuleDict):
             input = module(input)
     return input

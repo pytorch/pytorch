@@ -1,24 +1,55 @@
 def define_targets(rules):
-    rules.cc_test(
+    rules.test_suite(
         name = "tests",
+        tests = [
+            ":core_tests",
+            ":typeid_test",
+            ":util_base_tests",
+        ],
+        visibility = ["//:__pkg__"],
+    )
+
+    rules.cc_test(
+        name = "core_tests",
         size = "small",
         srcs = rules.glob([
-            "util/*.cpp",
             "core/*.cpp",
             "core/impl/*.cpp",
         ]),
+        copts = ["-Wno-deprecated-declarations"],
+        deps = [
+            "@com_google_googletest//:gtest_main",
+            "//c10/core:base",
+            "//c10/util:base",
+        ],
+    )
+
+    rules.cc_test(
+        name = "typeid_test",
+        size = "small",
+        srcs = ["util/typeid_test.cpp"],
+        copts = ["-Wno-deprecated-declarations"],
+        deps = [
+            "@com_google_googletest//:gtest_main",
+            "//c10/util:typeid",
+        ],
+    )
+
+    rules.cc_test(
+        name = "util_base_tests",
+        srcs = rules.glob(
+            ["util/*.cpp"],
+            exclude = ["util/typeid_test.cpp"],
+        ),
         copts = ["-Wno-deprecated-declarations"],
         deps = [
             ":Macros",
             ":complex_math_test_common",
             ":complex_test_common",
             "@com_google_googletest//:gtest_main",
-            "//c10/core:base",
             "//c10/macros",
             "//c10/util:base",
-            "//c10/util:typeid",
         ],
-        visibility = ["//:__pkg__"],
     )
 
     rules.cc_library(

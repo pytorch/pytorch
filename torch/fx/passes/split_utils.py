@@ -9,6 +9,25 @@ from torch.fx._compatibility import compatibility
 
 
 @compatibility(is_backward_compatible=False)
+def getattr_recursive(obj, name):
+    for layer in name.split("."):
+        if hasattr(obj, layer):
+            obj = getattr(obj, layer)
+        else:
+            return None
+    return obj
+
+
+@compatibility(is_backward_compatible=False)
+def setattr_recursive(obj, attr, value):
+    if "." not in attr:
+        setattr(obj, attr, value)
+    else:
+        layer = attr.split(".")
+        setattr_recursive(getattr(obj, layer[0]), ".".join(layer[1:]), value)
+
+
+@compatibility(is_backward_compatible=False)
 @dataclass
 class Component:
     """

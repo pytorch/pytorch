@@ -1,11 +1,16 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
+#include <ATen/core/operator_name.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
+#if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
+#include <torch/csrc/jit/codegen/onednn/interface.h>
+#endif
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -14,13 +19,13 @@
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
-#include <torch/csrc/jit/passes/common_expression_hoisting.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
+#include <torch/csrc/jit/passes/dbr_quantization/remove_redundant_aliases.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/device_type_analysis.h>
@@ -53,6 +58,7 @@
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
 #include <torch/csrc/jit/passes/quantization/quantization_type.h>
+#include <torch/csrc/jit/passes/refine_tuple_types.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
@@ -76,6 +82,7 @@
 #include <torch/csrc/jit/python/script_init.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/decomposition_registry.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/jit_trace.h>
@@ -87,6 +94,7 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
@@ -138,10 +146,34 @@ void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   auto jit = m.def_submodule("_jit");
 
-  py::register_exception<JITException>(m, "JITException");
+  static py::exception<JITException> exc(m, "JITException");
+
+  py::register_exception_translator([](std::exception_ptr p) {
+    try {
+      if (p) {
+        std::rethrow_exception(p);
+      }
+    } catch (const JITException& e) {
+      // special handling of JITException, to set its python class name and msg
+      py::gil_scoped_acquire acquire;
+      const auto& className = e.getPythonClassName();
+      const auto& originalMsg = e.getOriginalMsg();
+      JITException::setCaughtOriginalMsg(originalMsg.value_or(""));
+      JITException::setCaughtPythonClassName(className.value_or(""));
+      exc(e.what());
+    }
+  });
+
+  m.def(
+      "_get_caught_jit_exception_class_name",
+      JITException::getCaughtPythonClassName);
+  m.def(
+      "_get_caught_jit_exception_original_msg",
+      JITException::getCaughtOriginalMsg);
 
   py::class_<python::IODescriptor> iodescriptor(
-      m, "IODescriptor"); // NOLINT(bugprone-unused-raii)
+      m,
+      "IODescriptor"); // NOLINT(bugprone-unused-raii)
 
   m.def("_jit_init", loadPythonClasses)
       .def(
@@ -158,6 +190,38 @@ void initJITBindings(PyObject* module) {
               return c10::nullopt;
             }
             return shapeComputeGraphForSchema(n->schema());
+          })
+      .def(
+          "_jit_decomposition_graph_for_node",
+          [](Node* n) -> c10::optional<std::shared_ptr<Graph>> {
+            if (!n->maybeSchema()) {
+              return c10::nullopt;
+            }
+            return GetDecomposition(n->schema());
+          })
+      .def("_jit_pass_run_decompositions", RunDecompositions)
+      // using Node* here instead of Schema because looking up the schema
+      // and passing it in from Python will have a different pointer than the
+      // schema that is globally used for caching
+      .def(
+          "_jit_register_shape_compute_graph_for_node",
+          [](Node* n, std::shared_ptr<Graph>& graph) {
+            if (n->maybeSchema()) {
+              const FunctionSchema& schema = n->schema();
+              RegisterShapeComputeGraphForSchema(schema, graph);
+            } else {
+              TORCH_INTERNAL_ASSERT(false, "Expected schema", n);
+            }
+          })
+      .def(
+          "_jit_register_decomposition_for_schema",
+          [](const FunctionSchema& s, std::shared_ptr<Graph>& graph) {
+            // because this is invoked by python, the function schema *
+            // becomes different, and we need to find and reuse the
+            // one that is used for caching
+            auto op =
+                findOperatorFor(c10::OperatorName(s.name(), s.overload_name()));
+            RegisterDecomposition(op->schema(), graph);
           })
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def(
@@ -211,11 +275,6 @@ void initJITBindings(PyObject* module) {
             return EliminateCommonSubexpression(g); // overload resolution
           })
       .def(
-          "_jit_pass_common_expression_hoisting",
-          [](std::shared_ptr<Graph>& g) {
-            return HoistCommonExpression(g); // overload resolution
-          })
-      .def(
           "_jit_pass_fuse_quantized_add_relu",
           [](std::shared_ptr<Graph>& g) {
             return FuseQuantizedAddRelu(g); // overload resolution
@@ -267,6 +326,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_fold_convbn",
           [](Module& module) { return FoldConvBatchNorm(module); })
+      .def(
+          "_jit_pass_dbr_quant_remove_redundant_aliases",
+          [](Module& module) { return DBRQuantRemoveRedundantAliases(module); })
       .def(
           "_freeze_module",
           [](Module& module,
@@ -398,7 +460,11 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return FuseAddMM(g); })
       .def(
           "_jit_pass_canonicalize",
-          [](const std::shared_ptr<Graph>& g) { return Canonicalize(g); })
+          [](const std::shared_ptr<Graph>& g, bool keep_unique_names = true) {
+            return Canonicalize(g, keep_unique_names);
+          },
+          py::arg("graph"),
+          py::arg("keep_unique_names") = true)
       .def("_jit_pass_lint", LintGraph)
       .def(
           "_jit_pass_complete_shape_analysis",
@@ -592,7 +658,34 @@ void initJITBindings(PyObject* module) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
-      .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
+#if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
+      .def("_jit_set_llga_enabled", &RegisterLlgaFuseGraph::setEnabled)
+      .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
+#endif
+      .def(
+          "_jit_set_tracer_state_warn",
+          [](bool new_warn) {
+            jit::tracer::getTracerStateWarnMode() = new_warn;
+          })
+      .def(
+          "_jit_get_tracer_state_warn",
+          []() {
+            bool current_tracer_warn = jit::tracer::getTracerStateWarnMode();
+            return current_tracer_warn;
+          })
+      .def(
+          "_jit_set_nvfuser_skip_node_kind",
+          // Args:
+          //     `op_name`: Symbol of op;
+          //     `flip`: flag indicating whether to flip the given op in the
+          //             skip list.
+          // Returns:
+          //     a bool flag indicating if `op_name` was already in the skip
+          //     list.
+          [](const std::string& op_name, bool flip = true) {
+            return fuser::cuda::skipNode(op_name, flip);
+          })
+      .def("_jit_set_nvfuser_enabled", &fuser::cuda::setEnabled)
       .def(
           "_jit_set_nvfuser_single_node_mode",
           [](bool flag) { return fuser::cuda::setSingletonFusion(flag); })
@@ -612,7 +705,31 @@ void initJITBindings(PyObject* module) {
             fuser::cuda::getCudaFusionGuardMode() = profiling_flag;
             return oldState;
           })
-      .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
+      .def("_jit_nvfuser_enabled", &fuser::cuda::isEnabled)
+      .def(
+          "_jit_nvfuser_set_comparison_callback",
+          [](bool run_fallback, py::function fn) {
+            // If set, then the callback will be run after each nvfuser fusion
+            // group is executed. Can be used for testing accuracy.
+            // If run_fallback == True, then a fallback will be run and
+            // unfused_outputs will be nonempty, showing the result if the
+            // fusion didn't take place. Otherwise, unfused_outputs will
+            // be empty
+            auto fn_ptr = std::make_shared<py::function>(fn);
+            auto callback_lambda = [fn_ptr](
+                                       const Stack& fused_outputs,
+                                       const Stack& unfused_outputs,
+                                       const std::string& graph_ir) {
+              py::gil_scoped_acquire acquire{};
+              (*fn_ptr)(fused_outputs, unfused_outputs, graph_ir);
+            };
+            setCudaFuserComparisonCallback({run_fallback, callback_lambda});
+          })
+      .def(
+          "_jit_nvfuser_clear_comparison_callback",
+          []() {
+            setCudaFuserComparisonCallback({false, nullptr});
+          })
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
@@ -664,6 +781,7 @@ void initJITBindings(PyObject* module) {
                 vec_conv.emplace_back(FusionBehavior::DYNAMIC, pair.second);
               } else {
                 TORCH_INTERNAL_ASSERT(
+                    false,
                     "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: ",
                     pair.first);
               }
@@ -704,6 +822,12 @@ void initJITBindings(PyObject* module) {
               std::cerr << "ERROR: only `stdout` and `stderr`"
                         << "are supported as output options" << std::endl;
             }
+          })
+      .def(
+          "_storage_id",
+          [](const at::Tensor& ten) -> int64_t {
+            return reinterpret_cast<int64_t>(
+                ten.storage().unsafeGetStorageImpl());
           })
       .def(
           "_jit_try_infer_type",
@@ -805,7 +929,10 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_fuse_tensorexprs",
-          [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
+          [](std::shared_ptr<Graph>& g) {
+            FuseTensorExprs(g);
+            RemoveTensorTypeSpecializations(g);
+          })
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, const std::vector<at::Tensor>& inps) {
@@ -814,6 +941,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_remove_dropout",
           [](script::Module& module) { return removeDropout(module); })
+      .def(
+          "_jit_pass_refine_tuple_types",
+          [](std::shared_ptr<Graph>& graph) { return RefineTupleTypes(graph); })
       .def(
           "_jit_pass_transform_conv1d_to_conv2d",
           [](std::shared_ptr<Graph>& graph) {
@@ -1228,9 +1358,10 @@ void initJITBindings(PyObject* module) {
           auto operations = getAllOperatorsFor(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
-              auto func =
-                  py::cpp_function([op](py::args args, py::kwargs kwargs) {
-                    return invokeOperatorFromPython({op}, args, kwargs);
+              auto func = py::cpp_function(
+                  [op, symbol](py::args args, py::kwargs kwargs) {
+                    return _get_operation_for_overload_or_packet(
+                        {op}, symbol, args, kwargs, true);
                   });
               return func;
             }
@@ -1259,66 +1390,19 @@ void initJITBindings(PyObject* module) {
             docstring << "  " << op->schema() << "\n";
           }
 
+          py::list overload_names;
+          for (const auto& op : operations) {
+            overload_names.append(py::str(op->schema().overload_name()));
+          }
+
           auto func = py::cpp_function(
               [operations, symbol](py::args args, py::kwargs kwargs) {
-                std::vector<py::handle> overloaded_args;
-                size_t total_arg_num = args.size() + kwargs.size();
-                for (const auto i : c10::irange(args.size())) {
-                  is_tensor_and_append_overloaded(
-                      args[i].ptr(), &overloaded_args);
-                  is_tensor_list_and_append_overloaded(
-                      args[i].ptr(),
-                      &overloaded_args,
-                      static_cast<int>(total_arg_num),
-                      false /* throw_error */);
-                }
-                // NB: for kwargs, we cannot guarantee the order of appending
-                // is the same as the argument order in operator's schema.
-                // This is suboptimal, but should be fine. Later when we have
-                // better schema matching and argument parsing, we could
-                // match the operator in `operations` first, then the order will
-                // be guaranteed.
-                for (auto item : kwargs) {
-                  is_tensor_and_append_overloaded(
-                      item.second.ptr(), &overloaded_args);
-                  is_tensor_list_and_append_overloaded(
-                      item.second.ptr(),
-                      &overloaded_args,
-                      total_arg_num,
-                      false /* throw_error */);
-                }
-                if (overloaded_args.size() > 0) {
-                  std::vector<py::object> overloaded_types;
-                  overloaded_types.reserve(overloaded_args.size());
-                  for (auto& oarg : overloaded_args) {
-                    overloaded_types.push_back(
-                        py::reinterpret_borrow<py::object>(
-                            (PyObject*)Py_TYPE(oarg.ptr())));
-                  }
-                  py::tuple py_types = py::cast(overloaded_types);
-                  py::object ret;
-                  std::string ns = symbol.ns().toUnqualString();
-                  std::string method_name = symbol.toUnqualString();
-                  auto self_func = py::module::import("torch")
-                                       .attr("ops")
-                                       .attr(ns.c_str())
-                                       .attr(method_name.c_str());
-                  std::string module_name("torch.ops");
-                  module_name.append(ns);
-                  return pybind11::reinterpret_steal<py::object>(
-                      handle_torch_function_no_python_arg_parser(
-                          overloaded_args,
-                          args.ptr(),
-                          kwargs.ptr(),
-                          method_name.c_str(),
-                          self_func.ptr(),
-                          module_name.c_str()));
-                }
-                return invokeOperatorFromPython(operations, args, kwargs);
+                return _get_operation_for_overload_or_packet(
+                    operations, symbol, args, kwargs, false);
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
-          return func;
+          return py::make_tuple(func, overload_names);
         } catch (const c10::Error& e) {
           auto msg = torch::get_cpp_stacktraces_enabled()
               ? e.what()
@@ -1328,11 +1412,15 @@ void initJITBindings(PyObject* module) {
       },
       py::arg("qualified_name"));
 
-  m.def("parse_ir", [](const std::string& input) {
-    auto graph = std::make_shared<Graph>();
-    parseIR(input, &*graph);
-    return graph;
-  });
+  m.def(
+      "parse_ir",
+      [](const std::string& input, bool parse_tensor_constants) {
+        auto graph = std::make_shared<Graph>();
+        parseIR(input, &*graph, parse_tensor_constants);
+        return graph;
+      },
+      py::arg("input"),
+      py::arg("parse_tensor_constants") = false);
   m.def("parse_schema", parseSchema);
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
@@ -1401,6 +1489,8 @@ void initJITBindings(PyObject* module) {
           [](Argument& self) -> py::bool_ {
             return self.default_value().has_value();
           })
+      .def_property_readonly(
+          "is_out", [](Argument& self) { return self.is_out(); })
       .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
         return self.kwarg_only();
       });
@@ -1596,6 +1686,7 @@ void initJITBindings(PyObject* module) {
   initJitBackendBindings(module);
   initStaticModuleBindings(module);
   initTensorExprBindings(module);
+  initNvFuserPythonBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
@@ -1606,6 +1697,12 @@ void initJITBindings(PyObject* module) {
       throw std::runtime_error(e.what());
     }
   });
+
+  // On exit we need to reset the print handler to default one,
+  // because otherwise prim::Print() instruction won't work for JIT modules.
+  auto atexit = py::module_::import("atexit");
+  atexit.attr("register")(
+      py::cpp_function([]() { setPrintHandler(getDefaultPrintHandler()); }));
 }
 } // namespace jit
 } // namespace torch

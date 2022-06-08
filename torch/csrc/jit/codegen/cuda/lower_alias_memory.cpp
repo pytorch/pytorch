@@ -920,6 +920,31 @@ class AllocateReuseModifier {
           continue;
         }
 
+        if (alloc_info->alloc_expr->buffer()->isA<TensorView>()) {
+          if (!alloc_info->alloc_expr->buffer()->isA<TensorView>()) {
+            continue;
+          }
+          auto this_tv = alloc_info->alloc_expr->buffer()->as<TensorView>();
+          auto reuse_tv = alloc_info->alloc_expr->buffer()->as<TensorView>();
+          // Check that either both tv's are vectorized acceses, or neither are.
+          // Vectorized allocations require correct alignment so they can only
+          // alias with other allocations with the right alignment
+          const auto& va = GpuLower::current()->vectorizedAccesses();
+          if ((va.find(this_tv) == va.end()) !=
+              (va.find(reuse_tv) == va.end())) {
+            return false;
+          }
+
+          // Shared memory is all aligned to 128 bits, local memory might not be
+          if (this_tv->getMemoryType() == MemoryType::Local &&
+              va.find(this_tv) != va.end()) {
+            // Make sure alignment matches
+            if (va.at(this_tv) != va.at(reuse_tv)) {
+              return false;
+            }
+          }
+        }
+
         // TODO:
         //  Outer interval based sharing supports arbitrary re-indexing into
         //    the same buffer and would require additional syncs if fully
@@ -1051,7 +1076,7 @@ class AllocateReuseModifier {
         if (!tv_def) {
           continue;
         }
-        if (!isPointwiseTvOp(tv_def) && !isReductionTvOp(tv_def)) {
+        if (!isPointwiseTvOp(tv_def) && !ir_utils::isReductionTvOp(tv_def)) {
           if (isBroadcastTvOp(tv_def)) {
             info.has_broadcast_between = true;
           } else {
@@ -1073,8 +1098,10 @@ class AllocateReuseModifier {
 
     // Check index map for the corresponding axes.
     for (const auto id_it : c10::irange(alloc_domains.size())) {
-      if (!GpuLower::current()->caIndexMap().areMapped(
-              alloc_domains[id_it], reuse_domains[id_it])) {
+      if (!GpuLower::current()->caMap()->areMapped(
+              alloc_domains[id_it],
+              reuse_domains[id_it],
+              IdMappingMode::EXACT)) {
         return false;
       }
     }
@@ -1100,14 +1127,6 @@ class AllocateReuseModifier {
           expr->isA<TernaryOp>();
     }
     return false;
-  }
-
-  // Utility to capture reduction ops
-  bool isReductionTvOp(const Expr* expr) {
-    if (!ir_utils::isTvOp(expr)) {
-      return false;
-    }
-    return expr->isA<ReductionOp>() || expr->isA<WelfordOp>();
   }
 
   // Utility to capture reduction ops

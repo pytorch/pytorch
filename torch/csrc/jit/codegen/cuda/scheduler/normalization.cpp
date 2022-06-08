@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/vectorize_helper.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
 #include <ATen/cuda/CUDAContext.h>
@@ -426,7 +427,6 @@ ReductionParams innerPersistentHeuristic(
 
   // For persistent schedules always have to mark the reduction unrolled
   // otherwise rfactor can fail
-  rparams.unroll_inner_reduction = true;
   rparams.unroll_factor_inner_reduction = inner_reduction_unroll_factor;
   rparams.vectorize_inner_reduction = vectorize;
 
@@ -445,7 +445,6 @@ ReductionParams innerPersistentHeuristic(
   }
 
   if (iter_unroll_factor > 1) {
-    rparams.unroll_iter_dom = true;
     rparams.unroll_factor_iter_dom = iter_unroll_factor;
   }
 
@@ -456,7 +455,6 @@ ReductionParams innerPersistentHeuristic(
         batches_per_block_outer_reduction;
     rparams.block_dim_outer_reduction = ParallelType::TIDz;
     rparams.cross_block_outer_reduction = true;
-    rparams.unroll_outer_reduction = outer_reduction_unroll_factor > 1;
     rparams.unroll_factor_outer_reduction = outer_reduction_unroll_factor;
   }
 
@@ -726,12 +724,11 @@ ReductionParams OuterPersistentHeuristic(
 
   // Always need to mark inner reduction unroll for rfactor in outer persitent
   // kernels
-  rparams.unroll_inner_reduction = true;
   rparams.unroll_factor_inner_reduction = inner_reduction_unroll_factor;
 
+  rparams.unroll_factor_iter_dom = iter_unroll_factor;
+
   if (iter_unroll_factor > 1) {
-    rparams.unroll_iter_dom = true;
-    rparams.unroll_factor_iter_dom = iter_unroll_factor;
     rparams.vectorize_iter_dom = vectorize;
   }
 
@@ -810,7 +807,8 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getPersistentHeuristics(
       HeuristicSummaryEntry<HeuristicCompileTime::ReductionTVs>(
           data_cache, [&fusion]() {
             return std::make_unique<std::vector<TensorView*>>(
-                scheduler_utils::getReductionTvs(fusion));
+                scheduler_utils::getReductionTvs(
+                    fusion /*, ignore_trivial = true */));
           });
 
   auto& reduction_tvs = reduction_tv_entry.get();
@@ -906,13 +904,23 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getPersistentHeuristics(
   size_t vectorize_factor = std::numeric_limits<size_t>::max();
 
   for (auto tv : vectorizable_inputs_outputs) {
-    const auto tv_vectorize_factor = runtime_info.getVectorizableWidth(tv);
+    const auto tv_vectorize_factor =
+        runtime_info.getInnerDimVectorizableWidth(tv);
     vectorize_factor = std::min(vectorize_factor, tv_vectorize_factor);
   }
 
   if (vectorize_factor == std::numeric_limits<size_t>::max()) {
     vectorize_factor = 1;
   }
+
+  // Try expanding vectorization to contig merged domains
+  vectorize_factor = scheduler_utils::expandVectorizationToContigMergedDomains(
+      fusion,
+      runtime_info,
+      vectorizable_inputs_outputs,
+      first_red_tv,
+      (int)(first_red_tv->nDims() - properties.inner_most_dimension_ndims),
+      vectorize_factor);
 
   // Base max dtype and n_tensor_inputs on tensors that are vectorizable (i.e.
   // share inner dimension with data pattern we're looking at).
@@ -922,8 +930,12 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getPersistentHeuristics(
     if (!tv->isFusionInput()) {
       continue;
     }
-    max_dtype_size =
-        std::max(max_dtype_size, dataTypeSize(tv->getDataType().value()));
+
+    max_dtype_size = std::max(
+        max_dtype_size,
+        dataTypeSize(
+            tv->getDataType().value(),
+            indexModeToDtype(runtime_info.getIndexMode())));
     n_tensor_inputs++;
   }
 
@@ -966,7 +978,7 @@ TORCH_CUDA_CU_API void schedulePersistentKernel(
   // can invalidate the references since when applied to a reduction tensor view
   // the new tensor view contains the reduction and original doesn't.
 
-  bool unroll = rparams.unroll_inner_reduction || rparams.unroll_iter_dom;
+  bool unroll = rparams.isUnrolled();
 
   // Cache inputs if unrolled
   auto cached_inputs = scheduler_utils::cacheInputs(fusion, unroll);
@@ -980,9 +992,9 @@ TORCH_CUDA_CU_API void schedulePersistentKernel(
   scheduler_utils::clearMemorySpace(fusion);
 
   auto persistent_info = scheduler_utils::persistentBuffers(fusion);
-  // persistent_info.buffers[1]->setMemoryType(MemoryType::Shared);
 
-  auto reduction_tvs = scheduler_utils::getReductionTvs(fusion);
+  auto reduction_tvs =
+      scheduler_utils::getReductionTvs(fusion /*, ignore_trivial = true */);
 
   TORCH_INTERNAL_ASSERT(reduction_tvs.size());
   auto reduction_tv = reduction_tvs[0];

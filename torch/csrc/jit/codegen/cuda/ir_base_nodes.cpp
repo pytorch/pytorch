@@ -88,11 +88,7 @@ Val::Val(IrBuilderPasskey passkey, ValType _vtype, DataType _dtype)
 //  this constructor now leaving them to be resolved by later stages
 //
 Val::Val(const Val* src, IrCloner* ir_cloner)
-    : Statement(src, ir_cloner),
-      vtype_(src->vtype_),
-      dtype_(src->dtype_),
-      is_fusion_input_(src->is_fusion_input_),
-      is_fusion_output_(src->is_fusion_output_) {}
+    : Statement(src, ir_cloner), vtype_(src->vtype_), dtype_(src->dtype_) {}
 
 const std::vector<Expr*>& Val::uses() const {
   if (vtype_ == ValType::TensorView) {
@@ -101,6 +97,27 @@ const std::vector<Expr*>& Val::uses() const {
     }
   }
   return uses_;
+}
+
+// Converts the data type of TensorView or Scalar representing index
+// values. The data type of the original input should be
+// DataType::Index, but DataType::Int is also allowed as it is used
+// for index expressions.
+void Val::resolveIndexDtype() {
+  TORCH_INTERNAL_ASSERT(
+      vtype_ == ValType::TensorView || vtype_ == ValType::Scalar,
+      "Resolving index type is currently only supported on tensor view or scalar values. "
+      "Value type: ",
+      vtype_);
+  TORCH_INTERNAL_ASSERT(
+      dtype_ == DataType::Index || dtype_ == DataType::Int,
+      "Can only resolve index type if a Val has an Index or Int DataType. ",
+      "Data type: ",
+      dtype_);
+  TORCH_INTERNAL_ASSERT(
+      container()->isA<kir::Kernel>(),
+      "Index type can only be resolved at compile time.");
+  dtype_ = container()->as<kir::Kernel>()->indexType();
 }
 
 namespace {
@@ -178,6 +195,16 @@ bool Val::isZeroInt() const {
 bool Val::isOneInt() const {
   auto int_val = getInt();
   return int_val.has_value() && int_val.value() == 1;
+}
+
+bool Val::isDefinitionType(ExprType expression_type) const {
+  if (definition() != nullptr) {
+    auto def_expr_type = definition()->getExprType();
+    if (def_expr_type.has_value() && def_expr_type.value() == expression_type) {
+      return true;
+    }
+  }
+  return false;
 }
 
 c10::optional<DataType> Val::getDataType() const {

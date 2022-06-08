@@ -22,6 +22,7 @@
 #include <ATen/ops/_coalesce.h>
 #include <ATen/ops/_coalesce_native.h>
 #include <ATen/ops/_coalesced_native.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_dimI_native.h>
 #include <ATen/ops/_dimV_native.h>
 #include <ATen/ops/_indices_native.h>
@@ -344,7 +345,7 @@ void _validate_sparse_coo_tensor_args(
     Tensor max_indices =
         std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
     Tensor cpu_min_indices, cpu_max_indices;
-    if (indices.is_cuda()) {
+    if (!indices.is_cpu()) {
       cpu_min_indices = min_indices.to(at::DeviceType::CPU);
       cpu_max_indices = max_indices.to(at::DeviceType::CPU);
     } else {
@@ -545,15 +546,6 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
 
 // NB: Dropped the resizeNd variants
 
-Tensor sparse_to_dense(
-    const SparseTensor& self,
-    c10::optional<ScalarType> dtype) {
-  TORCH_CHECK(
-      !dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
-  Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
-  return dst.add_(self);
-}
-
 SparseTensor& copy_sparse_wrapper_(
     Tensor& self,
     const Tensor& src,
@@ -640,8 +632,8 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
   auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
 
   int64_t i = -1;
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, values.scalar_type(),
-                                        "coalesce", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, values.scalar_type(),
+                                         "coalesce", [&] {
     int64_t prev = -1;
     int64_t blockSize = values.stride(0);
     scalar_t* values_ptr = values.data_ptr<scalar_t>();
@@ -770,7 +762,7 @@ SparseTensor& sparse_mask_out_cpu(
     // TODO: Re-audit this; it used to be an indexSelect directly into r_values
     at::index_select_out(r_values, t_view, 0, indices);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, r_values.scalar_type(), "sparse_mask", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, r_values.scalar_type(), "sparse_mask", [&] {
       sparse_mask_out_cpu_kernel<scalar_t>(
           r_values, t, r_nnz, sparse_dim, mask_indices);
     });

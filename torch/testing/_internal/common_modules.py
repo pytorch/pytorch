@@ -14,10 +14,9 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM)
+    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
-
 
 # List of all namespaces containing modules to test.
 MODULE_NAMESPACES: List[ModuleType] = [
@@ -32,7 +31,6 @@ MODULES_TO_SKIP: Set[Type] = {
     torch.nn.Module,  # abstract base class
     torch.nn.Container,  # deprecated
     torch.nn.NLLLoss2d,  # deprecated
-    torch.nn.quantized.modules._ConvNd,  # abstract base class
     torch.nn.quantized.MaxPool2d,  # aliases to nn.MaxPool2d
 }
 
@@ -215,14 +213,14 @@ def module_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_grad, *
 
     module_inputs = [
         ModuleInput(constructor_input=FunctionInput(2, 3, 4),
-                    forward_input=FunctionInput(make_input(shape=(8, 2)), make_input(shape=(8, 3))),
+                    forward_input=FunctionInput(make_input((8, 2)), make_input((8, 3))),
                     reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1, x2)),
         ModuleInput(constructor_input=FunctionInput(2, 3, 4, bias=False),
-                    forward_input=FunctionInput(make_input(shape=(8, 2)), make_input(shape=(8, 3))),
+                    forward_input=FunctionInput(make_input((8, 2)), make_input((8, 3))),
                     desc='no_bias',
                     reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1, x2, bias=False)),
         ModuleInput(constructor_input=FunctionInput(2, 3, 4),
-                    forward_input=FunctionInput(make_input(shape=(2)), make_input(shape=(3))),
+                    forward_input=FunctionInput(make_input((2)), make_input((3))),
                     desc='no_batch_dim',
                     reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1.view(1, -1), x2.view(1, -1))),
     ]
@@ -420,7 +418,7 @@ def generate_regression_criterion_inputs(make_input):
     return [
         ModuleInput(
             constructor_input=FunctionInput(reduction=reduction),
-            forward_input=FunctionInput(make_input(shape=(4, )), make_input(shape=4,)),
+            forward_input=FunctionInput(make_input((4, )), make_input(4,)),
             reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True),
             desc='no_batch_dim_{}'.format(reduction)
         ) for reduction in ['none', 'mean', 'sum']]
@@ -431,7 +429,7 @@ def module_inputs_torch_nn_AvgPool1d(module_info, device, dtype, requires_grad, 
 
     return [
         ModuleInput(constructor_input=FunctionInput(kernel_size=2),
-                    forward_input=FunctionInput(make_input(shape=(3, 6))),
+                    forward_input=FunctionInput(make_input((3, 6))),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)]
 
@@ -441,7 +439,7 @@ def module_inputs_torch_nn_AdaptiveAvgPool2d(module_info, device, dtype, require
 
     return [
         ModuleInput(constructor_input=FunctionInput(3,),
-                    forward_input=FunctionInput(make_input(shape=(1, 3, 5, 6))),
+                    forward_input=FunctionInput(make_input((1, 3, 5, 6))),
                     desc='single')]
 
 
@@ -450,7 +448,7 @@ def module_inputs_torch_nn_BatchNorm2d(module_info, device, dtype, requires_grad
 
     return [
         ModuleInput(constructor_input=FunctionInput(3,),
-                    forward_input=FunctionInput(make_input(shape=(2, 3, 6, 6))))]
+                    forward_input=FunctionInput(make_input((2, 3, 6, 6))))]
 
 
 def module_inputs_torch_nn_BatchNorm3d(module_info, device, dtype, requires_grad, **kwargs):
@@ -458,7 +456,7 @@ def module_inputs_torch_nn_BatchNorm3d(module_info, device, dtype, requires_grad
 
     return [
         ModuleInput(constructor_input=FunctionInput(3,),
-                    forward_input=FunctionInput(make_input(shape=(2, 3, 4, 4, 4))))]
+                    forward_input=FunctionInput(make_input((2, 3, 4, 4, 4))))]
 
 
 def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, **kwargs):
@@ -474,7 +472,7 @@ def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, **k
         ModuleInput(constructor_input=(FunctionInput(C_out, kernel_size, **conv_kwargs) if lazy else
                                        FunctionInput(C_in, C_out, kernel_size, **conv_kwargs)),
                     forward_input=FunctionInput(make_input(
-                        shape=(input_batch_shape if with_batch else input_no_batch_shape))),
+                        input_batch_shape if with_batch else input_no_batch_shape)),
                     desc=('' if with_batch else 'no_batch_dim'),
                     reference_fn=(None if with_batch else no_batch_dim_reference_fn))
         for with_batch, conv_kwargs in itertools.product([True, False], conv_kwargs_list)
@@ -486,17 +484,17 @@ def module_inputs_torch_nn_ELU(module_info, device, dtype, requires_grad, **kwar
 
     return [
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(shape=(3, 2, 5))),
+                    forward_input=FunctionInput(make_input((3, 2, 5))),
                     reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2 * (i.exp() - 1))),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(shape=())),
+                    forward_input=FunctionInput(make_input(())),
                     desc='scalar'),
         ModuleInput(constructor_input=FunctionInput(),
-                    forward_input=FunctionInput(make_input(shape=(3,))),
+                    forward_input=FunctionInput(make_input((3,))),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(shape=(2, 3, 2, 5))),
+                    forward_input=FunctionInput(make_input((2, 3, 2, 5))),
                     desc='4d_input')]
 
 
@@ -505,14 +503,14 @@ def module_inputs_torch_nn_CELU(module_info, device, dtype, requires_grad, **kwa
 
     return [
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(shape=(3, 2, 5))),
+                    forward_input=FunctionInput(make_input((3, 2, 5))),
                     reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2. * ((.5 * i).exp() - 1))),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(shape=())),
+                    forward_input=FunctionInput(make_input(())),
                     reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2 * (i.exp() - 1)),
                     desc='scalar'),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(shape=(3,))),
+                    forward_input=FunctionInput(make_input((3,))),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)]
 
@@ -537,12 +535,12 @@ def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **k
 
     return [
         ModuleInput(constructor_input=FunctionInput(),
-                    forward_input=FunctionInput(make_input(shape=(2, 3, 4)),
-                                                make_input(shape=(2, 3, 4))),
+                    forward_input=FunctionInput(make_input((2, 3, 4)),
+                                                make_input((2, 3, 4))),
                     reference_fn=lambda m, p, i, t: 1. / i.numel() * sum((a - b).abs().sum()
                                                                          for a, b in zip(i, t))),
         ModuleInput(constructor_input=FunctionInput(),
-                    forward_input=FunctionInput(make_input(shape=()), make_input(shape=())),
+                    forward_input=FunctionInput(make_input(()), make_input(())),
                     reference_fn=lambda m, p, i, t: 1. / i.numel() * (i - t).abs().sum(),
                     desc='scalar')] + generate_regression_criterion_inputs(make_input)
 
@@ -558,23 +556,23 @@ def module_inputs_torch_nn_CrossEntropyLoss(module_info, device, dtype, requires
     for reduction in reductions:
         samples.append(
             ModuleInput(constructor_input=FunctionInput(reduction=reduction),
-                        forward_input=FunctionInput(make_input(shape=(9,)), make_target(shape=(), low=0, high=9)),
+                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
                         reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
         )
         samples.append(
-            ModuleInput(constructor_input=FunctionInput(reduction=reduction, weight=make_weight(shape=(9,))),
-                        forward_input=FunctionInput(make_input(shape=(9,)), make_target(shape=(), low=0, high=9)),
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction, weight=make_weight((9,))),
+                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
                         reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
         )
         samples.append(
             ModuleInput(constructor_input=FunctionInput(reduction=reduction, label_smoothing=0.5),
-                        forward_input=FunctionInput(make_input(shape=(9,)), make_target(shape=(), low=0, high=9)),
+                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
                         reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
         )
         samples.append(
             ModuleInput(constructor_input=FunctionInput(reduction=reduction, label_smoothing=0.5,
-                                                        weight=make_weight(shape=(9,))),
-                        forward_input=FunctionInput(make_input(shape=(9,)), make_target(shape=(), low=0, high=9)),
+                                                        weight=make_weight((9,))),
+                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
                         reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
         )
 
@@ -587,13 +585,13 @@ def module_inputs_torch_nn_Hardswish(module_info, device, dtype, requires_grad, 
     return [
         ModuleInput(
             constructor_input=FunctionInput(),
-            forward_input=FunctionInput(make_input(shape=4)),
+            forward_input=FunctionInput(make_input(4)),
             reference_fn=no_batch_dim_reference_fn,
             desc='no_batch_dim',
         ),
         ModuleInput(
             constructor_input=FunctionInput(),
-            forward_input=FunctionInput(make_input(shape=(2, 3, 2, 5))),
+            forward_input=FunctionInput(make_input((2, 3, 2, 5))),
             desc='4d_input')
     ]
 
@@ -604,15 +602,15 @@ def module_inputs_torch_nn_MaxPool2d(module_info, device, dtype, requires_grad, 
     return [
         ModuleInput(
             constructor_input=FunctionInput((3, 3), (2, 2), (1, 1)),
-            forward_input=FunctionInput(make_input(shape=((3, 7, 7)))),
+            forward_input=FunctionInput(make_input(((3, 7, 7)))),
             desc='3d_input'),
         ModuleInput(
             constructor_input=FunctionInput((3, 3), (2, 2), (1, 1)),
-            forward_input=FunctionInput(make_input(shape=(1, 3, 7, 7))),
+            forward_input=FunctionInput(make_input((1, 3, 7, 7))),
             desc='4d_input'),
         ModuleInput(
             constructor_input=FunctionInput((3, 3), (2, 2), (1, 1), return_indices=True),
-            forward_input=FunctionInput(make_input(shape=(1, 3, 7, 7))),
+            forward_input=FunctionInput(make_input((1, 3, 7, 7))),
             desc='return_indices'),
     ]
 
@@ -623,12 +621,12 @@ def module_inputs_torch_nn_Sigmoid(module_info, device, dtype, requires_grad, **
     return [
         ModuleInput(
             constructor_input=FunctionInput(),
-            forward_input=FunctionInput(make_input(shape=(2, 3, 4, 5))),
+            forward_input=FunctionInput(make_input((2, 3, 4, 5))),
             desc='channels_last_mem_format'
         ),
         ModuleInput(
             constructor_input=FunctionInput(),
-            forward_input=FunctionInput(make_input(shape=(2, 3, 3, 4, 5))),
+            forward_input=FunctionInput(make_input((2, 3, 3, 4, 5))),
             desc='channels_last_3d_mem_format'
         )
     ]
@@ -641,14 +639,14 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
         ModuleInput(
             constructor_input=FunctionInput(4, 2, 16, 0.0),
             forward_input=FunctionInput(
-                make_input(shape=(2, 3, 4))
+                make_input((2, 3, 4))
             ),
             desc='relu_activation'
         ),
         ModuleInput(
             constructor_input=FunctionInput(4, 2, 8, 0.0, F.gelu),
             forward_input=FunctionInput(
-                make_input(shape=(2, 3, 4))
+                make_input((2, 3, 4))
             ),
             desc='gelu_activation'
         ), ]
@@ -662,7 +660,7 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
                 constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
                                                 dropout=0.0, batch_first=True, norm_first=norm_first),
                 forward_input=FunctionInput(
-                    make_input(shape=(3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
+                    make_input((3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
                                      batch_first=True, kwargs_to_batchify={'src_key_padding_mask': 0}),
@@ -673,7 +671,7 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
             ModuleInput(
                 constructor_input=FunctionInput(4, 2, 8, dropout=0.0, batch_first=False, norm_first=norm_first),
                 forward_input=FunctionInput(
-                    make_input(shape=(3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
+                    make_input((3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
                                      batch_first=False, kwargs_to_batchify={'src_key_padding_mask': 0}),
@@ -690,14 +688,14 @@ def module_inputs_torch_nn_TransformerDecoderLayer(module_info, device, dtype, r
         ModuleInput(
             constructor_input=FunctionInput(4, 2, 16, 0.0),
             forward_input=FunctionInput(
-                make_input(shape=(2, 3, 4)), make_input(shape=(2, 3, 4))
+                make_input((2, 3, 4)), make_input((2, 3, 4))
             ),
             desc='relu_activation'
         ),
         ModuleInput(
             constructor_input=FunctionInput(4, 2, 8, 0.0, F.gelu),
             forward_input=FunctionInput(
-                make_input(shape=(2, 3, 4)), make_input(shape=(2, 3, 4))
+                make_input((2, 3, 4)), make_input((2, 3, 4))
             ),
             desc='gelu_activation'
         ), ]
@@ -714,7 +712,7 @@ def module_inputs_torch_nn_TransformerDecoderLayer(module_info, device, dtype, r
                 constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
                                                 dropout=0.0, batch_first=True, norm_first=norm_first),
                 forward_input=FunctionInput(
-                    make_input(shape=(3, 4)), make_input(shape=(3, 4)), tgt_mask=tgt_mask, memory_mask=memory_mask,
+                    make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, memory_mask=memory_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=memory_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
@@ -727,7 +725,7 @@ def module_inputs_torch_nn_TransformerDecoderLayer(module_info, device, dtype, r
             ModuleInput(
                 constructor_input=FunctionInput(4, 2, 8, dropout=0.0, batch_first=False, norm_first=norm_first),
                 forward_input=FunctionInput(
-                    make_input(shape=(3, 4)), make_input(shape=(3, 4)), tgt_mask=tgt_mask, memory_mask=memory_mask,
+                    make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, memory_mask=memory_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=memory_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
@@ -755,7 +753,7 @@ def module_inputs_torch_nn_Transformer(module_info, device, dtype, requires_grad
                                                 num_encoder_layers=1, num_decoder_layers=1,
                                                 dropout=0.0, batch_first=True, norm_first=norm_first),
                 forward_input=FunctionInput(
-                    make_input(shape=(3, 4)), make_input(shape=(3, 4)), tgt_mask=tgt_mask, src_mask=src_mask,
+                    make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, src_mask=src_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, src_key_padding_mask=src_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
@@ -770,7 +768,7 @@ def module_inputs_torch_nn_Transformer(module_info, device, dtype, requires_grad
                                                 num_encoder_layers=1, num_decoder_layers=1,
                                                 dropout=0.0, batch_first=False, norm_first=norm_first),
                 forward_input=FunctionInput(
-                    make_input(shape=(3, 4)), make_input(shape=(3, 4)), tgt_mask=tgt_mask, src_mask=src_mask,
+                    make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, src_mask=src_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, src_key_padding_mask=src_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
@@ -995,21 +993,29 @@ rnn_gru_lstm_module_info_decorators = (
 module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.AdaptiveAvgPool2d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-               module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool2d),
+               module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool2d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.AvgPool1d,
                module_inputs_func=module_inputs_torch_nn_AvgPool1d,
                skips=(
                    # No channels_last support for AvgPool1d as it does not take 4D inputs
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.BatchNorm2d,
                module_inputs_func=module_inputs_torch_nn_BatchNorm2d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=(
                    # Failure on ROCM for BatchNorm2d float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),)
                ),
     ModuleInfo(torch.nn.BatchNorm3d,
                module_inputs_func=module_inputs_torch_nn_BatchNorm3d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=(
                    # Failure on ROCM for BatchNorm3d float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),)
@@ -1023,6 +1029,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64])
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1036,6 +1043,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1049,6 +1057,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=8005), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1062,6 +1071,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1075,6 +1085,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1088,17 +1099,22 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=8005), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
                )),
     ModuleInfo(torch.nn.ELU,
-               module_inputs_func=module_inputs_torch_nn_ELU),
+               module_inputs_func=module_inputs_torch_nn_ELU,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.L1Loss,
                module_inputs_func=module_inputs_torch_nn_L1Loss,
                skips=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.LazyConv1d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=True),
@@ -1112,6 +1128,7 @@ module_db: List[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1121,6 +1138,7 @@ module_db: List[ModuleInfo] = [
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # channels_last support on cuda requires cudnn >= 7603
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
@@ -1144,6 +1162,7 @@ module_db: List[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1160,6 +1179,7 @@ module_db: List[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1176,6 +1196,7 @@ module_db: List[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1192,6 +1213,7 @@ module_db: List[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1199,6 +1221,7 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear,
                skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # No channels_last support for Linear currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
@@ -1212,6 +1235,7 @@ module_db: List[ModuleInfo] = [
                        'TestModule', 'test_forward', device_type='cpu')
                ],
                skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # No channels_last support for Bilinear currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
@@ -1222,72 +1246,105 @@ module_db: List[ModuleInfo] = [
                    # return_indices=True for MaxPool2D), submit fix
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_non_contiguous_tensors'),
                    # TODO: test_cpu_gpu_parity doesn't handle case where output is not a singleton, submit fix
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.NLLLoss,
                module_inputs_func=module_inputs_torch_nn_NLLLoss,
                skips=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.GaussianNLLLoss,
                module_inputs_func=module_inputs_torch_nn_GaussianNLLLoss,
                skips=(
                    # No channels_last support for loss functions.
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)),
     ModuleInfo(torch.nn.CrossEntropyLoss,
-               module_inputs_func=module_inputs_torch_nn_CrossEntropyLoss),
+               module_inputs_func=module_inputs_torch_nn_CrossEntropyLoss,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.Hardswish,
                module_inputs_func=module_inputs_torch_nn_Hardswish,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                supports_gradgrad=False),
     ModuleInfo(torch.nn.TransformerEncoderLayer,
                module_inputs_func=module_inputs_torch_nn_TransformerEncoderLayer,
                skips=(
                    # No channels_last support for TransformerEncoderLayer currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.TransformerDecoderLayer,
                module_inputs_func=module_inputs_torch_nn_TransformerDecoderLayer,
                skips=(
                    # No channels_last support for TransformerDecoderLayer currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.Transformer,
                module_inputs_func=module_inputs_torch_nn_Transformer,
                skips=(
                    # No channels_last support for Transformer currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.MultiheadAttention,
                module_inputs_func=module_inputs_torch_nn_MultiheadAttention,
                skips=(
                    # No channels_last support for MultiheadAttention currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.Embedding,
                module_inputs_func=module_inputs_torch_nn_Embedding,
                skips=(
-                   # No channels_last support for Embedding.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.ReLU,
-               module_inputs_func=module_inputs_torch_nn_ReLU),
+               module_inputs_func=module_inputs_torch_nn_ReLU,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.RNNCell,
-               module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True)),
+               module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True),
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.GRUCell,
-               module_inputs_func=module_inputs_torch_nn_RNN_GRU_Cell),
+               module_inputs_func=module_inputs_torch_nn_RNN_GRU_Cell,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.LSTMCell,
-               module_inputs_func=module_inputs_torch_nn_LSTMCell),
+               module_inputs_func=module_inputs_torch_nn_LSTMCell,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.Sigmoid,
-               module_inputs_func=module_inputs_torch_nn_Sigmoid),
+               module_inputs_func=module_inputs_torch_nn_Sigmoid,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.RNN,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=True),
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators
                ),
     ModuleInfo(torch.nn.GRU,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=False),
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.LSTM,
                module_inputs_func=module_inputs_torch_nn_LSTM,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators)
 ]

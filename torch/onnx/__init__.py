@@ -1,5 +1,6 @@
+from typing import Dict
+
 import torch._C as _C
-from typing import Dict, Optional
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
@@ -11,8 +12,9 @@ ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 producer_name = "pytorch"
 producer_version = _C._onnx.PRODUCER_VERSION
 
+
 class ExportTypes:
-    r""""Specifies how the ONNX model is stored."""
+    r"""Specifies how the ONNX model is stored."""
 
     PROTOBUF_FILE = "Saves model in the specified protobuf file."
     ZIP_ARCHIVE = "Saves model in the specified ZIP file (uncompressed)."
@@ -35,6 +37,7 @@ class SymbolicContext:
         cur_node (_C.Node): Current node being converted to ONNX domain.
         onnx_block (_C.Block): Current ONNX block that converted nodes are being appended to.
     """
+
     def __init__(self, params_dict, env, cur_node, onnx_block):
         self.params_dict: Dict[str, _C.IValue] = params_dict
         self.env: Dict[_C.Value, _C.Value] = env
@@ -43,17 +46,31 @@ class SymbolicContext:
         # Current onnx block that converted nodes are being appended to.
         self.onnx_block: _C.Block = onnx_block
 
+
 def _export(*args, **kwargs):
     from torch.onnx import utils
+
     result = utils._export(*args, **kwargs)
     return result
 
 
-def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
-           input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
-           opset_version=None, do_constant_folding=True, dynamic_axes=None,
-           keep_initializers_as_inputs=None, custom_opsets=None,
-           export_modules_as_functions=False):
+def export(
+    model,
+    args,
+    f,
+    export_params=True,
+    verbose=False,
+    training=TrainingMode.EVAL,
+    input_names=None,
+    output_names=None,
+    operator_export_type=OperatorExportTypes.ONNX,
+    opset_version=None,
+    do_constant_folding=True,
+    dynamic_axes=None,
+    keep_initializers_as_inputs=None,
+    custom_opsets=None,
+    export_modules_as_functions=False,
+):
     r"""
     Exports a model into ONNX format. If ``model`` is not a
     :class:`torch.jit.ScriptModule` nor a :class:`torch.jit.ScriptFunction`, this runs
@@ -126,7 +143,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         verbose (bool, default False): if True, prints a description of the
             model being exported to stdout. In addition, the final ONNX graph will include the
             field ``doc_string``` from the exported model which mentions the source code locations
-            for ``model``.
+            for ``model``. If True, ONNX exporter logging will be turned on.
         training (enum, default TrainingMode.EVAL):
             * ``TrainingMode.EVAL``: export the model in inference mode.
             * ``TrainingMode.PRESERVE``: export the model in inference mode if model.training is
@@ -195,9 +212,9 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
                 Models exported this way are probably runnable only by Caffe2.
 
-        opset_version (int, default 9): The version of the
+        opset_version (int, default 13): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
-            to target. Must be >= 7 and <= 15.
+            to target. Must be >= 7 and <= 16.
         do_constant_folding (bool, default True): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
@@ -304,6 +321,19 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             particular types of modules to export as local functions in ONNX.
             This feature requires ``opset_version`` >= 15, otherwise the export will fail. This is because
             ``opset_version`` < 15 implies IR version < 8, which means no local function support.
+            Module variables will be exported as function attributes. There are two categories of function
+            attributes.
+
+            1. Annotated attributes: class variables that have type annotations via
+            `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_
+            will be exported as attributes.
+            Annotated attributes are not used inside the subgraph of ONNX local function because
+            they are not created by PyTorch JIT tracing, but they may be used by consumers
+            to determine whether or not to replace the function with a particular fused kernel.
+
+            2. Inferred attributes: variables that are used by operators inside the module. Attribute names
+            will have prefix "inferred::". This is to differentiate from predefined attributes retrieved from
+            python module annotations. Inferred attributes are used inside the subgraph of ONNX local function.
 
             * ``False``(default): export ``nn.Module`` forward calls as fine grained nodes.
             * ``True``: export all ``nn.Module`` forward calls as local function nodes.
@@ -316,11 +346,24 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
     """
 
     from torch.onnx import utils
-    return utils.export(model, args, f, export_params, verbose, training,
-                        input_names, output_names, operator_export_type, opset_version,
-                        do_constant_folding, dynamic_axes,
-                        keep_initializers_as_inputs, custom_opsets,
-                        export_modules_as_functions)
+
+    return utils.export(
+        model,
+        args,
+        f,
+        export_params,
+        verbose,
+        training,
+        input_names,
+        output_names,
+        operator_export_type,
+        opset_version,
+        do_constant_folding,
+        dynamic_axes,
+        keep_initializers_as_inputs,
+        custom_opsets,
+        export_modules_as_functions,
+    )
 
 
 def export_to_pretty_string(*args, **kwargs) -> str:
@@ -341,10 +384,13 @@ def export_to_pretty_string(*args, **kwargs) -> str:
       A UTF-8 str containing a human-readable representation of the ONNX model.
     """
     from torch.onnx import utils
+
     return utils.export_to_pretty_string(*args, **kwargs)
+
 
 def _optimize_trace(graph, operator_export_type):
     from torch.onnx import utils
+
     return utils._optimize_graph(graph, operator_export_type)
 
 
@@ -360,16 +406,19 @@ def select_model_mode_for_export(model, mode):
     """
 
     from torch.onnx import utils
+
     return utils.select_model_mode_for_export(model, mode)
 
 
 def _run_symbolic_function(*args, **kwargs):
     from torch.onnx import utils
+
     return utils._run_symbolic_function(*args, **kwargs)
 
 
 def _run_symbolic_method(*args, **kwargs):
     from torch.onnx import utils
+
     return utils._run_symbolic_method(*args, **kwargs)
 
 
@@ -379,6 +428,7 @@ def is_in_onnx_export():
     """
 
     from torch.onnx import utils
+
     return utils.is_in_onnx_export()
 
 
@@ -396,6 +446,7 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
       opset_version (int): The ONNX opset version in which to register.
     """
     from torch.onnx import utils
+
     utils.register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version)
 
 
@@ -411,4 +462,48 @@ def unregister_custom_op_symbolic(symbolic_name, opset_version):
     """
 
     from torch.onnx import utils
+
     utils.unregister_custom_op_symbolic(symbolic_name, opset_version)
+
+
+def is_onnx_log_enabled():
+    r"""
+    Returns True iff ONNX logging is turned on.
+    """
+    return _C._jit_is_onnx_log_enabled()
+
+
+def enable_log():
+    r"""
+    Enables ONNX logging.
+    """
+    _C._jit_set_onnx_log_enabled(True)
+
+
+def disable_log():
+    r"""
+    Disables ONNX logging.
+    """
+    _C._jit_set_onnx_log_enabled(False)
+
+
+def set_log_stream(stream_name="stdout"):
+    r"""
+    Set output stream for ONNX logging.
+
+    Args:
+      stream_name (str, default "stdout"): Only ``stdout`` and ``stderr`` are supported
+        as `stream_name`.
+    """
+    _C._jit_set_onnx_log_output_stream(stream_name)
+
+
+def log(*args):
+    r"""
+    A simple logging facility for ONNX exporter.
+
+    Args:
+      args: Arguments are converted to string, concatenated together with a newline
+        character appended to the end, and flushed to output stream.
+    """
+    _C._jit_onnx_log(*args)

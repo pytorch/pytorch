@@ -4,7 +4,6 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_compat.h>
@@ -88,7 +87,7 @@ static inline Variable sequenceToVariable(c10::TensorOptions options, PyObject* 
   return torch::utils::indexing_tensor_from_data(options, kLong, c10::nullopt, seq);
 }
 
-static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value, const at::Device& device) {
+inline Variable valueToTensor(c10::TensorOptions options, PyObject* value, const at::Device& device) {
   if (THPVariable_Check(value)) {
     return THPVariable_Unpack(value);
   }
@@ -319,7 +318,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   variable_list variableIndices;
   int64_t specified_dims = count_specified_dimensions(holder.get());
   if (specified_dims == -1) {
-    return handle_torch_function_indexing(self, index);
+    return handle_torch_function_indexing(self, holder.get());
   }
   Variable sliced = applySlicing(
     self_, holder.get(), variableIndices, /*is_tracing=*/is_tracing, self_.device(), self_.sizes(), specified_dims);
@@ -369,7 +368,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   const auto& self_ = THPVariable_Unpack(self);
-  if (self_.is_sparse())
+  if (self_.is_sparse() || self_.is_sparse_csr())
   {
     throw TypeError("Cannot assign to a sparse tensor");
   }

@@ -14,15 +14,26 @@ TORCH_API at::ScalarType get_autocast_gpu_dtype();
 TORCH_API at::ScalarType get_autocast_cpu_dtype();
 TORCH_API void set_autocast_gpu_dtype(at::ScalarType dtype);
 TORCH_API void set_autocast_cpu_dtype(at::ScalarType dtype);
+TORCH_API bool is_xpu_enabled();
+TORCH_API void set_xpu_enabled(bool enabled);
+TORCH_API at::ScalarType get_autocast_xpu_dtype();
+TORCH_API void set_autocast_xpu_dtype(at::ScalarType dtype);
 TORCH_API bool is_autocast_cache_enabled();
 TORCH_API void set_autocast_cache_enabled(bool enabled);
 
 
 namespace {
   bool is_autocast_eligible(const Tensor& tensor, DeviceType device_type) {
-    return device_type == DeviceType::CUDA
-        ? (tensor.is_cuda() || tensor.is_xla()) && tensor.is_floating_point()
-        : (tensor.is_cpu() || tensor.is_mkldnn()) && tensor.is_floating_point();
+    switch (device_type) {
+      case DeviceType::CUDA:
+        return  (tensor.is_cuda() || tensor.is_xla()) && tensor.is_floating_point();
+      case DeviceType::CPU:
+        return (tensor.is_cpu() || tensor.is_mkldnn()) && tensor.is_floating_point();
+      case DeviceType::XPU:
+        return tensor.is_xpu() && tensor.is_floating_point();
+      default:
+        return false;
+    }
   }
 } // namespace
 
@@ -33,6 +44,8 @@ inline DispatchKey get_autocast_dispatch_key_from_device_type(
       return DispatchKey::Autocast;
     case DeviceType::CPU:
       return DispatchKey::AutocastCPU;
+    case DeviceType::XPU:
+      return DispatchKey::AutocastXPU;
     default:
       throw std::runtime_error(
           "unknown device type for autocast in get_autocast_dispatch_key_from_device_type");
@@ -46,6 +59,8 @@ inline at::ScalarType get_lower_precision_fp_from_device_type(
       return get_autocast_gpu_dtype();
     case DeviceType::CPU:
       return get_autocast_cpu_dtype();
+    case DeviceType::XPU:
+      return get_autocast_xpu_dtype();
     default:
       throw std::runtime_error(
           "unknown device type for autocast in get_lower_precision_fp_from_device_type");

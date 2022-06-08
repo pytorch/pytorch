@@ -68,7 +68,7 @@ def get_repo_labels() -> List[str]:
         page_labels = list(map(lambda x: str(x["name"]), response))
         if not page_labels:
             break
-            collected_labels += page_labels
+        collected_labels += page_labels
     return collected_labels
 
 def post_pytorch_comment(pr_number: int, merger: str) -> Any:

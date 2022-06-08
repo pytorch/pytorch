@@ -17,6 +17,7 @@ from .mappings import (
 )
 
 from ..qconfig import QConfigAny
+from ..qconfig_mapping import QConfigMapping
 
 from torch.quantization import (
     ObserverBase,
@@ -24,7 +25,7 @@ from torch.quantization import (
     is_activation_post_process,
 )
 
-from ..qconfig_dict_utils import (
+from ..qconfig_mapping_utils import (
     maybe_adjust_qconfig_for_module_type_or_name,
 )
 
@@ -102,6 +103,8 @@ class SeenQOpInfo:
     qconfig: QConfigAny
     # fusion_info for the op, is None if no fusion is found
     fusion_info: Optional[FusionInfo]
+    # True if this op is a reference op during inference
+    is_reference_op_at_inference: bool
 
     def __repr__(self) -> str:
         s = f"(type): {self.type}\n"
@@ -233,9 +236,6 @@ def get_func_output_obs_type(
     seen_q_op_info: SeenQOpInfo,
 ) -> FuncOutputObsType:
     op_type = seen_q_op_info.type
-    is_module = isinstance(op_type, type(torch.nn.Module))
-    if is_module:
-        return FuncOutputObsType.NONE
 
     if seen_q_op_info.qconfig is None:
         return FuncOutputObsType.NONE
@@ -267,6 +267,8 @@ def get_func_output_obs_type(
             seen_q_op_info.input_tensor_infos[0].inf_dtype in (torch.int32, torch.int64)
         ):
             return FuncOutputObsType.NONE
+    elif op_type in (torch.nn.LSTM,):
+        return FuncOutputObsType.NONE
     return FuncOutputObsType.NEW_OBS
 
 def converted_func_needs_scale_zp(seen_q_op_info: SeenQOpInfo) -> bool:
@@ -583,10 +585,9 @@ def get_torch_function_hook_type(
     # the direct __dict__ accesses are for performance, because
     # the default `torch.nn.Module.__getattr__` has overhead.
     parent_module_has_qstate = parent_module is not None and \
-        '_modules' in parent_module.__dict__ and \
-        '_auto_quant_state' in parent_module.__dict__['_modules']
+        '_auto_quant_state' in parent_module.__dict__
     needs_op_hooks = parent_module_has_qstate and \
-        parent_module.__dict__['_modules']['_auto_quant_state'].cur_op_needs_hooks(func)  # type: ignore[union-attr, operator]
+        parent_module.__dict__['_auto_quant_state'].cur_op_needs_hooks(func)  # type: ignore[union-attr, operator]
 
     if needs_op_hooks:
         return HookType.OP_HOOKS
@@ -608,17 +609,15 @@ def get_module_hook_type(
     if cached_hook_type is not None:
         return cached_hook_type
     parent_module_has_qstate = parent_module is not None and \
-        '_modules' in parent_module.__dict__ and \
-        '_auto_quant_state' in parent_module.__dict__['_modules']
+        '_auto_quant_state' in parent_module.__dict__
     needs_op_hooks = parent_module_has_qstate and \
-        parent_module.__dict__['_modules']['_auto_quant_state'].cur_op_needs_hooks(cur_module)  # type: ignore[union-attr, operator]
+        parent_module.__dict__['_auto_quant_state'].cur_op_needs_hooks(cur_module)  # type: ignore[union-attr, operator]
     # We need IO hooks if
     # * we are calling forward on a module (always True here)
     # * that module has quant state
     # * that module does not need op hooks for the parent
     needs_io_hooks = (
-        '_modules' in cur_module.__dict__ and
-        '_auto_quant_state' in cur_module.__dict__['_modules'] and
+        '_auto_quant_state' in cur_module.__dict__ and
         (not needs_op_hooks)
     )
     needs_arg_dequants = parent_module_has_qstate and not needs_op_hooks
@@ -652,7 +651,7 @@ def clone_detach_tensor_without_dispatch(x: torch.Tensor) -> torch.Tensor:
 def get_input_args_quant_dequant_info(
     seen_q_op_info: SeenQOpInfo,
     tensor_id_to_scale_zp: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
-) -> Tuple[List[Optional[Tuple[float, int]]], List[bool], bool]:
+) -> Tuple[List[Optional[Tuple[float, int, torch.dtype]]], List[bool], bool]:
     """
     Returns a list of information about the tensor inputs to the current op.
 
@@ -678,7 +677,7 @@ def get_input_args_quant_dequant_info(
       # dequants
       [False, False]
     """
-    quant_infos: List[Optional[Tuple[float, int]]] = []
+    quant_infos: List[Optional[Tuple[float, int, torch.dtype]]] = []
     dequant_infos: List[bool] = []
 
     # determine the expected output dtype
@@ -694,12 +693,20 @@ def get_input_args_quant_dequant_info(
             tensor_id = input_arg.id
             if input_arg.inf_dtype != output_dtype:
                 any_arg_quant_or_dequant_needed = True
-                if output_dtype == torch.quint8:
+                if output_dtype in (torch.quint8, torch.qint32):
                     assert tensor_id in tensor_id_to_scale_zp
                     scale, zp = tensor_id_to_scale_zp[tensor_id]
                     # TODO: return this to the caller
-                    quant_infos.append((scale, zp,))  # type: ignore[arg-type]
-                    dequant_infos.append(False)
+                    quant_infos.append((scale, zp, output_dtype))  # type: ignore[arg-type]
+                    if output_dtype == torch.qint32:
+                        # For now, we treat all qint32 ops as reference, so
+                        # we add a dequant before the op.
+                        # TODO(future PR): extend this to more dtypes
+                        # TODO(future PR): use is_reference flag instead of
+                        # assuming
+                        dequant_infos.append(True)
+                    else:
+                        dequant_infos.append(False)
                 else:
                     quant_infos.append(None)
                     dequant_infos.append(True)
@@ -712,7 +719,7 @@ def get_input_args_quant_dequant_info(
     return quant_infos, dequant_infos, any_arg_quant_or_dequant_needed
 
 def get_cur_qconfig(
-    qconfig_dict: Dict[str, Any],
+    qconfig_mapping: QConfigMapping,
     cur_fqn: str,
     cur_op_type: Callable,
 ) -> Optional[QConfigAny]:
@@ -721,9 +728,24 @@ def get_cur_qconfig(
     # (module_name_regex, module_name_object_type_order not implemented yet)
 
     # global
-    global_qconfig = qconfig_dict['']
+    global_qconfig = qconfig_mapping.global_qconfig
 
     qconfig = maybe_adjust_qconfig_for_module_type_or_name(
-        qconfig_dict, cur_op_type, cur_fqn, global_qconfig)
+        qconfig_mapping, cur_op_type, cur_fqn, global_qconfig)
 
     return qconfig
+
+
+# We store quantization state for all children on the top level module in a
+# ModuleDict. In order to properly special case this module from other
+# ModuleDict instances, we create a marker class for it.
+class AutoQuantizationStateModuleDict(torch.nn.ModuleDict):
+    pass
+
+def get_fqn_valid_for_module_dict_key(fqn: str) -> str:
+    """
+    Modifies `fqn` to make it a valid key to a ModuleDict.
+    """
+    if fqn == '':
+        fqn = ' '
+    return fqn.replace('.', ':')

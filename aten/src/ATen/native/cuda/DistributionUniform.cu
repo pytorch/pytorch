@@ -1,9 +1,7 @@
-#include <ATen/Dispatch.h>
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
-#include <ATen/native/Distributions.h>
-#include <ATen/native/TensorIterator.h>
 
 namespace at { namespace native {
 

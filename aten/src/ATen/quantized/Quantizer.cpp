@@ -4,7 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
@@ -415,6 +415,25 @@ Tensor from_blob_quantized_per_channel_affine(
   get_qtensorimpl(qtensor)->set_sizes_contiguous(sizes);
 
   return qtensor;
+}
+
+Tensor UnknownQuantizer::quantize(const Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT(false, "cannot call quantize on UnknownQuantizer");
+}
+Tensor UnknownQuantizer::dequantize(const Tensor& qtensor) {
+  TORCH_INTERNAL_ASSERT(false, "cannot call dequantize on UnknownQuantizer");
+}
+Tensor& UnknownQuantizer::dequantize_out(Tensor& rtensor, const Tensor& qtensor) {
+  TORCH_INTERNAL_ASSERT(false, "cannot call dequantize_out on UnknownQuantizer");
+}
+QScheme UnknownQuantizer::qscheme() const {
+  TORCH_INTERNAL_ASSERT(false, "cannot call qscheme on UnknownQuantizer");
+}
+bool UnknownQuantizer::equalTo(QuantizerPtr other) const{
+  TORCH_INTERNAL_ASSERT(false, "cannot call equalTo on UnknownQuantizer");
+}
+QuantizerPtr make_unknown_quantizer(ScalarType scalar_type) {
+  return c10::make_intrusive<UnknownQuantizer>(scalar_type);
 }
 
 } // namespace at

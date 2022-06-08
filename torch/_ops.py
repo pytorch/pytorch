@@ -6,7 +6,7 @@ import sys
 import types
 
 import torch.jit
-import torch._utils_internal
+import torch._utils_internal as torch_utils_internal
 
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags')
@@ -32,13 +32,17 @@ class OpOverload:
         self._op = op
         self._schema = schema
         self._overloadpacket = overloadpacket
+        self._overloadname = 'default' if schema.overload_name == '' else schema.overload_name
+        self.__name__ = "{}.{}".format(self._schema.name.split("::")[1], self._overloadname)
+        self.__module__ = overloadpacket.__module__
+        op.__module__ = overloadpacket.__module__
 
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
         return self
 
-    def __str__(self):
-        return "OpOverload(op='{}.{}', overload='{}')".format(*self._schema.name.split("::"), self.overload_name)
+    def __repr__(self):
+        return "<OpOverload(op='{}.{}', overload='{}')>".format(*self._schema.name.split("::"), self._overloadname)
 
     def __call__(self, *args, **kwargs):
         return self._op(*args, **kwargs or {})
@@ -46,17 +50,15 @@ class OpOverload:
     def __getattr__(self, key):
         return getattr(self._op, key)
 
-    # `my_namespace::my_op`
-    @property
-    def name(self):
-        return "{}.{}".format(*self._schema.name.split("::"))
+    def __hash__(self):
+        return hash(self._op)
+
+    # `my_namespace.my_op_name.overload_name`
+    def __str__(self):
+        return "{}.{}.{}".format(*self._schema.name.split("::"), self._overloadname)
 
     @property
-    def overload_name(self):
-        return self._schema.overload_name
-
-    @property
-    def overload_packet(self):
+    def overloadpacket(self):
         return self._overloadpacket
 
     @property
@@ -68,27 +70,26 @@ class OpOverload:
 # OpOverloadPacket class contains pointer to a base unresolved operator that doesn't correspond to a specific operator
 # You can obtain an OpOverload object through attribute query.
 class OpOverloadPacket:
-    def __init__(self, qualified_op_name, op_name, op):
+    def __init__(self, qualified_op_name, op_name, op, overload_names):
         # These attributes are accessible on the object through the properties
         # defined below but are immutable
         self._qualified_op_name = qualified_op_name
-        self._op_name = op_name
+        self.__name__ = op_name
         self._op = op
+        self._overload_names = overload_names
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
     def __deepcopy__(self, memo=None):
         return self
 
+    def __repr__(self):
+        return "<OpOverloadPacket(op='{}.{}')>".format(*self._qualified_op_name.split("::"))
+
+    def __hash__(self):
+        return hash(self._op)
+
     def __str__(self):
-        return "OpOverloadPacket(op='{}.{}')".format(*self._qualified_op_name.split("::"))
-
-    @property
-    def qualified_op_name(self):
         return "{}.{}".format(*self._qualified_op_name.split("::"))
-
-    @property
-    def op_name(self):
-        return self._op_name
 
     @property
     def op(self):
@@ -141,6 +142,10 @@ class OpOverloadPacket:
         # OpOverloadPacket to access it here.
         return self._op(*args, **kwargs or {})
 
+    # TODO: use this to make a __dir__
+    def overloads(self):
+        return [n if n else "default" for n in self._overload_names]
+
 # Resolution of torch.fn is different from torch.ops.aten.fn
 # torch.fn uses the Python argparser, matches with the
 # appropriate schema, and calls into the unboxed version of the method
@@ -184,17 +189,23 @@ class _OpNamespace(types.ModuleType):
         # It is not a valid op_name when __file__ is passed in
         if op_name == '__file__':
             return 'torch.ops'
+
         # Get the op `my_namespace::my_op` if available. This will also check
         # for overloads and raise an exception if there are more than one.
         namespace_name = self.name
         qualified_op_name = '{}::{}'.format(namespace_name, op_name)
-        op = torch._C._jit_get_operation(qualified_op_name)
+        try:
+            op, overload_names = torch._C._jit_get_operation(qualified_op_name)
+        except RuntimeError as e:
+            # Turn this into AttributeError so getattr(obj, key, default)
+            # works (this is called by TorchScript with __origin__)
+            raise AttributeError(f"'_OpNamespace' object has no attribute '{op_name}'") from e
 
         # let the script frontend know that op is identical to the builtin op
         # with qualified_op_name
         torch.jit._builtins._register_builtin(op, qualified_op_name)
         op.__module__ = self.__module__ + "." + namespace_name
-        opoverloadpacket = OpOverloadPacket(qualified_op_name, op_name, op)
+        opoverloadpacket = OpOverloadPacket(qualified_op_name, op_name, op, overload_names)
         opoverloadpacket.__module__ = self.__module__ + "." + namespace_name
         # cache the opoverloadpacket to ensure that each op corresponds to
         # a unique OpOverloadPacket object
@@ -236,7 +247,7 @@ class _Ops(types.ModuleType):
         if sys.executable == "torch_deploy":
             return
 
-        path = torch._utils_internal.resolve_library_path(path)
+        path = torch_utils_internal.resolve_library_path(path)
         with dl_open_guard():
             # Import the shared library into the process, thus running its
             # static (global) initialization code in order to register custom

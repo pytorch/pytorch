@@ -23,7 +23,7 @@ import java.util.Locale;
  * methods.
  *
  * <p>When constructing {@code Tensor} objects with {@code data} as an array, it is not specified
- * whether this data is is copied or retained as a reference so it is recommended not to modify it
+ * whether this data is copied or retained as a reference so it is recommended not to modify it
  * after constructing. {@code data} passed as a {@link Buffer} is not copied, so it can be modified
  * between {@link Module} calls to avoid reallocation. Data retrieved from {@code Tensor} objects
  * may be copied or may be a reference to the {@code Tensor}'s internal data buffer. {@code shape}
