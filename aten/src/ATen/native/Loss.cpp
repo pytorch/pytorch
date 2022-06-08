@@ -142,7 +142,8 @@ Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double mar
   auto margin_diff = (margin - self);
   // For Composite Compliance,
   // In Forward AD, if `margin_diff` is a CCT but its tangent isn't,
-  // using inplace clamp_min doesn't work.
+  // using inplace clamp_min doesn't work because we end up writing
+  // the CCT in-place to the tangent
   auto margin_clamp = (margin_diff._fw_grad(/*level*/ 0).defined() &&
                        isTensorSubclassLike(margin_diff))
       ? margin_diff.clamp_min(0)
