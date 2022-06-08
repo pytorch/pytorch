@@ -184,6 +184,22 @@ struct _cuda_scatter_large_index_internal_kernel {
     char* index_ptr = (char*)iter.data_ptr(2);
 
     auto ndim = iter.ndim();
+    int64_t index_shape_host[ndim], index_strides_host[ndim], src_shape_host[ndim], src_strides_host[ndim];
+    int64_t *index_shape_device, *index_strides_device, *src_shape_device, *src_strides_device;
+    cudaMalloc((void**)&index_shape_device, ndim * sizeof(int64_t));
+    cudaMalloc((void**)&index_strides_device, ndim * sizeof(int64_t));
+    cudaMalloc((void**)&src_shape_device, ndim * sizeof(int64_t));
+    cudaMalloc((void**)&src_strides_device, ndim * sizeof(int64_t));
+    for (int d = 0; d < ndim; d++) {
+      index_shape_host[d] = index_shape[d];
+      index_strides_host[d] = index_strides[d];
+      src_shape_host[d] = src_shape[d];
+      src_strides_host[d] = src_strides[d];
+    }
+    cudaMemcpy(index_shape_device, index_shape_host, ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(index_strides_device, src_shape_host, ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(src_shape_device, index_shape_host, ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(src_strides_device, src_strides_host, ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
 
     auto offset_calc = make_offset_calculator<3>(iter);
     auto loop = [=]C10_DEVICE(int i) {
@@ -197,11 +213,11 @@ struct _cuda_scatter_large_index_internal_kernel {
       auto original_index_offset = offsets[2] / 8;
       uint32_t index_idx;
       for (auto d = ndim - 1; d >= 0; d--) {
-        index_idx = (original_index_offset / index_strides[d]) % index_shape[d];
-        original_index_offset -= index_idx * index_strides[d];
+        index_idx = (original_index_offset / index_strides_device[d]) % index_shape_device[d];
+        original_index_offset -= index_idx * index_strides_device[d];
 
-        index_idx %= src_shape[d];
-        src_offset += src_strides[d] * index_idx;
+        index_idx %= src_shape_device[d];
+        src_offset += src_strides_device[d] * index_idx;
       }
 
       src_offset = src_offset * 4;
