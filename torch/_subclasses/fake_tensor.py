@@ -11,6 +11,8 @@ from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatc
 import weakref
 import functools
 import itertools
+from dataclasses import dataclass
+
 
 aten = torch.ops.aten
 
@@ -21,6 +23,29 @@ class ComplexInputException(Exception):
 class SparseInputException(Exception):
     pass
 
+@dataclass
+class DynamicOutputShapeException(Exception):
+    func: OpOverload
+
+
+# TODO: use tags when available
+# operators whose output shape depends on input tensor data
+_data_dependent_operators = (
+    aten.nonzero.out,
+    aten.nonzero.default,
+    aten.nonzero_numpy.default,
+    aten.unique_dim.default,
+    aten.unique_consecutive.default,
+    aten.unique_dim_consecutive.default,
+    aten._unique2.default,
+    aten.index.Tensor,
+    aten.index_select.out,
+    aten.index_select.default,
+    aten.index_select.dimname_out,
+    aten.index_select.dimname,
+    aten.masked_select.out,
+    aten.masked_select.default,
+)
 
 _device_not_kwarg_ops = (
     aten._resize_output_.default,
@@ -202,6 +227,9 @@ def clone(fake_mode, func, input, memory_format=None):
         out = torch.ops.aten._to_copy(input.to("meta"), memory_format=memory_format)
         return FakeTensor(fake_mode, out, out_device)
 
+@register_op_impl(lambda func: func in _data_dependent_operators)
+def data_dep_op(fake_mode, func, *args, **kwargs):
+    raise DynamicOutputShapeException(func)
 
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
@@ -349,7 +377,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
-
+        
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
         if "prims::" in func._schema.name:
