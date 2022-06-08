@@ -6092,6 +6092,47 @@ class _TestONNXRuntime:
         )
         self.run_test(TensorFactory(), x, remained_onnx_input_idx=[])
 
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_tensor_split(self):
+        class TensorSplitModel(torch.nn.Module):
+            def forward(self, input):
+                return (
+                    input.tensor_split([1, 3]),
+                    # test with output indexing.
+                    input.tensor_split([2, 4])[0],
+                    # test split on specific dim.
+                    input.tensor_split([1, 3, 4], dim=-2),
+                    # test split on specific dim and output indexing.
+                    input.tensor_split([0, 2], dim=-2)[-1],
+                    # test with out of bound end index (5).
+                    input.tensor_split([2, 3, 5]),
+                )
+
+        self.run_test(TensorSplitModel(), torch.randn(5, 4, 3))
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_tensor_split_scalar(self):
+        class TensorSplitModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.tensor_split(x, x.size(1))
+
+        self.run_test(TensorSplitModel(), torch.randn(1, 2, 3))
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_tensor_split_dynamic_axes(self):
+        class TensorSplitModel(torch.nn.Module):
+            def forward(self, x):
+                return x.tensor_split(1, dim=-1)
+
+        x = torch.randn(4, 384, 2)
+        input_names = ["logits"]
+        self.run_test(
+            TensorSplitModel(),
+            x,
+            input_names=input_names,
+            dynamic_axes={input_names[0]: {0: "batch"}},
+        )
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_eye(self):
         class TensorFactory(torch.nn.Module):
@@ -12469,6 +12510,22 @@ class _TestONNXRuntime:
             input_names=["a"],
             dynamic_axes={"a": {0: "a0"}},
         )
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_lerp(self):
+        class LerpModel(torch.nn.Module):
+            def forward(self, x):
+                return (
+                    x.lerp(torch.full_like(x, 10), 0.4),
+                    x.lerp(torch.full_like(x, 20), 0.7),
+                    x.lerp(torch.full_like(x, 30), torch.tensor(0.4)),
+                    x.lerp(torch.full_like(x, 40), x / 10.0),
+                    x.lerp(torch.tensor(10.0), x / 10.0),
+                    x.lerp(torch.tensor(10.0), 0.4),
+                    x.lerp(torch.tensor(10.0), torch.tensor(0.4)),
+                )
+
+        self.run_test(LerpModel(), torch.rand(5, 4, 3))
 
 
 def make_test(
