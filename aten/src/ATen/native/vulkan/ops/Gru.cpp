@@ -40,7 +40,7 @@ std::tuple<Tensor, Tensor> gru_input(
   TORCH_INTERNAL_ASSERT(batch_first, "Vulkan gru expects 'batch_first' to be true.");
   TORCH_INTERNAL_ASSERT(dropout < std::numeric_limits<double>::epsilon()*1000, "Vulkan gru expects 'dropout' to be 0.0.");
 
-  const auto h_in = input_vk.size(2);
+  const auto hidden_size = hx_vk.size(2);
   std::vector<at::Tensor> h_n_list;  // hidden output
 
   // reshape to 2D due to Vulkan at::mm op accepts only 2D
@@ -56,10 +56,10 @@ std::tuple<Tensor, Tensor> gru_input(
     const auto& b_ih = params_cpu[i * 4 + 2];
     const auto& b_hh = params_cpu[i * 4 + 3];
 
-    const auto&  w_i_rzn = w_ih.split(h_in);
-    const auto&  w_h_rzn = w_hh.split(h_in);
-    const auto&  b_i_rzn = b_ih.split(h_in);
-    const auto&  b_h_rzn = b_hh.split(h_in);
+    const auto&  w_i_rzn = w_ih.split(hidden_size);
+    const auto&  w_h_rzn = w_hh.split(hidden_size);
+    const auto&  b_i_rzn = b_ih.split(hidden_size);
+    const auto&  b_h_rzn = b_hh.split(hidden_size);
 
     const auto&  w_ir = w_i_rzn[0];
     const auto&  w_iz = w_i_rzn[1];
@@ -108,12 +108,12 @@ std::vector<LinearOpContext> pack_linear_op_contexts(
     const auto& w_hh = params_cpu.at(i * 4 + 1);
     const auto& b_ih = params_cpu.at(i * 4 + 2);
     const auto& b_hh = params_cpu.at(i * 4 + 3);
-    const auto& h_in = w_ih.size(0) / 3;
+    const auto& hidden_size = w_ih.size(0) / 3;
 
-    const auto&  w_i_rzn = w_ih.split(h_in);
-    const auto&  w_h_rzn = w_hh.split(h_in);
-    const auto&  b_i_rzn = b_ih.split(h_in);
-    const auto&  b_h_rzn = b_hh.split(h_in);
+    const auto&  w_i_rzn = w_ih.split(hidden_size);
+    const auto&  w_h_rzn = w_hh.split(hidden_size);
+    const auto&  b_i_rzn = b_ih.split(hidden_size);
+    const auto&  b_h_rzn = b_hh.split(hidden_size);
 
     const auto&  w_ir = w_i_rzn[0];
     const auto&  w_iz = w_i_rzn[1];
