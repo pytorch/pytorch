@@ -1426,7 +1426,7 @@ TEST_F(NVFuserTest, FusionGroupedReductionChannelsLastBatchNormLike_CUDA) {
   const int64_t vector = 2;
   TORCH_CHECK(num_channels % vector == 0);
   // Use at most 32 TIDx threads
-  const int64_t tidx = std::min(32l, num_channels / vector);
+  const int64_t tidx = std::min<int64_t>(32l, num_channels / vector);
   const auto bidx = ceilDiv(num_channels, tidx * vector);
 
   const int64_t tidy = 8;
@@ -1555,7 +1555,7 @@ TEST_F(
   const int64_t vector = 2;
   TORCH_CHECK(num_channels % vector == 0);
   // Use at most 32 TIDx threads
-  const int64_t tidx = std::min(32l, num_channels / vector);
+  const int64_t tidx = std::min<int64_t>(32l, num_channels / vector);
   const auto bidx = ceilDiv(num_channels, tidx * vector);
 
   const int64_t tidy = 8;
