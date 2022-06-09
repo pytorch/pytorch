@@ -15,6 +15,7 @@
 #include <onnx/shape_inference/implementation.h>
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <unordered_set>
 #include <utility>
@@ -684,9 +685,7 @@ std::vector<::c10::ShapeSymbol> Broadcast(
   size_t rank_min = std::min(rank_0, rank_1);
   std::vector<::c10::ShapeSymbol> final_shape;
   final_shape.reserve(rank_max);
-  for (auto idx : c10::irange(rank_max)) {
-    final_shape.emplace_back(::c10::ShapeSymbol::newSymbol());
-  }
+  std::generate_n(std::back_inserter(final_shape, rank_max, ::c10::ShapeSymbol::newSymbol));
   for (auto idx : c10::irange(rank_min)) {
     const c10::ShapeSymbol& ss_shape_0 = input_shape_value_0[rank_0 - 1 - idx];
     const c10::ShapeSymbol& ss_shape_1 = input_shape_value_1[rank_1 - 1 - idx];
@@ -1366,9 +1365,7 @@ void ComputeConstant(Node* n, int opset_version) {
                 expand_shape.value().size());
             if (expand_shape.value()[0] > 0) {
               std::vector<c10::ShapeSymbol> final_shape;
-              for (const auto i : c10::irange(expand_shape.value()[0])) {
-                final_shape.emplace_back(c10::ShapeSymbol::newSymbol());
-              }
+              std::generate_n(std::back_inserter(final_shape, expand_shape.value()[0]), ::c10::ShapeSymbol::newSymbol));
               UpdateShape(n->output(), c10::SymbolicShape(final_shape));
             }
           }
@@ -1607,7 +1604,6 @@ void SpecialPostProcess(Node* n) {
       // onnx Sequence type requires element type to be set.
       // If the list to insert is empty, we set the elem type by
       // looking at the tensor being inserted.
-      auto list_node = n->input(0)->node();
       auto seq_node = n->input(0)->node();
       auto t_type = n->input(1)->type()->cast<TensorType>();
 
