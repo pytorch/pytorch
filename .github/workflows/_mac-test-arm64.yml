@@ -11,7 +11,6 @@ on:
 
 jobs:
   run_mps_test:
-    if: ${{ false }}
     name: "Run MPS tests"
     runs-on: macos12.3-m1
     steps:
