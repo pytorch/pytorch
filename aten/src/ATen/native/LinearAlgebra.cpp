@@ -608,10 +608,7 @@ Tensor& matrix_rank_impl(
 
 Tensor get_matrix_rank_result_tensor(const Tensor& input) {
   // Matrices or batch of matrices are allowed
-  TORCH_CHECK(
-      input.dim() >= 2,
-      "torch.linalg.matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ",
-      input.sizes());
+  checkIsMatrix(input, "torch.linalg.matrix_rank", "input");
   // For Composite Compliance, allocate `result` of correct shape to
   // avoid resizing in `out` variant.
   // See also `NOTE [matrix rank output shape]`
@@ -632,15 +629,9 @@ Tensor& linalg_matrix_rank_out(
     bool hermitian,
     Tensor& result) {
   // Matrices or batch of matrices are allowed
-  TORCH_CHECK(
-      input.dim() >= 2,
-      "torch.linalg.matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ",
-      input.sizes());
-  // NOTE [matrix rank output shape]
-  // matrix_rank assigns a scalar value for each matrix in the batch so
-  // result's shape is equal to input.shape[0:input.ndim-2]
-  // for single matrix result_shape = {}
-  auto result_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
+  checkIsMatrix(input, "torch.linalg.matrix_rank", "input");
+  auto result_shape =
+    IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
   at::native::resize_output(result, result_shape);
   return matrix_rank_impl(input, atol_opt, rtol_opt, hermitian, result);
 }
