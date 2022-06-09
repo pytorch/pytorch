@@ -54,7 +54,9 @@ build \
     --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=type-limits                           \
     --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=type-limits                \
     --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-function                       \
-    --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=unused-function
+    --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=unused-function            \
+    --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-variable                       \
+    --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=unused-variable
 
 build \
     --per_file_copt=//:aten/src/ATen/RegisterCompositeExplicitAutograd.cpp@-Wno-error=unused-function \
