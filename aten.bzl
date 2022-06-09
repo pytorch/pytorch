@@ -78,6 +78,7 @@ def generate_aten_impl(ctx):
         tools = tool_inputs,
         input_manifests = tool_inputs_manifest,
         use_default_shell_env = True,
+        mnemonic = "GenerateAten",
     )
     return [DefaultInfo(files = depset(outputs))]
 
