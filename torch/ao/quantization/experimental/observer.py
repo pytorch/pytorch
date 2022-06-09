@@ -6,9 +6,6 @@ the values observed during calibration (PTQ) or training (QAT).
 import torch
 from torch.ao.quantization.observer import ObserverBase
 
-# TODO: Consider adding NonUniformQuantizationObserverBase class
-# when more than one non-uniform method is implemented
-
 class APoTObserver(ObserverBase):
     alpha = 0
     gamma = 0
