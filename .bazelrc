@@ -31,11 +31,15 @@ build --copt=-isystem --copt=bazel-out/k8-fastbuild-cpu-only/bin
 # rules_cuda configuration
 build:cpu-only --@rules_cuda//cuda:enable_cuda=False
 
-# We add additional warnings to our CPU build and not our GPU build
-# because the GPU build is set up as a C++ toolchain using nvcc. The
-# nvcc compiler does not know how to handle some of the C++ warning
-# flags and has fatal errors if it gets them. By only setting them on
-# the C++ builds, we cover most of our repo and avoid those issues.
-build:cpu-only                   \
-    --cxxopt=-Werror=type-limits \
-    --cxxopt=-Werror=unused-function
+# Set additional warnings to error level.
+#
+# Implementation notes:
+#  * we use file extensions to determine if we are using the C++
+#    compiler or the cuda compiler
+#  * we use ^// at the start of the regex to only permit matching
+#    PyTorch files. This excludes external repos.
+build \
+    --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=type-limits                \
+    --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=type-limits     \
+    --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-function            \
+    --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=unused-function
