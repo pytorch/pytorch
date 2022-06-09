@@ -1743,7 +1743,7 @@ class TestSparseCSR(TestCase):
 
     @onlyCUDA
     @skipCUDAIf(
-        not _check_cusparse_sddmm_available(),
+        not (TEST_WITH_ROCM or _check_cusparse_sddmm_available()),
         "cuSparse Generic API SDDMM is not available"
     )
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
