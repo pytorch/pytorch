@@ -1111,18 +1111,6 @@ Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<S
   return at::native::nansum_out(self, dim, keepdim, dtype, result);
 }
 
-static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim,
-                        bool keepdim, c10::optional<ScalarType> opt_dtype) {
-  ScalarType dtype = get_dtype_from_result(result, opt_dtype);
-  auto iter = make_reduction("prod", result, self, dim, keepdim, dtype);
-  if (iter.numel() == 0) {
-    result.fill_(1);
-  } else {
-    prod_stub(iter.device_type(), iter);
-  }
-  return result;
-}
-
 // NOTE: this could be implemented via diag and sum, but this has perf problems,
 // see https://github.com/pytorch/pytorch/pull/47305,
 Tensor trace_cpu(const Tensor& self) {

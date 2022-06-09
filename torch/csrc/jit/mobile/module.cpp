@@ -107,6 +107,7 @@ void slot_named_params_recurse(
   }
 }
 
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
 std::string getTopModuleTypeName(const Module& m) {
   std::string name;
   if (m._ivalue()->type() && m._ivalue()->type()->name()) {
@@ -114,6 +115,8 @@ std::string getTopModuleTypeName(const Module& m) {
   }
   return name;
 }
+#endif
+
 } // namespace
 
 const std::vector<at::Tensor> Module::parameters() const {

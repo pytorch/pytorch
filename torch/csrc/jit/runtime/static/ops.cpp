@@ -2642,12 +2642,6 @@ void signed_log1p_out(at::Tensor& out, const at::Tensor& input) {
   });
 }
 
-at::Tensor signed_log1p(const at::Tensor& input) {
-  auto out = create_empty_from(input);
-  signed_log1p_out(out, input);
-  return out;
-}
-
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
