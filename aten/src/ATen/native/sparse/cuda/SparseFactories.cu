@@ -229,39 +229,5 @@ SparseTensor spdiags_sparse_cuda(
   return result_coo;
 }
 
-// Tensor spdiags_backward_sparse_cpu(
-//     const Tensor& grad_out,
-//     const Tensor& offsets,
-//     IntArrayRef input_shape) {
-//   AT_ASSERT(input_shape.size() == 2);
-//   AT_ASSERT(offsets.dim() == 1);
-//   auto n_diag = input_shape[0];
-//   auto n_col_in = input_shape[1];
-//   auto n_col_out = grad_out.size(1);
-//   auto n_row_out = grad_out.size(0);
-//   AT_ASSERT(grad_out.dim() == 2);
-//   AT_ASSERT(offsets.size(0) == n_diag);
-//   // auto output_layout = grad_out.layout();
-//   auto grad_in_options = grad_out.options().layout(Layout::Strided);
-//   Tensor grad_in = at::zeros({input_shape}, grad_in_options);
-//   if (grad_out.layout() == Layout::Sparse) {
-//     spdiags_backward_from_coo(
-//         grad_out, offsets, n_diag, n_col_in, n_col_out, n_row_out, grad_in);
-//   } else {
-//     // Todo, for backward efficient implementation from different formats
-//     should
-//     // be possible
-//     spdiags_backward_from_coo(
-//         grad_out.to_sparse(),
-//         offsets,
-//         n_diag,
-//         n_col_in,
-//         n_col_out,
-//         n_row_out,
-//         grad_in);
-//   }
-//   return grad_in;
-// }
-
 } // namespace native
 } // namespace at
