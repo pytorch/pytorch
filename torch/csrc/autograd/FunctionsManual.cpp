@@ -1552,16 +1552,6 @@ Tensor infinitely_differentiable_logit_backward(
   }
 }
 
-Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, bool log_target) {
-  auto result = kl_div_backward(grad, input, target, at::Reduction::None, log_target);
-  if (reduction == at::Reduction::Mean) {
-    return result.mean();
-  } else if (reduction == at::Reduction::Sum) {
-    return result.sum();
-  }
-  return result;
-}
-
 // Compute derivatives for targets.
 Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction, bool log_target) {
   Tensor grad_target;
@@ -1582,13 +1572,36 @@ Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, in
 
   if (reduction == at::Reduction::Mean) {
     if (!grad_target._is_zerotensor()) {
-      grad_target.div_(target.numel());
+      grad_target.div_(self.numel());
     } else {
-      grad_target.div(target.numel());
+      grad_target.div(self.numel());
     }
   }
 
   return grad_target;
+}
+
+Tensor kl_div_double_backward_target(
+    const Tensor& grad,
+    const Tensor& result,
+    const Tensor& target,
+    const Tensor& grad_output,
+    const Tensor& input,
+    int64_t reduction,
+    bool log_target
+) {
+  Tensor g;
+  if (log_target) {
+    g = grad * result;
+  }
+  else {
+    g = at::where(target > 0, -grad * grad_output, at::zeros({}, grad.options()));
+    if (reduction == at::Reduction::Mean) {
+      g = areAnyTensorSubclassLike({g}) ? g / input.numel() : g.div_(input.numel());
+    }
+  }
+
+  return g;
 }
 
 Tensor binary_cross_entropy_target_backward(
