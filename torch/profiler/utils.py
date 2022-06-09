@@ -1,6 +1,7 @@
 from collections import deque
 from dataclasses import dataclass
-from torch.profiler import DeviceType
+from torch.profiler import profile, DeviceType
+import torch
 
 
 class EventKey:
@@ -29,7 +30,7 @@ class EventMetrics:
         return self.idle_time_ns / self.duration_time_ns
 
 
-def compute_event_metrics(prof):
+def compute_event_metrics(prof: torch.autograd.profiler.profile):
     metrics = dict()
     compute_self_time(prof, metrics)
     compute_idle_time(prof, metrics)
@@ -44,7 +45,7 @@ def compute_self_time(prof, metrics):
             event_tree: Profiler's kineto_results.experimental_event_tree
     '''
     stack = deque()
-    event_tree = prof.profiler.kineto_results.experimental_event_tree()
+    event_tree = prof.kineto_results.experimental_event_tree()
     for event in event_tree:
         stack.append(event)
 
@@ -63,9 +64,9 @@ def compute_self_time(prof, metrics):
         metrics[EventKey(curr_event)].duration_time_ns = curr_event.duration_time_ns
 
 
-def compute_idle_time(prof, metrics):
-    event_tree = prof.profiler.kineto_results.experimental_event_tree()
-    event_list = prof.profiler.kineto_results.events()
+def compute_idle_time(prof: torch.autograd.profiler.profile, metrics):
+    event_tree = prof.kineto_results.experimental_event_tree()
+    event_list = prof.kineto_results.events()
 
     def is_cuda_launch_kernel(e):
         return e.name() == "cudaLaunchKernel"
@@ -106,9 +107,10 @@ def compute_idle_time(prof, metrics):
         metrics[EventKey(event)].idle_time_ns = idle_time
 
 
-def get_optimizable_events(prof):
+def get_optimizable_events(prof: torch.autograd.profiler.profile):
     metrics = compute_event_metrics(prof)
 
     # Compute a list of events that that long idle time
 
     # Print the list of events in human-friendly format
+    pass

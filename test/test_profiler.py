@@ -1173,7 +1173,7 @@ class TestProfiler(TestCase):
             loss = (y - z) ** 2
             loss.backward()
 
-        metrics = utils.compute_event_metrics(p)
+        metrics = utils.compute_event_metrics(p.profiler)
         tree = p.profiler.kineto_results.experimental_event_tree()
         self.assertEqual(metrics[utils.EventKey(tree[0])].self_time_ns, tree[0].duration_time_ns -
                          sum([child.duration_time_ns for child in tree[0].children]))
