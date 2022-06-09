@@ -552,7 +552,6 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CI=1
             export CROSS_COMPILE_ARM64=1
             export JOB_BASE_NAME=$CIRCLE_JOB
 
@@ -590,7 +589,6 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CI=1
             export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Install sccache
@@ -627,7 +625,6 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CI=1
             export JOB_BASE_NAME=$CIRCLE_JOB
 
             chmod a+x .jenkins/pytorch/macos-test.sh
@@ -640,7 +637,6 @@ jobs:
             source /Users/distiller/workspace/miniconda3/bin/activate
             python3 -m pip install boto3==1.19.12
 
-            export IN_CI=1
             export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Using the same IAM user to write stats to our OSS bucket
@@ -666,7 +662,6 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CI=1
             export BUILD_LITE_INTERPRETER=1
             export JOB_BASE_NAME=$CIRCLE_JOB
             chmod a+x ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh
@@ -876,7 +871,6 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CI=1
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             export TCLLIBPATH="/usr/local/lib"
