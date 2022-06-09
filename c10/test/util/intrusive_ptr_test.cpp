@@ -1712,8 +1712,8 @@ struct WeakReferenceToSelf : public intrusive_ptr_target {
     ptr.reset();
   }
   weak_intrusive_ptr<intrusive_ptr_target> ptr =
-    weak_intrusive_ptr<intrusive_ptr_target>(
-        make_intrusive<intrusive_ptr_target>());
+      weak_intrusive_ptr<intrusive_ptr_target>(
+          make_intrusive<intrusive_ptr_target>());
 };
 } // namespace
 
