@@ -580,7 +580,12 @@ class GitHubPR:
 
     def get_authors(self) -> Dict[str, str]:
         rc = {}
-        for idx in range(self.get_commit_count()):
+        # TODO: replace with  `self.get_commit_count()` when GraphQL pagination can be used
+        # to fetch all commits, see https://gist.github.com/malfet/4f35321b0c9315bcd7116c7b54d83372
+        # and https://support.github.com/ticket/enterprise/1642/1659119
+        if self.get_commit_count() <= 250:
+            assert len(self._fetch_authors()) == self.get_commit_count()
+        for idx in range(len(self._fetch_authors())):
             rc[self.get_committer_login(idx)] = self.get_committer_author(idx)
 
         return rc
