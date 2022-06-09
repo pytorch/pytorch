@@ -992,7 +992,7 @@ def main() -> None:
               force=args.force,
               comment_id=args.comment_id,
               on_green=args.on_green,
-              mandatory_only=args.mandatory_only)
+              mandatory_only=args.on_mandatory)
     except Exception as e:
         handle_exception(e)
 
