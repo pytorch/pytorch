@@ -148,10 +148,6 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   void set_constructor_metadata();
   functionalization::FunctionalStorageImpl* functional_storage_impl() const;
 
-<<<<<<< HEAD
-  // Note that value is not taken by reference: internally, the wrapper will
-  // change the value tensor that it points to over time.
-=======
   // This is used to re-implement shallow_copy_and_detach for FunctionalTensorWrapper.
   // The implementation is identical, but we just need to return a subclass instead of a plain TensorImpl.
   // TODO: maybe it's possible to arrange for that to happen automatically without an override here?
@@ -160,8 +156,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
       VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const;
 
-  // Note that value is not taken by reference: internally, the wrapper will change the value tensor that it points to over time.
->>>>>>> 6194e9b001 ([prototype] integrate functionalization <> LTC torchscript backend)
+  // Note that value is not taken by reference: internally, the wrapper will
+  // change the value tensor that it points to over time.
   Tensor value_;
   int64_t level_;
 
