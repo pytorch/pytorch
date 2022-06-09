@@ -553,7 +553,6 @@ Node* FunctionExtractor::CreateFunctionNode(
     const std::string& domain_name,
     const std::string& func_name) {
   const auto& func_scope = func_ctx.scope_key_;
-  const auto& func_scope_ctx = func_ctx.scope_ctxs_[func_scope];
   GRAPH_DEBUG(
       "Create and insert local function for scope: ",
       func_scope->namesFromRoot());
