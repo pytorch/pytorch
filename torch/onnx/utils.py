@@ -1766,7 +1766,9 @@ def _run_symbolic_function(
                 ),
             )
     except RuntimeError:
-        if (
+        if operator_export_type == _C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
+            return None
+        elif (
             operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
             and not symbolic_helper.is_caffe2_aten_fallback()
         ):

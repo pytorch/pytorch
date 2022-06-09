@@ -9,8 +9,7 @@ class CustomFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input):
         ctx.save_for_backward(input)
-        h = input.clamp(min=0)
-        return torch.special.erf(h)
+        return input.clamp(min=0)
 
     @staticmethod
     def backward(ctx, grad_output):

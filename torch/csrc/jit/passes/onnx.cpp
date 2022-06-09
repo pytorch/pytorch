@@ -461,10 +461,15 @@ void NodeToONNX(
       // 1. The torch.autograd.Function class of this node object has `symbolic`
       // method defined.
       // 2. Custom export symbolic is registered for prim::PythonOp.
-      try {
-        inlineAutograd(op);
-      } catch (const std::exception& ex) {
-        TORCH_WARN("Unable to inline PythonOp: ", op->name());
+      if (operator_export_type == ::torch::onnx::OperatorExportTypes::ONNX) {
+        try {
+          inlineAutograd(op);
+        } catch (const std::exception& ex) {
+          // TODO : Add more description in warning
+          TORCH_WARN("Unable to inline PythonOp: ", op->name());
+          cloneNode(op);
+        }
+      } else {
         cloneNode(op);
       }
       return;

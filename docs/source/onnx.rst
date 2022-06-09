@@ -511,6 +511,9 @@ There is no static symbolic method present for this model, yet it is exported as
     %3 : float = onnx::Log[](%2)
     return (%3)
 
+In order to avoid inlining of autograd.Functions, model should be exported with
+operator_export_type set to ONNX_FALLTHROUGH or ONNX_ATEN_FALLBACK mode
+
 Custom operators
 ^^^^^^^^^^^^^^^^
 

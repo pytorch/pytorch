@@ -1181,8 +1181,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             @staticmethod
             def forward(ctx, input):
                 ctx.save_for_backward(input)
-                h = input.clamp(min=0)
-                return torch.special.erf(h)
+                return input.clamp(min=0)
 
             @staticmethod
             def backward(ctx, grad_output):
@@ -1213,8 +1212,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             @staticmethod
             def forward(ctx, input):
                 ctx.save_for_backward(input)
-                h = input.clamp(min=0)
-                return torch.special.erf(h)
+                return input.clamp(min=0)
 
             @staticmethod
             def backward(ctx, grad_output):
@@ -1231,7 +1229,11 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         batch = torch.FloatTensor(1, 3)
 
         graph, _, _ = self._model_to_graph(
-            model, batch, input_names=["batch"], dynamic_axes={"batch": [0, 1]}
+            model,
+            batch,
+            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+            input_names=["batch"],
+            dynamic_axes={"batch": [0, 1]}
         )
         iter = graph.nodes()
         autograd1 = next(iter)

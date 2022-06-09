@@ -131,10 +131,21 @@ class TestAutogradFuns(unittest.TestCase):
 
         model = Caller()
         input = torch.ones(1, 5)
+
+        # Test ONNX_FALLTHROUGH_MODE
         graph, _, _ = _model_to_graph(
             model,
             (input,),
             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+        )
+        iter = graph.nodes()
+        self.assertEqual(next(iter).kind(), "prim::PythonOp")
+
+        # Test ATEN_FALLBACK_MODE
+        graph, _, _ = _model_to_graph(
+            model,
+            (input,),
+            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK,
         )
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "prim::PythonOp")
