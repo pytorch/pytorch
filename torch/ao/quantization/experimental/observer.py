@@ -5,6 +5,7 @@ the values observed during calibration (PTQ) or training (QAT).
 
 import torch
 import itertools
+import math
 from torch.ao.quantization.observer import ObserverBase
 from typing import Tuple
 
@@ -52,7 +53,7 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         max_val: torch.Tensor,
             signed: bool) -> Tuple[float, torch.Tensor, torch.Tensor]:
         # compute alpha
-        self.alpha = float(max_val)
+        self.alpha = max_val
 
         # check for valid inputs of b, k
         assert(self.k and self.k != 0)
@@ -111,6 +112,25 @@ class NonUniformQuantizationObserverBase(ObserverBase):
 
         return (self.gamma, quantization_levels, level_indices)
 
+    def float_to_apot(self, x, levels, indices):
+        levels_lst = list(levels)
+        indices_lst = list(indices)
+
+        min_delta = math.inf
+        best_idx = 0
+
+        for level, idx in zip(levels_lst, indices_lst):
+            cur_delta = abs(level - x)
+            if cur_delta < min_delta:
+                min_delta = cur_delta
+                best_idx = idx
+
+        return best_idx
+
+    def apot_to_float(self, x_apot, levels, indices):
+        idx = list(indices).index(x_apot)
+        return levels[idx]
+
 class APoTObserver(NonUniformQuantizationObserverBase):
     def __init__(
         self,
@@ -138,5 +158,3 @@ class APoTObserver(NonUniformQuantizationObserverBase):
         self.min_val.copy_(min_val)
         self.max_val.copy_(max_val)
         return x_orig
-
-    def quant_levels_visualization():
