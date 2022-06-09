@@ -199,6 +199,7 @@ def meta_linalg_qr_helper(input, mode):
     R.transpose_(-2, -1)
     return (Q, R)
 
+
 # Leaving this function around because a python implementation
 # of indexing shape inference is useful,
 # but not registering it to the dispatcher because we already
