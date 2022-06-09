@@ -623,6 +623,11 @@ Tensor& multinomial_out(const Tensor& self,
     return result;
   }
 
+  if(self.is_mps()) {
+    result = multinomial_with_replacement_mps_kernel(const_cast<Tensor&>(self), n_sample, gen, result);
+  }
+
+  else
   multinomial_with_replacement_stub(
       result.device().type(), result, self, n_sample, gen);
   return result;

@@ -10,6 +10,10 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/Dispatch.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/AccumulateType.h>
 #include <torch/library.h>
 namespace at {
 namespace native {
@@ -517,6 +521,154 @@ Tensor& exponential_mps_(Tensor& self, double lambda, c10::optional<Generator> g
   }
 
   return self;
+
+}
+
+// Multinomial with replacement
+Tensor multinomial_with_replacement_mps_entry(
+    const Tensor& self,
+    const int64_t n_sample,
+    c10::optional<Generator> generator) {
+
+  Tensor result = at::empty({0}, self.options().dtype(kLong));
+
+  if (self.dim() == 1) {
+    result.resize_({n_sample});
+  } else {
+    const int64_t n_dist = self.size(0);
+    result.resize_({n_dist, n_sample});
+  }
+
+  return multinomial_with_replacement_mps_kernel(self, n_sample, generator, result);
+
+}
+
+Tensor& multinomial_with_replacement_mps_kernel(
+    const Tensor& self,
+    const int64_t n_sample,
+    c10::optional<Generator> generator,
+    Tensor& result) {
+
+  using namespace mps;
+
+  int inputSize = self.dim();
+  int numDist =
+      inputSize == 1 ? 1 : self.size(0);
+  int numCategories =
+      inputSize == 1 ? self.size(0) : self.size(1);
+
+  // Restructure data for 2d
+  auto self_v = inputSize == 1 ? self.view({numDist, numCategories}) : self;
+  auto result_v = inputSize == 1 ? result.view({numDist, n_sample}) : result;
+
+  MPSStream* stream = getCurrentMPSStream();
+  uint64_t seed_ = c10::detail::getNonDeterministicRandom(true);
+
+  @autoreleasepool {
+    MPSShape* prob_shape = getMPSShape(self_v);
+    MPSGraph* mpsGraph = make_mps_graph();
+
+    auto prob_dtype = getMPSDataType(self_v.scalar_type());
+    auto result_dtype = getMPSDataType(result.scalar_type());
+
+    // This is probability weights
+    MPSGraphTensor *probTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self_v.scalar_type()), prob_shape);
+
+    MPSGraphTensor *sumProbs = [mpsGraph reductionSumWithTensor:probTensor
+                                                           axis:-1
+                                                           name:nil];
+
+    MPSGraphTensor *normalizedProbs = [mpsGraph divisionWithPrimaryTensor:probTensor
+                                                          secondaryTensor:sumProbs
+                                                                     name:nil];
+
+    auto ns_numCategories = [NSNumber numberWithInt:numCategories];
+    auto ns_numDist = [NSNumber numberWithInt:numDist];
+    auto ns_n_sample = [NSNumber numberWithInt:n_sample];
+
+    MPSGraphTensor *ones = [mpsGraph constantWithScalar:1.0f
+                                                  shape:@[ns_numCategories, ns_numCategories]
+                                               dataType:prob_dtype];
+    MPSGraphTensor *upperTriangle = [mpsGraph bandPartWithTensor:ones
+                                                        numLower:0
+                                                        numUpper:-1
+                                                            name:nil];
+    MPSGraphTensor *upperProbRange = [mpsGraph matrixMultiplicationWithPrimaryTensor:normalizedProbs
+                                                                     secondaryTensor:upperTriangle
+                                                                                name:nil];
+
+    MPSGraphTensor *lowerProbRange = [mpsGraph subtractionWithPrimaryTensor:upperProbRange
+                                                            secondaryTensor:normalizedProbs
+                                                                       name:nil];
+
+    upperProbRange = [mpsGraph reshapeTensor:upperProbRange
+                                   withShape:@[ns_numDist, @1, ns_numCategories]
+                                        name:nil];
+    lowerProbRange = [mpsGraph reshapeTensor:lowerProbRange
+                                   withShape:@[ns_numDist, @1, ns_numCategories]
+                                        name:nil];
+
+    MPSGraphTensor *stateTensor = [mpsGraph randomPhiloxStateTensorWithSeed:seed_
+                                                                       name:nil];
+    MPSGraphRandomOpDescriptor *descriptor = [MPSGraphRandomOpDescriptor descriptorWithDistribution:MPSGraphRandomDistributionUniform
+                                                                                           dataType:prob_dtype];
+    NSArray<MPSGraphTensor*> *generatorTensors = [mpsGraph randomTensorWithShape:@[ns_numDist, ns_n_sample, @1]
+                                                                      descriptor:descriptor
+                                                                     stateTensor:stateTensor
+                                                                            name:nil];
+    MPSGraphTensor *randomTensor = generatorTensors[0];
+
+    auto broadcastShape = @[ns_numDist ,ns_n_sample, ns_numCategories];
+    int broadcastShapeVals[3] = {numDist, n_sample, numCategories};
+    MPSGraphTensor *broadcastShapeTensor = [mpsGraph constantWithData:[NSData dataWithBytes:broadcastShapeVals length:sizeof(int) * broadcastShape.count]
+                                                                shape:@[[NSNumber numberWithUnsignedInteger:broadcastShape.count]]
+                                                             dataType:MPSDataTypeUInt32];
+
+    MPSGraphTensor *samplesTensor = [mpsGraph broadcastTensor:randomTensor
+                                                      toShape:broadcastShape
+                                                         name:nil];
+    MPSGraphTensor *sampleAbove = [mpsGraph greaterThanWithPrimaryTensor:samplesTensor
+                                                         secondaryTensor:lowerProbRange
+                                                                    name:nil];
+    MPSGraphTensor *sampleBelow = [mpsGraph lessThanWithPrimaryTensor:samplesTensor
+                                                      secondaryTensor:upperProbRange
+                                                                 name:nil];
+    MPSGraphTensor *sampleWithin = [mpsGraph logicalANDWithPrimaryTensor:sampleAbove
+                                                      secondaryTensor:sampleBelow
+                                                                 name:nil];
+    MPSGraphTensor *sampleMask = [mpsGraph castTensor:sampleWithin
+                                               toType:MPSDataTypeInt32
+                                                 name:@"sampleMask"];
+    MPSGraphTensor *categoriesTensor = [mpsGraph coordinateAlongAxis:-1
+                                                     withShapeTensor:broadcastShapeTensor
+                                                                name:nil];
+    MPSGraphTensor *binnedSamplesTensor = [mpsGraph multiplicationWithPrimaryTensor:categoriesTensor
+                                                                 secondaryTensor:sampleMask
+                                                                            name:nil];
+    MPSGraphTensor *reducedTensor = [mpsGraph reductionSumWithTensor:binnedSamplesTensor
+                                                                axis:-1
+                                                                name:nil];
+    MPSGraphTensor *reshapeTensor = [mpsGraph reshapeTensor:reducedTensor
+                                                 withShape:@[ns_numDist ,ns_n_sample]
+                                                      name:nil];
+    MPSGraphTensor *resultTensor = [mpsGraph castTensor:reshapeTensor
+                                                 toType:getMPSDataType(result.scalar_type())
+                                                   name:@"resultTensor"];
+
+    auto probPlaceholder = Placeholder(probTensor, self_v);
+    auto outputPlaceholder = Placeholder(resultTensor, result_v);
+    NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds = @{
+      probPlaceholder.getMPSGraphTensor() : probPlaceholder.getMPSGraphTensorData()
+    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
+    };
+
+    runMPSGraph(stream, mpsGraph, feeds, results);
+  }
+
+  // TODO: If I change the view, does the original get altered? I should think so
+  return result;
 
 }
 
