@@ -77,6 +77,7 @@ bool Function::initialize_operators(bool should_check_operators) {
     if (!func.has_value()) {
       unsupported_op_names.insert(operator_str(opname));
       all_ops_supported = false;
+      break;
     } else {
       code_.operators_[i] = *func;
     }
@@ -84,7 +85,7 @@ bool Function::initialize_operators(bool should_check_operators) {
   if (should_check_operators) {
     TORCH_CHECK(
         unsupported_op_names.empty(),
-        "Following ops cannot be found. Please check if the operator library is included in the build. If built with selected ops, check if these ops are in the list. If you are a Meta employee, please see fburl.com/missing_ops for a fix. Or post it in https://discuss.pytorch.org/\n",
+        "Following ops cannot be found. Please check if the operator library is included in the build. If built with selected ops, check if these ops are in the list. If you are a Meta employee, please see fburl.com/missing_ops for a fix. Or post it in https://discuss.pytorch.org/",
         c10::Join(", ", unsupported_op_names));
   }
   code_.initialized = all_ops_supported;
