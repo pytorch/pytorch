@@ -138,3 +138,5 @@ class APoTObserver(NonUniformQuantizationObserverBase):
         self.min_val.copy_(min_val)
         self.max_val.copy_(max_val)
         return x_orig
+
+    def quant_levels_visualization():
