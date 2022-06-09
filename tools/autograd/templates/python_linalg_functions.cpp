@@ -37,7 +37,7 @@ ${py_forwards}
 
 static PyMethodDef linalg_functions[] = {
   ${py_method_defs}
-  {NULL}
+  {nullptr, nullptr, 0, nullptr}
 };
 
 static PyObject* THPLinalgVariableFunctionsModule = NULL;
@@ -49,6 +49,10 @@ void initLinalgFunctions(PyObject* module) {
      NULL,
      -1,
      linalg_functions
+     /*m_slots=*/nullptr,
+     /*m_traverse=*/nullptr,
+     /*m_clear=*/nullptr,
+     /*m_free=*/nullptr,
   };
   PyObject* linalg = PyModule_Create(&def);
   THPLinalgVariableFunctionsModule = linalg;
