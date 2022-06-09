@@ -156,6 +156,9 @@ struct _cuda_scatter_gather_internal_kernel {
   }
 }; // struct _cuda_scatter_gather_internal_kernel
 
+// When scatter is called and the index tensor
+// has any dimensions larger than the source tensor
+// we use this subroutine instead of the default one.
 template <typename scalar_t>
 struct _cuda_scatter_large_index_internal_kernel {
   template <typename func_t>
@@ -183,6 +186,8 @@ struct _cuda_scatter_large_index_internal_kernel {
     char* src_ptr = (char*)iter.data_ptr(1);
     char* index_ptr = (char*)iter.data_ptr(2);
 
+    // We send the relevant index and source metadata
+    // to the device
     int ndim = index_shape.size();
     int64_t *index_shape_device, *index_strides_device, *src_shape_device, *src_strides_device;
     cudaMalloc((void**)&index_shape_device, ndim * sizeof(int64_t));
@@ -202,7 +207,10 @@ struct _cuda_scatter_large_index_internal_kernel {
       CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
         && "index out of bounds");
 
-      auto original_index_offset = offsets[2] / 8;
+      // Recalculate the source tensor offset based on
+      // the index tensor offset, rather than taking it
+      // from the offset calculator
+      auto original_index_offset = offsets[2] / 8; // index tensor has word size = 8
       decltype(original_index_offset) src_offset = 0;
       int64_t index_idx;
       for (int d = ndim - 1; d >= 0; d--) {
@@ -212,7 +220,7 @@ struct _cuda_scatter_large_index_internal_kernel {
         index_idx %= src_shape_device[d];
         src_offset += src_strides_device[d] * index_idx;
       }
-      src_offset *= 4;
+      src_offset *= 4; // source tensor has word size = 4
 
       f(
         (scalar_t*)(self_ptr + offsets[0]),
@@ -245,6 +253,11 @@ struct cuda_scatter_gather_base_kernel {
     auto src_strides = src.strides();
     auto src_strides_vec = ensure_nonempty_vec(src_strides.vec());
 
+    // The scatter version of this works differently
+    // if any dimension of the index tensor is
+    // larger than that same dimension in the
+    // source tensor, so we create a variable to
+    // keep track of that possibility.
     bool index_larger_than_src_in_scatter = false;
     if (is_scatter_like) {
       for (int i = 0; i < ndim; i++) {
@@ -261,6 +274,10 @@ struct cuda_scatter_gather_base_kernel {
     // restride stride[dim] such that
     // if (is_scatter_like) self.stride[dim] = 0
     // else src.stride[dim] = 0
+    //
+    // also restride stride[d] such that
+    // if (index_larger_than_src_in_scatter) self.stride[d] = 0
+    // for all d
     auto self_restrided = is_scatter_like ?
         restride_dim(self, dim, index_sizes_vec)
       : self.as_strided(index_sizes_vec, self_strides_vec);
@@ -333,6 +350,11 @@ struct cuda_scatter_gather_base_kernel {
     auto src_strides = src.strides();
     auto src_strides_vec = ensure_nonempty_vec(src_strides.vec());
 
+    // The scatter version of this works differently
+    // if any dimension of the index tensor is
+    // larger than that same dimension in the
+    // source tensor, so we create a variable to
+    // keep track of that possibility.
     bool index_larger_than_src_in_scatter = false;
     if (is_scatter_like) {
       for (int i = 0; i < ndim; i++) {
@@ -349,6 +371,10 @@ struct cuda_scatter_gather_base_kernel {
     // restride stride[dim] such that
     // if (is_scatter_like) self.stride[dim] = 0
     // else src.stride[dim] = 0
+    //
+    // also restride stride[d] such that
+    // if (index_larger_than_src_in_scatter) self.stride[d] = 0
+    // for all d
     auto self_restrided = is_scatter_like ?
         restride_dim(self, dim, index_sizes_vec)
       : self.as_strided(index_sizes_vec, self_strides_vec);
@@ -422,6 +448,11 @@ struct cuda_scatter_gather_base_kernel {
     auto src_strides = src.strides();
     auto src_strides_vec = ensure_nonempty_vec(src_strides.vec());
 
+    // The scatter version of this works differently
+    // if any dimension of the index tensor is
+    // larger than that same dimension in the
+    // source tensor, so we create a variable to
+    // keep track of that possibility.
     bool index_larger_than_src_in_scatter = false;
     if (is_scatter_like) {
       for (int i = 0; i < ndim; i++) {
@@ -438,6 +469,10 @@ struct cuda_scatter_gather_base_kernel {
     // restride stride[dim] such that
     // if (is_scatter_like) self.stride[dim] = 0
     // else src.stride[dim] = 0
+    //
+    // also restride stride[d] such that
+    // if (index_larger_than_src_in_scatter) self.stride[d] = 0
+    // for all d
     auto self_restrided = is_scatter_like ?
         restride_dim(self, dim, index_sizes_vec)
       : self.as_strided(index_sizes_vec, self_strides_vec);
