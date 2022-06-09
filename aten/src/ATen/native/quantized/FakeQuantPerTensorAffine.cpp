@@ -3,7 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/native/quantized/fake_quant_affine.h>
+#include <ATen/native/quantized/FakeQuantAffine.h>
 
 // FakeQuantize Op for PerTensorAffine quantization scheme.
 namespace at {

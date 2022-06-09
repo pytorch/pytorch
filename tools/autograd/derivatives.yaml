@@ -413,7 +413,7 @@
 
 - name: _neg_view(Tensor(a) self) -> Tensor(a)
   self: grad.neg()
-  result: self_t.neg()
+  result: self_t._neg_view()
 
 - name: _conj_physical(Tensor self) -> Tensor
   self: grad.conj_physical()
@@ -949,9 +949,10 @@
   U: std::get<1>(linalg_lu_jvp(A_t, P, L, U, pivot))
   output_differentiability: [False, True, True]
 
-- name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
-  self, LU_data: lu_solve_backward(grad, result, LU_data, LU_pivots, grad_input_mask)
-  result: lu_solve_jvp(result, LU_data_p, LU_data_t, self_t, LU_pivots)
+- name: linalg_lu_solve(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False) -> Tensor
+  LU: linalg_lu_solve_LU(grad, LU, pivots, result, left, adjoint)
+  B: "at::linalg_lu_solve(LU, pivots, grad, left, !adjoint)"
+  result: linalg_lu_solve_jvp(result, LU_p, pivots, LU_t, B_t, left, adjoint)
 
 - name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
   LU_data: lu_unpack_backward(grad_L, grad_U, LU_data.size(-2), LU_data.size(-1))
@@ -2701,7 +2702,7 @@
   output_differentiability: [False]
 
 - name: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
-  data: _segment_reduce_backward(grad, result, data, reduce, lengths)
+  data: _segment_reduce_backward(grad, result, data, reduce, lengths, axis, initial)
 
 - name: _pin_memory(Tensor self, Device? device=None) -> Tensor
   self: grad
