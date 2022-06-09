@@ -1,4 +1,3 @@
-#include <c10/util/irange.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -10,6 +9,7 @@
 
 #include <algorithm>
 #include <cstdarg>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -129,9 +129,9 @@ void THPUtils_invalidArguments(PyObject *given_args, PyObject *given_kwargs,
   std::vector<std::string> option_strings;
   va_list option_list;
   va_start(option_list, num_options);
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  for(const auto i : c10::irange(num_options))
-    option_strings.emplace_back(va_arg(option_list, const char*));
+  std::generate_n(std::back_inserter(option_strings), num_options, [&option_list] {
+    return va_arg(option_list, const char*);
+  });
   va_end(option_list);
 
   PyErr_SetString(PyExc_TypeError, torch::format_invalid_args(
