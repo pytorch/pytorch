@@ -6,9 +6,6 @@ set -ex
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-# shellcheck disable=SC2034
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
-
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
