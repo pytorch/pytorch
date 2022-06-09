@@ -904,7 +904,7 @@ def unconvertible_ops(
         )
     unsupported_ops = list()
     supported_namespaces = ("onnx", "prim", "quantized")
-    for node in graph.nodes():  # type: ignore[attr-defined]
+    for node in graph.nodes():
         if node.kind().split(":")[0] not in supported_namespaces:
             unsupported_ops.append(node.kind())
     return graph, unsupported_ops
@@ -1365,10 +1365,10 @@ def _run_symbolic_function(
 
     # See Note [Export inplace]
     # TODO(ezyang): I think this is not necessary anymore
-    if n.kind().endswith("_"):  # type: ignore[attr-defined]
-        ns_op_name = n.kind()[:-1]  # type: ignore[attr-defined]
+    if n.kind().endswith("_"):
+        ns_op_name = n.kind()[:-1]
     else:
-        ns_op_name = n.kind()  # type: ignore[attr-defined]
+        ns_op_name = n.kind()
     ns, op_name = ns_op_name.split("::")
 
     try:

@@ -280,7 +280,7 @@ __global__ void segment_reduce_backward_kernel(
 } // namespace
 
 template <bool is_offsets_like = false>
-Tensor _segment_reduce_cuda_lengths_offsets_backward_kernel(
+Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
     const Tensor& grad_contig,
     const Tensor& output_contig,
     const Tensor& data_contig,
@@ -295,8 +295,8 @@ Tensor _segment_reduce_cuda_lengths_offsets_backward_kernel(
   int64_t lengths_stride_axis = lengths_or_offsets_contig.stride(axis);
   auto grad_input = at::zeros({data_contig.sizes()}, grad_contig.options());
 
-  Tensor& offsets = lengths_or_offsets_contig;
-  Tensor& lengths = lengths_or_offsets_contig;
+  auto offsets = lengths_or_offsets_contig;
+  auto lengths = lengths_or_offsets_contig;
   if (is_offsets_like) {
     lengths = lengths.diff();
   } else {
@@ -382,13 +382,37 @@ Tensor _segment_reduce_cuda_lengths_offsets_backward_kernel(
   return grad_input;
 }
 
+Tensor _segment_reduce_lengths_backward_cuda_kernel(
+  const Tensor& grad_contig,
+  const Tensor& output_contig,
+  const Tensor& data_contig,
+  SegmentReductionType reduction,
+  const Tensor& lengths_contig,
+  int64_t axis,
+  const c10::optional<Scalar>& initial) {
+  return _segment_reduce_lengths_offsets_backward_cuda_kernel</*is_offsets_like=*/false>(
+    grad_contig, output_contig, data_contig, reduction, lengths_contig, axis, initial);
+}
+
+Tensor _segment_reduce_offsets_backward_cuda_kernel(
+  const Tensor& grad_contig,
+  const Tensor& output_contig,
+  const Tensor& data_contig,
+  SegmentReductionType reduction,
+  const Tensor& offsets_contig,
+  int64_t axis,
+  const c10::optional<Scalar>& initial) {
+  return _segment_reduce_lengths_offsets_backward_cuda_kernel</*is_offsets_like=*/true>(
+    grad_contig, output_contig, data_contig, reduction, offsets_contig, axis, initial);
+}
+
 template <bool is_offsets_like = false>
-Tensor _segment_reduce_cuda_kernel(
-    SegmentReductionType reduction,
-    const Tensor& data,
-    const Tensor& lengths_or_offsets,
-    int64_t axis,
-    const c10::optional<Scalar>& initial) {
+Tensor _segment_reduce_lengths_offsets_cuda_kernel(
+  SegmentReductionType reduction,
+  const Tensor& data,
+  const Tensor& lengths_or_offsets,
+  int64_t axis,
+  const c10::optional<Scalar>& initial) {
   // data and lengths_or_offsets should be contiguous from the call to .contiguous in segment_reduce_kernel
   TORCH_CHECK(data.is_contiguous());
   TORCH_CHECK(lengths_or_offsets.is_contiguous());
@@ -400,8 +424,8 @@ Tensor _segment_reduce_cuda_kernel(
   auto output = at::empty(output_shape, data.options());
 
 
-  Tensor& offsets = lengths_or_offsets;
-  Tensor& lengths = lengths_or_offsets;
+  auto offsets = lengths_or_offsets;
+  auto lengths = lengths_or_offsets;
   if (is_offsets_like) {
     lengths = lengths.diff();
   } else {
@@ -568,14 +592,34 @@ Tensor _segment_reduce_cuda_kernel(
   return output;
 }
 
-REGISTER_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_cuda_kernel);
-REGISTER_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_cuda_kernel<true>)
+Tensor _segment_reduce_lengths_cuda_kernel(
+  SegmentReductionType reduction,
+  const Tensor& data,
+  const Tensor& lengths,
+  int64_t axis,
+  const c10::optional<Scalar>& initial) {
+  return _segment_reduce_lengths_offsets_cuda_kernel</*is_offsets_like=*/false>(
+    reduction, data, lengths, axis, initial);
+}
+
+Tensor _segment_reduce_offsets_cuda_kernel(
+  SegmentReductionType reduction,
+  const Tensor& data,
+  const Tensor& offsets,
+  int64_t axis,
+  const c10::optional<Scalar>& initial) {
+  return _segment_reduce_lengths_offsets_cuda_kernel</*is_offsets_like=*/true>(
+    reduction, data, offsets, axis, initial);
+}
+
+REGISTER_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cuda_kernel);
+REGISTER_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_offsets_cuda_kernel);
 REGISTER_DISPATCH(
     _segment_reduce_lengths_backward_stub,
-    &_segment_reduce_cuda_lengths_offsets_backward_kernel);
+    &_segment_reduce_lengths_backward_cuda_kernel);
 REGISTER_DISPATCH(
   _segment_reduce_offsets_backward_stub,
-  &_segment_reduce_cuda_lengths_offsets_backward_kernel<true>);
+  &_segment_reduce_offsets_backward_cuda_kernel);
 
 } // namespace native
 } // namespace at
