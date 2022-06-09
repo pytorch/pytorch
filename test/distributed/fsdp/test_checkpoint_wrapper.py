@@ -132,7 +132,7 @@ class CheckpointWrapperTest(TestCase):
         model = MyModel()
         n_linear = sum(1 if isinstance(x, nn.Linear) else 0 for x in model.modules())
 
-        def check_fn(_, l):
+        def check_fn(l):
             return isinstance(l, nn.Linear)
 
         apply_activation_checkpointing_wrapper(
@@ -142,7 +142,6 @@ class CheckpointWrapperTest(TestCase):
         n_checkpointed = sum(1 if isinstance(x, CheckpointWrapper) else 0 for x in model.modules())
         self.assertEqual(n_checkpointed, n_linear_wrapped)
         self.assertEqual(n_linear, n_linear_wrapped)
-        print(model)
         for j in range(3):
             self.assertTrue(isinstance(model.seq[j].lin, CheckpointWrapper))
             self.assertTrue(isinstance(model.seq[j].nested_linear[0], CheckpointWrapper))
