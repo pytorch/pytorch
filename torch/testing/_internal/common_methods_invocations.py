@@ -3667,10 +3667,6 @@ def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
                                      requires_grad=requires_grad))),)
 
 
-def error_inputs_trace(op, device):
-    yield ErrorInput(SampleInput(make_tensor((3, 4, 5), dtype=torch.float32, device=device)), error_regex="expected a matrix")
-
-
 def sample_inputs_renorm(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     cases = (((S, S, S), (2, 1, 0.5)),
@@ -4339,6 +4335,7 @@ def error_inputs_embedding(op_info, device, **kwargs):
 def error_inputs_t(op_info, device, **kwargs):
     yield ErrorInput(
         SampleInput(torch.randn(2, 3, 4, 5, device=device)),
+        error_type=RuntimeError,
         error_regex="expects a tensor with <= 2",
     )
 
@@ -9599,21 +9596,20 @@ def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
         ((2, 3, 4), "mean"),
         ((2,), "none"),
         ((2,), "batchmean"),
-        ((2, 3), "batchmean"),
-        ((2, 3, 4), "batchmean"),
         ((2,), "sum"),
     ]
 
+    sample_inputs = []
     for (shape, reduction), log_target in itertools.product(shapes_and_reduction, (True, False)):
-        # generate targets such that target.shape broadcasts over input.shape and
-        # len(target.shape) <= len(input.shape), and vice versa
-        for d in range(len(shape) + 1):
-            for input_shape, target_shape in ((shape, shape[d:]), (shape[d:], shape)):
-                # input should be log-probability, i.e. lie in (-inf, 0]
-                input = make(input_shape, low=None, high=0)
-                target = make(target_shape, low=None, high=0) if log_target else make(shape, low=0, high=1)
-                sample = SampleInput(input, args=(target,), kwargs=dict(reduction=reduction, log_target=log_target))
-                yield sample
+        # input should be log-probability, i.e. lie in (-inf, 0]
+        input = make(shape, low=None, high=0)
+        # target should be a probability by default, i.e. lie in [0, 1], and a log-probability if log_target is set,
+        # i.e. lie in (-inf, 0]
+        target = make(shape, low=None, high=0) if log_target else make(shape, low=0, high=1)
+        sample_inputs.append(
+            SampleInput(input, args=(target,), kwargs=dict(reduction=reduction, log_target=log_target))
+        )
+    return sample_inputs
 
 def sample_inputs_pdist(op_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -12538,7 +12534,7 @@ op_db: List[OpInfo] = [
            # In-place ops
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_qr_geqrf,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack]),
     OpInfo('linalg.slogdet',
            aten_name='linalg_slogdet',
            op=torch.linalg.slogdet,
@@ -15122,7 +15118,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # In-place ops
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack]),
     UnaryUfuncInfo('rad2deg',
                    ref=np.degrees,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
@@ -16058,7 +16054,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_pinv_singular,
            # Only large tensors show issues with implicit backward used prior to
            # explicit backward implementation.
-           decorators=[slowTest, skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[slowTest, skipCUDAIfNoCusolver, skipCPUIfNoLapack],
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # CUDA runs out of memory
@@ -16190,7 +16186,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_svd_lowrank,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off,
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack, with_tf32_off,
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
                                     'TestCommon', 'test_noncontiguous_samples',
                                     device_type='cuda')],
@@ -16212,7 +16208,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_pca_lowrank,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off,
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack, with_tf32_off,
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
                                     'TestCommon', 'test_noncontiguous_samples',
                                     device_type='cuda')],
@@ -17479,7 +17475,6 @@ op_db: List[OpInfo] = [
     OpInfo('trace',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           error_inputs_func=error_inputs_trace,
            supports_inplace_autograd=False,
            supports_out=False,
            supports_forward_ad=True,
@@ -19314,12 +19309,13 @@ op_db: List[OpInfo] = [
         supports_out=False,
         check_batched_grad=False,
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
         skips=(
-            # RuntimeError: input->type()->kind() == TypeKind::OptionalType
-            # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
-            # please report a bug to PyTorch.
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
+            # See https://github.com/pytorch/pytorch/issues/65466
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_gradgrad",
+            ),
         ),
     ),
     OpInfo(
@@ -20313,10 +20309,6 @@ python_ref_db = [
             ),
         )
     ),
-    ElementwiseUnaryPythonRefInfo(
-        "_refs.logical_not",
-        torch_opinfo_name="logical_not",
-    ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_or",
         torch_opinfo_name="logical_or",
@@ -20819,16 +20811,6 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
             # RuntimeError: Tracing expected 5 arguments but got 3 concrete arguments
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
-    ),
-    PythonRefInfo(
-        "_refs.trace",
-        torch_opinfo_name="trace",
-        decorators=(
-            # TODO: torch.diag is currently not supported by either refs, meta funcs, or NVFuser
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            DecorateInfo(unittest.skip("diag is not supported by meta"), 'TestCommon', 'test_python_ref_meta'),
-            DecorateInfo(unittest.skip("diag is not supported by nvfuser"), 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     #
