@@ -166,6 +166,8 @@ and implement it in the the corresponding shape_inference.cpp file.\n
 def get_ltc_helper_fns() -> str:
     return """\
 at::Tensor to_meta(const at::Tensor& tensor) {
+  // undefined tensors can't be converted to the meta device, since they don't have sizes/strides
+  if (!tensor.defined()) return tensor;
   auto out = at::native::empty_strided_meta(tensor.sizes(), tensor.strides(), \
 /*dtype=*/c10::make_optional(tensor.scalar_type()), /*layout=*/c10::make_optional(tensor.layout()), \
 /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
