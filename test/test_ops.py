@@ -1502,7 +1502,6 @@ fake_skips = (
 )
 
 dynamic_output_op_tests = (
-    "__getitem___",
     "argwhere",
     "bincount",
     "index_select",
@@ -1512,8 +1511,13 @@ dynamic_output_op_tests = (
     "nonzero",
     "unique_consecutive",
     "unique",
+    "linalg.lstsq.grad_oriented",
 )
 
+# some inputs invoke dynamic output shape operators, some do not
+sometimes_dynamic_output_op_test = (
+    "__getitem__",
+)
 
 class TestFakeTensorNonErroring(TestCase):
     @onlyCPU
@@ -1555,13 +1559,14 @@ class TestFakeTensorNonErroring(TestCase):
                     # if you see a shape exception here, you may need to add
                     # a `dynamic_output_shape` tag to an operator
                     prims.utils.compare_tensor_meta(fake_out, real_out)
+                self.assertTrue(name not in dynamic_output_op_tests)
 
             except torch._subclasses.fake_tensor.ComplexInputException:
                 pass
             except torch._subclasses.fake_tensor.SparseInputException:
                 pass
             except torch._subclasses.fake_tensor.DynamicOutputShapeException:
-                self.assertTrue(name in dynamic_output_op_tests)
+                self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
 
 
 instantiate_device_type_tests(TestCommon, globals())
