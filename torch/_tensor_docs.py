@@ -3448,6 +3448,37 @@ Example::
     tensor([[2.0000, 2.0000, 3.2300, 2.0000],
             [2.0000, 2.0000, 2.0000, 3.2300]])
 
+    >>> # Testing the case where index.size(d) > src.size(d)
+    >>> src = torch.arange(1, 13).reshape((2, 2, 3))
+    >>> src
+    tensor([[[ 1,  2,  3],
+             [ 4,  5,  6]],
+
+            [[ 7,  8,  9],
+             [10, 11, 12]]])
+    >>> gen = torch.Generator()
+    >>> gen.manual_seed(123456)
+    >>> index = torch.empty((2, 3, 4), dtype = torch.long).random_(0, 3, generator = gen)
+    >>> index
+    tensor([[[0, 0, 3, 0],
+             [2, 2, 0, 1],
+             [1, 0, 3, 2]],
+
+            [[1, 3, 0, 0],
+             [2, 0, 0, 3],
+             [2, 2, 0, 2]],
+
+            [[1, 3, 2, 1],
+             [2, 2, 1, 1],
+             [2, 0, 2, 3]]])
+    >>> torch.zeros((2, 3, 4), dtype=src.dtype).scatter_(2, index, src, reduce='add')
+    tensor([[[ 4,  0,  0,  3],
+             [ 6,  4,  9,  0],
+             [ 2,  1,  1,  3]],
+
+            [[16,  7,  0,  8],
+             [23,  0, 10, 10],
+             [ 9,  0, 22,  0]]])
 """)
 
 add_docstr_all('scatter_add_',
@@ -3511,6 +3542,38 @@ Example::
     tensor([[2., 0., 0., 1., 1.],
             [0., 2., 0., 0., 0.],
             [0., 0., 2., 1., 1.]])
+
+    >>> # Testing the case where index.size(d) > src.size(d)
+    >>> src = torch.arange(1, 13).reshape((2, 2, 3))
+    >>> src
+    tensor([[[ 1,  2,  3],
+             [ 4,  5,  6]],
+
+            [[ 7,  8,  9],
+             [10, 11, 12]]])
+    >>> gen = torch.Generator()
+    >>> gen.manual_seed(123456)
+    >>> index = torch.empty((2, 3, 4), dtype = torch.long).random_(0, 3, generator = gen)
+    >>> index
+    tensor([[[0, 0, 3, 0],
+             [2, 2, 0, 1],
+             [1, 0, 3, 2]],
+
+            [[1, 3, 0, 0],
+             [2, 0, 0, 3],
+             [2, 2, 0, 2]],
+
+            [[1, 3, 2, 1],
+             [2, 2, 1, 1],
+             [2, 0, 2, 3]]])
+    >>> torch.zeros((2, 3, 4), dtype=src.dtype).scatter_add_(2, index, src)
+    tensor([[[ 4,  0,  0,  3],
+             [ 6,  4,  9,  0],
+             [ 2,  1,  1,  3]],
+
+            [[16,  7,  0,  8],
+             [23,  0, 10, 10],
+             [ 9,  0, 22,  0]]])
 
 """.format(**reproducibility_notes))
 
@@ -3585,6 +3648,38 @@ Example::
     tensor([5., 6., 5., 2.])
     >>> input2.scatter_reduce(0, index, src, reduce="amax", include_self=False)
     tensor([3., 6., 5., 2.])
+
+    >>> # Testing the case where index.size(d) > src.size(d)
+    >>> src = torch.arange(1, 13).reshape((2, 2, 3))
+    >>> src
+    tensor([[[ 1,  2,  3],
+             [ 4,  5,  6]],
+
+            [[ 7,  8,  9],
+             [10, 11, 12]]])
+    >>> gen = torch.Generator()
+    >>> gen.manual_seed(123456)
+    >>> index = torch.empty((2, 3, 4), dtype = torch.long).random_(0, 3, generator = gen)
+    >>> index
+    tensor([[[0, 0, 3, 0],
+             [2, 2, 0, 1],
+             [1, 0, 3, 2]],
+
+            [[1, 3, 0, 0],
+             [2, 0, 0, 3],
+             [2, 2, 0, 2]],
+
+            [[1, 3, 2, 1],
+             [2, 2, 1, 1],
+             [2, 0, 2, 3]]])
+    >>> torch.zeros((2, 3, 4), dtype=src.dtype).scatter_reduce(2, index, src, reduce="sum")
+    tensor([[[ 4,  0,  0,  3],
+             [ 6,  4,  9,  0],
+             [ 2,  1,  1,  3]],
+
+            [[16,  7,  0,  8],
+             [23,  0, 10, 10],
+             [ 9,  0, 22,  0]]])
 
 
 """.format(**reproducibility_notes))
