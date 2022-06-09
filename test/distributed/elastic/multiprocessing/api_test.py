@@ -34,6 +34,7 @@ from torch.distributed.elastic.multiprocessing.errors import ErrorHandler
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_MACOS,
+    IS_WINDOWS,
     NO_MULTIPROCESSING_SPAWN,
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
