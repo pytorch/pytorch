@@ -364,7 +364,7 @@ PyTypeObject THPEngineType = {
   0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPEngine_new                                /* tp_new */
+  THPEngine_new,                               /* tp_new */
   nullptr,                                     /* tp_free */
   nullptr,                                     /* tp_is_gc */
   nullptr,                                     /* tp_bases */
@@ -376,6 +376,7 @@ PyTypeObject THPEngineType = {
   0,                                           /* tp_version_tag */
   nullptr,                                     /* tp_finalize */
   nullptr,                                     /* tp_vectorcall */
+  nullptr,                                     /* tp_print */
 };
 
 static void child_atfork() {
