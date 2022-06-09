@@ -49,7 +49,7 @@ static PyObject * THPStream_eq(THPStream *self, THPStream *other) {
 static struct PyMemberDef THPStream_members[] = {
   {(char*)"_cdata",
     T_ULONGLONG, offsetof(THPStream, cdata), READONLY, nullptr},
-  {nullptr, nullptr, 0, nullptr}
+  {nullptr, 0, 0, 0, nullptr}
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
