@@ -2527,6 +2527,203 @@ def native_batch_norm(input: List[int],
   return (out, _size, _size)
 
 )=====")
++ std::string(R"=====(def split(self: List[int],
+    split_sizes: List[int],
+    dim: int=0) -> List[List[int]]:
+  _0 = torch.len(self)
+  if torch.le(_0, 0):
+    dim_post_expr = 1
+  else:
+    dim_post_expr = _0
+  min = torch.neg(dim_post_expr)
+  max = torch.sub(dim_post_expr, 1)
+  if torch.lt(dim, min):
+    _1 = True
+  else:
+    _1 = torch.gt(dim, max)
+  if torch.__not__(_1):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.lt(dim, 0):
+    dim0 = torch.add(dim, dim_post_expr)
+  else:
+    dim0 = dim
+  results = annotate(List[List[int]], [])
+  end_idx = annotate(List[int], [])
+  num_splits = torch.len(split_sizes)
+  for i in range(num_splits):
+    if torch.eq(i, 0):
+      _2 = torch.append(end_idx, self[0])
+    else:
+      _3 = torch.add(end_idx[torch.sub(i, 1)], self[i])
+      _4 = torch.append(end_idx, _3)
+  start = 0
+  for i0 in range(num_splits):
+    end = end_idx[i0]
+    temp = annotate(List[int], [])
+    i1 = i0
+    for i2 in range(torch.len(self)):
+      if torch.eq(i2, dim0):
+        _5 = torch.append(temp, torch.sub(end, start))
+      else:
+        _6 = torch.append(temp, self[i2])
+      i1 = i2
+    _7 = torch.append(results, temp)
+    start = split_sizes[i1]
+  return results
+
+)=====")
++ std::string(R"=====(def split_with_sizes(self: List[int],
+    split_sizes: List[int],
+    dim: int=0) -> List[List[int]]:
+  _0 = torch.len(self)
+  if torch.le(_0, 0):
+    dim_post_expr = 1
+  else:
+    dim_post_expr = _0
+  min = torch.neg(dim_post_expr)
+  max = torch.sub(dim_post_expr, 1)
+  if torch.lt(dim, min):
+    _1 = True
+  else:
+    _1 = torch.gt(dim, max)
+  if torch.__not__(_1):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.lt(dim, 0):
+    dim0 = torch.add(dim, dim_post_expr)
+  else:
+    dim0 = dim
+  results = annotate(List[List[int]], [])
+  end_idx = annotate(List[int], [])
+  num_splits = torch.len(split_sizes)
+  for i in range(num_splits):
+    if torch.eq(i, 0):
+      _2 = torch.append(end_idx, self[0])
+    else:
+      _3 = torch.add(end_idx[torch.sub(i, 1)], self[i])
+      _4 = torch.append(end_idx, _3)
+  start = 0
+  for i0 in range(num_splits):
+    end = end_idx[i0]
+    temp = annotate(List[int], [])
+    i1 = i0
+    for i2 in range(torch.len(self)):
+      if torch.eq(i2, dim0):
+        _5 = torch.append(temp, torch.sub(end, start))
+      else:
+        _6 = torch.append(temp, self[i2])
+      i1 = i2
+    _7 = torch.append(results, temp)
+    start = split_sizes[i1]
+  return results
+
+)=====")
++ std::string(R"=====(def split_sizes(self: List[int],
+    split_size: List[int],
+    dim: int=0) -> List[List[int]]:
+  _0 = torch.len(self)
+  if torch.le(_0, 0):
+    dim_post_expr = 1
+  else:
+    dim_post_expr = _0
+  min = torch.neg(dim_post_expr)
+  max = torch.sub(dim_post_expr, 1)
+  if torch.lt(dim, min):
+    _1 = True
+  else:
+    _1 = torch.gt(dim, max)
+  if torch.__not__(_1):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.lt(dim, 0):
+    dim0 = torch.add(dim, dim_post_expr)
+  else:
+    dim0 = dim
+  results = annotate(List[List[int]], [])
+  end_idx = annotate(List[int], [])
+  num_splits = torch.len(split_size)
+  for i in range(num_splits):
+    if torch.eq(i, 0):
+      _2 = torch.append(end_idx, self[0])
+    else:
+      _3 = torch.add(end_idx[torch.sub(i, 1)], self[i])
+      _4 = torch.append(end_idx, _3)
+  start = 0
+  for i0 in range(num_splits):
+    end = end_idx[i0]
+    temp = annotate(List[int], [])
+    i1 = i0
+    for i2 in range(torch.len(self)):
+      if torch.eq(i2, dim0):
+        _5 = torch.append(temp, torch.sub(end, start))
+      else:
+        _6 = torch.append(temp, self[i2])
+      i1 = i2
+    _7 = torch.append(results, temp)
+    start = split_size[i1]
+  return results
+
+)=====")
++ std::string(R"=====(def split_tensor(self: List[int],
+    split_size: int,
+    dim: int=0) -> List[List[int]]:
+  dim_size = self[dim]
+  _0 = torch.sub(torch.add(dim_size, split_size), 1)
+  chunks = torch.floordiv(_0, split_size)
+  split_sizes = annotate(List[int], [])
+  for i in range(chunks):
+    _1 = torch.append(split_sizes, split_size)
+  _2 = torch.sub(torch.mul(split_size, chunks), dim_size)
+  _3 = torch.sub(split_size, _2)
+  _4 = torch._set_item(split_sizes, torch.sub(chunks, 1), _3)
+  _5 = torch.len(self)
+  if torch.le(_5, 0):
+    dim_post_expr = 1
+  else:
+    dim_post_expr = _5
+  min = torch.neg(dim_post_expr)
+  max = torch.sub(dim_post_expr, 1)
+  if torch.lt(dim, min):
+    _6 = True
+  else:
+    _6 = torch.gt(dim, max)
+  if torch.__not__(_6):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.lt(dim, 0):
+    dim0 = torch.add(dim, dim_post_expr)
+  else:
+    dim0 = dim
+  results = annotate(List[List[int]], [])
+  end_idx = annotate(List[int], [])
+  num_splits = torch.len(split_sizes)
+  for i0 in range(num_splits):
+    if torch.eq(i0, 0):
+      _7 = torch.append(end_idx, self[0])
+    else:
+      _8 = torch.add(end_idx[torch.sub(i0, 1)], self[i0])
+      _9 = torch.append(end_idx, _8)
+  start = 0
+  for i1 in range(num_splits):
+    end = end_idx[i1]
+    temp = annotate(List[int], [])
+    i2 = i1
+    for i3 in range(torch.len(self)):
+      if torch.eq(i3, dim0):
+        _10 = torch.append(temp, torch.sub(end, start))
+      else:
+        _11 = torch.append(temp, self[i3])
+      i2 = i3
+    _12 = torch.append(results, temp)
+    start = split_sizes[i2]
+  return results
+
+)=====")
 + std::string(R"=====(def broadcast_three(a: List[int],
     b: List[int],
     c: List[int]) -> List[int]:
@@ -2678,17 +2875,9 @@ def native_batch_norm(input: List[int],
   return out
 
 def nonzero_lower_bound(input: List[int]) -> List[int]:
-  if torch.ge(torch.len(input), 1):
-    pass
-  else:
-    ops.prim.RaiseException("AssertionError: ")
   return [0, torch.len(input)]
 
 def nonzero_upper_bound(input: List[int]) -> List[int]:
-  if torch.ge(torch.len(input), 1):
-    pass
-  else:
-    ops.prim.RaiseException("AssertionError: ")
   numel = 1
   for _0 in range(torch.len(input)):
     elem = input[_0]
@@ -2766,6 +2955,10 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", "nll_loss_forward"},
     {"aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", "native_layer_norm"},
     {"aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
+    {"aten::split(Tensor input, int[] split_sizes, int dim) -> (Tensor[])", "split"},
+    {"aten::split_with_sizes(Tensor input, int[] split_sizes, int dim) -> (Tensor[])", "split_with_sizes"},
+    {"aten::split.Sizes(Tensor input, int[] split_size, int dim) -> (Tensor[])", "split_sizes"},
+    {"aten::split.Tensor(Tensor input, int split_size, int dim) -> (Tensor[])", "split_tensor"},
     {"aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor", "broadcast_three"},
     {"aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor", "broadcast_one_three"},
     {"aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", "broadcast_inplace"},

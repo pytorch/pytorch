@@ -922,6 +922,33 @@ def native_batch_norm(input: List[int], weight: Optional[List[int]], bias: Optio
         _size = [0]
     return _copy(input), _size, _size
 
+def split_fn(input: List[int], split_sizes: List[int], dim: int = 0):
+    dim = maybe_wrap_dim(dim, len(input))
+    num_indices = len(split_sizes)
+    results: List[List[int]] = []
+    start = 0
+    for i in range(num_indices):
+        end = split_sizes[i]
+        results[i] = slice(input, dim, start, end, step = 1)
+        start = end
+    return results
+
+def split(self: List[int], split_sizes: List[int], dim: int = 0) -> List[List[int]]:
+    return split_fn(self, split_sizes, dim)
+
+def split_sizes(self: List[int], split_size: List[int], dim: int = 0) -> List[List[int]]:
+    return split_fn(self, split_size, dim)
+
+def split_with_sizes(self: List[int], split_sizes: List[int], dim: int = 0) -> List[List[int]]:
+    return split_fn(self, split_sizes, dim)
+
+def split_tensor(self: List[int], split_size: int, dim: int = 0) -> List[List[int]]:
+    dim_size = self[dim]
+    chunks = (dim_size + split_size - 1) // split_size
+    split_sizes = [split_size for i in range(chunks)]
+    split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size)
+    return split_fn(self, split_sizes, dim)
+
 # TODO: Add support for List[Optional[List[int]]] arguments (i.e. `Tensor?[]`).
 # def index_Tensor(self: List[int], indices: List[Optional[List[int]]]) -> List[int]:
 #     assert len(indices) <= len(self), "More indices than dimensions to index"
@@ -1021,6 +1048,11 @@ add_shape_compute_mapping("aten::topk(Tensor self, int k, int dim=-1, bool large
 add_shape_compute_mapping("aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", nll_loss_forward)
 add_shape_compute_mapping("aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", native_layer_norm)
 add_shape_compute_mapping("aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
+add_shape_compute_mapping("aten::split(Tensor input, int[] split_sizes, int dim) -> (Tensor[])", split)
+add_shape_compute_mapping("aten::split_with_sizes(Tensor input, int[] split_sizes, int dim) -> (Tensor[])", split_with_sizes)
+add_shape_compute_mapping("aten::split.Sizes(Tensor input, int[] split_size, int dim) -> (Tensor[])", split_sizes)
+add_shape_compute_mapping("aten::split.Tensor(Tensor input, int split_size, int dim) -> (Tensor[])", split_tensor)
+
 # TODO: Add support for List[Optional[List[int]]] arguments (i.e. `Tensor?[]`).
 #add_shape_compute_mapping("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", index_Tensor)
 
