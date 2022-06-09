@@ -2,9 +2,12 @@
 import argparse
 import os
 import pathlib
+<<<<<<< HEAD
+=======
 import sys
 
 import yaml
+>>>>>>> 95937de706b ([retake][mobile] Fix lightweight dispatch OOM error by introducing selective build)
 from dataclasses import dataclass
 from torchgen.api import cpp
 from torchgen.api import unboxing
@@ -158,9 +161,6 @@ def gen_unboxing(
     def key_func(fn: Union[NativeFunction, NativeFunctionsGroup]) -> str:
         return fn.root_name
 
-    selected_op_num: int = len(selector.operators)
-    # a best practice threshold of operators to enable sharding
-    sharding_threshold: int = 100
     cpu_fm.write_sharded(
         "UnboxingFunctions.cpp",
         native_functions,
@@ -168,7 +168,7 @@ def gen_unboxing(
         env_callable=lambda fn: {
             "definitions": [ComputeUnboxingFunctions(Target.DEFINITION, selector)(fn)]
         },
-        num_shards=1 if selected_op_num < sharding_threshold else 5,
+        num_shards=5,
         sharded_keys={"definitions"},
     )
     cpu_fm.write(
@@ -189,7 +189,7 @@ def gen_unboxing(
         env_callable=lambda fn: {
             "unboxed_ops": [ComputeCodegenUnboxedKernels(selector)(fn)]
         },
-        num_shards=1 if selected_op_num < sharding_threshold else 10,
+        num_shards=10,
         sharded_keys={"unboxed_ops"},
     )
 
@@ -248,7 +248,7 @@ def main(args: List[str]) -> None:
         op_registration_allowlist = None
 
     selector = get_custom_build_selector(
-        op_registration_allowlist,
+        options.op_registration_allowlist,
         options.op_selection_yaml_path,
     )
 
