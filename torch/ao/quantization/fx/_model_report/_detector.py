@@ -5,7 +5,6 @@ import torch.nn as nn
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.observer import ObserverBase
 from torch.ao.quantization.qconfig import QConfig
-from torch.fx import GraphModule
 from torch.nn.qat.modules.conv import _ConvNd as QatConvNd
 from torch.nn.qat.modules.linear import Linear as QatLinear
 
@@ -17,7 +16,7 @@ DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES: Dict[str, Set[Any]] = {
 }
 
 
-def _detect_per_channel(model: GraphModule) -> Tuple[str, Dict[str, Any]]:
+def _detect_per_channel(model: nn.Module) -> Tuple[str, Dict[str, Any]]:
     """Checks if any Linear or Conv layers in the model utilize per_channel quantization.
         Only Linear and Conv layers can use per_channel as of now so only these two are currently checked.
 
