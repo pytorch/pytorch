@@ -6,9 +6,7 @@ namespace at {
 namespace native {
 
 template <typename OPS>
-inline Tensor apply_reduction(
-    const Tensor& output,
-    at::Reduction::Reduction reduction) {
+inline Tensor apply_reduction(const Tensor& output, int64_t reduction) {
   switch (reduction) {
     case at::Reduction::Mean:
       return OPS::mean(output);
@@ -17,7 +15,7 @@ inline Tensor apply_reduction(
     case at::Reduction::None:
       return output;
     default:
-      TORCH_INTERNAL_ASSERT(false, "Invalid reduction: ", (int64_t) reduction);
+      TORCH_INTERNAL_ASSERT(false, "Invalid reduction: ", (int64_t)reduction);
   }
 }
 

@@ -57,19 +57,18 @@ from torchgen.model import DispatchKey, FunctionSchema, NativeFunction
 # specific dispatch key.
 #
 # Given that we are generating code for a dispatch key (K), finding the
-# appropriate (dispatch-less) kernel function to call at each call site
-# requires considering a couple of options, in order:
+# appropriate function to call for each dependency requires considering
+# 2 options, in order:
 #
 #   1. a function registered for K
 #
-#   2. a function registered for either CompositeExplicitAutograd or
-#      CompositeImplicitAutograd
-#
-#   3. the C++ API function that goes through the dispatcher
+#   2. the C++ API function that goes through the dispatcher
 #
 # In other words, if a dependent function like (1) is not found, we
-# try to find a function like (2). If that also fails, we fallback to
-# calling the dispatcher (see 'dest/dispatchless.py').
+# fallback to calling the dispatcher (see 'dest/dispatchless.py').
+#
+# Note that if K is CompositeExplicitAutograd, we always pick (2).
+# See: https://github.com/pytorch/pytorch/pull/77486#issuecomment-1150992380
 
 
 # name of the generated kernel.
