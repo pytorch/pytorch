@@ -447,11 +447,11 @@ class TestNestedTensorDeviceType(TestCase):
             nt1.clone(memory_format=torch.channels_last)
 
 class TestNestedTensorAutograd(TestCase):
-    def _create_nested_tensor_from_mask(self, requires_grad=False):
+    def _create_nested_tensor_from_list(self, requires_grad=False):
         return torch.nested_tensor([torch.randn(1, 2, requires_grad=requires_grad),
                                     torch.randn(7, 8, requires_grad=requires_grad)])
 
-    def _create_nested_tensor_from_list(self, requires_grad=False):
+    def _create_nested_tensor_from_mask(self, requires_grad=False):
         data = torch.randn(2, 3, 4, requires_grad=requires_grad)
         mask = torch.ones_like(data[:, :, 0]).bool()
         return torch._nested_tensor_from_mask(data, mask)
@@ -466,7 +466,7 @@ class TestNestedTensorAutograd(TestCase):
         nt.requires_grad_()
         assert nt.requires_grad
 
-    def test_requires_grad_not_pass_through(self):
+    def test_requires_grad_not_pass_through_from_list(self):
         # I don't know if this is behavior is intended
         nt = self._create_nested_tensor_from_list(True)
         assert not nt.requires_grad
