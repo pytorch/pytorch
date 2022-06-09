@@ -27,12 +27,14 @@ constexpr auto kFunctorchWrappedTensors = DispatchKeySet({
     DispatchKey::FuncTorchBatched});
 
 constexpr auto kTensorSubclassLike = kFunctorchWrappedTensors | DispatchKeySet({
+    // WARNING: DO NOT put combined backend component + functionality keys
+    // here, you will incorrectly always match on the functionality key
+    // no matter the backend component
     DispatchKey::Batched,
     DispatchKey::Sparse,
     DispatchKey::SparseCsrCPU,
     DispatchKey::SparseCsrCUDA,
-    DispatchKey::Meta,
-    DispatchKey::Python});
+    DispatchKey::Python}) | DispatchKeySet(BackendComponent::MetaBit);
 
 inline bool isTensorSubclassLike(const Tensor& tensor) {
   auto key_set = tensor.unsafeGetTensorImpl()->key_set();

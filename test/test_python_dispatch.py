@@ -1499,5 +1499,9 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
         a[[T(), T()]]
 
+    def test_standard_is_not_subclass(self):
+        # https://github.com/pytorch/pytorch/issues/79079
+        self.assertFalse(torch._C._dispatch_isTensorSubclassLike(torch.empty(0)))
+
 if __name__ == '__main__':
     run_tests()
