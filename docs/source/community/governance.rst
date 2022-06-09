@@ -91,7 +91,7 @@ decision-making, and give a clear reasoning for their
 decisions, vetoes and dispute resolution.
 
 The core maintainers are admins of the PyTorch GitHub Org
-and are listed in `Persons of Interest <https://pytorch.org/docs/stable/community/persons_of_interest.html>`__.
+and are listed in `Maintainers <https://pytorch.org/docs/stable/community/persons_of_interest.html>`__.
 
 Lead Core Maintainer (BDFL)
 ---------------------------
@@ -243,7 +243,7 @@ GitHub. Maintainers should avoid pushing their changes directly to
 the PyTorch repository, instead relying on pull requests. Approving a
 pull request by a core or module maintainer allows it to be merged
 without further process. Core and module maintainers, as listed on
-the `Persons of Interest <https://pytorch.org/docs/stable/community/persons_of_interest.html>`__
+the `Maintainers <https://pytorch.org/docs/stable/community/persons_of_interest.html>`__
 page and within `CODEOWNERS <https://github.com/pytorch/pytorch/blob/master/CODEOWNERS>`__
 ultimately approve these changes.
 
@@ -314,5 +314,5 @@ to allow this.
 or otherwise? Do I need to be 'officially' a committer to do this?** No,
 we encourage community members to showcase their work wherever and
 whenever they can. Please reach out to
-`pytorch-marketing@fb.com <http://mailto:pytorch-marketing@fb.com/>`__
+`marketing@pytorch.org <mailto:marketing@pytorch.org>`__
 for marketing support.
