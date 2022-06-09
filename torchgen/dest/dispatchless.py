@@ -101,44 +101,34 @@ def has_registered_kernel(
 
 @dataclass(frozen=True)
 class DispatchlessComposite:
-    # dispatch key we are generating for.
-    dispatch_key: DispatchKey
-
-    # we need all backend indices, since we will iterate a specific order
-    # of dispatch keys looking for registrations.
-    backend_indices: Dict[DispatchKey, BackendIndex]
+    # BackendIndex for the dispatch key we are generating code for.
+    backend_index: BackendIndex
 
     # a graph of dependency relations between operators.
     graph: CompositeGraph
 
     @staticmethod
     def new(
-        dispatch_key: DispatchKey,
-        backend_indices: Dict[DispatchKey, BackendIndex],
+        backend_index: BackendIndex,
         grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     ) -> "DispatchlessComposite":
-        graph = get_graph(grouped_native_functions, backend_indices[dispatch_key])
-        return DispatchlessComposite(dispatch_key, backend_indices, graph)
-
-    @property
-    def backend_index(self) -> BackendIndex:
-        return self.backend_indices[self.dispatch_key]
+        graph = get_graph(grouped_native_functions, backend_index)
+        return DispatchlessComposite(backend_index, graph)
 
     # figures out what namespace to dispatch.
     def _dispatch_namespace(
         self, f: NativeFunction, g: Optional[NativeFunctionsGroup]
     ) -> Optional[DispatchKey]:
-        # the precedence order is:
-        #   1. the current dispatch key we are generating code for
-        #   2. the CompositeExplicitAutograd kernel
-        #   3. the CompositeImplicitAutograd kernel
-        for k in (
-            self.dispatch_key,
-            DispatchKey.CompositeExplicitAutograd,
-            DispatchKey.CompositeImplicitAutograd,
+        dispatch_key = self.backend_index.dispatch_key
+
+        # Bypass the dispatcher if:
+        #   1. There is a kernel registered for f in dispatch_key; and
+        #   2. The key we are currently generating code for is not
+        #      CompositeExplicitAutograd
+        if has_registered_kernel(self.backend_index, f, g) and (
+                dispatch_key != DispatchKey.CompositeExplicitAutograd
         ):
-            if has_registered_kernel(self.backend_indices[k], f, g):
-                return k
+            return dispatch_key
 
         # bail if we have found no registered kernel.
         return None
@@ -250,7 +240,7 @@ namespace {{
 {impl_struct}
 }} // anonymous namespace
 
-{sig.defn(name=dispatchless.kernel(f.func, self.dispatch_key))} {{
+{sig.defn(name=dispatchless.kernel(f.func, self.backend_index.dispatch_key))} {{
   return {dispatchless.call(f)}({args_str});
 }}
 
