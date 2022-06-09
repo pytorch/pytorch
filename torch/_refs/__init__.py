@@ -161,7 +161,7 @@ __all__ = [
     "any",
     "mean",
     "std_mean",
-    "std_var",
+    "var_mean",
     "sum",
     "prod",
     "var",
@@ -1661,6 +1661,7 @@ def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
     return prims.broadcast_in_dim(a, size, dims)
 
 
+@register_decomposition(torch.ops.aten.cat)
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("tensors",),
@@ -1781,6 +1782,9 @@ def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeTy
     return prims.slice_in_dim(a, start, start + length, axis=dim)
 
 
+# TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
+# test/test_eager_transforms.py::TestFunctionalizeCPU::test_functionalize_fx_transpose_simple_cpu
+@register_decomposition(torch.ops.aten.permute, disable_meta=True)
 def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     _permutation = utils.canonicalize_dims(a.ndim, dims)
     return prims.transpose(a, _permutation)
@@ -1974,6 +1978,7 @@ def roll(
     return cat((t0, t1), dim)
 
 
+@register_decomposition(torch.ops.aten.rot90)
 def rot90(
     a: TensorLikeType, k: int = 1, dims: DimsSequenceType = (0, 1)
 ) -> TensorLikeType:
@@ -1994,11 +1999,11 @@ def rot90(
         )
     k = k % 4  # Rotation direction is from the second towards the first axis for k < 0
     if k == 1:
-        return transpose(flip(a, (dims[1],)), dims[0], dims[1])
+        return torch.transpose(torch.flip(a, (dims[1],)), dims[0], dims[1])
     elif k == 2:
-        return flip(a, dims)
+        return torch.flip(a, dims)
     elif k == 3:
-        return transpose(flip(a, (dims[0],)), dims[0], dims[1])
+        return torch.transpose(torch.flip(a, (dims[0],)), dims[0], dims[1])
     else:
         return clone(a)
 
