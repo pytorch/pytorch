@@ -9,10 +9,7 @@ import os
 import re
 import tempfile
 import textwrap
-import typing
 import unittest
-
-import expecttest
 
 import torch
 import torch.nn as nn
@@ -124,20 +121,20 @@ class ProfilerTree:
     def format(cls, profiler, indent: int = 0):
 
         def flatten(nodes, depth=0, out=None):
-          if out is None:
-            out = []
+            if out is None:
+                out = []
 
-          for node in nodes:
-            out.append((depth, cls.fmt_name(node.name())))
-            flatten(node.children, depth+1, out)
+            for node in nodes:
+                out.append((depth, cls.fmt_name(node.name())))
+                flatten(node.children, depth + 1, out)
 
-          return out
+            return out
 
         flat_nodes = flatten(profiler.kineto_results.experimental_event_tree())
         min_depth = min([d + 1 for d, name in flat_nodes if "begin_unit_test_marker" in name] or [0])
         return textwrap.indent(
-          "\n".join([f"{'  ' * (d - min_depth)}{name.rstrip()}" for d, name in flat_nodes if d >= min_depth]),
-          " " * indent)
+            "\n".join([f"{'  ' * (d - min_depth)}{name.rstrip()}" for d, name in flat_nodes if d >= min_depth]),
+            " " * indent)
 
     @staticmethod
     def fmt_name(name: str) -> str:
@@ -867,7 +864,7 @@ class TestProfiler(TestCase):
         with _profile(record_shapes=True, with_flops=True, use_kineto=kineto_available()) as prof:
             model(inputs)
         profiler_output = prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=10)
-        self.assertIn("Total KFLOPs", profiler_output)
+        self.assertIn("Total MFLOPs", profiler_output)
         if not (kineto_available() and torch.cuda.is_available()):
             return
 
@@ -880,7 +877,7 @@ class TestProfiler(TestCase):
             model(inputs)
         profiler_output = kineto_profiler.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=-1)
-        self.assertIn("Total KFLOPs", profiler_output)
+        self.assertIn("Total MFLOPs", profiler_output)
 
     def test_kineto_profiler_api(self):
         called_num = [0]
@@ -1431,7 +1428,7 @@ class TestProfiler(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler.py(1425): test_profiler_experimental_tree_with_memory_and_stack
+            test_profiler.py(1422): test_profiler_experimental_tree_with_memory_and_stack
               torch/profiler/profiler.py(...): __enter__
                 torch/profiler/profiler.py(...): start
                   torch/profiler/profiler.py(...): _transit_action
@@ -1553,7 +1550,7 @@ class TestProfiler(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler.py(1549): test_profiler_experimental_tree_with_stack_and_modules
+            test_profiler.py(1546): test_profiler_experimental_tree_with_stack_and_modules
               torch/profiler/profiler.py(...): __enter__
                 torch/profiler/profiler.py(...): start
                   torch/profiler/profiler.py(...): _transit_action
@@ -1570,7 +1567,7 @@ class TestProfiler(TestCase):
                   aten::fill_
               nn.Module: MyModule_0
                 <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler.py(1543): forward
+                test_profiler.py(1540): forward
                   nn.Module: ReLU_0
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward
@@ -1596,7 +1593,7 @@ class TestProfiler(TestCase):
                             aten::mv
                               aten::empty
                               aten::addmv_
-                          aten::add
+                          aten::add_
                   nn.Module: ReLU_1
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward
@@ -1611,7 +1608,7 @@ class TestProfiler(TestCase):
                   aten::fill_
               nn.Module: MyModule_0
                 <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler.py(1543): forward
+                test_profiler.py(1540): forward
                   nn.Module: ReLU_0
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward
@@ -1637,7 +1634,7 @@ class TestProfiler(TestCase):
                             aten::mv
                               aten::empty
                               aten::addmv_
-                          aten::add
+                          aten::add_
                   nn.Module: ReLU_1
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward
