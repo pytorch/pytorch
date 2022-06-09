@@ -61,6 +61,7 @@ def mock_parse_args(revert: bool = False,
             self.pr_num = 76123
             self.dry_run = True
             self.comment_id = 0
+            self.mandatory_only = False
             self.reason = 'this is for testing'
 
     return Object()
@@ -75,6 +76,7 @@ def mock_merge(pr_num: int, repo: GitRepo,
                dry_run: bool = False,
                force: bool = False,
                comment_id: Optional[int] = None,
+               mandatory_only: bool = False,
                timeout_minutes: int = 400) -> None:
     pass
 
@@ -240,7 +242,12 @@ class TestGitHubPR(TestCase):
     def test_main_force(self, mock_merge: Any, mock_parse_args: Any, mock_gh_get_info: Any) -> None:
         import trymerge
         trymerge.main()
-        mock_merge.assert_called_once_with(mock.ANY, mock.ANY, dry_run=mock.ANY, force=True, comment_id=mock.ANY)
+        mock_merge.assert_called_once_with(mock.ANY,
+                                           mock.ANY,
+                                           dry_run=mock.ANY,
+                                           force=True,
+                                           comment_id=mock.ANY,
+                                           mandatory_only=False)
 
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, False))
@@ -248,7 +255,12 @@ class TestGitHubPR(TestCase):
     def test_main_merge(self, mock_merge: Any, mock_parse_args: Any, mock_gh_get_info: Any) -> None:
         import trymerge
         trymerge.main()
-        mock_merge.assert_called_once_with(mock.ANY, mock.ANY, dry_run=mock.ANY, force=False, comment_id=mock.ANY)
+        mock_merge.assert_called_once_with(mock.ANY,
+                                           mock.ANY,
+                                           dry_run=mock.ANY,
+                                           force=False,
+                                           comment_id=mock.ANY,
+                                           mandatory_only=False)
 
 if __name__ == "__main__":
     main()
