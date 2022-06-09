@@ -4069,6 +4069,7 @@
   dispatch:
     CompositeExplicitAutograd: select
     SparseCsrCPU, SparseCsrCUDA: select_sparse_csr
+    NestedTensorCPU, NestedTensorCUDA: select_nested
 
 - func: select_backward(Tensor grad_output, int[] input_sizes, int dim, int index) -> Tensor
   variants: function
@@ -8226,6 +8227,12 @@
 - func: argsort(Tensor self, int dim=-1, bool descending=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
+
+- func: argsort.stable(Tensor self, *, bool stable, int dim=-1, bool descending=False) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: method, function
+  dispatch:
+    CPU, CUDA: argsort_stable
 
 - func: argsort.dimname(Tensor self, Dimname dim, bool descending=False) -> Tensor
   variants: method, function
