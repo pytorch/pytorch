@@ -367,7 +367,6 @@ class TestCommon(TestCase):
             return x
 
         # TODO: iterate over requires_grad true/false
-        inps = tuple(op.reference_inputs(device, dtype, requires_grad=False))
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
             result = op(sample.input, *sample.args, **sample.kwargs)
 
