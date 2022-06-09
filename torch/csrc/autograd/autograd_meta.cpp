@@ -97,7 +97,20 @@ namespace {
     if (!at::_has_same_storage_numel(base, other)) {
       return false;
     }
+    if (base.is_conj() != other.is_conj() || base.is_neg() != other.is_neg()) {
+      return false;
+    }
     return true;
+  }
+
+  Tensor maybe_match_conj_or_neg(const Tensor& self, const Tensor& target) {
+    if (target.is_conj()) {
+      return self.conj();
+    } else if (target.is_neg()) {
+      return self._neg_view();
+    } else {
+      return self;
+    }
   }
 
 } // anonymous namespace
@@ -107,6 +120,9 @@ namespace {
 void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::TensorBase& self_base, uint64_t level, bool is_inplace_op) {
   TORCH_CHECK(!new_grad_base._fw_grad(level).defined(), "Setting a forward grad that "
               "itself has a forward gradient at the same level", level, " is not supported.");
+  TORCH_INTERNAL_ASSERT((new_grad_base.is_floating_point() || new_grad_base.is_complex()) &&
+                        (self_base.is_floating_point() || self_base.is_complex()),
+                        "Expected both tensor and its forward grad to be floating point or complex");
   // Lazy initialization
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -160,6 +176,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
             new_base_fw_grad = new_grad;
           } else {
             new_base_fw_grad = at::_new_zeros_with_same_feature_meta(new_grad, base);
+            new_base_fw_grad = maybe_match_conj_or_neg(new_base_fw_grad, base);
 
             // Update new_grad to be a view of the base
             Tensor new_fw_grad_value;
@@ -186,6 +203,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
             "Expected the output of forward differentiable view operations to have the tangent have the same layout as primal")
       }
       auto res = at::_new_zeros_with_same_feature_meta(new_grad, self);
+      res = maybe_match_conj_or_neg(res, self);
       res.copy_(new_grad);
       new_grad = res;
     }
