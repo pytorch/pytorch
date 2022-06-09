@@ -28,7 +28,6 @@ from . import (
     symbolic_registry,
     utils,
 )
-from ._constants import ONNX_ARCHIVE_MODEL_PROTO_NAME
 from ._exporter_states import ExportTypes, SymbolicContext
 from .errors import CheckerError  # Backwards compatibility
 
@@ -51,8 +50,12 @@ __all__ = [
     "symbolic_opset15",
     "symbolic_opset16",
     # Enums
+    "ExportTypes",
     "OperatorExportTypes",
     "TrainingMode",
+    "TensorProtoDataType",
+    # Classes
+    "SymbolicContext",
     # Public functions
     "export",
     "export_to_pretty_string",
