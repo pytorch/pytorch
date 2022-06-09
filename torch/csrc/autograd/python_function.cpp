@@ -705,7 +705,10 @@ static void _trace_post_record(
       }
     }
   }
-  _append_subgraph(old_node, graph, trace_outputs, unpack_output);
+  py::bool_ is_in_onnx_export = py::module::import("torch.onnx.__init__").attr("is_in_onnx_export");
+  if (py::cast<bool>(is_in_onnx_export)) {
+    _append_subgraph(old_node, graph, trace_outputs, unpack_output);
+  }
 
   // If TupleUnpack operator is created, we copy its output type back
   // to the original tuple type.

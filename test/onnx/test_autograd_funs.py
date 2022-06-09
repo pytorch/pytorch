@@ -131,7 +131,7 @@ class TestAutogradFuns(unittest.TestCase):
 
         model = Caller()
         input = torch.ones(1, 5)
-        graph, _, _ =_model_to_graph(
+        graph, _, _ = _model_to_graph(
             model,
             (input,),
             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,

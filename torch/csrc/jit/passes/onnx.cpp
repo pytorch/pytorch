@@ -464,9 +464,7 @@ void NodeToONNX(
       try {
         inlineAutograd(op);
       } catch (const std::exception& ex) {
-        TORCH_WARN(
-            "Unable to inline PythonOp: ",
-            op->name());
+        TORCH_WARN("Unable to inline PythonOp: ", op->name());
         cloneNode(op);
       }
       return;
