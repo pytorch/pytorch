@@ -9,9 +9,9 @@ from torch.ao.quantization.observer import ObserverBase
 from typing import Tuple
 
 class NonUniformQuantizationObserverBase(ObserverBase):
-    min_val: torch.tensor
-    max_val: torch.tensor
-    level_indices: torch.tensor
+    min_val: torch.Tensor
+    max_val: torch.Tensor
+    level_indices: torch.Tensor
     b: int
     k: int
     n: int
@@ -48,9 +48,9 @@ class NonUniformQuantizationObserverBase(ObserverBase):
     """
     def _calculate_qparams(
         self,
-        min_val: torch.tensor,
-        max_val: torch.tensor,
-            signed: bool) -> Tuple[float, torch.tensor, torch.tensor]:
+        min_val: torch.Tensor,
+        max_val: torch.Tensor,
+            signed: bool) -> Tuple[float, torch.Tensor, torch.Tensor]:
         # compute alpha
         self.alpha = max_val
 
@@ -113,8 +113,8 @@ class NonUniformQuantizationObserverBase(ObserverBase):
 class APoTObserver(NonUniformQuantizationObserverBase):
     def __init__(
         self,
-        min_val=torch.tensor([]),
-        max_val=torch.tensor([]),
+        min_val=torch.Tensor,
+        max_val=torch.Tensor,
         b=0,
             k=0) -> None:
         super(APoTObserver, self).__init__(min_val, max_val, b, k)
