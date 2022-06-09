@@ -182,6 +182,10 @@ def wrap_key(f, inps):
                     flat_args[idx] = ProxyTensor(flat_inps[idx], arg, requires_grad=(
                         flat_inps[idx].is_leaf and flat_inps[idx].requires_grad
                     ))
+                    if flat_inps[idx]._backward_hooks is not None:
+                        flat_args[idx].register_hook(flat_inps[idx]._backward_hooks[0])
+                        # import pdb; pdb.set_trace()
+                    print()
             else:
                 flat_args[idx] = flat_inps[idx]
 
