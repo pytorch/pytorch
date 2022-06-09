@@ -14,10 +14,11 @@ import torch.nn.functional as F
 import itertools
 from torch._six import inf
 from torch.nn import Parameter
-from torch.testing._internal.common_utils import run_tests, TestCase, download_file, TEST_WITH_UBSAN
+from torch.testing._internal.common_utils import \
+        (run_tests, TestCase, download_file, TEST_WITH_UBSAN)
 from torch.testing._comparison import TensorLikePair
 import torch.backends.mps
-from torch.distributions import Uniform
+from torch.distributions import Uniform, Exponential
 
 from torch.testing._internal.common_nn import NNTestCase
 import numpy as np
@@ -1461,7 +1462,6 @@ class TestSmoothL1Loss(TestCase):
 
 
 class TestNLLLoss(TestCase):
-
     def test_nll_loss_mismatched_batch(self, device='mps'):
         x = torch.randn((10, 3), requires_grad=True, device=device)
         # t should have size (10,)
@@ -3953,17 +3953,15 @@ class TestNLLLoss(TestCase):
             helper([100, 100], 3, dtype)
             helper([100, 100], 0.5, dtype)
 
-    # Do kstest for exponential distribution
-    def test_exponential_kstest(self):
-        device = 'mps'
-        dtype = torch.float32
-        for dtype in [torch.float32, torch.float16]:
-            from scipy import stats
-            size = 1000
-            for lambd in [0.5, 1.0, 5.0]:
-                t = torch.empty(size, dtype=dtype, device=device).exponential_(lambd=lambd)
-                res = stats.kstest(t.cpu().to(torch.double), 'expon', args=(0, 1 / lambd,))
-                self.assertTrue(res.statistic < 0.1)
+    def test_exponential_1(self):
+        rate = torch.randn(5, 5).abs().requires_grad_()
+        rate_1d = torch.randn(1).abs().requires_grad_()
+        self.assertEqual(Exponential(rate).sample().size(), (5, 5))
+        self.assertEqual(Exponential(rate).sample((7,)).size(), (7, 5, 5))
+        self.assertEqual(Exponential(rate_1d).sample((1,)).size(), (1, 1))
+        self.assertEqual(Exponential(rate_1d).sample().size(), (1,))
+        self.assertEqual(Exponential(0.2).sample((1,)).size(), (1,))
+        self.assertEqual(Exponential(50.0).sample((1,)).size(), (1,))
 
     # Test add
     def test_add_binary_op(self):
