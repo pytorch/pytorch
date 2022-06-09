@@ -233,6 +233,23 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
   return grad_input;
 }
 
+Tensor foo(const Tensor& out1, const Tensor& in1, const Tensor& in2) {
+  std::cout << "CPU kernel" << std::endl;
+  auto out = at::empty_like(out1);
+  TensorIterator iter = TensorIteratorConfig()
+    .add_output(out)
+    .add_input(in1)
+    .add_input(in2)
+    .build();
+  AT_DISPATCH_FLOATING_TYPES(out1.scalar_type(), "foo_cpu", [&]() {
+    cpu_kernel(iter,
+      [] (scalar_t in1, scalar_t in2) -> scalar_t {
+        return in1 + in2;
+      });
+  });
+  return out;
+}
+
 Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);

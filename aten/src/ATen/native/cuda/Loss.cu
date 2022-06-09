@@ -17,6 +17,7 @@
 #include <ATen/ops/binary_cross_entropy_backward_native.h>
 #include <ATen/ops/binary_cross_entropy_native.h>
 #include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty.h>
 #include <ATen/ops/exp.h>
 #include <ATen/ops/nll_loss_backward_native.h>
 #include <ATen/ops/nll_loss_forward_native.h>
@@ -86,6 +87,23 @@ Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tenso
   }
 
   return grad_input;
+}
+
+Tensor foo(const Tensor& out1, const Tensor& in1, const Tensor& in2) {
+  std::cout << "CUDA kernel" << std::endl;
+  auto out = at::empty_like(out1);
+  TensorIterator iter = TensorIteratorConfig()
+    .add_output(out)
+    .add_input(in1)
+    .add_input(in2)
+    .build();
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, out1.scalar_type(), "foo_cuda", [&]() {
+    gpu_kernel(iter,
+      [] GPU_LAMBDA (scalar_t in1, scalar_t in2) -> scalar_t {
+        return in1 + in2;
+      });
+  });
+  return out;
 }
 
 Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {

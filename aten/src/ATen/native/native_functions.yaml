@@ -2662,6 +2662,10 @@
 - func: kron(Tensor self, Tensor other) -> Tensor
   variants: function, method
 
+- func: foo(Tensor out, Tensor in1, Tensor in2) -> Tensor
+  dispatch:
+    CPU, CUDA: foo
+
 - func: kron.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
