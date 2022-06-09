@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue_to.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
 #include <functional>

@@ -326,16 +326,6 @@ class TestModule(TestCase):
     @skipIfMps
     @modules(module_db)
     def test_non_contiguous_tensors(self, device, dtype, module_info, training):
-        # TODO: RNN / GRU / LSTM don't support backwards on eval mode for cuDNN; skip this in a
-        # nicer way for eval mode only.
-        # See https://github.com/pytorch/pytorch/issues/79161
-        rnn_modules = set([torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM])
-        if (module_info.module_cls in rnn_modules
-                and not training
-                and 'cuda' in device
-                and torch.backends.cudnn.enabled):
-            return
-
         # Check modules work with non-contiguous tensors
 
         module_cls = module_info.module_cls
@@ -499,6 +489,16 @@ class TestModule(TestCase):
                         torch.float64: tol(4e-4, 0)})
     @modules(module_db)
     def test_cpu_gpu_parity(self, device, dtype, module_info, training):
+        # TODO: RNN / GRU / LSTM don't support backwards on eval mode for cuDNN; skip this in a
+        # nicer way for eval mode only.
+        # See https://github.com/pytorch/pytorch/issues/79161
+        rnn_modules = set([torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM])
+        if (module_info.module_cls in rnn_modules
+                and not training
+                and 'cuda' in device
+                and torch.backends.cudnn.enabled):
+            return
+
         # Test cpu and gpu results are the same
         module_cls = module_info.module_cls
         module_inputs_cpu = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,

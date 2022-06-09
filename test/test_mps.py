@@ -3988,6 +3988,16 @@ class TestNLLLoss(TestCase):
         helper(0.1)
         helper(0.2)
 
+    def test_types_binary_op(self):
+        # Float * Bool
+        cpu_x = torch.arange(5, dtype=torch.float32, device="cpu") * torch.tensor([True, False, True, False, True], device="cpu")
+        mps_x = torch.arange(5, dtype=torch.float32, device="mps") * torch.tensor([True, False, True, False, True], device="mps")
+        self.assertEqual(cpu_x, mps_x)
+        # Float * Int64
+        cpu_y = torch.arange(5, dtype=torch.float32, device="cpu") * torch.tensor([1, 0, 1, 0, 1], device="cpu")
+        mps_y = torch.arange(5, dtype=torch.float32, device="mps") * torch.tensor([1, 0, 1, 0, 1], device="mps")
+        self.assertEqual(cpu_y, mps_y)
+
     def test_unary_ops(self):
         def helper(shape, op):
             for dtypef in [torch.float32]:
@@ -4358,24 +4368,15 @@ class TestRNNMPS(TestCase):
         self.assertEqual(cpu_weight_grad, mps_weight_grad)
 
 class TestFallbackWarning(TestCase):
+    # TODO: Remove once test_testing.py is running on MPS devices
     def test_no_warning_on_import(self):
-        script = """
-import warnings
-
-with warnings.catch_warnings(record=True) as w:
-    import torch
-
-exit(len(w))
-"""
-        try:
-            subprocess.check_output(
-                [sys.executable, '-W', 'all', '-c', script],
-                stderr=subprocess.STDOUT,
-                # On Windows, opening the subprocess with the default CWD makes `import torch`
-                # fail, so just set CWD to this script's directory
-                cwd=os.path.dirname(os.path.realpath(__file__)),)
-        except subprocess.CalledProcessError as e:
-            self.assertTrue(False, "There was a warning when importing torch.")
+        out = subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", "import torch"],
+            stderr=subprocess.STDOUT,
+            # On Windows, opening the subprocess with the default CWD makes `import torch`
+            # fail, so just set CWD to this script's directory
+            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+        self.assertEquals(out, "")
 
     def _get_not_implemented_op(self):
         # This can be changed once we actually implement `torch.bincount`
@@ -4402,6 +4403,7 @@ with warnings.catch_warnings(record=True) as w:
     import torch
 
 if len(w) > 0:
+    print(w)
     exit(1)
 
 # This should run just fine and raise warning about perf
@@ -4409,6 +4411,7 @@ with warnings.catch_warnings(record=True) as w:
     {op}
 
 if len(w) != 1:
+    print(w)
     exit(2)
 
 """
@@ -4421,12 +4424,14 @@ if len(w) != 1:
                 cwd=os.path.dirname(os.path.realpath(__file__)),)
         except subprocess.CalledProcessError as e:
             if e.returncode == 1:
-                self.assertTrue(False, "There was a warning when importing torch when PYTORCH_ENABLE_MPS_FALLBACK is set.")
+                self.assertTrue(False, "There was a warning when importing torch when PYTORCH_ENABLE_MPS_FALLBACK is set." +
+                                       e.output.decode("utf-8"))
             elif e.returncode == 2:
                 self.assertTrue(False, "There wasn't exactly one warning when running not implemented op with "
-                                "PYTORCH_ENABLE_MPS_FALLBACK set.")
+                                f"PYTORCH_ENABLE_MPS_FALLBACK set. {e.output}")
             else:
-                self.assertTrue(False, "Running a not implemented op failed even though PYTORCH_ENABLE_MPS_FALLBACK is set.")
+                self.assertTrue(False, "Running a not implemented op failed even though PYTORCH_ENABLE_MPS_FALLBACK is set. " +
+                                       e.output.decode("utf-8"))
 
 class TestNoRegression(TestCase):
     def test_assert_close(self):
