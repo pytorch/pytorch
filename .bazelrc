@@ -38,6 +38,16 @@ build:cpu-only --@rules_cuda//cuda:enable_cuda=False
 #    compiler or the cuda compiler
 #  * we use ^// at the start of the regex to only permit matching
 #    PyTorch files. This excludes external repos.
+#
+# Note that because this is logically a command-line flag, it is
+# considered the word on what warnings are enabled. This has the
+# unfortunate consequence of preventing us from disabling an error at
+# the target level because those flags will come before these flags in
+# the action invocation. Instead we provide per-file exceptions after
+# this.
+#
+# On the bright side, this means we don't have to more broadly apply
+# the exceptions to an entire target.
 build \
     --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=type-limits            \
     --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=type-limits
