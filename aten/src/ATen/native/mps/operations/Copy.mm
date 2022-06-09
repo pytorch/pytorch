@@ -17,7 +17,7 @@ namespace native {
 
 MPSGraphTensor* chainViewOperation(MPSGraph* mpsGraph, IntArrayRef size,
                              IntArrayRef stride, int64_t storage_offset,
-                             MPSGraphTensor* inputTensor, const Tensor& self) {
+                             MPSGraphTensor* inputTensor) {
   MPSGraphTensor *outputTensor = nil;
   const size_t shape_size = size.size();
 
@@ -143,7 +143,7 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
                                                                       name : nil];
               newCachedGraph->inputTensor_ = inputTensor;
               newCachedGraph->outputTensor_ = chainViewOperation(mpsGraph, size, stride,
-                                                                 storage_offset, inputTensor, self);
+                                                                 storage_offset, inputTensor);
           }
           return newCachedGraph;
         }, self.storage().data());
