@@ -41,7 +41,8 @@ using at::Tensor;
 //
 // All these cases can be handled by the following layout constraint on the forward grad:
 //   - A Tensor and its forward grad (for all levels) must have the same metadata (size, stride
-//     and storage offset). Storage offset must be in this metadata because of as_strided.
+//     conj/neg bit and storage offset). Storage offset must be in this metadata because of
+//     as_strided. conj/neg bit must be part of this metadata because of ops like `real`.
 //   - View operations must create a forward grad that is a view of the base's forward grad.
 //   - Inplace operations must modify the input's forward grad inplace.
 //
