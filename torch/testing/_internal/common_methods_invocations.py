@@ -9599,21 +9599,20 @@ def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
         ((2, 3, 4), "mean"),
         ((2,), "none"),
         ((2,), "batchmean"),
-        ((2, 3), "batchmean"),
-        ((2, 3, 4), "batchmean"),
         ((2,), "sum"),
     ]
 
+    sample_inputs = []
     for (shape, reduction), log_target in itertools.product(shapes_and_reduction, (True, False)):
-        # generate targets such that target.shape broadcasts over input.shape and
-        # len(target.shape) <= len(input.shape), and vice versa
-        for d in range(len(shape) + 1):
-            for input_shape, target_shape in ((shape, shape[d:]), (shape[d:], shape)):
-                # input should be log-probability, i.e. lie in (-inf, 0]
-                input = make(input_shape, low=None, high=0)
-                target = make(target_shape, low=None, high=0) if log_target else make(shape, low=0, high=1)
-                sample = SampleInput(input, args=(target,), kwargs=dict(reduction=reduction, log_target=log_target))
-                yield sample
+        # input should be log-probability, i.e. lie in (-inf, 0]
+        input = make(shape, low=None, high=0)
+        # target should be a probability by default, i.e. lie in [0, 1], and a log-probability if log_target is set,
+        # i.e. lie in (-inf, 0]
+        target = make(shape, low=None, high=0) if log_target else make(shape, low=0, high=1)
+        sample_inputs.append(
+            SampleInput(input, args=(target,), kwargs=dict(reduction=reduction, log_target=log_target))
+        )
+    return sample_inputs
 
 def sample_inputs_pdist(op_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -19315,12 +19314,13 @@ op_db: List[OpInfo] = [
         supports_out=False,
         check_batched_grad=False,
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
         skips=(
-            # RuntimeError: input->type()->kind() == TypeKind::OptionalType
-            # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
-            # please report a bug to PyTorch.
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
+            # See https://github.com/pytorch/pytorch/issues/65466
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_gradgrad",
+            ),
         ),
     ),
     OpInfo(
