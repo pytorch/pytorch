@@ -232,11 +232,11 @@ static struct PyGetSetDef THPFInfo_properties[] = {
     {"tiny", (getter)THPFInfo_tiny, nullptr, nullptr, nullptr},
     {"resolution", (getter)THPFInfo_resolution, nullptr, nullptr, nullptr},
     {"dtype", (getter)THPFInfo_dtype, nullptr, nullptr, nullptr},
-    {nullptr}};
+    {nullptr, nullptr, nullptr, nullptr, nullptr}};
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef THPFInfo_methods[] = {
-    {nullptr} /* Sentinel */
+    {nullptr, nullptr, 0, nullptr} /* Sentinel */
 };
 
 PyTypeObject THPFInfoType = {
@@ -277,6 +277,18 @@ PyTypeObject THPFInfoType = {
     nullptr,                                         /* tp_init */
     nullptr,                                         /* tp_alloc */
     THPFInfo_pynew,                                  /* tp_new */
+    nullptr,                                         /* tp_free */
+    nullptr,                                         /* tp_is_gc */
+    nullptr,                                         /* tp_bases */
+    nullptr,                                         /* tp_mro */
+    nullptr,                                         /* tp_cache */
+    nullptr,                                         /* tp_subclasses */
+    nullptr,                                         /* tp_weaklist */
+    nullptr,                                         /* tp_del */
+    0,                                               /* tp_version_tag */
+    nullptr,                                         /* tp_finalize */
+    nullptr,                                         /* tp_vectorcall */
+    nullptr,                                         /* tp_print */
 };
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays)
@@ -285,11 +297,11 @@ static struct PyGetSetDef THPIInfo_properties[] = {
     {"max", (getter)THPIInfo_max, nullptr, nullptr, nullptr},
     {"min", (getter)THPIInfo_min, nullptr, nullptr, nullptr},
     {"dtype", (getter)THPIInfo_dtype, nullptr, nullptr, nullptr},
-    {nullptr}};
+    {nullptr, nullptr, nullptr, nullptr, nullptr}};
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef THPIInfo_methods[] = {
-    {nullptr} /* Sentinel */
+    {nullptr, nullptr, 0, nullptr}  /* Sentinel */
 };
 
 PyTypeObject THPIInfoType = {
@@ -330,6 +342,18 @@ PyTypeObject THPIInfoType = {
     nullptr, /* tp_init */
     nullptr, /* tp_alloc */
     THPIInfo_pynew, /* tp_new */
+    nullptr, /* tp_free */
+    nullptr, /* tp_is_gc */
+    nullptr, /* tp_bases */
+    nullptr, /* tp_mro */
+    nullptr, /* tp_cache */
+    nullptr, /* tp_subclasses */
+    nullptr, /* tp_weaklist */
+    nullptr, /* tp_del */
+    0, /* tp_version_tag */
+    nullptr, /* tp_finalize */
+    nullptr, /* tp_vectorcall */
+    nullptr, /* tp_print */
 };
 
 void THPDTypeInfo_init(PyObject* module) {
