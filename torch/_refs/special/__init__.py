@@ -59,8 +59,8 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
     return torch.log(torch.true_divide(self, torch.sub(1, self)))
 
 
-@_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_zeta
+zeta = _make_elementwise_binary_reference(
+    prims.zeta,
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=torch.ops.aten.special_zeta,
 )
-def zeta(a):
-    return prims.zeta(a)
