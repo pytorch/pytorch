@@ -268,62 +268,75 @@ Tensor internal_new_from_data(
   // This exists to prevent us from tracing the call to empty().  The actual
   // autograd code doesn't really matter, because requires_grad is always false
   // here.
+  // What are the semantics of tensor_new()?
+  // We manually construct a tensor and place on it on the correct device with empty() and to().
+  // We then have to "lift" the newly constructed tensor in some cases, like when we're performing
+  // a functorch transform or running functionalization.
+  // The exclude guards are all to ensure that extra logic doesn't run when we're constructing the raw tensor.
   Tensor tensor;
   {
-    at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
-    at::tracer::impl::NoTracerDispatchMode tracer_guard;
+    at::AutoDispatchBelowADInplaceOrView guard;
     c10::impl::ExcludeDispatchKeyGuard torchdispatchmode_guard(c10::DispatchKey::Python);
     c10::impl::ExcludeDispatchKeyGuard torchdispatchmode_snapshot_guard(c10::DispatchKey::PythonTLSSnapshot);
     // functorch uses FuncTorchDynamicLayerBackMode as a mode key to wrap all
     // tensors returned from operators in special TensorWrapper tensor extension
-    // The problem with this is that TensorWrapper does not have storage so
-    // accessing the data_ptr (for recursive_store) internal asserts.
-    // As a quick hack, the guard here prevents functorch from wrapping the empty
-    // tensor in a TensorWrapper and instead when `tensor.to` is called later,
-    // the tensor gets wrapped. A more long-term solution is to think about
-    // what the extensibility mechanism for this function (internal_new_from_data)
-    // looks like for mode-based dispatch keys and C++ tensor extensions.
-    c10::impl::ExcludeDispatchKeyGuard functorch_guard(c10::DispatchKey::FuncTorchDynamicLayerBackMode);
+    c10::impl::ExcludeDispatchKeyGuard functorch_front_guard(c10::DispatchKey::FuncTorchDynamicLayerFrontMode);
+    c10::impl::ExcludeDispatchKeyGuard functorch_back_guard(c10::DispatchKey::FuncTorchDynamicLayerBackMode);
     // We disable DeferredInit handler for similar reasons as functorch.
     c10::impl::ExcludeDispatchKeyGuard deferred_init_guard(c10::DispatchKey::DeferredInit);
+    // Note [Functionalization <> torch.Tensor constructor]
+    // Functionalization "lifts" the newly constructed tensor into a wrapper using aten::lift().
+    c10::impl::ExcludeDispatchKeyGuard functionalize_guard(c10::DispatchKey::Functionalize);
+    {
+      // Tracing should probably also use the "lift" operator to add the tensor to a trace,
+      // but it's technically BC-breaking to do that, since we currently trace .to() calls.
+      at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
-    if (isStorage(data)) {
-      ScalarType storage_scalar_type;
-      bool is_typed_storage = false;
-      Storage storage = createStorageGetType(data, storage_scalar_type, is_typed_storage);
-      TORCH_CHECK(!is_typed_storage || storage_scalar_type == scalar_type,
-          "Expected a Storage of type ", scalar_type,
-          " or an _UntypedStorage, but got ", storage_scalar_type);
-      tensor = at::empty(sizes, at::initialTensorOptions().dtype(is_typed_storage ? storage_scalar_type : inferred_scalar_type).pinned_memory(pin_memory).device(storage.device()));
-      tensor.set_(storage);
+      if (isStorage(data)) {
+        ScalarType storage_scalar_type;
+        bool is_typed_storage = false;
+        Storage storage = createStorageGetType(data, storage_scalar_type, is_typed_storage);
+        TORCH_CHECK(!is_typed_storage || storage_scalar_type == scalar_type,
+            "Expected a Storage of type ", scalar_type,
+            " or an _UntypedStorage, but got ", storage_scalar_type);
+        tensor = at::empty(sizes, at::initialTensorOptions().dtype(is_typed_storage ? storage_scalar_type : inferred_scalar_type).pinned_memory(pin_memory).device(storage.device()));
+        tensor.set_(storage);
 
-    } else {
-      TensorOptions opts = at::initialTensorOptions().dtype(inferred_scalar_type);
+      } else {
+        TensorOptions opts = at::initialTensorOptions().dtype(inferred_scalar_type);
 
-      // If the device is Meta, take the shortcut. We don't want to allocate an
-      // empty CPU tensor which would break our contract for meta tensors.
-      if (device == at::kMeta) {
-        return at::empty(sizes, opts.device(device));
-      }
-      tensor = at::empty(sizes, opts.pinned_memory(pin_memory));
-      if (c10::multiply_integers(tensor.sizes()) != 0) {
-        recursive_store(
-            (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
-            inferred_scalar_type, tensor.dtype().itemsize(), data);
+        // If the device is Meta, take the shortcut. We don't want to allocate an
+        // empty CPU tensor which would break our contract for meta tensors.
+        if (device == at::kMeta) {
+          return at::empty(sizes, opts.device(device));
+        }
+        tensor = at::empty(sizes, opts.pinned_memory(pin_memory));
+        if (c10::multiply_integers(tensor.sizes()) != 0) {
+          recursive_store(
+              (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
+              inferred_scalar_type, tensor.dtype().itemsize(), data);
+        }
       }
     }
+    pybind11::gil_scoped_release no_gil;
+    maybe_initialize_cuda(device);
+    // However, it is VERY important that we trace the to() call here (even
+    // though the reason this is important is a hack).  Without *some* factory
+    // function call that is traced at construction time, we will consider
+    // a tensor constant as originating from "outside" the trace, and if you
+    // try to return it directly we will fail with the error saying no
+    // "no observable data dependence".  In an ideal world, we wouldn't trace
+    // a to() call but I need to think harder about what exactly we should trace
+    // in this case.
+    tensor = tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
   }
-  pybind11::gil_scoped_release no_gil;
-  maybe_initialize_cuda(device);
-  // However, it is VERY important that we trace the to() call here (even
-  // though the reason this is important is a hack).  Without *some* factory
-  // function call that is traced at construction time, we will consider
-  // a tensor constant as originating from "outside" the trace, and if you
-  // try to return it directly we will fail with the error saying no
-  // "no observable data dependence".  In an ideal world, we wouldn't trace
-  // a to() call but I need to think harder about what exactly we should trace
-  // in this case.
-  return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
+
+  // torch.jit.trace will continue to trace out `.to()` instead of `.lift()`, since
+  // changing it is BC-breaking.
+  at::tracer::impl::NoTracerDispatchMode tracer_guard;
+  // lift has no autograd implementation, so we need to make sure we don't try to dispatch to it.
+  at::AutoDispatchBelowADInplaceOrView guard;
+  return tensor.lift();
 }
 
 Tensor new_from_data_copy(
@@ -363,6 +376,7 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
         c10::DispatchKey::IPU,
         c10::DispatchKey::XPU,
         c10::DispatchKey::HPU,
+        c10::DispatchKey::MPS,
     });
     TORCH_CHECK(expected_key_set.has(dispatch_key),
         "new(): expected key in ",
