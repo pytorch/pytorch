@@ -29,6 +29,43 @@ def always_wrap_policy(*args, **kwargs) -> bool:
     """
     return True
 
+def lambda_auto_wrap_policy(
+    module: nn.Module,
+    recurse: bool,
+    unwrapped_params: int,
+    lambda_fn: Callable
+) -> bool:
+    """
+    A convenient auto wrap policy to wrap submodules based on an arbitrary user
+    function. If `lambda_fn(submodule) == True``, the submodule will be wrapped as
+    a `wrapper_cls` unit.
+
+    Return if a module should be wrapped during auto wrapping.
+
+    The first three parameters are required by :func:`_recursive_wrap`.
+
+    Args:
+       module (nn.Module):
+           The module to be considered in this decision.
+       recurse (bool):
+           Indicate if this is called to make a decision on whether we
+           should recurse down a subgraph of the module structure.
+           If False, it means this function is called to make a decision
+           on whether we should wrap the said module.
+       unwrapped_params (int):
+           The number of parameters yet to be wrapped in this module.
+
+       transformer_layer_cls (int):
+           Submodules with one of the `transformer_layer_cls` names
+           will be wrapped as seperated FSDP units
+    """
+    if recurse:
+        # always recurse
+        return True
+    else:
+        # if not recursing, decide whether we should wrap for the leaf node or reminder
+        return lambda_fn(module)
+
 def transformer_auto_wrap_policy(
     module: nn.Module,
     recurse: bool,
@@ -284,7 +321,11 @@ def _recursive_wrap(
     for _, child in module.named_modules():
         if child in ignored_modules:
             continue
-        assert not isinstance(child, cast(type, wrapper_cls))
+        try:
+            assert not isinstance(child, cast(type, wrapper_cls))
+        except TypeError:
+            # wrapper_cls is a function as opposed to a class type, just bypass above check.
+            pass
 
     # We count all params, assuming none of them are already wrapped.
     num_params = sum(
