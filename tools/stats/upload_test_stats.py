@@ -11,12 +11,14 @@ import rockset  # type: ignore[import]
 import boto3  # type: ignore[import]
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
-GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
-REQUEST_HEADERS = {
-    "Accept": "application/vnd.github.v3+json",
-    "Authorization": "token " + GITHUB_TOKEN,
-}
 S3_RESOURCE = boto3.resource("s3")
+
+
+def get_request_headers() -> Dict[str, str]:
+    return {
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": "token " + os.environ["GITHUB_TOKEN"],
+    }
 
 
 def parse_xml_report(
@@ -94,7 +96,9 @@ def get_artifact_urls(workflow_run_id: int) -> Dict[Path, str]:
     )
     artifacts = response.json()["artifacts"]
     while "next" in response.links.keys():
-        response = requests.get(response.links["next"]["url"], headers=REQUEST_HEADERS)
+        response = requests.get(
+            response.links["next"]["url"], headers=get_request_headers()
+        )
         artifacts.extend(response.json()["artifacts"])
 
     artifact_urls = {}
@@ -140,7 +144,7 @@ def download_and_extract_artifact(
 
     print(f"Downloading and extracting {artifact_name}")
 
-    response = requests.get(artifact_url, headers=REQUEST_HEADERS)
+    response = requests.get(artifact_url, headers=get_request_headers())
     with open(artifact_name, "wb") as f:
         f.write(response.content)
     unzip(artifact_name)
@@ -169,10 +173,53 @@ def download_and_extract_s3_reports(
         )
 
 
+def download_and_extract_gha_artifacts(
+    workflow_run_id: int, workflow_run_attempt: int
+) -> None:
+    artifact_urls = get_artifact_urls(workflow_run_id)
+    for name, url in artifact_urls.items():
+        download_and_extract_artifact(Path(name), url, workflow_run_attempt)
+
+
+def upload_to_rockset(test_cases: List[Any]) -> None:
+    print(f"Writing {len(test_cases)} test cases to Rockset")
+    client = rockset.Client(
+        api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+    )
+    client.Collection.retrieve("test_run").add_docs(test_cases)
+    print("Done!")
+
+
+def get_test_cases(
+    workflow_run_id: int, workflow_run_attempt: int
+) -> List[Dict[str, Any]]:
+    with TemporaryDirectory() as temp_dir:
+        print("Using temporary directory:", temp_dir)
+        os.chdir(temp_dir)
+
+        # Download and extract all the reports (both GHA and S3)
+        download_and_extract_s3_reports(workflow_run_id, workflow_run_attempt)
+        download_and_extract_gha_artifacts(workflow_run_id, workflow_run_attempt)
+
+        # Parse the reports and transform them to JSON
+        test_cases = []
+        for xml_report in Path(".").glob("**/*.xml"):
+            test_cases.extend(
+                parse_xml_report(
+                    xml_report,
+                    workflow_run_id,
+                    workflow_run_attempt,
+                )
+            )
+
+        return test_cases
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Upload test stats to Rockset")
     parser.add_argument(
         "--workflow-run-id",
+        type=int,
         required=True,
         help="id of the workflow to get artifacts from",
     )
@@ -183,32 +230,5 @@ if __name__ == "__main__":
         help="which retry of the workflow this is",
     )
     args = parser.parse_args()
-
-    with TemporaryDirectory() as temp_dir:
-        print("Using temporary directory:", temp_dir)
-        os.chdir(temp_dir)
-
-        # Download and extract all the reports (both GHA and S3)
-        download_and_extract_s3_reports(args.workflow_run_id, args.workflow_run_attempt)
-        artifact_urls = get_artifact_urls(args.workflow_run_id)
-        for name, url in artifact_urls.items():
-            download_and_extract_artifact(Path(name), url, args.workflow_run_attempt)
-
-        # Parse the reports and transform them to JSON
-        test_cases = []
-        for xml_report in Path(".").glob("**/*.xml"):
-            test_cases.extend(
-                parse_xml_report(
-                    xml_report,
-                    int(args.workflow_run_id),
-                    int(args.workflow_run_attempt),
-                )
-            )
-
-        # Write the JSON to rockset
-        print(f"Writing {len(test_cases)} test cases to Rockset")
-        client = rockset.Client(
-            api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-        )
-        client.Collection.retrieve("test_run").add_docs(test_cases)
-        print("Done!")
+    test_cases = get_test_cases(args.workflow_run_id, args.workflow_run_attempt)
+    upload_to_rockset(test_cases)
