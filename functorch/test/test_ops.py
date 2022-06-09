@@ -753,13 +753,11 @@ class TestOperators(TestCase):
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('nn.functional.batch_norm', device_type='cuda'),
         xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
-        xfail('nn.functional.hinge_embedding_loss', device_type='cuda'),
         xfail('_masked.mean'),
         xfail('_masked.prod'),
 
         # Causing issues with multiple cpu levels of forward mode AD
         xfail('nn.functional.batch_norm', device_type='cpu'),
-        xfail('nn.functional.hinge_embedding_loss', device_type='cpu'),
 
         # https://github.com/pytorch/functorch/issues/857
         skip('nn.functional.embedding', ''),
