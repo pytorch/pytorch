@@ -14012,10 +14012,7 @@ op_db: List[OpInfo] = [
         error_inputs_func=error_inputs_margin_ranking_loss,
         reference_inputs_func=reference_inputs_margin_ranking_loss,
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-        )),
+        supports_fwgrad_bwgrad=True),
     OpInfo(
         "nn.functional.multi_margin_loss",
         ref=_NOTHING,
@@ -19283,9 +19280,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_hinge_embedding_loss,
         error_inputs_func=error_inputs_hinge_embedding_loss,
         reference_inputs_func=reference_inputs_hinge_embedding_loss,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-        )
     ),
     OpInfo(
         "nn.functional.huber_loss",
