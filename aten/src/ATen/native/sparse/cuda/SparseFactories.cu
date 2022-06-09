@@ -189,7 +189,6 @@ SparseTensor spdiags_sparse_cuda(
     auto offsets_ti = getTensorInfo<int64_t, int64_t>(offsets_cont);
     auto nnz_per_diag_ti = getTensorInfo<int64_t, int64_t>(nnz_per_diag);
     auto nnz_prefix_sum_ti = getTensorInfo<int64_t, int64_t>(nnz_prefix_sum);
-    // TODO actually calculate block, grid sizes
     int64_t block_size = std::min(
         at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
     auto grid_size = ceil_div(nnz, block_size);
@@ -203,7 +202,7 @@ SparseTensor spdiags_sparse_cuda(
         [&] {
           auto values_out_ti = getTensorInfo<scalar_t, int64_t>(values_out);
           auto diagonals_ti = getTensorInfo<scalar_t, int64_t>(diagonals_cont);
-          _spdiags_sparse_coo_cuda_kernel<scalar_t><<<1, 1, 0, stream>>>(
+          _spdiags_sparse_coo_cuda_kernel<scalar_t><<<grid_size, block_size, 0, stream>>>(
               n_diag,
               offsets_ti,
               diagonals_ti,
