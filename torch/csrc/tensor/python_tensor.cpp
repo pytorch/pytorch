@@ -152,7 +152,7 @@ static struct PyGetSetDef metaclass_properties[] = {
 static PyTypeObject metaclass = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.tensortype",                          /* tp_name */
-  sizeof(PyTypeObject)                         /* tp_basicsize */
+  sizeof(PyTypeObject),                        /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
   0,                                           /* tp_vectorcall_offset */
