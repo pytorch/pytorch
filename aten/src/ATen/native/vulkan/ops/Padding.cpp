@@ -11,7 +11,8 @@ namespace {
 
 using namespace api::utils;
 
-Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
+Tensor pad2d(const Tensor& self_arg, IntArrayRef padding, const api::Shader::Descriptor& shader_descriptor,
+    const std::string& op_name) {
   const int pad_dim = padding.size();
   const IntArrayRef input_size = self_arg.sizes();
   const int input_dim = input_size.size();
@@ -56,7 +57,7 @@ Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    api::OpProfiler profiler(command_buffer, context->querypool(), "aten::reflection_pad2d");
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
     if C10_LIKELY (v_output.has_image() && v_self.has_image()) {
       const struct Block final {
@@ -81,7 +82,7 @@ Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
               VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(reflection_pad2d),
+          shader_descriptor,
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
@@ -103,10 +104,19 @@ Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
   return convert(v_output);
 }
 
+Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
+  return pad2d(self_arg, padding, VK_KERNEL(reflection_pad2d), "aten::reflection_pad2d");
+}
+
+Tensor replication_pad2d(const Tensor& self_arg, IntArrayRef padding) {
+  return pad2d(self_arg, padding, VK_KERNEL(replication_pad2d), "aten::replication_pad2d");
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::reflection_pad2d"), TORCH_FN(reflection_pad2d));
+  m.impl(TORCH_SELECTIVE_NAME("aten::replication_pad2d"), TORCH_FN(replication_pad2d));
 }
 
 #endif /* USE_VULKAN_API */
