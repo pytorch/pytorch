@@ -432,7 +432,6 @@ meta_function_expected_failures = {
     torch.nn.functional.conv_transpose2d: {f32, f64, i64},
     torch.nn.functional.conv_transpose3d: {f32, f64, i64},
     torch.nn.functional.ctc_loss: {f32, f64},
-    torch.nn.functional.embedding_bag: {f16, f32, f64},  # aten::_embedding_bag_forward_only
     torch.nn.functional.gaussian_nll_loss: {bf16, f32, f64},  # aten::_local_scalar_dense
     torch.nn.functional.grid_sample: {f32, f64},  # aten::grid_sampler_2d, aten::grid_sampler_3d
     torch.nn.functional.max_pool3d: {f32, f64},  # aten::max_pool3d_with_indices
@@ -552,7 +551,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.nn.functional.conv_transpose1d: {bf16, f16},
     torch.nn.functional.conv_transpose2d: {bf16, f16},
     torch.nn.functional.conv_transpose3d: {bf16, f16},
-    torch.nn.functional.embedding_bag: {bf16},  # aten::_embedding_bag_forward_only
     torch.nn.functional.gaussian_nll_loss: {f16},  # aten::_local_scalar_dense
     torch.nn.functional.grid_sample: {f16},  # aten::grid_sampler_2d, aten::grid_sampler_3d
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
@@ -635,7 +633,6 @@ meta_dispatch_expected_failures = {
     aten._conj_physical.default: {c32},
     aten._convolution.default: {c64, i64, f64, c128, bf16, f32},
     aten._ctc_loss.default: {f64, f32},
-    aten._embedding_bag_forward_only.default: {f16, f64, f32},
     aten._fft_r2c.default: {i64, u8, b8, f32, i8, f64, i16, i32},
     aten._histogramdd_bin_edges.default: {f64, f32},
     aten._histogramdd_from_bin_cts.default: {f64, f32},
@@ -743,7 +740,6 @@ meta_dispatch_expected_failures = {
 
 # these sometimes pass and sometimes fail
 meta_dispatch_skips = {
-    aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32},  # at::nonzero doesn't have a Meta function
     aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.aminmax.default: {i64, u8, b8, f32, i8, f64, i16, i32},
     aten.cummax.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
@@ -759,7 +755,6 @@ meta_dispatch_device_skips = defaultdict(dict)
 meta_dispatch_device_expected_failures['cuda'] = {
     aten._conj_physical.default: {f16},  # aten::conj_physical.out
     aten._convolution.default: {f16, c32},
-    aten._embedding_bag_forward_only.default: {bf16},  # aten::_embedding_bag_forward_only
     aten._fft_c2c.default: {c32, f16},  # aten::_fft_c2c
     aten._fft_c2c.out: {c32, f16},  # aten::_fft_c2c.out
     aten._fft_c2r.default: {c32, f16},  # aten::_fft_c2r
