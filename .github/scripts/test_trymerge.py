@@ -30,6 +30,7 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
         with open(gql_db_fname, encoding="utf-8", mode="w") as f:
             json.dump(obj, f, indent=2)
             f.write("\n")
+
     key = f"query_sha={sha256(query.encode('utf-8')).hexdigest()} " + " ".join([f"{k}={kwargs[k]}" for k in sorted(kwargs.keys())])
     mocked_queries = get_mocked_queries()
 
