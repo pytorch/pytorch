@@ -36,7 +36,7 @@ def print_latest_commits(qlambda: Any, minutes: int = 30) -> None:
             "git",
             "rev-list",
             f"--max-age={timestamp_since}",
-            "--remotes=*origin/master",
+            "--remotes=*master",
         ],
         encoding="ascii",
     ).splitlines()
@@ -67,7 +67,7 @@ def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, A
             )._asdict())
     return workflow_checks
 
-def isGreen(commit: str, results: Dict[str, Any]) -> bool:
+def isGreen(commit: str, results: Dict[str, Any]) -> Any:
     workflow_checks = get_commit_results(commit, results)
 
     for check in workflow_checks:
@@ -78,9 +78,9 @@ def isGreen(commit: str, results: Dict[str, Any]) -> bool:
                 pass
                 # there are trunk checks that run the same tests, so this pull workflow check can be skipped
             else:
-                return False
+                return workflowName + " checks were not successful"
         elif workflowName in ["periodic", "docker-release-builds"] and conclusion not in ["success", "skipped"]:
-            return False
+            return workflowName + " checks were not successful"
     return True
 
 def main() -> None:
