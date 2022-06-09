@@ -181,7 +181,7 @@ static struct PyGetSetDef THPDevice_properties[] = {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static PyMethodDef THPDevice_methods[] = {
   {"__reduce__", THPDevice_reduce, METH_NOARGS, nullptr},
-  {nullptr, nullptr, nullptr, nullptr},  /* Sentinel */
+  {nullptr, nullptr, 0, nullptr},  /* Sentinel */
 };
 
 PyTypeObject THPDeviceType = {
