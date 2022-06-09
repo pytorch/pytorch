@@ -26,13 +26,17 @@ TORCH_API MemOverlap has_internal_overlap(c10::TensorImpl* t);
 TORCH_API void assert_no_internal_overlap(const TensorBase& t);
 TORCH_API void assert_no_internal_overlap(c10::TensorImpl* t);
 
-TORCH_API MemOverlapStatus get_overlap_status(const TensorBase& a, const TensorBase& b);
-TORCH_API MemOverlapStatus get_overlap_status(c10::TensorImpl* a, c10::TensorImpl* b);
+TORCH_API MemOverlapStatus
+get_overlap_status(const TensorBase& a, const TensorBase& b);
+TORCH_API MemOverlapStatus
+get_overlap_status(c10::TensorImpl* a, c10::TensorImpl* b);
 
-TORCH_API void assert_no_partial_overlap(const TensorBase& a, const TensorBase& b);
+TORCH_API void assert_no_partial_overlap(
+    const TensorBase& a,
+    const TensorBase& b);
 void assert_no_partial_overlap(c10::TensorImpl* a, c10::TensorImpl* b);
 
 TORCH_API void assert_no_overlap(const TensorBase& a, const TensorBase& b);
 TORCH_API void assert_no_overlap(c10::TensorImpl* a, c10::TensorImpl* b);
 
-}
+} // namespace at
