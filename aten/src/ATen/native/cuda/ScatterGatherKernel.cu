@@ -344,18 +344,26 @@ struct cuda_scatter_gather_base_kernel {
 
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
+    auto index_strides = index.strides();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
-    auto src_strides_vec = ensure_nonempty_vec(src.strides().vec());
+    auto src_strides = src.strides();
+    auto src_strides_vec = ensure_nonempty_vec(src_strides.vec());
 
     auto ndim = index_sizes.size();
 
-    // For the TensorAssign version, all dimensions of
-    // the index tensor need to be smaller than those of
-    // the source tensor
+    // The scatter version of this works differently
+    // if any dimension of the index tensor is
+    // larger than that same dimension in the
+    // source tensor, so we create a variable to
+    // keep track of that possibility.
+    bool index_larger_than_src_in_scatter = false;
     if (is_scatter_like) {
       for (int i = 0; i < ndim; i++) {
-        TORCH_CHECK(index_sizes[i] <= src_sizes[i], "Expected index ", index_sizes, " to be smaller size than src ", src_sizes);
+        if (index_sizes[i] > src_sizes[i]) {
+          index_larger_than_src_in_scatter = true;
+          break;
+        }
       }
     }
 
@@ -365,11 +373,15 @@ struct cuda_scatter_gather_base_kernel {
     // restride stride[dim] such that
     // if (is_scatter_like) self.stride[dim] = 0
     // else src.stride[dim] = 0
+    //
+    // also restride stride[d] such that
+    // if (index_larger_than_src_in_scatter) self.stride[d] = 0
+    // for all d
     auto self_restrided = is_scatter_like ?
         restride_dim(self, dim, index_sizes_vec)
       : self.as_strided(index_sizes_vec, self_strides_vec);
     auto src_restrided = is_scatter_like ?
-        src.as_strided(index_sizes_vec, src_strides_vec)
+        src.as_strided(index_sizes_vec, index_larger_than_src_in_scatter ? std::vector<int64_t> (ndim, 0) : src_strides_vec)
       : restride_dim(src, dim, index_sizes_vec);
 
     auto iter = TensorIteratorConfig()
@@ -390,18 +402,34 @@ struct cuda_scatter_gather_base_kernel {
     auto index_size = is_scatter_like ? self_dim_size : src_dim_size;
     auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-      iter.dtype(),
-      "cuda_scatter_gather_base_kernel_func", [&] {
-        using dtype = typename std::conditional<cast_to_opaque,
-          OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+    if (!index_larger_than_src_in_scatter) {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+        iter.dtype(),
+        "cuda_scatter_gather_base_kernel_func", [&] {
+          using dtype = typename std::conditional<cast_to_opaque,
+            OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
-        _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, self.numel(), f
-        );
-      }
-    );
+          _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
+            iter, index_size, index_stride, self.numel(), f
+          );
+        }
+      );
+    }
+    else {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+        iter.dtype(),
+        "cuda_scatter_gather_base_kernel_func", [&] {
+          using dtype = typename std::conditional<cast_to_opaque,
+            OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+
+          _cuda_scatter_large_index_internal_kernel<dtype>()(
+            iter, index_size, index_stride, index_sizes, index_strides, src_sizes, src_strides, self.numel(), f
+          );
+        }
+      );
+    }
   }
 
   template <typename func_t>
@@ -420,7 +448,7 @@ struct cuda_scatter_gather_base_kernel {
     auto src_sizes = src.sizes();
     auto src_strides = src.strides();
     auto src_strides_vec = ensure_nonempty_vec(src_strides.vec());
-
+    
     auto ndim = index_sizes.size();
 
     // The scatter version of this works differently
