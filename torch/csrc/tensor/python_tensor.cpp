@@ -215,7 +215,7 @@ static void py_initialize_metaclass(PyTypeObject& metaclass) {
 static PyTypeObject tensor_type_prototype = {
   PyVarObject_HEAD_INIT(&metaclass, 0)
   nullptr,                                     /* tp_name */
-  sizeof(PyTensorType)                         /* tp_basicsize */
+  sizeof(PyTensorType),                        /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
   0,                                           /* tp_vectorcall_offset */
