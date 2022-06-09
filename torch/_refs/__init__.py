@@ -88,6 +88,7 @@ __all__ = [
     "square",
     "tan",
     "tanh",
+    "trace",
     #
     # Elementwise Binary References
     #
@@ -119,6 +120,7 @@ __all__ = [
     # 'ldexp',
     "le",
     "logical_and",
+    "logical_not",
     "logical_or",
     "logical_xor",
     "lt",
@@ -711,6 +713,7 @@ def _make_elementwise_binary_reference(
 
 
 # Add has its own implementation because it has an alpha argument
+@register_decomposition(torch.ops.aten.add)
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
@@ -952,10 +955,10 @@ le = _make_elementwise_binary_reference(
 
 def _logical_and(a: TensorLikeType, b: TensorLikeType):
     if not utils.is_boolean_dtype(a.dtype):
-        a = ne(a, 0)
+        a = a != 0
     if not utils.is_boolean_dtype(b.dtype):
-        b = ne(b, 0)
-    return bitwise_and(a, b)
+        b = b != 0
+    return a & b
 
 
 logical_and = _make_elementwise_binary_reference(
@@ -965,12 +968,25 @@ logical_and = _make_elementwise_binary_reference(
 )
 
 
+def _logical_not(a: TensorLikeType):
+    if not utils.is_boolean_dtype(a.dtype):
+        return a == 0
+    return ~a
+
+
+logical_not = _make_elementwise_unary_reference(
+    _logical_not,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.logical_not,
+)
+
+
 def _logical_or(a: TensorLikeType, b: TensorLikeType):
     if not utils.is_boolean_dtype(a.dtype):
-        a = ne(a, 0)
+        a = a != 0
     if not utils.is_boolean_dtype(b.dtype):
-        b = ne(b, 0)
-    return bitwise_or(a, b)
+        b = b != 0
+    return a | b
 
 
 logical_or = _make_elementwise_binary_reference(
@@ -982,10 +998,10 @@ logical_or = _make_elementwise_binary_reference(
 
 def _logical_xor(a: TensorLikeType, b: TensorLikeType):
     if not utils.is_boolean_dtype(a.dtype):
-        a = ne(a, 0)
+        a = a != 0
     if not utils.is_boolean_dtype(b.dtype):
-        b = ne(b, 0)
-    return bitwise_xor(a, b)
+        b = b != 0
+    return a ^ b
 
 
 # TODO: skip unnecessary conversion of long to float
@@ -1150,6 +1166,7 @@ def where(
 #
 # Data Movement References
 #
+# TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 def clone(
     a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:
@@ -1931,10 +1948,12 @@ def _reshape_view_helper(
     return a_
 
 
+# TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 def reshape(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=True)
 
 
+@register_decomposition(torch.ops.aten.roll)
 def roll(
     a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
 ) -> TensorLikeType:
@@ -1948,6 +1967,7 @@ def roll(
 
     # Avoid modulo by zero
     if a.numel() == 0:
+        # Keeping this as ref for now as FakeTensor runs into some issues with complex tensors
         return clone(a)
 
     len_shifts = len(shifts)
@@ -1958,7 +1978,7 @@ def roll(
         # Takes care of the case when dims is not specified (default)
         # By default, the tensor is flattened before shifting, after which the original shape is restored
         if len_dims == 0 and len_shifts == 1:
-            return view(roll(flatten(a), shifts, 0), a.shape)
+            return torch.roll(torch.flatten(a), shifts, 0).view(a.shape)
         if len_shifts != len_dims:
             raise RuntimeError(
                 f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}"
@@ -1966,17 +1986,17 @@ def roll(
         assert len_dims > 1
         tail_shifts = shifts[1:]
         tail_dims = dims[1:]
-        first_dim_rolled = roll(a, shifts[0], dims[0])
-        return roll(first_dim_rolled, tail_shifts, tail_dims)
+        first_dim_rolled = torch.roll(a, shifts[0], dims[0])
+        return torch.roll(first_dim_rolled, tail_shifts, tail_dims)
 
     # This path is taken when only one dimension is rolled
     # For example to get `first_dim_rolled` above
     dim = dims[0]
     size = a.shape[dim]
     start = (size - shifts[0]) % size
-    t0 = narrow(a, dim, start, size - start)
-    t1 = narrow(a, dim, 0, start)
-    return cat((t0, t1), dim)
+    t0 = torch.narrow(a, dim, start, size - start)
+    t1 = torch.narrow(a, dim, 0, start)
+    return torch.cat((t0, t1), dim)
 
 
 @register_decomposition(torch.ops.aten.rot90)
@@ -2009,11 +2029,30 @@ def rot90(
         return clone(a)
 
 
-# update to cat then view instead of unsqueezing each tensor
+def _check_stack_inputs(tensors: TensorSequenceType) -> None:
+    entry_shape = tensors[0].shape
+    for i in range(1, len(tensors)):
+        assert tensors[i].shape == entry_shape, (
+            f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0"
+            f"and {tensors[i].shape} at entry {i}"
+        )
+
+
+@register_decomposition(torch.ops.aten.stack)
 @out_wrapper
 def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
-    tensors = tuple(unsqueeze(a, dim) for a in tensors)
-    return cat(tensors, dim)
+    assert len(tensors) > 0, "stack expects a non-empty TensorList"
+    wrapped_dim = utils.canonicalize_dim(tensors[0].ndim + 1, dim)
+    # Refs need sparse support to check other condition
+    if wrapped_dim < tensors[0].ndim:  # and not tensors[0].is_sparse:
+        _check_stack_inputs(tensors)
+        result_sizes = list(tensors[0].shape)
+        result_sizes.insert(wrapped_dim, len(tensors))
+        out = torch.cat(tensors, wrapped_dim)
+        return out.view(result_sizes)
+
+    # If dim == tensors[0].ndim, view cannot efficiently handle it
+    return torch.cat([t.unsqueeze(wrapped_dim) for t in tensors], dim)
 
 
 @out_wrapper
@@ -2256,6 +2295,7 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
 swap_axes = transpose
 
 
+@register_decomposition(torch.ops.aten.unsqueeze)
 def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
     # Note that unsqueeze canonicalizes with rank + 1 because it allows
     # a new innermost dimension to be specified
@@ -2263,6 +2303,7 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
     return prims.expand_dims(a, (dim,))
 
 
+# TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 def view(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=False)
 
@@ -2427,6 +2468,13 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     return item(all(eq(a, b)))  # type: ignore[return-value]
 
 
-# populate the decomp table
+@register_decomposition(torch.ops.aten.trace)
+def trace(self: TensorLikeType) -> TensorLikeType:
+    utils.check(
+        self.ndim == 2, lambda: "expected a matrix, but got tensor with dim {self.ndim}"
+    )
+    return torch.sum(torch.diag(self, 0))
+
+
 import torch._refs.nn.functional
 import torch._refs.special

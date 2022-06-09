@@ -388,14 +388,12 @@ meta_function_expected_failures = {
     torch.fft.fft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
     torch.fft.fft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
     torch.fft.fftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
-    torch.fft.fftshift: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::roll
     torch.fft.hfft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
     torch.fft.hfft: {b8, f32, f64, i16, i32, i64, i8, u8},
     torch.fft.hfftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
     torch.fft.ifft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
     torch.fft.ifft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
     torch.fft.ifftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
-    torch.fft.ifftshift: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::roll
     torch.fft.ihfft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
     torch.fft.ihfft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
     torch.fft.ihfftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
@@ -424,7 +422,6 @@ meta_function_expected_failures = {
     torch.mvlgamma: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense, aten::mvlgamma.out
     torch.nanmean: {bf16, f16, f32, f64},
     torch.nanmedian: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::nanmedian, aten::nanmedian.dim_values
-    torch.nanquantile: {f32, f64},
     torch.nansum: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nansum, aten::nansum.out
     torch.nn.functional.conv1d: {bf16, f32, f64, i64},
     torch.nn.functional.conv2d: {bf16, f32, f64, i64},
@@ -432,7 +429,6 @@ meta_function_expected_failures = {
     torch.nn.functional.conv_transpose2d: {f32, f64, i64},
     torch.nn.functional.conv_transpose3d: {f32, f64, i64},
     torch.nn.functional.ctc_loss: {f32, f64},
-    torch.nn.functional.embedding_bag: {f16, f32, f64},  # aten::_embedding_bag_forward_only
     torch.nn.functional.gaussian_nll_loss: {bf16, f32, f64},  # aten::_local_scalar_dense
     torch.nn.functional.grid_sample: {f32, f64},  # aten::grid_sampler_2d, aten::grid_sampler_3d
     torch.nn.functional.max_pool3d: {f32, f64},  # aten::max_pool3d_with_indices
@@ -450,7 +446,6 @@ meta_function_expected_failures = {
     torch.nonzero: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero, aten::nonzero.out
     torch.polar: {f32, f64},  # aten::polar.out
     torch.repeat_interleave: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::repeat_interleave.Tensor
-    torch.roll: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::roll
     torch.segment_reduce: {bf16, f16, f32, f64},  # aten::segment_reduce
     torch.searchsorted: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::searchsorted.Tensor, aten::searchsorted.Tensor_out
     torch.symeig: {f32, f64},
@@ -497,7 +492,6 @@ meta_function_skips = {
     torch.functional.cdist: {f32, f64},
     torch.functional.tensordot: {bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.inner: {bf16, f32, f64, i16, i32, i64, i8, u8},
-    torch.logical_not: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.nn.functional.cross_entropy: {bf16, f32, f64},
     torch.nn.functional.interpolate: {bf16, f32, f64, u8},
     torch.nn.functional.nll_loss: {bf16, f32, f64},  # TODO
@@ -552,7 +546,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.nn.functional.conv_transpose1d: {bf16, f16},
     torch.nn.functional.conv_transpose2d: {bf16, f16},
     torch.nn.functional.conv_transpose3d: {bf16, f16},
-    torch.nn.functional.embedding_bag: {bf16},  # aten::_embedding_bag_forward_only
     torch.nn.functional.gaussian_nll_loss: {f16},  # aten::_local_scalar_dense
     torch.nn.functional.grid_sample: {f16},  # aten::grid_sampler_2d, aten::grid_sampler_3d
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
@@ -635,7 +628,6 @@ meta_dispatch_expected_failures = {
     aten._conj_physical.default: {c32},
     aten._convolution.default: {c64, i64, f64, c128, bf16, f32},
     aten._ctc_loss.default: {f64, f32},
-    aten._embedding_bag_forward_only.default: {f16, f64, f32},
     aten._fft_r2c.default: {i64, u8, b8, f32, i8, f64, i16, i32},
     aten._histogramdd_bin_edges.default: {f64, f32},
     aten._histogramdd_from_bin_cts.default: {f64, f32},
@@ -672,8 +664,6 @@ meta_dispatch_expected_failures = {
     aten.log_sigmoid_forward.output: {bf16, f64, f32},
     aten.logcumsumexp.default: {bf16, f64, f32},
     aten.logcumsumexp.out: {bf16, f64, f32},
-    aten.logical_not.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.logical_not_.default: {bf16, f16, f64, f32},
     aten.masked_select.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.masked_select.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.max_pool3d_with_indices.default: {f64, f32},
@@ -697,7 +687,6 @@ meta_dispatch_expected_failures = {
     aten.nonzero.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.polar.default: {f64, f32},
     aten.prelu.default: {bf16, f64, f32},
-    aten.roll.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.rrelu_with_noise.default: {bf16, f64, f32},
     aten.searchsorted.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.searchsorted.Tensor_out: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
@@ -743,7 +732,6 @@ meta_dispatch_expected_failures = {
 
 # these sometimes pass and sometimes fail
 meta_dispatch_skips = {
-    aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32},  # at::nonzero doesn't have a Meta function
     aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.aminmax.default: {i64, u8, b8, f32, i8, f64, i16, i32},
     aten.cummax.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
@@ -759,7 +747,6 @@ meta_dispatch_device_skips = defaultdict(dict)
 meta_dispatch_device_expected_failures['cuda'] = {
     aten._conj_physical.default: {f16},  # aten::conj_physical.out
     aten._convolution.default: {f16, c32},
-    aten._embedding_bag_forward_only.default: {bf16},  # aten::_embedding_bag_forward_only
     aten._fft_c2c.default: {c32, f16},  # aten::_fft_c2c
     aten._fft_c2c.out: {c32, f16},  # aten::_fft_c2c.out
     aten._fft_c2r.default: {c32, f16},  # aten::_fft_c2r

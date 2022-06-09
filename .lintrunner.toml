@@ -41,6 +41,7 @@ init_command = [
 [[linter]]
 code = 'CLANGFORMAT'
 include_patterns = [
+    'aten/src/ATen/*.h',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/jit/**/*.h',
@@ -564,6 +565,8 @@ include_patterns = [
     'torch/onnx/**/*.py',
     'torch/_refs/**/*.py',
     'torch/_prims/**/*.py',
+    'torch/_meta_registrations.py',
+    'torch/_decomp/**/*.py',
     'test/onnx/**/*.py',
 ]
 command = [
