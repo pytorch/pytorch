@@ -27,7 +27,13 @@ def torch_to_refs_map():
         (torch.nn.functional, torch._refs.nn.functional),
         (torch.special, torch._refs.special),
     ]
-    r = {}
+    r: Dict[Any, Any] = {
+        torch.Tensor.__invert__: torch._refs.bitwise_not,
+        torch.Tensor.__xor__: torch._refs.bitwise_xor,
+        torch.Tensor.__and__: torch._refs.bitwise_and,
+        torch.Tensor.__or__: torch._refs.bitwise_or,
+        torch.Tensor.__eq__: torch._refs.eq,
+    }
     for mod_torch, mod_refs in modules:
         for s in mod_refs.__all__:  # type: ignore[attr-defined]
             r[mod_torch.__dict__.get(s)] = mod_refs.__dict__.get(s)
