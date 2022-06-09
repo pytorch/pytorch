@@ -11,11 +11,6 @@ import rockset  # type: ignore[import]
 import boto3  # type: ignore[import]
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
-GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
-REQUEST_HEADERS = {
-    "Accept": "application/vnd.github.v3+json",
-    "Authorization": "token " + GITHUB_TOKEN,
-}
 S3_RESOURCE = boto3.resource("s3")
 
 
@@ -89,6 +84,12 @@ def process_xml_element(element: ET.Element) -> Dict[str, Any]:
 
 def get_artifact_urls(workflow_run_id: int) -> Dict[Path, str]:
     """Get all workflow artifacts with 'test-report' in the name."""
+    GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
+    REQUEST_HEADERS = {
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": "token " + GITHUB_TOKEN,
+    }
+
     response = requests.get(
         f"{PYTORCH_REPO}/actions/runs/{workflow_run_id}/artifacts?per_page=100",
     )
