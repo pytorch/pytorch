@@ -1391,7 +1391,6 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 called += 1
                 return super().__torch_dispatch__(func, types, args, kwargs)
 
-        print(torch._C._get_torch_dispatch_mode())
         x = SubTensor(torch.empty(2))
         x.data
         self.assertEqual(called, 1)
