@@ -56,6 +56,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/native/TensorAdvancedIndexingUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
@@ -363,21 +364,6 @@ static bool all_strides_match(TensorList tensors) {
   return true;
 }
 
-static std::string shapes_as_str(TensorList tensors) {
-  std::ostringstream os;
-  bool first = true;
-  for (auto& tensor : tensors) {
-    if (tensor.defined()) {
-      if (!first) {
-        os << ", ";
-      }
-      os << tensor.sizes();
-      first = false;
-    }
-  }
-  return os.str();
-}
-
 // Replace indexed dimensions in src with stride 0 and the size of the result tensor.
 // The offset in these dimensions is computed by the kernel using the index tensor's
 // values and the stride of src. The new shape is not meaningful. It's used to make
@@ -454,69 +440,6 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
       }
     }
   }
-}
-
-static std::tuple<bool, Tensor> canDispatchToMaskedFill(const Tensor& self, const torch::List<c10::optional<at::Tensor>>& indices,
-const Tensor& value){
-  if (!(value.numel() ==1 && value.device().is_cpu())){
-    return std::make_tuple(false,Tensor());
-  }
-  int64_t num_ind = 0;
-  Tensor mask;
-  auto self_device = self.device();
-  for (const c10::optional<Tensor> i: indices) {
-    if (!i.has_value() || !(*i).defined()){
-      num_ind++;
-    } else {
-      Tensor index = std::move(*i);
-      if ((index.scalar_type() != kByte && index.scalar_type() != kBool) ||
-          index.device() != self_device || mask.defined()){
-        return std::make_tuple(false, Tensor());
-      } else {
-        mask = index;
-        for (const auto j : c10::irange(index.dim())) {
-          int64_t srcIdx = num_ind + j;
-          TORCH_CHECK_INDEX(index.size(j) == self.size(srcIdx), "The shape of the mask ", index.sizes(), " at index ", j,
-  " does not match the shape of the indexed tensor ", self.sizes(), " at index ", srcIdx);
-        }
-        num_ind += mask.ndimension();
-      }
-    }
-  }
-  for (const auto i : c10::irange(num_ind, self.ndimension())) {
-    (void)i; //Suppress unused variable warning
-    mask = mask.unsqueeze(-1);
-  }
-  return std::make_tuple(true, mask);
-}
-
-static AdvancedIndex make_info(Tensor self, const torch::List<c10::optional<at::Tensor>>& orig) {
-  checkIndexTensorTypes(orig);
-  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
-  auto indices = expandTensors(self, orig);
-  // next broadcast all index tensors together
-  try {
-    indices = expand_outplace(indices);
-  } catch (std::exception& e) {
-    TORCH_CHECK_INDEX(false, "shape mismatch: indexing tensors could not be broadcast together"
-                   " with shapes ", shapes_as_str(indices));
-  }
-  // add missing null Tensors so that it matches self.dim()
-  while (indices.size() < (size_t)self.dim()) {
-    indices.emplace_back();
-  }
-  // if the non-null indices are not all adjacent, transpose self and indices
-  // together so that they're adjacent at the front
-  if (!hasContiguousSubspace(indices)) {
-    std::tie(self, indices) = transposeToFront(self, indices);
-  }
-  // Ensure indices are on the same device as self
-  for (auto & indice : indices) {
-    if (indice.defined() && indice.device() != self.device()) {
-      indice = indice.to(self.device());
-    }
-  }
-  return AdvancedIndex(self, indices);
 }
 
 static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
@@ -1919,8 +1842,8 @@ Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
   const auto num_threads = at::get_num_threads();
   DimVector thread_count_nonzero(num_threads);
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_count_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf, kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_count_cpu", [&] {
     at::parallel_for(0, iter.numel(), internal::GRAIN_SIZE, [&] (int64_t begin, int64_t end) {
       const auto tid = at::get_thread_num();
       thread_count_nonzero[tid] = count_nonzero_impl<scalar_t>(iter, {begin, end});
@@ -1962,8 +1885,8 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   DimVector thread_count_nonzero(num_threads + 1);
 
   // Pass 1: Count nonzero element per-thread
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_count_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf, kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_count_cpu", [&] {
     at::parallel_for(0, numel, internal::GRAIN_SIZE, [&] (int64_t begin, int64_t end) {
       const auto tid = at::get_thread_num();
       thread_begin[tid] = begin;
@@ -1989,8 +1912,8 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   }
 
   // Pass 2: Write indexes
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf, kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_cpu", [&] {
     at::parallel_for(0, numel, internal::GRAIN_SIZE, [&] (int64_t begin, int64_t end) {
       auto tid = at::get_thread_num();
       // Work needs to be distributed the same on both passes
