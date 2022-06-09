@@ -11,7 +11,7 @@ class TestUploadTestStats(unittest.TestCase):
         IN_CI,
         "don't run in CI as this does a lot of network calls and uses up GH API rate limit",
     )
-    def test_existing_job(self):
+    def test_existing_job(self) -> None:
         """Run on a known-good job and make sure we don't error and get basically okay reults."""
         test_cases = get_test_cases(2465214458, 1)
         self.assertEqual(len(test_cases), 731457)
