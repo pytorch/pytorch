@@ -808,7 +808,11 @@ PyObject* initModule() {
      "torch._C",
      nullptr,
      -1,
-     methods.data()
+     methods.data(),
+     /*m_slots=*/nullptr,
+     /*m_traverse=*/nullptr,
+     /*m_clear=*/nullptr,
+     /*m_free=*/nullptr,
   };
   ASSERT_TRUE(module = PyModule_Create(&torchmodule));
   ASSERT_TRUE(THPGenerator_init(module));
