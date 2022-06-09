@@ -1803,6 +1803,7 @@ class TestImports(TestCase):
                     raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
 
+    @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
     def test_no_warning_on_import(self) -> None:
         out = subprocess.check_output(
             [sys.executable, "-W", "all", "-c", "import torch"],
