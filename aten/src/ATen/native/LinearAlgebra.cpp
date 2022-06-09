@@ -619,6 +619,8 @@ Tensor get_matrix_rank_result_tensor(const Tensor& input) {
       IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
   Tensor result =
       at::empty(result_shape, input.options().dtype(ScalarType::Long));
+
+  return result;
 }
 
 }  // anonymous namespace
