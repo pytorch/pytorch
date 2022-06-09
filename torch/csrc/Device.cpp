@@ -234,6 +234,7 @@ PyTypeObject THPDeviceType = {
   0,                                     /* tp_version_tag */
   nullptr,                               /* tp_finalize */
   nullptr,                               /* tp_vectorcall */
+  nullptr,                               /* tp_print */
 };
 
 void THPDevice_init(PyObject *module)
