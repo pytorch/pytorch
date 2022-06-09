@@ -389,7 +389,14 @@ cc_library(
     name = "aten_cuda_cpp",
     srcs = [":aten_cuda_cpp_srcs"] + generated_cuda_cpp,
     hdrs = [":aten_src_ATen_cuda_config"],
-    copts = ATEN_COPTS,
+    copts = ATEN_COPTS + [
+        # Dispatcher codegen unconditionally adds resize_out() and
+        # check_inplace() to an anonymous namespace in its generated
+        # files, even if that file doesn't use it. Consider moving
+        # these declarations and definitions to a library rather than
+        # duplicating them.
+        "-Wno-error=unused-function",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":aten",
