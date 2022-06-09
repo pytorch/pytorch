@@ -111,6 +111,9 @@ class FlatParameter(nn.Parameter):
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
             info entries; see :class:`SharedParamInfo`.
 
+        _flat_param_name (str): Uniquely-identifying name for the flattened
+            parameter.
+
         _shard_param_offsets (List[Tuple[int, int])): [start, end] offsets (in
             units of numel) giving this rank's part of each flattened original
             module parameter; for any parameter ``p`` that is not sharded
@@ -168,13 +171,14 @@ class FlatParameter(nn.Parameter):
 
     @property
     def _flat_param_name(self) -> str:
+        """
+        Returns a name for the flattened parameter that uniquely identifies
+        it in a module hierarchy wrapped by a top-level FSDP instance. The name
+        is constructed from the fully-prefixed names of the original parameters
+        comprising the flattened parameter with "." replaced with "_" since
+        parameter names cannot contain ".".
+        """
         return ",".join(self._prefixed_param_names).replace(".", "_")
-
-    def _get_debug_name(self) -> str:
-        # TODO (awgu): Very useful for debugging since we can see all the of
-        # the prefixed parameter names of this `FlatParameter`; we may make
-        # this into a real method later
-        return f"{[n for n in self._prefixed_param_names]}"
 
 
 class FlatParamHandle:
@@ -254,8 +258,6 @@ class FlatParamHandle:
                         raise ValueError("`FlatParameter` requires uniform `requires_grad`")
                     dtype = param.dtype
                     requires_grad = param.requires_grad
-                    # prefixed_param_name = ".".join([submodule_name, param_name]) \
-                    #     if submodule_name else param_name
                     shared_param_memo[param] = (submodule, submodule_name, param_name)
                     params_to_flatten.append(param)
                     param_infos.append(ParamInfo(
@@ -267,7 +269,9 @@ class FlatParamHandle:
                     prefixed_param_names.append(param_to_param_name[param])
         assert requires_grad is not None
         self.flat_param = FlatParamHandle.flatten_params(params_to_flatten, requires_grad)
-        self.flat_param.init_metadata(param_infos, numels, shapes, prefixed_param_names, shared_param_infos)
+        self.flat_param.init_metadata(
+            param_infos, numels, shapes, prefixed_param_names, shared_param_infos,
+        )
 
     @staticmethod
     def flatten_params(
@@ -480,34 +484,13 @@ class FlatParamHandle:
             set(spi.module for spi in self.flat_param._shared_param_infos)
         )
 
-    def _get_flat_param_name(self) -> str:
-        """
-        TODO (awgu): Use this for now..
-        dedup with ``_get_debug_name()``
-        """
-        return self.flat_param._flat_param_name
 
-
-# TODO (awgu): refactor with FSDP?
 def _get_param_to_param_name(
     model: torch.nn.Module,
 ) -> Dict[torch.nn.Parameter, List[str]]:
     """
-    Constructs a mapping from flattened parameter (including non-FSDP-module
-    parameters) to its unflattened parameter names. For non-FSDP-module
-    parameters, these mapped-to lists always contain a single element. The
-    unflattened parameter names should match the keys of the model state dict.
-
-    For shared parameters, only the first parameter name is included (following
-    the ``torch.nn.Module.parameters()`` order).
-
-    Args:
-        model (torch.nn.Module): Root module (which may or may not be a
-            :class:`FullyShardedDataParallel` instance).
-        dedup_shared_params (bool): If ``True``, only includes the first
-            list of unflattened parameter names corresponding to a parameter
-            in the module walk order; if ``False``, then includes all of the
-            unflattened parameter names.
+    Returns a mapping from parameter to parameter name for all parameters in
+    the module hierarchy rooted at ``model`` (assuming no FSDP wrapping).
     """
     def module_fn(module, prefix, param_to_param_name):
         for param_name, param in module.named_parameters(recurse=False):

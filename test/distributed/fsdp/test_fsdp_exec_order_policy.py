@@ -86,19 +86,6 @@ class TestFSDPExecOrderPolicy(FSDPTest):
                 optim.step()
             self.assertEqual(iter_losses[0], iter_losses[1])
 
-
-
-
-
-    @skip_if_lt_x_gpu(2)
-    def test_constructor(self):
-        group = dist.distributed_c10d._get_default_group()
-        model = self._get_nonwrapped_model(group).cuda()
-        fsdp_model = FSDP(model, group, auto_wrap_policy=_ExecOrderPolicy(4e3))
-        print(f"[Rank {self.rank}] printing parameters!")
-        for param_name, param in fsdp_model.named_parameters():
-            print(f"[Rank {self.rank}] {param_name} {param.shape}")
-
     @skip_if_lt_x_gpu(2)
     def test_fwd_bwd(self):
         self._test_parity_with_ddp(CNN, 1e2, 3)
