@@ -1,6 +1,8 @@
 # Owner(s): ["module: onnx"]
 
 import torch
+from torch.onnx import OperatorExportTypes
+from torch.onnx.utils import _model_to_graph
 from torch.onnx._globals import GLOBALS
 
 from test_pytorch_onnx_onnxruntime import run_model_test
@@ -109,9 +111,7 @@ class TestAutogradFuns(unittest.TestCase):
         input = torch.ones(1, 5)
         run_model_test(self, model, input_args=(input,))
 
-    # Skip test as torch.erf() is not supported
-    # This is a proof of concept to show error message originates from
-    # unsupported operator rather than missing symbolic method
+    # Run export in ONNX_FALLTHROUGH mode as torch.erf() is not supported
     def test_aten_unsupported(self):
         class Erf(torch.autograd.Function):
             @staticmethod
@@ -131,10 +131,13 @@ class TestAutogradFuns(unittest.TestCase):
 
         model = Caller()
         input = torch.ones(1, 5)
-        try:
-            run_model_test(self, model, input_args=(input,))
-        except Exception:
-            raise unittest.SkipTest("Unsupported operator")
+        graph, _, _ =_model_to_graph(
+            model,
+            (input,),
+            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+        )
+        iter = graph.nodes()
+        self.assertEqual(next(iter).kind(), "prim::PythonOp")
 
     def test_inline_and_symbolic(self):
         class Exp(torch.autograd.Function):
