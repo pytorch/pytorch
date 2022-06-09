@@ -167,7 +167,7 @@ static PyObject * THPGenerator_get_device(THPGenerator *self, void *unused) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPGenerator_properties[] = {
   {"device", (getter)THPGenerator_get_device, nullptr, nullptr, nullptr},
-  {nullptr}
+  {nullptr, nullptr, nullptr, nullptr, nullptr}
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
@@ -177,13 +177,13 @@ static PyMethodDef THPGenerator_methods[] = {
   {"manual_seed",     THPGenerator_manualSeed,     METH_O,       nullptr},
   {"seed",            THPGenerator_seed,           METH_NOARGS,  nullptr},
   {"initial_seed",    THPGenerator_initialSeed,    METH_NOARGS,  nullptr},
-  {nullptr}
+  {nullptr, nullptr, 0, nullptr}
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMemberDef THPGenerator_members[] = {
   {(char*)"_cdata", T_ULONGLONG, offsetof(THPGenerator, cdata), READONLY, nullptr},
-  {nullptr}
+  {nullptr, 0, 0, 0, nullptr}
 };
 
 PyTypeObject THPGeneratorType = {
@@ -225,6 +225,18 @@ PyTypeObject THPGeneratorType = {
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
   THPGenerator_pynew,                          /* tp_new */
+  nullptr,                                     /* tp_free */
+  nullptr,                                     /* tp_is_gc */
+  nullptr,                                     /* tp_bases */
+  nullptr,                                     /* tp_mro */
+  nullptr,                                     /* tp_cache */
+  nullptr,                                     /* tp_subclasses */
+  nullptr,                                     /* tp_weaklist */
+  nullptr,                                     /* tp_del */
+  0,                                           /* tp_version_tag */
+  nullptr,                                     /* tp_finalize */
+  nullptr,                                     /* tp_vectorcall */
+  nullptr,                                     /* tp_print */
 };
 
 bool THPGenerator_init(PyObject *module)
