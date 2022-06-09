@@ -1687,6 +1687,27 @@ TEST_F(VulkanAPITest, reflection_pad2d) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, replication_pad2d) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a_cpu = at::rand({2, 3, 47, 63}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  constexpr std::array<int64_t, 4u> padding_params{9, 8, 5, 12};
+
+  const auto out_cpu = at::replication_pad2d(a_cpu, padding_params);
+  const auto out_vulkan = at::replication_pad2d(a_vulkan, padding_params).cpu();
+
+  const auto check = almostEqual(out_cpu, out_vulkan);
+  if (!check) {
+    showRtol(out_cpu, out_vulkan);
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, reshape) {
   if (!at::is_vulkan_available()) {
     return;
