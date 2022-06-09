@@ -317,3 +317,113 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
             setattr(main_root, x.name, getattr(gm, x.target))  # type: ignore[arg-type]
 
     return torch.fx.GraphModule(main_root, main_g)
+
+def fuse_partition(gm, partition_name, nodes):
+
+    subgraph = torch.fx.Graph()
+
+    original_inputs = []
+    node_map = {}       # mapping of nodes from old graph to new graph
+
+    # handles inputs throught graph.node_copy's arg_transform functions
+    def remap_inputs(x):
+        if x.op == "get_attr":
+            # TODO: do we really need copy the get_attr node into the graph?
+            # do something here
+            pass
+
+        if x in nodes:
+            # x is inside subgraph, return the copied node
+            # the node should have been copied aleady, as we are copying graph in the topological order
+            return node_map[x]
+
+        # x is not in subgraph, create a new placeholder for subgraph
+        input = subgraph.placeholder(x.name, type_expr=x.type)
+        original_inputs.append(x)
+
+        return input
+
+    # copy nodes
+    for node in nodes:
+        new_node = subgraph.node_copy(node, remap_inputs)
+        node_map[node] = new_node
+
+    #handles outputs
+
+    outs = set()
+    original_outputs = set()
+    for node in nodes:
+        for user_node in node.users:
+            if user_node not in nodes:
+                # external user node, need to expose as an output
+                outs.add(node_map[node])
+                original_outputs.add(node)
+
+    # outs = tuple(map(node_remapping.__getitem__, comp.orig_outputs))
+
+    # outs contain nodes in the new subgraph
+    outs = tuple(outs)
+    original_outputs = tuple(original_outputs)
+    # Take care of the args of FX output node. If there's a single
+    # output then the output node args is like (output_single), else
+    # if there're multiple outputs then the output node args is like
+    # ((output_0, output_1, ...)).
+    subgraph.output(outs[0] if len(outs) == 1 else outs)
+
+    # lint to ensure correctness
+    subgraph.lint()
+
+    sub_gm = torch.fx.GraphModule(nn.Module(), subgraph, class_name=partition_name)
+
+    sub_gm.name = partition_name
+    sub_gm.orig_inputs = tuple(original_inputs)
+    sub_gm.orig_outputs = original_outputs   # todo: fix here
+
+    return sub_gm
+
+def insert_subgm(gm, sub_gm, original_nodes):
+    setattr(gm, sub_gm.name, sub_gm)
+
+    # Create a call_module node in main graph.
+    module_node = gm.graph.call_module(
+        sub_gm.name,
+        args=sub_gm.orig_inputs,
+        kwargs=None,
+    )
+
+    outs = sub_gm.orig_outputs
+
+
+    # TODO: handle multiple output case
+    for out in outs:
+        out.replace_all_uses_with(module_node)
+
+    # erase original nodes in inversed topological order
+    for node in reversed(original_nodes):
+        gm.graph.erase_node(node)
+
+    return gm
+
+
+def fuse_by_partitions(gm: torch.fx.GraphModule, partitions) -> torch.fx.GraphModule:
+    for partition_id, nodes in partitions.items():
+        partition_name = "fused_" + str(partition_id)
+        sub_gm = fuse_partition(gm, partition_name, nodes)
+
+        print(partition_name)
+        print(sub_gm.graph)
+
+
+        insert_subgm(gm, sub_gm, nodes)
+
+        # break
+    print("before")
+    print(gm)
+
+    from torch.fx.passes.tools_common import legalize_graph
+    legalize_graph(gm)
+    print("after")
+    print(gm)
+
+    return gm
+

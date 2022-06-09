@@ -30,6 +30,14 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 import torch.fx.experimental.meta_tracer
 from torch.fx.experimental.proxy_tensor import make_fx
+
+from torch.fx.partitioner.partitioner import CapabilityBasedPartitioner
+from torch.fx.partitioner.nvfuser_operator_support import NvFuserOperatorSupport
+import torch._prims as prims
+from torch._prims.executor import make_traced
+from torch.fx.passes.graph_drawer import FxGraphDrawer
+
+
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.operator_schemas import (
@@ -40,7 +48,8 @@ from torch.fx.operator_schemas import (
     create_type_hint,
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
-from torch.fx.passes.split_module import split_module
+# from torch.fx.passes.split_module import split_module
+from torch.fx.passes.split_utils import split_by_tags, fuse_by_partitions
 from torch.testing._internal.common_device_type import (
     ops,
     onlyCPU,
@@ -1728,6 +1737,167 @@ class TestModule(torch.nn.Module):
             args, kwargs = normalize_function(target, (inp1,), {"the_template": inp2}, normalize_to_only_use_kwargs=True)
             self.assertIs(kwargs["input"], inp1)
             self.assertIs(kwargs["the_template"], inp2)
+
+class TestFXGraphPartitioner(JitTestCase):
+
+    # class TestModule0(torch.nn.Module):
+    #     def forward(self, a, b):
+    #         add_1 = a + b
+    #         add_2 = add_1 + torch.rand(4)
+    #         add_3 = add_2 + torch.rand(4)
+    #         return add_3
+
+    # class TestModule1(torch.nn.Module):
+    #     def __init__(self):
+    #         super(TestModule1, self).__init__()
+    #         self.linear = torch.nn.Linear(4, 4)
+
+    #     def forward(self, a):
+    #         add_1 = a + torch.rand(4)
+    #         add_2 = add_1 + torch.rand(4)
+    #         linear_1 = self.linear(add_1)
+    #         add_3 = add_2 + linear_1
+    #         add_4 = add_2 + add_3
+    #         return add_4
+
+
+
+    # torchvision.models.resnet18,
+    # torchvision.models.resnet50,
+    # torchvision.models.densenet121,
+    # torchvision.models.shufflenet_v2_x1_0,
+    # torchvision.models.vgg16,
+    # torchvision.models.mobilenet_v2,
+    # torchvision.models.mnasnet1_0,
+    # torchvision.models.resnext50_32x4d,
+
+    def test_nvfuser_partition(self):
+        class TestModule2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.linear2 = torch.nn.Linear(4, 4)
+                self.param = torch.nn.Parameter(torch.rand(4, 4))
+
+            def forward(self, a, b, c, d):
+                add = a + b
+
+                linear_1 = self.linear(add)
+
+                add_1 = add + c
+                add_2 = add_1 + self.param
+                add_3 = add_1 + linear_1
+                add_4 = add_2 + add_3
+
+                linear_2 = self.linear2(add_4)
+
+                add_5 = linear_2 + add_4
+                add_6 = add_5 + a
+
+                return add_4, add_5, add_6
+
+        m = TestModule2()
+        traced = symbolic_trace(m)
+        # a, b = torch.rand(4), torch.rand(4)
+        # graph_manipulation.get_size_of_all_nodes(traced, [a, b])
+
+        supported_ops = NvFuserOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(traced, supported_ops)
+
+        candidates = partitioner.get_candidates()
+
+        partitions = partitioner.partition(candidates)
+
+        # tags = []
+        # for partition_id, nodes in reversed(list(partitions.items())):
+        #     tags.append(str(partition_id))
+        #     for node in nodes:
+        #         node.tag = str(partition_id)
+
+        # for node in traced.graph.nodes:
+        #     if node.op in  ["call_function", "call_method", "call_module"] :
+        #         # if not hasattr(node, 'tag'):
+        #         #     node.tag = "fallback"
+        #         if node.name == "linear":
+        #             node.tag = "fallback"
+        #         if node.name == "linear2":
+        #             node.tag = "fallback2"
+
+
+        # tags = ["2", "fallback", "1", "fallback2", "0"]
+
+        # print(tags)
+
+        # print(traced.graph)
+        print(partitions)
+
+
+        drawer = FxGraphDrawer(traced, "test")
+        dot_graph = drawer.get_dot_graph()
+        dot_graph.write_png("before.png")
+
+
+        # module_with_submodules = split_module(traced, m, lambda node: assignment[node] if node in assignment else -1)
+
+        fused_graph = fuse_by_partitions(traced, partitions)
+
+
+        drawer = FxGraphDrawer(fused_graph, "test")
+        dot_graph = drawer.get_dot_graph()
+        dot_graph.write_png("after.png")
+
+
+        # print(split_graph.graph)
+
+        # print(split_graph.get_submodule("2").graph)
+
+
+    def test_nvfuser_operator_support(self):
+        def _wrapper(a, b, broadcast_dimensions):
+            a_bc = prims.broadcast_in_dim(a, b.shape, broadcast_dimensions)
+            return prims.add(a_bc, b)
+
+        traced = symbolic_trace(_wrapper)
+
+        supported_ops = NvFuserOperatorSupport()
+        for node in traced.graph.nodes:
+            assert supported_ops.is_node_supported({}, node)
+
+
+    def test_multiple_outputs(self):
+        class TestModule2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c):
+                add = a + b
+                add_1 = b + c
+
+                return add, add_1
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = TestModule2()
+
+            def forward(self, a, b, c):
+                o0, o1 = self.m(a,b,c)
+                x = o0 + o1
+                return x
+
+        m = TestModule()
+
+        class TestTracer(torch.fx.Tracer):
+            def is_leaf_module(self, module, name):
+                return True
+
+        t = TestTracer()
+
+        traced = t.trace(m)
+
+
+        print(traced)
+
 
 instantiate_device_type_tests(TestNormalizeOperators, globals())
 
