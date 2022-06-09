@@ -460,10 +460,15 @@ MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataTy
 
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const Tensor& tensor) {
     return [mpsGraph placeholderWithShape:getMPSShape(tensor)
-                                 dataType:getMPSDataType(tensor.scalar_type())
+                                 dataType:getMPSScalarType(tensor.scalar_type())
                                      name:nil];
 }
 
+// this is meant to suppress the availability warning on castTensor
+// we pass ScalarType instead of MPSDataType to handle MPSDataTypeBoolean's availability too
+MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType) {
+  return [mpsGraph castTensor:tensor toType:getMPSScalarType(toType) name:@"castTensor"];
+}
 
 string get_mem_format_string(c10::MemoryFormat memory_format) {
   string mem_format_key;
