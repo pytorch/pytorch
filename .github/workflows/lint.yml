@@ -42,7 +42,7 @@ jobs:
       - name: Run lintrunner on all files
         run: |
           set +e
-          if ! lintrunner --verbose --force-color --all-files --tee-json=lint.json; then
+          if ! lintrunner --force-color --all-files --tee-json=lint.json; then
               echo ""
               echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
               echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
