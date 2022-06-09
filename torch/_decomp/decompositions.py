@@ -1202,32 +1202,6 @@ def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
     return torch.permute(self, perm)
 
 
-def check_stack_inputs(tensors: List[Tensor]):
-    entry_shape = tensors[0].shape
-    for i in range(1, len(tensors)):
-        assert tensors[i].shape == entry_shape, (f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0"
-                                                 f"and {tensors[i].shape} at entry {i}")
-
-
-def get_stack_inputs(tensors: List[Tensor], dim: int):
-    check_stack_inputs(tensors)
-    return [t.unsqueeze(dim) for t in tensors]
-
-
-@register_decomposition(aten.stack.default)
-def stack(tensors: List[Tensor], dim: int = 0) -> Tensor:
-    assert len(tensors) > 0, "stack expects a non-empty TensorList"
-    wrapped_dim = utils.canonicalize_dim(tensors[0].dim() + 1, dim)
-    if wrapped_dim < tensors[0].dim() and not tensors[0].is_sparse:
-        check_stack_inputs(tensors)
-        result_sizes = list(tensors[0].shape)
-        result_sizes.insert(wrapped_dim, len(tensors))
-        out = torch.cat(tensors, wrapped_dim)
-        return out.view(result_sizes)
-    else:
-        return torch.cat(get_stack_inputs(tensors, wrapped_dim), dim)
-
-
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
     ndim = self.dim()
     wrapped_dims = utils.canonicalize_dims(ndim, dims)
