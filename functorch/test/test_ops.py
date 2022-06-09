@@ -1322,8 +1322,6 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(torch.nn.functional.l1_loss, (cotangents, input, target))
 
-    # ("https://github.com/pytorch/functorch/issues/858")
-    @unittest.expectedFailure
     def test_extremal_numerics_mse_loss(self, device):
         N, C, H, W = 3, 4, 5, 6
         shapes = ((N, C), (N, C, H), (N, C, H, W))
