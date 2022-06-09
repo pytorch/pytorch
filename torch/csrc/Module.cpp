@@ -1058,6 +1058,9 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_set_neg", [](const at::Tensor & x, bool neg) {
     x._set_neg(neg);
   });
+  py_module.def("_dispatch_key_set", [](const at::Tensor & x) {
+    return toString(x.key_set());
+  });
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator = (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);
