@@ -22,13 +22,14 @@ class EventMetrics:
     duration_time_ns: int = 0
     self_time_ns: int = 0
     idle_time_ns: int = 0
+
     def percent_idle_time(self):
         if self.duration_time_ns == 0:
             return 0
         return self.idle_time_ns / self.duration_time_ns
 
 
-def compute_event_metrics(prof) -> dict[EventKey, EventMetrics]:
+def compute_event_metrics(prof):
     metrics = dict()
     compute_self_time(prof, metrics)
     compute_idle_time(prof, metrics)
@@ -68,7 +69,7 @@ def compute_idle_time(prof, metrics):
 
     def is_cuda_launch_kernel(e):
         return e.name() == "cudaLaunchKernel"
-    
+
     def is_cuda_kernel(e):
         # TODO: find a better way to identify cudaLaunchKernel
         return e.device_type() == DeviceType.CUDA and e.name() != "[memory]" and e.name() != "Memset (Device)"
@@ -104,9 +105,10 @@ def compute_idle_time(prof, metrics):
                 idle_time += overlap_end - overlap_start
         metrics[EventKey(event)].idle_time_ns = idle_time
 
+
 def get_optimizable_events(prof):
     metrics = compute_event_metrics(prof)
-    
+
     # Compute a list of events that that long idle time
 
     # Print the list of events in human-friendly format
