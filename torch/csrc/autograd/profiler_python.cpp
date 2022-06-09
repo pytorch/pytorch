@@ -276,7 +276,8 @@ FrameArgs ValueCache::load<CallType::PyCall>(const PyCallKey& key) const {
           frame_state.line_no_,
           frame_state.funcname_.str()),
       CallType::PyCall,
-      /*module_=*/c10::nullopt};
+      /*module_=*/c10::nullopt,
+      /*module_id_=*/c10::nullopt};
 }
 
 template <>
@@ -330,7 +331,8 @@ FrameArgs ValueCache::load<CallType::PyCCall>(const PyCCallKey& key) const {
   return {
       std::get<CallType::PyCCall>(state_).at(key).str(),
       CallType::PyCCall,
-      /*module_=*/c10::nullopt};
+      /*module_=*/c10::nullopt,
+      /*module_id_=*/c10::nullopt};
 }
 
 // TODO: Use re2.
@@ -441,7 +443,18 @@ static PyTypeObject TraceContextType = {
   nullptr,                    /* tp_init */
   nullptr,                    /* tp_alloc */
   PyType_GenericNew,          /* tp_new */
-  nullptr                     /* tp_free */
+  nullptr,                    /* tp_free */
+  nullptr,                    /* tp_is_gc */
+  nullptr,                    /* tp_bases */
+  nullptr,                    /* tp_mro */
+  nullptr,                    /* tp_cache */
+  nullptr,                    /* tp_subclasses */
+  nullptr,                    /* tp_weaklist */
+  nullptr,                    /* tp_del */
+  0,                          /* tp_version_tag */
+  nullptr,                    /* tp_finalize */
+  nullptr,                    /* tp_vectorcall */
+  nullptr,                    /* tp_print */
 };
 
 // ============================================================================
