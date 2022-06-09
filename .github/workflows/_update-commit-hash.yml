@@ -56,9 +56,11 @@ jobs:
 
       - name: Get new commit hash, update file, push to branch
         shell: bash
+        id: update-file
         env:
           BRANCH_NAME: ${{ steps.already-existing.outputs.result || env.NEW_BRANCH_NAME }}
         run: |
+          set -x
           pushd ${{ inputs.repo-name }}
           git rev-parse ${{ inputs.branch }} > ../.github/${{ inputs.repo-name }}_commit_hash.txt
           popd
@@ -71,11 +73,13 @@ jobs:
             git add .github/${{ inputs.repo-name }}_commit_hash.txt
             git commit -m "update ${{ inputs.repo-name }} commit hash"
             git push --set-upstream origin "${BRANCH_NAME}" -f
+          else
+            echo ::set-output name=no-changes::1
           fi
 
       - name: Create Pull Request
         uses: actions/github-script@v6
-        if: ${{ !steps.already-existing.outputs.result }}
+        if: ${{ !steps.already-existing.outputs.result && !steps.update-file.outputs.no-changes}}
         with:
           github-token: ${{ secrets.MERGEBOT_TOKEN }}
           script: |
