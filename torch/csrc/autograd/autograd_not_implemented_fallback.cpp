@@ -10,6 +10,7 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
+#include <ATen/core/TorchDispatchModeTLS.h>
 
 #include <vector>
 
@@ -148,6 +149,8 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
       TORCH_INTERNAL_ASSERT(impl_saved.at(idx_tensor) == t.getIntrusivePtr(), op_name);
   }, &stack_args_copy, 0, num_arguments);
   _foreach_tensor([&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
+    if (at::impl::tensor_has_dispatch(t) || at::impl::dispatch_mode_enabled())
+      return;
     if (!is_inplace_output[idx_ret])
       TORCH_INTERNAL_ASSERT(t.use_count() <= 1, op_name);  // Okay to return undefined tensor
     if (!is_aliased_output[idx_ret] && t.has_storage())
