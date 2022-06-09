@@ -4,6 +4,7 @@
 #include <torch/library.h>
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <c10/core/SafePyObject.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -231,6 +232,10 @@ void initDispatchBindings(PyObject* module) {
   });
   m.def("_dispatch_tls_is_dispatch_key_excluded", [](const char* dispatch_key) {
     return c10::impl::tls_is_dispatch_key_excluded(c10::parseDispatchKey(dispatch_key));
+  });
+
+  m.def("_dispatch_isTensorSubclassLike", [](const at::Tensor& tensor) {
+    return at::isTensorSubclassLike(tensor);
   });
 
 
