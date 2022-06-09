@@ -16378,20 +16378,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                # the stride of the tensor was modified directly without going through the PyTorch dispatcher.
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-               # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='cuda'),
-               # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_complex_half_reference_testing',
-                            device_type='cuda'),
-               # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta',
-                            device_type='cuda', dtypes=(torch.chalf,)),
-               # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta',
-                            device_type='cuda', dtypes=(torch.chalf,)),
-               # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
-                            device_type='cuda', dtypes=(torch.chalf,)),
            )
            ),
     OpInfo('reshape',
@@ -20636,10 +20622,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.ravel",
         torch_opinfo_name="ravel",
-        skips=(
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='cuda'),
-        )
     ),
     PythonRefInfo(
         "_refs.reshape",
