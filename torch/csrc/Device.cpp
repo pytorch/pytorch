@@ -175,13 +175,13 @@ typedef PyObject *(*getter)(PyObject *, void *);
 static struct PyGetSetDef THPDevice_properties[] = {
   {"type",       (getter)THPDevice_type, nullptr, nullptr, nullptr},
   {"index",      (getter)THPDevice_index, nullptr, nullptr, nullptr},
-  {nullptr}
+  {nullptr, nullptr, nullptr, nullptr, nullptr},
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static PyMethodDef THPDevice_methods[] = {
   {"__reduce__", THPDevice_reduce, METH_NOARGS, nullptr},
-  {nullptr}  /* Sentinel */
+  {nullptr, nullptr, nullptr, nullptr, nullptr},  /* Sentinel */
 };
 
 PyTypeObject THPDeviceType = {
