@@ -3,9 +3,10 @@ from torch.utils.data.datapipes.iter import Shuffler
 import warnings
 
 __all__ = [
-    "get_all_graph_pipes",
     "apply_sharding",
+    "apply_shuffle_seed",
     "apply_shuffle_settings",
+    "get_all_graph_pipes",
 ]
 
 
@@ -51,5 +52,17 @@ def apply_shuffle_settings(datapipe, shuffle):
 
     for shuffler in shufflers:
         shuffler.set_shuffle(shuffle)
+
+    return datapipe
+
+
+def apply_shuffle_seed(datapipe, rng):
+    graph = torch.utils.data.graph.traverse(datapipe, only_datapipe=True)
+    all_pipes = get_all_graph_pipes(graph)
+    shufflers = {pipe for pipe in all_pipes if isinstance(pipe, Shuffler)}
+
+    for shuffler in shufflers:
+        shuffle_seed = int(torch.empty((), dtype=torch.int64).random_(generator=rng).item())
+        shuffler.set_seed(shuffle_seed)
 
     return datapipe
