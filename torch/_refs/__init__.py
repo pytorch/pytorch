@@ -2410,10 +2410,10 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     else:
         # NOTE: Could not use value = item(value) as it resulted in
         # RuntimeError: Cannot cast FakeTensor(cpu) to number
-        assert isinstance(value, TensorLike)
+        value_ndim = value.ndim
         check(
-            value.ndim == 0,
-            lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value.ndim} dimension",
+            value_ndim == 0,
+            lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value_ndim} dimension",
         )
         value_type = utils.dtype_to_type(value.dtype)
 
