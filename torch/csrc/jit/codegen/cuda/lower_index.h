@@ -45,6 +45,7 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
   void handle(const ReductionOp*) final;
   void handle(const GroupedReductionOp*) final;
   void handle(const WelfordOp*) final;
+  void handle(const LoadStoreOp*) final;
   void handle(const MmaOp*) final;
   void handle(const BroadcastOp*) final;
 
@@ -53,6 +54,7 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
   void handle(const kir::Allocate*) final;
   void handle(const kir::BlockSync*) final;
   void handle(const kir::GridSync*) final;
+  void handle(const kir::CpAsyncWait*) final;
 
   void generate(const std::vector<Expr*>& exprs);
 
