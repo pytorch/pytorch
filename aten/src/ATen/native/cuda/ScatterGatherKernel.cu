@@ -247,11 +247,12 @@ struct cuda_scatter_gather_base_kernel {
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
     auto index_strides = index.strides();
-    auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
     auto src_strides = src.strides();
     auto src_strides_vec = ensure_nonempty_vec(src_strides.vec());
+
+    auto ndim = index_sizes.size();
 
     // The scatter version of this works differently
     // if any dimension of the index tensor is
@@ -344,11 +345,12 @@ struct cuda_scatter_gather_base_kernel {
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
     auto index_strides = index.strides();
-    auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
     auto src_strides = src.strides();
     auto src_strides_vec = ensure_nonempty_vec(src_strides.vec());
+
+    auto ndim = index_sizes.size();
 
     // The scatter version of this works differently
     // if any dimension of the index tensor is
@@ -442,11 +444,12 @@ struct cuda_scatter_gather_base_kernel {
     auto index_sizes = index.sizes();
     auto index_sizes_vec = ensure_nonempty_vec(index_sizes.vec());
     auto index_strides = index.strides();
-    auto ndim = index_sizes.size();
     auto self_strides_vec = ensure_nonempty_vec(self.strides().vec());
     auto src_sizes = src.sizes();
     auto src_strides = src.strides();
     auto src_strides_vec = ensure_nonempty_vec(src_strides.vec());
+    
+    auto ndim = index_sizes.size();
 
     // The scatter version of this works differently
     // if any dimension of the index tensor is
