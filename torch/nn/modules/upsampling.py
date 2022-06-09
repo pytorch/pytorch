@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from .module import Module
 from .. import functional as F
 
