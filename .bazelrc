@@ -63,4 +63,5 @@ build \
     --per_file_copt=//:aten/src/ATen/RegisterSparseCPU.cpp$@-Wno-error=unused-function                \
     --per_file_copt=//:aten/src/ATen/RegisterSparseCsrCPU.cpp$@-Wno-error=unused-function             \
     --per_file_copt=//:aten/src/ATen/RegisterZeroTensor.cpp$@-Wno-error=unused-function               \
-    --per_file_copt=//:torch/csrc/lazy/generated/RegisterAutogradLazy.cpp@-Wno-error=unused-function
+    --per_file_copt=//:torch/csrc/lazy/generated/RegisterAutogradLazy.cpp@-Wno-error=unused-function  \
+    --per_file_copt=//:torch/csrc/lazy/generated/RegisterLazy.cpp@-Wno-error=unused-function
