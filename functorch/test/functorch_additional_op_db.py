@@ -185,6 +185,37 @@ additional_op_db.append(
     ))
 
 
+def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
+    def make_input(shape, requires_grad=requires_grad):
+        return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    rhs_requires_grad = kwargs.get('rhs_requires_grad', requires_grad)
+    S = 5
+
+    shapes = ((S, S), (S, S, S), (S, S, S, S))
+    reductions = ("none", "mean", "sum")
+
+    for shape, reduction in itertools.product(shapes, reductions):
+        yield SampleInput(make_input(shape),
+                          args=(make_input(shape, requires_grad=rhs_requires_grad),),
+                          kwargs={"reduction": reduction})
+
+
+additional_op_db.append(
+    OpInfo(
+        "nn.functional.mse_loss",
+        variant_test_name="functorch",
+        sample_inputs_func=sample_inputs_mse_loss,
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        dtypes=floating_types_and(torch.float16),
+        backward_dtypes=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        backward_dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+    ))
+
+
 def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
     S = 5
     test_args = [
