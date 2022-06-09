@@ -27,12 +27,6 @@ std::string ptrType(DataType dt) {
   return ss.str();
 }
 
-std::string refType(DataType dt) {
-  std::stringstream ss;
-  ss << dt << "&";
-  return ss.str();
-}
-
 //! Utility class to build an argument list
 class ArgumentBuilder {
  public:

@@ -2407,19 +2407,6 @@ std::vector<PredicateDomainInfo> getPredicateContigIds(
   return contig_id_infos;
 }
 
-IterDomain* getMappedReferenceDomain(
-    IterDomain* id,
-    const ReferenceTensor& reference) {
-  // Partially overlaps with getPredicateContigIds()
-  auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
-      id, IdMappingMode::EXACT);
-  auto it = reference.concrete_to_id.find(concrete_id);
-  if (it == reference.concrete_to_id.end()) {
-    return nullptr;
-  }
-  return it->second;
-}
-
 std::vector<PredicateDomainInfo> getNonDivisibleConsumerDomainsToPredicate(
     TensorView* consumer_tv) {
   const auto& non_divisible_split_info =

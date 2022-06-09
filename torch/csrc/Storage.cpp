@@ -337,20 +337,6 @@ static PyObject * THPStorage_device(THPStorage* self, void *unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_dtype(THPStorage *self, void *unused)
-{
-  HANDLE_TH_ERRORS
-  return torch::autograd::utils::wrap(
-      torch::getTHPDtype(at::typeMetaToScalarType(
-#ifdef THQUANTIZED
-          caffe2::TypeMeta::Make<quantized_t>()
-#else
-          caffe2::TypeMeta::Make<uint8_t>()
-#endif
-              )));
-  END_HANDLE_TH_ERRORS
-}
-
 typedef PyObject *(*getter)(PyObject *, void *);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
