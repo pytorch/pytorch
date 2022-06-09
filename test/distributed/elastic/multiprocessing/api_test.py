@@ -9,6 +9,7 @@
 import ctypes
 import multiprocessing
 import os
+from re import X
 import shutil
 import signal
 import sys
@@ -32,9 +33,9 @@ from torch.distributed.elastic.multiprocessing.api import (
 )
 from torch.distributed.elastic.multiprocessing.errors import ErrorHandler
 from torch.testing._internal.common_utils import (
-    IS_IN_CI,
+    IS_CI,
     IS_MACOS,
-    IS_WINDOWS,
+   ,
     NO_MULTIPROCESSING_SPAWN,
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
@@ -658,7 +659,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 
 
 # tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows
-if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_IN_CI):
+if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
 
     class StartProcessesNotCITest(StartProcessesTest):
         def test_wrap_bad(self):
