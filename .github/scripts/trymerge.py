@@ -855,7 +855,6 @@ def pr_has_pending_checks(pr: GitHubPR) -> bool:
     return len(get_pending_checks(pr)) > 0
 
 
-
 def try_revert(repo: GitRepo, pr: GitHubPR, *,
                dry_run: bool = False,
                comment_id: Optional[int] = None,
