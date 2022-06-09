@@ -659,14 +659,15 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     nproc_per_node = determine_local_world_size(args.nproc_per_node)
     if "OMP_NUM_THREADS" not in os.environ and nproc_per_node > 1:
         omp_num_threads = 1
-        log.warning(
-            f"\n*****************************************\n"
-            f"Setting OMP_NUM_THREADS environment variable for each process to be "
-            f"{omp_num_threads} in default, to avoid your system being overloaded, "
-            f"please further tune the variable for optimal performance in "
-            f"your application as needed. \n"
-            f"*****************************************"
-        )
+        if args.node_rank == 0:
+            log.warning(
+                f"\n*****************************************\n"
+                f"Setting OMP_NUM_THREADS environment variable for each process to be "
+                f"{omp_num_threads} in default, to avoid your system being overloaded, "
+                f"please further tune the variable for optimal performance in "
+                f"your application as needed. \n"
+                f"*****************************************"
+            )
         # This env variable will be passed down to the subprocesses
         os.environ["OMP_NUM_THREADS"] = str(omp_num_threads)
 
