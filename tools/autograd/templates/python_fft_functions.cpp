@@ -61,7 +61,7 @@ void initFFTFunctions(PyObject* module) {
      "torch._C._fft",
      NULL,
      -1,
-     fft_functions
+     fft_functions,
      /*m_slots=*/nullptr,
      /*m_traverse=*/nullptr,
      /*m_clear=*/nullptr,
