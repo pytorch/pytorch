@@ -22,6 +22,7 @@ namespace tensorexpr {
 Tensor computeSum(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   std::vector<size_t> axes;
@@ -53,12 +54,12 @@ Tensor computeSum(
     std::iota(axes.begin(), axes.end(), 0);
   }
   // Axes go into reduction dimensions.
-  std::vector<DimArg> reductionDims;
+  std::vector<ExprHandle> reductionDims;
   reductionDims.reserve(rank);
   for (size_t axis : axes) {
     reductionDims.emplace_back(sizes[axis]);
   }
-  std::vector<DimArg> outputDims;
+  std::vector<ExprHandle> outputDims;
   // Output dimensions are the complement of axes. When keepdim is set, a
   // one-sized dimension is inserted for each axis.
   for (size_t dim = 0; dim < rank; ++dim) {
@@ -72,6 +73,7 @@ Tensor computeSum(
   return Reduce(
       "sum",
       outputDims,
+      outputStrides,
       Sum(),
       [&](ParameterList& indices) {
         // "Squeeze" out indices inserted when keepdim is set.
@@ -105,6 +107,7 @@ Tensor computeSum(
 Tensor computeMean(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
@@ -137,6 +140,7 @@ Tensor computeMean(
 Tensor computeMax(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
@@ -160,6 +164,7 @@ Tensor computeMax(
 Tensor computeAdaptiveAvgPool2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;

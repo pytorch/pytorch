@@ -11,8 +11,10 @@
 /torch/nn/ @albanD @jbschlosser
 /torch/optim/ @albanD
 /test/test_public_bindings.py @albanD
+/test/allowlist_for_publicAPI.json @albanD @anjali411
 /docs/source/conf.py @albanD
-/aten/src/ATen/native/native_functions.yaml @ezyang
+/aten/src/ATen/native/native_functions.yaml @bdhirsh
+/aten/src/ATen/native/tags.yaml @anjali411
 
 # Tensorpipe RPC Agent.
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
@@ -21,15 +23,15 @@
 # Distributed package
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @bowangbj
-/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @bowangbj
-/torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @bowangbj
+/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
+/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
+/torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
 
 # Distributed tests
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @bowangbj
-/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @bowangbj
+/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu
+/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu
 
 # ONNX Export
 /torch/csrc/jit/passes/onnx.h @bowenbao @shubhambhokare1
@@ -39,12 +41,17 @@
 /test/onnx/ @bowenbao @shubhambhokare1
 
 # Docker
-/.circleci/docker/ @jeffdaily @jithunnair-amd
+/.circleci/docker/ @jeffdaily
 
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
 # related to Github Actions
-/.github/ @seemethere @janeyx99 @atalman
+/.github/ @pytorch/pytorch-dev-infra
+
+# Custom Test Infrastructure
+/test/run_test.py @pytorch/pytorch-dev-infra
+/torch/testing/_internal/common_device_type.py @mruberry
+/torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
 
 # Parametrizations
 /torch/nn/utils/parametriz*.py @lezcano
@@ -56,3 +63,18 @@
 /aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved @IvanYashchuk
 # tests
 /test/test_linalg.py @lezcano @nikitaved @IvanYashchuk
+
+# OpInfo-related files
+/torch/testing/_internal/common_methods_invocations.py @mruberry @ngimel
+/torch/testing/_internal/common_device_type.py @mruberry @ngimel
+test/test_ops.py @mruberry @ngimel
+test/test_ops_gradients.py @mruberry @ngimel
+test/test_unary_ufuncs.py @mruberry @ngimel
+test/test_binary_ufuncs.py @mruberry @ngimel
+test/test_reductions.py @mruberry @ngimel
+test/test_type_promotion.py @mruberry @ngimel
+
+# torch MPS
+test/test_mps.py @kulinseth
+aten/src/ATen/mps/ @kulinseth
+aten/src/ATen/native/mps/ @kulinseth

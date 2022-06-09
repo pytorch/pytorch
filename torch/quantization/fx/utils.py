@@ -7,7 +7,6 @@ appropriate files under `torch/ao/quantization/fx/`, while adding an import stat
 here.
 """
 from torch.ao.quantization.fx.utils import (
-    _parent_name,
     graph_pretty_str,
     get_per_tensor_qparams,
     quantize_node,
@@ -22,7 +21,7 @@ from torch.ao.quantization.fx.utils import (
     create_qparam_nodes,
     all_node_args_have_no_tensors,
     node_return_type_is_int,
-    node_bool_tensor_arg_indexes,
+    get_non_observable_arg_indexes_and_types,
     is_get_tensor_info_node,
     maybe_get_next_module
 )

@@ -48,6 +48,8 @@ CppFunction::CppFunction(c10::KernelFunction func, c10::optional<c10::impl::CppS
   , debug_()
   {}
 
+CppFunction::~CppFunction() = default;
+
 #define ERROR_CONTEXT "(Error occurred while processing ", toString(kind_), " block at ", file_, ":", line_, ")"
 
 Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, const char* file, uint32_t line)
@@ -233,6 +235,9 @@ Library& Library::_fallback(CppFunction&& f) & {
   // Note if dispatch_key is DispatchKey::Undefined, it'll be ignored here since Undefined
   // isn't a runtime key, you shouldn't register anything to it at all.
   for (auto k : c10::getRuntimeDispatchKeySet(*dispatch_key)) {
+    // mobile doesn't use all dispatch keys, so skip any fallback registrations for the unused keys.
+    auto idx = getDispatchTableIndexForDispatchKey(k);
+    if (idx < 0) continue;
     registrars_.emplace_back(
       c10::Dispatcher::singleton().registerFallback(
         k,

@@ -1,8 +1,10 @@
-#include <ATen/native/vulkan/ops/Convolution.h>
+#include <ATen/native/vulkan/api/OpProfiler.h>
+#include <ATen/native/vulkan/api/Utils.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/ops/Common.h>
-#include <ATen/native/vulkan/api/Utils.h>
+#include <ATen/native/vulkan/ops/Convolution.h>
+#include <ATen/native/vulkan/ops/VulkanOpContext.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -100,7 +102,7 @@ vTensor pack_weights_dw(
   float* const dst_weight_ptr = v_weight_payload.get();
   memset(dst_weight_ptr, 0, v_weight.nbytes());
 
-  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
+  for (const auto src_oc : c10::irange(src_filter[Layout::Filter::output])) {
     /* Source */
     const float* const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block_sz;
 
@@ -112,7 +114,7 @@ vTensor pack_weights_dw(
                                     dst_c * dst_kernel_sz +
                                     dst_oh * dst_kw_sz;
 
-    for (int64_t src_ih = 0; src_ih < src_filter[Layout::Filter::height]; ++src_ih) {
+    for (const auto src_ih : c10::irange(src_filter[Layout::Filter::height])) {
       memcpy(
           dst_weight_c_ptr + src_ih * src_kw_sz,
           src_weight_oc_ptr + src_ih * src_kw_sz,
@@ -161,7 +163,7 @@ vTensor pack_weights_2d(
   float* const dst_weight_ptr = v_weight_payload.get();
   memset(dst_weight_ptr, 0, v_weight.nbytes());
 
-  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
+  for (const auto src_oc : c10::irange(src_filter[Layout::Filter::output])) {
     /* Source */
     const float* const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block_sz;
 
@@ -171,7 +173,7 @@ vTensor pack_weights_2d(
 
     float* const dst_weight_c_ptr = dst_weight_ptr + dst_c * dst_kernel_sz;
 
-    for (int64_t src_ic = 0; src_ic < src_filter[Layout::Filter::input]; ++src_ic) {
+    for (const auto src_ic : c10::irange(src_filter[Layout::Filter::input])) {
       const int64_t dst_ic4 = src_ic / 4;
 
       for (const auto src_ih : c10::irange(src_kh_sz)) {
@@ -290,7 +292,7 @@ vTensor pack_weights(
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   const Tensor weight = weight_arg.contiguous();
 
@@ -322,7 +324,7 @@ vTensor pack_biases(
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   const int64_t src_w = weight.size(Layout::Filter::output);
   const int64_t packed_w = div_up(src_w, INT64_C(4));
@@ -460,44 +462,7 @@ bool usable(const Tensor& input) {
 
 } // namespace
 
-Conv2dOpContext::Conv2dOpContext(
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias,
-    const IntArrayRef stride,
-    const IntArrayRef padding,
-    const IntArrayRef dilation,
-    const bool /* transposed */,
-    const IntArrayRef /* output_padding */,
-    const int64_t groups,
-    const Conv2dMethod method,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max)
-  : packed_{
-      pack_weights(weight, method),
-      pack_biases(bias, weight),
-      pack_filter(weight, expand_param_if_needed(dilation, "dilation", 2)),
-      pack_params(expand_param_if_needed(stride, "stride", 2)),
-      pack_params(expand_param_if_needed(padding, "padding", 2)),
-      pack_params(expand_param_if_needed(dilation, "dilation", 2)),
-      safe_downcast<int32_t>(groups),
-      output_min ? output_min->template to<float>() : -std::numeric_limits<float>::infinity(),
-      output_max ? output_max->template to<float>() : +std::numeric_limits<float>::infinity(),
-    },
-    unpacked_{
-      weight,
-      bias,
-      weight.sizes().vec(),
-      stride.vec(),
-      padding.vec(),
-      dilation.vec(),
-      groups,
-      output_min,
-      output_max,
-    },
-    method_(method) {
-}
-
-Conv2dOpContext Conv2dOpContext::create(
+VulkanOpContext conv2d_context_create(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const IntArrayRef stride_arg,
@@ -537,33 +502,61 @@ Conv2dOpContext Conv2dOpContext::create(
       dilation,
       groups);
 
-  // Pass in the originals
-  return Conv2dOpContext{
-    weight,
-    bias,
-    stride_arg,
-    padding_arg,
-    dilation_arg,
-    transposed,
-    output_padding_arg,
-    groups,
-    method,
-    output_min,
-    output_max,
-  };
+  c10::impl::GenericList packed_context{c10::AnyType::get()};
+  packed_context.reserve(10);
+  packed_context.emplace_back(convert(pack_weights(weight, method)));
+  packed_context.emplace_back(convert(pack_biases(bias, weight)));
+  packed_context.emplace_back(pack_filter(weight, dilation));
+  packed_context.emplace_back(pack_params(stride));
+  packed_context.emplace_back(pack_params(padding));
+  packed_context.emplace_back(output_padding);
+  packed_context.emplace_back(pack_params(dilation));
+  packed_context.emplace_back(safe_downcast<int32_t>(groups));
+  packed_context.emplace_back(output_min ? output_min->template to<float>() : -std::numeric_limits<float>::infinity());
+  packed_context.emplace_back(output_max ? output_max->template to<float>() : +std::numeric_limits<float>::infinity());
+  packed_context.emplace_back(method);
+
+  c10::impl::GenericList unpacked_context{c10::AnyType::get()};
+  unpacked_context.reserve(10);
+  unpacked_context.emplace_back(weight);
+  unpacked_context.emplace_back(bias);
+  unpacked_context.emplace_back(weight.sizes().vec());
+  unpacked_context.emplace_back(stride_arg.vec());
+  unpacked_context.emplace_back(padding_arg.vec());
+  unpacked_context.emplace_back(output_padding_arg.vec());
+  unpacked_context.emplace_back(dilation_arg.vec());
+  unpacked_context.emplace_back(groups);
+  unpacked_context.emplace_back(output_min);
+  unpacked_context.emplace_back(output_max);
+  unpacked_context.emplace_back(method);
+
+  return VulkanOpContext::create(packed_context, unpacked_context);
 }
 
-void Conv2dOpContext::conv2d_sliding_window(
+void conv2d_sliding_window(
     const api::Shader::Descriptor& shader,
     vTensor& v_output,
-    const vTensor& v_input) const {
-  bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && packed_.v_weight.has_image());
+    const vTensor& v_input,
+    const vTensor& packed_v_weight,
+    const vTensor& packed_v_bias,
+    const IntArrayRef packed_filter,
+    const IntArrayRef packed_stride,
+    const IntArrayRef packed_padding,
+    const IntArrayRef packed_dilation,
+    const float packed_output_min,
+    const float packed_output_max,
+    const IntArrayRef unpacked_filter,
+    const Conv2dMethod method_,
+    const std::string& op_name) {
+  bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && packed_v_weight.has_image());
   TORCH_CHECK(valid, "Not Implemented!")
 
   api::Context* const context = api::context();
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     const struct Block final {
       uvec3 extents;
       int32_t ic4;
@@ -576,32 +569,32 @@ void Conv2dOpContext::conv2d_sliding_window(
       ivec4 src_filter;
     } block {
       v_output.extents(),
-      safe_downcast<int32_t>(packed_.filter[Layout::Filter::input]),
+      safe_downcast<int32_t>(packed_filter[Layout::Filter::input]),
       {
-        safe_downcast<int32_t>(packed_.filter[Layout::Filter::width]),
-        safe_downcast<int32_t>(packed_.filter[Layout::Filter::height]),
+        safe_downcast<int32_t>(packed_filter[Layout::Filter::width]),
+        safe_downcast<int32_t>(packed_filter[Layout::Filter::height]),
         safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
         safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
       },
       {
-        safe_downcast<int32_t>(unpacked_.filter[Layout::Filter::width]),
-        safe_downcast<int32_t>(unpacked_.filter[Layout::Filter::height]),
+        safe_downcast<int32_t>(unpacked_filter[Layout::Filter::width]),
+        safe_downcast<int32_t>(unpacked_filter[Layout::Filter::height]),
       },
       {
-        safe_downcast<int32_t>(packed_.stride[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_.stride[Layout::Parameter::height]),
+        safe_downcast<int32_t>(packed_stride[Layout::Parameter::width]),
+        safe_downcast<int32_t>(packed_stride[Layout::Parameter::height]),
       },
       {
-        safe_downcast<int32_t>(packed_.padding[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_.padding[Layout::Parameter::height]),
+        safe_downcast<int32_t>(packed_padding[Layout::Parameter::width]),
+        safe_downcast<int32_t>(packed_padding[Layout::Parameter::height]),
       },
       {
-        safe_downcast<int32_t>(packed_.dilation[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_.dilation[Layout::Parameter::height]),
+        safe_downcast<int32_t>(packed_dilation[Layout::Parameter::width]),
+        safe_downcast<int32_t>(packed_dilation[Layout::Parameter::height]),
       },
       {
-        packed_.output_min,
-        packed_.output_max,
+        packed_output_min,
+        packed_output_max,
       },
     };
 
@@ -639,12 +632,12 @@ void Conv2dOpContext::conv2d_sliding_window(
             vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        packed_.v_weight.image(
+        packed_v_weight.image(
             command_buffer,
             vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        packed_.v_bias.image(
+        packed_v_bias.image(
             command_buffer,
             vTensor::Stage::Compute),
         // Object lifetime is managed by the resource pool.
@@ -654,125 +647,149 @@ void Conv2dOpContext::conv2d_sliding_window(
   command_pool.submit(context->gpu().queue, command_buffer);
 }
 
-void Conv2dOpContext::conv2d_winograd_2_3(
+void conv2d_winograd_2_3(
     vTensor& v_output,
-    const vTensor& v_input) const {
+    const vTensor& v_input,
+    const vTensor& packed_v_weight,
+    const vTensor& packed_v_bias,
+    const IntArrayRef packed_filter,
+    const IntArrayRef packed_padding,
+    const float packed_output_min,
+    const float packed_output_max) {
   // Winograd(2x2, 3x3) calculates 2x2 tile of output for every subprogram
   const int64_t out_h_units = div_up(v_output.sizes()[Layout::Activation4D::height], INT64_C(2));
   const int64_t out_w_units = div_up(v_output.sizes()[Layout::Activation4D::width], INT64_C(2));
 
-  bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && packed_.v_weight.has_image());
+  bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && packed_v_weight.has_image());
   TORCH_CHECK(valid, "Not Implemented!")
 
   api::Context* const context = api::context();
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
+  {
+    api::OpProfiler profiler(command_buffer, context->querypool(), "prepacked::conv2d_clamp_run (conv2d_winograd_2_3)");
 
-  vTensor v_input_winograd{
-    context,
+    vTensor v_input_winograd{
+      context,
+      {
+        v_input.sizes()[Layout::Activation4D::batch],
+        v_input.sizes()[Layout::Activation4D::channels],
+        out_h_units*4,
+        out_w_units*4,
+      },
+      v_output.options(),
+    };
+
     {
-      v_input.sizes()[Layout::Activation4D::batch],
-      v_input.sizes()[Layout::Activation4D::channels],
-      out_h_units*4,
-      out_w_units*4,
-    },
-    v_output.options(),
-  };
-
-  {
-    const struct TransformBlock final {
-      uvec3 extents;
-      uint32_t fill;
-      ivec2 limits;
-      ivec2 padding;
-    } transform_block {
-      v_input_winograd.extents(),
-      0u,
-      {
-        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
-        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
-      },
-      {
-        safe_downcast<int32_t>(packed_.padding[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_.padding[Layout::Parameter::height]),
-      },
-    };
-
-    context->dispatch(
-        command_buffer,
-        {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        },
-        VK_KERNEL(transform_winograd_2_3_sh),
+      const struct TransformBlock final {
+        uvec3 extents;
+        uint32_t fill;
+        ivec2 limits;
+        ivec2 padding;
+      } transform_block {
         v_input_winograd.extents(),
-        adaptive_work_group_size(v_input_winograd.extents()),
-        v_input_winograd.image(
-            command_buffer,
-            vTensor::Stage::Compute,
-            vTensor::Access::Write),
-        v_input.image(
-            command_buffer,
-            vTensor::Stage::Compute),
-        context->resource().pool.uniform(transform_block).object);
-
-  }
-  {
-    const struct Block final {
-      uvec3 extents;
-      int32_t ic4;
-      vec2 clamp;
-    } block {
-      v_output.extents(),
-      safe_downcast<int32_t>(packed_.filter[Layout::Filter::input] / 4),
-      {
-        packed_.output_min,
-        packed_.output_max,
-      },
-    };
-
-    uvec3 global_size = {
-      safe_downcast<uint32_t>(out_w_units),
-      safe_downcast<uint32_t>(out_h_units),
-      v_output.extents().data[2u],
-    };
-
-    context->dispatch(
-        command_buffer,
+        0u,
         {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
+          safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
         },
-        VK_KERNEL(conv2d_winograd_2_3),
-        global_size,
-        adaptive_work_group_size(global_size),
-        v_output.image(
-            command_buffer,
-            vTensor::Stage::Compute,
-            vTensor::Access::Write),
-        v_input_winograd.image(
-            command_buffer,
-            vTensor::Stage::Compute),
-        packed_.v_weight.image(
-            command_buffer,
-            vTensor::Stage::Compute),
-        packed_.v_bias.buffer(
-            command_buffer,
-            vTensor::Stage::Compute),
-        context->resource().pool.uniform(block).object);
+        {
+          safe_downcast<int32_t>(packed_padding[Layout::Parameter::width]),
+          safe_downcast<int32_t>(packed_padding[Layout::Parameter::height]),
+        },
+      };
+
+      context->dispatch(
+          command_buffer,
+          {
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          },
+          VK_KERNEL(transform_winograd_2_3_sh),
+          v_input_winograd.extents(),
+          adaptive_work_group_size(v_input_winograd.extents()),
+          v_input_winograd.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Write),
+          v_input.image(
+              command_buffer,
+              vTensor::Stage::Compute),
+          context->resource().pool.uniform(transform_block).object);
+
+    }
+    {
+      const struct Block final {
+        uvec3 extents;
+        int32_t ic4;
+        vec2 clamp;
+      } block {
+        v_output.extents(),
+        safe_downcast<int32_t>(packed_filter[Layout::Filter::input] / 4),
+        {
+          packed_output_min,
+          packed_output_max,
+        },
+      };
+
+      uvec3 global_size = {
+        safe_downcast<uint32_t>(out_w_units),
+        safe_downcast<uint32_t>(out_h_units),
+        v_output.extents().data[2u],
+      };
+
+      context->dispatch(
+          command_buffer,
+          {
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          },
+          VK_KERNEL(conv2d_winograd_2_3),
+          global_size,
+          adaptive_work_group_size(global_size),
+          v_output.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Write),
+          v_input_winograd.image(
+              command_buffer,
+              vTensor::Stage::Compute),
+          packed_v_weight.image(
+              command_buffer,
+              vTensor::Stage::Compute),
+          packed_v_bias.buffer(
+              command_buffer,
+              vTensor::Stage::Compute),
+          context->resource().pool.uniform(block).object);
+    }
   }
   command_pool.submit(context->gpu().queue, command_buffer);
 }
 
-Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
+Tensor conv2d_context_run(
+    const Tensor& input_arg,
+    const c10::impl::GenericList& packed_context,
+    const c10::impl::GenericList& unpacked_context) {
   api::Context* const context = api::context();
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
+
+  const vTensor& packed_v_weight = convert(packed_context.get(0).toTensor());
+  const vTensor& packed_v_bias = convert(packed_context.get(1).toTensor());
+
+  const auto packed_filter = packed_context.get(2).toIntVector();
+  const auto packed_stride = packed_context.get(3).toIntVector();
+  const auto packed_padding = packed_context.get(4).toIntVector();
+  const auto packed_dilation = packed_context.get(6).toIntVector();
+  const float packed_output_min = packed_context.get(8).toDouble();
+  const float packed_output_max = packed_context.get(9).toDouble();
+  const auto unpacked_filter = unpacked_context.get(2).toIntVector();
+  const Conv2dMethod method_ = (Conv2dMethod)unpacked_context.get(10).toInt();
 
   TORCH_CHECK(
       usable(input),
@@ -783,49 +800,172 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
     context,
     conv_output_size(
         v_input.sizes(),
-        unpacked_.filter,
-        packed_.padding,
-        packed_.stride,
-        packed_.dilation),
+        unpacked_filter,
+        packed_padding,
+        packed_stride,
+        packed_dilation),
     input.options(),
   };
 
   switch(method_) {
     case Conv2dWinograd_2_3:
-      conv2d_winograd_2_3(v_output, v_input);
+      conv2d_winograd_2_3(
+        v_output,
+        v_input,
+        packed_v_weight,
+        packed_v_bias,
+        packed_filter,
+        packed_padding,
+        packed_output_min,
+        packed_output_max);
     case Conv2dDepthwise:
       conv2d_sliding_window(
         VK_KERNEL(conv2d_dw),
         v_output,
-        v_input);
+        v_input,
+        packed_v_weight,
+        packed_v_bias,
+        packed_filter,
+        packed_stride,
+        packed_padding,
+        packed_dilation,
+        packed_output_min,
+        packed_output_max,
+        unpacked_filter,
+        method_,
+        "prepacked::conv2d_clamp_run (conv2d_sliding_window::conv2d_dw)");
       break;
     case Conv2dPointwise:
       conv2d_sliding_window(
         VK_KERNEL(conv2d_pw_2x2),
         v_output,
-        v_input);
+        v_input,
+        packed_v_weight,
+        packed_v_bias,
+        packed_filter,
+        packed_stride,
+        packed_padding,
+        packed_dilation,
+        packed_output_min,
+        packed_output_max,
+        unpacked_filter,
+        method_,
+        "prepacked::conv2d_clamp_run (conv2d_sliding_window::conv2d_pw_2x2)");
       break;
     default:
       conv2d_sliding_window(
         VK_KERNEL(conv2d),
         v_output,
-        v_input);
+        v_input,
+        packed_v_weight,
+        packed_v_bias,
+        packed_filter,
+        packed_stride,
+        packed_padding,
+        packed_dilation,
+        packed_output_min,
+        packed_output_max,
+        unpacked_filter,
+        method_,
+        "prepacked::conv2d_clamp_run (conv2d_sliding_window::conv2d)");
       break;
   }
 
   return convert(v_output);
 }
 
+c10::intrusive_ptr<VulkanOpContext> create_conv2d_clamp_context(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
+  return c10::make_intrusive<VulkanOpContext>(
+      conv2d_context_create(
+          weight,
+          bias,
+          stride,
+          padding,
+          dilation,
+          /* transposed = */ false,
+          /* output_padding_arg = */ {},
+          groups,
+          output_min,
+          output_max));
+}
+
+Tensor run_conv2d_clamp_context(
+    const Tensor& input,
+    const c10::intrusive_ptr<VulkanOpContext>& vulkan_context) {
+  return conv2d_context_run(
+    input,
+    vulkan_context->get_packed(),
+    vulkan_context->get_unpacked());
+}
+
+/* Backwards compatibility */
+Conv2dOpContext::Conv2dOpContext(VulkanOpContext vulkan_context)
+  : vulkan_context_{std::move(vulkan_context)} {
+}
+
+Conv2dOpContext Conv2dOpContext::create(
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias,
+    const IntArrayRef stride_arg,
+    const IntArrayRef padding_arg,
+    const IntArrayRef dilation_arg,
+    const bool transposed,
+    const IntArrayRef output_padding_arg,
+    const int64_t groups,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
+  return Conv2dOpContext {
+      conv2d_context_create(
+        weight,
+        bias,
+        stride_arg,
+        padding_arg,
+        dilation_arg,
+        transposed,
+        output_padding_arg,
+        groups,
+        output_min,
+        output_max)
+  };
+}
+
+Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
+  return conv2d_context_run(
+    input_arg,
+    vulkan_context_.get_packed(),
+    vulkan_context_.get_unpacked());
+}
+
 Conv2dOpContext::State Conv2dOpContext::unpack() const {
+  const c10::impl::GenericList unpacked_ = std::get<1>(vulkan_context_.get_state());
+  const Tensor unpacked_weight = unpacked_.get(0).toTensor();
+  const c10::optional<Tensor> unpacked_bias
+   = unpacked_.get(1).isTensor() ? unpacked_.get(1).toTensor() : (c10::optional<Tensor>&) c10::nullopt;
+  const std::vector<int64_t> unpacked_stride = unpacked_.get(2).toIntVector();
+  const std::vector<int64_t> unpacked_padding = unpacked_.get(3).toIntVector();
+  const std::vector<int64_t> unpacked_dilation = unpacked_.get(4).toIntVector();
+  const int64_t unpacked_groups = unpacked_.get(5).toInt();
+  const c10::optional<Scalar> unpacked_output_min
+   = unpacked_.get(6).isScalar() ? unpacked_.get(6).toScalar() : (c10::optional<Scalar>) c10::nullopt;
+  const c10::optional<Scalar> unpacked_output_max
+   = unpacked_.get(6).isScalar() ? unpacked_.get(7).toScalar() : (c10::optional<Scalar>) c10::nullopt;
   return Conv2dOpContext::State{
-    unpacked_.weight,
-    unpacked_.bias,
-    unpacked_.stride,
-    unpacked_.padding,
-    unpacked_.dilation,
-    unpacked_.groups,
-    unpacked_.output_min,
-    unpacked_.output_max,
+    unpacked_weight,
+    unpacked_bias,
+    unpacked_stride,
+    unpacked_padding,
+    unpacked_dilation,
+    unpacked_groups,
+    unpacked_output_min,
+    unpacked_output_max
   };
 }
 

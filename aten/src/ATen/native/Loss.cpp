@@ -8,6 +8,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/Exception.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 constexpr float EPSILON = 1e-12;
 
@@ -30,6 +31,17 @@ TORCH_META_FUNC(smooth_l1_loss)
   TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.")
   // TODO: Reduce this extra TensorIterator construction for Reduction::Mean & Sum.
   // We do another TensorIterator construction in the IMPL for the two cases.
+  build_borrowing_binary_op(maybe_get_output(), input, target);
+  if (reduction == Reduction::None) {
+    return;
+  }
+
+  TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
+  maybe_get_output().resize_({});
+}
+
+TORCH_META_FUNC(mse_loss)
+(const Tensor& input, const Tensor& target, const int64_t reduction) {
   build_borrowing_binary_op(maybe_get_output(), input, target);
   if (reduction == Reduction::None) {
     return;
@@ -67,6 +79,22 @@ TORCH_IMPL_FUNC(smooth_l1_loss_out)
     }
   } else {
     smooth_l1_stub(device_type(), *this, beta);
+  }
+}
+
+TORCH_IMPL_FUNC(mse_loss_out)
+(const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& result) {
+  if (reduction != Reduction::None) {
+    Tensor loss;
+    auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
+    mse_stub(iter.device_type(), iter);
+    if (reduction == Reduction::Mean) {
+      at::mean_out(const_cast<Tensor&>(result), iter.output(), IntArrayRef{});
+    } else {
+      at::sum_out(const_cast<Tensor&>(result), iter.output(), IntArrayRef{});
+    }
+  } else {
+    mse_stub(device_type(), *this);
   }
 }
 
@@ -111,7 +139,15 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
 
 Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double margin, int64_t reduction) {
   auto zeros = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto margin_clamp = (margin - self).clamp_min_(0);
+  auto margin_diff = (margin - self);
+  // For Composite Compliance,
+  // In Forward AD, if `margin_diff` is a CCT but its tangent isn't,
+  // using inplace clamp_min doesn't work because we end up writing
+  // the CCT in-place to the tangent
+  auto margin_clamp = (margin_diff._fw_grad(/*level*/ 0).defined() &&
+                       isTensorSubclassLike(margin_diff))
+      ? margin_diff.clamp_min(0)
+      : margin_diff.clamp_min_(0);
   auto output_margin = at::where(target != 1, margin_clamp, zeros);
   auto output_self = at::where(target != -1, self, zeros);
   auto output = output_margin + output_self;
@@ -143,7 +179,15 @@ Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const T
 }
 
 Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
-  auto output =  (-target * (input1 - input2) + margin).clamp_min_(0);
+  auto unclamped_output = (-target * (input1 - input2) + margin);
+  // For Composite Compliance,
+  // In Forward AD, if `margin_diff` is a CCT but its tangent isn't,
+  // using inplace clamp_min doesn't work because we end up writing
+  // the CCT in-place to the tangent
+  auto output = (unclamped_output._fw_grad(/*level*/ 0).defined() &&
+                 isTensorSubclassLike(unclamped_output))
+      ? unclamped_output.clamp_min(0)
+      : unclamped_output.clamp_min_(0);
   return apply_loss_reduction(output, reduction);
 }
 
@@ -291,7 +335,8 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> pos_weight_maybe_owned = at::borrow_from_optional_tensor(pos_weight_opt);
+  const Tensor& pos_weight = *pos_weight_maybe_owned;
 
     Tensor loss;
     auto max_val = (-input).clamp_min_(0);
@@ -310,30 +355,47 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
     return apply_loss_reduction(loss, reduction);
 }
 
-Tensor binary_cross_entropy_with_logits_backward(const Tensor& grad, const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& pos_weight_opt, int64_t reduction) {
+Tensor binary_cross_entropy_with_logits_backward(
+    const Tensor& grad,
+    const Tensor& input,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight_opt,
+    const c10::optional<Tensor>& pos_weight_opt,
+    int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
+  const Tensor& pos_weight =
+      c10::value_or_else(pos_weight_opt, [] { return Tensor(); });
 
-    Tensor grad_input;
-    if (pos_weight.defined()) {
-        // pos_weight need to be broadcasted, thus mul(target) is not inplace.
-        auto t = pos_weight.mul(target);
-        grad_input = t.add(1).sub_(target).mul_(input.sigmoid()).sub_(t).mul_(grad);
+  Tensor grad_input;
+  auto hasSubclassTensors = at::areAnyTensorSubclassLike({grad, input, target});
+
+  // If there are subclassed tensors use the out of place version
+  if (pos_weight.defined()) {
+    // pos_weight might need to be broadcasted, thus mul(target) is not inplace.
+    auto t = pos_weight.mul(target);
+    grad_input = hasSubclassTensors
+        ? t.add(1).sub(target).mul(input.sigmoid()).sub(t).mul(grad)
+        : t.add(1).sub_(target).mul_(input.sigmoid()).sub_(t).mul_(grad);
+  } else {
+    grad_input = hasSubclassTensors ? (input.sigmoid() - target).mul(grad)
+                                    : (input.sigmoid() - target).mul_(grad);
+  }
+  if (weight.defined()) {
+    if (at::areAnyTensorSubclassLike({grad_input, weight})) {
+      grad_input = grad_input.mul(weight);
     } else {
-        grad_input = (input.sigmoid() - target).mul_(grad);
+      grad_input.mul_(weight);
     }
+  }
 
-    if (weight.defined()) {
-        grad_input.mul_(weight);
-    }
+  if (reduction == at::Reduction::Mean) {
+    return grad_input / input.numel();
+  }
 
-    if (reduction == at::Reduction::Mean) {
-        return grad_input / input.numel();
-    }
-
-    return grad_input;
+  return grad_input;
 }
 
 Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool log_input, const bool full, const double eps, const int64_t reduction)
@@ -454,30 +516,6 @@ Tensor& huber_loss_backward_out(const Tensor& grad_output, const Tensor& input, 
   return grad_input;
 }
 
-Tensor mse_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
-  Tensor loss;
-  auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
-  mse_stub(iter.device_type(), iter);
-  return apply_loss_reduction(iter.output(), reduction);
-}
-
-Tensor& mse_loss_out(const Tensor& input, const Tensor& target, int64_t reduction, Tensor&result) {
-  if (reduction != Reduction::None) {
-    Tensor loss;
-    auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
-    mse_stub(iter.device_type(), iter);
-    if (reduction == Reduction::Mean) {
-      at::mean_out(result, iter.output(), 0);
-    } else {
-      at::sum_out(result, iter.output(), 0);
-    }
-  } else {
-    auto iter = TensorIterator::borrowing_binary_op(result, input, target);
-    mse_stub(iter.device_type(), iter);
-  }
-  return result;
-}
-
 Tensor mse_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
   Tensor grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::mse_loss_backward_out(grad_input, grad_output, input, target, reduction);
@@ -497,7 +535,7 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
 }
 
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
-  const auto float_type = c10::toValueType(input.scalar_type());
+  const auto float_type = c10::toRealValueType(input.scalar_type());
   Tensor result = at::empty({0}, input.options().dtype(float_type));
   return at::l1_loss_out(result, input, target, reduction);
 }

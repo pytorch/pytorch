@@ -21,7 +21,7 @@ Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, cons
 
 }}
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -67,4 +67,4 @@ Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, cons
 
 }}
 
-#endif // AT_MKLDNN_EBABLED
+#endif // AT_MKLDNN_ENABLED

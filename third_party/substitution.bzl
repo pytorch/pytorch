@@ -58,7 +58,7 @@ def header_template_rule_impl(ctx):
         CcInfo(compilation_context = cc_common.create_compilation_context(
 
             # pass out the include path for finding this header
-            includes = depset([ctx.outputs.out.dirname, ctx.bin_dir.path]),
+            system_includes = depset([ctx.attr.include, ctx.outputs.out.dirname, ctx.bin_dir.path]),
 
             # and the actual header here.
             headers = depset([ctx.outputs.out]),
@@ -67,6 +67,7 @@ def header_template_rule_impl(ctx):
 
 header_template_rule = rule(
     attrs = {
+        "include": attr.string(),
         "out": attr.output(mandatory = True),
         "src": attr.label(
             mandatory = True,

@@ -1,19 +1,10 @@
 import torch
 from torch.utils._pytree import tree_map
-
 from typing import Iterator, List
 import logging
 import contextlib
 import itertools
-
-# TODO: move this into library proper
-@contextlib.contextmanager
-def no_dispatch() -> Iterator[None]:
-    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
-    try:
-        yield
-    finally:
-        del guard
+from torch.utils._python_dispatch import TorchDispatchMode, push_torch_dispatch_mode
 
 
 # How the chain of calls works for LoggingTensor:
@@ -22,11 +13,23 @@ def no_dispatch() -> Iterator[None]:
 # 3. Enter dispatcher, wind your way through Autograd
 # 4. Hit Python dispatch key, call __torch_dispatch__
 
+# This Tensor can work with autograd in two ways:
+#  - The wrapped Tensor does not require gradients. In that case, the LoggingTensor
+#    can require gradients if the user asks for it as a constructor kwarg.
+#  - The wrapped Tensor can require gradients. In that case autograd will be tracked
+#    for the wrapped Tensor and the LoggingTensor itself cannot require gradients.
+# WARNING: We allow these two possibilities for testing purposes. You should NEVER use both in a single
+# test or you might get surprising behavior.
+
 # TODO: TensorBase should work
 class LoggingTensor(torch.Tensor):
     elem: torch.Tensor
 
     __slots__ = ['elem']
+
+    context = contextlib.nullcontext
+
+    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
     def __new__(cls, elem, *args, **kwargs):
@@ -38,39 +41,49 @@ class LoggingTensor(torch.Tensor):
             strides=elem.stride(), storage_offset=elem.storage_offset(),
             # TODO: clone storage aliasing
             dtype=elem.dtype, layout=elem.layout,
-            device=elem.device, requires_grad=elem.requires_grad
+            device=elem.device, requires_grad=kwargs.get("requires_grad", False)
         )
         # ...the real tensor is held as an element on the tensor.
-        r.elem = elem
+        r.elem = elem.detach() if r.requires_grad else elem
         return r
 
     def __repr__(self):
-        return f"LoggingTensor({self.elem})"
+        return super().__repr__(tensor_contents=f"{self.elem}")
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         def unwrap(e):
-            return e.elem if isinstance(e, LoggingTensor) else e
+            return e.elem if isinstance(e, cls) else e
 
         def wrap(e):
-            return LoggingTensor(e) if isinstance(e, torch.Tensor) else e
+            return cls(e) if isinstance(e, torch.Tensor) else e
 
-        # no_dispatch is only needed if you use enable_python_mode.
-        # It prevents infinite recursion.
-        with no_dispatch():
+        with cls.context():
             rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
         logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
         return rs
+
+class LoggingTensorMode(TorchDispatchMode):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        rs = func(*args, **kwargs)
+        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
+        return rs
+
+class LoggingTensorReentrant(LoggingTensor):
+    context = torch.overrides.enable_reentrant_dispatch
 
 # https://stackoverflow.com/questions/36408496/python-logging-handler-to-append-to-list
 class LoggingTensorHandler(logging.Handler):
     log_list: List[str]
     next_shortid: int
 
-    def __init__(self, log_list: List[str]) -> None:
+    def __init__(self, log_list: List[str], use_shortid_for_all_tensors: bool) -> None:
         logging.Handler.__init__(self)
         self.log_list = log_list
         self.next_shortid = 0
+        self.use_shortid_for_all_tensors = use_shortid_for_all_tensors
 
     # WARNING: not deterministic over multiple threads, this matters for
     # autograd
@@ -81,7 +94,8 @@ class LoggingTensorHandler(logging.Handler):
         return o._shortid  # type: ignore[attr-defined]
 
     def _fmt(self, a: object) -> str:
-        return f'${self._shortid(a)}' if isinstance(a, LoggingTensor) else repr(a)
+        cond_cls = torch.Tensor if self.use_shortid_for_all_tensors else LoggingTensor
+        return f'${self._shortid(a)}' if isinstance(a, cond_cls) else repr(a)
 
     def emit(self, record):
         fmt_args = ", ".join(itertools.chain(
@@ -96,10 +110,10 @@ def log_input(name: str, var: object):
     logging.getLogger("LoggingTensor").info("input", (name,), {}, (var,))
 
 @contextlib.contextmanager
-def capture_logs() -> Iterator[List[str]]:
+def capture_logs(is_mode=False) -> Iterator[List[str]]:
     logger = logging.getLogger("LoggingTensor")
     log_list: List[str] = []
-    handler = LoggingTensorHandler(log_list)
+    handler = LoggingTensorHandler(log_list, use_shortid_for_all_tensors=is_mode)
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.propagate = False
@@ -107,3 +121,8 @@ def capture_logs() -> Iterator[List[str]]:
         yield log_list
     finally:
         logger.removeHandler(handler)
+
+@contextlib.contextmanager
+def capture_logs_with_logging_tensor_mode():
+    with push_torch_dispatch_mode(LoggingTensorMode), capture_logs(True) as logs:
+        yield logs

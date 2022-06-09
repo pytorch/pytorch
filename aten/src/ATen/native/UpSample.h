@@ -2,7 +2,7 @@
 
 #include <math.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/DispatchStub.h>
 
@@ -51,7 +51,7 @@ namespace upsample {
 
 TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
     c10::IntArrayRef input_size,  // Full input tensor size.
-    c10::optional<c10::IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     c10::optional<c10::ArrayRef<double>> scale_factors);
 
 inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>> scales, int idx) {
@@ -75,6 +75,7 @@ using upsampling_bilinear2d = void(*)(const Tensor& output, const Tensor& input,
 using _upsampling_bilinear2d_aa = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 using upsampling_trilinear3d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_d, scale_t scales_h, scale_t scales_w);
 using upsampling_bicubic2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
+using _upsampling_bicubic2d_aa = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_kernel);
 DECLARE_DISPATCH(_upsampling_nearest_exact1d, _upsample_nearest_exact1d_kernel);
 DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_kernel);
@@ -96,6 +97,8 @@ DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_backward_kernel);
 DECLARE_DISPATCH(_upsampling_bilinear2d_aa, _upsample_bilinear2d_aa_backward_kernel);
 DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_backward_kernel);
 DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel);
+DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_kernel);
+DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_backward_kernel);
 
 static C10_UNUSED std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
@@ -324,6 +327,39 @@ static inline int64_t nearest_neighbor_exact_compute_source_index(
       std::min(static_cast<int64_t>(floorf((dst_index + 0.5) * scale)), input_size - 1);
   return src_index;
 }
+
+static inline int64_t nearest_idx(
+    int64_t output_index,
+    int64_t input_size,
+    int64_t output_size,
+    c10::optional<double> scales) {
+  // This method specificly treats cases: output_size == input_size or
+  // output_size == 2 * input_size, that we would like to get rid of
+  // We keep this method for BC and consider as deprecated.
+  // See nearest_exact_idx as replacement
+  if (output_size == input_size) {
+    // scale_factor = 1, simply copy
+    return output_index;
+  } else if (output_size == 2 * input_size) {
+    // scale_factor = 2, shift input index
+    return output_index >> 1;
+  } else {
+    float scale = compute_scales_value<float>(scales, input_size, output_size);
+    return nearest_neighbor_compute_source_index(scale, output_index, input_size);
+  }
+}
+
+static inline int64_t nearest_exact_idx(
+    int64_t output_index,
+    int64_t input_size,
+    int64_t output_size,
+    c10::optional<double> scales) {
+  float scale = compute_scales_value<float>(scales, input_size, output_size);
+    return nearest_neighbor_exact_compute_source_index(scale, output_index, input_size);
+}
+
+// Define a typedef to dispatch to nearest_idx or nearest_exact_idx
+typedef int64_t (*nearest_idx_fn_t)(int64_t, int64_t, int64_t, c10::optional<double>);
 
 template <typename scalar_t>
 static scalar_t upsample_get_value_bounded(

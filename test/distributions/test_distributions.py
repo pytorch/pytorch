@@ -34,6 +34,7 @@ import unittest
 from collections import namedtuple
 from itertools import product
 from random import shuffle
+from packaging import version
 
 import torch
 
@@ -41,7 +42,7 @@ import torch
 # Distributions tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
-from torch._six import inf
+from torch._six import inf, nan
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests,
      gradcheck)
@@ -61,7 +62,7 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  OneHotCategorical, OneHotCategoricalStraightThrough,
                                  Pareto, Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
-                                 VonMises, Weibull, constraints, kl_divergence)
+                                 VonMises, Weibull, Wishart, constraints, kl_divergence)
 from torch.distributions.constraint_registry import transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
@@ -452,6 +453,10 @@ EXAMPLES = [
                                         torch.randn(2, 3, 5).abs().requires_grad_()),
             'transforms': AffineTransform(1, 2),
         },
+        {
+            'base_distribution': Uniform(torch.tensor(1e8).log(), torch.tensor(1e10).log()),
+            'transforms': ExpTransform(),
+        },
     ]),
     Example(Uniform, [
         {
@@ -472,6 +477,32 @@ EXAMPLES = [
             'scale': torch.randn(5, 5).abs().requires_grad_(),
             'concentration': torch.randn(1).abs().requires_grad_()
         }
+    ]),
+    Example(Wishart, [
+        {
+            'covariance_matrix': torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True),
+            'df': torch.tensor([3.], requires_grad=True),
+        },
+        {
+            'precision_matrix': torch.tensor([[2.0, 0.1, 0.0],
+                                              [0.1, 0.25, 0.0],
+                                              [0.0, 0.0, 0.3]], requires_grad=True),
+            'df': torch.tensor([5., 4], requires_grad=True),
+        },
+        {
+            'scale_tril': torch.tensor([[[2.0, 0.0], [-0.5, 0.25]],
+                                        [[2.0, 0.0], [0.3, 0.25]],
+                                        [[5.0, 0.0], [-0.5, 1.5]]], requires_grad=True),
+            'df': torch.tensor([5., 3.5, 3], requires_grad=True),
+        },
+        {
+            'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
+            'df': torch.tensor([3.0]),
+        },
+        {
+            'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
+            'df': 3.0,
+        },
     ]),
     Example(MixtureSameFamily, [
         {
@@ -740,6 +771,20 @@ BAD_EXAMPLES = [
             'concentration': torch.tensor([-1.0], requires_grad=True)
         }
     ]),
+    Example(Wishart, [
+        {
+            'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, -2.0]], requires_grad=True),
+            'df': torch.tensor([1.5], requires_grad=True),
+        },
+        {
+            'covariance_matrix': torch.tensor([[1.0, 1.0], [1.0, -2.0]], requires_grad=True),
+            'df': torch.tensor([3.], requires_grad=True),
+        },
+        {
+            'covariance_matrix': torch.tensor([[1.0, 1.0], [1.0, -2.0]], requires_grad=True),
+            'df': 3.,
+        },
+    ]),
     Example(ContinuousBernoulli, [
         {'probs': torch.tensor([1.1, 0.2, 0.4], requires_grad=True)},
         {'probs': torch.tensor([-0.5], requires_grad=True)},
@@ -792,10 +837,10 @@ class TestDistributions(TestCase):
         ref_samples = ref_dist.rvs(num_samples).astype(np.float64)
         if multivariate:
             # Project onto a random axis.
-            axis = np.random.normal(size=torch_samples.shape[-1])
+            axis = np.random.normal(size=(1,) + torch_samples.shape[1:])
             axis /= np.linalg.norm(axis)
-            torch_samples = np.dot(torch_samples, axis)
-            ref_samples = np.dot(ref_samples, axis)
+            torch_samples = (axis * torch_samples).reshape(num_samples, -1).sum(-1)
+            ref_samples = (axis * ref_samples).reshape(num_samples, -1).sum(-1)
         samples = [(x, +1) for x in torch_samples] + [(x, -1) for x in ref_samples]
         if circular:
             samples = [(np.cos(x), v) for (x, v) in samples]
@@ -822,9 +867,15 @@ class TestDistributions(TestCase):
         torch_samples = torch_samples.cpu().numpy()
         unique, counts = np.unique(torch_samples, return_counts=True)
         pmf = ref_dist.pmf(unique)
+        pmf = pmf / pmf.sum()  # renormalize to 1.0 for chisq test
         msk = (counts > 5) & ((pmf * num_samples) > 5)
         self.assertGreater(pmf[msk].sum(), 0.9, "Distribution is too sparse for test; try increasing num_samples")
-        chisq, p = scipy.stats.chisquare(counts[msk], pmf[msk] * num_samples)
+        # Add a remainder bucket that combines counts for all values
+        # below threshold, if such values exist (i.e. mask has False entries).
+        if not msk.all():
+            counts = np.concatenate([counts[msk], np.sum(counts[~msk], keepdims=True)])
+            pmf = np.concatenate([pmf[msk], np.sum(pmf[~msk], keepdims=True)])
+        chisq, p = scipy.stats.chisquare(counts, pmf * num_samples)
         self.assertGreater(p, failure_rate, message)
 
     def _check_enumerate_support(self, dist, examples):
@@ -2168,6 +2219,170 @@ class TestDistributions(TestCase):
         empirical_var = samples.var(0)
         self.assertEqual(d.variance, empirical_var, atol=0.05, rtol=0)
 
+    # We applied same tests in Multivariate Normal distribution for Wishart distribution
+    def test_wishart_shape(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        ndim = 3
+
+        df = torch.rand(5, requires_grad=True) + ndim
+        df_no_batch = torch.rand([], requires_grad=True) + ndim
+        df_multi_batch = torch.rand(6, 5, requires_grad=True) + ndim
+
+        # construct PSD covariance
+        tmp = torch.randn(ndim, 10)
+        cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
+        prec = cov.inverse().requires_grad_()
+        scale_tril = torch.linalg.cholesky(cov).requires_grad_()
+
+        # construct batch of PSD covariances
+        tmp = torch.randn(6, 5, ndim, 10)
+        cov_batched = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
+        prec_batched = cov_batched.inverse()
+        scale_tril_batched = torch.linalg.cholesky(cov_batched)
+
+        # ensure that sample, batch, event shapes all handled correctly
+        self.assertEqual(Wishart(df, cov).sample().size(), (5, ndim, ndim))
+        self.assertEqual(Wishart(df_no_batch, cov).sample().size(), (ndim, ndim))
+        self.assertEqual(Wishart(df_multi_batch, cov).sample().size(), (6, 5, ndim, ndim))
+        self.assertEqual(Wishart(df, cov).sample((2,)).size(), (2, 5, ndim, ndim))
+        self.assertEqual(Wishart(df_no_batch, cov).sample((2,)).size(), (2, ndim, ndim))
+        self.assertEqual(Wishart(df_multi_batch, cov).sample((2,)).size(), (2, 6, 5, ndim, ndim))
+        self.assertEqual(Wishart(df, cov).sample((2, 7)).size(), (2, 7, 5, ndim, ndim))
+        self.assertEqual(Wishart(df_no_batch, cov).sample((2, 7)).size(), (2, 7, ndim, ndim))
+        self.assertEqual(Wishart(df_multi_batch, cov).sample((2, 7)).size(), (2, 7, 6, 5, ndim, ndim))
+        self.assertEqual(Wishart(df, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, ndim, ndim))
+        self.assertEqual(Wishart(df_no_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, ndim, ndim))
+        self.assertEqual(Wishart(df_multi_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, ndim, ndim))
+        self.assertEqual(Wishart(df, precision_matrix=prec).sample((2, 7)).size(), (2, 7, 5, ndim, ndim))
+        self.assertEqual(Wishart(df, precision_matrix=prec_batched).sample((2, 7)).size(), (2, 7, 6, 5, ndim, ndim))
+        self.assertEqual(Wishart(df, scale_tril=scale_tril).sample((2, 7)).size(), (2, 7, 5, ndim, ndim))
+        self.assertEqual(Wishart(df, scale_tril=scale_tril_batched).sample((2, 7)).size(), (2, 7, 6, 5, ndim, ndim))
+
+        # check gradients
+        # Modified and applied the same tests for multivariate_normal
+        def wishart_log_prob_gradcheck(df=None, covariance=None, precision=None, scale_tril=None):
+            wishart_samples = Wishart(df, covariance, precision, scale_tril).sample().requires_grad_()
+
+            def gradcheck_func(samples, nu, sigma, prec, scale_tril):
+                if sigma is not None:
+                    sigma = 0.5 * (sigma + sigma.mT)  # Ensure symmetry of covariance
+                if prec is not None:
+                    prec = 0.5 * (prec + prec.mT)  # Ensure symmetry of precision
+                if scale_tril is not None:
+                    scale_tril = scale_tril.tril()
+                return Wishart(nu, sigma, prec, scale_tril).log_prob(samples)
+            gradcheck(gradcheck_func, (wishart_samples, df, covariance, precision, scale_tril), raise_exception=True)
+
+        wishart_log_prob_gradcheck(df, cov)
+        wishart_log_prob_gradcheck(df_multi_batch, cov)
+        wishart_log_prob_gradcheck(df_multi_batch, cov_batched)
+        wishart_log_prob_gradcheck(df, None, prec)
+        wishart_log_prob_gradcheck(df_no_batch, None, prec_batched)
+        wishart_log_prob_gradcheck(df, None, None, scale_tril)
+        wishart_log_prob_gradcheck(df_no_batch, None, None, scale_tril_batched)
+
+    def test_wishart_stable_with_precision_matrix(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        ndim = 10
+        x = torch.randn(ndim)
+        P = torch.exp(-(x - x.unsqueeze(-1)) ** 2)  # RBF kernel
+        Wishart(torch.tensor(ndim), precision_matrix=P)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_wishart_log_prob(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        ndim = 3
+        df = torch.rand([], requires_grad=True) + ndim - 1
+        # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
+        if version.parse(scipy.__version__) < version.parse("1.7.0"):
+            df += 1.
+        tmp = torch.randn(ndim, 10)
+        cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
+        prec = cov.inverse().requires_grad_()
+        scale_tril = torch.linalg.cholesky(cov).requires_grad_()
+
+        # check that logprob values match scipy logpdf,
+        # and that covariance and scale_tril parameters are equivalent
+        dist1 = Wishart(df, cov)
+        dist2 = Wishart(df, precision_matrix=prec)
+        dist3 = Wishart(df, scale_tril=scale_tril)
+        ref_dist = scipy.stats.wishart(df.item(), cov.detach().numpy())
+
+        x = dist1.sample((1000,))
+        expected = ref_dist.logpdf(x.transpose(0, 2).numpy())
+
+        self.assertEqual(0.0, np.mean((dist1.log_prob(x).detach().numpy() - expected)**2), atol=1e-3, rtol=0)
+        self.assertEqual(0.0, np.mean((dist2.log_prob(x).detach().numpy() - expected)**2), atol=1e-3, rtol=0)
+        self.assertEqual(0.0, np.mean((dist3.log_prob(x).detach().numpy() - expected)**2), atol=1e-3, rtol=0)
+
+        # Double-check that batched versions behave the same as unbatched
+        df = torch.rand(5, requires_grad=True) + ndim - 1
+        # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
+        if version.parse(scipy.__version__) < version.parse("1.7.0"):
+            df += 1.
+        tmp = torch.randn(5, ndim, 10)
+        cov = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
+
+        dist_batched = Wishart(df, cov)
+        dist_unbatched = [Wishart(df[i], cov[i]) for i in range(df.size(0))]
+
+        x = dist_batched.sample((1000,))
+        batched_prob = dist_batched.log_prob(x)
+        unbatched_prob = torch.stack([dist_unbatched[i].log_prob(x[:, i]) for i in range(5)]).t()
+
+        self.assertEqual(batched_prob.shape, unbatched_prob.shape)
+        self.assertEqual(0.0, (batched_prob - unbatched_prob).abs().max(), atol=1e-3, rtol=0)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_wishart_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        ndim = 3
+        df = torch.rand([], requires_grad=True) + ndim - 1
+        # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
+        if version.parse(scipy.__version__) < version.parse("1.7.0"):
+            df += 1.
+        tmp = torch.randn(ndim, 10)
+        cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
+        prec = cov.inverse().requires_grad_()
+        scale_tril = torch.linalg.cholesky(cov).requires_grad_()
+
+        ref_dist = scipy.stats.wishart(df.item(), cov.detach().numpy())
+
+        self._check_sampler_sampler(Wishart(df, cov),
+                                    ref_dist,
+                                    'Wishart(df={}, covariance_matrix={})'.format(df, cov),
+                                    multivariate=True)
+        self._check_sampler_sampler(Wishart(df, precision_matrix=prec),
+                                    ref_dist,
+                                    'Wishart(df={}, precision_matrix={})'.format(df, prec),
+                                    multivariate=True)
+        self._check_sampler_sampler(Wishart(df, scale_tril=scale_tril),
+                                    ref_dist,
+                                    'Wishart(df={}, scale_tril={})'.format(df, scale_tril),
+                                    multivariate=True)
+
+    def test_wishart_properties(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        ndim = 5
+        df = torch.rand([]) + ndim - 1
+        scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(ndim, ndim))
+        m = Wishart(df=df, scale_tril=scale_tril)
+        self.assertEqual(m.covariance_matrix, m.scale_tril.mm(m.scale_tril.t()))
+        self.assertEqual(m.covariance_matrix.mm(m.precision_matrix), torch.eye(m.event_shape[0]))
+        self.assertEqual(m.scale_tril, torch.linalg.cholesky(m.covariance_matrix))
+
+    def test_wishart_moments(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        ndim = 3
+        df = torch.rand([]) + ndim - 1
+        scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(ndim, ndim))
+        d = Wishart(df=df, scale_tril=scale_tril)
+        samples = d.rsample((ndim * ndim * 100000,))
+        empirical_mean = samples.mean(0)
+        self.assertEqual(d.mean, empirical_mean, atol=0.5, rtol=0)
+        empirical_var = samples.var(0)
+        self.assertEqual(d.variance, empirical_var, atol=0.5, rtol=0)
+
     def test_exponential(self):
         rate = torch.randn(5, 5).abs().requires_grad_()
         rate_1d = torch.randn(1).abs().requires_grad_()
@@ -2541,6 +2756,18 @@ class TestDistributions(TestCase):
                                     'Dirichlet(alpha={})'.format(list(alpha)),
                                     multivariate=True)
 
+    def test_dirichlet_mode(self):
+        # Test a few edge cases for the Dirichlet distribution mode. This also covers beta distributions.
+        concentrations_and_modes = [
+            ([2, 2, 1], [.5, .5, 0.]),
+            ([3, 2, 1], [2 / 3, 1 / 3, 0]),
+            ([.5, .2, .2], [1., 0., 0.]),
+            ([1, 1, 1], [nan, nan, nan]),
+        ]
+        for concentration, mode in concentrations_and_modes:
+            dist = Dirichlet(torch.tensor(concentration))
+            self.assertEqual(dist.mode, torch.tensor(mode))
+
     def test_beta_shape(self):
         con1 = torch.randn(2, 3).exp().requires_grad_()
         con0 = torch.randn(2, 3).exp().requires_grad_()
@@ -2736,6 +2963,14 @@ class TestDistributions(TestCase):
                     'icdf(cdf(x)) = {}'.format(actual),
                 ]))
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_gamma_log_prob_at_boundary(self):
+        for concentration, log_prob in [(.5, inf), (1, 0), (2, -inf)]:
+            dist = Gamma(concentration, 1)
+            scipy_dist = scipy.stats.gamma(concentration)
+            self.assertAlmostEqual(dist.log_prob(0), log_prob)
+            self.assertAlmostEqual(dist.log_prob(0), scipy_dist.logpdf(0))
+
     def test_cdf_log_prob(self):
         # Tests if the differentiation of the CDF gives the PDF at a given value
         for Dist, params in EXAMPLES:
@@ -2919,17 +3154,87 @@ class TestDistributions(TestCase):
                 'alpha': torch.tensor([1, 1, 1])
             }),
             (StudentT, {
-                'df': torch.tensor([1, 1]),
-                'scale': torch.tensor([1, 1, 1])
+                'df': torch.tensor([1., 1.]),
+                'scale': torch.tensor([1., 1., 1.])
             }),
             (StudentT, {
-                'df': torch.tensor([1, 1]),
-                'loc': torch.tensor([1, 1, 1])
+                'df': torch.tensor([1., 1.]),
+                'loc': torch.tensor([1., 1., 1.])
             })
         ]
 
         for dist, kwargs in invalid_examples:
             self.assertRaises(RuntimeError, dist, **kwargs)
+
+    def _test_discrete_distribution_mode(self, dist, sanitized_mode, batch_isfinite):
+        # We cannot easily check the mode for discrete distributions, but we can look left and right
+        # to ensure the log probability is smaller than at the mode.
+        for step in [-1, 1]:
+            log_prob_mode = dist.log_prob(sanitized_mode)
+            if isinstance(dist, OneHotCategorical):
+                idx = (dist._categorical.mode + 1) % dist.probs.shape[-1]
+                other = torch.nn.functional.one_hot(idx, num_classes=dist.probs.shape[-1]).to(dist.mode)
+            else:
+                other = dist.mode + step
+            mask = batch_isfinite & dist.support.check(other)
+            self.assertTrue(mask.any() or dist.mode.unique().numel() == 1)
+            # Add a dimension to the right if the event shape is not a scalar, e.g. OneHotCategorical.
+            other = torch.where(mask[..., None] if mask.ndim < other.ndim else mask, other, dist.sample())
+            log_prob_other = dist.log_prob(other)
+            delta = log_prob_mode - log_prob_other
+            self.assertTrue((-1e-12 < delta[mask].detach()).all())  # Allow up to 1e-12 rounding error.
+
+    def _test_continuous_distribution_mode(self, dist, sanitized_mode, batch_isfinite):
+        if isinstance(dist, Wishart):
+            return
+        # We perturb the mode in the unconstrained space and expect the log probability to decrease.
+        num_points = 10
+        transform = transform_to(dist.support)
+        unconstrained_mode = transform.inv(sanitized_mode)
+        perturbation = 1e-5 * (torch.rand((num_points,) + unconstrained_mode.shape) - 0.5)
+        perturbed_mode = transform(perturbation + unconstrained_mode)
+        log_prob_mode = dist.log_prob(sanitized_mode)
+        log_prob_other = dist.log_prob(perturbed_mode)
+        delta = log_prob_mode - log_prob_other
+
+        # We pass the test with a small tolerance to allow for rounding and manually set the
+        # difference to zero if both log probs are infinite with the same sign.
+        both_infinite_with_same_sign = (log_prob_mode == log_prob_other) & (log_prob_mode.abs() == inf)
+        delta[both_infinite_with_same_sign] = 0.
+        ordering = (delta > -1e-12).all(axis=0)
+        self.assertTrue(ordering[batch_isfinite].all())
+
+    def test_mode(self):
+        discrete_distributions = (
+            Bernoulli, Binomial, Categorical, Geometric, NegativeBinomial, OneHotCategorical, Poisson,
+        )
+        no_mode_available = (
+            ContinuousBernoulli, LKJCholesky, LogisticNormal, MixtureSameFamily, Multinomial,
+            RelaxedBernoulli, RelaxedOneHotCategorical,
+        )
+
+        for dist_cls, params in EXAMPLES:
+            for param in params:
+                dist = dist_cls(**param)
+                if isinstance(dist, no_mode_available) or type(dist) is TransformedDistribution:
+                    with self.assertRaises(NotImplementedError):
+                        dist.mode
+                    continue
+
+                # Check that either all or no elements in the event shape are nan: the mode cannot be
+                # defined for part of an event.
+                isfinite = dist.mode.isfinite().reshape(dist.batch_shape + (dist.event_shape.numel(),))
+                batch_isfinite = isfinite.all(axis=-1)
+                self.assertTrue((batch_isfinite | ~isfinite.any(axis=-1)).all())
+
+                # We sanitize undefined modes by sampling from the distribution.
+                sanitized_mode = torch.where(~dist.mode.isnan(), dist.mode, dist.sample())
+                if isinstance(dist, discrete_distributions):
+                    self._test_discrete_distribution_mode(dist, sanitized_mode, batch_isfinite)
+                else:
+                    self._test_continuous_distribution_mode(dist, sanitized_mode, batch_isfinite)
+
+                self.assertFalse(dist.log_prob(sanitized_mode).isnan().any())
 
 
 # These tests are only needed for a few distributions that implement custom
@@ -3486,6 +3791,23 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(weibull.sample((3, 2)).size(), torch.Size((3, 2)))
         self.assertEqual(weibull.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(weibull.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
+    def test_wishart_shape_scalar_params(self):
+        wishart = Wishart(torch.tensor(1), torch.tensor([[1.]]))
+        self.assertEqual(wishart._batch_shape, torch.Size())
+        self.assertEqual(wishart._event_shape, torch.Size((1, 1)))
+        self.assertEqual(wishart.sample().size(), torch.Size((1, 1)))
+        self.assertEqual(wishart.sample((3, 2)).size(), torch.Size((3, 2, 1, 1)))
+        self.assertRaises(ValueError, wishart.log_prob, self.scalar_sample)
+
+    def test_wishart_shape_tensor_params(self):
+        wishart = Wishart(torch.tensor([1., 1.]), torch.tensor([[[1.]], [[1.]]]))
+        self.assertEqual(wishart._batch_shape, torch.Size((2,)))
+        self.assertEqual(wishart._event_shape, torch.Size((1, 1)))
+        self.assertEqual(wishart.sample().size(), torch.Size((2, 1, 1)))
+        self.assertEqual(wishart.sample((3, 2)).size(), torch.Size((3, 2, 2, 1, 1)))
+        self.assertRaises(ValueError, wishart.log_prob, self.tensor_sample_2)
+        self.assertEqual(wishart.log_prob(torch.ones(2, 1, 1)).size(), torch.Size((2,)))
 
     def test_normal_shape_scalar_params(self):
         normal = Normal(0, 1)
@@ -4305,6 +4627,8 @@ class TestAgainstScipy(TestCase):
         positive_var2 = torch.randn(20).exp()
         random_var = torch.randn(20)
         simplex_tensor = softmax(torch.randn(20), dim=-1)
+        cov_tensor = torch.randn(20, 20)
+        cov_tensor = cov_tensor @ cov_tensor.mT
         self.distribution_pairs = [
             (
                 Bernoulli(simplex_tensor),
@@ -4376,6 +4700,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.multivariate_normal(random_var, torch.diag(positive_var2))
             ),
             (
+                MultivariateNormal(random_var, cov_tensor),
+                scipy.stats.multivariate_normal(random_var, cov_tensor)
+            ),
+            (
                 Normal(random_var, positive_var2),
                 scipy.stats.norm(random_var, positive_var2)
             ),
@@ -4406,7 +4734,19 @@ class TestAgainstScipy(TestCase):
             (
                 Weibull(positive_var[0], positive_var2[0]),  # scipy var for Weibull only supports scalars
                 scipy.stats.weibull_min(c=positive_var2[0], scale=positive_var[0])
-            )
+            ),
+            (
+                # scipy var for Wishart only supports scalars
+                # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
+                Wishart(
+                    (20 if version.parse(scipy.__version__) < version.parse("1.7.0") else 19) + positive_var[0],
+                    cov_tensor,
+                ),
+                scipy.stats.wishart(
+                    (20 if version.parse(scipy.__version__) < version.parse("1.7.0") else 19) + positive_var[0].item(),
+                    cov_tensor,
+                ),
+            ),
         ]
 
     def test_mean(self):
@@ -4681,7 +5021,7 @@ class TestJit(TestCase):
     def _perturb_tensor(self, value, constraint):
         if isinstance(constraint, constraints._IntegerGreaterThan):
             return value + 1
-        if isinstance(constraint, constraints._PositiveDefinite):
+        if isinstance(constraint, constraints._PositiveDefinite) or isinstance(constraint, constraints._PositiveSemidefinite):
             return value + torch.eye(value.shape[-1])
         if value.dtype in [torch.float, torch.double]:
             transform = transform_to(constraint)

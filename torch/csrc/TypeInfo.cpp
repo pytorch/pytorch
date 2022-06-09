@@ -21,7 +21,7 @@ PyObject* THPFInfo_New(const at::ScalarType& type) {
   if (!self)
     throw python_error();
   auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
-  self_->type = c10::toValueType(type);
+  self_->type = c10::toRealValueType(type);
   return self.release();
 }
 
@@ -168,11 +168,16 @@ static PyObject* THPIInfo_dtype(THPIInfo* self, void*) {
   });
 }
 
-static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
+static PyObject* THPFInfo_smallest_normal(THPFInfo* self, void*) {
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::kHalf, at::ScalarType::BFloat16, self->type, "min", [] {
     return PyFloat_FromDouble(
         std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min());
   });
+}
+
+static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
+  // see gh-70909, essentially the array_api prefers smallest_normal over tiny
+  return THPFInfo_smallest_normal(self, nullptr);
 }
 
 static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
@@ -197,6 +202,7 @@ PyObject* THPFInfo_str(THPFInfo* self) {
   oss << ", min=" << PyFloat_AsDouble(THPFInfo_min(self, nullptr));
   oss << ", max=" << PyFloat_AsDouble(THPFInfo_max(self, nullptr));
   oss << ", eps=" << PyFloat_AsDouble(THPFInfo_eps(self, nullptr));
+  oss << ", smallest_normal=" << PyFloat_AsDouble(THPFInfo_smallest_normal(self, nullptr));
   oss << ", tiny=" << PyFloat_AsDouble(THPFInfo_tiny(self, nullptr));
   oss << ", dtype=" << PyUnicode_AsUTF8(THPFInfo_dtype(self, nullptr)) << ")";
 
@@ -222,6 +228,7 @@ static struct PyGetSetDef THPFInfo_properties[] = {
     {"eps", (getter)THPFInfo_eps, nullptr, nullptr, nullptr},
     {"max", (getter)THPFInfo_max, nullptr, nullptr, nullptr},
     {"min", (getter)THPFInfo_min, nullptr, nullptr, nullptr},
+    {"smallest_normal", (getter)THPFInfo_smallest_normal, nullptr, nullptr, nullptr},
     {"tiny", (getter)THPFInfo_tiny, nullptr, nullptr, nullptr},
     {"resolution", (getter)THPFInfo_resolution, nullptr, nullptr, nullptr},
     {"dtype", (getter)THPFInfo_dtype, nullptr, nullptr, nullptr},

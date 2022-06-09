@@ -188,7 +188,6 @@ __device__ float unjoined_sigmoid_xent_backward(float lgt, float tgt) {
 }
 
 __global__ void SigmoidCrossEntropyWithLogitsKernel(
-    const int outer_size,
     const int inner_size,
     const bool log_D_trick,
     const bool unjoined_lr_loss,
@@ -276,7 +275,6 @@ bool SigmoidCrossEntropyWithLogitsOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      outer_size,
       inner_size,
       log_D_trick_,
       unjoined_lr_loss_,
@@ -327,7 +325,6 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
 namespace {
 
 __global__ void WeightedSigmoidCrossEntropyWithLogitsKernel(
-    const int outer_size,
     const int inner_size,
     const float* logits_ptr,
     const float* targets_ptr,
@@ -396,7 +393,7 @@ bool WeightedSigmoidCrossEntropyWithLogitsOp<float, CUDAContext>::
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      outer_size, inner_size, logits_ptr, targets_ptr, weights_ptr, out_ptr);
+      inner_size, logits_ptr, targets_ptr, weights_ptr, out_ptr);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;

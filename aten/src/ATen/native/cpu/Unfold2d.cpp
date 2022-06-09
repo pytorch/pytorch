@@ -1,8 +1,11 @@
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/Unfold2d.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/irange.h>
+#include <ATen/native/cpu/utils.h>
 #include <cmath>
 
 namespace at {
@@ -116,6 +119,61 @@ static void unfolded2d_acc(
   });
 }
 
+template <typename scalar_t>
+static void unfolded2d_acc_channels_last(
+    scalar_t* finput_data,
+    scalar_t* input_data,
+    int64_t kH,
+    int64_t kW,
+    int64_t dH,
+    int64_t dW,
+    int64_t padH,
+    int64_t padW,
+    int64_t n_input_plane,
+    int64_t input_height,
+    int64_t input_width,
+    int64_t output_height,
+    int64_t output_width) {
+
+  for (int64_t y = 0; y < output_height; y++) {
+    for (int64_t x = 0; x < output_width; x++) {
+      scalar_t* src = finput_data + y * output_width * kH * kW * n_input_plane + x * kH * kW * n_input_plane;
+      scalar_t* dst = input_data;
+
+      if (padW > 0 || padH > 0) {
+        for (int64_t kh = 0; kh < kH; kh++) {
+          for (int64_t kw = 0; kw < kW; kw++) {
+            int64_t iy = y * dH - padH + kh;
+            int64_t ix = x * dW - padW + kw;
+            if (iy < 0 || iy >= input_height || ix < 0 || ix >= input_width) {
+            } else {
+              scalar_t* dst_slice = dst + iy * input_width * n_input_plane + ix * n_input_plane;
+              scalar_t* src_slice = src + kh * kW * n_input_plane + kw * n_input_plane;
+              cadd(dst_slice,
+                   dst_slice,
+                   src_slice,
+                   n_input_plane);
+            }
+          }
+        }
+      } else {
+        for (int64_t kh = 0; kh < kH; kh++) {
+          for (int64_t kw = 0; kw < kW; kw++) {
+            int64_t iy = y * dH + kh;
+            int64_t ix = x * dW + kw;
+            scalar_t* dst_slice = dst + iy * input_width * n_input_plane + ix * n_input_plane;
+            scalar_t* src_slice = src + kh * kW * n_input_plane + kw * n_input_plane;
+            cadd(dst_slice,
+                 dst_slice,
+                 src_slice,
+                 n_input_plane);
+          }
+        }
+      }
+    }
+  }
+}
+
 /* note: due to write issues, this one cannot be parallelized as well as
  * unfolded2d_copy */
 void unfolded2d_acc_kernel(
@@ -132,28 +190,41 @@ void unfolded2d_acc_kernel(
     int64_t input_height,
     int64_t input_width,
     int64_t output_height,
-    int64_t output_width) {
+    int64_t output_width,
+    bool is_channels_last) {
   // This function assumes that
   // output_height*dH does not overflow a int64_t
   // output_width*dW does not overflow a int64_t
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, dtype, "unfolded2d_acc", [&] {
-        unfolded2d_acc(
-            static_cast<scalar_t*>(finput_data),
-            static_cast<scalar_t*>(input_data),
-            kH,
-            kW,
-            dH,
-            dW,
-            padH,
-            padW,
-            n_input_plane,
-            input_height,
-            input_width,
-            output_height,
-            output_width);
+  if (is_channels_last) {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, dtype, "unfolded2d_acc_channels_last", [&] {
+      unfolded2d_acc_channels_last(
+          static_cast<scalar_t*>(finput_data),
+          static_cast<scalar_t*>(input_data),
+          kH, kW,
+          dH, dW,
+          padH, padW,
+          n_input_plane,
+          input_height,
+          input_width,
+          output_height,
+          output_width);
+     });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, dtype, "unfolded2d_acc", [&] {
+      unfolded2d_acc(
+          static_cast<scalar_t*>(finput_data),
+          static_cast<scalar_t*>(input_data),
+          kH, kW,
+          dH, dW,
+          padH, padW,
+          n_input_plane,
+          input_height,
+          input_width,
+          output_height,
+          output_width);
       });
+  }
 }
 
 template <typename scalar_t>
@@ -263,6 +334,64 @@ static void unfolded2d_copy(
       });
 }
 
+template <typename scalar_t>
+static void unfolded2d_copy_channels_last(
+    scalar_t* input_data,
+    scalar_t* finput_data,
+    int64_t kH,
+    int64_t kW,
+    int64_t dH,
+    int64_t dW,
+    int64_t padH,
+    int64_t padW,
+    int64_t n_input_plane,
+    int64_t input_height,
+    int64_t input_width,
+    int64_t output_height,
+    int64_t output_width) {
+  at::parallel_for(0, output_height * output_width, 0, [&](int64_t start, int64_t end) {
+    int64_t y = 0;
+    int64_t x = 0;
+    data_index_init(start, y, output_height, x, output_width);
+
+    for (const auto k : c10::irange(start, end)) {
+      (void)k; // Suppress unused variable warning
+      scalar_t* dst = finput_data + y * output_width * kH * kW * n_input_plane + x * kH * kW * n_input_plane;
+      scalar_t* src = input_data;
+
+      if (padW > 0 || padH > 0) {
+        for (int64_t kh = 0; kh < kH; kh++) {
+          for (int64_t kw = 0; kw < kW; kw++) {
+            int64_t iy = y * dH - padH + kh;
+            int64_t ix = x * dW - padW + kw;
+            if (iy < 0 || iy >= input_height || ix < 0 || ix >= input_width) {
+              memset(dst + kh * kW * n_input_plane + kw * n_input_plane,
+                    0,
+                    sizeof(scalar_t) * n_input_plane);
+            } else {
+              memcpy(dst + kh * kW * n_input_plane + kw * n_input_plane,
+                     src + iy * input_width * n_input_plane + ix * n_input_plane,
+                     sizeof(scalar_t) * n_input_plane);
+            }
+          }
+        }
+      } else {
+        for (int64_t kh = 0; kh < kH; kh++) {
+          for (int64_t kw = 0; kw < kW; kw++) {
+            int64_t iy = y * dH + kh;
+            int64_t ix = x * dW + kw;
+            memcpy(dst + kh * kW * n_input_plane + kw * n_input_plane,
+                   src + iy * input_width * n_input_plane + ix * n_input_plane,
+                   sizeof(scalar_t) * n_input_plane);
+          }
+        }
+      }
+      // move on to next output index
+      data_index_step(y, output_height, x, output_width);
+    }
+  });
+}
+
 void unfolded2d_copy_kernel(
     ScalarType dtype,
     void *finput_data,
@@ -277,30 +406,43 @@ void unfolded2d_copy_kernel(
     int64_t input_height,
     int64_t input_width,
     int64_t output_height,
-    int64_t output_width) {
+    int64_t output_width,
+    bool is_channels_last) {
   // This function assumes that
   // kH*kW does not overflow an int
   // n_input_plane*kH*kW does not overflow a int64_t
   // output_height*dH does not overflow a int64_t
   // output_width*dW does not overflow a int64_t
 
-  AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::BFloat16, dtype, "unfolded2d_copy", [&] {
-        unfolded2d_copy(
-            static_cast<scalar_t*>(input_data),
-            static_cast<scalar_t*>(finput_data),
-            kH,
-            kW,
-            dH,
-            dW,
-            padH,
-            padW,
+  if (is_channels_last) {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, dtype, "unfolded2d_copy_channels_last", [&] {
+      unfolded2d_copy_channels_last(
+          static_cast<scalar_t*>(input_data),
+          static_cast<scalar_t*>(finput_data),
+            kH, kW,
+            dH, dW,
+            padH, padW,
             n_input_plane,
             input_height,
             input_width,
             output_height,
             output_width);
-      });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, dtype, "unfolded2d_copy", [&] {
+      unfolded2d_copy(
+          static_cast<scalar_t*>(input_data),
+          static_cast<scalar_t*>(finput_data),
+            kH, kW,
+            dH, dW,
+            padH, padW,
+            n_input_plane,
+            input_height,
+            input_width,
+            output_height,
+            output_width);
+    });
+  }
 }
 
 } // namespace

@@ -3,10 +3,13 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/debug_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/jit_log.h>
 
 namespace torch {
 namespace jit {
@@ -14,28 +17,6 @@ namespace fuser {
 namespace cuda {
 
 namespace {
-
-// permutes tensor from [N, S0, S1, ..., C] to [N, C, S0, S1, ...]
-at::Tensor revert_channels_last(at::Tensor& v) {
-  auto n_dim = v.dim();
-  std::vector<int64_t> permutation(n_dim);
-  std::iota(permutation.begin(), permutation.end(), -1); // -1, 0, 1, ..., n-2
-  permutation[0] = 0; // 0, 0, 1, ..., n-2
-  permutation[1] = n_dim - 1; // 0, n-1, 1, ..., n-2
-  return v.permute(permutation);
-}
-
-// permutes tensor from [N, C, S0, S1, ...] to [N, S0, S1, ..., C]
-at::Tensor convert_channels_last(IValue& v) {
-  TORCH_CHECK(v.isTensor(), "permutation can only be applied at tensor");
-  auto tensor = v.toTensor();
-  auto n_dim = tensor.dim();
-  std::vector<int64_t> permutation(n_dim);
-  std::iota(permutation.begin(), permutation.end(), 1); // 1, 2, 3, ..., n
-  permutation[0] = 0; // 0, 2, 3, ..., n
-  permutation[n_dim - 1] = 1; // 0, 2, 3, ..., 1
-  return tensor.permute(permutation);
-}
 
 // Check device of TensorType in all inputs ensure all tensors are on cuda
 // devices.
@@ -47,6 +28,10 @@ int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs) {
       continue;
     }
     const auto& device = input.toTensor().device();
+    // skip cpu scalar tensor as they'll be promoted to scalar later
+    if (device.is_cpu() && is_cpu_scalar(input.toTensor())) {
+      continue;
+    }
     TORCH_CHECK(device.is_cuda(), "nvfuser only supports cuda device");
     auto cur_index = device.index();
     if (index != -1 && index != cur_index) {
@@ -94,6 +79,11 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
         encodeBuffer(stride, encoding_);
         encoding_.push_back(' ');
       }
+      encoding_.push_back('a');
+      encodeBuffer(
+          SchedulerRuntimeInfo::computeAlignmentSize(
+              (size_t)input_tensor.data_ptr()),
+          encoding_);
       encoding_.push_back('d');
       encodeBuffer(input_tensor.device().index(), encoding_);
     } else {
@@ -101,9 +91,6 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
       encoding_.push_back('s');
     }
     encoding_.push_back(';');
-  }
-  if (additional_info) {
-    encodeBuffer(additional_info->getCommonAlignmentSize(), encoding_);
   }
 
   auto& entry = encoding_lookup_[encoding_];
@@ -135,36 +122,39 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
 }
 
 FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion> fusion)
-    : fusion_(std::move(fusion)) {}
+    : fusion_(std::move(fusion)) {
+  for (const auto& indices : fusion_->getOutputAliasIndices()) {
+    aliased_output_indices_.insert(indices);
+  }
+}
 
-// Note [ Channels Last support in nvfuser ]
+// Note [ Permutation support in nvfuser ]
 //
 // Background:
-// To support channels last in nvfuser with optimal performance, we would want
-// to allow dimension collapsing in generated code on channels-last tensors,
-// which greatly simplifies indexing. Current API in codegen only allows
-// dimensional collapsing on neighboring axes. The unfortunate thing is that
-// memory format design in PyTorch is implicitly marked by strides, while the
-// semantics meaning of axes remain unchanged. i.e. A 4d tensor with axes [N, C,
-// H, W] would have the same shape in both format, while contiguous tensor
-// carries strides [C*H*W, H*W, W, 1] and channels-last tensor [H*W*C, 1, W*C,
-// C].
+// To support permutation in nvfuser with optimal performance, we would want to
+// allow dimension collapsing in generated code on channels-last tensors, which
+// greatly simplifies indexing. Current API in codegen only allows dimensional
+// collapsing on neighboring axes. The unfortunate thing is that memory format
+// design in PyTorch is implicitly marked by strides, while the semantics
+// meaning of axes remain unchanged. i.e. A 4d tensor with axes [N, C, H, W]
+// would have the same shape in both format, while contiguous tensor carries
+// strides [C*H*W, H*W, W, 1] and channels-last tensor [H*W*C, 1, W*C, C]
 //
 // Approach:
-// Part_1. To allow axes collapsing for channels-last format in codegen, we can
+// Part_1. To allow axes collapsing for permuted tensor in codegen, we can
 // permute input tensor to have axes in decending order by their strides, so
 // they would be viewed as `contiguous` in codegen, hence collapsed to simple
 // indexing. Part_2. To ensure correct result, we need to ensure computation in
 // nvfuser carries same semantics as with TorchScript graph. We need to
 //   Part_2_1. Maintain a bookkeeping where each codegen tensor is tagged with
-//   either `contiguous` format or `channels_last` format. Part_2_2. Parsing
-//   rule should handle and propagate the tag properly, i.e. having special
-//   rules for `channels_last` input tensor and mark output in its right format.
-// Part_3. Codegen output tensor in `channels_last` format should be permuted
-// back to `contiguous` format before returning to TorchScript
+//   either their permutation. Part_2_2. Parsing rule should handle and
+//   propagate the tag properly, e.g. batch normalization has special rules for
+//   `channels_last` input tensor and mark output in its right permutation.
+// Part_3. Codegen output tensor that has been permuted should be restored to
+// original layout before returning to TorchScript
 //
-// For details  on Part_2, refer to implementation Note [ Format Bookkeeping and
-// Propagation in Parser ]
+// For details  on Part_2, refer to implementation Note [ Permutation
+// Bookkeeping and Propagation in Parser ]
 std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("FusionExecutorCache::runFusionWithInputs");
@@ -172,12 +162,16 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
   // permute input tensor for kernel execution. See Part_1 in Note [ Channels
   // Last support in nvfuser ]
   at::ArrayRef<IValue> perm_inputs = inputs;
-  const auto& c_last_inputs = fusion_->getChannelsLastInputIndices();
+  const auto& to_be_permuted_inputs = fusion_->getPermutationInputMap();
   std::vector<IValue> inputs_vec;
-  if (!c_last_inputs.empty()) {
+  if (!to_be_permuted_inputs.empty()) {
     inputs_vec = inputs.vec();
-    for (const auto i : c_last_inputs) {
-      inputs_vec[i] = convert_channels_last(inputs_vec[i]);
+    for (const auto& pair : to_be_permuted_inputs) {
+      auto v = inputs_vec[pair.first];
+      TORCH_CHECK(
+          v.isTensor(), "input permutation can only be applied at tensor");
+      auto tensor = v.toTensor();
+      inputs_vec[pair.first] = tensor.permute(pair.second);
     }
     perm_inputs = inputs_vec;
   }
@@ -196,9 +190,15 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
   auto outputs = kernel_runtime->runWithInput(perm_inputs, unique_id);
 
   // permute output tensor returned by kernel execution. See Part_3 in Note [
-  // Channels Last support in nvfuser ]
-  for (const auto i : fusion_->getChannelsLastOutputIndices()) {
-    outputs[i] = revert_channels_last(outputs[i]);
+  // Permutation support in nvfuser ]
+  for (const auto& pair : fusion_->getPermutationOutputMap()) {
+    outputs[pair.first] = outputs[pair.first].permute(pair.second);
+  }
+
+  int offset = 0;
+  for (const auto& v : aliased_output_indices_) {
+    outputs.erase(outputs.begin() + v - offset);
+    offset++;
   }
 
   return outputs;
@@ -221,9 +221,9 @@ FusionKernelRuntime* FusionExecutorCache::getKernelRuntimeFor(
   }
 
   // Access kernels associated with the common device id
-  auto dev_id = getCommonDeviceCUDA(inputs);
-  TORCH_INTERNAL_ASSERT(dev_id >= 0);
-  auto& kernel_runtimes = kernel_runtimes_[dev_id];
+  auto device_index = getCommonDeviceCUDA(inputs);
+  TORCH_CHECK(device_index >= 0, "device is not coherent for fusion inputs");
+  auto& kernel_runtimes = kernel_runtimes_[device_index];
 
   // Check for re-use hit case
   //  a kernel runtime is re-usable if all the compiled
@@ -277,6 +277,9 @@ FusionKernelRuntime::FusionKernelRuntime(
       std::make_unique<FusionPrecomputedIntegers>(fusion_copy.get());
 
   //! Try to schedule the complete fusion
+  scheduler_debug_utils::canScheduleMessage(
+      "***Runtime***: Try to schedule fusion un-segmented:\n");
+
   const auto maybe_complete_fusion_heuristic =
       SchedulerEntry::proposeHeuristics(fusion_copy.get(), runtime_info);
 
@@ -287,48 +290,25 @@ FusionKernelRuntime::FusionKernelRuntime(
     // Take ownership and segment transformed fusion
     segmented_fusion_ =
         SegmentCandidateFinder::segment(std::move(fusion_copy), inputs);
-    heuristics_ = segmented_fusion_->makeInitialHeuristics(inputs);
-    executors_ =
-        std::vector<FusionExecutor>(segmented_fusion_->groups().size());
-    if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
-      segmented_fusion_->print();
-    }
   } else {
-    auto complete_fusion_heuristic = maybe_complete_fusion_heuristic.value();
-
-    // Translate welfords if apply
-    if (fusion_copy->hasWelford()) {
-      bool translated = SegmentCandidateFinder::TranslateWelfordInFusion(
-          fusion_copy.get(), inputs);
-      if (translated) {
-        complete_fusion_heuristic = ScheduleHeuristic::Persistent;
-      }
-    }
-    // Take ownership of the transformed fusion
-    single_kernel_fusion_ = std::move(fusion_copy);
-
-    single_kernel_fusion_data_cache_ = std::make_unique<HeuristicSummary>(
-        single_kernel_fusion_.get(), complete_fusion_heuristic, runtime_info);
-
-    heuristics_ = std::make_unique<FusionHeuristics>(
-        complete_fusion_heuristic,
-        runtime_info,
-        single_kernel_fusion_data_cache_.get());
-
-    executors_ = std::vector<FusionExecutor>(1);
-    // In the case that the fusion isn't segmented but user
-    //  wants segmented fusion in the debug print. Will
-    //  print math of the composite fusion as placeholder
-    if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
-      single_kernel_fusion_->printMath();
-    }
+    segmented_fusion_ = SegmentedFusion::fromCompleteFusion(
+        std::move(fusion_copy), maybe_complete_fusion_heuristic.value());
   }
 
-  is_segmented_ = segmented;
-
-  if (is_segmented_) {
-    prepareRuntimeOrder();
+  heuristics_ = segmented_fusion_->makeInitialHeuristics(inputs);
+  executors_ = std::vector<FusionExecutor>(segmented_fusion_->groups().size());
+  if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
+    segmented_fusion_->print();
   }
+
+  // Even if we go through the segmented path we may still end up
+  //  with a segmented fusion with one group. This case still
+  //  counts as un-segmented.
+  is_segmented_ = segmented_fusion_->groups().size() > 1;
+
+  // Pre-compute the executor order so that the run time path
+  //  would go directly to kernel launch.
+  prepareRuntimeOrder();
 }
 
 std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
@@ -342,7 +322,8 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
   //   a kernel is compiled and run for a segmented group
   //  In the case of complete fusion, sg = nullptr, and the original fusion
   //   is complied and run
-  auto group_id = sg ? sg->groupId() : 0;
+  TORCH_INTERNAL_ASSERT(sg, "runKernelWithInput: need valid group to run");
+  auto group_id = sg->groupId();
   const int device_index = getCommonDeviceCUDA(inputs);
   TORCH_CHECK(device_index >= 0, "device is not coherent for fusion inputs");
 
@@ -356,15 +337,10 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
   if (!executors_[group_id].compiled()) {
     FUSER_PERF_SCOPE("FusionKernelRuntime::runKernelWithInput::Compile");
     std::unique_ptr<Fusion> fusion_to_run;
-    if (sg) {
-      // Running a segment group as a single kernel,
-      //  make a fusion to run from segmented fusion
-      fusion_to_run = segmented_fusion_->makeFusion(sg);
-    } else {
-      // Without a segmented group defaults to compiling the
-      //  complete fusion
-      fusion_to_run = std::make_unique<Fusion>(*single_kernel_fusion_);
-    }
+
+    // Running a segment group as a single kernel,
+    //  make a fusion to run from segmented fusion
+    fusion_to_run = segmented_fusion_->makeFusion(sg);
     CompileOptions options;
     options.device = c10::Device(DeviceType::CUDA, device_index);
     options.index_mode = scheduler_entry->indexMode();
@@ -377,7 +353,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
       launch_params = scheduler_entry->pointwiseParams().lparams;
     }
     executors_[group_id].compileFusion(
-        fusion_to_run.get(), options, inputs, launch_params);
+        fusion_to_run.get(), inputs, launch_params, options);
   } else {
     // Load launch params for reduction and normalization kernels
     if (scheduler_entry->hasReductionParam()) {
@@ -389,7 +365,6 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
 
   if (profiling_) {
     most_recent_executor_log_.fusion_executor = &executors_[group_id];
-    most_recent_executor_log_.launch_constraints = launch_params;
     if (scheduler_entry->hasReductionParam()) {
       most_recent_executor_log_.reduction_params =
           scheduler_entry->reductionParams();
@@ -399,7 +374,49 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     }
   }
 
-  return executors_[group_id].runFusion(inputs, launch_params, input_id);
+  auto& executor = executors_[group_id];
+  if (isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
+    executor.setMeasureKernelTimeFlag(true);
+  }
+
+  auto outputs = executor.runFusion(inputs, launch_params, input_id);
+
+  // Print relevant information all at once for easy debuging of perf
+  if (isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
+    std::cout << "\nRun kernel:\n";
+    if (sg) {
+      segmented_fusion_->makeFusion(sg)->printMath();
+    } else {
+      segmented_fusion_->completeFusion()->printMath();
+    }
+    std::cout << "With inputs:\n";
+    for (auto inp : inputs) {
+      if (inp.isTensor()) {
+        auto inp_tensor = inp.toTensor();
+        std::cout << "  " << inp_tensor.dtype() << "  " << inp_tensor.sizes()
+                  << "  " << inp_tensor.strides() << "\n";
+      } else {
+        std::cout << "  " << inp << "\n";
+      }
+    }
+    std::cout << "Compiler log: " << executor.compilerLog() << "\n";
+    if (scheduler_entry->hasReductionParam()) {
+      std::cout << scheduler_entry->reductionParams().toString() << "\n";
+    } else {
+      std::cout << scheduler_entry->pointwiseParams().toString() << "\n";
+    }
+    std::cout << "With arguments: " << executor.lastLaunchParams().toString();
+    std::cout << executor.kernelName() << " " << executor.bytesProcessed()
+              << " bytes/ " << std::setprecision(3) << executor.kernelTimeMs()
+              << " ms "
+              << ((double)executor.bytesProcessed() /
+                  ((double)executor.kernelTimeMs() / 1000)) /
+            (double)1.0e9
+              << " GB/s" << std::endl;
+    executor.setMeasureKernelTimeFlag(false);
+  }
+
+  return outputs;
 }
 
 void FusionKernelRuntime::prepareRuntimeOrder() {
@@ -462,95 +479,121 @@ void FusionKernelRuntime::prepareRuntimeOrder() {
 std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
     const at::ArrayRef<IValue>& inputs,
     size_t input_id) {
-  if (is_segmented_) {
-    FUSER_PERF_SCOPE("FusionKernelRuntime::runMultiKernelWithInput");
+  FUSER_PERF_SCOPE("FusionKernelRuntime::runMultiKernelWithInput");
 
-    TORCH_INTERNAL_ASSERT(
-        inputs.size() == segmented_fusion_->inputs().size(),
-        "Inputs were not set up correctly, recieved ",
-        inputs.size(),
-        " inputs but expecting ",
-        segmented_fusion_->inputs().size());
+  TORCH_INTERNAL_ASSERT(
+      inputs.size() == segmented_fusion_->inputs().size(),
+      "Inputs were not set up correctly, recieved ",
+      inputs.size(),
+      " inputs but expecting ",
+      segmented_fusion_->inputs().size());
 
-    int extent_index_ = 0;
-    // Bind input in the tensor_map
-    for (const auto i : c10::irange(inputs.size())) {
-      runtime_workspace_.tensor_map.emplace(
-          segmented_fusion_->inputs()[i], inputs[i]);
+  c10::Device device(c10::DeviceType::CUDA, 0);
+  int extent_index_ = 0;
+  // Bind input in the tensor_map
+  for (const auto i : c10::irange(inputs.size())) {
+    runtime_workspace_.tensor_map.emplace(
+        segmented_fusion_->inputs()[i], inputs[i]);
 
-      // Bind tensorview inputs values in case some segmented group
-      //  needs it down the road.
-      // TODO: we probably have done this already up to this point
-      //      should consider caching the expression evaluators, both
-      //      more convenient and safer than replication
-      if (inputs[i].isTensor()) {
-        auto aten_tensor = inputs[i].toTensor();
-        for (auto dim_size : aten_tensor.sizes()) {
-          runtime_workspace_.tensor_map.emplace(
-              runtime_workspace_.group_extent_binding_order[extent_index_++],
-              dim_size);
-        }
-      }
-    }
-
-    for (auto group_to_run : runtime_workspace_.group_run_order) {
-      // Prepare input vector
-      for (auto input : group_to_run->inputs()) {
-        runtime_workspace_.group_runtime_inputs.push_back(
-            runtime_workspace_.tensor_map.at(input));
-      }
-      // Run graph segment
-      runtime_workspace_.group_runtime_outputs = runKernelWithInput(
-          runtime_workspace_.group_runtime_inputs, input_id, group_to_run);
-
-      const auto& group_outputs = group_to_run->outputs();
-
-      // Insert graph segment output to tensor map
-      for (unsigned int group_out_i = 0; group_out_i < group_outputs.size();
-           group_out_i++) {
+    // Bind tensorview inputs values in case some segmented group
+    //  needs it down the road.
+    // TODO: we probably have done this already up to this point
+    //      should consider caching the expression evaluators, both
+    //      more convenient and safer than replication
+    if (inputs[i].isTensor()) {
+      auto aten_tensor = inputs[i].toTensor();
+      device = aten_tensor.device();
+      for (auto dim_size : aten_tensor.sizes()) {
         runtime_workspace_.tensor_map.emplace(
-            group_outputs[group_out_i],
-            runtime_workspace_.group_runtime_outputs[group_out_i]);
-      }
-      runtime_workspace_.group_runtime_inputs.clear();
-      runtime_workspace_.group_runtime_outputs.clear();
-    }
-
-    // Produce final global output
-    std::vector<IValue> fusion_outputs;
-    for (auto output : segmented_fusion_->outputs()) {
-      const auto iter = runtime_workspace_.tensor_map.find(output);
-      if (iter != runtime_workspace_.tensor_map.end()) {
-        fusion_outputs.push_back(iter->second);
-      } else {
-        // This is the check for an empty tensor;
-        TORCH_INTERNAL_ASSERT(
-            output->as<TensorView>()->nDims() == 0 &&
-                output->getDataType().has_value() &&
-                output->getDataType().value() == DataType::Float,
-            "Non empty tensor cannot be found at tensor_map in ",
-            __FUNCTION__);
-        fusion_outputs.emplace_back(at::Tensor());
+            runtime_workspace_.group_extent_binding_order[extent_index_++],
+            dim_size);
       }
     }
-
-    std::vector<at::Tensor> fusion_output_tensors;
-    std::transform(
-        fusion_outputs.begin(),
-        fusion_outputs.end(),
-        std::back_inserter(fusion_output_tensors),
-        [](IValue ival) {
-          TORCH_INTERNAL_ASSERT(
-              ival.isTensor(),
-              "Cannot output non-tensor objects from a fusion.");
-          return ival.toTensor();
-        });
-
-    runtime_workspace_.tensor_map.clear();
-    return fusion_output_tensors;
-  } else {
-    return runKernelWithInput(inputs, input_id);
   }
+
+  if (isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
+    std::cout << "=================RUNNING FUSION SEGMENTS================="
+              << std::endl;
+  }
+  for (auto group_to_run : runtime_workspace_.group_run_order) {
+    // Prepare input vector
+    for (auto input : group_to_run->inputs()) {
+      runtime_workspace_.group_runtime_inputs.push_back(
+          runtime_workspace_.tensor_map.at(input));
+    }
+    // Run graph segment
+    runtime_workspace_.group_runtime_outputs = runKernelWithInput(
+        runtime_workspace_.group_runtime_inputs, input_id, group_to_run);
+
+    const auto& group_outputs = group_to_run->outputs();
+
+    // Insert graph segment output to tensor map
+    for (unsigned int group_out_i = 0; group_out_i < group_outputs.size();
+         group_out_i++) {
+      runtime_workspace_.tensor_map.emplace(
+          group_outputs[group_out_i],
+          runtime_workspace_.group_runtime_outputs[group_out_i]);
+    }
+    runtime_workspace_.group_runtime_inputs.clear();
+    runtime_workspace_.group_runtime_outputs.clear();
+  }
+
+  if (isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
+    std::cout << "=============FINISHED RUNNING FUSION SEGMENTS============"
+              << std::endl;
+  }
+  // Produce final global output
+  std::vector<IValue> fusion_outputs;
+  for (auto output : segmented_fusion_->outputs()) {
+    const auto iter = runtime_workspace_.tensor_map.find(output);
+    if (iter != runtime_workspace_.tensor_map.end()) {
+      fusion_outputs.push_back(iter->second);
+    } else {
+      bool empty_type_check = output->getDataType().has_value() &&
+          output->getDataType().value() == DataType::Float;
+
+      // Only support two cases of empty tensor here, since
+      //   this is hot path.
+      auto out_tv = output->as<TensorView>();
+
+      // TODO: should be only one of the two once the "empty"
+      //  definition has been unified throughout the ops.
+      bool empty_tensor_check = out_tv->isZeroDim() || out_tv->isEmptyTensor();
+
+      // This is the check for an empty tensor;
+      TORCH_INTERNAL_ASSERT(
+          empty_tensor_check && empty_type_check,
+          "Is empty tensor? ",
+          !empty_tensor_check,
+          " Is empty type check? ",
+          !empty_type_check,
+          " Output empty tensor check failed for tensor: ",
+          out_tv->toString(),
+          " In function: ",
+          __FUNCTION__);
+
+      // TODO: would need to clean up this part when
+      //   we have a unified and consistent way to generate
+      //   size-0 tensors.
+      const auto tensor_options =
+          at::TensorOptions().dtype(at::kFloat).device(device);
+      fusion_outputs.emplace_back(at::empty({0}, tensor_options));
+    }
+  }
+
+  std::vector<at::Tensor> fusion_output_tensors;
+  std::transform(
+      fusion_outputs.begin(),
+      fusion_outputs.end(),
+      std::back_inserter(fusion_output_tensors),
+      [](IValue ival) {
+        TORCH_INTERNAL_ASSERT(
+            ival.isTensor(), "Cannot output non-tensor objects from a fusion.");
+        return ival.toTensor();
+      });
+
+  runtime_workspace_.tensor_map.clear();
+  return fusion_output_tensors;
 }
 
 const std::vector<FusionKernelRuntime::SchedulerEntryPtr>& FusionKernelRuntime::
@@ -579,8 +622,7 @@ void FusionKernelRuntime::updateHeuristicsLaunchParams(
 c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
     getMaybeHeuristicsFor(const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("FusionKernelRuntime::getMaybeHeuristicsFor");
-  auto complete_fusion = is_segmented_ ? segmented_fusion_->completeFusion()
-                                       : single_kernel_fusion_.get();
+  auto complete_fusion = segmented_fusion_->completeFusion();
   SchedulerRuntimeInfo runtime_info(complete_fusion, inputs);
   precomputed_integers_->bindFusionInputs(inputs);
   precomputed_integers_->evaluate();
@@ -588,46 +630,21 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
       precomputed_integers_.get());
 
   c10::optional<FusionKernelRuntime::HeuristicsPtr> ret;
-  // Segmented case, need to iterate over all segmented groups
-  if (is_segmented_) {
-    ret = std::make_unique<FusionHeuristics>();
-    size_t total_groups = segmented_fusion_->groups().size();
-    for (const auto group_index : c10::irange(total_groups)) {
-      auto group = segmented_fusion_->groups()[group_index];
+  ret = std::make_unique<FusionHeuristics>();
+  size_t total_groups = segmented_fusion_->groups().size();
+  for (const auto group_index : c10::irange(total_groups)) {
+    auto group = segmented_fusion_->groups()[group_index];
 
-      auto maybe_scheduler_entry = group->getMaybeSchedulerEntry(runtime_info);
-      if (!maybe_scheduler_entry.has_value()) {
-        return c10::nullopt;
-      }
-      auto scheduler_entry = std::move(maybe_scheduler_entry.value());
-      if (!scheduler_entry->sameAs(
-              heuristics_->heuristicsList()[group_index].get())) {
-        return c10::nullopt;
-      }
-      ret.value()->emplaceBack(std::move(scheduler_entry));
+    auto maybe_scheduler_entry = group->getMaybeSchedulerEntry(runtime_info);
+    if (!maybe_scheduler_entry.has_value()) {
+      return c10::nullopt;
     }
-
-    return ret;
-  }
-
-  // Un-segmented case, just check the complete fusion
-  auto& complete_fusion_scheduler = schedulers()[0];
-  auto complete_fusion_heuristic = complete_fusion_scheduler->heuristc();
-  if (!SchedulerEntry::canSchedule(
-          complete_fusion_heuristic,
-          complete_fusion,
-          runtime_info,
-          single_kernel_fusion_data_cache_.get())) {
-    return c10::nullopt;
-  }
-
-  ret = std::make_unique<FusionHeuristics>(
-      complete_fusion_heuristic,
-      runtime_info,
-      single_kernel_fusion_data_cache_.get());
-  if (!complete_fusion_scheduler->sameAs(
-          ret.value()->heuristicsList()[0].get())) {
-    return c10::nullopt;
+    auto scheduler_entry = std::move(maybe_scheduler_entry.value());
+    if (!scheduler_entry->sameAs(
+            heuristics_->heuristicsList()[group_index].get())) {
+      return c10::nullopt;
+    }
+    ret.value()->emplaceBack(std::move(scheduler_entry));
   }
 
   return ret;
@@ -638,6 +655,8 @@ void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
 
   fusion_executor_cache_ =
       std::make_unique<FusionExecutorCache>(parseJitIR(graph));
+
+  num_of_outputs_ = graph->outputs().size();
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -646,6 +665,8 @@ GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
   TORCH_INTERNAL_ASSERT(
       IsNewExecutorEnabled(), "legacy executor is not supported by nvfuser");
 
+  GRAPH_DEBUG("GraphCache constructor: ", this);
+  GRAPH_DUMP("GraphCache created for graph", graph);
   createFusion(graph);
 }
 
@@ -653,7 +674,16 @@ std::vector<at::Tensor> GraphCache::runGraphWithInputs(
     const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("GraphCache::runGraphWithInputs");
 
-  return fusion_executor_cache_->runFusionWithInputs(inputs);
+  GRAPH_DEBUG("running GraphCache: ", this);
+  auto outputs = fusion_executor_cache_->runFusionWithInputs(inputs);
+  TORCH_INTERNAL_ASSERT(
+      outputs.size() == num_of_outputs_,
+      "FusionExecutorCache returned ",
+      outputs.size(),
+      " outputs, doesn't match computational graph, which requires ",
+      num_of_outputs_);
+
+  return outputs;
 }
 
 } // namespace cuda

@@ -68,6 +68,22 @@ inline Tensor& householder_product_out(Tensor& result, const Tensor& input, cons
   return torch::linalg_householder_product_out(result, input, tau);
 }
 
+inline std::tuple<Tensor, Tensor> lu_factor(const Tensor& self, const bool pivot) {
+  return torch::linalg_lu_factor(self, pivot);
+}
+
+inline std::tuple<Tensor&, Tensor&> lu_factor_out(Tensor& LU, Tensor& pivots, const Tensor& self, const bool pivot) {
+  return torch::linalg_lu_factor_out(LU, pivots, self, pivot);
+}
+
+inline std::tuple<Tensor, Tensor, Tensor> lu(const Tensor& self, const bool pivot) {
+  return torch::linalg_lu(self, pivot);
+}
+
+inline std::tuple<Tensor&, Tensor&, Tensor&> lu_out(Tensor& P, Tensor& L, Tensor& U, const Tensor& self, const bool pivot) {
+  return torch::linalg_lu_out(P, L, U, self, pivot);
+}
+
 inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, const Tensor& b, c10::optional<double> cond, c10::optional<c10::string_view> driver) {
   return torch::linalg_lstsq(self, b, cond, driver);
 }
@@ -76,27 +92,27 @@ inline Tensor matrix_exp(const Tensor& self) {
   return torch::linalg_matrix_exp(self);
 }
 
-inline Tensor norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor norm(const Tensor& self, const optional<Scalar>& opt_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor norm(const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor norm(const Tensor& self, c10::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& norm_out(Tensor& result, const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor& norm_out(Tensor& result, const Tensor& self, c10::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor vector_norm(const Tensor& self, Scalar ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor vector_norm(const Tensor& self, Scalar ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_vector_norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, Scalar ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, Scalar ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_vector_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -124,12 +140,36 @@ inline Tensor& matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
   return torch::linalg_matrix_power_out(result, self, n);
 }
 
-inline Tensor matrix_rank(const Tensor input, double tol, bool hermitian) {
+inline Tensor matrix_rank(const Tensor& input, double tol, bool hermitian) {
   return torch::linalg_matrix_rank(input, tol, hermitian);
 }
 
-inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, double tol, bool hermitian) {
+inline Tensor matrix_rank(const Tensor& input, const Tensor& tol, bool hermitian) {
+  return torch::linalg_matrix_rank(input, tol, hermitian);
+}
+
+inline Tensor matrix_rank(const Tensor& input, c10::optional<double> atol, c10::optional<double> rtol, bool hermitian) {
+  return torch::linalg_matrix_rank(input, atol, rtol, hermitian);
+}
+
+inline Tensor matrix_rank(const Tensor& input, const c10::optional<Tensor>& atol, const c10::optional<Tensor>& rtol, bool hermitian) {
+  return torch::linalg_matrix_rank(input, atol, rtol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, double tol, bool hermitian) {
   return torch::linalg_matrix_rank_out(result, input, tol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, const Tensor& tol, bool hermitian) {
+  return torch::linalg_matrix_rank_out(result, input, tol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, c10::optional<double> atol, c10::optional<double> rtol, bool hermitian) {
+  return torch::linalg_matrix_rank_out(result, input, atol, rtol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, const c10::optional<Tensor>& atol, const c10::optional<Tensor>& rtol, bool hermitian) {
+  return torch::linalg_matrix_rank_out(result, input, atol, rtol, hermitian);
 }
 
 inline Tensor multi_dot(TensorList tensors) {
@@ -172,20 +212,21 @@ inline Tensor& solve_triangular_out(Tensor& result, const Tensor& input, const T
   return torch::linalg_solve_triangular_out(result, input, other, upper, left, unitriangular);
 }
 
-inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices) {
-  return torch::linalg_svd(input, full_matrices);
+inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices, c10::optional<c10::string_view> driver) {
+  return torch::linalg_svd(input, full_matrices, driver);
 }
 
-inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices) {
-  return torch::linalg_svd_out(U, S, Vh, input, full_matrices);
+inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices,
+    c10::optional<c10::string_view> driver) {
+  return torch::linalg_svd_out(U, S, Vh, input, full_matrices, driver);
 }
 
-inline Tensor svdvals(const Tensor& input) {
-  return torch::linalg_svdvals(input);
+inline Tensor svdvals(const Tensor& input, c10::optional<c10::string_view> driver) {
+  return torch::linalg_svdvals(input, driver);
 }
 
-inline Tensor& svdvals_out(Tensor& result, const Tensor& input) {
-  return torch::linalg_svdvals_out(result, input);
+inline Tensor& svdvals_out(Tensor& result, const Tensor& input, c10::optional<c10::string_view> driver) {
+  return torch::linalg_svdvals_out(result, input, driver);
 }
 
 inline Tensor tensorinv(const Tensor& self, int64_t ind) {
@@ -196,11 +237,11 @@ inline Tensor& tensorinv_out(Tensor& result,const Tensor& self, int64_t ind) {
   return torch::linalg_tensorinv_out(result, self, ind);
 }
 
-inline Tensor tensorsolve(const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
+inline Tensor tensorsolve(const Tensor& self, const Tensor& other, OptionalIntArrayRef dims) {
   return torch::linalg_tensorsolve(self, other, dims);
 }
 
-inline Tensor& tensorsolve_out(Tensor& result, const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
+inline Tensor& tensorsolve_out(Tensor& result, const Tensor& self, const Tensor& other, OptionalIntArrayRef dims) {
   return torch::linalg_tensorsolve_out(result, self, other, dims);
 }
 
@@ -322,47 +363,69 @@ inline Tensor matrix_exp(const Tensor& input) {
 }
 
 // C10_DEPRECATED_MESSAGE("linalg_norm is deprecated, use norm instead.")
-inline Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
 // C10_DEPRECATED_MESSAGE("linalg_norm is deprecated, use norm instead.")
-inline Tensor linalg_norm(const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor linalg_norm(const Tensor& self, c10::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
 // C10_DEPRECATED_MESSAGE("linalg_norm_out is deprecated, use norm_out instead.")
-inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
 // C10_DEPRECATED_MESSAGE("linalg_norm_out is deprecated, use norm_out instead.")
-inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, c10::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+/// Computes the LU factorization with partial pivoting
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.lu_factor
+inline std::tuple<Tensor, Tensor> lu_factor(const Tensor& input, const bool pivot=true) {
+  return detail::lu_factor(input, pivot);
+}
+
+inline std::tuple<Tensor&, Tensor&> lu_factor_out(Tensor& LU, Tensor& pivots, const Tensor& self, const bool pivot=true) {
+  return detail::lu_factor_out(LU, pivots, self, pivot);
+}
+
+/// Computes the LU factorization with partial pivoting
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.lu
+inline std::tuple<Tensor, Tensor, Tensor> lu(const Tensor& input, const bool pivot=true) {
+  return detail::lu(input, pivot);
+}
+
+inline std::tuple<Tensor&, Tensor&, Tensor&> lu_out(Tensor& P, Tensor& L, Tensor& U, const Tensor& self, const bool pivot=true) {
+  return detail::lu_out(P, L, U, self, pivot);
+}
+
+inline Tensor norm(const Tensor& self, const optional<Scalar>& opt_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor norm(const Tensor& self, std::string ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.vector_norm
-inline Tensor vector_norm(const Tensor& self, Scalar ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor vector_norm(const Tensor& self, Scalar ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::vector_norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, Scalar ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, Scalar ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::vector_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -393,12 +456,36 @@ inline Tensor& matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_rank
-inline Tensor matrix_rank(const Tensor input, double tol, bool hermitian) {
+inline Tensor matrix_rank(const Tensor& input, double tol, bool hermitian) {
   return detail::matrix_rank(input, tol, hermitian);
 }
 
-inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, double tol, bool hermitian) {
+inline Tensor matrix_rank(const Tensor& input, const Tensor& tol, bool hermitian) {
+  return detail::matrix_rank(input, tol, hermitian);
+}
+
+inline Tensor matrix_rank(const Tensor& input, c10::optional<double> atol, c10::optional<double> rtol, bool hermitian) {
+  return detail::matrix_rank(input, atol, rtol, hermitian);
+}
+
+inline Tensor matrix_rank(const Tensor& input, const c10::optional<Tensor>& atol, const c10::optional<Tensor>& rtol, bool hermitian) {
+  return detail::matrix_rank(input, atol, rtol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, double tol, bool hermitian) {
   return detail::matrix_rank_out(result, input, tol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, const Tensor& tol, bool hermitian) {
+  return detail::matrix_rank_out(result, input, tol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, c10::optional<double> atol, c10::optional<double> rtol, bool hermitian) {
+  return detail::matrix_rank_out(result, input, atol, rtol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, const c10::optional<Tensor>& atol, const c10::optional<Tensor>& rtol, bool hermitian) {
+  return detail::matrix_rank_out(result, input, atol, rtol, hermitian);
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.multi_dot
@@ -434,6 +521,48 @@ inline std::tuple<Tensor&, Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& i
   return detail::qr_out(Q, R, input, mode);
 }
 
+/// Computes the LDL decomposition
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.ldl_factor_ex
+inline std::tuple<Tensor, Tensor, Tensor> ldl_factor_ex(
+    const Tensor& input,
+    bool hermitian,
+    bool check_errors) {
+  return torch::linalg_ldl_factor_ex(input, hermitian, check_errors);
+}
+
+inline std::tuple<Tensor&, Tensor&, Tensor&> ldl_factor_ex_out(
+    Tensor& LD,
+    Tensor& pivots,
+    Tensor& info,
+    const Tensor& input,
+    bool hermitian,
+    bool check_errors) {
+  return torch::linalg_ldl_factor_ex_out(
+      LD, pivots, info, input, hermitian, check_errors);
+}
+
+/// Solve a system of linear equations using the LDL decomposition
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.ldl_solve
+inline Tensor ldl_solve(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool hermitian) {
+  return torch::linalg_ldl_solve(LD, pivots, B, hermitian);
+}
+
+inline Tensor& ldl_solve_out(
+    Tensor& result,
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool hermitian) {
+  return torch::linalg_ldl_solve_out(
+      result, LD, pivots, B, hermitian);
+}
+
 /// Computes a tensor `x` such that `matmul(input, x) = other`.
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.solve
@@ -460,23 +589,23 @@ inline Tensor& solve_triangular_out(Tensor& result, const Tensor& input, const T
 /// Computes the singular values and singular vectors
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.svd
-inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices) {
-  return detail::svd(input, full_matrices);
+inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices, c10::optional<c10::string_view> driver) {
+  return detail::svd(input, full_matrices, driver);
 }
 
-inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices) {
-  return detail::svd_out(U, S, Vh, input, full_matrices);
+inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices, c10::optional<c10::string_view> driver) {
+  return detail::svd_out(U, S, Vh, input, full_matrices, driver);
 }
 
 /// Computes the singular values
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.svdvals
-inline Tensor svdvals(const Tensor& input) {
-  return detail::svdvals(input);
+inline Tensor svdvals(const Tensor& input, c10::optional<c10::string_view> driver) {
+  return detail::svdvals(input, driver);
 }
 
-inline Tensor& svdvals_out(Tensor& result, const Tensor& input) {
-  return detail::svdvals_out(result, input);
+inline Tensor& svdvals_out(Tensor& result, const Tensor& input, c10::optional<c10::string_view> driver) {
+  return detail::svdvals_out(result, input, driver);
 }
 
 /// Computes the inverse of a tensor
@@ -507,11 +636,11 @@ inline Tensor& tensorinv_out(Tensor& result, const Tensor& self, int64_t ind) {
 /// auto b = torch::randn(2*3, 4);
 /// auto x = torch::linalg::tensorsolve(a, b);
 /// ```
-inline Tensor tensorsolve(const Tensor& input, const Tensor& other, optional<IntArrayRef> dims) {
+inline Tensor tensorsolve(const Tensor& input, const Tensor& other, OptionalIntArrayRef dims) {
   return detail::tensorsolve(input, other, dims);
 }
 
-inline Tensor& tensorsolve_out(Tensor& result, const Tensor& input, const Tensor& other, optional<IntArrayRef> dims) {
+inline Tensor& tensorsolve_out(Tensor& result, const Tensor& input, const Tensor& other, OptionalIntArrayRef dims) {
   return detail::tensorsolve_out(result, input, other, dims);
 }
 

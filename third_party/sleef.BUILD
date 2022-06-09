@@ -10,17 +10,11 @@ SLEEF_COPTS = [
     "-DDNNL_CPU_RUNTIME=TBB",
     "-DONNX_ML=1",
     "-DONNX_NAMESPACE=onnx",
-    "-DTH_BLAS_MKL",
     "-D_FILE_OFFSET_BITS=64",
     "-ffp-contract=off",
     "-fno-math-errno",
     "-fno-trapping-math",
     "-DCAFFE2_USE_GLOO",
-    "-DCUDA_HAS_FP16=1",
-    "-DHAVE_GCC_GET_CPUID",
-    "-DUSE_AVX",
-    "-DUSE_AVX2",
-    "-DTH_HAVE_THREAD",
     "-std=gnu99",
 ]
 

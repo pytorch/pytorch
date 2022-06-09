@@ -1,6 +1,7 @@
 #include <ATen/cuda/PeerToPeerAccess.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <vector>
 #include <algorithm>
@@ -23,7 +24,7 @@ void init_p2p_access_cache(int64_t num_devices) {
   p2pAccessEnabled_.resize(num_devices * num_devices, -1);
   num_devices_ = num_devices;
 
-  for (int64_t i = 0; i < num_devices; ++i) {
+  for (const auto i : c10::irange(num_devices)) {
     p2pAccessEnabled_[i * num_devices + i] = 1;
   }
 }

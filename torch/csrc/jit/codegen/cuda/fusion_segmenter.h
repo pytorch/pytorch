@@ -129,7 +129,7 @@ class TORCH_CUDA_CU_API SegmentedGroup {
   int group_id_ = -1;
 
   //! The scheduler to use for compiling this group
-  ScheduleHeuristic heuristic_ = ScheduleHeuristic::PointWise;
+  ScheduleHeuristic heuristic_ = ScheduleHeuristic::None;
 
   //! Exprs that make up the group
   std::vector<Expr*> exprs_;
@@ -253,6 +253,13 @@ class TORCH_CUDA_CU_API SegmentedFusion {
  public:
   explicit SegmentedFusion(std::unique_ptr<Fusion> fusion);
 
+  //! Factory function for the un-segmented case, directly
+  //!  constructs a "SegmentedFusion", with the given Fusion
+  //!  as the only group.
+  static std::unique_ptr<SegmentedFusion> fromCompleteFusion(
+      std::unique_ptr<Fusion> fusion,
+      ScheduleHeuristic heuristic);
+
   //! Is the fusion segmented?
   bool isSegmented() const {
     return !groups_.empty();
@@ -275,7 +282,7 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   }
 
   //! Returns the original un-segmented fusion
-  Fusion* completeFusion() {
+  Fusion* completeFusion() const {
     return complete_fusion_.get();
   }
 
@@ -288,11 +295,11 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   }
 
   Val* findAlias(Val* val) const {
-    Val* alias_val = nullptr;
-    if (complete_fusion_->io_alias_.count(val) != 0) {
-      alias_val = complete_fusion_->io_alias_[val];
+    auto alias_it = complete_fusion_->ioAlias().find(val);
+    if (alias_it != complete_fusion_->ioAlias().end()) {
+      return alias_it->second;
     }
-    return alias_val;
+    return nullptr;
   }
 
   //! Make a clone of the group and convert to fusion
@@ -442,7 +449,8 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
       SegmentCandidateFinderOptions options = SegmentCandidateFinderOptions()) {
     auto fusion_copy = std::make_unique<Fusion>(*fusion);
     if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
-      std::cout << "Segment the fusion: " << std::endl;
+      std::cout << "Segment the fusion (Original Fusion Un-modified): "
+                << std::endl;
       fusion_copy->printMath();
     }
     SegmentCandidateFinder scf(std::move(fusion_copy), inputs, options);
@@ -456,7 +464,8 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
       SegmentCandidateFinderOptions options = SegmentCandidateFinderOptions()) {
     SegmentCandidateFinder scf(std::move(fusion), inputs, options);
     if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
-      std::cout << "Segment the fusion: " << std::endl;
+      std::cout << "Segment the fusion (Original Fusion Un-modified): "
+                << std::endl;
       scf.completeFusion()->printMath();
     }
     return std::move(scf.segmented_fusion_);
@@ -606,6 +615,7 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
   const at::ArrayRef<IValue>& runtime_inputs_;
 };
 
+// TODO: Make as member functions on classes instead of global scope
 TORCH_CUDA_CU_API std::string toString(const SegmentedGroup* group);
 TORCH_CUDA_CU_API std::string toString(const SegmentedEdge* edge);
 TORCH_CUDA_CU_API std::string toString(const SegmentedFusion* segmented_fusion);

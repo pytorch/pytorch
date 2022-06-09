@@ -76,7 +76,7 @@ class MklSparseCsrDescriptor
     : public MklSparseDescriptor<sparse_matrix, &mkl_sparse_destroy> {
  public:
   MklSparseCsrDescriptor(const Tensor& input) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_sparse_csr());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY((input.layout() == kSparseCsr || input.layout() == kSparseBsr));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() == 2);
 
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -92,21 +92,44 @@ class MklSparseCsrDescriptor
 
     crow_indices_ = prepare_indices_for_mkl(crow_indices);
     col_indices_ = prepare_indices_for_mkl(col_indices);
+    values_ = values.expect_contiguous();
 
-    auto values_ptr = values.data_ptr<scalar_t>();
+    auto values_ptr = values_->data_ptr<scalar_t>();
     auto crow_indices_ptr = crow_indices_->data_ptr<MKL_INT>();
     auto col_indices_ptr = col_indices_->data_ptr<MKL_INT>();
 
     sparse_matrix_t raw_descriptor;
-    create_csr<scalar_t>(
-        &raw_descriptor,
-        SPARSE_INDEX_BASE_ZERO,
-        rows,
-        cols,
-        crow_indices_ptr,
-        crow_indices_ptr + 1,
-        col_indices_ptr,
-        values_ptr);
+
+    if (input.layout() == kSparseBsr) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          values.dim() == 3 && crow_indices.dim() == 1 &&
+          col_indices.dim() == 1);
+      TORCH_CHECK(
+          values.size(-1) == values.size(-2),
+          "MKL Sparse doesn't support matrices with non-square blocks.");
+      auto block_size = mkl_int_cast(values.size(-1), "block_size");
+      create_bsr<scalar_t>(
+          &raw_descriptor,
+          SPARSE_INDEX_BASE_ZERO,
+          SPARSE_LAYOUT_ROW_MAJOR,
+          rows / block_size,
+          cols / block_size,
+          block_size,
+          crow_indices_ptr,
+          crow_indices_ptr + 1,
+          col_indices_ptr,
+          values_ptr);
+    } else {
+      create_csr<scalar_t>(
+          &raw_descriptor,
+          SPARSE_INDEX_BASE_ZERO,
+          rows,
+          cols,
+          crow_indices_ptr,
+          crow_indices_ptr + 1,
+          col_indices_ptr,
+          values_ptr);
+    }
 
     descriptor_.reset(raw_descriptor);
   }
@@ -119,6 +142,7 @@ class MklSparseCsrDescriptor
  private:
   c10::MaybeOwned<Tensor> crow_indices_;
   c10::MaybeOwned<Tensor> col_indices_;
+  c10::MaybeOwned<Tensor> values_;
 };
 
 } // namespace sparse

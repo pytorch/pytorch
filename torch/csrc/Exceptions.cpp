@@ -9,37 +9,39 @@
 
 #include <torch/csrc/THP.h>
 
-PyObject *THPException_FatalError;
+PyObject *THPException_FatalError, *THPException_LinAlgError;
 
 #define ASSERT_TRUE(cond) if (!(cond)) return false
 bool THPException_init(PyObject *module)
 {
   ASSERT_TRUE(THPException_FatalError = PyErr_NewException("torch.FatalError", nullptr, nullptr));
   ASSERT_TRUE(PyModule_AddObject(module, "FatalError", THPException_FatalError) == 0);
+
+  // Set the doc string here since _add_docstr throws malloc errors if tp_doc is modified
+  // for an error class.
+  ASSERT_TRUE(THPException_LinAlgError = PyErr_NewExceptionWithDoc("torch._C._LinAlgError",
+    "Error raised by torch.linalg function when the cause of error is a numerical inconsistency in the data.\n \
+For example, you can the torch.linalg.inv function will raise torch.linalg.LinAlgError when it finds that \
+a matrix is not invertible.\n \
+\n\
+Example:\n \
+>>> matrix = torch.eye(3, 3)\n \
+>>> matrix[-1, -1] = 0\n \
+>>> matrix\n \
+    tensor([[1., 0., 0.],\n \
+            [0., 1., 0.],\n \
+            [0., 0., 0.]])\n \
+>>> torch.linalg.inv(matrix)\n \
+Traceback (most recent call last):\n \
+File \"<stdin>\", line 1, in <module>\n \
+torch._C._LinAlgError: torch.linalg.inv: The diagonal element 3 is zero, the inversion\n \
+could not be completed because the input matrix is singular.", PyExc_RuntimeError, nullptr));
+  ASSERT_TRUE(PyModule_AddObject(module, "_LinAlgError", THPException_LinAlgError) == 0);
+
   return true;
 }
 
 namespace torch {
-
-static bool compute_cpp_stack_traces_enabled() {
-  auto envar = std::getenv("TORCH_SHOW_CPP_STACKTRACES");
-  if (envar) {
-    if (strcmp(envar, "0") == 0) {
-      return false;
-    }
-    if (strcmp(envar, "1") == 0) {
-      return true;
-    }
-    TORCH_WARN("ignoring invalid value for TORCH_SHOW_CPP_STACKTRACES: ", envar,
-               " valid values are 0 or 1.");
-  }
-  return false;
-}
-
-bool get_cpp_stacktraces_enabled() {
-  static bool enabled = compute_cpp_stack_traces_enabled();
-  return enabled;
-}
 
 void replaceAll(std::string & str,
     const std::string & old_str,
@@ -139,6 +141,15 @@ static std::string formatMessage(const char *format, va_list fmt_args) {
   return std::string(error_buf);
 }
 
+void translate_exception_to_python(const std::exception_ptr &e_ptr) {
+  try {
+    TORCH_INTERNAL_ASSERT(e_ptr, "translate_exception_to_python "
+                          "called with invalid exception pointer");
+    std::rethrow_exception(e_ptr);
+  }
+  CATCH_ALL_ERRORS(return)
+}
+
 IndexError::IndexError(const char *format, ...) {
   va_list fmt_args;
   va_start(fmt_args, format);
@@ -161,6 +172,13 @@ ValueError::ValueError(const char *format, ...) {
 }
 
 AttributeError::AttributeError(const char* format, ...) {
+  va_list fmt_args;
+  va_start(fmt_args, format);
+  msg = formatMessage(format, fmt_args);
+  va_end(fmt_args);
+}
+
+LinAlgError::LinAlgError(const char* format, ...) {
   va_list fmt_args;
   va_start(fmt_args, format);
   msg = formatMessage(format, fmt_args);

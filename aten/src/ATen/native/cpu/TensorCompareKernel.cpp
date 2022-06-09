@@ -1,3 +1,5 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/TensorCompare.h>
 
@@ -10,12 +12,19 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/WrapDimUtils.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/Loops.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/result_type.h>
+#endif
 
 namespace at { namespace native { namespace {
 
@@ -196,7 +205,7 @@ static void aminmax_kernel(
 }
 
 static void where_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBFloat16, kBool,
     iter.dtype(), "where_cpu", [&] {
       cpu_kernel(
         iter,
@@ -299,8 +308,10 @@ static void isin_default_kernel_cpu(
   // Since test elements is not an input of the TensorIterator, type promotion
   // must be done manually.
   ScalarType common_type = at::result_type(elements, test_elements);
-  Tensor test_elements_flat = test_elements.to(common_type).ravel();
   Tensor promoted_elements = elements.to(common_type);
+  Tensor test_elements_flat = test_elements.to(common_type).view(-1);
+  auto test_elements_stride = test_elements_flat.stride(0);
+
   auto iter = TensorIteratorConfig()
     .add_output(out)
     .add_input(promoted_elements)
@@ -309,9 +320,9 @@ static void isin_default_kernel_cpu(
   // Dispatch based on promoted type.
   AT_DISPATCH_ALL_TYPES(iter.dtype(1), "isin_default_cpu", [&]() {
     cpu_kernel(iter, [&](scalar_t element_val) -> bool {
-      const auto* test_element_data = reinterpret_cast<scalar_t*>(test_elements_flat.data_ptr());
+      const auto* test_element_data = test_elements_flat.data_ptr<scalar_t>();
       for (const auto j : c10::irange(test_elements_flat.numel())) {
-        if (element_val == test_element_data[j]) {
+        if (element_val == *(test_element_data + test_elements_stride * j)) {
           return !invert;
         }
       }
@@ -320,25 +331,28 @@ static void isin_default_kernel_cpu(
   });
 }
 
-static void clamp_kernel_impl(TensorIterator& iter) {
+static void clamp_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_cpu", [&]() {
     cpu_kernel_vec(iter,
       [](scalar_t a, scalar_t min, scalar_t max) -> scalar_t {
-        return std::min(std::max(a, min), max);
+        if (min != min || max != max) {
+            return std::numeric_limits<scalar_t>::quiet_NaN();
+        } else {
+            return std::min(std::max(a, min), max);
+        }
       },
       [](Vectorized<scalar_t> a, Vectorized<scalar_t> min, Vectorized<scalar_t> max) {
-        return vec::clamp(a, min, max);
+        return vec::minimum(vec::maximum(a, min), max);
       });
   });
 }
 
-static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, const Scalar& max_, at::native::detail::ClampLimits minmax) {
+static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, const Scalar& max_) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_scalar_cpu", [&]() {
     const auto min = min_.to<scalar_t>();
     const auto max = max_.to<scalar_t>();
     const Vectorized<scalar_t> min_vec(min);
     const Vectorized<scalar_t> max_vec(max);
-    if (minmax == at::native::detail::ClampLimits::MinMax) {
       cpu_kernel_vec(iter,
         [=](scalar_t a) -> scalar_t {
           return std::min(std::max(a, min), max);
@@ -346,40 +360,10 @@ static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min
         [=](Vectorized<scalar_t> a) {
           return vec::clamp(a, min_vec, max_vec);
         });
-    } else if (minmax == at::native::detail::ClampLimits::Min) {
-      cpu_kernel_vec(iter,
-        [=](scalar_t a) -> scalar_t {
-          return std::max(a, min);
-        },
-        [=](Vectorized<scalar_t> a) {
-          return vec::clamp_min(a, min_vec);
-        });
-
-    } else { //max
-      cpu_kernel_vec(iter,
-        [=](scalar_t a) -> scalar_t {
-          return std::min(a, max);
-        },
-        [=](Vectorized<scalar_t> a) {
-          return vec::clamp_max(a, max_vec);
-        });
-    }
   });
 }
 
-static void clamp_max_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_max_cpu", [&]() {
-    cpu_kernel_vec(iter,
-      [](scalar_t a, scalar_t max) -> scalar_t {
-        return std::min(a, max);
-      },
-      [](Vectorized<scalar_t> a, Vectorized<scalar_t> max) {
-        return vec::clamp_max(a, max);
-      });
-  });
-}
-
-static void clamp_max_scalar_kernel_impl(TensorIterator& iter, Scalar max_) {
+static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_max_scalar_cpu", [&]() {
     const auto max = max_.to<scalar_t>();
     const Vectorized<scalar_t> max_vec(max);
@@ -393,19 +377,7 @@ static void clamp_max_scalar_kernel_impl(TensorIterator& iter, Scalar max_) {
   });
 }
 
-static void clamp_min_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_min_cpu", [&]() {
-    cpu_kernel_vec(iter,
-        [](scalar_t a, scalar_t min) -> scalar_t {
-          return std::max(a, min);
-        },
-        [](Vectorized<scalar_t> a, Vectorized<scalar_t> min) {
-          return vec::clamp_min(a, min);
-        });
-  });
-}
-
-static void clamp_min_scalar_kernel_impl(TensorIterator& iter, Scalar min_) {
+static void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_min_cpu", [&]() {
     const auto min = min_.to<scalar_t>();
     const Vectorized<scalar_t> min_vec(min);
@@ -429,8 +401,6 @@ REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
 REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
 REGISTER_DISPATCH(mode_stub, &mode_kernel_impl);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl);
-REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_impl);
-REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_impl);
 REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);

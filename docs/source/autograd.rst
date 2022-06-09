@@ -14,6 +14,26 @@ Automatic differentiation package - torch.autograd
     backward
     grad
 
+.. _forward-mode-ad:
+
+Forward-mode Automatic Differentiation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. warning::
+    This API is in beta. Even though the function signatures are very unlikely to change, improved
+    operator coverage is planned before we consider this stable.
+
+Please see the `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
+for detailed steps on how to use this API.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    forward_ad.dual_level
+    forward_ad.make_dual
+    forward_ad.unpack_dual
+
 .. _functional-api:
 
 Functional higher level API
@@ -52,16 +72,8 @@ Locally disabling gradient computation
 
 See :ref:`locally-disable-grad-doc` for more information on the differences
 between no-grad and inference mode as well as other related mechanisms that
-may be confused with the two.
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    no_grad
-    enable_grad
-    set_grad_enabled
-    inference_mode
+may be confused with the two. Also see :ref:`torch-rst-local-disable-grad`
+for a list of functions that can be used to locally disable gradients.
 
 .. _default-grad-layouts:
 

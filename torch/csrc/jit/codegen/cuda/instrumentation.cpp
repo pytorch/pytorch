@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 
 #ifdef _WIN32
 #include <c10/util/win32-headers.h>
@@ -32,7 +32,7 @@ Trace::Trace() {
     logEvent('I', "TRACE_START");
   }
 
-  if (getenv("PYTORCH_NVFUSER_DISABLE_NVTX")) {
+  if (isDisabled(DisableOption::Nvtx)) {
     record_nvtx_range_ = false;
   }
 }

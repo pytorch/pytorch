@@ -2,9 +2,9 @@
 #include <ATen/NativeFunctions.h>
 #include <torch/library.h>
 #include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
@@ -19,6 +19,11 @@ namespace {
 #ifdef USE_PYTORCH_QNNPACK
 Tensor qnnpack_hardsigmoid(Tensor input) {
   TORCH_CHECK(input.ndimension() > 0, "qnnpack_hardsigmoid(): Got empty input tensor");
+  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
+                "qnnpack_hardsigmoid(): Expected input data type ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(input.scalar_type()));
   initQNNPACK();
 
   Tensor input_contig = input.contiguous(input.suggest_memory_format());

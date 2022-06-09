@@ -60,19 +60,18 @@ function get_pr_change_files() {
   set -e
 }
 
-function file_diff_from_base() {
-  # The fetch may fail on Docker hosts, this fetch is necessary for GHA
-  set +e
-  git fetch origin master --quiet
-  set -e
-  git diff --name-only "$(git merge-base origin/master HEAD)" > "$1"
-}
-
 function get_bazel() {
-  # download bazel version
-  wget https://ossci-linux.s3.amazonaws.com/bazel-4.2.1-linux-x86_64 -O tools/bazel
-  # verify content
-  echo '1a4f3a3ce292307bceeb44f459883859c793436d564b95319aacb8af1f20557c tools/bazel' | sha256sum --quiet -c
+  if [[ $(uname) == "Darwin" ]]; then
+    # download bazel version
+    curl https://github.com/bazelbuild/bazel/releases/download/4.2.1/bazel-4.2.1-darwin-x86_64  -Lo tools/bazel
+    # verify content
+    echo '74d93848f0c9d592e341e48341c53c87e3cb304a54a2a1ee9cff3df422f0b23c  tools/bazel' | shasum -a 256 -c >/dev/null
+  else
+    # download bazel version
+    curl https://ossci-linux.s3.amazonaws.com/bazel-4.2.1-linux-x86_64 -o tools/bazel
+    # verify content
+    echo '1a4f3a3ce292307bceeb44f459883859c793436d564b95319aacb8af1f20557c  tools/bazel' | shasum -a 256 -c >/dev/null
+  fi
 
   chmod +x tools/bazel
 }
@@ -82,11 +81,9 @@ function install_monkeytype {
   pip_install MonkeyType
 }
 
-TORCHVISION_COMMIT=8a2dc6f22ac4389ccba8859aa1e1cb14f1ee53db
+TORCHVISION_COMMIT="$(cat .github/ci_commit_pins/vision.txt)"
 
 function install_torchvision() {
-  # Check out torch/vision at Jun 11 2020 commit
-  # This hash must match one in .jenkins/caffe2/test.sh
   pip_install --user "git+https://github.com/pytorch/vision.git@$TORCHVISION_COMMIT"
 }
 
@@ -100,6 +97,14 @@ function checkout_install_torchvision() {
 
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
-    git clone --recursive https://github.com/pytorch/xla.git
+    git clone --recursive --quiet https://github.com/pytorch/xla.git
+    pushd xla
+    # pin the xla hash so that we don't get broken by changes to xla
+    git checkout "$(cat ../.github/ci_commit_pins/xla.txt)"
+    popd
   fi
+}
+
+function install_torchdynamo() {
+  pip_install --user "git+https://github.com/pytorch/torchdynamo.git@$(cat .github/ci_commit_pins/torchdynamo.txt)"
 }

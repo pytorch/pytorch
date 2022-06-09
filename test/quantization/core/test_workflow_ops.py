@@ -7,7 +7,7 @@ from torch.ao.quantization import (
     FakeQuantize,
     MovingAverageMinMaxObserver,
     default_observer,
-    default_affine_fixed_qparams_fake_quant,
+    default_fixed_qparams_range_0to1_fake_quant,
 )
 
 from torch.ao.quantization._learnable_fake_quantize import _LearnableFakeQuantize
@@ -181,11 +181,11 @@ def _get_per_row_min_max(
     y = x.permute(*new_axis_list)
 
     y = torch.flatten(y, start_dim=1)
-    # min_vals, max_vals = torch._aminmax(y, 1)
+    # min_vals, max_vals = torch.aminmax(y, dim=1)
     if math.isinf(min_vals[0]) or math.isinf(max_vals[0]):
-        min_vals, max_vals = torch._aminmax(y, 1)
+        min_vals, max_vals = torch.aminmax(y, dim=1)
     else:
-        min_vals_cur, max_vals_cur = torch._aminmax(y, 1)
+        min_vals_cur, max_vals_cur = torch.aminmax(y, dim=1)
         min_vals = min_vals + averaging_const * (min_vals_cur - min_vals)
         max_vals = max_vals + averaging_const * (max_vals_cur - max_vals)
     return min_vals, max_vals
@@ -425,6 +425,9 @@ class TestFakeQuantizeOps(TestCase):
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_learnable_forward_per_tensor_cpu(self, X):
         X, (_, _, _) = X
         scale_base = torch.normal(mean=0, std=1, size=(1,)).clamp(1e-4, 100)
@@ -544,7 +547,7 @@ class TestFakeQuantizeOps(TestCase):
     def test_fixed_qparams_fq_module(self, device, X):
         X, (scale, zero_point, torch_type) = X
         X = to_tensor(X, device)
-        fq_module = default_affine_fixed_qparams_fake_quant()
+        fq_module = default_fixed_qparams_range_0to1_fake_quant()
         fq_module.to(device)
         fixed_scale = fq_module.scale.clone()
         fixed_zero_point = fq_module.zero_point.clone()
@@ -557,7 +560,7 @@ class TestFakeQuantizeOps(TestCase):
     def test_fq_serializable_per_tensor(self):
         observer = default_observer
         quant_min = 0
-        quant_max = 255
+        quant_max = 127
         for FakeQuantizeClass in [FakeQuantize, _LearnableFakeQuantize]:
             fq_module = FakeQuantizeClass(observer, quant_min, quant_max)
             X = torch.tensor([-5, -3.5, -2, 0, 3, 5, 7], dtype=torch.float32)
@@ -763,7 +766,7 @@ class TestFakeQuantizeOps(TestCase):
             scale = to_tensor(scale, device)
 
             # Ensure that zero_point < quant_min.
-            zero_point = torch.tensor(torch.full(zero_point.shape, -1 - quant_min)).to(dtype=torch.int32, device=device)
+            zero_point = torch.full(zero_point.shape, -1 - quant_min).to(dtype=torch.int32, device=device)
 
             # For non-float zero_point, fakequant requires zero_point between quant_min and quant_max.
             with self.assertRaisesRegex(RuntimeError, "`zero_point` must be between `quant_min` and `quant_max`."):
@@ -827,6 +830,9 @@ class TestFakeQuantizeOps(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_backward_per_channel(self, device, X):
         r"""Tests the backward method.
         """
@@ -839,7 +845,7 @@ class TestFakeQuantizeOps(TestCase):
         for zero_point_type in zero_point_types:
             X = to_tensor(X, device)
             scale = to_tensor(scale, device)
-            zero_point = torch.tensor(zero_point).to(dtype=zero_point_type, device=device)
+            zero_point = to_tensor(zero_point, device).to(dtype=zero_point_type)
             X.requires_grad_()
             Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)
@@ -936,6 +942,9 @@ class TestFakeQuantizeOps(TestCase):
 
     @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_learnable_backward_per_channel_cpu(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
         X, (_, _, axis, _) = X

@@ -98,6 +98,8 @@
 #include <c10/core/Storage.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/core/Stream.h>
+#include <c10/core/SymInt.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
@@ -105,6 +107,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/InlineDeviceGuard.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/SizesAndStrides.h>
 #include <c10/core/impl/VirtualGuardImpl.h>
 
@@ -153,20 +156,20 @@
 #include <c10/util/quint4x2.h>
 #include <c10/util/quint8.h>
 #include <c10/util/reverse_iterator.h>
+#include <c10/util/safe_numerics.h>
 #include <c10/util/string_utils.h>
 #include <c10/util/string_view.h>
 #include <c10/util/typeid.h>
 
-#include <ATen/Dispatch.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
+#include <ATen/core/DimVector.h>
 #include <ATen/core/Dimname.h>
 #include <ATen/core/Generator.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/core/TensorBase.h>
-#include <ATen/core/aten_interned_strings.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 
 #pragma pop_macro("TORCH_ASSERT_NO_OPERATORS")

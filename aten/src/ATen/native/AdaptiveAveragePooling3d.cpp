@@ -98,7 +98,7 @@ void adaptive_avg_pool3d_out_cpu_template(
 
   TORCH_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
-      "adaptive_avg_pool3d(): Expected 3D or 4D tensor, but got ",
+      "adaptive_avg_pool3d(): Expected 4D or 5D tensor, but got ",
       input.sizes());
   TORCH_CHECK(input.dtype() == output.dtype(),
       "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
@@ -299,8 +299,12 @@ Tensor adaptive_avg_pool3d_cpu(Tensor const& input, IntArrayRef output_size) {
   return output;
 }
 
-Tensor adaptive_avg_pool3d(at::Tensor const& input, IntArrayRef output_size) {
+Tensor adaptive_avg_pool3d(Tensor const& input, IntArrayRef output_size) {
   TORCH_CHECK(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
+  TORCH_CHECK(
+        (output_size[0] >= 0 && output_size[1] >= 0 && output_size[2] >= 0),
+        "adaptive_avg_pool2d: elements of output_size must be greater than or equal to 0 ",
+        "but received {", output_size[0], ", ", output_size[1], ",", output_size[2], "}");
 
   if (output_size[0] == 1 && output_size[1] == 1 && output_size[2] == 1) {
     // in this case, adaptive pooling is just computing mean over hw

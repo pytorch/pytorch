@@ -58,21 +58,21 @@ class saved_tensors_hooks():
         to undefined behavior.
 
     .. warning ::
-        Only one pair of hooks is allowed at a time. Recursively nesting this
-        context-manager is not yet supported.
+        Only one pair of hooks is allowed at a time. When recursively nesting this
+        context-manager, only the inner-most pair of hooks will be applied.
     """
     def __init__(self, pack_hook: Callable[[torch.Tensor], Any], unpack_hook: Callable[[Any], torch.Tensor]):
         self.pack_hook = pack_hook
         self.unpack_hook = unpack_hook
 
     def __enter__(self):
-        torch._C._autograd._register_saved_tensors_default_hooks(self.pack_hook, self.unpack_hook)
+        torch._C._autograd._push_saved_tensors_default_hooks(self.pack_hook, self.unpack_hook)
 
     def __exit__(self, *args: Any):
-        torch._C._autograd._reset_saved_tensors_default_hooks()
+        torch._C._autograd._pop_saved_tensors_default_hooks()
 
 
-class save_on_cpu():
+class save_on_cpu(saved_tensors_hooks):
     """Context-manager under which tensors saved by the forward pass will be
     stored on cpu, then retrieved for backward.
 
@@ -129,11 +129,4 @@ class save_on_cpu():
             device, tensor = packed
             return tensor.to(device, non_blocking=pin_memory)
 
-        self.pack_hook = pack_to_cpu
-        self.unpack_hook = unpack_from_cpu
-
-    def __enter__(self):
-        torch._C._autograd._register_saved_tensors_default_hooks(self.pack_hook, self.unpack_hook)
-
-    def __exit__(self, *args: Any):
-        torch._C._autograd._reset_saved_tensors_default_hooks()
+        super().__init__(pack_to_cpu, unpack_from_cpu)

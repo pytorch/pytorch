@@ -181,8 +181,6 @@ class TransformedDistribution(Distribution):
         transform(s) and computing the score of the base distribution.
         """
         value = self._monotonize_cdf(value)
-        if self._validate_args:
-            self.base_dist._validate_sample(value)
         value = self.base_dist.icdf(value)
         for transform in self.transforms:
             value = transform(value)

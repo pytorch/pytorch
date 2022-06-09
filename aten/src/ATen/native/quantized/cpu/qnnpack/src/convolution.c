@@ -37,59 +37,10 @@ static inline size_t compute_output_dimension(
       1;
 }
 
-enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
-    uint32_t input_padding_height,
-    uint32_t input_padding_width,
-    uint32_t kernel_height,
-    uint32_t kernel_width,
-    uint32_t subsampling_height,
-    uint32_t subsampling_width,
-    uint32_t dilation_height,
-    uint32_t dilation_width,
-    uint32_t groups,
-    size_t group_input_channels,
-    size_t group_output_channels,
-    uint8_t input_zero_point,
-    const uint8_t* kernel_zero_points,
-    const uint8_t* kernel,
-    const int32_t* bias,
-    uint8_t output_zero_point,
-    uint8_t output_min,
-    uint8_t output_max,
-    uint32_t flags,
-    const float* requantization_scales,
-    bool per_channel,
-    pytorch_qnnp_operator_t* convolution_out) {
-  return pytorch_qnnp_create_convolution3d_ndhwc_q8(
-      0,
-      input_padding_height,
-      input_padding_width,
-      1,
-      kernel_height,
-      kernel_width,
-      1,
-      subsampling_height,
-      subsampling_width,
-      1,
-      dilation_height,
-      dilation_width,
-      groups,
-      group_input_channels,
-      group_output_channels,
-      input_zero_point,
-      kernel_zero_points,
-      kernel,
-      bias,
-      output_zero_point,
-      output_min,
-      output_max,
-      flags,
-      requantization_scales,
-      per_channel,
-      convolution_out);
-}
-
-enum pytorch_qnnp_status pytorch_qnnp_create_convolution3d_ndhwc_q8(
+/**
+ * Not exposed in header file
+ */
+static enum pytorch_qnnp_status pytorch_qnnp_create_convolution_ndhwc_q8(
     uint32_t input_padding_depth,
     uint32_t input_padding_height,
     uint32_t input_padding_width,
@@ -115,7 +66,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution3d_ndhwc_q8(
     uint32_t flags,
     const float* requantization_scales,
     bool per_channel,
-    pytorch_qnnp_operator_t* convolution_out) {
+    pytorch_qnnp_operator_t* convolution_out,
+    bool is_2d /* true: 2d, false: 3d */) {
   pytorch_qnnp_operator_t convolution = NULL;
   enum pytorch_qnnp_status status = pytorch_qnnp_status_uninitialized;
 
@@ -246,8 +198,15 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution3d_ndhwc_q8(
   enum pytorch_qnnp_ukernel_type ukernel_type = pytorch_qnnp_ukernel_type_none;
   const bool any_padding =
       (input_padding_depth | input_padding_height | input_padding_width) != 0;
-  if ((kernel_size == 9 || kernel_size == 25) && group_input_channels == 1 &&
-      group_output_channels == 1 && groups > 1) {
+
+  const bool has_depthwise_dimensions =
+      (is_2d &&
+       ((kernel_height == 3 && kernel_width == 3) ||
+        (kernel_height == 5 && kernel_width == 5))) ||
+      (!is_2d && kernel_height == 3 && kernel_width == 3 && kernel_depth == 3);
+  const bool has_depthwise_grouping =
+      group_input_channels == 1 && group_output_channels == 1 && groups > 1;
+  if (has_depthwise_dimensions && has_depthwise_grouping) {
     ukernel_type = pytorch_qnnp_ukernel_type_dwconv;
   } else if (
       kernel_size == 1 && subsampling_height == 1 && subsampling_width == 1 &&
@@ -295,7 +254,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution3d_ndhwc_q8(
           break;
         case 25:
           /* change this later */
-          pytorch_pack_q8dw_w_dilation(
+          pytorch_pack_q8dw_2d_w_dilation(
               kernel_height,
               kernel_width,
               groups,
@@ -308,7 +267,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution3d_ndhwc_q8(
               bias,
               convolution->packed_weights,
               true);
-          pytorch_pack_q8dw_w_dilation(
+          pytorch_pack_q8dw_2d_w_dilation(
               kernel_height,
               kernel_width,
               groups,
@@ -322,7 +281,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution3d_ndhwc_q8(
               (char*)convolution->packed_weights +
                   (10 + sizeof(int32_t) / sizeof(uint8_t)) * c_stride,
               false);
-          pytorch_pack_q8dw_w_dilation(
+          pytorch_pack_q8dw_2d_w_dilation(
               kernel_height,
               kernel_width,
               groups,
@@ -335,6 +294,62 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution3d_ndhwc_q8(
               bias,
               (char*)convolution->packed_weights +
                   (20 + sizeof(int32_t) / sizeof(uint8_t)) * c_stride,
+              false);
+          break;
+        case 27:
+          pytorch_pack_q8dw_3d_w_dilation(
+              kernel_depth,
+              kernel_height,
+              kernel_width,
+              groups,
+              cr,
+              0,
+              kernel_depth,
+              0,
+              kernel_height,
+              0,
+              1,
+              kernel,
+              bias,
+              convolution->packed_weights,
+              true);
+          pytorch_pack_q8dw_3d_w_dilation(
+              kernel_depth,
+              kernel_height,
+              kernel_width,
+              groups,
+              cr,
+              0,
+              kernel_depth,
+              0,
+              kernel_height,
+              1,
+              2,
+              kernel,
+              bias,
+              (char*)convolution->packed_weights +
+                  (kernel_depth * kernel_height +
+                   sizeof(int32_t) / sizeof(uint8_t)) *
+                      c_stride,
+              false);
+          pytorch_pack_q8dw_3d_w_dilation(
+              kernel_depth,
+              kernel_height,
+              kernel_width,
+              groups,
+              cr,
+              0,
+              kernel_depth,
+              0,
+              kernel_height,
+              2,
+              3,
+              kernel,
+              bias,
+              (char*)convolution->packed_weights +
+                  (2 * kernel_depth * kernel_height +
+                   sizeof(int32_t) / sizeof(uint8_t)) *
+                      c_stride,
               false);
           break;
         default:
@@ -531,6 +546,116 @@ error:
   return status;
 }
 
+enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
+    uint32_t kernel_height,
+    uint32_t kernel_width,
+    uint32_t subsampling_height,
+    uint32_t subsampling_width,
+    uint32_t dilation_height,
+    uint32_t dilation_width,
+    uint32_t groups,
+    size_t group_input_channels,
+    size_t group_output_channels,
+    uint8_t input_zero_point,
+    const uint8_t* kernel_zero_points,
+    const uint8_t* kernel,
+    const int32_t* bias,
+    uint8_t output_zero_point,
+    uint8_t output_min,
+    uint8_t output_max,
+    uint32_t flags,
+    const float* requantization_scales,
+    bool per_channel,
+    pytorch_qnnp_operator_t* convolution_out) {
+  return pytorch_qnnp_create_convolution_ndhwc_q8(
+      0,
+      input_padding_height,
+      input_padding_width,
+      1,
+      kernel_height,
+      kernel_width,
+      1,
+      subsampling_height,
+      subsampling_width,
+      1,
+      dilation_height,
+      dilation_width,
+      groups,
+      group_input_channels,
+      group_output_channels,
+      input_zero_point,
+      kernel_zero_points,
+      kernel,
+      bias,
+      output_zero_point,
+      output_min,
+      output_max,
+      flags,
+      requantization_scales,
+      per_channel,
+      convolution_out,
+      true /* is_2d? */);
+}
+
+enum pytorch_qnnp_status pytorch_qnnp_create_convolution3d_ndhwc_q8(
+    uint32_t input_padding_depth,
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
+    uint32_t kernel_depth,
+    uint32_t kernel_height,
+    uint32_t kernel_width,
+    uint32_t subsampling_depth,
+    uint32_t subsampling_height,
+    uint32_t subsampling_width,
+    uint32_t dilation_depth,
+    uint32_t dilation_height,
+    uint32_t dilation_width,
+    uint32_t groups,
+    size_t group_input_channels,
+    size_t group_output_channels,
+    uint8_t input_zero_point,
+    const uint8_t* kernel_zero_points,
+    const uint8_t* kernel,
+    const int32_t* bias,
+    uint8_t output_zero_point,
+    uint8_t output_min,
+    uint8_t output_max,
+    uint32_t flags,
+    const float* requantization_scales,
+    bool per_channel,
+    pytorch_qnnp_operator_t* convolution_out) {
+  return pytorch_qnnp_create_convolution_ndhwc_q8(
+      input_padding_depth,
+      input_padding_height,
+      input_padding_width,
+      kernel_depth,
+      kernel_height,
+      kernel_width,
+      subsampling_depth,
+      subsampling_height,
+      subsampling_width,
+      dilation_depth,
+      dilation_height,
+      dilation_width,
+      groups,
+      group_input_channels,
+      group_output_channels,
+      input_zero_point,
+      kernel_zero_points,
+      kernel,
+      bias,
+      output_zero_point,
+      output_min,
+      output_max,
+      flags,
+      requantization_scales,
+      per_channel,
+      convolution_out,
+      false /* is_2d? */);
+}
+
 enum pytorch_qnnp_status pytorch_qnnp_setup_convolution2d_nhwc_q8(
     pytorch_qnnp_operator_t convolution,
     size_t batch_size,
@@ -658,19 +783,10 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_convolution_ndhwc_q8(
       return pytorch_qnnp_status_success;
     }
     case pytorch_qnnp_ukernel_type_dwconv: {
-      const size_t kernel_depth = convolution->kernel_depth;
-      const size_t kernel_height = convolution->kernel_height;
-      const size_t kernel_width = convolution->kernel_width;
-      const size_t kernel_size = kernel_depth * kernel_height * kernel_width;
-      const size_t output_height = convolution->output_height;
-      const size_t output_width = convolution->output_width;
-      const size_t step_width = convolution->dilation_width == 1
-          ? convolution->stride_width
-          : kernel_width;
-      const size_t step_height =
-          kernel_size + (output_width * step_width - 1) * kernel_height;
-      const size_t indirection_buffer_size =
-          sizeof(void*) * batch_size * output_height * step_height;
+      pytorch_qnnp_indirection_set_step_dimensions(convolution);
+
+      const size_t indirection_buffer_size = sizeof(void*) * batch_size *
+          convolution->output_depth * convolution->step_depth;
 
       const void** indirection_buffer = (const void**)realloc(
           convolution->indirection_buffer, indirection_buffer_size);
@@ -682,8 +798,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_convolution_ndhwc_q8(
       }
       convolution->indirection_buffer = indirection_buffer;
 
-      pytorch_qnnp_indirection_init_dwconv2d(
-          convolution, 0, step_height, step_width);
+      pytorch_qnnp_indirection_init_dwconv(convolution, 0);
       return pytorch_qnnp_status_success;
     }
     default:

@@ -62,5 +62,4 @@ binary_windows_params: &binary_windows_params
       default: "windows-xlarge-cpu-with-nvidia-cuda"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
-    BUILD_FOR_SYSTEM: windows
     JOB_EXECUTOR: <<parameters.executor>>

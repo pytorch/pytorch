@@ -10,6 +10,8 @@ import json
 categories = [
     'Uncategorized',
     'distributed',
+    'lazy',
+    'hub',
     'mobile',
     'jit',
     'visualization',
@@ -17,7 +19,9 @@ categories = [
     'caffe2',
     'quantization',
     'amd',
+    'rocm',
     'cuda',
+    'cudnn',
     'benchmark',
     'profiler',
     'performance_as_product',
@@ -28,6 +32,10 @@ categories = [
     'code_coverage',
     'vulkan',
     'skip',
+    'composability',
+    'meta_frontend',
+    'nn_frontend',
+    'linalg_frontend',
     'cpp_frontend',
     'python_frontend',
     'complex_frontend',
@@ -36,7 +44,8 @@ categories = [
     'build_frontend',
     'memory_format_frontend',
     'foreach_frontend',
-    'dataloader_frontend'
+    'dataloader_frontend',
+    'sparse_frontend'
 ]
 
 topics = [

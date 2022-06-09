@@ -590,8 +590,11 @@ class SequentialLR(_LRScheduler):
     which scheduler is supposed to be called at a given epoch.
 
     Args:
+        optimizer (Optimizer): Wrapped optimizer.
         schedulers (list): List of chained schedulers.
         milestones (list): List of integers that reflects milestone points.
+        last_epoch (int): The index of last epoch. Default: -1.
+        verbose (bool): Does nothing.
 
     Example:
         >>> # Assuming optimizer uses lr = 1. for all groups
@@ -610,11 +613,17 @@ class SequentialLR(_LRScheduler):
     """
 
     def __init__(self, optimizer, schedulers, milestones, last_epoch=-1, verbose=False):
-        for scheduler_idx in range(1, len(schedulers)):
+        for scheduler_idx in range(len(schedulers)):
+            if schedulers[scheduler_idx].optimizer != optimizer:
+                raise ValueError(
+                    "Sequential Schedulers expects all schedulers to belong to the same optimizer, but "
+                    f"got schedulers at index {scheduler_idx} to be different than the optimizer passed in."
+                )
+
             if (schedulers[scheduler_idx].optimizer != schedulers[0].optimizer):
                 raise ValueError(
                     "Sequential Schedulers expects all schedulers to belong to the same optimizer, but "
-                    "got schedulers at index {} and {} to be different".format(0, scheduler_idx)
+                    f"got schedulers at index {0} and {scheduler_idx} to be different."
                 )
         if (len(milestones) != len(schedulers) - 1):
             raise ValueError(
@@ -626,6 +635,7 @@ class SequentialLR(_LRScheduler):
         self._milestones = milestones
         self.last_epoch = last_epoch + 1
         self.optimizer = optimizer
+        self._last_lr = schedulers[0].get_last_lr()
 
     def step(self):
         self.last_epoch += 1
@@ -634,6 +644,7 @@ class SequentialLR(_LRScheduler):
             self._schedulers[idx].step(0)
         else:
             self._schedulers[idx].step()
+        self._last_lr = self._schedulers[idx].get_last_lr()
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
@@ -719,6 +730,11 @@ class CosineAnnealingLR(_LRScheduler):
 
         if self.last_epoch == 0:
             return [group['lr'] for group in self.optimizer.param_groups]
+        elif self._step_count == 1 and self.last_epoch > 0:
+            return [self.eta_min + (base_lr - self.eta_min) *
+                    (1 + math.cos((self.last_epoch) * math.pi / self.T_max)) / 2
+                    for base_lr, group in
+                    zip(self.base_lrs, self.optimizer.param_groups)]
         elif (self.last_epoch - 1 - self.T_max) % (2 * self.T_max) == 0:
             return [group['lr'] + (base_lr - self.eta_min) *
                     (1 - math.cos(math.pi / self.T_max)) / 2

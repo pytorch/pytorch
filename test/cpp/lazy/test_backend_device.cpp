@@ -4,6 +4,7 @@
 
 #include <c10/core/Device.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
+#include <torch/torch.h>
 
 namespace torch {
 namespace lazy {
@@ -73,9 +74,13 @@ TEST(BackendDeviceTest, FromAten) {
   auto device = c10::Device(c10::kCPU);
   EXPECT_THROW(atenDeviceToBackendDevice(device), c10::Error);
 
-  // TODO(alanwaketan): Update the following test once we have TorchScript backend upstreamed.
   device = c10::Device(c10::kLazy);
+#ifndef FBCODE_CAFFE2
+  auto backend_device = atenDeviceToBackendDevice(device);
+#else
+  // Lazy Tensor is disabled in FBCODE until addressing non-virtual methods (e.g. sizes) in TensorImpl
   EXPECT_THROW(atenDeviceToBackendDevice(device), c10::Error);
+#endif // FBCODE_CAFFE2
 }
 
 TEST(BackendDeviceTest, ToAten) {
@@ -83,6 +88,19 @@ TEST(BackendDeviceTest, ToAten) {
   EXPECT_EQ(device.type(), c10::kLazy);
   EXPECT_TRUE(device.has_index());
   EXPECT_EQ(device.index(), 0);
+}
+
+// TODO(alanwaketan): Update the following test once we have TorchScript backend upstreamed.
+TEST(BackendDeviceTest, GetBackendDevice1) {
+  auto tensor = torch::rand({0, 1, 3, 0});
+  EXPECT_FALSE(GetBackendDevice(tensor));
+}
+
+TEST(BackendDeviceTest, GetBackendDevice2) {
+  auto tensor1 = torch::rand({0, 1, 3, 0});
+  auto tensor2 = torch::rand({0, 1, 3, 0});
+  // TODO(alanwaketan): Cover the test case for GetBackendDevice().
+  EXPECT_FALSE(GetBackendDevice(tensor1, tensor2));
 }
 
 }  // namespace lazy

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
@@ -95,6 +96,41 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
       linear_weight_no_transpose,
       value_mappings);
   cleanup.runOnGraph(graph);
+
+  SwapFunctionalLinear(graph);
 }
+
+void SwapFunctionalLinear(Module& module) {
+  for (auto& method : module.get_methods()) {
+    std::shared_ptr<Graph> g = method.graph();
+    SwapFunctionalLinear(g);
+  }
+  for (Module m : module.children()) {
+    SwapFunctionalLinear(m);
+  }
+}
+
+void SwapFunctionalLinear(std::shared_ptr<Graph>& graph) {
+  std::string functional_linear = R"(
+graph(%linear, %input, %weight, %bias):
+  %r = prim::CallFunction(%linear, %input, %weight, %bias)
+  return (%r) )";
+  std::string aten_linear = R"(
+graph(%linear, %input, %weight, %bias):
+  %r = aten::linear(%input, %weight, %bias)
+  return (%r) )";
+
+  auto filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto linear = graph_rewrite_helper::getValue("linear", match_vmap, vmap);
+    auto func_name = graph_rewrite_helper::getFuncName(linear);
+    return func_name == "linear";
+  };
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(functional_linear, aten_linear);
+  rewriter.runOnGraph(graph, filter);
+}
+
 } // namespace jit
 } // namespace torch

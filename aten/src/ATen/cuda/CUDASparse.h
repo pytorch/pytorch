@@ -31,3 +31,11 @@
 #else
 #define AT_USE_CUSPARSE_GENERIC_SDDMM() 0
 #endif
+
+// BSR triangular solve functions were added in hipSPARSE 1.11.2 (ROCm 4.5.0)
+#if defined(CUDART_VERSION) ||                            \
+      (defined(USE_ROCM) && ROCM_VERSION >= 40500 )
+#define AT_USE_HIPSPARSE_TRIANGULAR_SOLVE() 1
+#else
+#define AT_USE_HIPSPARSE_TRIANGULAR_SOLVE() 0
+#endif

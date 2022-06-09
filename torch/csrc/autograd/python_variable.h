@@ -2,11 +2,15 @@
 
 #include <torch/csrc/python_headers.h>
 #include <memory>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/Exceptions.h>
+#include <pybind11/pybind11.h>
+#include <ATen/core/function_schema.h>
+
+namespace py = pybind11;
 
 // Python object that backs torch.autograd.Variable
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -62,3 +66,7 @@ inline const at::Tensor& THPVariable_Unpack(PyObject* obj) {
 }
 
 TORCH_PYTHON_API c10::impl::PyInterpreter* getPyInterpreter();
+
+std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(const c10::OperatorHandle& op, const std::vector<c10::IValue>& arguments);
+
+void pushPyOutToStack(const c10::OperatorHandle& op, torch::jit::Stack* stack, py::object out, const char* msg);

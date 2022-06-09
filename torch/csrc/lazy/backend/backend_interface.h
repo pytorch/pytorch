@@ -10,11 +10,15 @@
 namespace torch {
 namespace lazy {
 
+struct IrBuilder;
+
 /**
  * Work in progress- don't treat this as a stable interface yet!
  */
 class TORCH_API BackendImplInterface {
  public:
+  virtual ~BackendImplInterface() = default;
+
   /**
    * Initialization/Teardown
    * */
@@ -31,15 +35,26 @@ class TORCH_API BackendImplInterface {
   virtual void SetRngSeed(size_t seed) const = 0;
 
   /**
+   * IR Tracing
+   * */
+
+  virtual const IrBuilder* GetIrBuilder() const = 0;
+
+  /**
    * Data Transfer
    * */
 
   virtual BackendDataPtr MakeComputationDataFromTensor(
       const at::Tensor& tensor, const Shape& shape,
       const BackendDevice& device) const = 0;
-
+  virtual BackendDataPtr MakeComputationDataFromScalar(
+      const at::Scalar& scalar,
+      const torch::lazy::BackendDevice& device) const = 0;
   virtual BackendDataPtr CreateDataPlaceholder(
       const BackendDevice& device, const Shape& shape) const = 0;
+
+  // Gets backend data if the node is a device data node. Otherwise returns nullptr
+  virtual BackendDataPtr GetComputationDataFromNode(Node*) const = 0;
 
   virtual at::Tensor MakeTensorFromComputationData(
       const BackendDataPtr data,
@@ -117,7 +132,10 @@ class TORCH_API BackendRegistrar {
   BackendRegistrar(const BackendImplInterface* backend_impl_interface);
 };
 
+TORCH_API bool hasBackend();
 TORCH_API const BackendImplInterface* getBackend();
+
+TORCH_API const IrBuilder* getIrBuilder();
 
 }  // lazy
 }  // torch

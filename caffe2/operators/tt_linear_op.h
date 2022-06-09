@@ -126,8 +126,7 @@ class TTLinearOp final : public Operator<Context> {
 
     // Check that output size of Y is the element-wise product of out_sizes
     int prod_out_sizes = 1;
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 0; i < out_sizes_.size(); i++) {
+    for (const auto i : c10::irange(out_sizes_.size())) {
       prod_out_sizes *= out_sizes_[i];
     }
     CAFFE_ENFORCE(

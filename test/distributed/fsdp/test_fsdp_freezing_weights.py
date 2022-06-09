@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch import distributed as dist
-from torch.distributed._fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -134,16 +134,12 @@ class TestFreezingWeights(FSDPTest):
             optimizer.zero_grad()
             fake_loss.backward()
             if freezing_method == FreezingMethod.GradToNone:
-                if with_fsdp:
-                    for param in model.module.module.trunk.parameters():
-                        param.grad = None
-                else:
-                    for param in model.module.trunk.parameters():
-                        param.grad = None
+                for param in model.module.trunk.parameters():
+                    param.grad = None
             optimizer.step()
 
         if with_fsdp:
-            get_full_params(model)
+            return get_full_params(model)
 
         return list(model.parameters())
 

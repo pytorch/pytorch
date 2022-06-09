@@ -14,6 +14,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/FuncTorchTLS.h>
 #include <c10/util/Exception.h>
 
 #include <list>
@@ -400,6 +401,10 @@ void VariableHooks::set_data(const at::TensorBase & self_base, const at::TensorB
     _has_compatible_shallow_copy_type(self, new_data),
     "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have incompatible tensor type.");
 
+  TORCH_CHECK(
+    !self.requires_grad() || isDifferentiableType(at::typeMetaToScalarType(new_data.dtype())),
+    "data set to a tensor that requires gradients must be floating point or complex dtype");
+
   // Resets gradient accumulator if metadata is out of date
   AutogradMeta* autograd_meta = impl::get_autograd_meta(self);
   if (autograd_meta) {
@@ -436,6 +441,13 @@ int64_t VariableHooks::_version(const at::TensorBase & self) const {
 
 void VariableHooks::retain_grad(const at::TensorBase& self) const {
   TORCH_CHECK(self.requires_grad(), "can't retain_grad on Tensor that has requires_grad=False");
+
+  // temporary hack to improve functorch UX.
+  const auto& functorch_tls = at::functorch::functorchTLSAccessor();
+  if (functorch_tls) {
+    functorch_tls->checkSupportsRetainGrad();
+  }
+
   if (self.is_leaf()) {  // no-op for leaves
     return;
   }

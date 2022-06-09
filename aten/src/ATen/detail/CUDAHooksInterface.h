@@ -75,14 +75,15 @@ struct TORCH_API CUDAHooksInterface {
   }
 
   virtual const Generator& getDefaultCUDAGenerator(DeviceIndex device_index = -1) const {
+    (void)device_index; // Suppress unused variable warning
     TORCH_CHECK(false, "Cannot get default CUDA generator without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual Device getDeviceFromPtr(void* data) const {
+  virtual Device getDeviceFromPtr(void* /*data*/) const {
     TORCH_CHECK(false, "Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual bool isPinnedPtr(void* data) const {
+  virtual bool isPinnedPtr(void* /*data*/) const {
     return false;
   }
 
@@ -99,6 +100,14 @@ struct TORCH_API CUDAHooksInterface {
   }
 
   virtual bool hasCuDNN() const {
+    return false;
+  }
+
+  virtual bool hasCuSOLVER() const {
+    return false;
+  }
+
+  virtual bool hasROCM() const {
     return false;
   }
 
@@ -155,19 +164,19 @@ struct TORCH_API CUDAHooksInterface {
         "Cannot query batchnormMinEpsilonCuDNN() without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual int64_t cuFFTGetPlanCacheMaxSize(int64_t device_index) const {
+  virtual int64_t cuFFTGetPlanCacheMaxSize(int64_t /*device_index*/) const {
     TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual void cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size) const {
+  virtual void cuFFTSetPlanCacheMaxSize(int64_t /*device_index*/, int64_t /*max_size*/) const {
     TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual int64_t cuFFTGetPlanCacheSize(int64_t device_index) const {
+  virtual int64_t cuFFTGetPlanCacheSize(int64_t /*device_index*/) const {
     TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual void cuFFTClearPlanCache(int64_t device_index) const {
+  virtual void cuFFTClearPlanCache(int64_t /*device_index*/) const {
     TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
@@ -175,7 +184,7 @@ struct TORCH_API CUDAHooksInterface {
     return 0;
   }
 
-  virtual void deviceSynchronize(int64_t device_index) const {
+  virtual void deviceSynchronize(int64_t /*device_index*/) const {
     TORCH_CHECK(false, "Cannot synchronize CUDA device without ATen_cuda library. ", CUDA_HELP);
   }
 };

@@ -6,9 +6,15 @@
 namespace torch {
 namespace jit {
 
-std::atomic<PrintHandler> print_handler([](const std::string& str) {
-  std::cout << str;
-});
+namespace {
+
+std::atomic<PrintHandler> print_handler(getDefaultPrintHandler());
+
+} // namespace
+
+PrintHandler getDefaultPrintHandler() {
+  return [](const std::string& s) { std::cout << s; };
+}
 
 PrintHandler getPrintHandler() {
   return print_handler.load();

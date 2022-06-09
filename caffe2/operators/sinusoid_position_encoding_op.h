@@ -51,7 +51,7 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
     float max_alpha_pow =
         ((float)embedding_size_ - 1.0f) / (float)embedding_size_;
 
-    for (int i = 0; i < M; ++i) {
+    for (const auto i : c10::irange(M)) {
       float pos = (float)idxs[i * K];
 
       // Compute the embedding for position i, example 0 first
@@ -72,7 +72,7 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
       row_array = amplitude_ * row_array.sin().eval();
 
       // Copy the embedding to position i in the other examples
-      for (int j = 1; j < K; ++j) {
+      for (const auto j : c10::irange(1, K)) {
         int base = i * K * embedding_size_;
         std::copy(
             &out[base],

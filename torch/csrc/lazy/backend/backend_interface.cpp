@@ -7,6 +7,10 @@ namespace {
 std::atomic<const BackendImplInterface*> backend_impl_registry;
 } // namespace
 
+bool hasBackend() {
+  return !!backend_impl_registry.load();
+}
+
 const BackendImplInterface* getBackend() {
   auto* interface = backend_impl_registry.load();
   TORCH_CHECK(interface, "Lazy tensor backend not registered.");
@@ -17,6 +21,13 @@ BackendRegistrar::BackendRegistrar(
     const BackendImplInterface* backend_impl_interface) {
   backend_impl_registry.store(backend_impl_interface);
 }
+
+// Get IrBuilder from backend. Use TorchScriptIrBuilder by default
+const IrBuilder* getIrBuilder() {
+  static const IrBuilder* builder = getBackend()->GetIrBuilder();
+  return builder;
+}
+
 
 at::Tensor MakeTensorFromComputationData(
     const BackendDataPtr data,

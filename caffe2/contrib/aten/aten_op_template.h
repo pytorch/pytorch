@@ -179,8 +179,9 @@ private:
     std::vector<std::string> attrs;
     for (const auto i : c10::irange(operator_def.arg_size())) {
       auto & attr = operator_def.arg(i);
-      if(attr.name() == "operator" || attr.name() == "type" )
+      if (attr.name() == "operator" || attr.name() == "type" || attr.name() == "overload_name") {
         continue;
+      }
       attrs.push_back(attr.name());
     }
     std::sort(attrs.begin(), attrs.end());

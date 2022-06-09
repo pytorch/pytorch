@@ -3,8 +3,9 @@ import importlib.machinery
 import io
 import linecache
 import pickletools
+import platform
 import types
-from collections import OrderedDict, defaultdict
+from collections import defaultdict, OrderedDict
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -12,13 +13,14 @@ from typing import (
     Any,
     BinaryIO,
     Callable,
+    cast,
+    DefaultDict,
     Dict,
     List,
     Optional,
     Sequence,
     Set,
     Union,
-    cast,
 )
 
 import torch
@@ -83,6 +85,11 @@ class PackagingErrorReason(Enum):
         "Module did not match against any action pattern. Extern, mock, or intern it."
     )
     DENIED = "Module was denied by a pattern."
+    MOCKED_BUT_STILL_USED = (
+        "Module was mocked out, but is still being used in the package. "
+        "Please intern or extern the mocked modules if objects are supposed to be in "
+        "the package."
+    )
 
 
 @dataclass
@@ -190,6 +197,8 @@ class PackageExporter:
             importer: If a single Importer is passed, use that to search for modules.
                 If a sequence of importers are passsed, an ``OrderedImporter`` will be constructed out of them.
         """
+        torch._C._log_api_usage_once("torch.package.PackageExporter")
+
         if isinstance(f, (Path, str)):
             f = str(f)
             self.buffer: Optional[BinaryIO] = None
@@ -550,7 +559,12 @@ class PackageExporter:
                 self.add_dependency(dep)
 
     def save_pickle(
-        self, package: str, resource: str, obj: Any, dependencies: bool = True
+        self,
+        package: str,
+        resource: str,
+        obj: Any,
+        dependencies: bool = True,
+        pickle_protocol: int = 3,
     ):
         """Save a python object to the archive using pickle. Equivalent to :func:`torch.save` but saving into
         the archive rather than a stand-alone file. Stanard pickle does not save the code, only the objects.
@@ -568,14 +582,19 @@ class PackageExporter:
             obj (Any): The object to save, must be picklable.
             dependencies (bool, optional): If ``True``, we scan the source for dependencies.
         """
+
+        assert (pickle_protocol == 4) or (
+            pickle_protocol == 3
+        ), "torch.package only supports pickle protocols 3 and 4"
+
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
         data_buf = io.BytesIO()
-        pickler = create_pickler(data_buf, self.importer)
+        pickler = create_pickler(data_buf, self.importer, protocol=pickle_protocol)
         pickler.persistent_id = self._persistent_id
         pickler.dump(obj)
         data_value = data_buf.getvalue()
-
+        mocked_modules = defaultdict(list)
         name_in_dependency_graph = f"<{package}.{resource}>"
         self.dependency_graph.add_node(
             name_in_dependency_graph,
@@ -584,18 +603,85 @@ class PackageExporter:
             is_pickle=True,
         )
 
+        def _check_mocked_error(module: Optional[str], field: Optional[str]):
+            """
+            checks if an object (field) comes from a mocked module and then adds
+            the pair to mocked_modules which contains mocked modules paired with their
+            list of mocked objects present in the pickle.
+
+            We also hold the invariant that the first user defined rule that applies
+            to the module is the one we use.
+            """
+
+            assert isinstance(module, str)
+            assert isinstance(field, str)
+            if self._can_implicitly_extern(module):
+                return
+            for pattern, pattern_info in self.patterns.items():
+                if pattern.matches(module):
+                    if pattern_info.action == _ModuleProviderAction.MOCK:
+                        mocked_modules[module].append(field)
+                    return
+
         if dependencies:
             all_dependencies = []
+            module = None
+            field = None
+            memo: DefaultDict[int, str] = defaultdict(None)
+            memo_count = 0
+            # pickletools.dis(data_value)
             for opcode, arg, pos in pickletools.genops(data_value):
-                if opcode.name == "GLOBAL":  # a global reference
+                if pickle_protocol == 4:
+                    if (
+                        opcode.name == "SHORT_BINUNICODE"
+                        or opcode.name == "BINUNICODE8"
+                    ):
+                        assert isinstance(arg, str)
+                        module = field
+                        field = arg
+                        memo[memo_count] = arg
+                    elif (
+                        opcode.name == "BINGET_LONG"
+                        or opcode.name == "BINGET"
+                        or opcode.name == "GET"
+                    ):
+                        assert isinstance(arg, int)
+                        module = field
+                        field = memo.get(arg, None)
+                    elif opcode.name == "MEMOIZE":
+                        memo_count += 1
+                    elif opcode.name == "STACK_GLOBAL":
+                        assert isinstance(module, str)
+                        if module not in all_dependencies:
+                            all_dependencies.append(module)
+                        _check_mocked_error(module, field)
+                elif (
+                    pickle_protocol == 3 and opcode.name == "GLOBAL"
+                ):  # a global reference
                     assert isinstance(arg, str)
                     module, field = arg.split(" ")
                     if module not in all_dependencies:
                         all_dependencies.append(module)
-
+                    _check_mocked_error(module, field)
             for module_name in all_dependencies:
                 self.dependency_graph.add_edge(name_in_dependency_graph, module_name)
-                self.add_dependency(module_name)
+
+                """ If an object happens to come from a mocked module, then we collect these errors and spit them
+                    out with the other errors found by package exporter.
+                """
+                if module in mocked_modules:
+                    assert isinstance(module, str)
+                    fields = mocked_modules[module]
+                    self.dependency_graph.add_node(
+                        module_name,
+                        action=_ModuleProviderAction.MOCK,
+                        error=PackagingErrorReason.MOCKED_BUT_STILL_USED,
+                        error_context=f"Object(s) '{fields}' from module `{module_name}` was mocked out during packaging "
+                        f"but is being used in resource - `{resource}` in package `{package}`. ",
+                        provided=True,
+                    )
+                else:
+                    self.add_dependency(module_name)
 
         self._write(filename, data_value)
 
@@ -790,23 +876,25 @@ class PackageExporter:
         )
 
     def _persistent_id(self, obj):
-        if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
-            if isinstance(obj, torch.storage.TypedStorage):
+        if torch.is_storage(obj) or isinstance(obj, torch.storage._TypedStorage):
+            if isinstance(obj, torch.storage._TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can
                 # remove this case
-                storage = obj._storage
+                untyped_storage = obj._storage
                 storage_type_str = obj.pickle_storage_type()
                 storage_type = getattr(torch, storage_type_str)
                 dtype = obj.dtype
                 storage_numel = obj.size()
 
-            else:
-                storage = obj
+            elif isinstance(obj, torch._UntypedStorage):
+                untyped_storage = obj
                 storage_type = normalize_storage_type(type(storage))
                 dtype = torch.uint8
                 storage_numel = storage.nbytes()
+            else:
+                raise RuntimeError(f"storage type not recognized: {type(obj)}")
 
-            storage = cast(Storage, storage)
+            storage: Storage = cast(Storage, untyped_storage)
             location = location_tag(storage)
 
             # serialize storage if not already written
@@ -845,7 +933,7 @@ class PackageExporter:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        # If __exit__ was called because an exception was raised, we do not attempt to
+        # If __exit__ was called because an exception was raised, we do not
         # attempt to finalize the package. Instead, control is returned to the
         # caller to continue raising the exception.
         if exc_type is not None:
@@ -927,7 +1015,7 @@ class PackageExporter:
                     )
 
                 if attrs.get("is_pickle") is True:
-                    # This node came from save_source_pickle, we don't need to write any source for it.
+                    # This node came from save_pickle, we don't need to write any source for it.
                     continue
 
                 is_package = attrs["is_package"]
@@ -946,6 +1034,10 @@ class PackageExporter:
         extern_file_contents = "\n".join(extern_modules) + "\n"
         self._write(".data/extern_modules", extern_file_contents)
 
+    def _write_python_version(self):
+        """Writes the python version that the package was created with to .data/python_version"""
+        self._write(".data/python_version", platform.python_version())
+
     def close(self):
         """Write the package to the filesystem. Any calls after :meth:`close` are now invalid.
         It is preferable to use resource guard syntax instead::
@@ -954,6 +1046,7 @@ class PackageExporter:
                 ...
         """
         self._execute_dependency_graph()
+        self._write_python_version()
 
         self.script_module_serializer.write_files()
         self._finalize_zip()

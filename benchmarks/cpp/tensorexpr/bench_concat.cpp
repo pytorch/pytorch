@@ -61,7 +61,7 @@ class ConcatBench : public benchmark::Fixture {
 
     Tensor output = Compute(
         "aten_cat",
-        {{output_size_[0], "M"}, {output_size_[1], "N"}},
+        {output_size_[0], output_size_[1]},
         [&](const VarHandle& m, const VarHandle& n) {
           int d = 0;
           std::vector<int> cumulative_concat_dim_sizes(num_inputs);

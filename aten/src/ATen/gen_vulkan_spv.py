@@ -2,10 +2,11 @@
 
 import argparse
 import array
+import glob
 import os
 import sys
 import subprocess
-from tools.codegen.code_template import CodeTemplate
+from torchgen.code_template import CodeTemplate
 
 H_NAME = "spv.h"
 CPP_NAME = "spv.cpp"
@@ -18,8 +19,7 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
     print("hFilePath:{} cppFilePath:{} srcDirPath:{} glslcPath:{} tmpDirPath:{}".format(
         hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath))
 
-    cmd = "find " + srcDirPath + " -name \"*.glsl\""
-    vexs = os.popen(cmd).read().split('\n')
+    vexs = glob.glob(os.path.join(srcDirPath, '**', '*.glsl'), recursive=True)
     templateSrcPaths = []
     for f in vexs:
         if len(f) > 1:

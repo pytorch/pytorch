@@ -42,7 +42,8 @@ Tensor UpsampleImpl::forward(const Tensor& input) {
       options.scale_factor(),
       mode,
       options.align_corners(),
-      c10::nullopt);
+      c10::nullopt,
+      false);
 }
 
 } // namespace nn

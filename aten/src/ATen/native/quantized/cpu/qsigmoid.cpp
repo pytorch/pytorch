@@ -4,9 +4,9 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
@@ -21,6 +21,11 @@ DEFINE_DISPATCH(qsigmoid_stub);
 Tensor qnnpack_sigmoid(
     Tensor input, double output_scale, int64_t output_zero_point) {
   TORCH_CHECK(input.ndimension() > 0, "qnnpack_sigmoid(): Got empty input tensor");
+  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
+               "qnnpack_sigmoid(): Expected input data type ",
+               toString(c10::kQUInt8),
+               " but got ",
+               toString(input.scalar_type()));
 
   Tensor qy;
   initQNNPACK();

@@ -1,6 +1,9 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/cuda/im2col.cuh>
+
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
@@ -8,7 +11,17 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
 
-#include <ATen/native/cuda/im2col.cuh>
+#include <ATen/native/ConvUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/slow_conv_transpose2d_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -815,6 +828,8 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cuda(
 
   return std::tuple<Tensor, Tensor, Tensor>(grad_input, grad_weight, grad_bias);
 }
+
+REGISTER_CUDA_DISPATCH(slow_conv_transpose2d_backward_stub, &slow_conv_transpose2d_backward_cuda);
 
 } // namespace native
 } // namespace at

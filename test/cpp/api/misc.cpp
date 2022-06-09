@@ -90,3 +90,14 @@ TEST(UtilsTest, AmbiguousOperatorDefaults) {
   at::_test_ambiguous_defaults(tmp, 1, 1);
   at::_test_ambiguous_defaults(tmp, 2, "2");
 }
+
+int64_t get_first_element(c10::OptionalIntArrayRef arr) {
+  return arr.value()[0];
+}
+
+TEST(OptionalArrayRefTest, DanglingPointerFix) {
+  // Ensure that the converting constructor of `OptionalArrayRef` does not
+  // create a dangling pointer when given a single value
+  ASSERT_TRUE(get_first_element(300) == 300);
+  ASSERT_TRUE(get_first_element({400}) == 400);
+}

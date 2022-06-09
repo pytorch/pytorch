@@ -180,7 +180,7 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   if (rpn_pre_nms_topN_ <= 0 || rpn_pre_nms_topN_ >= scores.size()) {
     // 4. sort all (proposal, score) pairs by score from highest to lowest
     // 5. take top pre_nms_topN (e.g. 6000)
-    std::sort(order.begin(), order.end(), [&scores](int lhs, int rhs) {
+    std::stable_sort(order.begin(), order.end(), [&scores](int lhs, int rhs) {
       return scores[lhs] > scores[rhs];
     });
   } else {

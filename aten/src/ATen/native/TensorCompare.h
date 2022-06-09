@@ -32,19 +32,16 @@ DECLARE_DISPATCH(is_infinity_op_fn, isneginf_stub);
 using mode_fn = void (*)(Tensor&, Tensor&, const Tensor&, int64_t, bool);
 DECLARE_DISPATCH(mode_fn, mode_stub);
 
-using clamp_fn = void (*)(TensorIterator &);
-DECLARE_DISPATCH(clamp_fn, clamp_stub);
-DECLARE_DISPATCH(clamp_fn, clamp_min_stub);
-DECLARE_DISPATCH(clamp_fn, clamp_max_stub);
+using clamp_tensor_fn = void (*)(TensorIteratorBase &);
+DECLARE_DISPATCH(clamp_tensor_fn, clamp_stub);
 
 namespace detail {
     enum class ClampLimits {Min, Max, MinMax};
 }
 
-DECLARE_DISPATCH(void (*)(TensorIteratorBase &, const c10::Scalar&, const c10::Scalar&,
-const at::native::detail::ClampLimits minmax), clamp_scalar_stub);
-DECLARE_DISPATCH(void (*)(TensorIterator &, c10::Scalar), clamp_min_scalar_stub);
-DECLARE_DISPATCH(void (*)(TensorIterator &, c10::Scalar), clamp_max_scalar_stub);
+DECLARE_DISPATCH(void (*)(TensorIteratorBase &, const c10::Scalar&, const c10::Scalar&), clamp_scalar_stub);
+DECLARE_DISPATCH(void (*)(TensorIteratorBase &, c10::Scalar), clamp_min_scalar_stub);
+DECLARE_DISPATCH(void (*)(TensorIteratorBase &, c10::Scalar), clamp_max_scalar_stub);
 
 using isin_default_fn = void (*)(const Tensor&, const Tensor&, bool, const Tensor&);
 DECLARE_DISPATCH(isin_default_fn, isin_default_stub);
