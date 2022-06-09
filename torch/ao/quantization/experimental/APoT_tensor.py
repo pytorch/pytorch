@@ -5,7 +5,7 @@ from torch import Tensor
 class TensorAPoT(torch.Tensor):
     @staticmethod
     def quantize_APoT(tensor2quantize: Tensor) -> Tensor:
-        raise NotImplementedError
+        # traverse tensor2quantize, quantize each element
 
     def dequantize(self) -> Tensor:
         raise NotImplementedError
