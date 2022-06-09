@@ -126,7 +126,7 @@ class DispatchlessComposite:
         #   2. The key we are currently generating code for is not
         #      CompositeExplicitAutograd
         if has_registered_kernel(self.backend_index, f, g) and (
-                dispatch_key != DispatchKey.CompositeExplicitAutograd
+            dispatch_key != DispatchKey.CompositeExplicitAutograd
         ):
             return dispatch_key
 
