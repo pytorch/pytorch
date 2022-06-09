@@ -257,6 +257,7 @@ class TestONNXShapeInference(unittest.TestCase):
         scale_2 = self.insert_tensor_constant(
             g, torch.tensor([2, 2], dtype=torch.float)
         )
+        # `scales` values should be statically known due to constant folding in shape inference.
         scales = g.op("Concat", scale_1, scale_2, axis_i=0)
         resize = g.op(
             "Resize",
