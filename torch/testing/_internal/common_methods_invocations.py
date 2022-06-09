@@ -20765,15 +20765,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.lerp",
         torch_opinfo_name="lerp",
-        skips=(
-            # torch implementation computes the complete computation in op_math
-            # (including intermediates)
-            # however, in ref implementation, intermediates are stored in lower precision.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.half, torch.bfloat16)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                         dtypes=(torch.half, torch.bfloat16)),
-        )
     ),
     #
     # Reduction Reference OpInfos

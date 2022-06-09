@@ -1,3 +1,4 @@
+import builtins
 import torch
 
 import torch._prims as prims
@@ -1612,17 +1613,17 @@ def lerp(
         )
 
     if isinstance(weight, (float, complex)):
-        if py_abs(weight) < 0.5:
-            return add(input, mul(weight, sub(end, input)))
-        return sub(end, mul(1.0 - weight, sub(end, input)))
+        if builtins.abs(weight) < 0.5:
+            return input + (weight * (end - input))
+        return end - ((1.0 - weight) * (end - input))
     else:  # weight is TensorLikeType
         if input.dtype != weight.dtype:
             raise RuntimeError(
                 f"expected dtype {input.dtype} for `weight` but got dtype {weight.dtype}"
             )
         ge_half = ge(abs(weight), 0.5)
-        le_half_computation = add(input, mul(weight, sub(end, input)))
-        ge_half_computation = sub(end, mul(sub(1.0, weight), sub(end, input)))
+        le_half_computation = input + (weight * (end - input))
+        ge_half_computation = end - (sub(1.0, weight) * (end - input))
         return where(ge_half, ge_half_computation, le_half_computation)
 
 
