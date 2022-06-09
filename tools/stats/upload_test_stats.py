@@ -14,6 +14,13 @@ PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 S3_RESOURCE = boto3.resource("s3")
 
 
+def get_request_headers() -> Dict[str, str]:
+    return {
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": "token " + os.environ["GITHUB_TOKEN"],
+    }
+
+
 def parse_xml_report(
     report: Path, workflow_id: int, workflow_run_attempt: int
 ) -> List[Dict[str, Any]]:
@@ -84,18 +91,14 @@ def process_xml_element(element: ET.Element) -> Dict[str, Any]:
 
 def get_artifact_urls(workflow_run_id: int) -> Dict[Path, str]:
     """Get all workflow artifacts with 'test-report' in the name."""
-    GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
-    REQUEST_HEADERS = {
-        "Accept": "application/vnd.github.v3+json",
-        "Authorization": "token " + GITHUB_TOKEN,
-    }
-
     response = requests.get(
         f"{PYTORCH_REPO}/actions/runs/{workflow_run_id}/artifacts?per_page=100",
     )
     artifacts = response.json()["artifacts"]
     while "next" in response.links.keys():
-        response = requests.get(response.links["next"]["url"], headers=REQUEST_HEADERS)
+        response = requests.get(
+            response.links["next"]["url"], headers=get_request_headers()
+        )
         artifacts.extend(response.json()["artifacts"])
 
     artifact_urls = {}
@@ -141,7 +144,7 @@ def download_and_extract_artifact(
 
     print(f"Downloading and extracting {artifact_name}")
 
-    response = requests.get(artifact_url, headers=REQUEST_HEADERS)
+    response = requests.get(artifact_url, headers=get_request_headers())
     with open(artifact_name, "wb") as f:
         f.write(response.content)
     unzip(artifact_name)
