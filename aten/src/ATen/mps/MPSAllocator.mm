@@ -8,6 +8,8 @@
 namespace at {
 namespace mps {
 
+C10_DEFINE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
+
 namespace HeapAllocator {
 
 HeapBlock* MPSHeapAllocatorImpl::get_free_heap(AllocParams& p)
@@ -125,6 +127,7 @@ id<MTLBuffer> MPSHeapAllocatorImpl::Malloc(size_t size, bool sharedStorage)
 void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block)
 {
   TORCH_INTERNAL_ASSERT(buffer_block->in_use);
+  trigger_memory_callbacks(buffer_block, IMpsAllocatorCallback::EventType::FREED);
   buffer_block->in_use = false;
   BufferPool *pool = buffer_block->heap->pool;
   // Makes sure the BufferBlock* isn't already present in the pool we're freeing it back into.
@@ -139,6 +142,12 @@ BufferBlock* MPSHeapAllocatorImpl::get_allocated_buffer_block(void* ptr)
     return nullptr;
 
   return it->second;
+}
+
+void MPSHeapAllocatorImpl::trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event) {
+  for (const auto& name : MPSAllocatorCallbacksRegistry()->Keys()) {
+    MPSAllocatorCallbacksRegistry()->Create(name)->executeMPSAllocatorCallback(buffer_block->buffer, event);
+  }
 }
 
 bool MPSHeapAllocatorImpl::isSharedBuffer(void* ptr)
@@ -167,6 +176,8 @@ void MPSHeapAllocatorImpl::EmptyCache()
 
 void MPSHeapAllocatorImpl::release_buffer(BufferBlock* buffer_block, bool remove_empty_heap)
 {
+  trigger_memory_callbacks(buffer_block, IMpsAllocatorCallback::EventType::RELEASED);
+
   HeapBlock *heap = buffer_block->heap;
   BufferPool *pool = heap->pool;
   m_total_allocated_memory -= buffer_block->size;
@@ -318,6 +329,7 @@ MPSAllocator& _getSharedAllocator() {
   static MPSAllocator s_mps_shared_alloc(true);
   return s_mps_shared_alloc;
 }
+
 MPSAllocator& _getPrivateAllocator() {
   static mps::MPSAllocator s_mps_private_alloc(false);
   return s_mps_private_alloc;

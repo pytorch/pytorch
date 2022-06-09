@@ -280,10 +280,15 @@ class intrusive_ptr final {
       // See comment above about weakcount. As long as refcount>0,
       // weakcount is one larger than the actual number of weak references.
       // So we need to decrement it here.
-      bool should_delete = target_->weakcount_.load(std::memory_order_acquire) == 1;
+      bool should_delete =
+          target_->weakcount_.load(std::memory_order_acquire) == 1;
       if (!should_delete) {
+        // justification for const_cast: release_resources is basically a
+        // destructor and a destructor always mutates the object, even for const
+        // objects. NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
-        should_delete = detail::atomic_weakcount_decrement(target_->weakcount_) == 0;
+        should_delete =
+            detail::atomic_weakcount_decrement(target_->weakcount_) == 0;
       }
       if (should_delete) {
         delete target_;

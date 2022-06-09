@@ -1711,7 +1711,9 @@ struct WeakReferenceToSelf : public intrusive_ptr_target {
   void release_resources() override {
     ptr.reset();
   }
-  weak_intrusive_ptr<intrusive_ptr_target> ptr = weak_intrusive_ptr<intrusive_ptr_target>(make_intrusive<intrusive_ptr_target>());
+  weak_intrusive_ptr<intrusive_ptr_target> ptr =
+    weak_intrusive_ptr<intrusive_ptr_target>(
+        make_intrusive<intrusive_ptr_target>());
 };
 } // namespace
 
@@ -3547,7 +3549,10 @@ TEST(WeakIntrusivePtrTest, givenStackObject_whenReclaimed_thenCrashes) {
 #endif
 }
 
-TEST(WeakIntrusivePtrTest, givenObjectWithWeakReferenceToSelf_whenDestroyed_thenDoesNotCrash) {
+TEST(
+    WeakIntrusivePtrTest,
+    givenObjectWithWeakReferenceToSelf_whenDestroyed_thenDoesNotCrash) {
   auto p = make_intrusive<WeakReferenceToSelf>();
-  p->ptr = weak_intrusive_ptr<intrusive_ptr_target>(intrusive_ptr<intrusive_ptr_target>(p));
+  p->ptr = weak_intrusive_ptr<intrusive_ptr_target>(
+      intrusive_ptr<intrusive_ptr_target>(p));
 }
