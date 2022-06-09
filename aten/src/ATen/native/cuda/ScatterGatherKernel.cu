@@ -355,7 +355,7 @@ struct cuda_scatter_gather_base_kernel {
     // the source tensor
     if (is_scatter_like) {
       for (int i = 0; i < ndim; i++) {
-        TORCH_CHECK(index_sizes[i] < src_sizes[i], "Expected index ", index_sizes, " to be smaller size than src ", src_sizes);
+        TORCH_CHECK(index_sizes[i] <= src_sizes[i], "Expected index ", index_sizes, " to be smaller size than src ", src_sizes);
       }
     }
 
