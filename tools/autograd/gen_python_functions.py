@@ -678,7 +678,7 @@ def generate_return_type_definition_and_map_entry(
             definitions.append(
                 f"""\
 PyTypeObject* get_{name}_namedtuple() {{
-    static PyStructSequence_Field NamedTuple_fields[] = {{ {fields, /*doc=*/nullptr},  {{nullptr, /*doc=*/nullptr}} }};
+    static PyStructSequence_Field NamedTuple_fields[] = {{ {fields},  {{nullptr, /*doc=*/nullptr}} }};
     static PyTypeObject {typename};
     static bool is_initialized = false;
     static PyStructSequence_Desc desc = {{ "torch.return_types.{name}", nullptr, NamedTuple_fields, {len(fieldnames)} }};
