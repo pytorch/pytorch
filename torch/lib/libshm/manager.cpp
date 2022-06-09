@@ -38,10 +38,7 @@ std::unordered_map<int, ClientSession> client_sessions;
 std::set<std::string> used_objects;
 
 void register_fd(int fd) {
-  struct pollfd pfd = {0};
-  pfd.fd = fd;
-  pfd.events = POLLIN;
-  pollfds.push_back(pfd);
+  pollfds.push_back({/*fd=*/fd, /*events=*/POLLIN, /*revents=*/0);
 }
 
 void unregister_fd(int fd) {
@@ -55,12 +52,8 @@ void unregister_fd(int fd) {
 }
 
 void print_init_message(const char* message) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t unused;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  unused = write(1, message, strlen(message));
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  unused = write(1, "\n", 1);
+  write(1, message, strlen(message));
+  write(1, "\n", 1);
 }
 
 bool object_exists(const char* name) {
