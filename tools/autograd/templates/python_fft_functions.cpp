@@ -50,7 +50,7 @@ ${py_forwards}
 
 static PyMethodDef fft_functions[] = {
   ${py_method_defs}
-  {NULL}
+  {nullptr, nullptr, 0, nullptr}
 };
 
 static PyObject* THPFFTVariableFunctionsModule = NULL;
@@ -62,6 +62,10 @@ void initFFTFunctions(PyObject* module) {
      NULL,
      -1,
      fft_functions
+     /*m_slots=*/nullptr,
+     /*m_traverse=*/nullptr,
+     /*m_clear=*/nullptr,
+     /*m_free=*/nullptr,
   };
   PyObject* fft = PyModule_Create(&def);
   THPFFTVariableFunctionsModule = fft;

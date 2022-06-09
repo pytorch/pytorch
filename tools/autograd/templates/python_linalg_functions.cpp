@@ -48,7 +48,7 @@ void initLinalgFunctions(PyObject* module) {
      "torch._C._linalg",
      NULL,
      -1,
-     linalg_functions
+     linalg_functions,
      /*m_slots=*/nullptr,
      /*m_traverse=*/nullptr,
      /*m_clear=*/nullptr,
