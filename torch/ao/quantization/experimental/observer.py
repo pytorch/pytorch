@@ -31,7 +31,7 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         self.level_indices = torch.tensor([])
         self.b = b
         self.k = k
-        self.n = None
+        self.n = 0
         self.alpha = 0.0
         self.gamma = 0.0
 
@@ -85,7 +85,7 @@ class NonUniformQuantizationObserverBase(ObserverBase):
 
         # gamma calculation:
         # loop through all tensors, add element at index 1 for each tensor
-        p_sum = 0
+        p_sum = 0.0
         for tens in p_all:
             p_sum += float(tens[1])
 
@@ -104,8 +104,9 @@ class NonUniformQuantizationObserverBase(ObserverBase):
                 sum += ele
             quantization_levels_list.append(sum)
 
-        quantization_levels = [self.gamma * ele for ele in quantization_levels_list]
-        quantization_levels = torch.tensor(quantization_levels)
+        quantization_levels_gamma = [self.gamma * ele for ele in quantization_levels_list]
+        quantization_levels = torch.tensor(quantization_levels_gamma)
+        level_indices = torch.tensor([])
         quantization_levels, level_indices = quantization_levels.sort()
 
         return (self.gamma, quantization_levels, level_indices)
