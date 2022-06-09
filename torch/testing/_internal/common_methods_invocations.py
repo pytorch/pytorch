@@ -20926,9 +20926,10 @@ python_ref_db = [
         "_refs.trace",
         torch_opinfo_name="trace",
         decorators=(
-            # TODO: torch.diag is currently not supported by either refs or meta funcs
+            # TODO: torch.diag is currently not supported by either refs, meta funcs, or NVFuser
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
+            DecorateInfo(unittest.skip, 'TestCommon', 'test_python_ref_meta'),
+            DecorateInfo(unittest.skip, 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     #
