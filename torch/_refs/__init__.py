@@ -2428,12 +2428,15 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
         assert isinstance(value, TensorLike)
         check(
             value.ndim == 0,
-            lambda: "only supports a 0-dimensional value tensor, but got tensor with 1 dimension",
+            lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value.ndim} dimension",
         )
         value_type = utils.dtype_to_type(value.dtype)
 
     if value_type is complex:
         # only downcasting from complex to lower type is not allowed.
+        # We allow casting `value` to lower type for other case
+        # Eg. float -> int.
+        # Ref: https://github.com/pytorch/pytorch/issues/79195
         check(
             utils.is_weakly_lesser_type(value_type, python_type),
             lambda: f"could not convert to type {python_type} without overflow",

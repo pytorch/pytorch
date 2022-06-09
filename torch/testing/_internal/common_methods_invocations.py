@@ -7816,6 +7816,7 @@ def sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
 
 def error_inputs_masked_fill(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
+    # `value` is not a 0-D tensor.
     yield ErrorInput(SampleInput(make_arg((2, 2)), args=(make_arg(()) > 0, make_arg((1,)))),
                      error_regex="only supports a 0-dimensional value tensor, but got tensor with 1 dimension")
     # downcasting complex value (scalar overload)
@@ -20914,8 +20915,12 @@ python_ref_db = [
         "_refs.masked_fill",
         torch_opinfo_name="masked_fill",
         skips=(
+            # NotImplementedError: argument of type: <class 'complex'>
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.cfloat, torch.cdouble)),
             # TypeError: where(): incompatible function arguments.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.skip("Passes for aten executor but not nvfuser"), 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.float32, torch.int32)),
         )
     ),
     PythonRefInfo(
