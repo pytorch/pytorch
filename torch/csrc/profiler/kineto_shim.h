@@ -62,8 +62,7 @@ using interface_trace_t = DummyTraceBuffer;
 enum class KinetoActivityType : uint8_t {
   CPU_OP = 0,
   CPU_INSTANT_EVENT,
-  USER_ANNOTATION,
-  PYTHON_FUNCTION
+  USER_ANNOTATION
 };
 
 using annotation_t = std::vector<std::pair<std::string, std::string>>;
