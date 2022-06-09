@@ -27,21 +27,21 @@ __all__ = [
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i0e
 )
 def i0e(a):
-    return prims.i0e(a)
+    return prims.bessel_i0e(a)
 
 
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i1
 )
 def i1(a):
-    return prims.i1(a)
+    return prims.bessel_i1(a)
 
 
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i1e
 )
 def i1e(a):
-    return prims.i1e(a)
+    return prims.bessel_i1e(a)
 
 
 @register_decomposition(torch.ops.aten.logit)
