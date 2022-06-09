@@ -5,8 +5,10 @@ import torch
 from torch.autograd.graph import save_on_cpu
 from torch.utils.checkpoint import checkpoint
 from torch.distributed.utils import _replace_by_prefix
+from torch.distributed.fsdp.wrap import _recursive_wrap, lambda_auto_wrap_policy
 import torch.nn as nn
 from typing import Dict, Any
+from functools import partial
 
 _CHECKPOINT_PREFIX = "mod"
 
@@ -126,7 +128,7 @@ def checkpoint_wrapper(
 
 
 def apply_activation_checkpointing_wrapper(
-    model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=lambda _, _unused: True
+    model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=lambda _: True
 ):
     """
     Applies :func:`checkpoint_wrapper` to modules within `model` based on a user-defined
@@ -136,11 +138,14 @@ def apply_activation_checkpointing_wrapper(
     Note::
         This function modifies `model` in place and replaces appropriate layers with
         their checkpoint-wrapped modules.
+    Note::
+        This function will not wrap the overall root module. If this is needed, please directly use
+        :class:`CheckpointWrapper`.
     Usage::
         model = nn.Sequential(
             nn.Linear(10, 10), nn.Linear(10, 10), nn.Linear(10, 10)
         )
-        check_fn = lambda m, l: isinstance(l, nn.Linear)
+        check_fn = lambda l: isinstance(l, nn.Linear)
         apply_activation_checkpointing(model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=check_fn)
     Args:
         module (nn.Module):
@@ -148,31 +153,15 @@ def apply_activation_checkpointing_wrapper(
         checkpoint_wrapper_fn (Optional[Callable[nn.Module]])
             A `Callable` which will wrap modules
         check_fn (Optional[Callable[nn.Module, nn.Module]])
-            A lambda function which will be passed overall model and current layer and returns
+            A lambda function which will be passed current layer and returns
             ``True`` or ``False`` depending on whether input layer should be wrapped.
     Returns: None (`model` is modified inplace)
     """
-    # checkpointed_submodules will create a list of (parent, child_attr, wrapped_child)
-    # which will allow us to set the checkpoint wrapped child on the parent appropriately.
-    checkpointed_submodules = []
-    for name, submodule in model.named_modules():
-        if check_fn(model, submodule):
-            # This submodule should be wrapped with activation checkpointing
-            tokens = name.strip().split(".")
-            submodule_parent = model
-            # Get parent layer of module by iterating through the tokenized FQN.
-            for token in tokens[:-1]:
-                # isnumeric() check to handle case where layers are in a list,
-                # see https://discuss.pytorch.org/t/how-to-replace-a-layer-with-own-custom-variant/43586/12
-                if not token.isnumeric():
-                    submodule_parent = getattr(submodule_parent, token)
-                else:
-                    submodule_parent = submodule_parent[int(token)]
-            # Create a checkpoint-wrapped version of submodule
-            checkpoint_wrapped_submodule = checkpoint_wrapper_fn(submodule)
-            # Add a tuple (parent, child_attr, wrapped_child) to set the checkpoint wrapped
-            # child after we've collected all such children to checkpoint-wrap.
-            checkpointed_submodules.append((submodule_parent, tokens[-1], checkpoint_wrapped_submodule))
-
-    for parent, attr, checkpointed in checkpointed_submodules:
-        setattr(parent, attr, checkpointed)
+    return _recursive_wrap(
+        module=model,
+        auto_wrap_policy=partial(lambda_auto_wrap_policy, lambda_fn=check_fn),
+        wrapper_cls=checkpoint_wrapper_fn,
+        ignored_modules=set(),
+        ignored_params=set(),
+        only_wrap_children=True
+    )
