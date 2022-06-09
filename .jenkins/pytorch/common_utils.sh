@@ -116,7 +116,7 @@ function checkout_install_torchdynamo() {
   git clone https://github.com/pytorch/torchdynamo
   pushd torchdynamo
   git checkout "$TORCHDYNAMO_COMMIT"
-  time python setup.py install
+  time python setup.py develop
   popd
   popd
 }

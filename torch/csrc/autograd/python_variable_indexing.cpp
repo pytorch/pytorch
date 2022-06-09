@@ -137,18 +137,25 @@ static inline Variable applySlicing(
     variable_list& outIndices,
     bool is_tracing,
     const at::Device& self_device,
-    const IntArrayRef& self_sizes,
+    const c10::optional<IntArrayRef> & self_sizes,
     int64_t specified_dims) {
   int64_t size = PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
   int64_t dim = 0;
 
-  if (specified_dims > (int64_t)self_sizes.size()) {
-    throw IndexError("too many indices for tensor of dimension %d", (int)(self_sizes.size()));
+  // See NOTE [nested tensor size for indexing]
+  if (self_sizes.has_value()) {
+    TORCH_CHECK_INDEX(
+      specified_dims <= (int64_t)self_sizes->size(),
+      "too many indices for tensor of dimension ", (int)self_sizes->size());
   }
 
   Variable result = self;
   for(const auto i : c10::irange(size)) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+    // NOTE [nested tensor size for indexing]
+    // nested tensor does not have a size (yet) so for now we represent its size as null
+    // may need to be changed after we reach a better solution for nested tensor size
+    c10::optional<IntArrayRef> result_sizes = result.is_nested() ? c10::optional<IntArrayRef>(c10::nullopt) : c10::optional<IntArrayRef>(result.sizes());
     result = at::indexing::handleDimInMultiDimIndexing(
       /*prev_dim_result=*/result,
       /*original_tensor=*/self,
@@ -202,7 +209,7 @@ static inline Variable applySlicing(
       // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
       /*disable_slice_optimization=*/is_tracing,
       /*original_tensor_device=*/self_device,
-      /*prev_dim_result_sizes=*/result.sizes());
+      /*prev_dim_result_sizes=*/result_sizes);
   }
   return result;
 }
@@ -320,8 +327,11 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   if (specified_dims == -1) {
     return handle_torch_function_indexing(self, holder.get());
   }
+  // See NOTE [nested tensor size for indexing]
+  c10::optional<IntArrayRef> self_sizes = c10::nullopt;
+  if (! self_.is_nested()) self_sizes = self_.sizes();
   Variable sliced = applySlicing(
-    self_, holder.get(), variableIndices, /*is_tracing=*/is_tracing, self_.device(), self_.sizes(), specified_dims);
+    self_, holder.get(), variableIndices, /*is_tracing=*/is_tracing, self_.device(), self_sizes, specified_dims);
   if (variableIndices.empty()) {
     if (sliced.is_same(self_)) {
       // ensure we return a shallow copy for things like x[...]
