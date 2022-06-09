@@ -199,7 +199,9 @@ if __name__ == "__main__":
         for xml_report in Path(".").glob("**/*.xml"):
             test_cases.extend(
                 parse_xml_report(
-                    xml_report, int(args.workflow_run_id), int(args.workflow_run_attempt)
+                    xml_report,
+                    int(args.workflow_run_id),
+                    int(args.workflow_run_attempt),
                 )
             )
 
