@@ -80,7 +80,7 @@ struct _cpu_scatter_gather_dim_loop {
     int64_t* index_data, int64_t index_dim_stride,
     scalar_t* src_data, int64_t src_dim_stride,
     int64_t dim, int64_t index_dim_size,
-    int64_t index_upper_bound, int64_t src_dim_size,
+    int64_t index_upper_bound,
     func_t& f
   ) {
 
@@ -96,7 +96,7 @@ struct _cpu_scatter_gather_dim_loop {
 
       f(
         self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-        src_data + (is_scatter_like ? (i % src_dim_size) : idx_dim) * src_dim_stride
+        src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride
       );
     }
   }
@@ -273,7 +273,7 @@ struct cpu_scatter_gather_base_kernel {
                  (int64_t*)index_data_bytes, index_dim_stride,
                  (scalar_t*)src_data_bytes, src_dim_stride,
                  dim, index_dim_size, index_upper_bound,
-                 src_dim_size, kernel_func
+                 kernel_func
                );
 
               self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
@@ -298,7 +298,7 @@ struct cpu_scatter_gather_base_kernel {
 
                 kernel_func(
                   (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-                  (scalar_t*)src_data + (is_scatter_like ? (i % src_dim_size) : idx_dim) * src_dim_stride);
+                  (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
 
                 self_data += strides[SELF_ITER_STRIDE_IDX];
                 index_data += strides[INDEX_ITER_STRIDE_IDX];
@@ -362,7 +362,7 @@ struct cpu_scatter_gather_base_kernel {
                  (int64_t*)index_data_bytes, index_dim_stride,
                  (scalar_t*)src_data_bytes, src_dim_stride,
                  dim, index_dim_size, index_upper_bound,
-                 src_dim_size, kernel_func
+                 kernel_func
                );
 
               self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
@@ -387,7 +387,7 @@ struct cpu_scatter_gather_base_kernel {
 
                 kernel_func(
                   (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-                  (scalar_t*)src_data + (is_scatter_like ? (i % src_dim_size) : idx_dim) * src_dim_stride);
+                  (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
 
                 self_data += strides[SELF_ITER_STRIDE_IDX];
                 index_data += strides[INDEX_ITER_STRIDE_IDX];
@@ -451,7 +451,7 @@ struct cpu_scatter_gather_base_kernel {
                  (int64_t*)index_data_bytes, index_dim_stride,
                  (scalar_t*)src_data_bytes, src_dim_stride,
                  dim, index_dim_size, index_upper_bound,
-                 src_dim_size, kernel_func
+                 kernel_func
                );
 
               self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
@@ -476,7 +476,7 @@ struct cpu_scatter_gather_base_kernel {
 
                 kernel_func(
                   (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-                  (scalar_t*)src_data + (is_scatter_like ? (i % src_dim_size) : idx_dim) * src_dim_stride);
+                  (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
 
                 self_data += strides[SELF_ITER_STRIDE_IDX];
                 index_data += strides[INDEX_ITER_STRIDE_IDX];
@@ -540,7 +540,7 @@ struct cpu_scatter_gather_base_kernel {
                  (int64_t*)index_data_bytes, index_dim_stride,
                  (scalar_t*)src_data_bytes, src_dim_stride,
                  dim, index_dim_size, index_upper_bound,
-                 src_dim_size, kernel_func
+                 kernel_func
                );
 
               self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
@@ -565,7 +565,7 @@ struct cpu_scatter_gather_base_kernel {
 
                 kernel_func(
                   (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-                  (scalar_t*)src_data + (is_scatter_like ? (i % src_dim_size) : idx_dim) * src_dim_stride);
+                  (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
 
                 self_data += strides[SELF_ITER_STRIDE_IDX];
                 index_data += strides[INDEX_ITER_STRIDE_IDX];
