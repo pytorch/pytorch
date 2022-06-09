@@ -15,6 +15,7 @@ import itertools
 from torch._six import inf
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, TestCase, download_file, TEST_WITH_UBSAN
+from torch.testing._comparison import TensorLikePair
 import torch.backends.mps
 from torch.distributions import Uniform
 
@@ -4357,24 +4358,15 @@ class TestRNNMPS(TestCase):
         self.assertEqual(cpu_weight_grad, mps_weight_grad)
 
 class TestFallbackWarning(TestCase):
+    # TODO: Remove once test_testing.py is running on MPS devices
     def test_no_warning_on_import(self):
-        script = """
-import warnings
-
-with warnings.catch_warnings(record=True) as w:
-    import torch
-
-exit(len(w))
-"""
-        try:
-            subprocess.check_output(
-                [sys.executable, '-W', 'all', '-c', script],
-                stderr=subprocess.STDOUT,
-                # On Windows, opening the subprocess with the default CWD makes `import torch`
-                # fail, so just set CWD to this script's directory
-                cwd=os.path.dirname(os.path.realpath(__file__)),)
-        except subprocess.CalledProcessError as e:
-            self.assertTrue(False, "There was a warning when importing torch.")
+        out = subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", "import torch"],
+            stderr=subprocess.STDOUT,
+            # On Windows, opening the subprocess with the default CWD makes `import torch`
+            # fail, so just set CWD to this script's directory
+            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+        self.assertEquals(out, "")
 
     def _get_not_implemented_op(self):
         # This can be changed once we actually implement `torch.bincount`
@@ -4401,6 +4393,7 @@ with warnings.catch_warnings(record=True) as w:
     import torch
 
 if len(w) > 0:
+    print(w)
     exit(1)
 
 # This should run just fine and raise warning about perf
@@ -4408,6 +4401,7 @@ with warnings.catch_warnings(record=True) as w:
     {op}
 
 if len(w) != 1:
+    print(w)
     exit(2)
 
 """
@@ -4420,12 +4414,14 @@ if len(w) != 1:
                 cwd=os.path.dirname(os.path.realpath(__file__)),)
         except subprocess.CalledProcessError as e:
             if e.returncode == 1:
-                self.assertTrue(False, "There was a warning when importing torch when PYTORCH_ENABLE_MPS_FALLBACK is set.")
+                self.assertTrue(False, "There was a warning when importing torch when PYTORCH_ENABLE_MPS_FALLBACK is set." +
+                                       e.output.decode("utf-8"))
             elif e.returncode == 2:
                 self.assertTrue(False, "There wasn't exactly one warning when running not implemented op with "
-                                "PYTORCH_ENABLE_MPS_FALLBACK set.")
+                                f"PYTORCH_ENABLE_MPS_FALLBACK set. {e.output}")
             else:
-                self.assertTrue(False, "Running a not implemented op failed even though PYTORCH_ENABLE_MPS_FALLBACK is set.")
+                self.assertTrue(False, "Running a not implemented op failed even though PYTORCH_ENABLE_MPS_FALLBACK is set. " +
+                                       e.output.decode("utf-8"))
 
 class TestNoRegression(TestCase):
     def test_assert_close(self):
@@ -4439,6 +4435,19 @@ class TestNoRegression(TestCase):
 
         with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
             torch.testing.assert_close(a, nan)
+
+    @unittest.expectedFailure
+    def test_mps_compat(self):
+        # If this test is successful, that means that all operations in the comparison logic are supported natively on
+        # the MPS backend. Please remove this test as well as the compatibility logic in
+        # torch.testing._comparison.TensorLikePair._equalize_attributes
+        actual = torch.tensor(1.0, device="mps")
+        expected = actual.clone()
+
+        # We can't use assert_close or TensorLikePair.compare() directly, since that would hit the compatibility logic
+        # in torch.testing._comparison.TensorLikePair._equalize_attributes that we want to circumvent here
+        pair = TensorLikePair(actual, expected)
+        pair._compare_values(actual, expected)
 
     def test_double_error(self):
         with self.assertRaisesRegex(TypeError, "the MPS framework doesn't support float64"):
