@@ -34,7 +34,10 @@ mse_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const a
   if (result.dim() == 1) {
     return std::make_tuple(result, 0);
   } else if (reduction == Reduction::None) {
-    return std::make_tuple(result, 0);
+    DimVector end_shape;
+    const auto batched_elem = self_bdim.has_value() ?
+        moveBatchDimToFront(self, self_bdim) : moveBatchDimToFront(target, target_bdim);
+    return std::make_tuple(result.reshape(batched_elem.sizes()), 0);
   } else if (reduction == Reduction::Sum) {
     return std::make_tuple(result.sum(-1), 0);
   } else if (reduction == Reduction::Mean) {
@@ -43,28 +46,18 @@ mse_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const a
   TORCH_INTERNAL_ASSERT(false);
 };
 
-std::tuple<at::Tensor,optional<int64_t>>
+at::Tensor
 mse_loss_backward_batch_rule(
-    const at::Tensor& grad_output, optional<int64_t> grad_output_bdim,
-    const at::Tensor& self, optional<int64_t> self_bdim,
-    const at::Tensor& target, optional<int64_t> target_bdim,
+    const at::Tensor& grad_output,
+    const at::Tensor& self,
+    const at::Tensor& target,
     int64_t reduction) {
-  auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim);
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto target_ = moveBatchDimToFront(target, target_bdim);
-  if (reduction != Reduction::None && grad_output_bdim.has_value()) {
-    // grad_output_ is of shape [N]. Input is of shape [N?, ...].
-    // We need to view grad_output_ as shape [N, ...].
-    auto self_rank_without_bdim = rankWithoutBatchDim(self, self_bdim);
-    DimVector view_shape(self_rank_without_bdim + 1, 1);
-    view_shape[0] = grad_output_.size(0);
-    grad_output_ = grad_output_.view(view_shape);
-  }
-  auto result = at::mse_loss_backward(grad_output_, self_, target_, Reduction::None);
+
+  const auto result = 2. * (self - target) * grad_output;
   if (reduction == Reduction::Mean) {
-    return std::make_tuple(result / numelWithoutBatchDim(self, self_bdim), 0);
+    return result / self.numel();
   }
-  return std::make_tuple(result, 0);
+  return result;
 };
 
 static Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
@@ -303,7 +296,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("nll_loss_backward", nll_loss_backward_decomposition);
   m.impl("nll_loss2d_backward", nll_loss_backward_decomposition);
   VMAP_SUPPORT(mse_loss, mse_loss_batch_rule);
-  VMAP_SUPPORT(mse_loss_backward, mse_loss_backward_batch_rule);
+  m.impl("mse_loss_backward", mse_loss_backward_batch_rule);
   m.impl("binary_cross_entropy", binary_cross_entropy_plumbing);
   m.impl("binary_cross_entropy_backward", binary_cross_entropy_backward_plumbing);
 }
