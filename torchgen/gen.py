@@ -2051,7 +2051,7 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
 
         if dispatch_key in COMPOSITE_DISPATCH_KEYS:
             dispatchless = dest.DispatchlessComposite.new(
-                dispatch_key, backend_indices, grouped_native_functions
+                backend_index, grouped_native_functions
             )
             fm.write_with_template(
                 f"Dispatchless{dispatch_key}.cpp",
