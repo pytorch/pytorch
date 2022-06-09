@@ -1934,6 +1934,7 @@ def reshape(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=True)
 
 
+@register_decomposition(torch.ops.aten.roll)
 def roll(
     a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
 ) -> TensorLikeType:
@@ -1947,6 +1948,7 @@ def roll(
 
     # Avoid modulo by zero
     if a.numel() == 0:
+        # Keeping this as ref for now as FakeTensor runs into some issues with complex tensors
         return clone(a)
 
     len_shifts = len(shifts)
@@ -1957,7 +1959,7 @@ def roll(
         # Takes care of the case when dims is not specified (default)
         # By default, the tensor is flattened before shifting, after which the original shape is restored
         if len_dims == 0 and len_shifts == 1:
-            return view(roll(flatten(a), shifts, 0), a.shape)
+            return torch.roll(torch.flatten(a), shifts, 0).view(a.shape)
         if len_shifts != len_dims:
             raise RuntimeError(
                 f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}"
@@ -1965,17 +1967,17 @@ def roll(
         assert len_dims > 1
         tail_shifts = shifts[1:]
         tail_dims = dims[1:]
-        first_dim_rolled = roll(a, shifts[0], dims[0])
-        return roll(first_dim_rolled, tail_shifts, tail_dims)
+        first_dim_rolled = torch.roll(a, shifts[0], dims[0])
+        return torch.roll(first_dim_rolled, tail_shifts, tail_dims)
 
     # This path is taken when only one dimension is rolled
     # For example to get `first_dim_rolled` above
     dim = dims[0]
     size = a.shape[dim]
     start = (size - shifts[0]) % size
-    t0 = narrow(a, dim, start, size - start)
-    t1 = narrow(a, dim, 0, start)
-    return cat((t0, t1), dim)
+    t0 = torch.narrow(a, dim, start, size - start)
+    t1 = torch.narrow(a, dim, 0, start)
+    return torch.cat((t0, t1), dim)
 
 
 @register_decomposition(torch.ops.aten.rot90)
