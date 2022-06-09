@@ -16,7 +16,7 @@ from torchgen.gen import parse_native_yaml, cpp_string, get_custom_build_selecto
 from torchgen.model import NativeFunction, NativeFunctionsGroup, Variant, Argument
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import Target, FileManager, mapMaybe, make_file_manager
-from typing import Union, Sequence
+from typing import Union, Sequence, List
 from typing_extensions import Literal
 
 
@@ -194,7 +194,7 @@ def gen_unboxing(
     )
 
 
-def main(args) -> None:
+def main(args: List[str]) -> None:
     parser = argparse.ArgumentParser(description="Generate unboxing source files")
     parser.add_argument(
         "-s",
@@ -227,15 +227,15 @@ def main(args) -> None:
         "--op_registration_allowlist",
         nargs="*",
         help="filter op registrations by the allowlist (if set); "
-             "each item is `namespace`::`operator name` without overload name; "
-             "e.g.: aten::empty aten::conv2d ...",
+        "each item is `namespace`::`operator name` without overload name; "
+        "e.g.: aten::empty aten::conv2d ...",
     )
     parser.add_argument(
         "--TEST_ONLY_op_registration_allowlist_yaml_path",
         help="Provide a path to the operator selection (for custom build) YAML "
-             "which contains a list of operators. It is to serve testing purpose and "
-             "each item is `namespace`::`operator name` without overload name; "
-             "e.g.: aten::empty aten::conv2d ...",
+        "which contains a list of operators. It is to serve testing purpose and "
+        "each item is `namespace`::`operator name` without overload name; "
+        "e.g.: aten::empty aten::conv2d ...",
     )
 
     options = parser.parse_args(args)
