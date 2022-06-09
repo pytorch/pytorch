@@ -2423,8 +2423,7 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_svd_lowrank(self, device, dtype):
@@ -5260,7 +5259,7 @@ class TestLinalg(TestCase):
     def test_lobpcg_basic(self, device, dtype):
         self._test_lobpcg_method(device, dtype, 'basic')
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_lobpcg_ortho(self, device, dtype):
@@ -6668,7 +6667,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @skipCUDAIf(torch.version.cuda is not None
                 and torch.version.cuda.split(".") < ["11", "3"], "There's a bug in cuSOLVER < 11.3")
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_det_logdet_slogdet(self, device, dtype):
@@ -7322,7 +7321,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.symeig(a, out=(out_w, out_v))
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     def test_pca_lowrank(self, device):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
@@ -7601,14 +7600,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual([(0, 2), (0, 0)], [evalues.shape, evectors.shape])
         evalues, evectors = fn(torch.symeig, (0, 0), True)
         self.assertEqual([(0,), (0, 0)], [evalues.shape, evectors.shape])
-
-        # qr
-        q, r = fn(torch.qr, (3, 0), True)
-        self.assertEqual([(3, 0), (0, 0)], [q.shape, r.shape])
-        q, r = fn(torch.qr, (0, 3), True)
-        self.assertEqual([(0, 0), (0, 3)], [q.shape, r.shape])
-        q, r = fn(torch.qr, (3, 0), False)
-        self.assertEqual([(3, 3), (3, 0)], [q.shape, r.shape])
 
         # lstsq
         self.assertRaises(RuntimeError, lambda: torch.lstsq(torch.randn(0, 0), torch.randn(0, 0)))
