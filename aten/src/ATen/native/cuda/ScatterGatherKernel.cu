@@ -198,7 +198,7 @@ struct _cuda_scatter_large_index_internal_kernel {
     }
     cudaMemcpy(index_shape_device, index_shape_host, ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
     cudaMemcpy(index_strides_device, src_shape_host, ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
-    cudaMemcpy(src_shape_device, index_shape_host, ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(src_shape_device, index_strides_host, ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
     cudaMemcpy(src_strides_device, src_strides_host, ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
 
     auto offset_calc = make_offset_calculator<3>(iter);
