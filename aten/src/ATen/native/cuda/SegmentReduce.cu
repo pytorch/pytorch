@@ -279,7 +279,6 @@ __global__ void segment_reduce_backward_kernel(
 
 } // namespace
 
-template <bool is_offsets_like = false>
 Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
     const Tensor& grad_contig,
     const Tensor& output_contig,
@@ -287,7 +286,8 @@ Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
     SegmentReductionType reduction,
     const Tensor& lengths_or_offsets_contig,
     int64_t axis,
-    const c10::optional<Scalar>& initial) {
+    const c10::optional<Scalar>& initial,
+    bool is_offsets_like) {
   axis = lengths_or_offsets_contig.dim() - 1;
   int64_t segment_count = is_offsets_like ?
                           lengths_or_offsets_contig.size(axis) - 1 :
@@ -390,8 +390,8 @@ Tensor _segment_reduce_lengths_backward_cuda_kernel(
   const Tensor& lengths_contig,
   int64_t axis,
   const c10::optional<Scalar>& initial) {
-  return _segment_reduce_lengths_offsets_backward_cuda_kernel</*is_offsets_like=*/false>(
-    grad_contig, output_contig, data_contig, reduction, lengths_contig, axis, initial);
+  return _segment_reduce_lengths_offsets_backward_cuda_kernel(
+    grad_contig, output_contig, data_contig, reduction, lengths_contig, axis, initial, /*is_offsets_like=*/false);
 }
 
 Tensor _segment_reduce_offsets_backward_cuda_kernel(
@@ -402,17 +402,17 @@ Tensor _segment_reduce_offsets_backward_cuda_kernel(
   const Tensor& offsets_contig,
   int64_t axis,
   const c10::optional<Scalar>& initial) {
-  return _segment_reduce_lengths_offsets_backward_cuda_kernel</*is_offsets_like=*/true>(
-    grad_contig, output_contig, data_contig, reduction, offsets_contig, axis, initial);
+  return _segment_reduce_lengths_offsets_backward_cuda_kernel(
+    grad_contig, output_contig, data_contig, reduction, offsets_contig, axis, initial, /*is_offsets_like=*/true);
 }
 
-template <bool is_offsets_like = false>
 Tensor _segment_reduce_lengths_offsets_cuda_kernel(
   SegmentReductionType reduction,
   const Tensor& data,
   const Tensor& lengths_or_offsets,
   int64_t axis,
-  const c10::optional<Scalar>& initial) {
+  const c10::optional<Scalar>& initial,
+  bool is_offsets_like) {
   // data and lengths_or_offsets should be contiguous from the call to .contiguous in segment_reduce_kernel
   TORCH_CHECK(data.is_contiguous());
   TORCH_CHECK(lengths_or_offsets.is_contiguous());
@@ -598,8 +598,8 @@ Tensor _segment_reduce_lengths_cuda_kernel(
   const Tensor& lengths,
   int64_t axis,
   const c10::optional<Scalar>& initial) {
-  return _segment_reduce_lengths_offsets_cuda_kernel</*is_offsets_like=*/false>(
-    reduction, data, lengths, axis, initial);
+  return _segment_reduce_lengths_offsets_cuda_kernel(
+    reduction, data, lengths, axis, initial, /*is_offsets_like=*/false);
 }
 
 Tensor _segment_reduce_offsets_cuda_kernel(
@@ -608,8 +608,8 @@ Tensor _segment_reduce_offsets_cuda_kernel(
   const Tensor& offsets,
   int64_t axis,
   const c10::optional<Scalar>& initial) {
-  return _segment_reduce_lengths_offsets_cuda_kernel</*is_offsets_like=*/true>(
-    reduction, data, offsets, axis, initial);
+  return _segment_reduce_lengths_offsets_cuda_kernel(
+    reduction, data, offsets, axis, initial, /*is_offsets_like=*/true);
 }
 
 REGISTER_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cuda_kernel);
