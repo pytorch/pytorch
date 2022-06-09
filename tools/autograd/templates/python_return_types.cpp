@@ -36,8 +36,7 @@ PyTypeObject* get_namedtuple(std::string name) {
 
 void initReturnTypes(PyObject* module) {
   static struct PyModuleDef def = {
-      PyModuleDef_HEAD_INIT, "torch._C._return_types", nullptr, -1, {},
-      /*m_slots=*/nullptr, /*m_traverse=*/nullptr, /*m_clear=*/nullptr, /*m_free=*/nullptr};
+      PyModuleDef_HEAD_INIT, "torch._C._return_types", nullptr, -1, {}};
   PyObject* return_types_module = PyModule_Create(&def);
   if (!return_types_module) {
     throw python_error();

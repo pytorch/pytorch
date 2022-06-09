@@ -123,9 +123,7 @@ static PySequenceMethods THPSize_as_sequence = {
   nullptr,                                          /* sq_slice */
   nullptr,                                          /* sq_ass_item */
   nullptr,                                          /* sq_ass_slice */
-  nullptr,                                          /* sq_contains */
-  nullptr,                                          /* sq_inplace_concat */
-  nullptr,                                          /* sq_inplace_repeat */
+  nullptr                                           /* sq_contains */
 };
 
 static PyMappingMethods THPSize_as_mapping = {
@@ -177,7 +175,7 @@ static PyObject *THPSize_reduce(PyObject *_self, PyObject *noargs)
 static PyMethodDef THPSize_methods[] = {
   {"numel",       THPSize_numel,       METH_NOARGS,  nullptr},
   {"__reduce__",  THPSize_reduce,      METH_NOARGS,  nullptr},
-  {nullptr,              nullptr,                0,  nullptr}
+  {nullptr}
 };
 
 
@@ -220,18 +218,6 @@ PyTypeObject THPSizeType = {
   nullptr,                               /* tp_init */
   nullptr,                               /* tp_alloc */
   THPSize_pynew,                         /* tp_new */
-  nullptr,                               /* tp_free */
-  nullptr,                               /* tp_is_gc */
-  nullptr,                               /* tp_bases */
-  nullptr,                               /* tp_mro */
-  nullptr,                               /* tp_cache */
-  nullptr,                               /* tp_subclasses */
-  nullptr,                               /* tp_weaklist */
-  nullptr,                               /* tp_del */
-  0,                                     /* tp_version_tag */
-  nullptr,                               /* tp_finalize */
-  nullptr,                               /* tp_vectorcall */
-  nullptr,                               /* tp_print */
 };
 
 void THPSize_init(PyObject *module)

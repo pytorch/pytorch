@@ -625,7 +625,7 @@ static PyMethodDef THPStorage_sharingMethods[] = {
   {"_shared_incref", THPStorage_sharedIncref, METH_NOARGS, nullptr},
   {"_get_shared_fd", THPStorage_sharedFd, METH_NOARGS, nullptr},
   {"is_shared", THPStorage_isShared, METH_NOARGS, nullptr},
-  {nullptr, nullptr, 0, nullptr}
+  {nullptr}
 };
 
 PyMethodDef* THPStorage_getSharingMethods() {

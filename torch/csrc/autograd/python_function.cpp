@@ -997,7 +997,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
   {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
   {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
   {"materialize_grads", nullptr, (setter)THPFunction_set_materialize_grads, nullptr, nullptr},
-  {nullptr, nullptr, nullptr, nullptr, nullptr}
+  {nullptr}
 };
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
@@ -1006,7 +1006,7 @@ static struct PyMethodDef THPFunction_methods[] = {
   {(char*)"apply", THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
   {(char*)"_register_hook_dict", THPFunction__register_hook_dict, METH_O, nullptr},
   {(char*)"register_hook", THPFunction_register_hook, METH_O, nullptr},
-  {nullptr, nullptr, 0, nullptr}
+  {nullptr}
 };
 
 PyTypeObject THPFunctionType = {
@@ -1047,19 +1047,7 @@ PyTypeObject THPFunctionType = {
   0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPFunction_new,                             /* tp_new */
-  nullptr,                                     /* tp_free */
-  nullptr,                                     /* tp_is_gc */
-  nullptr,                                     /* tp_bases */
-  nullptr,                                     /* tp_mro */
-  nullptr,                                     /* tp_cache */
-  nullptr,                                     /* tp_subclasses */
-  nullptr,                                     /* tp_weaklist */
-  nullptr,                                     /* tp_del */
-  0,                                           /* tp_version_tag */
-  nullptr,                                     /* tp_finalize */
-  nullptr,                                     /* tp_vectorcall */
-  nullptr,                                     /* tp_print */
+  THPFunction_new                              /* tp_new */
 };
 
 bool THPFunction_initModule(PyObject *module)

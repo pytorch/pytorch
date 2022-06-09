@@ -476,7 +476,7 @@ static PyMethodDef THPStorage_methods[] = {
   {"from_file", castPyCFunctionWithKeywords(THPStorage_fromFile),
     METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"_set_cdata", THPStorage__setCdata, METH_O, nullptr},
-  {nullptr, nullptr, 0, nullptr}
+  {nullptr}
 };
 
 PyMethodDef* THPStorage_getMethods() {

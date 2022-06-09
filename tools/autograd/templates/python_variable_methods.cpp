@@ -1290,7 +1290,7 @@ PyMethodDef variable_methods[] = {
   {"tolist", THPVariable_tolist, METH_NOARGS, NULL},
   {"type", castPyCFunctionWithKeywords(THPVariable_type), METH_VARARGS | METH_KEYWORDS, NULL},
   ${py_method_defs}
-  {nullptr, nullptr, 0, nullptr}
+  {NULL}
 };
 
 }} // namespace torch::autograd

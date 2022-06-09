@@ -323,24 +323,12 @@ PyTypeObject THPStorageType = {
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
   THPStorage_pynew,                            /* tp_new */
-  nullptr,                                     /* tp_free */
-  nullptr,                                     /* tp_is_gc */
-  nullptr,                                     /* tp_bases */
-  nullptr,                                     /* tp_mro */
-  nullptr,                                     /* tp_cache */
-  nullptr,                                     /* tp_subclasses */
-  nullptr,                                     /* tp_weaklist */
-  nullptr,                                     /* tp_del */
-  0,                                           /* tp_version_tag */
-  nullptr,                                     /* tp_finalize */
-  nullptr,                                     /* tp_vectorcall */
-  nullptr,                                     /* tp_print */
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMemberDef THPStorage_members[] = {
   {(char*)"_cdata", T_ULONGLONG, offsetof(THPStorage, cdata), READONLY, nullptr},
-  {nullptr, 0, 0, 0, nullptr}
+  {nullptr}
 };
 
 static PyObject * THPStorage_device(THPStorage* self, void *unused) {
@@ -354,7 +342,7 @@ typedef PyObject *(*getter)(PyObject *, void *);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPStorage_properties[] = {
   {"device", (getter)THPStorage_device, nullptr, nullptr, nullptr},
-  {nullptr, nullptr, nullptr, nullptr, nullptr}
+  {nullptr}
 };
 
 bool THPStorage_init(PyObject *module)

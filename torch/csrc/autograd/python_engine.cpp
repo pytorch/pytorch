@@ -322,7 +322,7 @@ static struct PyMethodDef THPEngine_methods[] = {
     METH_VARARGS | METH_KEYWORDS, nullptr},
   {(char*)"queue_callback", THPEngine_queue_callback, METH_O, nullptr},
   {(char*)"is_checkpoint_valid", THPEngine_is_checkpoint_valid, METH_NOARGS, nullptr},
-  {nullptr, nullptr, 0, nullptr}
+  {nullptr}
 };
 
 
@@ -364,19 +364,7 @@ PyTypeObject THPEngineType = {
   0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPEngine_new,                               /* tp_new */
-  nullptr,                                     /* tp_free */
-  nullptr,                                     /* tp_is_gc */
-  nullptr,                                     /* tp_bases */
-  nullptr,                                     /* tp_mro */
-  nullptr,                                     /* tp_cache */
-  nullptr,                                     /* tp_subclasses */
-  nullptr,                                     /* tp_weaklist */
-  nullptr,                                     /* tp_del */
-  0,                                           /* tp_version_tag */
-  nullptr,                                     /* tp_finalize */
-  nullptr,                                     /* tp_vectorcall */
-  nullptr,                                     /* tp_print */
+  THPEngine_new                                /* tp_new */
 };
 
 static void child_atfork() {

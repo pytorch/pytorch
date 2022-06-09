@@ -175,13 +175,13 @@ typedef PyObject *(*getter)(PyObject *, void *);
 static struct PyGetSetDef THPDevice_properties[] = {
   {"type",       (getter)THPDevice_type, nullptr, nullptr, nullptr},
   {"index",      (getter)THPDevice_index, nullptr, nullptr, nullptr},
-  {nullptr, nullptr, nullptr, nullptr, nullptr},
+  {nullptr}
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static PyMethodDef THPDevice_methods[] = {
   {"__reduce__", THPDevice_reduce, METH_NOARGS, nullptr},
-  {nullptr, nullptr, 0, nullptr},  /* Sentinel */
+  {nullptr}  /* Sentinel */
 };
 
 PyTypeObject THPDeviceType = {
@@ -223,18 +223,6 @@ PyTypeObject THPDeviceType = {
   nullptr,                               /* tp_init */
   nullptr,                               /* tp_alloc */
   THPDevice_pynew,                       /* tp_new */
-  nullptr,                               /* tp_free */
-  nullptr,                               /* tp_is_gc */
-  nullptr,                               /* tp_bases */
-  nullptr,                               /* tp_mro */
-  nullptr,                               /* tp_cache */
-  nullptr,                               /* tp_subclasses */
-  nullptr,                               /* tp_weaklist */
-  nullptr,                               /* tp_del */
-  0,                                     /* tp_version_tag */
-  nullptr,                               /* tp_finalize */
-  nullptr,                               /* tp_vectorcall */
-  nullptr,                               /* tp_print */
 };
 
 void THPDevice_init(PyObject *module)

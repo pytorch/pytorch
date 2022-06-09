@@ -49,13 +49,11 @@ build:cpu-only --@rules_cuda//cuda:enable_cuda=False
 # On the bright side, this means we don't have to more broadly apply
 # the exceptions to an entire target.
 build \
-    --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=missing-field-initializers            \
-    --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=missing-field-initializers \
-    --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=type-limits                           \
-    --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=type-limits                \
-    --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-function                       \
-    --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=unused-function            \
-    --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-variable                       \
+    --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=type-limits                \
+    --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=type-limits     \
+    --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-function            \
+    --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=unused-function \
+    --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-variable            \
     --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=unused-variable
 
 build \
