@@ -206,3 +206,11 @@ For example, `export PYTORCH_NVFUSER_DISABLE=fma,index_hoist` would disable FMA 
 2. I didn't see any speedup with nvfuser.
 
 Check if there is fusion in your script model. Run your script with `PYTORCH_JIT_LOG_LEVEL="graph_fuser"`, you should see some log dump of before/after graph regarding fusion pass. If nothing shows up in the log, that means something in TorchScript is not right and fusion pass are not executed. Check [General ideals of debug no-fusion] for more details.
+
+3. I ran into codegen issues with nvfuser, how do I disable nvfuser?
+
+There are three ways to disable nvfuser. Listed below with descending priorities:
+
+- Force using NNC instead of nvfuser for GPU fusion with env variable `export PYTORCH_JIT_USE_NNC_NOT_NVFUSER=1`.
+- Disabling nvfuser with torch API `torch._C._jit_set_nvfuser_enabled(False)`.
+- Disable nvfuser with env variable `export PYTORCH_JIT_ENABLE_NVFUSER=0`.
