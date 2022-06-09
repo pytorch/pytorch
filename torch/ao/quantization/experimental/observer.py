@@ -49,11 +49,12 @@ class NonUniformQuantizationObserverBase(ObserverBase):
     """
     def _calculate_qparams(
         self,
-        min_val: torch.Tensor,
-        max_val: torch.Tensor,
-            signed: bool) -> Tuple[float, torch.Tensor, torch.Tensor]:
+        signed: bool,
+        min_val=None,
+            max_val=None) -> Tuple[float, torch.Tensor, torch.Tensor]:
         # compute alpha
-        self.alpha = max_val
+        if max_val:
+            self.alpha = max_val.item()
 
         # check for valid inputs of b, k
         assert(self.k and self.k != 0)
@@ -134,17 +135,17 @@ class NonUniformQuantizationObserverBase(ObserverBase):
 class APoTObserver(NonUniformQuantizationObserverBase):
     def __init__(
         self,
-        min_val=torch.Tensor,
-        max_val=torch.Tensor,
+        min_val=None,
+        max_val=None,
         b=0,
             k=0) -> None:
         super(APoTObserver, self).__init__(min_val, max_val, b, k)
 
     def calculate_qparams(self, signed):
-        return self._calculate_qparams(self.min_val, self.max_val, signed)
+        return self._calculate_qparams(signed, self.min_val, self.max_val)
 
-    def _calculate_qparams(self, min_val, max_val, signed):
-        return super(APoTObserver, self)._calculate_qparams(min_val, max_val, signed)
+    def _calculate_qparams(self, signed, min_val, max_val):
+        return super(APoTObserver, self)._calculate_qparams(signed, min_val, max_val)
 
     def forward(self, x_orig):
         r"""Records the running minimum and maximum of ``x``."""

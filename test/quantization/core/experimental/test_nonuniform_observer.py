@@ -3,6 +3,7 @@
 from torch.ao.quantization.experimental.observer import APoTObserver
 import unittest
 import matplotlib.pyplot as plt
+import torch
 
 class TestNonUniformObserver(unittest.TestCase):
     def quant_levels_visualization(self, obs, obs_result, filename):
@@ -13,6 +14,9 @@ class TestNonUniformObserver(unittest.TestCase):
         f = plt.figure(figsize=(15, 10))
 
         plt.plot(xs, ys)
+        plt.title("APoT Quantization Plot")
+        plt.xlabel("Float")
+        plt.ylabel("Quantized")
         filestr = "/data/users/amandaliu/pytorch/test/quantization/core/experimental/plots/" + filename
         plt.savefig(filestr)
 
@@ -35,7 +39,7 @@ class TestNonUniformObserver(unittest.TestCase):
         * n = 2 (number of additive terms)
         * note: b = k * n
         """
-        obs2 = APoTObserver(max_val=1.0, b=4, k=2)
+        obs2 = APoTObserver(max_val=torch.tensor([1.0]), b=4, k=2)
         obs2_result = obs2.calculate_qparams(signed=False)
 
         self.assertEqual(obs2_result[0], (2 / 3))
@@ -63,7 +67,7 @@ class TestNonUniformObserver(unittest.TestCase):
         * k = 2 (base bitwidth, i.e. bitwidth of every term)
         * n = 3 (number of additive terms)
         """
-        obs3 = APoTObserver(max_val=1.0, b=6, k=2)
+        obs3 = APoTObserver(max_val=torch.tensor([1.0]), b=6, k=2)
 
         obs3_result = obs3.calculate_qparams(signed=False)
 
@@ -93,7 +97,7 @@ class TestNonUniformObserver(unittest.TestCase):
         * n = 2 (number of additive terms)
         * signed = True
         """
-        obs4 = APoTObserver(max_val=1.0, b=4, k=2)
+        obs4 = APoTObserver(max_val=torch.tensor([1.0]), b=4, k=2)
         obs4_result = obs4.calculate_qparams(signed=True)
 
         self.assertEqual(obs4_result[0], (8 / 3))
