@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <type_traits>
+#include <c10/core/DynamicCast.h>
 #include <c10/util/Exception.h>
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
@@ -107,21 +108,12 @@ struct LoadWithCast {
   array_t dtypes;
   size_array_t element_sizes;
 
-  template<typename array_t_>
-  LoadWithCast(array_t_ dtypes) {
-    #pragma unroll
-    for (int i = 0; i < N; i++) {
-      this->dtypes[i] = dtypes[i];
-      element_sizes[i] = c10::elementSize(dtypes[i]);
-    }
-  }
-
   LoadWithCast(const TensorIteratorBase& iter) {
     assert(iter.ninputs() == N);
     #pragma unroll
     for (auto i = 0; i < N; ++i) {
-      this->dtypes[i] = iter.dtype(i + 1);
-      element_sizes[i] = c10::elementSize(iter.dtype(i + 1));
+      this->dtypes[i] = iter.dtype(i + iter.noutputs());
+      element_sizes[i] = c10::elementSize(iter.dtype(i + iter.noutputs()));
     }
   }
 
@@ -134,19 +126,32 @@ struct LoadWithCast {
 
 struct StoreWithoutCast {
   template<typename scalar_t>
-  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
+  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset, int arg = 0) {
     *(reinterpret_cast<scalar_t *>(base_ptr) + offset) = value;
   }
 };
 
+template <int N = 1>
 struct StoreWithCast {
-  at::ScalarType dtype;
-  uint32_t element_size;
-  StoreWithCast(at::ScalarType dtype): dtype(dtype), element_size(c10::elementSize(dtype)) {}
+  using array_t = at::detail::Array<at::ScalarType, std::max<int>(N, 1)>;
+  using size_array_t = at::detail::Array<uint32_t, std::max<int>(N, 1)>;
+
+  array_t dtypes;
+  size_array_t element_sizes;
+
+  StoreWithCast(const TensorIteratorBase& iter) {
+    assert(iter.noutputs() == N);
+    #pragma unroll
+    for (auto i = 0; i < N; ++i) {
+      this->dtypes[i] = iter.dtype(i);
+      element_sizes[i] = c10::elementSize(iter.dtype(i));
+    }
+  }
+
   template<typename scalar_t>
-  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
-    void *ptr = base_ptr + element_size * offset;
-    c10::cast_and_store<scalar_t>(dtype, ptr, value);
+  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset, int arg = 0) {
+    void *ptr = base_ptr + element_sizes[arg] * offset;
+    c10::cast_and_store<scalar_t>(dtypes[arg], ptr, value);
   }
 };
 

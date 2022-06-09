@@ -30,11 +30,32 @@ static void noop_dispatch_fn(
       "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
+static bool noop_is_contiguous_fn(const PyInterpreter*, const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call `is_contiguous` on Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
+static c10::Device noop_device_fn(const PyInterpreter*, const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call `device` on Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
+static int64_t noop_dim_fn(const PyInterpreter*, const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call `dim` on Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
 void PyInterpreter::disarm() noexcept {
   name_fn_ = &noop_name_fn;
   decref_fn_ = &noop_decref_fn;
   detach_fn_ = &noop_detach_fn;
   dispatch_fn_ = &noop_dispatch_fn;
+  is_contiguous_fn_ = &noop_is_contiguous_fn;
+  device_fn_ = &noop_device_fn;
+  dim_fn_ = &noop_dim_fn;
 }
 
 } // namespace impl
