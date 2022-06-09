@@ -111,12 +111,20 @@ struct AccumulateType<BFloat16, false> {
   using type = float;
 };
 template <>
+struct AccumulateType<c10::complex<Half>, false> {
+  using type = c10::complex<float>;
+};
+template <>
 struct AccumulateType<c10::complex<float>, false> {
   using type = c10::complex<double>;
 };
 template <>
 struct AccumulateType<c10::complex<double>, false> {
   using type = c10::complex<double>;
+};
+template <>
+struct AccumulateType<c10::complex<Half>, true> {
+  using type = c10::complex<float>;
 };
 template <>
 struct AccumulateType<c10::complex<float>, true> {
