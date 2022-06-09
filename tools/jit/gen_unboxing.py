@@ -2,13 +2,13 @@
 import argparse
 import os
 import pathlib
-<<<<<<< HEAD
-=======
 import sys
+from dataclasses import dataclass
+from typing import Union, Sequence, List
 
 import yaml
->>>>>>> 95937de706b ([retake][mobile] Fix lightweight dispatch OOM error by introducing selective build)
-from dataclasses import dataclass
+from typing_extensions import Literal
+
 from torchgen.api import cpp
 from torchgen.api import unboxing
 from torchgen.api.translate import translate
@@ -19,8 +19,6 @@ from torchgen.gen import parse_native_yaml, cpp_string, get_custom_build_selecto
 from torchgen.model import NativeFunction, NativeFunctionsGroup, Variant, Argument
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import Target, FileManager, mapMaybe, make_file_manager
-from typing import Union, Sequence, List
-from typing_extensions import Literal
 
 
 # Generates UnboxingFunctions.h & UnboxingFunctions.cpp.
