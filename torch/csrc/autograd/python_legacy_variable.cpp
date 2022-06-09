@@ -127,7 +127,19 @@ PyTypeObject THPLegacyVariableType = {
   0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPVariable_pynew                            /* tp_new */
+  THPVariable_pynew,                           /* tp_new */
+  nullptr,                                     /* tp_free */
+  nullptr,                                     /* tp_is_gc */
+  nullptr,                                     /* tp_bases */
+  nullptr,                                     /* tp_mro */
+  nullptr,                                     /* tp_cache */
+  nullptr,                                     /* tp_subclasses */
+  nullptr,                                     /* tp_weaklist */
+  nullptr,                                     /* tp_del */
+  0,                                           /* tp_version_tag */
+  nullptr,                                     /* tp_finalize */
+  nullptr,                                     /* tp_vectorcall */
+  nullptr,                                     /* tp_print */
 };
 
 void init_legacy_variable(PyObject *module) {
