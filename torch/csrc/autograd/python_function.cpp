@@ -1047,7 +1047,7 @@ PyTypeObject THPFunctionType = {
   0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPFunction_new                              /* tp_new */
+  THPFunction_new,                             /* tp_new */
   nullptr,                                     /* tp_free */
   nullptr,                                     /* tp_is_gc */
   nullptr,                                     /* tp_bases */
