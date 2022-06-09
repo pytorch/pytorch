@@ -114,7 +114,7 @@ std::vector<at::Tensor> nested_size(const Tensor& self) {
 bool _has_same_shape(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       self.is_nested() == other.is_nested(),
-      "Expected both self and other to be either nested or not nested tensors.",
+      "Expected both self and other to be either nested or not nested tensors. ",
       "Self ", self.is_nested()? "is " : "is not ",
       "nested. While Other ",
       other.is_nested()? "is " : "is not ",

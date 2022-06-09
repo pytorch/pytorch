@@ -5918,6 +5918,31 @@ class TestTorch(TestCase):
         self.assertFalse(t1.is_same_size(t3))
         self.assertTrue(t1.is_same_size(t4))
 
+    def test__has_same_shape(self):
+        t1 = torch.empty(3, 4, 9, 10)
+        t2 = torch.empty(3, 4)
+        t3 = torch.empty(1, 9, 3, 3)
+        t4 = torch.empty(3, 4, 9, 10)
+
+        self.assertFalse(t1._has_same_shape(t2))
+        self.assertFalse(t1._has_same_shape(t3))
+        self.assertTrue(t1._has_same_shape(t4))
+
+        nt1 = torch.nested_tensor([torch.ones(2, 4), torch.ones(3, 4), torch.ones(5, 4)])
+        nt2 = torch.nested_tensor([torch.ones(2, 4), torch.ones(2, 4), torch.ones(2, 4)])
+        nt3 = torch.nested_tensor([torch.ones(2, 4, 5), torch.ones(2, 6, 5)])
+        nt4 = torch.nested_tensor([torch.ones(2, 4), torch.ones(3, 4), torch.ones(5, 4)])
+
+        self.assertFalse(nt1._has_same_shape(nt2))
+        self.assertFalse(nt1._has_same_shape(nt3))
+        self.assertTrue(nt1._has_same_shape(nt4))
+
+        with self.assertRaisesRegex(RuntimeError, "Expected both self and other to be either nested or not nested tensors"):
+            t1._has_same_shape(nt1)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected both self and other to be either nested or not nested tensors"):
+            nt1._has_same_shape(t1)
+
     def test_tensor_set(self):
         t1 = torch.tensor([])
         t2 = torch.empty(3, 4, 9, 10).uniform_()
