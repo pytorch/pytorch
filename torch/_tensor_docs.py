@@ -4989,6 +4989,14 @@ masked_fill(mask, value) -> Tensor
 Out-of-place version of :meth:`torch.Tensor.masked_fill_`
 """)
 
+add_docstr_all('grad',
+               r"""
+This attribute is ``None`` by default and becomes a Tensor the first time a call to
+:func:`backward` computes gradients for ``self``.
+The attribute will then contain the gradients computed and future calls to
+:func:`backward` will accumulate (add) gradients into it.
+""")
+
 add_docstr_all('retain_grad',
                r"""
 retain_grad() -> None

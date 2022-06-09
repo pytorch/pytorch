@@ -945,6 +945,7 @@ class _TensorBase(metaclass=_TensorMeta):
     grad_fn: Any
     _grad_fn: Any
     _grad: Optional[Tensor]
+    grad: Optional[Tensor]
     _backward_hooks: Optional[Dict[_int, Callable[[Tensor], Optional[Tensor]]]]
     ${tensor_method_hints}
 

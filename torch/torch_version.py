@@ -23,7 +23,7 @@ class _LazyImport:
         except ImportError:
             # If packaging isn't installed, try and use the vendored copy
             # in pkg_resources
-            from pkg_resources import packaging  # type: ignore[attr-defined]
+            from pkg_resources import packaging  # type: ignore[attr-defined, no-redef]
         return getattr(packaging.version, self._cls_name)
 
     def __call__(self, *args, **kwargs):
