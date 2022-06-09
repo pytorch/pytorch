@@ -3497,6 +3497,13 @@ at::Tensor& transpose_copy_int_out(const at::Tensor & self, int64_t dim0, int64_
 }
 
 
+at::Tensor& _unsafe_view_copy_out(const at::Tensor & self, at::IntArrayRef size, at::Tensor & out) {
+  auto tmp = at::_unsafe_view(self, size);
+  out.copy_(tmp);
+  return out;
+}
+
+
 at::Tensor& unsqueeze_copy_out(const at::Tensor & self, int64_t dim, at::Tensor & out) {
   auto tmp = self.unsqueeze(dim);
   out.copy_(tmp);
