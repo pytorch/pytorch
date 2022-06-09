@@ -45,7 +45,6 @@ namespace autograd {
 namespace profiler {
 
 namespace {
-const std::string kMemoryEventName = "[memory]";
 // TODO: consider TLS (tid + tls counter)
 uint64_t next_correlation_id() {
   static std::atomic<uint64_t> corr_id_{1};
@@ -59,44 +58,7 @@ inline int64_t getTimeUs() {
   return torch::profiler::impl::getTime() / 1000;
 #endif // USE_KINETO
 }
-} // namespace
 
-namespace python_tracer {
-using torch::profiler::impl::python_tracer::PyTraceEvent;
-using torch::profiler::impl::python_tracer::PythonTracerBase;
-
-// We do not want `getTimeUs` to be directly visible, but we need a way for
-// the python tracer to use the same timing convention as the profiler.
-int64_t now() {
-  return getTimeUs();
-}
-
-struct Replay {
-  PyTraceEvent* frame_;
-  bool enter_;
-
-  C10_NODISCARD int64_t t() const {
-    return enter_ ? frame_->startTime_ : frame_->endTime_;
-  }
-
-  C10_NODISCARD size_t idx() const {
-    return enter_ ? frame_->call_idx_ : frame_->return_idx_;
-  }
-
-  bool operator<(const Replay& other) const {
-    return idx() < other.idx();
-  }
-};
-
-void _push_reverse_order(PyTraceEvent* e, std::vector<std::string>& names) {
-  if (e != nullptr) {
-    _push_reverse_order(e->parent_, names);
-    names.push_back(e->name_);
-  }
-}
-} // namespace python_tracer
-
-namespace {
 using torch::profiler::impl::ProfilerThreadLocalStateBase;
 using torch::profiler::impl::ActiveProfilerType;
 using torch::profiler::impl::EventType;
@@ -106,14 +68,18 @@ using torch::profiler::impl::kineto::annotation_t;
 using torch::profiler::impl::shapesToStr;
 using torch::profiler::impl::dtypesToStr;
 using torch::profiler::impl::stacksToStr;
+using torch::profiler::impl::kineto::KinetoActivityType;
 
 struct EventFieldsVisitor {
   EventFieldsVisitor(
       std::shared_ptr<Result>& result,
       KinetoEvent& kineto_event,
       const post_process_t& post_process)
-      : kineto_event_{kineto_event}, post_process_{post_process} {
+      : kineto_event_{kineto_event},
+        post_process_{post_process} {
+    pushPythonMetadata(result->parent_.lock());
     c10::visit(*this, result->extra_fields_);
+    handleStack(result->parent_);
   }
 
   void operator()(ExtraFields<EventType::TorchOp>& op_event) {
@@ -214,8 +180,69 @@ struct EventFieldsVisitor {
     }
   }
 
+  void operator()(const ExtraFields<EventType::PyCall>& py_call) {
+    addPythonAnnotations(py_call);
+    if (py_call.module_.has_value()) {
+      annotations_.emplace_back(
+          "Python module id", std::to_string(py_call.module_->id_));
+    }
+  }
+
+  void operator()(const ExtraFields<EventType::PyCCall>& py_call) {
+    addPythonAnnotations(py_call);
+  }
+
+  void pushPythonMetadata(std::shared_ptr<Result> parent) {
+    auto push = [&](const auto& i) {
+      c10::guts::if_constexpr<std::is_base_of<
+          torch::profiler::impl::PyExtraFieldsBase,
+          typename std::remove_reference<decltype(i)>::type>::
+                                  value>([&](auto _) {
+        py_metadata_.push_back({_(i).id_, _(i).python_tid_, parent->name()});
+      });
+    };
+
+    while (parent != nullptr) {
+      c10::visit(push, parent->extra_fields_);
+      parent = parent->parent_.lock();
+    }
+  }
+
+  template <typename T>
+  void addPythonAnnotations(T& t) {
+    annotations_.emplace_back("Python id", std::to_string(t.id_));
+    annotations_.emplace_back(
+        "Python parent id",
+        !py_metadata_.empty() ? py_metadata_.at(0).name_ : "null");
+    annotations_.emplace_back("Python thread", std::to_string(t.python_tid_));
+  }
+
+  void handleStack(std::weak_ptr<Result> parent) {
+    // JIT stack takes precidence.
+    if (!kineto_event_.get().hasStack() && !py_metadata_.empty()) {
+      std::vector<std::string> stack;
+      for (auto i = py_metadata_.rbegin(); i < py_metadata_.rend(); ++i) {
+        stack.push_back(i->name_);
+      }
+      kineto_event_.get().stack(std::move(stack));
+    }
+
+    if (kineto_event_.get().hasStack()) {
+      annotations_.emplace_back(
+          "Call stack",
+          torch::profiler::impl::stacksToStr(kineto_event_.get().stack(), ";"));
+    }
+  }
+
+  struct PythonMetadata {
+    size_t id_;
+    size_t python_tid_;
+    std::string name_;
+  };
+
   std::reference_wrapper<KinetoEvent> kineto_event_;
   std::reference_wrapper<const post_process_t> post_process_;
+  std::vector<PythonMetadata> py_metadata_;
   annotation_t annotations_;
 };
 
@@ -231,8 +258,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       std::set<torch::profiler::impl::ActivityType> activities)
       : ProfilerThreadLocalStateBase(config),
         start_time_(getTimeUs()),
-        activities_(std::move(activities)),
-        record_queue_(config),
+        record_queue_(config, activities),
         cpu_trace_(start_time_, "PyTorch Profiler") {}
   ~KinetoThreadLocalState() override = default;
 
@@ -245,10 +271,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
   ActiveProfilerType profilerType() override {
     return ActiveProfilerType::KINETO;
-  }
-
-  bool tracePython() {
-    return config().with_stack && activities_.count(ActivityType::CPU);
   }
 
   void reportMemoryUsage(
@@ -279,9 +301,20 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
   torch::profiler::impl::kineto::ActivityTraceWrapper finalizeTrace() {
     auto end_time = getTimeUs();
+    record_queue_.stop();
     materializeOpEvents();
 
     finalizeCPUTrace(cpu_trace_.get());
+
+    // `kineto_events_` does not include Python events. Instead it exposes them
+    // via the `stacks` property.
+    kineto_events_.erase(
+        std::remove_if(
+            kineto_events_.begin(),
+            kineto_events_.end(),
+            [](const auto& i) { return i.is_python_function_; }),
+        kineto_events_.end());
+
     {
       std::lock_guard<std::mutex> guard(state_mutex_);
       cpu_trace_.transferCpuTrace(end_time);
@@ -309,7 +342,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       if (e->finished_) {
         int64_t start_us = e->start_time_ns_ / 1000;
         int64_t end_us = e->endTimeNS() / 1000;
-        kineto_events_.emplace_back();
+        kineto_events_.emplace_back(
+            e->kinetoType() == KinetoActivityType::PYTHON_FUNCTION);
         kineto_events_.back()
             .name(e->name())
             .startUs(start_us)
@@ -366,129 +400,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       }
     }
     */
-
-    addPythonEvents(cpu_trace);
-  }
-
-  void addPythonEvents(std::unique_ptr<torch::profiler::impl::kineto::trace_t>& cpu_trace) {
-    if (!tracePython()) {
-      return;
-    }
-
-    auto py_events = python_tracer::PythonTracerBase::get().getEvents();
-    for (const auto& e : py_events) {
-      TORCH_INTERNAL_ASSERT(
-          !e->thread_id_,
-          "Profiler expects only single threaded Python tracing.");
-    }
-
-    // The remainder of this function merges the Python and Kineto event
-    // streams into a single stream. If Python tracing is not enabled, we want
-    // to avoid this process altogether to cut down on processing time.
-    if (!py_events.size()) {
-      return;
-    }
-
-    // Kineto event times
-    std::vector<int64_t> op_start_times;
-    for (const auto& a : cpu_trace->activities) {
-      op_start_times.push_back(a.startTime);
-    }
-    std::sort(op_start_times.begin(), op_start_times.end());
-
-    // Map PyTraceEvent* to sequential integers for JSON export.
-    ska::flat_hash_map<python_tracer::PyTraceEvent*, std::string>
-        py_event_indices_{
-            { nullptr,
-              std::string("null") }};
-    for (const auto i : c10::irange(py_events.size())) {
-      py_event_indices_.insert({py_events[i].get(), std::to_string(i)});
-    }
-
-    // Python events
-    std::vector<python_tracer::Replay> py_replay;
-    for (const auto& e : py_events) {
-      py_replay.push_back({e.get(), true});
-      py_replay.push_back({e.get(), false});
-    }
-    std::sort(py_replay.begin(), py_replay.end());
-
-    // In order to determine the state of the python interpreter when a
-    // particular op is called, we have to replay the python events and note
-    // timestamps which are associated with op start times.
-    std::vector<python_tracer::PyTraceEvent*> py_stack;
-    ska::flat_hash_map<int64_t, python_tracer::PyTraceEvent*> op_py_map;
-    auto replay_it = py_replay.begin();
-    for (auto t : op_start_times) {
-      while (replay_it != py_replay.end() && replay_it->t() <= t) {
-        if (replay_it->enter_) {
-          py_stack.push_back(replay_it->frame_);
-        } else {
-          TORCH_INTERNAL_ASSERT(py_stack.size());
-          TORCH_INTERNAL_ASSERT(py_stack.back() == replay_it->frame_);
-          py_stack.pop_back();
-        }
-        replay_it++;
-      }
-      op_py_map.insert({t, py_stack.size() ? py_stack.back() : nullptr});
-    }
-
-    std::vector<libkineto::GenericTraceActivity> py_activities;
-    auto py_events_it = py_events.begin();
-    auto py_device = libkineto::processId();
-    auto main_thread = libkineto::systemThreadId();
-    auto push_py_event = [&]() {
-      auto e = (*py_events_it).get();
-      libkineto::GenericTraceActivity op(
-          cpu_trace->span, libkineto::ActivityType::PYTHON_FUNCTION, e->name_);
-
-      op.device = py_device;
-      op.resource = main_thread;
-      op.startTime = e->startTime_;
-      op.endTime = e->endTime_;
-
-      op.addMetadata("Python id", py_event_indices_.at(e));
-      op.addMetadata("Python parent id", py_event_indices_.at(e->parent_));
-      op.addMetadata("Python thread", std::to_string(e->thread_id_));
-      if (e->module_id_.has_value()) {
-        op.addMetadata("Python module id", *e->module_id_);
-      }
-
-      py_activities.push_back(op);
-      py_events_it++;
-    };
-
-    TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == kineto_events_.size());
-    for (const auto idx : c10::irange(cpu_trace->activities.size())) {
-      auto& activity = cpu_trace->activities[idx];
-
-      // Add any python events that occurred between this Kineto event and the
-      // previous Kineto event.
-      while (py_events_it != py_events.end() &&
-             (*py_events_it)->endTime_ <= activity.endTime) {
-        push_py_event();
-      }
-
-      auto python_caller = op_py_map.at(activity.startTime);
-      activity.addMetadata(
-          "python_caller_id", py_event_indices_.at(python_caller));
-
-      // If the kineto event has a stack that means the JIT model has a stack
-      // associated with it that we need to respect.
-      if (!kineto_events_[idx].hasStack()) {
-        std::vector<std::string> py_names;
-        python_tracer::_push_reverse_order(python_caller, py_names);
-        kineto_events_[idx].stack(py_names);
-        activity.addMetadata("Call stack", torch::profiler::impl::stacksToStr(py_names, ";"));
-      }
-    }
-
-    // Add any Python events which finish after the last Kineto event.
-    while (py_events_it != py_events.end()) {
-      push_py_event();
-    }
-
-    cpu_trace->activities.insert(cpu_trace->activities.end(), py_activities.begin(), py_activities.end());
   }
 
   void generateForwardBackwardLink(
@@ -565,7 +476,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
   uint64_t start_time_;
   torch::profiler::impl::ApproximateClockToUnixTimeConverter clock_converter_;
-  std::set<torch::profiler::impl::ActivityType> activities_;
   torch::profiler::impl::RecordQueue record_queue_;
   torch::profiler::impl::kineto::TraceWrapper cpu_trace_;
   std::vector<KinetoEvent> kineto_events_;
@@ -768,10 +678,6 @@ void enableProfiler(
     auto state = std::make_shared<KinetoThreadLocalState>(config, activities);
     c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
-    if (state->tracePython()) {
-      python_tracer::PythonTracerBase::get().start();
-    }
-
     if (activities.count(ActivityType::CPU)) {
       pushProfilingCallbacks<false>(scopes);
     }
@@ -821,15 +727,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   if (config.state == ProfilerState::KINETO ||
       config.state == ProfilerState::KINETO_GPU_FALLBACK) {
     auto kineto_state_ptr = std::static_pointer_cast<KinetoThreadLocalState>(state_ptr);
-    if (kineto_state_ptr->tracePython()) {
-      python_tracer::PythonTracerBase::get().stop();
-    }
-
     auto trace = kineto_state_ptr->finalizeTrace();
-    if (kineto_state_ptr->tracePython()) {
-      python_tracer::PythonTracerBase::get().clear();
-    }
-
     result = std::make_unique<ProfilerResult>(
         kineto_state_ptr->start_time_,
         std::move(kineto_state_ptr->kineto_events_),
