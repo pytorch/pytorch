@@ -3681,7 +3681,7 @@ def rand(g, shapes, dtype, *options):
             shape_const,
             dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
         )
-    return g.op("RandomUniform", shape_i=shape)
+    return g.op("RandomUniform", shape_i=shape, dtype_i=symbolic_helper.scalar_type_to_onnx[dtype])
 
 
 def randn_like(
