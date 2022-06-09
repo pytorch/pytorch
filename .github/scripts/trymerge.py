@@ -915,6 +915,10 @@ def merge(pr_num: int, repo: GitRepo,
           timeout_minutes: int = 400) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
+    if force:
+        pr = GitHubPR(org, project, pr_num)
+        pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
+
     start_time = time.time()
     last_exception = ''
     elapsed_time = 0.0
