@@ -74,7 +74,7 @@ def isGreen(commit: str, results: Dict[str, Any]) -> Any:
         workflowName = check['workflowName']
         conclusion = check['conclusion']
         if re.search("|".join(regex), workflowName) and conclusion != 'success':
-            if check['name'] == "pull / win-vs2019-cuda11.3-py3" and check['conclusion'] == 'skipped':
+            if check['name'] == "pull / win-vs2019-cuda11.3-py3" and conclusion == 'skipped':
                 pass
                 # there are trunk checks that run the same tests, so this pull workflow check can be skipped
             else:
