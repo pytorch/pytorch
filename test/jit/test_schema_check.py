@@ -4,7 +4,7 @@ import os
 import sys
 import torch
 
-from torch.testing._internal.schema_check_tensor import SchemaCheckTensor, reset_cache, schema_check_recorded_ops
+from torch.testing._internal.schema_check_tensor import SchemaCheckTensor
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
@@ -18,19 +18,19 @@ if __name__ == '__main__':
 # Tests various schema checking functionalities.
 class TestSchemaCheck(JitTestCase):
     def setUp(self):
-        reset_cache()
+        SchemaCheckTensor.reset_cache()
 
     # Tests that SchemaCheckTensor records operator order with grad
     def test_schema_check_tensor_operator_order_grad(self):
         x = torch.rand((3, 3), requires_grad=True)
         SchemaCheckTensor(x).relu().sin()
-        self.assertEqual(["relu.default", "detach.default", "sin.default"], schema_check_recorded_ops)
+        self.assertEqual(["relu.default", "detach.default", "sin.default"], SchemaCheckTensor.recorded_ops)
 
     # Tests that SchemaCheckTensor records operator order without grad
     def test_schema_check_tensor_operator_order_no_grad(self):
         x = torch.rand((3, 3), requires_grad=False)
         SchemaCheckTensor(x).relu().sin()
-        self.assertEqual(["relu.default", "sin.default"], schema_check_recorded_ops)
+        self.assertEqual(["relu.default", "sin.default"], SchemaCheckTensor.recorded_ops)
 
     # Tests that SchemaCheckTensor wraps torch.Tensor
     def test_schema_check_tensor_functionality(self):
