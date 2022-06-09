@@ -70,7 +70,7 @@ class TestModelReportFxDetector(QuantizationTestCase):
 
     """Prepares and callibrate the model"""
 
-    def prepare_model_and_run_input(self, model, q_config_mapping, input):
+    def _prepare_model_and_run_input(self, model, q_config_mapping, input):
         model_prep = torch.ao.quantization.quantize_fx.prepare_fx(
             model, q_config_mapping, input
         )  # prep model
@@ -95,7 +95,7 @@ class TestModelReportFxDetector(QuantizationTestCase):
         )
 
         input = torch.randn(1, 3, 10, 10)
-        prepared_model = self.prepare_model_and_run_input(
+        prepared_model = self._prepare_model_and_run_input(
             ConvModel(), q_config_mapping, input
         )
 
@@ -136,7 +136,7 @@ class TestModelReportFxDetector(QuantizationTestCase):
             torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine)
         )
 
-        prepared_model = self.prepare_model_and_run_input(
+        prepared_model = self._prepare_model_and_run_input(
             TwoLayerLinearModel(),
             q_config_mapping,
             TwoLayerLinearModel().get_example_inputs()[0],
@@ -202,7 +202,7 @@ class TestModelReportFxDetector(QuantizationTestCase):
             torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine)
         ).set_object_type(torch.nn.Conv2d, per_channel_qconfig)
 
-        prepared_model = self.prepare_model_and_run_input(
+        prepared_model = self._prepare_model_and_run_input(
             ConvLinearModel(),
             q_config_mapping,
             torch.randn(1, 3, 10, 10),
@@ -255,7 +255,7 @@ class TestModelReportFxDetector(QuantizationTestCase):
             torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine)
         )
 
-        prepared_model = self.prepare_model_and_run_input(
+        prepared_model = self._prepare_model_and_run_input(
             NESTED_CONV_LINEAR_EXAMPLE,
             q_config_mapping,
             torch.randn(1, 3, 10, 10),
@@ -298,7 +298,7 @@ class TestModelReportFxDetector(QuantizationTestCase):
             torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine)
         )
 
-        prepared_model = self.prepare_model_and_run_input(
+        prepared_model = self._prepare_model_and_run_input(
             LAZY_CONV_LINEAR_EXAMPLE,
             q_config_mapping,
             torch.randn(1, 3, 10, 10),
@@ -341,7 +341,7 @@ class TestModelReportFxDetector(QuantizationTestCase):
             torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine)
         )
 
-        prepared_model = self.prepare_model_and_run_input(
+        prepared_model = self._prepare_model_and_run_input(
             FUSION_CONV_LINEAR_EXAMPLE,
             q_config_mapping,
             torch.randn(1, 3, 10, 10),
