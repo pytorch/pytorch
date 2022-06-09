@@ -63,6 +63,7 @@ def mock_parse_args(revert: bool = False,
             self.dry_run = True
             self.comment_id = 0
             self.mandatory_only = False
+            self.on_green = False
             self.reason = 'this is for testing'
 
     return Object()
@@ -248,6 +249,7 @@ class TestGitHubPR(TestCase):
                                            dry_run=mock.ANY,
                                            force=True,
                                            comment_id=mock.ANY,
+                                           on_green=False,
                                            mandatory_only=False)
 
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
@@ -261,6 +263,7 @@ class TestGitHubPR(TestCase):
                                            dry_run=mock.ANY,
                                            force=False,
                                            comment_id=mock.ANY,
+                                           on_green=False,
                                            mandatory_only=False)
 
 if __name__ == "__main__":
