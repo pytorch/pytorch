@@ -1428,6 +1428,12 @@ class TestMPS(TestCase):
 
         self.assertEqual(shared_np[9], mps_tensor.cpu().numpy())
 
+    def test_materialize_expanded_view(self):
+        tensor_mps = torch.ones((1, 1, 3, 3), device='mps').expand((32, 32, 3, 3)).view((1024, 3, 3)).contiguous()
+        tensor_cpu = torch.ones((1, 1, 3, 3)).expand((32, 32, 3, 3)).view((1024, 3, 3)).contiguous()
+
+        self.assertEqual(tensor_cpu, tensor_mps)
+
 
 class TestSmoothL1Loss(TestCase):
 

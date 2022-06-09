@@ -138,7 +138,7 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
               newCachedGraph = new CachedGraph(mpsGraph);
 
               // Self is the input tensor we are creating view of
-              MPSGraphTensor* inputTensor = [mpsGraph placeholderWithShape : getMPSShape(self)
+              MPSGraphTensor* inputTensor = [mpsGraph placeholderWithShape : nil
                                                                   dataType : getMPSDataType(self.scalar_type())
                                                                       name : nil];
               newCachedGraph->inputTensor_ = inputTensor;

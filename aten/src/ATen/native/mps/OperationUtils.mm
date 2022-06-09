@@ -288,12 +288,13 @@ id<MTLBuffer> _gatherViewTensor(const at::Tensor& src, id<MTLBuffer> sourceBuffe
   };
 
   CachedGraph* cachedGraph = static_cast<CachedGraph *>(mpsCachedGraph);
+  const size_t storageElemCount = src.storage().nbytes() / src.dtype().itemsize();
 
   @autoreleasepool {
     MPSGraphTensor* inputTensor = cachedGraph->inputTensor_;
     MPSGraphTensorData* inputTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer: sourceBuffer
-                                                                        shape: [inputTensor shape]
-                                                                        dataType: [inputTensor dataType]] autorelease];
+                                                                       shape: @[[NSNumber numberWithUnsignedInteger: storageElemCount]]
+                                                                       dataType: [inputTensor dataType]] autorelease];
     id<MTLBuffer> resultBuffer = __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
     MPSGraphTensorData* outputTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer: resultBuffer
                                                                         shape: getMPSShape(src.sizes())
