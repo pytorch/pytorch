@@ -163,17 +163,14 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
     def __exit__(self, exc_type, exc_val, exc_tb):
         _set_torch_dispatch_mode(self.inner)
 
+    @contextlib.contextmanager
     def restore(self):
-        return restore(self)
+        return _restore_mode(self, mode_info=TorchDispatchModeInfo())
 
     @classmethod
     def push(cls, *args, **kwargs):
         return push_torch_dispatch_mode(functools.partial(cls, *args, **kwargs))
 
-
-@contextlib.contextmanager
-def restore(mode: TorchDispatchMode):
-    return _restore_mode(mode, mode_info=TorchDispatchModeInfo())
 
 class BaseTorchDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
