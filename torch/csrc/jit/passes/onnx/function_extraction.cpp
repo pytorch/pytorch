@@ -670,8 +670,7 @@ void FunctionExtractor::ConvertScopeToFunction(
   const auto func_name =
       construct_unique_module_name(module_class_name.substr(pos + 1));
 
-  auto func_def_n =
-      CreateFunctionDefNode(func_ctx, graph, domain_name, func_name);
+  CreateFunctionDefNode(func_ctx, graph, domain_name, func_name);
 
   // create and insert local function node to graph.
   for (const auto& it : func_ctx.scope_ctxs_) {
