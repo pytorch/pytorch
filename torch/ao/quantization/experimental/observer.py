@@ -52,7 +52,7 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         max_val: torch.Tensor,
             signed: bool) -> Tuple[float, torch.Tensor, torch.Tensor]:
         # compute alpha
-        self.alpha = max_val
+        self.alpha = float(max_val)
 
         # check for valid inputs of b, k
         assert(self.k and self.k != 0)
