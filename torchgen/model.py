@@ -816,11 +816,6 @@ class NativeFunctionsGroup:
                     f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
                 )
         assert self.functional.func.kind() == SchemaKind.functional
-        assert not self.functional.is_view_op, (
-            "View operator shouldn't be grouped into NativeFunctionsGroup objects."
-            f"This is likely because you tried to add an out= variant for '{f.func.name}', which is an existing view operator."
-            "out= variants of view operators are not valid. Please reach out to to the core team if you have questions."
-        )
         assert self.out.func.kind() == SchemaKind.out
 
         if self.inplace is not None:
@@ -1077,18 +1072,14 @@ class FunctionSchema:
             self.arguments.out,
         )
 
+    decl_re = re.compile(r"(?P<name>[^\(]+)\((?P<args>.*)\) -> (?P<returns>.*)")
+
     @staticmethod
     def parse(func: str) -> "FunctionSchema":
         # We should probably get a proper parser here
-        assert (
-            " -> " in func
-        ), "function schema missing return type (spaces are mandatory)"
-        last_index = func.rfind(" -> ")
-        func_decl = func[:last_index]
-        return_decl = func[last_index + len(" -> ") :]
-        ops, args = func_decl.split("(", 1)
-        assert args[-1] == ")", "Expecting closing )"
-        args = args[:-1]
+        decls = FunctionSchema.decl_re.findall(func)
+        assert len(decls) == 1, f"Invalid function schema: {func}"
+        ops, args, return_decl = decls[0]
         name = OperatorName.parse(ops)
         arguments = Arguments.parse(args)
         returns = parse_returns(return_decl)
@@ -2341,6 +2332,15 @@ class Precompute:
         r = Precompute(replace=replace, add=add_args)
         assert r.to_list() == src, "r.to_list() != src"
         return r
+
+    def __post_init__(self) -> None:
+        # the template parameters are upper so if these are the
+        # same then it is ambiguous
+        for a in self.add:
+            assert a.name.upper() != a.name
+        for args in self.replace.values():
+            for a in args:
+                assert a.name.upper() != a.name
 
     def to_list(self) -> List[str]:
         replace_list = []
