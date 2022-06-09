@@ -1376,7 +1376,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"names", (getter)THPVariable_get_names, (setter)THPVariable_set_names, nullptr, nullptr},
   {"real", (getter)THPVariable_get_real, (setter)THPVariable_set_real, nullptr, nullptr},
   {"imag", (getter)THPVariable_get_imag, (setter)THPVariable_set_imag, nullptr, nullptr},
-  {nullptr, nullptr, nullptr, nullptr, nullptr}
+  {nullptr}
 };
 
 static PyMappingMethods THPVariable_as_mapping = {
@@ -1395,7 +1395,7 @@ static PyMethodDef extra_methods[] = {
     METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
   {"_fix_weakref", THPVariable_fix_weakref,
     METH_NOARGS, nullptr},
-  {nullptr, nullptr, 0, nullptr}
+  {nullptr}
 };
 
 /* From https://github.com/python/cpython/blob/v3.7.0/Modules/xxsubtype.c
@@ -1452,18 +1452,6 @@ PyTypeObject THPVariableMetaType = {
   THPVariableMetaType_init,                    /* tp_init */
   nullptr,                                     /* tp_alloc */
   nullptr,                                     /* tp_new */
-  nullptr,                                     /* tp_free */
-  nullptr,                                     /* tp_is_gc */
-  nullptr,                                     /* tp_bases */
-  nullptr,                                     /* tp_mro */
-  nullptr,                                     /* tp_cache */
-  nullptr,                                     /* tp_subclasses */
-  nullptr,                                     /* tp_weaklist */
-  nullptr,                                     /* tp_del */
-  0,                                           /* tp_version_tag */
-  nullptr,                                     /* tp_finalize */
-  nullptr,                                     /* tp_vectorcall */
-  nullptr,                                     /* tp_print */
 };
 
 PyTypeObject THPVariableType = {
@@ -1513,18 +1501,6 @@ PyTypeObject THPVariableType = {
     // Although new is provided here, it is illegal to call this with cls ==
     // THPVariableMeta.  Instead, subclass it first and then construct it
     THPVariable_pynew, /* tp_new */
-    nullptr, /* tp_free */
-    nullptr, /* tp_is_gc */
-    nullptr, /* tp_bases */
-    nullptr, /* tp_mro */
-    nullptr, /* tp_cache */
-    nullptr, /* tp_subclasses */
-    nullptr, /* tp_weaklist */
-    nullptr, /* tp_del */
-    0, /* tp_version_tag */
-    nullptr, /* tp_finalize */
-    nullptr, /* tp_vectorcall */
-    nullptr, /* tp_print */
 };
 
 PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)

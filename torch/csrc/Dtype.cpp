@@ -68,13 +68,13 @@ static struct PyGetSetDef THPDtype_properties[] = {
   {"is_floating_point", (getter)THPDtype_is_floating_point, nullptr, nullptr, nullptr},
   {"is_complex", (getter)THPDtype_is_complex, nullptr, nullptr, nullptr},
   {"is_signed", (getter)THPDtype_is_signed, nullptr, nullptr, nullptr},
-  {nullptr, nullptr, nullptr, nullptr, nullptr}
+  {nullptr}
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static PyMethodDef THPDtype_methods[] = {
   {"__reduce__", THPDtype_reduce, METH_NOARGS, nullptr},
-  {nullptr, nullptr, 0, nullptr}  /* Sentinel */
+  {nullptr}  /* Sentinel */
 };
 
 PyObject *THPDtype_repr(THPDtype *self)
@@ -122,18 +122,6 @@ PyTypeObject THPDtypeType = {
   nullptr,                               /* tp_init */
   nullptr,                               /* tp_alloc */
   nullptr,                               /* tp_new */
-  nullptr,                               /* tp_free */
-  nullptr,                               /* tp_is_gc */
-  nullptr,                               /* tp_bases */
-  nullptr,                               /* tp_mro */
-  nullptr,                               /* tp_cache */
-  nullptr,                               /* tp_subclasses */
-  nullptr,                               /* tp_weaklist */
-  nullptr,                               /* tp_del */
-  0,                                     /* tp_version_tag */
-  nullptr,                               /* tp_finalize */
-  nullptr,                               /* tp_vectorcall */
-  nullptr,                               /* tp_print */
 };
 
 void THPDtype_init(PyObject *module)

@@ -49,19 +49,19 @@ static PyObject * THPStream_eq(THPStream *self, THPStream *other) {
 static struct PyMemberDef THPStream_members[] = {
   {(char*)"_cdata",
     T_ULONGLONG, offsetof(THPStream, cdata), READONLY, nullptr},
-  {nullptr, 0, 0, 0, nullptr}
+  {nullptr}
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPStream_properties[] = {
   {"device", (getter)THPStream_get_device, nullptr, nullptr, nullptr},
-  {nullptr, nullptr, nullptr, nullptr, nullptr}
+  {nullptr}
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStream_methods[] = {
   {(char*)"__eq__", (PyCFunction)THPStream_eq, METH_O, nullptr},
-  {nullptr, nullptr, 0, nullptr}
+  {nullptr}
 };
 
 PyTypeObject THPStreamType = {
@@ -103,18 +103,6 @@ PyTypeObject THPStreamType = {
   nullptr,                               /* tp_init */
   nullptr,                               /* tp_alloc */
   THPStream_pynew,                       /* tp_new */
-  nullptr,                               /* tp_free */
-  nullptr,                               /* tp_is_gc */
-  nullptr,                               /* tp_bases */
-  nullptr,                               /* tp_mro */
-  nullptr,                               /* tp_cache */
-  nullptr,                               /* tp_subclasses */
-  nullptr,                               /* tp_weaklist */
-  nullptr,                               /* tp_del */
-  0,                                     /* tp_version_tag */
-  nullptr,                               /* tp_finalize */
-  nullptr,                               /* tp_vectorcall */
-  nullptr,                               /* tp_print */
 };
 
 

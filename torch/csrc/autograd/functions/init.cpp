@@ -92,7 +92,7 @@ static PyObject* accumulateGradVar(PyObject *_self, void* _unused)
 static struct PyGetSetDef accumulate_grad_properties[] = {
   THP_FUNCTION_DEFAULT_PROPERTIES,
   {(char*)"variable", accumulateGradVar, nullptr, nullptr, nullptr},
-  {nullptr, nullptr, nullptr, nullptr, nullptr}
+  {nullptr}
 };
 
 void THPAutograd_initFunctions()
