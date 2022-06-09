@@ -183,7 +183,7 @@ struct _cuda_scatter_large_index_internal_kernel {
     char* src_ptr = (char*)iter.data_ptr(1);
     char* index_ptr = (char*)iter.data_ptr(2);
 
-    int ndim = iter.ndim();
+    int ndim = index_shape.size();
     int64_t index_shape_host[ndim], index_strides_host[ndim], src_shape_host[ndim], src_strides_host[ndim];
     int64_t *index_shape_device, *index_strides_device, *src_shape_device, *src_strides_device;
     cudaMalloc((void**)&index_shape_device, ndim * sizeof(int64_t));
