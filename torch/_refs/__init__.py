@@ -581,12 +581,10 @@ def reciprocal(a):
 
 
 # TODO: round takes additional kwargs
-_make_elementwise_unary_reference(
+@_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
 )
-
-
 def round(a):
     return prims.round(a)
 
