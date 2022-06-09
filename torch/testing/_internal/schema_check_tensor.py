@@ -1,8 +1,7 @@
 import torch
 from torch.utils._pytree import tree_map, tree_flatten
-from torch.fx.operator_schemas import get_signature_for_torch_op
+from torch.fx.operator_schemas import normalize_function
 from torch.testing._internal.jit_utils import clone_inputs
-from typing import Any, Callable, Dict, Tuple
 
 # This Tensor Subclass is used to verify op schemas
 # This Tensor currently:
@@ -58,12 +57,19 @@ class SchemaCheckTensor(torch.Tensor):
         def has_mutated(before, after):
             return not torch.equal(before, after) if isinstance(before, torch.Tensor) and isinstance(after, torch.Tensor) else False
 
-        SchemaCheckTensor.recorded_ops.append(func.__name__)
-        schema, arguments = find_matching_schema(func, tree_map(unwrap, args), tree_map(unwrap, kwargs))
+        SchemaCheckTensor.recorded_ops.append(func._schema.name)
+
+        arguments = normalize_function(
+            func,
+            tree_map(unwrap, args),
+            tree_map(unwrap, kwargs),
+            normalize_to_only_use_kwargs=True
+        ).kwargs
+
         cloned_arguments = dict(zip(arguments.keys(), clone_inputs(arguments.values())))
         out = func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
 
-        for argument in schema.arguments:
+        for argument in func._schema.arguments:
             name = argument.name if argument.name != "self" else "input"
             if arguments.get(name) is not None:
                 before = tree_flatten(arguments.get(name))[0]
@@ -72,21 +78,3 @@ class SchemaCheckTensor(torch.Tensor):
                     raise RuntimeError(f"Argument {name} is not defined as mutable but was mutated")
 
         return tree_map(wrap, out)
-
-def find_matching_schema(op: Callable, args : Tuple[Any], kwargs : Dict[str, Any]):
-    signatures, schemas = get_signature_for_torch_op(op, return_schemas=True)
-    if (signatures and schemas):
-        matched_schemas = []
-        for candidate_signature, schema in zip(signatures, schemas):
-            try:
-                candidate_bound_arguments = candidate_signature.bind(*args, **kwargs)
-                matched_schemas.append((schema, candidate_bound_arguments.arguments))
-            except TypeError as e:
-                continue
-
-        if (len(matched_schemas) == 0):
-            raise RuntimeError('No matching schema found')
-        if (len(matched_schemas) == 1):
-            return matched_schemas[0]
-        else:
-            raise RuntimeError('More than one matching schema found')

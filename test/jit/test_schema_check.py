@@ -24,13 +24,13 @@ class TestSchemaCheck(JitTestCase):
     def test_schema_check_tensor_operator_order_grad(self):
         x = torch.rand((3, 3), requires_grad=True)
         SchemaCheckTensor(x).relu().sin()
-        self.assertEqual(["relu.default", "detach.default", "sin.default"], SchemaCheckTensor.recorded_ops)
+        self.assertEqual(["aten::relu", "aten::detach", "aten::sin"], SchemaCheckTensor.recorded_ops)
 
     # Tests that SchemaCheckTensor records operator order without grad
     def test_schema_check_tensor_operator_order_no_grad(self):
         x = torch.rand((3, 3), requires_grad=False)
         SchemaCheckTensor(x).relu().sin()
-        self.assertEqual(["relu.default", "sin.default"], SchemaCheckTensor.recorded_ops)
+        self.assertEqual(["aten::relu", "aten::sin"], SchemaCheckTensor.recorded_ops)
 
     # Tests that SchemaCheckTensor wraps torch.Tensor
     def test_schema_check_tensor_functionality(self):
