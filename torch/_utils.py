@@ -478,7 +478,7 @@ class ExceptionWrapper(object):
 def _get_available_device_type():
     if torch.cuda.is_available():
         return "cuda"
-    if hasattr(torch, "xpu") and torch.xpu.is_available():
+    if hasattr(torch, "xpu") and torch.xpu.is_available(): # type: ignore
         return "xpu"
     # add more available device types here
     return None
