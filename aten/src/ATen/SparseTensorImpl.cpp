@@ -54,6 +54,8 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
   set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
 }
 
+  // Destructor doesn't call release_resources because it's
+  // unnecessary; don't forget to change that if needed!
 void SparseTensorImpl::release_resources() {
   TensorImpl::release_resources();
   values_.reset();

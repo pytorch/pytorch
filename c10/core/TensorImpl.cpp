@@ -69,8 +69,9 @@ void TensorImpl::_set_fw_grad(
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
-// some compiler does not generate the destructor correctly
-TensorImpl::~TensorImpl() = default;
+TensorImpl::~TensorImpl() {
+  destroy_pyobj_if_needed();
+}
 
 TensorImpl::TensorImpl(
     Storage&& storage,
@@ -330,6 +331,10 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
+  destroy_pyobj_if_needed();
+}
+
+void TensorImpl::destroy_pyobj_if_needed() {
   if (owns_pyobj()) {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
