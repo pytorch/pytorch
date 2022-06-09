@@ -94,7 +94,6 @@ static PyObject * THPStorage_isPinned(PyObject *_self, PyObject *noargs)
 static PyObject * THPStorage_elementSize(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  (THPStorage*)_self;
   return THPUtils_packInt64(sizeof(uint8_t));
   END_HANDLE_TH_ERRORS
 }
