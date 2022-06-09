@@ -130,7 +130,7 @@ The Principles
 The Process for Nomination
 ++++++++++++++++++++++++++
 
-* We have a `nomination form <TBA>`__, where anyone in the community can
+* We will have a nomination form, where anyone in the community can
   nominate a person to a Module maintainer position
 * Every 3 months, the core maintainers go through the nominations,
   do light filtering around spam or desk-rejection, and draw up a
@@ -154,7 +154,7 @@ The Process for Removal
 +++++++++++++++++++++++
 
 * Similar to the process for nomination, anyone in the community
-  can `nominate a person to be removed <TBA>`__ from a Module maintainer
+  can nominate a person to be removed from a Module maintainer
   position or a Core maintainer position.
 * A person can also self-nominate to be removed
 * The core maintainers (excluding persons with conflict of
