@@ -336,7 +336,8 @@ void AddRequiresGradToDifferentiableGraph(Node* diff_graph) {
     c10::optional<bool> requiresGrad = c10::nullopt;
     for (auto& use : diff_graph->output(i)->uses()) {
       if (use.user->kind() == prim::profile) {
-        if ((auto req_grad_use = getProfileNodeRequiresGrad(use.user)).has_value()) {
+        c10::optional<bool> req_grad_use;
+        if ((req_grad_use = getProfileNodeRequiresGrad(use.user)).has_value()) {
           requiresGrad = req_grad_use;
           break;
         }
@@ -349,7 +350,8 @@ void AddRequiresGradToDifferentiableGraph(Node* diff_graph) {
         Value* dg_value = dg->inputs()[use.offset];
         for (auto& dg_use : dg_value->uses()) {
           if (dg_use.user->kind() == prim::profile) {
-            if ((auto req_grad_use = getProfileNodeRequiresGrad(dg_use.user))
+            c10::optional<bool> req_grad_use;
+            if ((req_grad_use = getProfileNodeRequiresGrad(dg_use.user))
                     .has_value()) {
               requiresGrad = req_grad_use;
               break;
