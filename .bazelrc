@@ -49,5 +49,19 @@ build:cpu-only --@rules_cuda//cuda:enable_cuda=False
 # On the bright side, this means we don't have to more broadly apply
 # the exceptions to an entire target.
 build \
-    --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=type-limits            \
-    --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=type-limits
+    --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=type-limits                \
+    --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=type-limits     \
+    --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-function            \
+    --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=unused-function
+
+build \
+    --per_file_copt=//:aten/src/ATen/RegisterCompositeExplicitAutograd.cpp@-Wno-error=unused-function \
+    --per_file_copt=//:aten/src/ATen/RegisterCompositeImplicitAutograd.cpp@-Wno-error=unused-function \
+    --per_file_copt=//:aten/src/ATen/RegisterMkldnnCPU.cpp$@-Wno-error=unused-function                \
+    --per_file_copt=//:aten/src/ATen/RegisterNestedTensorCPU.cpp$@-Wno-error=unused-function          \
+    --per_file_copt=//:aten/src/ATen/RegisterQuantizedCPU.cpp$@-Wno-error=unused-function             \
+    --per_file_copt=//:aten/src/ATen/RegisterSparseCPU.cpp$@-Wno-error=unused-function                \
+    --per_file_copt=//:aten/src/ATen/RegisterSparseCsrCPU.cpp$@-Wno-error=unused-function             \
+    --per_file_copt=//:aten/src/ATen/RegisterZeroTensor.cpp$@-Wno-error=unused-function               \
+    --per_file_copt=//:torch/csrc/lazy/generated/RegisterAutogradLazy.cpp@-Wno-error=unused-function  \
+    --per_file_copt=//:torch/csrc/lazy/generated/RegisterLazy.cpp@-Wno-error=unused-function
