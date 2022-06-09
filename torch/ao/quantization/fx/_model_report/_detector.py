@@ -5,7 +5,6 @@ import torch.nn as nn
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.observer import ObserverBase
 from torch.ao.quantization.qconfig import QConfig
-from torch.ao.sparsity.sparsifier.utils import module_to_fqn
 from torch.fx import GraphModule
 from torch.nn.qat.modules.conv import _ConvNd as QatConvNd
 from torch.nn.qat.modules.linear import Linear as QatLinear
@@ -50,9 +49,9 @@ def _detect_per_channel(model: GraphModule) -> Tuple[str, Dict[str, Any]]:
     # store information on submodules and if per_channel quantization is supported and used as well as qconfig information
     per_channel_info = {"backend": backend_chosen, "per_channel_status": {}}
 
-    def _detect_per_channel_helper(module: nn.Module):
+    def _detect_per_channel_helper(model: nn.Module):
         """
-        Recursive operation to determine if per_channel quantization is supported in modules and submodules.
+        determines if per_channel quantization is supported in modules and submodules.
 
         Populates a dictionary in the higher level _detect_per_channel function.
         Each entry maps the fully-qualified-name to information on whether per_channel quantization.
@@ -60,58 +59,60 @@ def _detect_per_channel(model: GraphModule) -> Tuple[str, Dict[str, Any]]:
         Args:
             module: The current module that is being checked to see if it is per_channel qunatizable
         """
-        # get the fully qualified name and check if in list of modules to include and list of modules to ignore
-        fqn = module_to_fqn(model, module)
-        is_in_include_list = (
-            True
-            if sum(list(map(lambda x: isinstance(module, x), supported_modules))) > 0
-            else False
-        )
+        for named_mod in model.named_modules():
 
-        # check if the module per_channel is supported
-        # based on backend
-        per_channel_supported = False
+            # get the fully qualified name and check if in list of modules to include and list of modules to ignore
+            fqn, module = named_mod
 
-        if is_in_include_list:
-            per_channel_supported = True
+            # asserts for MyPy
+            assert isinstance(fqn, str) and isinstance(per_channel_info["per_channel_status"], dict)
 
-            # assert statement for MyPy
-            q_config_file = module.qconfig
-            assert isinstance(q_config_file, QConfig)
-
-            # this object should either be fake quant or observer
-            q_or_s_obj = module.qconfig.weight.p.func()
-            assert isinstance(q_or_s_obj, FakeQuantize) or isinstance(
-                q_or_s_obj, ObserverBase
+            is_in_include_list = (
+                True
+                if sum(list(map(lambda x: isinstance(module, x), supported_modules))) > 0
+                else False
             )
 
-            per_channel_used = False  # will be true if found in qconfig
+            # check if the module per_channel is supported
+            # based on backend
+            per_channel_supported = False
 
-            if hasattr(
-                q_or_s_obj, "ch_axis"
-            ):  # then we know that per_channel quantization used
+            if is_in_include_list:
+                per_channel_supported = True
 
-                # all fake quants have channel axis so need to check is_per_channel
-                if isinstance(q_or_s_obj, FakeQuantize):
-                    if (
-                        hasattr(q_or_s_obj, "is_per_channel")
-                        and q_or_s_obj.is_per_channel
-                    ):
+                # assert statement for MyPy
+                q_config_file = module.qconfig
+                assert isinstance(q_config_file, QConfig)
+
+                # this object should either be fake quant or observer
+                q_or_s_obj = module.qconfig.weight.p.func()
+                assert isinstance(q_or_s_obj, FakeQuantize) or isinstance(
+                    q_or_s_obj, ObserverBase
+                )
+
+                per_channel_used = False  # will be true if found in qconfig
+
+                if hasattr(
+                    q_or_s_obj, "ch_axis"
+                ):  # then we know that per_channel quantization used
+
+                    # all fake quants have channel axis so need to check is_per_channel
+                    if isinstance(q_or_s_obj, FakeQuantize):
+                        if (
+                            hasattr(q_or_s_obj, "is_per_channel")
+                            and q_or_s_obj.is_per_channel
+                        ):
+                            per_channel_used = True
+                    elif isinstance(q_or_s_obj, ObserverBase):
+                        # should be an observer otherwise
                         per_channel_used = True
-                elif isinstance(q_or_s_obj, ObserverBase):
-                    # should be an observer otherwise
-                    per_channel_used = True
-                else:
-                    raise ValueError("Should be either observer or fake quant")
+                    else:
+                        raise ValueError("Should be either observer or fake quant")
 
-            per_channel_info["per_channel_status"][fqn] = {
-                "per_channel_supported": per_channel_supported,
-                "per_channel_used": per_channel_used,
-            }
-
-        # recurse on children
-        for child in module.children():
-            _detect_per_channel_helper(child)
+                per_channel_info["per_channel_status"][fqn] = {
+                    "per_channel_supported": per_channel_supported,
+                    "per_channel_used": per_channel_used,
+                }
 
     # run the helper function to populate the dictionary
     _detect_per_channel_helper(model)

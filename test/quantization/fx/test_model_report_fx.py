@@ -109,13 +109,13 @@ class TestModelReportFxDetector(QuantizationTestCase):
         )
         self.assertEqual(per_channel_info["backend"], torch.backends.quantized.engine)
         self.assertEqual(len(per_channel_info["per_channel_status"]), 1)
-        self.assertEqual(list(per_channel_info["per_channel_status"])[0], ".conv")
+        self.assertEqual(list(per_channel_info["per_channel_status"])[0], "conv")
         self.assertEqual(
-            per_channel_info["per_channel_status"][".conv"]["per_channel_supported"],
+            per_channel_info["per_channel_status"]["conv"]["per_channel_supported"],
             True,
         )
         self.assertEqual(
-            per_channel_info["per_channel_status"][".conv"]["per_channel_used"], True
+            per_channel_info["per_channel_status"]["conv"]["per_channel_used"], True
         )
 
     """Case includes:
