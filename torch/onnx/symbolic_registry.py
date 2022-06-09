@@ -5,7 +5,20 @@ import warnings
 from typing import Any, Callable, Dict, Tuple, Union
 
 from torch import _C
-from torch.onnx import _constants
+from torch.onnx import _constants, errors
+
+__all__ = [
+    "get_op_supported_version",
+    "get_ops_in_version",
+    "get_registered_op",
+    "is_registered_op",
+    "is_registered_version",
+    "register_op",
+    "register_ops_helper",
+    "register_ops_in_version",
+    "register_version",
+    "unregister_op",
+]
 
 _SymbolicFunction = Callable[..., Union[_C.Value, Tuple[_C.Value]]]
 
@@ -149,26 +162,7 @@ def get_registered_op(opname: str, domain: str, version: int) -> _SymbolicFuncti
         warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
     global _registry
     if not is_registered_op(opname, domain, version):
-        raise UnsupportedOperatorError(domain, opname, version)
+        raise errors.UnsupportedOperatorError(
+            domain, opname, version, get_op_supported_version(opname, domain, version)
+        )
     return _registry[(domain, version)][opname]
-
-
-class UnsupportedOperatorError(RuntimeError):
-    def __init__(self, domain: str, opname: str, version: int):
-        supported_version = get_op_supported_version(opname, domain, version)
-        if domain in {"", "aten", "prim", "quantized"}:
-            msg = f"Exporting the operator {domain}::{opname} to ONNX opset version {version} is not supported. "
-            if supported_version is not None:
-                msg += (
-                    f"Support for this operator was added in version {supported_version}, "
-                    "try exporting with this version."
-                )
-            else:
-                msg += "Please feel free to request support or submit a pull request on PyTorch GitHub."
-        else:
-            msg = (
-                f"ONNX export failed on an operator with unrecognized namespace {domain}::{opname}. "
-                "If you are trying to export a custom operator, make sure you registered "
-                "it with the right domain and version."
-            )
-        super().__init__(msg)

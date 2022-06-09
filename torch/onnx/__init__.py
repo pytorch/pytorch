@@ -14,66 +14,86 @@ from typing import (
     Type,
     Union,
 )
+import warnings
 
 import torch
-import torch._C as _C
+from torch import _C
+from torch._C import _onnx as _C_onnx
+from torch._C._onnx import (
+    _CAFFE2_ATEN_FALLBACK,
+    OperatorExportTypes,
+    TensorProtoDataType,
+    TrainingMode,
+)
 
-TensorProtoDataType = _C._onnx.TensorProtoDataType
-OperatorExportTypes = _C._onnx.OperatorExportTypes
-TrainingMode = _C._onnx.TrainingMode
-_CAFFE2_ATEN_FALLBACK = _C._onnx._CAFFE2_ATEN_FALLBACK
+from . import (
+    errors,
+    symbolic_caffe2,
+    symbolic_helper,
+    symbolic_opset7,
+    symbolic_opset8,
+    symbolic_opset9,
+    symbolic_opset10,
+    symbolic_opset11,
+    symbolic_opset12,
+    symbolic_opset13,
+    symbolic_opset14,
+    symbolic_opset15,
+    symbolic_opset16,
+    symbolic_registry,
+    utils,
+)
+from ._constants import ONNX_ARCHIVE_MODEL_PROTO_NAME
+from ._exporter_states import ExportTypes, SymbolicContext
+from .errors import CheckerError  # Backwards compatibility
 
-ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
+__all__ = [
+    # Modules
+    "symbolic_helper",
+    "symbolic_registry",
+    "utils",
+    "errors",
+    # All opsets
+    "symbolic_caffe2",
+    "symbolic_opset7",
+    "symbolic_opset8",
+    "symbolic_opset9",
+    "symbolic_opset10",
+    "symbolic_opset11",
+    "symbolic_opset12",
+    "symbolic_opset13",
+    "symbolic_opset14",
+    "symbolic_opset15",
+    "symbolic_opset16",
+    # Enums
+    "OperatorExportTypes",
+    "TrainingMode",
+    # Public functions
+    "export",
+    "export_to_pretty_string",
+    "is_in_onnx_export",
+    "select_model_mode_for_export",
+    "register_custom_op_symbolic",
+    "unregister_custom_op_symbolic",
+    "disable_log",
+    "enable_log",
+    "is_onnx_log_enabled",
+    "log",
+    "set_log_stream",
+    # Errors
+    "CheckerError",  # Backwards compatibility
+]
 
 producer_name = "pytorch"
-producer_version = _C._onnx.PRODUCER_VERSION
-
-
-class ExportTypes:
-    r"""Specifies how the ONNX model is stored."""
-
-    PROTOBUF_FILE = "Saves model in the specified protobuf file."
-    ZIP_ARCHIVE = "Saves model in the specified ZIP file (uncompressed)."
-    COMPRESSED_ZIP_ARCHIVE = "Saves model in the specified ZIP file (compressed)."
-    DIRECTORY = "Saves model in the specified folder."
-
-
-class CheckerError(Exception):
-    r"""Raised when ONNX checker detects an invalid model."""
-
-    pass
-
-
-class SymbolicContext:
-    """Extra context for symbolic functions.
-
-    Attributes:
-        params_dict (Dict[str, _C.IValue]): Mapping from graph initializer name to IValue.
-        env (Dict[_C.Value, _C.Value]): Mapping from Torch domain graph Value to ONNX domain graph Value.
-        cur_node (_C.Node): Current node being converted to ONNX domain.
-        onnx_block (_C.Block): Current ONNX block that converted nodes are being appended to.
-    """
-
-    def __init__(
-        self,
-        params_dict: Dict[str, _C.IValue],
-        env: Dict[_C.Value, _C.Value],
-        cur_node: _C.Node,
-        onnx_block: _C.Block,
-    ):
-        self.params_dict: Dict[str, _C.IValue] = params_dict
-        self.env: Dict[_C.Value, _C.Value] = env
-        # Current node that is being converted.
-        self.cur_node: _C.Node = cur_node
-        # Current onnx block that converted nodes are being appended to.
-        self.onnx_block: _C.Block = onnx_block
+producer_version = _C_onnx.PRODUCER_VERSION
 
 
 def _export(*args, **kwargs):
-    from torch.onnx import utils
-
-    result = utils._export(*args, **kwargs)
-    return result
+    warnings.warn(
+        "`torch.onnx._export` is deprecated. Please use `export` instead.",
+        DeprecationWarning,
+    )
+    return utils._export(*args, **kwargs)
 
 
 def export(
@@ -370,8 +390,6 @@ def export(
         model to the file ``f`` even if this is raised.
     """
 
-    from torch.onnx import utils
-
     return utils.export(
         model,
         args,
@@ -408,14 +426,10 @@ def export_to_pretty_string(*args, **kwargs) -> str:
     Returns:
       A UTF-8 str containing a human-readable representation of the ONNX model.
     """
-    from torch.onnx import utils
-
     return utils.export_to_pretty_string(*args, **kwargs)
 
 
 def _optimize_trace(graph: _C.Graph, operator_export_type: OperatorExportTypes):
-    from torch.onnx import utils
-
     return utils._optimize_graph(graph, operator_export_type)
 
 
@@ -430,27 +444,21 @@ def select_model_mode_for_export(model, mode):
         mode: Same type and meaning as ``training`` arg to :func:`export`.
     """
 
-    from torch.onnx import utils
-
     return utils.select_model_mode_for_export(model, mode)
 
 
 def _run_symbolic_function(*args, **kwargs):
-    from torch.onnx import utils
 
     return utils._run_symbolic_function(*args, **kwargs)
 
 
 def _run_symbolic_method(*args, **kwargs):
-    from torch.onnx import utils
 
     return utils._run_symbolic_method(*args, **kwargs)
 
 
 def is_in_onnx_export() -> bool:
     r"""Returns True iff :func:`export` is running in the current thread."""
-
-    from torch.onnx import utils
 
     return utils.is_in_onnx_export()
 
@@ -470,7 +478,6 @@ def register_custom_op_symbolic(
             operator nodes to add to the graph.
         opset_version (int): The ONNX opset version in which to register.
     """
-    from torch.onnx import utils
 
     utils.register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version)
 
@@ -485,8 +492,6 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int) -> Non
             format.
         opset_version (int): The ONNX opset version in which to unregister.
     """
-
-    from torch.onnx import utils
 
     utils.unregister_custom_op_symbolic(symbolic_name, opset_version)
 

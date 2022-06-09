@@ -5,6 +5,9 @@ import gc
 import io
 import json
 import os
+import tempfile
+import textwrap
+import typing
 import unittest
 
 import torch
@@ -21,7 +24,7 @@ from torch.autograd.profiler import profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
     kineto_available, profile, record_function, supported_activities,
-    DeviceType, ProfilerAction, ProfilerActivity
+    DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver
 )
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
@@ -89,6 +92,49 @@ class TestProfilerCUDA(TestCase):
             s = custom_layer(z)
             q = s.sum()
             q.backward()
+
+class IcicleNode:
+    OP_TEMPLATE = "[ {}]"
+    PAD_LENGTH = len(OP_TEMPLATE.format(""))
+
+    @classmethod
+    def format(cls, profiler, indent: int = 0):
+        tree = profiler.kineto_results.experimental_event_tree()
+        lines = cls.cat([cls(i).materialize() for i in tree])
+        out = "\n".join([textwrap.indent(l.rstrip(), " " * indent) for l in lines])
+        return f"{out}\n{' ' * indent}"
+
+    @staticmethod
+    def cat(inputs: typing.List[typing.List[str]], join_str="") -> typing.List[str]:
+        assert inputs and all(i for i in inputs), "inputs cannot be empty"
+        depth = max(len(i) for i in inputs)
+        widths = [max(len(j) for j in i) for i in inputs]
+        inputs = [i + [""] * (depth - len(i)) for i in inputs]
+        inputs = [[j.ljust(w) for j in i] for i, w in zip(inputs, widths)]
+        return [join_str.join(i) for i in zip(*inputs)]
+
+    def __init__(self, event) -> None:
+        self.width = 0
+        self.children : typing.List[IcicleNode] = []
+        for child in event.children:
+            self.children.append(IcicleNode(child))
+            self.width += self.children[-1].width
+
+        self.name = f"{event.name()} "
+
+        # torch::autograd::Node relies on c10::demangle to generate names, and
+        # Windows demangles to include `struct` in the name.
+        if IS_WINDOWS:
+            self.name = self.name.replace('struct torch::autograd::AccumulateGrad', 'torch::autograd::AccumulateGrad')
+
+        self.width = max(self.width, len(self.name) + self.PAD_LENGTH)
+
+    def materialize(self) -> typing.List[str]:
+        name = self.OP_TEMPLATE.format(self.name.ljust(self.width - self.PAD_LENGTH, "-"))
+        out = [name]
+        if self.children:
+            out.extend(self.cat([child.materialize() for child in self.children]))
+        return out
 
 class TestRecordFunction(TestCase):
     def _record_function_with_param(self):
@@ -201,6 +247,158 @@ class TestRecordFunction(TestCase):
                 has_child = True
         self.assertTrue(has_iter)
         self.assertTrue(has_child)
+
+
+class TestExecutionGraph(TestCase):
+    def payload(self, use_cuda=False):
+        u = torch.randn(3, 4, 5, requires_grad=True)
+        with record_function("## TEST 1 ##", "1, 2, 3"):
+            rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u), "hello", u)
+            x = torch.randn(10, 10)
+            if use_cuda:
+                x = x.cuda()
+            y = torch.randn(10, 10)
+            if use_cuda:
+                y = y.cuda()
+            z = x + y + x * y + x * y
+            if use_cuda:
+                z = z.cpu()
+            _record_function_with_args_exit(rf_handle)
+
+    def get_execution_graph_root(self, output_file_name):
+        nodes = []
+        with open(output_file_name, 'r') as f:
+            eg_graph = json.load(f)
+            assert "nodes" in eg_graph
+            nodes = eg_graph["nodes"]
+        return nodes
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_execution_graph_with_kineto(self):
+        trace_called_num = 0
+
+        def trace_handler(p):
+            nonlocal trace_called_num
+            trace_called_num += 1
+
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        # Create a temp file to save execution graph data.
+        fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+        fp.close()
+        expected_loop_events = 0
+        eg = ExecutionGraphObserver()
+        eg.register_callback(fp.name)
+        with profile(
+            activities=supported_activities(),
+            schedule=torch.profiler.schedule(
+                skip_first=3,
+                wait=1,
+                warmup=1,
+                active=2),
+            on_trace_ready=trace_handler,
+        ) as p:
+            eg.start()
+            for idx in range(10):
+                expected_loop_events += 1
+                with record_function(f"## LOOP {idx} ##"):
+                    self.payload(use_cuda=use_cuda)
+                p.step()
+            eg.stop()
+
+        eg.unregister_callback()
+
+        assert trace_called_num == 2
+        assert fp.name == eg.get_output_file_path()
+        nodes = self.get_execution_graph_root(fp.name)
+        loop_count = 0
+        for n in nodes:
+            assert "name" in n
+            if "[pytorch|profiler|execution_graph|process]" in n["name"]:
+                found_root_node = True
+            if n["name"].startswith("## LOOP "):
+                loop_count += 1
+        assert found_root_node
+        assert loop_count == expected_loop_events
+
+    def test_execution_graph_alone(self):
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        # Create a temp file to save execution graph data.
+        fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+        fp.close()
+        expected_loop_events = 0
+
+        eg = ExecutionGraphObserver()
+        eg.register_callback(fp.name)
+        eg.start()
+        for idx in range(5):
+            expected_loop_events += 1
+            with record_function(f"## LOOP {idx} ##"):
+                self.payload(use_cuda=use_cuda)
+        eg.stop()
+        eg.unregister_callback()
+
+        assert fp.name == eg.get_output_file_path()
+        nodes = self.get_execution_graph_root(fp.name)
+        loop_count = 0
+        for n in nodes:
+            assert "name" in n
+            if "[pytorch|profiler|execution_graph|process]" in n["name"]:
+                found_root_node = True
+            if n["name"].startswith("## LOOP "):
+                loop_count += 1
+        assert found_root_node
+        assert loop_count == expected_loop_events
+
+    def test_execution_graph_start_stop(self):
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        # Create a temp file to save execution graph data.
+        fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+        fp.close()
+        expected_loop_events = 0
+        eg = ExecutionGraphObserver()
+        eg.register_callback(fp.name)
+        for idx in range(10):
+            if idx == 3:
+                eg.start()
+            elif idx == 5:
+                eg.stop()
+            elif idx == 8:
+                eg.start()
+            elif idx == 9:
+                eg.stop()
+                eg.unregister_callback()
+            if eg._execution_graph_running:
+                expected_loop_events += 1
+            with record_function(f"## LOOP {idx} ##"):
+                self.payload(use_cuda=use_cuda)
+
+        assert fp.name == eg.get_output_file_path()
+        nodes = self.get_execution_graph_root(fp.name)
+        loop_count = 0
+        for n in nodes:
+            assert "name" in n
+            if "[pytorch|profiler|execution_graph|process]" in n["name"]:
+                found_root_node = True
+            if n["name"].startswith("## LOOP "):
+                loop_count += 1
+        assert found_root_node
+        assert loop_count == expected_loop_events
+
+    def test_execution_graph_no_capture(self):
+        fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+        fp.close()
+        eg = ExecutionGraphObserver()
+        eg.register_callback(fp.name)
+        eg.unregister_callback()
+
+        assert fp.name == eg.get_output_file_path()
+        nodes = self.get_execution_graph_root(fp.name)
+        for n in nodes:
+            assert "name" in n
+            if "[pytorch|profiler|execution_graph|process]" in n["name"]:
+                found_root_node = True
+        assert found_root_node
+
 
 class TestProfiler(TestCase):
     def test_source(self):
@@ -636,7 +834,7 @@ class TestProfiler(TestCase):
         with _profile(record_shapes=True, with_flops=True, use_kineto=kineto_available()) as prof:
             model(inputs)
         profiler_output = prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=10)
-        self.assertIn("Total MFLOPs", profiler_output)
+        self.assertIn("Total KFLOPs", profiler_output)
         if not (kineto_available() and torch.cuda.is_available()):
             return
 
@@ -649,7 +847,7 @@ class TestProfiler(TestCase):
             model(inputs)
         profiler_output = kineto_profiler.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=-1)
-        self.assertIn("Total MFLOPs", profiler_output)
+        self.assertIn("Total KFLOPs", profiler_output)
 
     def test_kineto_profiler_api(self):
         called_num = [0]
@@ -908,6 +1106,79 @@ class TestProfiler(TestCase):
         # Kineto profiler
         with profile():
             self.assertEqual(profiler_type(), ActiveProfilerType.KINETO)
+
+    def test_profiler_experimental_tree(self):
+        t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
+        with profile() as p:
+            z = torch.add(t1, t2)
+            y = torch.ones(1)
+            loss = (y - z) ** 2
+            loss.backward()
+
+        self.assertExpectedInline(
+            IcicleNode.format(p.profiler, 12),
+            """\
+            [ aten::add ][ aten::ones ----------------][ aten::sub ][ aten::pow --------------------][ aten::ones_like -------------------][ autograd::engine::evaluate_function: PowBackward0 ----------------------------------------------][ autograd::engine::evaluate_function: SubBackward0 ][ autograd::engine::evaluate_function: AddBackward0 ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ]
+                         [ aten::empty ][ aten::fill_ ]             [ aten::result_type ][ aten::to ][ aten::empty_like ---][ aten::fill_ ][ PowBackward0 -----------------------------------------------------------------------------------][ SubBackward0 ]                                     [ AddBackward0 ]                                     [ torch::autograd::AccumulateGrad -------]                              [ torch::autograd::AccumulateGrad ]
+                                                                                                     [ aten::empty_strided ]               [ aten::pow -----------------------------------][ aten::mul -------------------------][ aten::mul ][ aten::neg ]                                                                                             [ aten::new_empty_strided ][ aten::copy_ ]                              [ aten::detach ]
+                                                                                                                                           [ aten::result_type ][ aten::to ][ aten::copy_ ][ aten::mul -------------------------]                                                                                                                       [ aten::empty_strided ]                                                 [ detach ]
+                                                                                                                                                                                           [ aten::to --------------------------]
+                                                                                                                                                                                           [ aten::_to_copy --------------------]
+                                                                                                                                                                                           [ aten::empty_strided ][ aten::copy_ ]
+            """  # noqa: B950
+        )
+
+    def test_profiler_experimental_tree_with_record_function(self):
+        with profile() as p:
+            with torch.autograd.profiler.record_function("Top level Annotation"):
+                with torch.autograd.profiler.record_function("First Annotation"):
+                    x = torch.ones((1,), requires_grad=True)
+
+                # Check that we correctly handle the case when a user
+                # annotation does not call `__exit__`.
+                _ = torch.autograd.profiler.record_function("Second Annotation").__enter__()
+
+                y = x + 1
+                with torch.autograd.profiler.record_function("Third Annotation"):
+                    y.backward()
+
+        # NB: The `aten::zeros` before the record function annotations are due to
+        # `at::cpp_custom_type_hack`. When we switch to `torch::CustomClassHolder`
+        # they will disappear.
+        self.assertExpectedInline(
+            IcicleNode.format(p.profiler, 12),
+            """\
+            [ aten::zeros ---------------][ Top level Annotation ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------]
+            [ aten::empty ][ aten::zero_ ][ aten::empty ][ aten::zeros ---------------][ First Annotation -------------------------][ aten::zeros ---------------][ Second Annotation ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------]
+                                                         [ aten::empty ][ aten::zero_ ][ aten::empty ][ aten::ones ----------------][ aten::empty ][ aten::zero_ ][ aten::empty ][ aten::add -------------------------][ aten::zeros ---------------][ Third Annotation --------------------------------------------------------------------------------------------------------------------------------------------------------------]
+                                                                                                      [ aten::empty ][ aten::fill_ ]                                             [ aten::to --------------------------][ aten::empty ][ aten::zero_ ][ aten::empty ][ aten::ones_like -------------------][ autograd::engine::evaluate_function: AddBackward0 ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ]
+                                                                                                                                                                                 [ aten::_to_copy --------------------]                                             [ aten::empty_like ---][ aten::fill_ ][ AddBackward0 ]                                     [ torch::autograd::AccumulateGrad -------]
+                                                                                                                                                                                 [ aten::empty_strided ][ aten::copy_ ]                                             [ aten::empty_strided ]                                                                    [ aten::new_empty_strided ][ aten::copy_ ]
+                                                                                                                                                                                                                                                                                                                                                               [ aten::empty_strided ]
+            """  # noqa: B950
+        )
+
+    def test_profiler_experimental_tree_with_memory(self):
+        t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
+        with profile(profile_memory=True) as p:
+            z = torch.add(t1, t2)
+            y = torch.ones(1)
+            loss = (y - z) ** 2
+            loss.backward()
+
+        self.assertExpectedInline(
+            IcicleNode.format(p.profiler, 12),
+            """\
+            [ aten::add ][ aten::ones ----------------][ aten::sub ][ aten::pow --------------------------------][ aten::ones_like -------------------][ autograd::engine::evaluate_function: PowBackward0 ----------------------------------------------------------------------------------------------------------------------------------------------][ autograd::engine::evaluate_function: SubBackward0 ][ autograd::engine::evaluate_function: AddBackward0 ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ][ [memory] ]
+            [ [memory] ] [ aten::empty ][ aten::fill_ ][ [memory] ] [ aten::result_type ][ aten::to ][ [memory] ][ aten::empty_like ---][ aten::fill_ ][ PowBackward0 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------][ [memory] ][ SubBackward0 ][ [memory] ]                         [ AddBackward0 ]                                     [ torch::autograd::AccumulateGrad -------]                              [ torch::autograd::AccumulateGrad ]
+                         [ [memory] ]                                                                            [ aten::empty_strided ]               [ aten::pow -----------------------------------------------][ aten::mul -------------------------------------------------------------------------][ aten::mul ][ [memory] ][ [memory] ]            [ aten::neg ]                                                                                             [ aten::new_empty_strided ][ aten::copy_ ]                              [ aten::detach ]
+                                                                                                                 [ [memory] ]                          [ aten::result_type ][ aten::to ][ [memory] ][ aten::copy_ ][ [memory] ][ aten::mul -------------------------------------------------][ [memory] ][ [memory] ]                                     [ [memory] ]                                                                                              [ aten::empty_strided ]                                                 [ detach ]
+                                                                                                                                                                                                                               [ aten::to --------------------------][ [memory] ][ [memory] ]                                                                                                                                                                       [ [memory] ]
+                                                                                                                                                                                                                               [ aten::_to_copy --------------------]
+                                                                                                                                                                                                                               [ aten::empty_strided ][ aten::copy_ ]
+                                                                                                                                                                                                                               [ [memory] ]
+            """  # noqa: B950
+        )
 
 
 if __name__ == '__main__':

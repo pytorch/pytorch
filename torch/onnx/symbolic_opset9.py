@@ -8,7 +8,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import Optional
+from typing import List, Optional
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -19,7 +19,7 @@ from torch import _C
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
-from torch.onnx import symbolic_helper
+from torch.onnx import _exporter_states, symbolic_helper
 from torch.onnx._globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -52,6 +52,272 @@ from torch.onnx._globals import GLOBALS
 #     By having the argument name line up with the name of the scalar attribute
 #     if it exists, we can write a single function for both overloads.
 #
+
+__all__ = [
+    "unused",
+    "reshape",
+    "reshape_as",
+    "add",
+    "sub",
+    "rsub",
+    "mul",
+    "div",
+    "addcmul",
+    "floor_divide",
+    "floordiv",
+    "true_divide",
+    "reciprocal",
+    "cat",
+    "stack",
+    "mm",
+    "bmm",
+    "matmul",
+    "addmm",
+    "neg",
+    "sqrt",
+    "rsqrt",
+    "tanh",
+    "sin",
+    "cos",
+    "tan",
+    "asin",
+    "acos",
+    "atan",
+    "sigmoid",
+    "sign",
+    "overload_by_arg_count",
+    "sum",
+    "mean",
+    "prod",
+    "cumsum",
+    "t",
+    "expand",
+    "expand_as",
+    "embedding",
+    "embedding_bag",
+    "size",
+    "transpose",
+    "permute",
+    "view",
+    "view_as",
+    "unsafe_chunk",
+    "split",
+    "unsafe_split",
+    "split_with_sizes",
+    "unsafe_split_with_sizes",
+    "unbind",
+    "select",
+    "square",
+    "squeeze",
+    "prelu",
+    "silu",
+    "mish",
+    "op_with_optional_float_cast",
+    "relu",
+    "relu6",
+    "ceil",
+    "floor",
+    "threshold",
+    "leaky_relu",
+    "glu",
+    "softmax",
+    "softplus",
+    "get_pool_ceil_padding",
+    "max_pool1d",
+    "max_pool2d",
+    "max_pool3d",
+    "max_pool1d_with_indices",
+    "max_pool2d_with_indices",
+    "max_pool3d_with_indices",
+    "avg_pool1d",
+    "avg_pool2d",
+    "avg_pool3d",
+    "adaptive_avg_pool1d",
+    "adaptive_avg_pool2d",
+    "adaptive_avg_pool3d",
+    "adaptive_max_pool1d",
+    "adaptive_max_pool2d",
+    "adaptive_max_pool3d",
+    "constant_pad_nd",
+    "reflection_pad",
+    "replication_pad",
+    "reflection_pad1d",
+    "reflection_pad2d",
+    "reflection_pad3d",
+    "replication_pad1d",
+    "replication_pad2d",
+    "replication_pad3d",
+    "pad",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "upsample_linear1d",
+    "upsample_bilinear2d",
+    "upsample_trilinear3d",
+    "bitwise_not",
+    "wrap_logical_op_with_cast_to",
+    "wrap_logical_op_with_cast_to_and_from",
+    "wrap_logical_op_with_negation",
+    "eq",
+    "ne",
+    "gt",
+    "gt_impl",
+    "lt",
+    "lt_impl",
+    "ge",
+    "le",
+    "logical_and",
+    "logical_or",
+    "logical_xor",
+    "where",
+    "log_softmax",
+    "conv1d",
+    "conv2d",
+    "conv3d",
+    "conv_transpose1d",
+    "conv_transpose2d",
+    "conv_transpose3d",
+    "batch_norm",
+    "layer_norm",
+    "instance_norm",
+    "unfold",
+    "elu",
+    "selu",
+    "index_select",
+    "index_put",
+    "index_fill",
+    "index_copy",
+    "bucketize",
+    "type_as",
+    "cosine_similarity",
+    "pairwise_distance",
+    "clone",
+    "abs",
+    "log",
+    "log1p",
+    "log10",
+    "pow",
+    "clamp",
+    "clamp_min",
+    "clamp_max",
+    "max",
+    "maximum",
+    "min",
+    "minimum",
+    "amax",
+    "amin",
+    "aminmax",
+    "exp",
+    "dropout",
+    "feature_dropout",
+    "alpha_dropout",
+    "feature_alpha_dropout",
+    "dropout_",
+    "feature_dropout_",
+    "alpha_dropout_",
+    "feature_alpha_dropout_",
+    "norm",
+    "conv_tbc",
+    "empty",
+    "empty_like",
+    "new_empty",
+    "scalar_tensor",
+    "tensor",
+    "as_tensor",
+    "zeros",
+    "zeros_like",
+    "new_zeros",
+    "ones",
+    "ones_like",
+    "new_ones",
+    "full",
+    "full_like",
+    "new_full",
+    "eye",
+    "slice",
+    "hardtanh",
+    "hardswish",
+    "hardsigmoid",
+    "tanhshrink",
+    "hardshrink",
+    "softshrink",
+    "alias",
+    "unsqueeze",
+    "sort",
+    "numel",
+    "topk",
+    "to",
+    "repeat",
+    "repeat_interleave",
+    "pixel_shuffle",
+    "pixel_unshuffle",
+    "lstm",
+    "lstm_cell",
+    "gru",
+    "rnn_tanh",
+    "rnn_relu",
+    "detach",
+    "contiguous",
+    "randn",
+    "rand",
+    "randn_like",
+    "rand_like",
+    "rrelu",
+    "bernoulli",
+    "log_sigmoid",
+    "erf",
+    "flatten",
+    "nonzero",
+    "nonzero_numpy",
+    "isnan",
+    "narrow",
+    "argmax",
+    "argmin",
+    "scatter",
+    "scatter_add",
+    "log2",
+    "is_floating_point",
+    "one_hot",
+    "gather",
+    "std",
+    "var",
+    "var_mean",
+    "std_mean",
+    "logsumexp",
+    "arange",
+    "linspace",
+    "lift",
+    "masked_fill",
+    "index",
+    "linalg_norm",
+    "linalg_vector_norm",
+    "linalg_matrix_norm",
+    "linalg_cross",
+    "frobenius_norm",
+    "multinomial",
+    "baddbmm",
+    "meshgrid",
+    "remainder",
+    "gelu",
+    "group_norm",
+    "dim",
+    "item",
+    "take",
+    "kl_div",
+    "as_strided",
+    "linear",
+    "hann_window",
+    "mv",
+    "dot",
+    "fill",
+    "index_add",
+    "roll",
+    "cross",
+    "cdist",
+    "broadcast_tensors",
+    "Prim",
+    "Onnx",
+]
 
 # used to represent "missing" optional inputs
 def unused(g):
@@ -361,6 +627,8 @@ def atan(g, self):
     return g.op("Atan", self)
 
 
+# Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qsigmoid.cpp
+@symbolic_helper.quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
@@ -1029,6 +1297,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
 
 
 def _max_pool(name, tuple_fn, ndims, return_indices):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "is", "i")
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if set(tuple_fn(dilation)) != {1}:
@@ -2376,13 +2645,9 @@ def exp(g, self):
 @symbolic_helper.parse_args("v", "f", "i")
 def dropout(g, input, p, train):
     symbolic_helper.check_training_mode(train, "dropout")
-    # in eval mode, dropout is non-op - if the node's train param is set to False, dropout is non-op
+    # if train is False, dropout is no-op
     if not train:
         return input
-    warnings.warn(
-        "Dropout is a training op and should not be exported in inference mode. "
-        "For inference, make sure to call eval() on the model and to export it with param training=False."
-    )
     r, _ = g.op("Dropout", input, ratio_f=p, outputs=2)
     return r
 
@@ -2467,7 +2732,7 @@ def _unique2(g, input, sorted, return_inverse, return_counts):
 
 # TODO(justinchuby): Clean up this function generation magic by defining the functions
 # explicitly.
-for k, v in symbolic_helper.cast_pytorch_to_onnx.items():
+for k, v in symbolic_helper.cast_pytorch_to_onnx.items():  # type: ignore[has-type]
     name = f"_cast_{k}"
     globals()[name] = symbolic_helper.parse_args("v", "i")(
         functools.partial(symbolic_helper._cast_func_template, v)
@@ -2713,12 +2978,11 @@ def slice(g, self, *args):
         step = symbolic_helper._parse_arg(step, "i")
         if step != 1:
             raise RuntimeError("step!=1 is currently not supported")
-        is_start_none = (
-            start.node().kind() == "prim::Constant"
-            and start.type().kind() == "NoneType"
+        is_start_none = start.node().kind() == "prim::Constant" and isinstance(
+            start.type(), _C.NoneType
         )
-        is_end_none = (
-            end.node().kind() == "prim::Constant" and end.type().kind() == "NoneType"
+        is_end_none = end.node().kind() == "prim::Constant" and isinstance(
+            end.type(), _C.NoneType
         )
         is_start_onnx_const = start.node().kind() == "onnx::Constant"
         is_end_onnx_const = end.node().kind() == "onnx::Constant"
@@ -2759,12 +3023,11 @@ def slice(g, self, *args):
         # aten::slice(t[] l, int start, int end, int step) -> t[]
         start, end, step = args
         dim = 0
-        is_start_none = (
-            start.node().kind() == "prim::Constant"
-            and start.type().kind() == "NoneType"
+        is_start_none = start.node().kind() == "prim::Constant" and isinstance(
+            start.type(), _C.NoneType
         )
-        is_end_none = (
-            end.node().kind() == "prim::Constant" and end.type().kind() == "NoneType"
+        is_end_none = end.node().kind() == "prim::Constant" and isinstance(
+            end.type(), _C.NoneType
         )
         start = 0 if is_start_none else symbolic_helper._parse_arg(start, "i")
         end = (
@@ -3889,7 +4152,7 @@ def scatter_add(g, self, dim, index, src):
 
 def log2(g, self):
     _ln2 = 0.693147180559945309
-    return g.op("Div", log(g, self), g.op("Constant", value_t=torch.tensor([_ln2])))
+    return g.op("Div", log(g, self), g.op("Constant", value_t=torch.tensor(_ln2)))
 
 
 def is_floating_point(g, self):
@@ -4961,7 +5224,12 @@ class Prim:
         return None
 
     @staticmethod
-    def ListUnpack(g, *inputs, **kwargs):
+    def ListUnpack(g, *inputs, **kwargs) -> Optional[List[_C.Value]]:
+        if len(inputs) == 1 and inputs[0].node().kind() == "prim::ListConstruct":
+            # Cancel the previous node if it is ListConstruct by returning its inputs
+            # TODO(justinchuby): Use a public method in the helper module
+            return symbolic_helper._unpack_list(inputs[0])
+
         return None
 
     @staticmethod
@@ -5004,18 +5272,20 @@ class Prim:
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
     @staticmethod
-    def device(ctx: torch.onnx.SymbolicContext, g, *inputs, **kwargs):
-        n = ctx.cur_node
-
-        if n.output().type().kind() == "DeviceObjType":
+    def device(
+        ctx: _exporter_states.SymbolicContext, g: _C.Graph, *inputs, **kwargs
+    ) -> None:
+        output_type = ctx.cur_node.output().type()
+        if isinstance(output_type, _C.DeviceObjType):
             return None
 
         return symbolic_helper._unimplemented(
-            "prim::device", "output type is not `DeviceObjType`."
+            "prim::device",
+            f"output type should be 'DeviceObjType', not '{output_type.kind()}'",
         )
 
     @staticmethod
-    def Loop(ctx: torch.onnx.SymbolicContext, g, *inputs, **attrs):
+    def Loop(ctx: _exporter_states.SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
         env = ctx.env
         params_dict = ctx.params_dict
@@ -5061,7 +5331,7 @@ class Prim:
         return new_op_outputs
 
     @staticmethod
-    def If(ctx: torch.onnx.SymbolicContext, g, *inputs, **attrs):
+    def If(ctx: _exporter_states.SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
         block = ctx.onnx_block
         env = ctx.env
@@ -5149,7 +5419,7 @@ class Prim:
             return new_op_outputs
 
     @staticmethod
-    def Constant(ctx: torch.onnx.SymbolicContext, g, *inputs, **attrs):
+    def Constant(ctx: _exporter_states.SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
 
         if n.mustBeNone():
@@ -5180,7 +5450,7 @@ class Onnx:
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
     @staticmethod
-    def Placeholder(ctx: torch.onnx.SymbolicContext, g, *inputs, **attrs):
+    def Placeholder(ctx: _exporter_states.SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
         block = ctx.onnx_block
         env = ctx.env

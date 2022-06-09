@@ -27,7 +27,8 @@ class SymbolicIntNode;
 // named data_.
 class C10_API SymInt {
  public:
-  explicit SymInt(int64_t d) : data_(d){};
+  /*implicit*/ SymInt(int64_t d) : data_(d){};
+  SymInt() = default;
 
   int64_t expect_int() const {
     TORCH_CHECK(!is_symbolic());
@@ -42,15 +43,25 @@ class C10_API SymInt {
     return data_ == p2.data_;
   }
 
-  SymInt operator+(SymInt sci) const {
-    TORCH_CHECK(
-        !this->is_symbolic() && !sci.is_symbolic(),
-        "Symbolic Add isn't supported yet");
-    return SymInt(data_ + sci.data_);
+  bool operator!=(const SymInt& p2) const {
+    return data_ != p2.data_;
   }
+
+  SymInt operator+(SymInt sci) const;
+  bool operator<(SymInt sci) const;
+  void operator*=(SymInt sci);
+
+  SymInt operator*(int64_t sci) const;
+  bool operator<(int64_t sci) const;
+  bool operator==(int64_t sci) const;
+  bool operator!=(int64_t sci) const;
 
   std::shared_ptr<SymbolicIntNode> toSymbolicIntNode();
   static c10::SymInt toSymInt(std::shared_ptr<SymbolicIntNode> sin);
+
+  int64_t as_int_unchecked() const {
+    return data_;
+  }
 
   // This is needed for interoperability with IValue
   int64_t data() const {
