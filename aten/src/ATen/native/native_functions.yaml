@@ -11596,6 +11596,7 @@
   variants: function
   dispatch:
     CPU, CUDA: linalg_lstsq_out
+  tags: dynamic_output_shape
 
 # torch.linalg.matmul, alias for torch.matmul
 - func: linalg_matmul(Tensor self, Tensor other) -> Tensor

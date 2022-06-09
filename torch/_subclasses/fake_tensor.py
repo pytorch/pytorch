@@ -31,6 +31,8 @@ class DynamicOutputShapeException(Exception):
 # TODO: use tags when available
 # operators whose output shape depends on input tensor data
 _data_dependent_operators = (
+    aten.bincount.default,
+    aten.one_hot.default,
     aten.nonzero.out,
     aten.nonzero.default,
     aten.nonzero_numpy.default,
@@ -45,6 +47,8 @@ _data_dependent_operators = (
     aten.index_select.dimname,
     aten.masked_select.out,
     aten.masked_select.default,
+    aten.linalg_lstsq.default,
+    aten.linalg_lstsq.out,
 )
 
 _device_not_kwarg_ops = (

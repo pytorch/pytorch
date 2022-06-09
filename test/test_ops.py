@@ -1505,6 +1505,7 @@ dynamic_output_op_tests = (
     "__getitem___",
     "argwhere",
     "bincount",
+    "index_select",
     "combinations",
     "linalg.lstsq",
     "masked_select",
