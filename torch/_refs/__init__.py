@@ -30,7 +30,7 @@ from torch._prims.wrappers import (
 )
 
 from collections.abc import Iterable
-from functools import reduce, partial
+from functools import reduce, partial, wraps
 from typing import Sequence, Optional, Union, Callable, List, Tuple
 import operator
 import warnings
@@ -307,118 +307,122 @@ infer_aten_op = object()
 
 # TODO: add type promotion support
 def _make_elementwise_unary_reference(
-    prim: Callable,
-    *,
     type_promotion_kind,
+    *,
     aten_op=infer_aten_op,
     disable_meta=False,
     extra_meta=None,
 ) -> Callable:
-    @out_wrapper
-    @elementwise_unary_scalar_wrapper
-    @elementwise_type_promotion_wrapper(
-        type_promoting_args=("a",),
-        type_promotion_kind=type_promotion_kind,
-    )
-    def _ref(a: TensorLikeType) -> TensorLikeType:
-        if not isinstance(a, TensorLike):
-            raise RuntimeError(
-                "Expected a tensor input for an elementwise unary operation!"
-            )
+    def inner(prim: Callable):
+        nonlocal aten_op
 
-        if extra_meta is not None:
-            extra_meta(a)
+        @wraps(prim)
+        @out_wrapper
+        @elementwise_unary_scalar_wrapper
+        @elementwise_type_promotion_wrapper(
+            type_promoting_args=("a",),
+            type_promotion_kind=type_promotion_kind,
+        )
+        def _ref(a: TensorLikeType) -> TensorLikeType:
+            if not isinstance(a, TensorLike):
+                raise RuntimeError(
+                    "Expected a tensor input for an elementwise unary operation!"
+                )
 
-        return prim(a)
+            if extra_meta is not None:
+                extra_meta(a)
 
-    if aten_op is infer_aten_op:
-        aten_op = getattr(torch.ops.aten, prim.__name__.split(".")[0])
-    if aten_op is not None:
-        register_decomposition(aten_op, disable_meta=disable_meta)(_ref)
+            return prim(a)
 
-    return _ref
+        if aten_op is infer_aten_op:
+            aten_op = getattr(torch.ops.aten, prim.__name__)
+        if aten_op is not None:
+            register_decomposition(aten_op, disable_meta=disable_meta)(_ref)
+
+        return _ref
+
+    return inner
 
 
-abs = _make_elementwise_unary_reference(
-    prims.abs,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
+def abs(a):
+    return prims.abs(a)
 
-acos = _make_elementwise_unary_reference(
-    prims.acos,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
 
-acosh = _make_elementwise_unary_reference(
-    prims.acosh,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def acos(a):
+    return prims.acos(a)
 
-asin = _make_elementwise_unary_reference(
-    prims.asin,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
 
-atan = _make_elementwise_unary_reference(
-    prims.atan,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def acosh(a):
+    return prims.acosh(a)
 
-bitwise_not = _make_elementwise_unary_reference(
-    prims.bitwise_not,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
 
-ceil = _make_elementwise_unary_reference(
-    prims.ceil,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def asin(a):
+    return prims.asin(a)
 
-cos = _make_elementwise_unary_reference(
-    prims.cos,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
 
-cosh = _make_elementwise_unary_reference(
-    prims.cosh,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def atan(a):
+    return prims.atan(a)
 
-digamma = _make_elementwise_unary_reference(
-    prims.digamma,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
 
-erf = _make_elementwise_unary_reference(
-    prims.erf,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+def bitwise_not(a):
+    return prims.bitwise_not(a)
 
-erfinv = _make_elementwise_unary_reference(
-    prims.erf_inv,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=torch.ops.aten.erfinv,  # prim/aten name mismatch
-)
 
-erfc = _make_elementwise_unary_reference(
-    prims.erfc,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+def ceil(a):
+    return prims.ceil(a)
 
-exp = _make_elementwise_unary_reference(
-    prims.exp,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
 
-expm1 = _make_elementwise_unary_reference(
-    prims.expm1,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def cos(a):
+    return prims.cos(a)
 
-exp2 = _make_elementwise_unary_reference(
-    prims.exp2,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def cosh(a):
+    return prims.cosh(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def digamma(a):
+    return prims.digamma(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def erf(a):
+    return prims.erf(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def erfinv(a):
+    return prims.erf_inv(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def erfc(a):
+    return prims.erfc(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def exp(a):
+    return prims.exp(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def expm1(a):
+    return prims.expm1(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def exp2(a):
+    return prims.exp2(a)
+
 
 # Fill has its own implementation because it has a value parameter
 @out_wrapper
@@ -441,39 +445,30 @@ def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
     return prims.fill(a, value)
 
 
-floor = _make_elementwise_unary_reference(
-    prims.floor,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+def floor(a):
+    return prims.floor(a)
 
 
-def _frac(x: TensorLikeType) -> TensorLikeType:
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+def frac(x: TensorLikeType) -> TensorLikeType:
     trunc_x = mul(floor(abs(x)), sign(x))
     return sub(x, trunc_x)
 
 
-frac = _make_elementwise_unary_reference(
-    _frac,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    aten_op=torch.ops.aten.frac,
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=None,  # CompositeImplicitAutograd
 )
-
-
-def _isfinite(a: TensorLikeType) -> TensorLikeType:
+def isfinite(a: TensorLikeType) -> TensorLikeType:
     if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
         return prims.isfinite(a)
 
     return ones_like(a, dtype=torch.bool)
 
 
-isfinite = _make_elementwise_unary_reference(
-    _isfinite,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
-    aten_op=None,  # CompositeImplicitAutograd
-)
-
-
-def _isinf(a: TensorLikeType) -> TensorLikeType:
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+def isinf(a: TensorLikeType) -> TensorLikeType:
     # TODO Add complex tensor support to remove is_infinite prim
     # if utils.is_complex_dtype(a):
     #     return bitwise_or(_isinf(real(a), _isinf(imag(a))
@@ -485,53 +480,42 @@ def _isinf(a: TensorLikeType) -> TensorLikeType:
     return zeros_like(a, dtype=torch.bool)
 
 
-isinf = _make_elementwise_unary_reference(
-    _isinf,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
-    aten_op=torch.ops.aten.isinf,  # prim/aten name mismatch
-)
-
-
-def _isnan(a: TensorLikeType) -> TensorLikeType:
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+def isnan(a: TensorLikeType) -> TensorLikeType:
     return prims.ne(a, a)
 
 
-isnan = _make_elementwise_unary_reference(
-    _isnan,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
-    aten_op=torch.ops.aten.isnan,  # prim/aten name mismatch
+# TODO: if this is special maybe it should be defined there and imported here?
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i0
 )
+def i0(a):
+    return prims.bessel_i0(a)
 
-i0 = _make_elementwise_unary_reference(
-    prims.bessel_i0,
-    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=torch.ops.aten.special_i0,
-)
 
-lgamma = _make_elementwise_unary_reference(
-    prims.lgamma,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def lgamma(a):
+    return prims.lgamma(a)
 
-log = _make_elementwise_unary_reference(
-    prims.log,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
 
-log1p = _make_elementwise_unary_reference(
-    prims.log1p,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def log(a):
+    return prims.log(a)
 
-log2 = _make_elementwise_unary_reference(
-    prims.log2,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
 
-log10 = _make_elementwise_unary_reference(
-    prims.log10,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def log1p(a):
+    return prims.log1p(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def log2(a):
+    return prims.log2(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def log10(a):
+    return prims.log10(a)
 
 
 @register_decomposition(torch.ops.aten.nan_to_num)
@@ -575,11 +559,11 @@ def _neg_meta(a: TensorLikeType):
         raise RuntimeError(msg)
 
 
-neg = _make_elementwise_unary_reference(
-    prims.neg,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    extra_meta=_neg_meta,
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT, extra_meta=_neg_meta
 )
+def neg(a):
+    return prims.neg(a)
 
 
 # positive does not use _make_elementwise_unary_reference because it does not support out
@@ -591,74 +575,68 @@ def positive(a: TensorLikeType) -> TensorLikeType:
     return a
 
 
-reciprocal = _make_elementwise_unary_reference(
-    prims.reciprocal,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def reciprocal(a):
+    return prims.reciprocal(a)
+
 
 # TODO: round takes additional kwargs
-round = _make_elementwise_unary_reference(
-    prims.round,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
 )
 
 
-def _sigmoid(a: TensorLikeType) -> TensorLikeType:
+def round(a):
+    return prims.round(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def sigmoid(a: TensorLikeType) -> TensorLikeType:
     return true_divide(1, add(1, exp(neg(a))))
 
 
-sigmoid = _make_elementwise_unary_reference(
-    _sigmoid,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=torch.ops.aten.sigmoid,
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+def sign(a):
+    return prims.sign(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+def signbit(a):
+    return prims.sign(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def sin(a):
+    return prims.sin(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def sinh(a):
+    return prims.sinh(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def sqrt(a):
+    return prims.sqrt(a)
+
+
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    aten_op=None,  # CompositeImplicitAutograd,
 )
-
-sign = _make_elementwise_unary_reference(
-    prims.sign,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
-
-
-signbit = _make_elementwise_unary_reference(
-    prims.signbit,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
-)
-
-sin = _make_elementwise_unary_reference(
-    prims.sin,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-
-sinh = _make_elementwise_unary_reference(
-    prims.sinh,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-
-sqrt = _make_elementwise_unary_reference(
-    prims.sqrt,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-
-
-def _square(a: TensorLikeType) -> TensorLikeType:
+def square(a: TensorLikeType) -> TensorLikeType:
     return mul(a, a)
 
 
-square = _make_elementwise_unary_reference(
-    _square,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
-    aten_op=None,  # CompositeImplicitAutograd,
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def tan(a):
+    return prims.tan(a)
 
-tan = _make_elementwise_unary_reference(
-    prims.tan,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
 
-tanh = _make_elementwise_unary_reference(
-    prims.tanh, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
-)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def tanh(a):
+    return prims.tanh(a)
 
 
 def _make_elementwise_binary_reference(
