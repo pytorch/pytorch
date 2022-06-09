@@ -20246,6 +20246,17 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.rrelu",
         torch_opinfo_name="nn.functional.rrelu",
+        decorators=(
+            # The errors are from uniform not being tested and likely not having a seed reset
+            # AssertionError: tensor(False) is not true : Reference result
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
+            # AssertionError: tensor(False) is not true : Reference result
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback'),
+            # RuntimeError: Tracing expected 4 arguments but got 1 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.selu",

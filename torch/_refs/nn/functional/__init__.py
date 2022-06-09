@@ -219,7 +219,7 @@ def rrelu(a: TensorLikeType,
     if inplace:
         raise NotImplementedError
 
-    rhs = refs.uniform(a.shape, low=lower, high=upper, dtype=a.dtype, device=a.device),
+    rhs = refs.uniform(a.shape, low=lower, high=upper, dtype=a.dtype, device=a.device)
     return refs.where(refs.ge(a, 0), a, rhs)
 
 
