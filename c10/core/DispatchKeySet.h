@@ -814,38 +814,15 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
 
 // Returns a DispatchKeySet of autocast related keys mapped to backend.
 inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
-  constexpr auto autograd_cpu_ks_ = DispatchKeySet(DispatchKey::AutogradCPU);
-  constexpr auto autograd_cuda_ks_ = DispatchKeySet(DispatchKey::AutogradCUDA);
-  constexpr auto autograd_hip_ks_ = DispatchKeySet(DispatchKey::AutogradHIP);
-  constexpr auto autograd_xla_ks_ = DispatchKeySet(DispatchKey::AutogradXLA);
-  constexpr auto autograd_mps_ks_ = DispatchKeySet(DispatchKey::AutogradMPS);
-  constexpr auto autograd_ipu_ks_ = DispatchKeySet(DispatchKey::AutogradIPU);
-  constexpr auto autograd_xpu_ks_ = DispatchKeySet(DispatchKey::AutogradXPU);
-
   constexpr auto autocast_cpu_ks =
       DispatchKeySet(DispatchKey::AutocastFunctionality) |
       DispatchKeySet(BackendComponent::CPUBit);
   constexpr auto autocast_cuda_ks =
       DispatchKeySet(DispatchKey::AutocastFunctionality) |
       DispatchKeySet(BackendComponent::CUDABit);
-  constexpr auto autocast_hip_ks =
-      DispatchKeySet(DispatchKey::AutocastFunctionality) |
-      DispatchKeySet(BackendComponent::HIPBit);
   constexpr auto autocast_xla_ks =
       DispatchKeySet(DispatchKey::AutocastFunctionality) |
       DispatchKeySet(BackendComponent::XLABit);
-  constexpr auto autocast_mps_ks =
-      DispatchKeySet(DispatchKey::AutocastFunctionality) |
-      DispatchKeySet(BackendComponent::MPSBit);
-  constexpr auto autocast_ipu_ks =
-      DispatchKeySet(DispatchKey::AutocastFunctionality) |
-      DispatchKeySet(BackendComponent::IPUBit);
-  constexpr auto autocast_hpu_ks =
-      DispatchKeySet(DispatchKey::AutocastFunctionality) |
-      DispatchKeySet(BackendComponent::HPUBit);
-  constexpr auto autocast_ve_ks =
-      DispatchKeySet(DispatchKey::AutocastFunctionality) |
-      DispatchKeySet(BackendComponent::VEBit);
   constexpr auto autocast_lazy_ks =
       DispatchKeySet(DispatchKey::AutocastFunctionality) |
       DispatchKeySet(BackendComponent::LazyBit);
@@ -862,6 +839,8 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
       return autocast_cuda_ks;
     case BackendComponent::XLABit:
       return autocast_xla_ks;
+    case BackendComponent::LazyBit:
+      return autocast_lazy_ks;
     default:
       return DispatchKeySet();
   }
