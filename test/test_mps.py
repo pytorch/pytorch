@@ -1420,6 +1420,14 @@ class TestMPS(TestCase):
                     self.assertEqual(t[2, 1], j)
                     self.assertEqual(t.sum(), 1 + i + j)
 
+    def test_copy_from_shared_storage(self):
+        shared_np = np.ones((10, 256, 256, 3), dtype=np.float32)
+        shared_torch = torch.from_numpy(shared_np)
+
+        mps_tensor = shared_torch[9].to('mps')
+
+        self.assertEqual(shared_np[9], mps_tensor.cpu().numpy())
+
 
 class TestSmoothL1Loss(TestCase):
 

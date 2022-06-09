@@ -340,14 +340,15 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_,
   }
 
   const void* host_src = src.storage().data();
-  uint64_t size = src.nbytes();
+  uint64_t src_storage_size = src.storage().nbytes();
+  uint64_t src_tensor_size = src.nbytes();
 
   NSUInteger sourceOffset = 0;
   @autoreleasepool {
     MTLResourceOptions options = MTLResourceOptionCPUCacheModeDefault | MTLResourceStorageModeShared;
     NSUInteger alignedLength = 0;
 
-    void* alignedPtr = pageAlignedBlockPtr(host_src, (NSUInteger)size, &alignedLength);
+    void* alignedPtr = pageAlignedBlockPtr(host_src, (NSUInteger)src_storage_size, &alignedLength);
     id<MTLBuffer> sourceBuffer = [device newBufferWithBytesNoCopy:alignedPtr
                                           length:alignedLength
                                          options:options
@@ -366,7 +367,7 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_,
                        sourceOffset:(NSUInteger)sourceOffset
                            toBuffer:destBuffer
                   destinationOffset:(NSUInteger)dst_byte_offset
-                               size:(NSUInteger)size];
+                               size:(NSUInteger)src_tensor_size];
         [blitEncoder endEncoding];
         if (non_blocking) {
           stream->commit(true);
