@@ -466,11 +466,39 @@ TORCH_META_FUNC(linalg_lu_solve)(const Tensor& LU,
 }
 
 
+TORCH_META_FUNC(linalg_qr)(const Tensor& A,
+                           c10::string_view mode) {
+  at::native::checkIsMatrix(A, "linalg.qr");
+  bool compute_q, reduced_mode;
+  std::tie(compute_q, reduced_mode) = at::native::_parse_qr_mode(mode);
+
+  auto A_shape = A.sizes().vec();
+  const auto m = A_shape.cend()[-2];
+  const auto n = A_shape.cend()[-1];
+  const auto k = std::min(m, n);
+
+  if (compute_q) {
+    auto Q_shape = A_shape;
+    Q_shape.end()[-1] = reduced_mode ? k : m;
+    auto Q_strides = at::native::batched_matrix_contiguous_strides(Q_shape, /*f-contig*=*/true);
+    set_output_strided(0, Q_shape, Q_strides, A.options(), {});
+  } else {
+    set_output_raw_strided(0, {0}, {}, A.options(), {});
+  }
+
+  // For readability
+  auto R_shape = std::move(A_shape);
+  R_shape.end()[-2] = (reduced_mode || !compute_q) ? k : m;
+  auto R_strides = at::native::batched_matrix_contiguous_strides(R_shape, /*f-contig*=*/true);
+  set_output_strided(1, R_shape, R_strides, A.options(), {});
+}
+
+
 TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
                              bool full_matrices,
                              bool compute_uv,
                              c10::optional<c10::string_view> driver) {
-  TORCH_CHECK(A.dim() >= 2, "linalg.svd: input should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
+  at::native::checkIsMatrix(A, "linalg.svd");
 
   auto sizes = A.sizes().vec();
   const auto m = sizes.cend()[-2];
@@ -2443,137 +2471,63 @@ std::tuple<Tensor, Tensor> geqrf(const Tensor& input) {
 
   For further details, please see the LAPACK documentation for GEQRF and ORGQR.
 */
-void linalg_qr_out_helper(const Tensor& input, const Tensor& Q, const Tensor& R, bool compute_q, bool reduced_mode) {
+TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
+                               c10::string_view mode,
+                               const Tensor & Q,
+                               const Tensor & R) {
+  auto m = A.size(-2);
+  auto n = A.size(-1);
+  auto k = std::min(m, n);
+  bool compute_q, reduced_mode;
+  std::tie(compute_q, reduced_mode) = at::native::_parse_qr_mode(mode);
 
-  TORCH_INTERNAL_ASSERT(input.dim() >= 2);
 
-  TORCH_INTERNAL_ASSERT(input.scalar_type() == Q.scalar_type());
-  TORCH_INTERNAL_ASSERT(input.device() == Q.device());
-
-  TORCH_INTERNAL_ASSERT(input.scalar_type() == R.scalar_type());
-  TORCH_INTERNAL_ASSERT(input.device() == R.device());
-
-  auto m = input.size(-2);
-  auto n = input.size(-1);
-  auto mn = std::min(m, n);
-
-  // Q must have the expected shape: reduced_mode ? (..., m, min(m, n)) : (..., m, m)
-  if (compute_q) {
-    auto expected_Q_shape = input.sizes().vec();
-    expected_Q_shape.back() = reduced_mode ? mn : m;
-    TORCH_INTERNAL_ASSERT(Q.sizes().equals(expected_Q_shape));
-
-    // Q tensor must be in batched column major order (Fortran contiguous)
-    TORCH_INTERNAL_ASSERT(Q.mT().is_contiguous());
-  }
-
-  // R must have the expected shape: (reduced_mode || !compute_q) ? (..., min(m,n), n) : (..., m, n)
-  auto expected_R_shape = input.sizes().vec();
-  expected_R_shape.end()[-2] = (reduced_mode || !compute_q) ? mn : m;
-  TORCH_INTERNAL_ASSERT(R.sizes().equals(expected_R_shape));
-
-  // R tensor must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT(R.mT().is_contiguous());
-
-  auto tau_shape = input.sizes().vec();
+  // We need an auxiliary tensor to call geqrf
+  auto tau_shape = A.sizes().vec();
   tau_shape.pop_back();
-  tau_shape.back() = mn;
-  Tensor tau = at::empty(tau_shape, input.options());
+  tau_shape.back() = k;
+  auto tau = A.new_empty(tau_shape);
 
   // geqrf requires m x n workspace input that is modified in-place
-  // if m > n and reduced==true we use Q tensor for storing the result of geqrf operation
-  // otherwise R tensor is used
+  // We try to use Q. If it doesn't fit, we try to use R
+  // If m > n and compute_q==false, it won't fit into Q or R, so we neet to create an auxiliary tensor
   Tensor QR;
-  if (m <= n) {
+  if (compute_q && Q.size(-1) == n) {
+    QR = Q;
+    QR.copy_(A);
+  } else if (R.size(-2) == m) {
     QR = R;
-  } else { // m > n
-    if (compute_q) {
-      QR = reduced_mode ? Q : R;
-    } else {
-      // if m > n and compute_q==false we need to allocate an additional temporary tensor
-      QR = at::empty(input.mT().sizes(), input.options());
-      QR.transpose_(-2, -1);
-    }
+    QR.copy_(A);
+  } else {
+    QR = cloneBatchedColumnMajor(A);
   }
 
-  // geqrf_stub (apply_geqrf) performs calculations in-place and 'QR' must be a copy of input
-  QR.copy_(input);
-  geqrf_stub(input.device().type(), QR, tau);
+  geqrf_stub(A.device().type(), QR, tau);
 
-  // this is for mode='r'
-  if (!compute_q) {
-    // if m > n we used a temporary tensor to store the result of geqrf
-    if (m > n) {
-      R.copy_(QR.slice(-2, 0, mn));
+  // Split QR into Q (unless compute_q == false) and R
+  if (QR.is_alias_of(R)) {
+    // Copy QR into Q
+    if (compute_q) {
+      // If the result didn't fit in Q and compute_q == true is because Q is not of size m x n (i.e. it's of size m x m)
+      TORCH_INTERNAL_ASSERT(Q.size(-1) == m);
+      if (m < n) {
+        Q.copy_(QR.slice(-1, 0, m));
+      } else {
+        Q.slice(-1, 0, n).copy_(QR);
+      }
     }
     R.triu_();
-    return;
-  }
-
-  // if Q tensor was used for geqrf copy the result for R from QR
-  if (m > n && reduced_mode) {
-    R.copy_(Q.slice(-2, 0, n));
   } else {
-    Q.slice(-1, 0, n).copy_(R.slice(-1, 0, m));
+    // Copy QR into R from Q or the aux tensor
+    at::triu_out(const_cast<Tensor&>(R), QR.slice(-2, 0, n));
   }
-  R.triu_();
 
-  // Next perform ORGQR for Q using the result from GEQRF
-  orgqr_stub(input.device().type(), const_cast<Tensor&>(Q), tau);
-}
-
-std::tuple<Tensor, Tensor> _linalg_qr_helper_default(const Tensor& input, c10::string_view mode) {
-  bool compute_q, reduced_mode;
-  std::tie(compute_q, reduced_mode) = _parse_qr_mode(mode);
-  auto m = input.size(-2);
-  auto n = input.size(-1);
-  auto mn = std::min(m, n);
-
-  // Allocate Q, R tensors with correct shape and memory layout
-  Tensor Q;
   if (compute_q) {
-    auto Qt_shape = input.sizes().vec();
-    Qt_shape.end()[-2] = reduced_mode ? mn : m;
-    Qt_shape.end()[-1] = m;
-    Q = at::empty(Qt_shape, input.options());
-    Q.transpose_(-2, -1); // make 'Q' with Fortran contiguous memory layout
-  } else {
-    Q = at::empty({0}, input.options());
+    // Next perform ORGQR for Q using the result from GEQRF
+    orgqr_stub(A.device().type(), const_cast<Tensor&>(Q), tau);
   }
-
-  auto Rt_shape = input.sizes().vec();
-  Rt_shape.end()[-2] = n;
-  Rt_shape.end()[-1] = (reduced_mode || !compute_q) ? mn : m;
-  Tensor R = at::empty(Rt_shape, input.options());
-  R.transpose_(-2, -1); // make 'R' with Fortran contiguous memory layout
-
-  // Now fill Q, R tensors with the result
-  linalg_qr_out_helper(input, Q, R, compute_q, reduced_mode);
-
-  return std::make_tuple(Q, R);
 }
 
-std::tuple<Tensor,Tensor> linalg_qr(const Tensor& self, c10::string_view mode) {
-  TORCH_CHECK(self.dim() >= 2,
-              "qr input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  return at::_linalg_qr_helper(self, mode);
-}
-
-std::tuple<Tensor&,Tensor&> linalg_qr_out(const Tensor& self, c10::string_view mode, Tensor& Q, Tensor& R) {
-  TORCH_CHECK(self.dim() >= 2,
-              "torch.linalg.qr: input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  checkSameDevice("torch.linalg.qr", Q, self, "Q");
-  checkSameDevice("torch.linalg.qr", R, self, "R");
-  checkLinalgCompatibleDtype("torch.linalg.qr", Q, self, "Q");
-  checkLinalgCompatibleDtype("torch.linalg.qr", R, self, "R");
-  Tensor Q_tmp, R_tmp;
-  std::tie(Q_tmp, R_tmp) = at::_linalg_qr_helper(self, mode);
-  at::native::resize_output(Q, Q_tmp.sizes());
-  Q.copy_(Q_tmp);
-  at::native::resize_output(R, R_tmp.sizes());
-  R.copy_(R_tmp);
-  return std::tuple<Tensor&, Tensor&>(Q, R);
-}
 
 std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
   TORCH_WARN_ONCE(
