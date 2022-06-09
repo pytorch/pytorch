@@ -1760,8 +1760,6 @@ class TestFXGraphPartitioner(JitTestCase):
     #         add_4 = add_2 + add_3
     #         return add_4
 
-
-
     # torchvision.models.resnet18,
     # torchvision.models.resnet50,
     # torchvision.models.densenet121,
@@ -1779,7 +1777,7 @@ class TestFXGraphPartitioner(JitTestCase):
                 self.linear2 = torch.nn.Linear(4, 4)
                 self.param = torch.nn.Parameter(torch.rand(4, 4))
 
-            def forward(self, a, b, c, d):
+            def forward(self, a, b, c):
                 add = a + b
 
                 linear_1 = self.linear(add)
@@ -1808,27 +1806,9 @@ class TestFXGraphPartitioner(JitTestCase):
 
         partitions = partitioner.partition(candidates)
 
-        # tags = []
-        # for partition_id, nodes in reversed(list(partitions.items())):
-        #     tags.append(str(partition_id))
-        #     for node in nodes:
-        #         node.tag = str(partition_id)
+        partitions[1].extend(partitions[0])
+        partitions.pop(0)
 
-        # for node in traced.graph.nodes:
-        #     if node.op in  ["call_function", "call_method", "call_module"] :
-        #         # if not hasattr(node, 'tag'):
-        #         #     node.tag = "fallback"
-        #         if node.name == "linear":
-        #             node.tag = "fallback"
-        #         if node.name == "linear2":
-        #             node.tag = "fallback2"
-
-
-        # tags = ["2", "fallback", "1", "fallback2", "0"]
-
-        # print(tags)
-
-        # print(traced.graph)
         print(partitions)
 
 
@@ -1836,20 +1816,20 @@ class TestFXGraphPartitioner(JitTestCase):
         dot_graph = drawer.get_dot_graph()
         dot_graph.write_png("before.png")
 
-
         # module_with_submodules = split_module(traced, m, lambda node: assignment[node] if node in assignment else -1)
 
         fused_graph = fuse_by_partitions(traced, partitions)
-
 
         drawer = FxGraphDrawer(fused_graph, "test")
         dot_graph = drawer.get_dot_graph()
         dot_graph.write_png("after.png")
 
+        a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
 
-        # print(split_graph.graph)
+        expected = m(a, b, c)
+        result = fused_graph(a, b, c)
 
-        # print(split_graph.get_submodule("2").graph)
+        torch.testing.assert_close(expected, result)
 
 
     def test_nvfuser_operator_support(self):

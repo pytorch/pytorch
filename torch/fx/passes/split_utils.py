@@ -318,7 +318,9 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
 
     return torch.fx.GraphModule(main_root, main_g)
 
-def fuse_partition(gm, partition_name, nodes):
+def fuse_partition(gm: torch.fx.GraphModule, partition_name, nodes) -> torch.fx.GraphModule:
+    # returns a graph module that is a copy of `nodes` in gm
+    # assumption: nodes are already sorted in topo order
 
     subgraph = torch.fx.Graph()
 
@@ -343,7 +345,7 @@ def fuse_partition(gm, partition_name, nodes):
 
         return input
 
-    # copy nodes
+    # copy nodes in topological order
     for node in nodes:
         new_node = subgraph.node_copy(node, remap_inputs)
         node_map[node] = new_node
@@ -375,6 +377,7 @@ def fuse_partition(gm, partition_name, nodes):
 
     sub_gm = torch.fx.GraphModule(nn.Module(), subgraph, class_name=partition_name)
 
+    # TODO: fix this
     sub_gm.name = partition_name
     sub_gm.orig_inputs = tuple(original_inputs)
     sub_gm.orig_outputs = original_outputs   # todo: fix here
@@ -382,6 +385,7 @@ def fuse_partition(gm, partition_name, nodes):
     return sub_gm
 
 def insert_subgm(gm, sub_gm, original_nodes):
+    # assign sub_gm into gm
     setattr(gm, sub_gm.name, sub_gm)
 
     # Create a call_module node in main graph.
@@ -391,12 +395,17 @@ def insert_subgm(gm, sub_gm, original_nodes):
         kwargs=None,
     )
 
-    outs = sub_gm.orig_outputs
+    orig_outputs = sub_gm.orig_outputs
 
+    if len(orig_outputs) == 1:
+        # main_remapping[comp.orig_outputs[0]] = module_node
+        orig_outputs[0].replace_all_uses_with(module_node)
+    else:
+        for i, out in enumerate(orig_outputs):
+            # Use Proxy to record getitem access.
+            proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
 
-    # TODO: handle multiple output case
-    for out in outs:
-        out.replace_all_uses_with(module_node)
+            out.replace_all_uses_with(proxy_out)
 
     # erase original nodes in inversed topological order
     for node in reversed(original_nodes):
@@ -412,7 +421,6 @@ def fuse_by_partitions(gm: torch.fx.GraphModule, partitions) -> torch.fx.GraphMo
 
         print(partition_name)
         print(sub_gm.graph)
-
 
         insert_subgm(gm, sub_gm, nodes)
 
