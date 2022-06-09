@@ -210,7 +210,7 @@ struct _cuda_scatter_large_index_internal_kernel {
       // Recalculate the source tensor offset based on
       // the index tensor offset, rather than taking it
       // from the offset calculator
-      auto original_index_offset = offsets[2] / 8; // index tensor has word size = 8
+      auto original_index_offset = offsets[2] / sizeof(int64_t); // index tensor has word size = 8
       decltype(original_index_offset) src_offset = 0;
       int64_t index_idx;
       for (int d = ndim - 1; d >= 0; d--) {
@@ -220,7 +220,7 @@ struct _cuda_scatter_large_index_internal_kernel {
         index_idx %= src_shape_device[d];
         src_offset += src_strides_device[d] * index_idx;
       }
-      src_offset *= 4; // source tensor has word size = 4
+      src_offset *= sizeof(scalar_t); // source tensor has word size dependent on type
 
       f(
         (scalar_t*)(self_ptr + offsets[0]),
