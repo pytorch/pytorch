@@ -1,9 +1,13 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include "c10/core/DeviceType.h"
+#include "c10/core/ScalarType.h"
+#include "torch/csrc/lazy/core/tensor.h"
+#include "torch/csrc/lazy/ts_backend/ops/device_data.h"
 
 #include <c10/core/Device.h>
 #include <test/cpp/lazy/test_lazy_ops_util.h>
+#include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/metrics.h>
@@ -6864,6 +6868,94 @@ TEST_F(LazyOpsTest, TestNarrowInNarrowUpdate) {
     }
   }
 }
+
+TEST_F(LazyOpsTest, TestReuseSymInt) {
+  FLAGS_torch_lazy_reuse_ir = true;
+  std::vector<float> values{1.0f, 0.0f};
+  torch::Tensor input =
+      torch::tensor(values, torch::TensorOptions(torch::kFloat).device(torch::kLazy));
+
+  // extract SizeNode and remember BackendData it's based on in `bd1`
+  torch::lazy::LazyTensorPtr lazy_tensor = torch::lazy::TryGetLtcTensor(input);
+  auto si = input.sym_sizes()[0];
+  auto size1 = std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>(si.toSymbolicIntNode())->node_;
+  auto dd1 = NodeCast<DeviceData>(size1->operand(0).node); 
+  auto bd1 = dd1->data();
+
+  // mark step
+  auto backend_device = torch::lazy::atenDeviceToBackendDevice(c10::Device("lazy:0"));
+  torch::lazy::LazyGraphExecutor::Get()->SyncLiveTensorsGraph(&backend_device, {"lazy:0"}, true);
+  torch::lazy::LazyGraphExecutor::Get()->MarkStep(backend_device);
+  
+  values = {3.0f, 4.0f};
+  input =
+      torch::tensor(values, torch::TensorOptions(torch::kFloat).device(torch::kLazy));
+  auto si2 = input.sym_sizes()[0];
+  auto size2 = std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>(si2.toSymbolicIntNode())->node_;
+  auto dd2 = NodeCast<DeviceData>(size2->operand(0).node); 
+
+  // retrieve device node from the SizeNode again
+  auto dd1_2 = NodeCast<DeviceData>(size1->operand(0).node); 
+  // double check we reused device data
+  ASSERT_EQ(dd1, dd2);
+  // size1 is NOT pointing to the old backendData
+  ASSERT_EQ(dd1_2->data(), bd1);
+  FLAGS_torch_lazy_reuse_ir = false;
+
+}
+
+/*
+TEST_F(LazyOpsTest, TestReuseSymInt) {
+  FLAGS_torch_lazy_reuse_ir = true;
+  std::vector<float> values{1.0f, 0.0f};
+  torch::Tensor input =
+      torch::tensor(values, torch::TensorOptions(torch::kFloat).device(torch::kLazy));
+
+  torch::lazy::LazyTensorPtr lazy_tensor = torch::lazy::TryGetLtcTensor(input);
+  // {lazy_tensor->GetIrValue().node}
+  auto rp_n = lazy_tensor->GetIrValue().node.get();
+  auto dd  = NodeCast<DeviceData>(rp_n);
+  std::cerr << "DeviceData ptr dd = " << dd << ", BackendData = " << dd->data() << std::endl;
+    
+  auto si = input.sym_sizes()[0];
+  auto size1 = std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>(si.toSymbolicIntNode())->node_;
+  auto dd1 = NodeCast<DeviceData>(size1->operand(0).node); 
+  auto bd1 = dd1->data();
+  std::cerr << "DeviceData ptr dd1 = " << dd1 << ", BackendData = " << dd1->data() << std::endl;
+
+  auto backend_device = torch::lazy::atenDeviceToBackendDevice(c10::Device("lazy:0"));
+  torch::lazy::LazyGraphExecutor::Get()->SyncLiveTensorsGraph(&backend_device, {"lazy:0"}, true);
+  torch::lazy::LazyGraphExecutor::Get()->MarkStep(backend_device);
+  
+  //std::cerr << input.cpu() << std::endl;
+
+
+  values = {3.0f, 4.0f};
+  input =
+      torch::tensor(values, torch::TensorOptions(torch::kFloat).device(torch::kLazy));
+  lazy_tensor = torch::lazy::TryGetLtcTensor(input);
+  rp_n = lazy_tensor->GetIrValue().node.get();
+  dd  = NodeCast<DeviceData>(rp_n);
+  std::cerr << "DeviceData ptr dd = " << dd << ", BackendData = " << dd->data() << std::endl;
+
+  auto si2 = input.sym_sizes()[0];
+  auto size2 = std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>(si2.toSymbolicIntNode())->node_;
+  auto dd2 = NodeCast<DeviceData>(size2->operand(0).node); 
+  // auto bd2 = dd1->data();
+  std::cerr << "DeviceData ptr dd2 = " << dd2 << ", BackendData = " << dd2->data() << std::endl;
+
+  // retrieve device node from the SizeNode again
+  auto dd1_2 = NodeCast<DeviceData>(size1->operand(0).node); 
+
+  // double check we reused device data
+  ASSERT_EQ(dd1, dd2);
+  // size1 is NOT pointing to the old backendData
+  ASSERT_EQ(dd1_2->data(), bd1);
+
+  FLAGS_torch_lazy_reuse_ir = false;
+  //std::cerr << torch::lazy::DumpUtil::ToText({lazy_tensor->GetIrValue().node.get()});
+}
+*/
 
 TEST_F(LazyOpsTest, TestNarrowCopy) {
   for (int64_t dim : {1, -3}) {
