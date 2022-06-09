@@ -955,6 +955,21 @@ def main() -> None:
     msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
     gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
 
+    if args.revert:
+        try:
+            try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id, reason=args.reason)
+        except Exception as e:
+            handle_exception(e, f"Reverting PR {args.pr_num} failed")
+        return
+
+    if pr.is_closed():
+        gh_post_comment(org, project, args.pr_num, f"Can't merge closed PR #{args.pr_num}", dry_run=args.dry_run)
+        return
+
+    if pr.is_cross_repo() and pr.is_ghstack_pr():
+        gh_post_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
+        return
+
     if args.on_green:
         try:
             merge_on_green(args.pr_num, repo, force=args.force, comment_id=args.comment_id, dry_run=args.dry_run)
