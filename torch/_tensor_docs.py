@@ -3398,6 +3398,21 @@ is updated as::
 Reducing with the addition operation is the same as using
 :meth:`~torch.Tensor.scatter_add_`.
 
+For reduce operations other than the default assignment one, the :attr:`index`
+tensor is permitted to have ``index.size(d) > src.size(d)`` for some or all
+dimensions ``d``, though the other two requirements still apply. In this case,
+the indices used to fetch the values from the :attr:`src` tensor loop back
+to the start of the tensor.
+
+Using the above example::
+
+    self[index[i][j][k]][j][k] *= src[i % src.size(0)][j % src.size(1)][k % src.size(2)]  # if dim == 0
+    self[i][index[i][j][k]][k] *= src[i % src.size(0)][j % src.size(1)][k % src.size(2)]  # if dim == 1
+    self[i][j][index[i][j][k]] *= src[i % src.size(0)][j % src.size(1)][k % src.size(2)]  # if dim == 2
+
+Note that the function is less efficient/runs slower if you fall into this use
+case.
+
 Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter, can be either empty
@@ -3456,6 +3471,19 @@ For a 3-D tensor, :attr:`self` is updated as::
 dimensions. It is also required that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``. Note that ``index`` and ``src`` do not broadcast.
 
+In case there is any dimension ``d`` such that ``index.size(d) > src.size(d)``,
+the indices used to fetch the values from the :attr:`src` tensor loop back
+to the start of the tensor.
+
+Using the above example::
+
+    self[index[i][j][k]][j][k] += src[i % src.size(0)][j % src.size(1)][k % src.size(2)]  # if dim == 0
+    self[i][index[i][j][k]][k] += src[i % src.size(0)][j % src.size(1)][k % src.size(2)]  # if dim == 1
+    self[i][j][index[i][j][k]] += src[i % src.size(0)][j % src.size(1)][k % src.size(2)]  # if dim == 2
+
+Note that the function is less efficient/runs slower if you fall into this use
+case.
+
 Note:
     {forward_reproducibility_note}
 
@@ -3509,6 +3537,19 @@ output is given as::
     self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
     self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
     self[i][j][index[i][j][k]] += src[i][j][k]  # if dim == 2
+
+In case there is any dimension ``d`` such that ``index.size(d) > src.size(d)``,
+the indices used to fetch the values from the :attr:`src` tensor loop back
+to the start of the tensor.
+
+Using the above example::
+
+    self[index[i][j][k]][j][k] += src[i % src.size(0)][j % src.size(1)][k % src.size(2)]  # if dim == 0
+    self[i][index[i][j][k]][k] += src[i % src.size(0)][j % src.size(1)][k % src.size(2)]  # if dim == 1
+    self[i][j][index[i][j][k]] += src[i % src.size(0)][j % src.size(1)][k % src.size(2)]  # if dim == 2
+
+Note that the function is less efficient/runs slower if you fall into this use
+case.
 
 Note:
     {forward_reproducibility_note}
