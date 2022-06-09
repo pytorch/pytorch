@@ -123,7 +123,9 @@ static PySequenceMethods THPSize_as_sequence = {
   nullptr,                                          /* sq_slice */
   nullptr,                                          /* sq_ass_item */
   nullptr,                                          /* sq_ass_slice */
-  nullptr                                           /* sq_contains */
+  nullptr,                                          /* sq_contains */
+  nullptr,                                          /* sq_inplace_concat */
+  nullptr,                                          /* sq_inplace_repeat */
 };
 
 static PyMappingMethods THPSize_as_mapping = {
@@ -175,7 +177,7 @@ static PyObject *THPSize_reduce(PyObject *_self, PyObject *noargs)
 static PyMethodDef THPSize_methods[] = {
   {"numel",       THPSize_numel,       METH_NOARGS,  nullptr},
   {"__reduce__",  THPSize_reduce,      METH_NOARGS,  nullptr},
-  {nullptr}
+  {nullptr,              nullptr,                0,  nullptr}
 };
 
 
