@@ -10,7 +10,6 @@
 import json
 import os
 from hashlib import sha256
-from argparse import ArgumentParser
 
 from trymerge import find_matching_merge_rule, gh_graphql, gh_get_team_members, GitHubPR, MergeRule, MandatoryChecksMissingError
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
@@ -56,32 +55,30 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
 def mock_parse_args(revert: bool = False,
                     force: bool = False) -> Any:
     class Object(object):
-        pass
-    args = Object()
-    args.revert = revert
-    args.force = force
-    args.pr_num = 76123
-    args.dry_run=True
-    args.comment_id=0
-    args.reason='this is for testing'
-    return args
+        def __init__(self) -> None:
+            self.revert = revert
+            self.force = force
+            self.pr_num = 76123
+            self.dry_run = True
+            self.comment_id = 0
+            self.reason = 'this is for testing'
+
+    return Object()
 
 def mock_revert(repo: GitRepo, pr: GitHubPR, *,
-                  dry_run: bool = False,
-                  comment_id: Optional[int] = None,
-                  reason: Optional[str] = None) -> None:
-        print('revertin')
-        pass
+                dry_run: bool = False,
+                comment_id: Optional[int] = None,
+                reason: Optional[str] = None) -> None:
+    pass
 
 def mock_merge(pr_num: int, repo: GitRepo,
-          dry_run: bool = False,
-          force: bool = False,
-          comment_id: Optional[int] = None,
-          timeout_minutes: int = 400) -> None:
-        print("BEING CALLED" , pr_num, repo, dry_run, force, comment_id, timeout_minutes)
-        pass
+               dry_run: bool = False,
+               force: bool = False,
+               comment_id: Optional[int] = None,
+               timeout_minutes: int = 400) -> None:
+    pass
 
-def mock_gh_get_info():
+def mock_gh_get_info() -> Any:
     return {"closed": False, "isCrossRepository": False}
 
 
