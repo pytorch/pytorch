@@ -40,7 +40,6 @@ def with_comms(func=None):
     return wrapper
 
 class TestObjectCollectives(MultiProcessTestCase):
-    r"""Test cases for the generic join context."""
     def setUp(self):
         super(TestObjectCollectives, self).setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
