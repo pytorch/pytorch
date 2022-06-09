@@ -6305,6 +6305,7 @@
   dispatch:
     CPU: masked_fill__cpu
     CUDA: masked_fill__cuda
+    QuantizedCPU: masked_fill__quantized_cpu
     MPS: masked_fill__mps
   autogen: masked_fill.Scalar_out
 
@@ -6320,6 +6321,7 @@
   dispatch:
     CPU: masked_fill__cpu
     CUDA: masked_fill__cuda
+    QuantizedCPU: masked_fill__quantized_cpu
     MPS: masked_fill__mps
   autogen: masked_fill.Tensor_out
 
