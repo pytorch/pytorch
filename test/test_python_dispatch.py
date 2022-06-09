@@ -1490,6 +1490,18 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             t = DimImplementedTensor(torch.randn(3, 3), use_wrapper_subclass)
             self.assertEqual(t.dim(), 2)
 
+    def test_maybe_tuple_bug(self):
+        class T(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, *args, **kwargs):
+                pass
+        a = torch.rand(3)
+
+        a[[T(), T()]]
+
+    def test_standard_is_not_subclass(self):
+        # https://github.com/pytorch/pytorch/issues/79079
+        self.assertFalse(torch._C._dispatch_isTensorSubclassLike(torch.empty(0)))
 
 if __name__ == '__main__':
     run_tests()

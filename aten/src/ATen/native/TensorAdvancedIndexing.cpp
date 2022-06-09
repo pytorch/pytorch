@@ -1878,7 +1878,7 @@ int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
     int64_t i = 0;
     for (; i + (ilp_factor - 1) < n; i += ilp_factor) {
       c10::ForcedUnroll<ilp_factor>{}([&](int k) {
-        const auto& val = *reinterpret_cast<const scalar_t*>(ptr + k * stride);
+        const auto& val = c10::load<scalar_t>(ptr + k * stride);
         if (val != scalar_t(0)) {
           ++nonzero[k];
         }
@@ -1886,7 +1886,7 @@ int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
       ptr += ilp_factor * stride;
     }
     for (; i < n; ++i) {
-      const auto& val = *reinterpret_cast<const scalar_t*>(ptr);
+      const auto& val = c10::load<scalar_t>(ptr);
       if (val != scalar_t(0)) {
         ++nonzero[0];
       }
@@ -1919,8 +1919,8 @@ Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
   const auto num_threads = at::get_num_threads();
   DimVector thread_count_nonzero(num_threads);
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_count_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf, kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_count_cpu", [&] {
     at::parallel_for(0, iter.numel(), internal::GRAIN_SIZE, [&] (int64_t begin, int64_t end) {
       const auto tid = at::get_thread_num();
       thread_count_nonzero[tid] = count_nonzero_impl<scalar_t>(iter, {begin, end});
@@ -1962,8 +1962,8 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   DimVector thread_count_nonzero(num_threads + 1);
 
   // Pass 1: Count nonzero element per-thread
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_count_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf, kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_count_cpu", [&] {
     at::parallel_for(0, numel, internal::GRAIN_SIZE, [&] (int64_t begin, int64_t end) {
       const auto tid = at::get_thread_num();
       thread_begin[tid] = begin;
@@ -1989,8 +1989,8 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   }
 
   // Pass 2: Write indexes
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf, kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_cpu", [&] {
     at::parallel_for(0, numel, internal::GRAIN_SIZE, [&] (int64_t begin, int64_t end) {
       auto tid = at::get_thread_num();
       // Work needs to be distributed the same on both passes
@@ -2025,7 +2025,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
           const char* ptr = data[0] + i * strides[1];
           for (const auto j : c10::irange(n1)) {
             (void)j; //Suppress unused variable warning
-            const auto& val = *reinterpret_cast<const scalar_t*>(ptr);
+            const auto& val = c10::load<scalar_t>(ptr);
             // If nonzero, write index
             if (val != scalar_t(0)) {
               for (const auto k : c10::irange(ndim)) {
