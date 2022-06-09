@@ -38,6 +38,7 @@ ALLOW_LIST = [
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
+    ("aten::_sparse_addmm", datetime.date(2022, 6, 30)),
     ("aten::linalg_matrix_rank", datetime.date(2021, 10, 30)),
     ("aten::linalg_pinv", datetime.date(2021, 10, 30)),
     ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
@@ -75,6 +76,9 @@ ALLOW_LIST = [
     ("aten::slow_conv_transpose2d_backward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_transpose3d", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_transpose3d_backward", datetime.date(2022, 1, 31)),
+    ("aten::solve", datetime.date(9999, 1, 1)),
+    ("aten::solve.solution", datetime.date(9999, 1, 1)),
+    ("aten::_solve_helper", datetime.date(9999, 1, 1)),
     ("aten::_index_copy_", datetime.date(2022, 5, 31)),
     ("aten::_svd_helper", datetime.date(2022, 3, 31)),
     ("aten::linalg_svdvals", datetime.date(2022, 3, 31)),
@@ -130,6 +134,12 @@ ALLOW_LIST = [
     ("aten::stft", datetime.date(2022, 5, 23)),
     ("aten::linalg_lu_solve", datetime.date(2022, 5, 23)),
     ("aten::linalg_lu_solve.out", datetime.date(2022, 5, 23)),
+    ("aten::_index_reduce", datetime.date(2022, 5, 15)),
+    ("aten::_csr_to_block_csr", datetime.date(2022, 5, 20)),
+    ("aten::_weight_norm_cuda_interface", datetime.date(9999, 1, 1)),
+    ("aten::_weight_norm_cuda_interface_backward", datetime.date(9999, 1, 1)),
+    # TODO: FIXME: prims shouldn't be checked
+    ("prims::.*", datetime.date(9999, 1, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [

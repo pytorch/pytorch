@@ -81,11 +81,9 @@ function install_monkeytype {
   pip_install MonkeyType
 }
 
-TORCHVISION_COMMIT=8a2dc6f22ac4389ccba8859aa1e1cb14f1ee53db
+TORCHVISION_COMMIT="$(cat .github/ci_commit_pins/vision.txt)"
 
 function install_torchvision() {
-  # Check out torch/vision at Jun 11 2020 commit
-  # This hash must match one in .jenkins/caffe2/test.sh
   pip_install --user "git+https://github.com/pytorch/vision.git@$TORCHVISION_COMMIT"
 }
 
@@ -99,6 +97,14 @@ function checkout_install_torchvision() {
 
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
-    git clone --recursive https://github.com/pytorch/xla.git
+    git clone --recursive --quiet https://github.com/pytorch/xla.git
+    pushd xla
+    # pin the xla hash so that we don't get broken by changes to xla
+    git checkout "$(cat ../.github/ci_commit_pins/xla.txt)"
+    popd
   fi
+}
+
+function install_torchdynamo() {
+  pip_install --user "git+https://github.com/pytorch/torchdynamo.git@$(cat .github/ci_commit_pins/torchdynamo.txt)"
 }
