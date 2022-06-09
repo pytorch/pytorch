@@ -1,7 +1,7 @@
 import unittest
 import os
 
-IN_CI = os.environ.get("IN_CI")
+IN_CI = os.environ.get("CI")
 
 from tools.stats.upload_test_stats import get_test_cases
 
