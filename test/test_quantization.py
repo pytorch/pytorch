@@ -82,6 +82,12 @@ try:
 except ImportError:
     pass
 
+# Test the model report module
+try:
+    from quantization.fx.test_model_report_fx import TestModelReportFxDetector  # noqa: F401
+except ImportError:
+    pass
+
 # Equalization for FX mode
 try:
     from quantization.fx.test_equalize_fx import TestEqualizeFx  # noqa: F401
