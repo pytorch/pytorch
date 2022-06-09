@@ -20741,6 +20741,7 @@ python_ref_db = [
             # SyntaxError: cannot assign to literal
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.squeeze",
