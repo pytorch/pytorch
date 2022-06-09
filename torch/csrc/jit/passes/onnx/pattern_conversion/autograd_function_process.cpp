@@ -8,7 +8,8 @@ namespace torch {
 namespace jit {
 
 void convertSubgraphToSubBlock(Block* block) {
-  for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;) {
+  for (auto it = block->nodes().begin(), end = block->nodes().end();
+    it != end;) {
     Node* node = *it++;
     for (auto block : node->blocks()) {
       convertSubgraphToSubBlock(block);
@@ -27,17 +28,23 @@ void convertSubgraphToSubBlock(Block* block) {
         env[subgraph->inputs()[i]] = subblock->inputs()[i];
       }
       for (auto* n : subgraph->nodes()) {
-        auto cloned_n = subblock->appendNode(graph->createClone(
-          n, [&](Value* v) { return env.find(v) != env.end() ? env[v] : v; }));
+        auto cloned_n = 
+          subblock->appendNode(graph->createClone(n, [&](Value* v) {
+            return env.find(v) != env.end() ? env[v] : v;
+          }));
         for (size_t i = 0; i < n->outputs().size(); ++i) {
           env[n->outputs().at(i)] = cloned_n->outputs().at(i);
-          auto it = std::find(subgraph->outputs().begin(), subgraph->outputs().end(), n->outputs()[i]);
+          auto it = std::find(
+            subgraph->outputs().begin(),
+            subgraph->outputs().end(),
+            n->outputs()[i]);
           if (it != subgraph->outputs().end()) {
             subblock->registerOutput(cloned_n->outputs()[i]);
           }
         }
       }
-      // Remove subgraph attribute from the pythonOp node and recurse through sub-blocks
+      // Remove subgraph attribute from the pythonOp node and recurse through
+      // sub-blocks
       node->removeAttribute(attr::Subgraph);
       for (auto block : node->blocks()) {
         convertSubgraphToSubBlock(block);
