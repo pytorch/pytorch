@@ -847,12 +847,17 @@ def find_matching_merge_rule(pr: GitHubPR,
     raise RuntimeError(reject_reason)
 
 
-def get_pending_checks(pr: GitHubPR) -> List[Tuple[str, str]]:
+def pr_get_checks_with_lambda(pr: GitHubPR, status_check: Callable[[Optional[str]], bool]) -> List[Tuple[str, str]]:
     checks = pr.get_checkrun_conclusions()
-    return [(name, status[1]) for name, status in checks.items() if status[0] is None]
+    return [(name, status[1]) for name, status in checks.items() if status_check(status[0])]
 
-def pr_has_pending_checks(pr: GitHubPR) -> bool:
-    return len(get_pending_checks(pr)) > 0
+
+def pr_get_pending_checks(pr: GitHubPR) -> List[Tuple[str, str]]:
+    return pr_get_checks_with_lambda(pr, lambda x: x is None)
+
+
+def pr_get_failed_checks(pr: GitHubPR) -> List[Tuple[str, str]]:
+    return pr_get_checks_with_lambda(pr, lambda x: x == "FAILURE")
 
 
 def try_revert(repo: GitRepo, pr: GitHubPR, *,
@@ -917,13 +922,16 @@ def merge_on_green(pr_num: int, repo: GitRepo,
         current_time = time.time()
         elapsed_time = current_time - start_time
 
-
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
         try:
             find_matching_merge_rule(pr, repo)
-            if not mandatory_only and pr_has_pending_checks(pr):
-                pending = get_pending_checks(pr)
+            pending = pr_get_pending_checks(pr)
+            failing = pr_get_failed_checks(pr)
+            if not mandatory_only and len(failing) > 0:
+                raise RuntimeError(f"{len(failing)} additional jobs have failed, first few of them are: " +
+                                   ' ,'.join(f"[{x[0]}]({x[1]})" for x in failing[:5]))
+            if not mandatory_only and len(pending) > 0:
                 raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
                                                   f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
             return pr.merge_into(repo, dry_run=dry_run)
