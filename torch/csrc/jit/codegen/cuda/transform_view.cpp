@@ -115,7 +115,7 @@ class MergeTransform final : public ViewTransform {
       const std::vector<IterDomain*>& new_root_domain,
       std::vector<IterDomain*>& rfactor_domain) override {
     TORCH_INTERNAL_ASSERT(
-        index_ >= 0 && (index_ + 1) < new_root_domain.size(),
+        (index_ + 1) < new_root_domain.size(),
         "Index: \t",
         index_,
         "\t Domain Size:\t",
@@ -174,7 +174,7 @@ class SplitTransform final : public ViewTransform {
       const std::vector<IterDomain*>& new_root_domain,
       std::vector<IterDomain*>& rfactor_domain) override {
     TORCH_INTERNAL_ASSERT(
-        index_ >= 0 && index_ < new_root_domain.size(),
+        index_ < new_root_domain.size(),
         "Index: \t",
         index_,
         "\t Domain Size:\t",
@@ -237,7 +237,7 @@ class KeepTransform final : public ViewTransform {
       const std::vector<IterDomain*>& new_root_domain,
       std::vector<IterDomain*>& rfactor_domain) override {
     TORCH_INTERNAL_ASSERT(
-        index_ >= 0 && index_ < new_root_domain.size(),
+        index_ < new_root_domain.size(),
         "Index: \t",
         index_,
         "\t Domain Size:\t",

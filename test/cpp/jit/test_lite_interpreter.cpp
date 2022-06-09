@@ -563,8 +563,7 @@ TEST(LiteInterpreterTest, GetContainTypes) {
   std::stringstream ss;
   m._save_for_mobile(ss, {}, true);
 
-  auto contained_types = _get_mobile_model_contained_types(ss);
-  AT_ASSERT(contained_types.size() >= 0);
+  _get_mobile_model_contained_types(ss);
 }
 
 namespace {
