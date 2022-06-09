@@ -89,7 +89,7 @@ Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tenso
   return grad_input;
 }
 
-Tensor foo(const Tensor& out1, const Tensor& in1, const Tensor& in2) {
+Tensor foo_cuda(const Tensor& out1, const Tensor& in1, const Tensor& in2) {
   std::cout << "CUDA kernel" << std::endl;
   auto out = at::empty_like(out1);
   TensorIterator iter = TensorIteratorConfig()

@@ -233,7 +233,7 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
   return grad_input;
 }
 
-Tensor foo(const Tensor& out1, const Tensor& in1, const Tensor& in2) {
+Tensor foo_cpu(const Tensor& out1, const Tensor& in1, const Tensor& in2) {
   std::cout << "CPU kernel" << std::endl;
   auto out = at::empty_like(out1);
   TensorIterator iter = TensorIteratorConfig()

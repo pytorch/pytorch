@@ -2664,7 +2664,8 @@
 
 - func: foo(Tensor out, Tensor in1, Tensor in2) -> Tensor
   dispatch:
-    CPU, CUDA: foo
+    CPU: foo_cpu
+    CUDA: foo_cuda
 
 - func: kron.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
 
