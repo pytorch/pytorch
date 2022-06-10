@@ -12,3 +12,7 @@
   desc: |
           This tag indicates if an operator's output's shape depends on input Tensor
           data.
+- tag: generated
+  desc: |
+          This tag indicates that the operator doesn't have an explicit entry in
+          native_functions.yaml, and instead was generated automatically by the codegen.
