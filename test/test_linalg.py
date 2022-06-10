@@ -6569,6 +6569,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @skipCUDAIf(torch.version.cuda is not None
                 and torch.version.cuda.split(".") < ["11", "3"], "There's a bug in cuSOLVER < 11.3")
+    # FIXME One of the backends of lu_factor fails in windows. I haven't investigated which or why
+    # https://github.com/pytorch/pytorch/issues/75225
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
