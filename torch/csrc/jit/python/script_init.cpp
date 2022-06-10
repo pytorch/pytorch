@@ -59,6 +59,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
+#include <torch/csrc/jit/mobile/train/export_data.h>
 #include <chrono>
 #include <cstddef>
 #include <memory>
@@ -2293,6 +2294,14 @@ void initJitScriptBindings(PyObject* module) {
         return "invalid";
     }
   });
+
+  m.def(
+      "_save_parameters",
+      [](const std::map<std::string, at::Tensor>& map,
+         const std::string& filename,
+         bool use_flatbuffer = false) {
+        _save_parameters(map, filename, use_flatbuffer);
+      });
 
   initScriptDictBindings(module);
   initScriptListBindings(module);
