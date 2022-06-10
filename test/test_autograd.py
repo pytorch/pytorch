@@ -4497,6 +4497,35 @@ for shape in [(1,), ()]:
         when using non-reentrant checkpoint.
         """
 
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def backward(ctx, grad_out):
+                x, y, z, w, out = ctx.saved_tensors
+                # This access is fine as entire saved_tensors is
+                # accessed, so storage dict in the hooks-based
+                # checkpoint is cleared, and repopulated during
+                # recomputation.
+                x_2, y_2, z_2, w_2, out_2 = ctx.saved_tensors
+                self.assertEqual(x.data_ptr(), x_2.data_ptr())
+                self.assertEqual(y.data_ptr(), y_2.data_ptr())
+                self.assertEqual(z.data_ptr(), z_2.data_ptr())
+                self.assertEqual(w, w_2)
+                self.assertEqual(out, out_2)
+                return x, x, x
+                return grad_out, grad_out, grad_out
+
+        x = torch.tensor(1., requires_grad=True)
+        y = torch.tensor(2., requires_grad=True)
+        z = torch.tensor(3., requires_grad=True)
+        out = checkpoint(MyFunc.apply, x, y, z, use_reentrant=False)
+        out.sum().backward()
+
+    def test_access_saved_tensor_twice_without_recomputation_raises(self):
+        """
+        If using saved tensor hooks based checkpointing and a saved tensor
+        is accessed multiple times without triggering recomputation in the
+        middle, error is raised indicating so.
+        """
         def foo(a):
             b = a * a
             c = a * b
@@ -4505,34 +4534,14 @@ for shape in [(1,), ()]:
 
         a = torch.randn(5, requires_grad=True)
         d = checkpoint(foo, a, use_reentrant=False)
-        print(d.grad_fn._saved_result)
-        print(d.grad_fn._saved_result)
-        return
-        # class MyFunc(torch.autograd.Function):
-        #     @staticmethod
-        #     def forward(ctx, x, y, z):
-        #         w = x * y * z
-        #         out = w + w
-        #         ctx.save_for_backward(x, y, z, w, out)
-        #         return out
-
-        #     @staticmethod
-        #     def backward(ctx, grad_out):
-        #         x, y, z, w, out = ctx.saved_tensors
-        #         x_2, y_2, z_2, w_2, out_2 = ctx.saved_tensors
-        #         self.assertEqual(x.data_ptr(), x_2.data_ptr())
-        #         self.assertEqual(y.data_ptr(), y_2.data_ptr())
-        #         self.assertEqual(z.data_ptr(), z_2.data_ptr())
-        #         self.assertEqual(w, w_2)
-        #         self.assertEqual(out, out_2)
-        #         return x, y, w
-
-        # x = torch.tensor(1., requires_grad=True)
-        # y = torch.tensor(2., requires_grad=True)
-        # z = torch.tensor(3., requires_grad=True)
-        # out = checkpoint(MyFunc.apply, x, y, z, use_reentrant=False)
-        # saved_tensors = out.grad_fn._raw_saved_self
-        # out.sum().backward()
+        # First access
+        d.grad_fn._saved_result
+        # Second access raises error
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Attempt to retrieve a tensor saved by autograd multiple times"
+        ):
+            d.grad_fn._saved_result
 
     @slowTest
     @parametrize("input_requires_grad", [True, False])
