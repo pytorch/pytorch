@@ -4,14 +4,19 @@
 #include <vector>
 
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/util.h>
 
 namespace torch {
 namespace autograd {
 namespace profiler {
+using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
 
 struct TORCH_API KinetoEvent {
+  explicit KinetoEvent(bool is_python_function = false)
+      : is_python_function_{is_python_function} {}
+
   uint64_t startThreadId() const {
     return start_thread_id_;
   }
@@ -235,6 +240,10 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
+  bool isPythonFunction() const {
+    return is_python_function_;
+  }
+
   int64_t cudaElapsedUs() const;
 
   uint64_t start_thread_id_ = 0;
@@ -265,6 +274,7 @@ struct TORCH_API KinetoEvent {
 
   torch::profiler::impl::CUDAEventStub cuda_event_start_ = nullptr;
   torch::profiler::impl::CUDAEventStub cuda_event_end_ = nullptr;
+  bool is_python_function_;
 };
 
 // Consolidating events returned directly from Kineto
@@ -275,7 +285,8 @@ struct TORCH_API ProfilerResult {
   ProfilerResult(
       uint64_t start_time,
       std::vector<KinetoEvent> events,
-      torch::profiler::impl::kineto::ActivityTraceWrapper trace);
+      torch::profiler::impl::kineto::ActivityTraceWrapper trace,
+      std::vector<experimental_event_t>&& event_tree);
   ~ProfilerResult();
 
   uint64_t trace_start_us() const {
@@ -286,12 +297,17 @@ struct TORCH_API ProfilerResult {
     return events_;
   }
 
+  const std::vector<experimental_event_t>& event_tree() const {
+    return event_tree_;
+  }
+
   void save(const std::string& path);
 
  private:
   uint64_t trace_start_us_ = 0;
   std::vector<KinetoEvent> events_;
   torch::profiler::impl::kineto::ActivityTraceWrapper trace_;
+  std::vector<experimental_event_t> event_tree_;
 };
 
 /*
@@ -359,53 +375,6 @@ TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities);
-
-namespace python_tracer {
-
-/*
-Libtorch does not depend on Python (e.g. cannot #include <Python.h>); however
-when we call the profiler from libtorch_python we need the profiler to be able
-to ingest the data that we collect from the Python tracer. (`PyEval_SetProfile`)
-
-In order to solve this dependency issue we define a set of methods which do not
-contain any Python symbols, but can contain the information that Kineto needs
-such as times and names. The python tracer then implements these functions and
-wraps their registration in an init function which is called from
-`torch/csrc/autograd/init.cpp`. This pattern of registration for faux python
-dependencies in libtorch is common in the PyTorch codebase.
-*/
-enum CallType { kPyCall = 0, kPyModuleCall, kCCall };
-
-struct TORCH_API PyTraceEvent {
-  int64_t startTime_;
-  int64_t endTime_;
-  std::string name_;
-
-  uint64_t thread_id_;
-  PyTraceEvent* parent_;
-  CallType call_type_;
-  size_t module_id_;  // Only set call_type_ == kPyModuleCall
-
-  // Index in the list of raw call and return events. This allows one to
-  // convert a vector of PyTraceEvents back into the constituent call and
-  // return events, even when events share the same timestamp.
-  size_t call_idx_;
-  size_t return_idx_;
-};
-
-enum Command { kStartOne = 0, kStartAll, kStop, kClear };
-using CallFn = void (*)(Command);
-using TraceEventsFn = std::vector<std::unique_ptr<PyTraceEvent>> (*)();
-
-TORCH_API void registerFunctions(
-  CallFn call,
-  TraceEventsFn get_events
-);
-
-// Because we are interleaving events, the Python tracer should use the same
-// timer as the profiler.
-TORCH_API int64_t now();
-}  // namespace python_tracer
 
 } // namespace profiler
 }} // namespace torch::autograd

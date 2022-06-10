@@ -1,9 +1,13 @@
 #include <torch/csrc/profiler/collection.h>
 
 #include <algorithm>
+#include <queue>
+
+#include <fmt/format.h>
 
 #include <ATen/record_function.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
@@ -127,9 +131,47 @@ std::atomic<uint32_t> queue_id_{0};
 thread_local SubQueueThreadCache sub_queue_cache_{0, nullptr};
 } // namespace
 
+namespace python_tracer {
+namespace {
+GetFn get_fn;
+
+struct NoOpPythonTracer : public PythonTracerBase {
+  static NoOpPythonTracer& singleton() {
+    static NoOpPythonTracer singleton_;
+    return singleton_;
+  }
+  void start(RecordQueue*) override {}
+  void stop() override {}
+  void clear() override {}
+  std::vector<std::shared_ptr<Result>> getEvents(
+      std::function<time_t(approx_time_t)>,
+      std::vector<CompressedEvent>&) override {
+    return {};
+  }
+  ~NoOpPythonTracer() = default;
+};
+} // namespace
+
+void registerTracer(GetFn get_tracer) {
+  get_fn = get_tracer;
+}
+
+PythonTracerBase& PythonTracerBase::get() {
+  if (get_fn == nullptr) {
+    return NoOpPythonTracer::singleton();
+  }
+  return get_fn();
+}
+} // namespace python_tracer
+
 #define OUT_T(method_name) decltype(std::declval<Result>().method_name())
 #define DEFINE_VISITOR(                                                 \
-    method_name, torch_op_field, backend_field, allocation_field)       \
+    method_name,                                                        \
+    torch_op_field,                                                     \
+    backend_field,                                                      \
+    allocation_field,                                                   \
+    py_field,                                                           \
+    py_c_field)                                                         \
   OUT_T(method_name) Result::method_name() const {                      \
     using out_t = OUT_T(method_name);                                   \
     return c10::visit(                                                  \
@@ -145,9 +187,29 @@ thread_local SubQueueThreadCache sub_queue_cache_{0, nullptr};
             [&](const ExtraFields<EventType::Allocation>& e) -> out_t { \
               (void)e;                                                  \
               return allocation_field;                                  \
+            },                                                          \
+            [&](const ExtraFields<EventType::PyCall>& e) -> out_t {     \
+              (void)e;                                                  \
+              return py_field;                                          \
+            },                                                          \
+            [&](const ExtraFields<EventType::PyCCall>& e) -> out_t {    \
+              (void)e;                                                  \
+              return py_c_field;                                        \
             }),                                                         \
         extra_fields_);                                                 \
   }
+
+std::string toString(const ExtraFields<EventType::PyCall>& e) {
+  if (e.module_.has_value()) {
+    return fmt::format(
+        "nn.Module: {}_{}", e.module_->cls_name_.str(), e.module_->id_);
+  }
+  return fmt::format(
+      "{}({}): {}",
+      e.callsite_.filename_.str(),
+      e.callsite_.line_no_,
+      e.callsite_.funcname_.str());
+}
 
 using torch::profiler::impl::kineto::KinetoActivityType;
 namespace {
@@ -158,20 +220,42 @@ KinetoActivityType scopeToType(at::RecordScope scope) {
 }
 } // namespace
 
-DEFINE_VISITOR(name, e.name_, e.name_, "[memory]");
+DEFINE_VISITOR(
+    name,
+    e.name_,
+    e.name_,
+    "[memory]",
+    toString(e),
+    e.function_name_.str());
 DEFINE_VISITOR(
     kinetoType,
     scopeToType(e.scope_),
     scopeToType(e.scope_),
-    KinetoActivityType::CPU_INSTANT_EVENT);
-DEFINE_VISITOR(correlationID, e.correlation_id_, 0, 0);
-DEFINE_VISITOR(endTimeNS, e.end_time_ns_, e.end_time_us_ * 1000, start_time_ns_);
-DEFINE_VISITOR(endTID, e.end_tid_, start_tid_, start_tid_);
+    KinetoActivityType::CPU_INSTANT_EVENT,
+    KinetoActivityType::PYTHON_FUNCTION,
+    KinetoActivityType::PYTHON_FUNCTION);
+DEFINE_VISITOR(correlationID, e.correlation_id_, 0, 0, 0, 0);
+DEFINE_VISITOR(
+    endTimeNS,
+    e.end_time_ns_,
+    e.end_time_us_ * 1000,
+    start_time_ns_,
+    e.end_time_ns_,
+    e.end_time_ns_);
+DEFINE_VISITOR(
+    endTID,
+    e.end_tid_,
+    start_tid_,
+    start_tid_,
+    start_tid_,
+    start_tid_);
 DEFINE_VISITOR(
     deviceType,
     c10::DeviceType::CPU,
     c10::DeviceType::CPU,
-    e.device_type_);
+    e.device_type_,
+    c10::DeviceType::CPU,
+    c10::DeviceType::CPU);
 #undef DEFINE_VISITOR
 #undef OUT_T
 
@@ -229,8 +313,18 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   return out;
 }
 
-RecordQueue::RecordQueue(const ProfilerConfig& config)
-    : id_(++queue_id_), config_{config} {}
+RecordQueue::RecordQueue(
+    const ProfilerConfig& config,
+    std::set<ActivityType> activities)
+    : id_(++queue_id_), config_{config}, activities_{activities} {
+  if (tracePython()) {
+    python_tracer::PythonTracerBase::get().start(this);
+  }
+}
+
+bool RecordQueue::tracePython() const {
+  return config_.with_stack && activities_.count(ActivityType::CPU);
+}
 
 ThreadLocalSubqueue* RecordQueue::getSubqueue() {
   // In the most common case, a thread will want to write to the same sub-queue
@@ -255,6 +349,12 @@ ThreadLocalSubqueue* RecordQueue::getSubqueue() {
 
   sub_queue_cache_ = SubQueueThreadCache{id_, it->second.get()};
   return it->second.get();
+}
+
+void RecordQueue::stop() {
+  if (tracePython()) {
+    python_tracer::PythonTracerBase::get().stop();
+  }
 }
 
 namespace {
@@ -296,16 +396,111 @@ void set_autograd_evaluate(std::vector<std::shared_ptr<Result>>& results) {
     }
   }
 }
+
+using result_ptr_t = std::shared_ptr<Result>;
+struct ResultGreater {
+  bool operator()(const result_ptr_t& a, const result_ptr_t& b) const {
+    return a->endTimeNS() > b->endTimeNS();
+  }
+};
+
+void build_tree(std::vector<std::shared_ptr<Result>>& events) {
+  set_autograd_evaluate(events);
+  std::stable_sort(
+      events.begin(), events.end(), [](const auto& a, const auto& b) {
+        return a->start_time_ns_ < b->start_time_ns_;
+      });
+
+  using op_fields = ExtraFields<EventType::TorchOp>;
+  ska::flat_hash_map<uint64_t, std::shared_ptr<Result>> stacks;
+  std::priority_queue<result_ptr_t, std::vector<result_ptr_t>, ResultGreater>
+      end_events_;
+
+  auto push_event = [&stacks, &end_events_](std::shared_ptr<Result>& event) {
+    TORCH_INTERNAL_ASSERT(event->parent_.expired());
+    TORCH_INTERNAL_ASSERT(event->children_.empty());
+    TORCH_INTERNAL_ASSERT(!event->finished_);
+
+    auto parent_it = stacks.find(event->start_tid_);
+    if (parent_it == stacks.end()) {
+      auto fwd_tid = c10::visit(
+          c10::overloaded(
+              [](const op_fields& i) { return i.forward_tid_; },
+              [](const auto&) -> uint64_t { return 0; }),
+          event->extra_fields_);
+      if (fwd_tid) {
+        parent_it = stacks.find(fwd_tid);
+      }
+    }
+
+    if (parent_it != stacks.end()) {
+      event->parent_ = parent_it->second;
+      parent_it->second->children_.push_back(event);
+    }
+
+    if (event->endTimeNS() > event->start_time_ns_) {
+      stacks[event->start_tid_] = event;
+      end_events_.push(event);
+    } else if (event->endTimeNS() == std::numeric_limits<time_t>::min()) {
+      // We use min time to indicate the lack of a termination event, so if we
+      // encounter such a case we don't push to `end_events_`.
+      stacks[event->start_tid_] = event;
+    } else {
+      event->finished_ = true;
+    }
+  };
+
+  auto pop_event = [&stacks](const std::shared_ptr<Result>& event) {
+    if (event->finished_) {
+      // This event was marked finished by a previous `pop_event` call.
+      return;
+    }
+
+    auto start_tid = event->start_tid_;
+    auto frame = stacks.at(start_tid);
+
+    while (frame.get() != event.get()) {
+      TORCH_INTERNAL_ASSERT(frame != nullptr);
+      frame->finished_ = true;
+      TORCH_INTERNAL_ASSERT(!frame->parent_.expired());
+      frame = frame->parent_.lock();
+    }
+
+    event->finished_ = true;
+    stacks.erase(start_tid);
+    auto new_frame = event->parent_.lock();
+    if (new_frame != nullptr) {
+      stacks[start_tid] = new_frame;
+    }
+  };
+
+  // Stack replay loop.
+  for (auto& event : events) {
+    while (!end_events_.empty() &&
+           end_events_.top()->endTimeNS() < event->start_time_ns_) {
+      pop_event(end_events_.top());
+      end_events_.pop();
+    }
+    push_event(event);
+  }
+
+  // Cleanup remaining exit events.
+  while (!end_events_.empty()) {
+    pop_event(end_events_.top());
+    end_events_.pop();
+  }
+}
 } // namespace
 
 std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
     std::function<time_t(approx_time_t)> time_converter) {
   auto converter = [&](approx_time_t t) {
     return t == std::numeric_limits<approx_time_t>::min()
-        ? std::numeric_limits<int64_t>::min()
+        ? std::numeric_limits<time_t>::min()
         : time_converter(t);
   };
   std::vector<std::shared_ptr<Result>> out;
+  std::vector<python_tracer::CompressedEvent> python_enters;
   for (auto& subqueue_it : sub_queues_) {
     auto& queue = *subqueue_it.second;
     for (auto& i : queue.backend_events_) {
@@ -355,12 +550,22 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
           /*extra_fields_=*/std::move(i)));
     }
     queue.allocations_.clear();
+
+    for (auto& i : queue.py_calls_) {
+      python_enters.push_back(
+          {i.first, queue.tid(), queue.kineto_info(), converter(i.second)});
+    }
   }
 
-  set_autograd_evaluate(out);
-  std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-    return a->start_time_ns_ < b->start_time_ns_;
-  });
+  if (tracePython()) {
+    auto& tracer = python_tracer::PythonTracerBase::get();
+    for (auto i : tracer.getEvents(converter, python_enters)) {
+      out.push_back(i);
+    }
+    tracer.clear();
+  }
+
+  build_tree(out);
   return out;
 }
 
