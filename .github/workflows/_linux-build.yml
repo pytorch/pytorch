@@ -29,7 +29,6 @@ on:
 
 env:
   IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
 
 jobs:
   build:
@@ -102,7 +101,6 @@ jobs:
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
-            -e IS_GHA \
             -e PR_NUMBER \
             -e SHA1 \
             -e BRANCH \
