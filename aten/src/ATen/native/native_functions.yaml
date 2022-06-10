@@ -2648,6 +2648,9 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: nested_is_same_size
+    CompositeExplicitAutograd: is_same_size
 
 - func: is_signed(Tensor self) -> bool
   variants: function, method
