@@ -933,7 +933,7 @@ def merge(pr_num: int, repo: GitRepo,
     if force:
         pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
     if (pr.last_pushed_at() - datetime.utcnow()).days > stale_pr_days:
-        raise RuntimeError("This PR is too stale; the last push is greater than 3 days. Please rebase and try again.")
+        raise RuntimeError("This PR is too stale; the last push date is greater than 3 days. Please rebase and try again.")
 
     start_time = time.time()
     last_exception = ''
