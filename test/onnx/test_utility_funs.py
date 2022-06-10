@@ -1233,7 +1233,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             batch,
             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
             input_names=["batch"],
-            dynamic_axes={"batch": [0, 1]}
+            dynamic_axes={"batch": [0, 1]},
         )
         iter = graph.nodes()
         autograd1 = next(iter)
