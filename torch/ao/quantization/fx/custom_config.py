@@ -138,7 +138,7 @@ class PrepareCustomConfig:
             """
             Convert the given object into a QConfigMapping if possible, else throw an exception.
             """
-            if isinstance(obj, QConfigMapping):
+            if isinstance(obj, QConfigMapping) or obj is None:
                 return obj
             if isinstance(obj, Dict):
                 return QConfigMapping.from_dict(obj)
@@ -169,7 +169,7 @@ class PrepareCustomConfig:
             prepare_custom_config = _get_prepare_custom_config(prepare_custom_config_dict, STANDALONE_MODULE_CLASS_DICT_KEY)
             conf.set_standalone_module_class(
                 module_class, qconfig_mapping, example_inputs, prepare_custom_config, backend_config_dict)
-        for quant_type_name, custom_module_mapping in prepare_custom_config_dict.get(FLOAT_TO_OBSERVED_DICT_KEY, {}):
+        for quant_type_name, custom_module_mapping in prepare_custom_config_dict.get(FLOAT_TO_OBSERVED_DICT_KEY, {}).items():
             quant_type = _quant_type_from_str(quant_type_name)
             for float_class, observed_class in custom_module_mapping.items():
                 conf.set_float_to_observed_mapping(float_class, observed_class, quant_type)
@@ -250,7 +250,7 @@ class ConvertCustomConfig:
         TODO: write this
         """
         conf = cls()
-        for quant_type_name, custom_module_mapping in convert_custom_config_dict.get(OBSERVED_TO_QUANTIZED_DICT_KEY, {}):
+        for quant_type_name, custom_module_mapping in convert_custom_config_dict.get(OBSERVED_TO_QUANTIZED_DICT_KEY, {}).items():
             quant_type = _quant_type_from_str(quant_type_name)
             for observed_class, quantized_class in custom_module_mapping.items():
                 conf.set_observed_to_quantized_mapping(observed_class, quantized_class, quant_type)

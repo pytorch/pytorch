@@ -1,3 +1,4 @@
+import copy
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import warnings
 
@@ -206,8 +207,8 @@ forward graph of the parent module,
             "in a future version. Please pass in a PrepareCustomConfig instead.")
         prepare_custom_config = PrepareCustomConfig.from_dict(prepare_custom_config)
 
-    skipped_module_names = prepare_custom_config.non_traceable_module_names
-    skipped_module_classes = prepare_custom_config.non_traceable_module_classes
+    skipped_module_names = copy.copy(prepare_custom_config.non_traceable_module_names)
+    skipped_module_classes = copy.copy(prepare_custom_config.non_traceable_module_classes)
 
     # swap FloatFunctional with FXFloatFunctional
     _swap_ff_with_fxff(model)
