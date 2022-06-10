@@ -1667,7 +1667,7 @@
   output_differentiability: [True, False, False]
   self: not_implemented("_unique2")
 
-- name: _unsafe_view(Tensor self, int[] size) -> Tensor
+- name: _unsafe_view(Tensor(a) self, int[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
   result: auto_linear
 
