@@ -55,12 +55,15 @@ class CNN(nn.Module):
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return x
+
+
 class TestFSDPExecOrderPolicy(FSDPTest):
     def _test_parity_with_ddp(
         self,
         model_ctor,
         bucket_size: int,
         num_iters: int,
+        num_warmup_iters: int,
     ):
         torch.manual_seed(42)
         # TODO (awgu): Add *args, **kwargs as needed to `model_ctor()`
@@ -73,6 +76,20 @@ class TestFSDPExecOrderPolicy(FSDPTest):
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-3)
         ddp_model = DistributedDataParallel(model, device_ids=[self.rank], process_group=group)
         ddp_optim = torch.optim.Adam(ddp_model.parameters(), lr=1e-3)
+
+        for _ in range(num_warmup_iters):
+            inp = torch.randn((4, 3, 32, 32)).to(self.rank)
+            out = fsdp_model(inp)
+            loss = out.sum()
+            loss.backward()
+            # No optimizer step to keep model parameters unchanged
+        # Reset gradients and optimizer for new `FlatParameter`s
+        fsdp_model.zero_grad(set_to_none=True)
+        fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-3)
+
+        with FSDP.summon_full_params(fsdp_model):
+            for p1, p2 in zip(fsdp_model.parameters(), ddp_model.parameters()):
+                torch.testing.assert_close(p1, p2)
 
         for _ in range(num_iters):
             inp = torch.randn((4, 3, 32, 32)).to(self.rank)
@@ -87,29 +104,9 @@ class TestFSDPExecOrderPolicy(FSDPTest):
             self.assertEqual(iter_losses[0], iter_losses[1])
 
     @skip_if_lt_x_gpu(2)
-    def test_fwd_bwd(self):
-        self._test_parity_with_ddp(CNN, 1e2, 3)
-        # group = dist.distributed_c10d._get_default_group()
-        # model = self._get_nonwrapped_model(group).cuda()
-        # fsdp_model = FSDP(model, group, auto_wrap_policy=_ExecOrderPolicy(4e3))
-        # # model = torch.nn.Sequential(
-        # #     torch.nn.Linear(2, 3),
-        # #     torch.nn.ReLU(),
-        # #     torch.nn.Sequential(torch.nn.Linear(3, 2)),
-        # # )
-        # # fsdp_model = FSDP(model.cuda(), group, auto_wrap_policy=_ExecOrderPolicy(1))
-        # optim = torch.optim.Adam(list(fsdp_model.parameters()), lr=1e-3)
-        # # module = fsdp_model.module
-        # device = torch.device("cuda")
-        # for _ in range(3):
-        #     inp = fsdp_model.module.get_input(device)
-        #     output = fsdp_model(*inp)
-        #     # inp = (torch.randn((8, 2)).to(device),)
-        #     # loss = module.get_loss(inp, output).to(device)
-        #     # module.run_backward(loss)
-        #     loss = output.sum()
-        #     loss.backward()
-        #     optim.step()
+    @parametrize("bucket_size", [0])
+    def test_fwd_bwd(self, bucket_size: int):
+        self._test_parity_with_ddp(CNN, bucket_size, 3, 1)
 
 
 instantiate_parametrized_tests(TestFSDPExecOrderPolicy)
