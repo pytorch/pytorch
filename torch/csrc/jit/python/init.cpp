@@ -1491,12 +1491,6 @@ void initJITBindings(PyObject* module) {
           })
       .def_property_readonly(
           "is_out", [](Argument& self) { return self.is_out(); })
-      .def_property_readonly(
-          "is_mutable",
-          [](Argument& self) {
-            const AliasInfo* aliasInfo = self.alias_info();
-            return aliasInfo && aliasInfo->isWrite();
-          })
       .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
         return self.kwarg_only();
       });
