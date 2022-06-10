@@ -44,6 +44,7 @@ namespace torch {
 namespace autograd {
 namespace profiler {
 
+namespace {
 inline int64_t getTimeUs() {
 #ifdef USE_KINETO
   return libkineto::timeSinceEpoch(std::chrono::system_clock::now());
