@@ -14,7 +14,6 @@
 - (void)testCoreML {
   NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"model_coreml"
                                                                          ofType:@"ptl"];
-  XCTAssertNotNil(modelPath, @"model_coreml.ptl not found. Run coreml_backend.py in ios/TestApp/benchmark to generate it.");
   auto module = torch::jit::_load_for_mobile(modelPath.UTF8String);
   c10::InferenceMode mode;
   auto input = torch::ones({1, 3, 224, 224}, at::kFloat);
@@ -29,10 +28,10 @@
   [self runModel:modelPath];
 
   // model generated on the fly
-  NSString* onTheFlyModelName = [NSString stringWithFormat:@"%@_temp", modelName]];
+  NSString* onTheFlyModelName = [NSString stringWithFormat:@"%@", modelName];
   NSString* onTheFlyModelPath = [[NSBundle bundleForClass:[self class]] pathForResource:onTheFlyModelName
                                                                          ofType:@"ptl"];
-  XCTAssertNotNil(onTheFlyModelPath, @"On-the-fly model not found. Follow https://github.com/pytorch/pytorch/tree/master/test/mobile/model_test#diagnose-failed-test to generate them and run the setup script again.");
+  XCTAssertNotNil(onTheFlyModelPath, @"On-the-fly model not found. Follow https://github.com/pytorch/pytorch/tree/master/test/mobile/model_test#diagnose-failed-test to generate them and run the setup.rb script again.");
   [self runModel:onTheFlyModelPath];
 }
 
