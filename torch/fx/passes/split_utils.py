@@ -1,12 +1,12 @@
 from dataclasses import dataclass, field
+from queue import SimpleQueue
 from typing import List, Optional, Dict
 
 import torch.fx
 import torch.nn as nn
 from torch.fx.graph import map_arg
-from .tools_common import NodeList, NodeSet
+from torch.fx.passes.tools_common import NodeList, NodeSet, legalize_graph
 from torch.fx._compatibility import compatibility
-
 
 @compatibility(is_backward_compatible=False)
 def getattr_recursive(obj, name):
@@ -318,8 +318,32 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
 
     return torch.fx.GraphModule(main_root, main_g)
 
+def topo_sort(nodes: NodeList) -> NodeList:
+    indegree_map = {node : 0 for node in nodes}
+    candidates = SimpleQueue()
+
+    for node in nodes:
+        for n in node.all_input_nodes:
+            if n in indegree_map:
+                indegree_map[node] += 1
+        if indegree_map[node] == 0:
+            candidates.put(node)
+
+    sorted_nodes: NodeList = list()
+    while not candidates.empty():
+        node = candidates.get()
+        sorted_nodes.append(node)
+
+        for n in node.users:
+            if n in indegree_map:
+                indegree_map[n] -= 1
+                if indegree_map[n] == 0:
+                    candidates.put(n)
+
+    return sorted_nodes
+
 def fuse_partition(gm: torch.fx.GraphModule,
-                   nodes: List[torch.fx.Node],
+                   nodes: NodeList,
                    partition_name: str) -> torch.fx.GraphModule:
     # returns a graph module that is a copy of `nodes` in gm
     # assumption: nodes are already sorted in topo order
@@ -328,6 +352,9 @@ def fuse_partition(gm: torch.fx.GraphModule,
         assert node.graph.owning_module is gm, f"{node} doesn't belong to passed in graph module {gm._get_name()}"
         assert not node._erased, f"{node} has been removed from owning graph"
         assert node in gm.graph.nodes, f"{node} is not found in graph module {gm._get_name()}"
+
+    # validate partition
+    # - partition doesn't introduce circles in the graph
 
     subgraph = torch.fx.Graph()
 
@@ -424,20 +451,25 @@ def insert_subgm(gm, sub_gm, original_nodes):
 
     return gm
 
-def fuse_by_partitions(gm: torch.fx.GraphModule, partitions: List[List[torch.fx.Node]]) -> torch.fx.GraphModule:
+def fuse_by_partitions(gm: torch.fx.GraphModule, partitions: List[NodeList]) -> torch.fx.GraphModule:
     for partition_id, nodes in enumerate(partitions):
         partition_name = "fused_" + str(partition_id)
-        sub_gm = fuse_partition(gm, nodes, partition_name)
+
+        sorted_nodes = topo_sort(nodes)
+
+        sub_gm = fuse_partition(gm, sorted_nodes, partition_name)
 
         print(partition_name)
         print(sub_gm.graph)
 
-        insert_subgm(gm, sub_gm, nodes)
+        insert_subgm(gm, sub_gm, sorted_nodes)
 
     # print("before")
     # print(gm)
-    from torch.fx.passes.tools_common import legalize_graph
+
     legalize_graph(gm)
+
+    # gm.graph.lint()
 
     # print("after")
     # print(gm)

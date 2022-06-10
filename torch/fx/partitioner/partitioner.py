@@ -1,7 +1,7 @@
 import operator
 from typing import Dict, List, Set, NamedTuple, Tuple
 
-from numpy import partition
+from torch.fx.passes.tools_common import NodeList, NodeSet, legalize_graph
 
 import torch
 # from torch.fx.passes.graph_manipulation import get_size_of_all_nodes
@@ -52,7 +52,7 @@ class CapabilityBasedPartitioner:
                     candidates.append(node)
         return candidates
 
-    def partition(self, candidates):
+    def partition(self, candidates: NodeList) -> NodeList:
         assignment = {}
         partition_id = 0
 
