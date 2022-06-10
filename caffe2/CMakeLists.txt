@@ -983,8 +983,17 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda_linalg PRIVATE
         torch_cpu
         torch_cuda
-        ${CUDA_cusolver_LIBRARY}
     )
+    if($ENV{ATEN_STATIC_CUDA})
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
+          ${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a     # needed for libcusolver_static
+      )
+    else()
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          ${CUDA_cusolver_LIBRARY}
+      )
+    endif()
     # NS: TODO, is this really necessary?
     if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
       target_link_libraries(torch_cuda_linalg PRIVATE
