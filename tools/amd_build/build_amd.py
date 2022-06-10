@@ -78,6 +78,8 @@ includes = [
     "caffe2/contrib/gloo/*",
     "caffe2/contrib/nccl/*",
     "c10/cuda/*",
+    # CMakeLists.txt isn't processed by default, but there are a few
+    # we do want to handle, so explicitly specify them
     "c10/cuda/test/CMakeLists.txt",
     "modules/*",
     # PyTorch paths
@@ -90,11 +92,7 @@ includes = [
     "aten/src/ATen/native/sparse/cuda/*",
     "aten/src/ATen/native/quantized/cuda/*",
     "aten/src/ATen/native/transformers/cuda/*",
-    "aten/src/THC/*",
     "aten/src/ATen/test/*",
-    # CMakeLists.txt isn't processed by default, but there are a few
-    # we do want to handle, so explicitly specify them
-    "aten/src/THC/CMakeLists.txt",
     "torch/*",
     "tools/autograd/templates/python_variable_methods.cpp",
 ]
