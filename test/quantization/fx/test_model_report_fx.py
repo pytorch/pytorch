@@ -508,25 +508,8 @@ class TestModelReportObserver(QuantizationTestCase):
                 current_epoch_min = getattr(model, "obs1").epoch_activation_min
                 current_epoch_max = getattr(model, "obs1").epoch_activation_max
 
-                # print(current_average_range,current_epoch_max,current_epoch_min)
-
                 # run input through
                 model(ex_input)
-
-                # check min and max of epoch is correctly recorded
-                self.assertEqual(
-                    getattr(model, "obs1").epoch_activation_min,
-                    min(current_epoch_min, batch_min),
-                )
-                self.assertEqual(
-                    getattr(model, "obs1").epoch_activation_max,
-                    max(current_epoch_max, batch_max),
-                )
-
-                # check that batches run correctly updated
-                self.assertEqual(
-                    getattr(model, "obs1").num_batches_tracked, num_tracked_so_far + 1
-                )
 
                 # check that average batch activation range updated correctly
                 correct_updated_value = (
@@ -536,6 +519,12 @@ class TestModelReportObserver(QuantizationTestCase):
                     getattr(model, "obs1").average_batch_activation_range,
                     correct_updated_value,
                 )
+
+                if current_epoch_max - current_epoch_min > 0:
+                    self.assertEqual(
+                        getattr(model, "obs1").get_batch_to_epoch_ratio(),
+                        correct_updated_value / (current_epoch_max - current_epoch_min),
+                    )
 
     """Case includes:
         all zero tensor
