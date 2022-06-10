@@ -19,7 +19,6 @@ on:
 
 env:
   IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
@@ -61,7 +60,6 @@ jobs:
           MAX_JOBS: 8
           CUDA_VERSION: ${{ inputs.cuda-version }}
           PYTHON_VERSION: "3.8"
-          PYTORCH_RETRY_TEST_CASES: 1
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           SCCACHE_BUCKET: "ossci-compiler-cache"
           VC_PRODUCT: "BuildTools"
