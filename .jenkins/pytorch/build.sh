@@ -37,6 +37,9 @@ gcc --version
 echo "CMake version:"
 cmake --version
 
+echo "Environment variables:"
+env
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   echo "NVCC version:"
   nvcc --version
