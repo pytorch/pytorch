@@ -71,7 +71,11 @@ template at::Tensor PackedConvWeight<3>::apply_dynamic(
 template <int kSpatialDim>
 at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_dynamic(
     const at::Tensor& input,
-    bool /*reduce_range*/) {
+    bool reduce_range) {
+  if (reduce_range) {
+    TORCH_WARN("reduce_range is set to true for qnnpack backend. qnnpack does not require a reduction in range. The Conv operator "
+    "will ignore this setting and use the full range");
+  }
   // On empty input, no output data will be generated,
   // so use arbitrary qparams.
   float x_min = 0;

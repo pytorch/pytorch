@@ -375,7 +375,11 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
 
 at::Tensor PackedLinearWeightsQnnp::apply_dynamic(
     at::Tensor input,
-    bool /* reduce_range */) {
+    bool reduce_range) {
+  if (reduce_range) {
+    TORCH_WARN("reduce_range is set to true for qnnpack backend. qnnpack does not require a reduction in range. The linear operator "
+    "will ignore this setting and use the full range");
+  }
   return apply_dynamic_impl</*ReluFused=*/false>(std::move(input));
 }
 
