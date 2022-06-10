@@ -129,6 +129,51 @@ struct _cpu_scatter_gather_dim_loop {
 };
 
 
+struct _cpu_scatter_large_index_dim_loop {
+  template <typename scalar_t, typename func_t>
+  void operator()(
+    scalar_t* self_data, int64_t self_dim_stride,
+    int64_t* index_data, int64_t index_dim_stride,
+    int64_t* index_starting_ptr, int* index_shape,
+    int* index_strides,
+    scalar_t* src_starting_ptr, int* src_shape,
+    int* src_strides,
+    int64_t dim, int64_t index_dim_size,
+    int64_t index_upper_bound,
+    func_t& f
+  ) {
+
+    for (const auto i : c10::irange(index_dim_size)) {
+      int64_t idx_dim = index_data[i * index_dim_stride];
+      // we are not putting idx_dim in the error message because it disables
+      // loop optimization in clang-7
+      TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
+        "index ", index_data[i * index_dim_stride],
+        " is out of bounds for dimension ", dim,
+        " with size ", index_upper_bound
+      );
+
+      int ndim = index_shape.size();
+      int64_t src_offset = 0;
+      int64_t absolute_index_offset = (int64_t)((int64_t*)&idx_dim - index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
+      int64_t index_idx;
+      for (int d = ndim - 1; d >= 0; d--) {
+        index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
+        absolute_index_offset -= index_idx * index_strides[d];
+
+        index_idx %= src_shape[d];
+        src_offset += src_strides[d] * index_idx;
+      }
+
+      f(
+        self_data + idx_dim * self_dim_stride,
+        src_starting_ptr + src_offset // * sizeof(scalar_t); // source tensor has word size dependent on type
+      );
+    }
+  }
+};
+
+
 template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
   template <typename func_t>
@@ -237,6 +282,25 @@ struct cpu_scatter_gather_base_kernel {
       .add_input(index)
       .build();
 
+    auto index_shape = index.sizes();
+    auto index_strides = index.strides();
+    auto src_shape = src.sizes();
+    auto src_strides = src.strides();
+    char* src_ptr = (char*)iter.data_ptr(1);
+    char* index_ptr = (char*)iter.data_ptr(2);
+
+    int ndim = index.dim();
+
+    bool index_larger_than_src_in_scatter = false;
+    if (is_scatter_like) {
+      for (int i = 0; i < ndim; i++) {
+        if (index_shape[i] > src_shape[i]) {
+          index_larger_than_src_in_scatter = true;
+          break;
+        }
+      }
+    }
+
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
     auto self_dim_size = ensure_nonempty_size(self, dim);
 
@@ -268,17 +332,29 @@ struct cpu_scatter_gather_base_kernel {
               (void)nelem; //Suppress unused variable warning
               // dim loop is a separate code block
               // for better performance
-              _cpu_scatter_gather_dim_loop<is_scatter_like>()(
-                 (scalar_t*)self_data_bytes, self_dim_stride,
-                 (int64_t*)index_data_bytes, index_dim_stride,
-                 (scalar_t*)src_data_bytes, src_dim_stride,
-                 dim, index_dim_size, index_upper_bound,
-                 kernel_func
-               );
+              if (!index_larger_than_src_in_scatter)
+                _cpu_scatter_gather_dim_loop<is_scatter_like>()(
+                   (scalar_t*)self_data_bytes, self_dim_stride,
+                   (int64_t*)index_data_bytes, index_dim_stride,
+                   (scalar_t*)src_data_bytes, src_dim_stride,
+                   dim, index_dim_size, index_upper_bound,
+                   kernel_func
+                 );
+              else
+                _cpu_scatter_large_index_dim_loop()(
+                   (scalar_t*)self_data_bytes, self_dim_stride,
+                   (int64_t*)index_data_bytes, index_dim_stride,
+                   (int64_t*)index_ptr, index_shape,
+                   index_strides,
+                   (scalar_t*)src_ptr, src_shape,
+                   src_strides,
+                   dim, index_dim_size, index_upper_bound,
+                   kernel_func
+                 );
 
               self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
               index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
-              src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
+              if (!index_larger_than_src_in_scatter) src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
             }
           }
           else {
@@ -286,6 +362,22 @@ struct cpu_scatter_gather_base_kernel {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
               auto* src_data = src_data_bytes;
+
+              scalar_t* absolute_src_ptr;
+              if (index_larger_than_src_in_scatter) {
+                int64_t src_offset = 0;
+                int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
+                int64_t index_idx;
+                for (int d = ndim - 1; d >= 0; d--) {
+                  index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
+                  absolute_index_offset -= index_idx * index_strides[d];
+
+                  index_idx %= src_shape[d];
+                  src_offset += src_strides[d] * index_idx;
+                }
+                absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
+              }
+
               for (const auto nelem : c10::irange(n)) {
                 (void)nelem; //Suppress unused variable warning
                 int64_t idx_dim = *(int64_t*)index_data;
@@ -298,11 +390,13 @@ struct cpu_scatter_gather_base_kernel {
 
                 kernel_func(
                   (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-                  (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
+                  !index_larger_than_src_in_scatter ?
+                      (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride)
+                    : absolute_src_ptr;
 
                 self_data += strides[SELF_ITER_STRIDE_IDX];
                 index_data += strides[INDEX_ITER_STRIDE_IDX];
-                src_data += strides[SRC_ITER_STRIDE_IDX];
+                if (!index_larger_than_src_in_scatter) src_data += strides[SRC_ITER_STRIDE_IDX];
               }
             }
           }
@@ -325,6 +419,25 @@ struct cpu_scatter_gather_base_kernel {
       .add_input(src)
       .add_input(index)
       .build();
+
+    auto index_shape = index.sizes();
+    auto index_strides = index.strides();
+    auto src_shape = src.sizes();
+    auto src_strides = src.strides();
+    char* src_ptr = (char*)iter.data_ptr(1);
+    char* index_ptr = (char*)iter.data_ptr(2);
+
+    int ndim = index.dim();
+
+    bool index_larger_than_src_in_scatter = false;
+    if (is_scatter_like) {
+      for (int i = 0; i < ndim; i++) {
+        if (index_shape[i] > src_shape[i]) {
+          index_larger_than_src_in_scatter = true;
+          break;
+        }
+      }
+    }
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
     auto self_dim_size = ensure_nonempty_size(self, dim);
@@ -357,17 +470,29 @@ struct cpu_scatter_gather_base_kernel {
               (void)nelem; //Suppress unused variable warning
               // dim loop is a separate code block
               // for better performance
-              _cpu_scatter_gather_dim_loop<is_scatter_like>()(
-                 (scalar_t*)self_data_bytes, self_dim_stride,
-                 (int64_t*)index_data_bytes, index_dim_stride,
-                 (scalar_t*)src_data_bytes, src_dim_stride,
-                 dim, index_dim_size, index_upper_bound,
-                 kernel_func
-               );
+              if (!index_larger_than_src_in_scatter)
+                _cpu_scatter_gather_dim_loop<is_scatter_like>()(
+                   (scalar_t*)self_data_bytes, self_dim_stride,
+                   (int64_t*)index_data_bytes, index_dim_stride,
+                   (scalar_t*)src_data_bytes, src_dim_stride,
+                   dim, index_dim_size, index_upper_bound,
+                   kernel_func
+                 );
+              else
+                _cpu_scatter_large_index_dim_loop()(
+                   (scalar_t*)self_data_bytes, self_dim_stride,
+                   (int64_t*)index_data_bytes, index_dim_stride,
+                   (int64_t*)index_ptr, index_shape,
+                   index_strides,
+                   (scalar_t*)src_ptr, src_shape,
+                   src_strides,
+                   dim, index_dim_size, index_upper_bound,
+                   kernel_func
+                 );
 
               self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
               index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
-              src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
+              if (!index_larger_than_src_in_scatter) src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
             }
           }
           else {
@@ -375,6 +500,22 @@ struct cpu_scatter_gather_base_kernel {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
               auto* src_data = src_data_bytes;
+
+              scalar_t* absolute_src_ptr;
+              if (index_larger_than_src_in_scatter) {
+                int64_t src_offset = 0;
+                int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
+                int64_t index_idx;
+                for (int d = ndim - 1; d >= 0; d--) {
+                  index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
+                  absolute_index_offset -= index_idx * index_strides[d];
+
+                  index_idx %= src_shape[d];
+                  src_offset += src_strides[d] * index_idx;
+                }
+                absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
+              }
+
               for (const auto nelem : c10::irange(n)) {
                 (void)nelem; //Suppress unused variable warning
                 int64_t idx_dim = *(int64_t*)index_data;
@@ -387,11 +528,13 @@ struct cpu_scatter_gather_base_kernel {
 
                 kernel_func(
                   (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-                  (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
+                  !index_larger_than_src_in_scatter ?
+                      (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride)
+                    : absolute_src_ptr;
 
                 self_data += strides[SELF_ITER_STRIDE_IDX];
                 index_data += strides[INDEX_ITER_STRIDE_IDX];
-                src_data += strides[SRC_ITER_STRIDE_IDX];
+                if (!index_larger_than_src_in_scatter) src_data += strides[SRC_ITER_STRIDE_IDX];
               }
             }
           }
@@ -414,6 +557,25 @@ struct cpu_scatter_gather_base_kernel {
       .add_input(src)
       .add_input(index)
       .build();
+
+    auto index_shape = index.sizes();
+    auto index_strides = index.strides();
+    auto src_shape = src.sizes();
+    auto src_strides = src.strides();
+    char* src_ptr = (char*)iter.data_ptr(1);
+    char* index_ptr = (char*)iter.data_ptr(2);
+
+    int ndim = index.dim();
+
+    bool index_larger_than_src_in_scatter = false;
+    if (is_scatter_like) {
+      for (int i = 0; i < ndim; i++) {
+        if (index_shape[i] > src_shape[i]) {
+          index_larger_than_src_in_scatter = true;
+          break;
+        }
+      }
+    }
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
     auto self_dim_size = ensure_nonempty_size(self, dim);
@@ -446,17 +608,29 @@ struct cpu_scatter_gather_base_kernel {
               (void)nelem; //Suppress unused variable warning
               // dim loop is a separate code block
               // for better performance
-              _cpu_scatter_gather_dim_loop<is_scatter_like>()(
-                 (scalar_t*)self_data_bytes, self_dim_stride,
-                 (int64_t*)index_data_bytes, index_dim_stride,
-                 (scalar_t*)src_data_bytes, src_dim_stride,
-                 dim, index_dim_size, index_upper_bound,
-                 kernel_func
-               );
+              if (!index_larger_than_src_in_scatter)
+                _cpu_scatter_gather_dim_loop<is_scatter_like>()(
+                   (scalar_t*)self_data_bytes, self_dim_stride,
+                   (int64_t*)index_data_bytes, index_dim_stride,
+                   (scalar_t*)src_data_bytes, src_dim_stride,
+                   dim, index_dim_size, index_upper_bound,
+                   kernel_func
+                 );
+              else
+                _cpu_scatter_large_index_dim_loop()(
+                   (scalar_t*)self_data_bytes, self_dim_stride,
+                   (int64_t*)index_data_bytes, index_dim_stride,
+                   (int64_t*)index_ptr, index_shape,
+                   index_strides,
+                   (scalar_t*)src_ptr, src_shape,
+                   src_strides,
+                   dim, index_dim_size, index_upper_bound,
+                   kernel_func
+                 );
 
               self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
               index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
-              src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
+              if (!index_larger_than_src_in_scatter) src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
             }
           }
           else {
@@ -464,6 +638,22 @@ struct cpu_scatter_gather_base_kernel {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
               auto* src_data = src_data_bytes;
+
+              scalar_t* absolute_src_ptr;
+              if (index_larger_than_src_in_scatter) {
+                int64_t src_offset = 0;
+                int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
+                int64_t index_idx;
+                for (int d = ndim - 1; d >= 0; d--) {
+                  index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
+                  absolute_index_offset -= index_idx * index_strides[d];
+
+                  index_idx %= src_shape[d];
+                  src_offset += src_strides[d] * index_idx;
+                }
+                absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
+              }
+
               for (const auto nelem : c10::irange(n)) {
                 (void)nelem; //Suppress unused variable warning
                 int64_t idx_dim = *(int64_t*)index_data;
@@ -476,11 +666,13 @@ struct cpu_scatter_gather_base_kernel {
 
                 kernel_func(
                   (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-                  (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
+                  !index_larger_than_src_in_scatter ?
+                      (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride)
+                    : absolute_src_ptr;
 
                 self_data += strides[SELF_ITER_STRIDE_IDX];
                 index_data += strides[INDEX_ITER_STRIDE_IDX];
-                src_data += strides[SRC_ITER_STRIDE_IDX];
+                if (!index_larger_than_src_in_scatter) src_data += strides[SRC_ITER_STRIDE_IDX];
               }
             }
           }
@@ -503,6 +695,25 @@ struct cpu_scatter_gather_base_kernel {
       .add_input(src)
       .add_input(index)
       .build();
+
+    auto index_shape = index.sizes();
+    auto index_strides = index.strides();
+    auto src_shape = src.sizes();
+    auto src_strides = src.strides();
+    char* src_ptr = (char*)iter.data_ptr(1);
+    char* index_ptr = (char*)iter.data_ptr(2);
+
+    int ndim = index.dim();
+
+    bool index_larger_than_src_in_scatter = false;
+    if (is_scatter_like) {
+      for (int i = 0; i < ndim; i++) {
+        if (index_shape[i] > src_shape[i]) {
+          index_larger_than_src_in_scatter = true;
+          break;
+        }
+      }
+    }
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
     auto self_dim_size = ensure_nonempty_size(self, dim);
@@ -535,17 +746,29 @@ struct cpu_scatter_gather_base_kernel {
               (void)nelem; //Suppress unused variable warning
               // dim loop is a separate code block
               // for better performance
-              _cpu_scatter_gather_dim_loop<is_scatter_like>()(
-                 (scalar_t*)self_data_bytes, self_dim_stride,
-                 (int64_t*)index_data_bytes, index_dim_stride,
-                 (scalar_t*)src_data_bytes, src_dim_stride,
-                 dim, index_dim_size, index_upper_bound,
-                 kernel_func
-               );
+              if (!index_larger_than_src_in_scatter)
+                _cpu_scatter_gather_dim_loop<is_scatter_like>()(
+                   (scalar_t*)self_data_bytes, self_dim_stride,
+                   (int64_t*)index_data_bytes, index_dim_stride,
+                   (scalar_t*)src_data_bytes, src_dim_stride,
+                   dim, index_dim_size, index_upper_bound,
+                   kernel_func
+                 );
+              else
+                _cpu_scatter_large_index_dim_loop()(
+                   (scalar_t*)self_data_bytes, self_dim_stride,
+                   (int64_t*)index_data_bytes, index_dim_stride,
+                   (int64_t*)index_ptr, index_shape,
+                   index_strides,
+                   (scalar_t*)src_ptr, src_shape,
+                   src_strides,
+                   dim, index_dim_size, index_upper_bound,
+                   kernel_func
+                 );
 
               self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
               index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
-              src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
+              if (!index_larger_than_src_in_scatter) src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
             }
           }
           else {
@@ -553,6 +776,22 @@ struct cpu_scatter_gather_base_kernel {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
               auto* src_data = src_data_bytes;
+
+              scalar_t* absolute_src_ptr;
+              if (index_larger_than_src_in_scatter) {
+                int64_t src_offset = 0;
+                int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
+                int64_t index_idx;
+                for (int d = ndim - 1; d >= 0; d--) {
+                  index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
+                  absolute_index_offset -= index_idx * index_strides[d];
+
+                  index_idx %= src_shape[d];
+                  src_offset += src_strides[d] * index_idx;
+                }
+                absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
+              }
+
               for (const auto nelem : c10::irange(n)) {
                 (void)nelem; //Suppress unused variable warning
                 int64_t idx_dim = *(int64_t*)index_data;
@@ -565,11 +804,13 @@ struct cpu_scatter_gather_base_kernel {
 
                 kernel_func(
                   (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-                  (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
+                  !index_larger_than_src_in_scatter ?
+                      (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride)
+                    : absolute_src_ptr;
 
                 self_data += strides[SELF_ITER_STRIDE_IDX];
                 index_data += strides[INDEX_ITER_STRIDE_IDX];
-                src_data += strides[SRC_ITER_STRIDE_IDX];
+                if (!index_larger_than_src_in_scatter) src_data += strides[SRC_ITER_STRIDE_IDX];
               }
             }
           }
