@@ -885,6 +885,7 @@ def _dispatch_has_kernel_for_dispatch_key(name: str, dispatch: str) -> _bool: ..
 def _dispatch_has_kernel(name: str) -> _bool: ...
 def _dispatch_tls_is_dispatch_key_excluded(dispatch: str) -> _bool: ...
 def _dispatch_tls_set_dispatch_key_excluded(dispatch: str, val: _bool) -> None: ...
+def _dispatch_isTensorSubclassLike(tensor: Tensor) -> _bool: ...
 
 class _AutoDispatchBelowAutograd:
     pass
@@ -944,6 +945,7 @@ class _TensorBase(metaclass=_TensorMeta):
     grad_fn: Any
     _grad_fn: Any
     _grad: Optional[Tensor]
+    grad: Optional[Tensor]
     _backward_hooks: Optional[Dict[_int, Callable[[Tensor], Optional[Tensor]]]]
     ${tensor_method_hints}
 
