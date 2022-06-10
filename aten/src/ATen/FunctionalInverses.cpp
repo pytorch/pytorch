@@ -228,6 +228,14 @@ Tensor FunctionalInverses::transpose_copy_int_inverse(const Tensor& base, const 
     }
 }
 
+Tensor FunctionalInverses::_unsafe_view_copy_inverse(const at::Tensor & base, const at::Tensor & mutated_view, bool reapply_views, at::IntArrayRef size) {
+    if (reapply_views) {
+      return at::_unsafe_view(mutated_view, base.sizes());
+    } else {
+      return at::_unsafe_view_copy(mutated_view, base.sizes());
+    }
+}
+
 Tensor FunctionalInverses::unsqueeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim) {
     if (reapply_views) {
       return at::squeeze(mutated_view, dim);
