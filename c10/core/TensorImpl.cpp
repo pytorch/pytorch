@@ -399,6 +399,9 @@ c10::Device TensorImpl::device_custom() const {
 }
 
 IntArrayRef TensorImpl::strides_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->strides(this);
+  }
   TORCH_CHECK(
       false,
       "Tensors of type ",
@@ -556,6 +559,7 @@ void TensorImpl::copy_generic_tensor_metadata(
   if (src_impl->named_tensor_meta_ != nullptr) {
     dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
   }
+  dest_impl->sizes_strides_policy_ = src_impl->sizes_strides_policy_;
 }
 
 void TensorImpl::copy_tensor_metadata_except_version_counter(
@@ -574,7 +578,6 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->key_set_ = (src_impl->key_set_ - c10::python_ks) |
       (dest_impl->key_set_ & c10::python_ks);
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-  dest_impl->sizes_strides_policy_ = src_impl->sizes_strides_policy_;
   dest_impl->storage_access_should_throw_ =
       src_impl->storage_access_should_throw_;
 }
