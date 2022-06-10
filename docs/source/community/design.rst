@@ -114,8 +114,7 @@ of good automation faster.
 Principle 3: Python First with Best In Class Language Interoperability
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This principle began as `Python
-First <http://This%20link%20seems%20broken>`__: 
+This principle began as **Python First**:
   
   PyTorch is not a Python binding into a monolithic C++ framework.
   It is built to be deeply integrated into Python. You can use it
