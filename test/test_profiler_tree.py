@@ -8,7 +8,7 @@ import unittest
 
 import torch
 from torch.testing._internal.common_utils import (
-  TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF)
+    TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF)
 
 
 class ProfilerTree:
