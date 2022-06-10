@@ -50,12 +50,15 @@ build:cpu-only --@rules_cuda//cuda:enable_cuda=False
 # the exceptions to an entire target.
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=type-limits
 build --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=type-limits
-build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-function
-build --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=unused-function
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-but-set-variable
 build --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=unused-but-set-variable
-build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-variable
-build --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=unused-variable
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=all
+build --per_file_copt=^//.*\.cu$@--compiler-options=-Werror=all
+
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-error=sign-compare
+build --per_file_copt=^//.*\.cu$@--compiler-options=-Wno-error=sign-compare
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-error=unknown-pragmas
+build --per_file_copt=^//.*\.cu$@--compiler-options=-Wno-error=unknown-pragmas
 
 build \
     --per_file_copt=//:aten/src/ATen/RegisterCompositeExplicitAutograd.cpp@-Wno-error=unused-function \
