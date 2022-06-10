@@ -22,6 +22,8 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/nan_to_num.h>
 #include <ATen/ops/ones.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -121,7 +123,7 @@ void lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots, const Tenso
 template <typename scalar_t>
 static void apply_lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
 #ifndef CUDART_VERSION
-  TORCH_CHECK(false, "lu_solve: cuBLAS backend for lu_solve is not available.")
+  TORCH_CHECK(false, "linalg.lu_solve: cuBLAS backend for linalg.lu_solve is not available.")
 #else
   TORCH_INTERNAL_ASSERT(batchCount(LU) == batchCount(B), "batch_size of LU and B must be the same");
   TORCH_INTERNAL_ASSERT(batchCount(LU) == batchCount(pivots.unsqueeze(-1)), "batch_size of LU and pivots must be the same");
@@ -1712,14 +1714,14 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 // The 'apply_' word is used for templated by dtype functions that call an API routine
 // underneath. Since the cusolver API has a slightly different structure we do not prepend
 // apply_ to this function.
-void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots, const bool use_magma_) {
+void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
     self.scalar_type(),
     "lu_factor_cusolver",
     [&self,
      &pivots,
      &infos,
-     &get_pivots]() {
+     get_pivots]() {
     const auto m = cuda_int_cast(self.size(-2), "m");
     const auto n = cuda_int_cast(self.size(-1), "n");
     const auto lda = std::max<int>(1, m);
@@ -1744,10 +1746,16 @@ void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const T
   });
 
   // Necessary because cuSOLVER uses nan for outputs that correspond to 0 in MAGMA for non-pivoted LU.
-  // See https://github.com/pytorch/pytorch/issues/53879 for more details.
-  if (!get_pivots && use_magma_) {
-    at::nan_to_num_(const_cast<Tensor&>(self), 0, std::numeric_limits<double>::infinity(),
-      -std::numeric_limits<double>::infinity());
+  // https://github.com/pytorch/pytorch/issues/53879#issuecomment-830633572
+  if (!get_pivots) {
+    // nan_to_num does not work for complex inputs
+    // https://github.com/pytorch/pytorch/issues/59247
+    if (self.is_complex()) {
+      self.copy_(at::where(self.eq(self), self,  at::scalar_tensor(0., self.options())));
+    } else {
+      at::nan_to_num_(const_cast<Tensor&>(self), 0, std::numeric_limits<double>::infinity(),
+        -std::numeric_limits<double>::infinity());
+    }
   }
 }
 

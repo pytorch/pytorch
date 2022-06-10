@@ -2016,6 +2016,11 @@ TORCH_IMPL_FUNC(linalg_lu_factor_ex_out)(const Tensor& A,
                                          const Tensor& LU,
                                          const Tensor& pivots,
                                          const Tensor& info) {
+  if (A.numel() == 0) {
+    // zero out the infos as it will have one element if the input is a matrix of size (0, 0)
+    info.zero_();
+    return;
+  }
   if (!LU.is_same(A)) {
     LU.copy_(A);
   }
