@@ -20,7 +20,7 @@ namespace {
 
 using namespace vec;
 
-void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+void index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
     iter.dtype(), "index_cpu", [&] {
     cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {

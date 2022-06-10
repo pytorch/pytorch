@@ -53,7 +53,7 @@ struct Indexer {
 } // anonymous namespace
 
 template <typename scalar_t, typename func_t>
-void cpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride,
+void cpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride,
                       const func_t& f, bool serial_execution=false)
 {
   int ntensor = iter.ntensors();
