@@ -48,6 +48,7 @@ jobs:
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PR_BODY: ${{ github.event.pull_request.body }}
       PYTORCH_RETRY_TEST_CASES: 1
+      PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -77,6 +78,7 @@ jobs:
         run: .github/scripts/parse_ref.py
 
       - name: Test
+        id: test
         run: |
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
           export COMMIT_MESSAGES
@@ -92,7 +94,7 @@ jobs:
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
-        if: always()
+        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
@@ -108,6 +110,8 @@ jobs:
           SHARD_NUMBER: ${{ matrix.shard }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PYTORCH_RETRY_TEST_CASES: 1
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: ${{ github.run_id }}

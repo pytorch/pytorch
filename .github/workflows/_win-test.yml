@@ -59,12 +59,14 @@ jobs:
           tree /F C:\$Env:GITHUB_RUN_ID\build-results
 
       - name: Test
+        id: test
         shell: bash
         env:
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           INSTALL_WINDOWS_SDK: 1
           PYTHON_VERSION: 3.8
           PYTORCH_RETRY_TEST_CASES: 1
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
@@ -97,7 +99,7 @@ jobs:
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
-        if: always()
+        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
@@ -116,6 +118,8 @@ jobs:
           SHARD_NUMBER: ${{ matrix.shard }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PYTORCH_RETRY_TEST_CASES: 1
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: ${{ github.run_id }}
