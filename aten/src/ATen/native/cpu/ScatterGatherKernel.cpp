@@ -155,7 +155,7 @@ struct _cpu_scatter_large_index_dim_loop {
 
       int ndim = index_shape.size();
       int64_t src_offset = 0;
-      int64_t absolute_index_offset = (int64_t)((int64_t*)&idx_dim - index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
+      int64_t absolute_index_offset = (int64_t)((int64_t*)&idx_dim - index_starting_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
       int64_t index_idx;
       for (int d = ndim - 1; d >= 0; d--) {
         index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
