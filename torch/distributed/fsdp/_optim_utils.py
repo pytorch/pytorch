@@ -196,7 +196,7 @@ def _unflatten_communicated_optim_state(
     """
     unflat_param_state: List[Dict[str, Any]] = []
     flat_param_views: Dict[str, Iterator] = {}
-    num_unflat_params = len(flat_param._param_infos)
+    num_unflat_params = flat_param._num_params
     tensor_state, zero_dim_tensor_state, non_tensor_state = \
         state.tensor_state, state.zero_dim_tensor_state, state.non_tensor_state
 

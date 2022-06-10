@@ -61,7 +61,6 @@ from ._utils import (
     _apply_to_modules,
     _apply_to_tensors,
     _contains_batchnorm,
-    _get_param_from_param_name,
     _override_batchnorm_mixed_precision,
 )
 from .flatten_params_wrapper import (
@@ -1151,15 +1150,24 @@ class FullyShardedDataParallel(nn.Module):
         handles_per_flat_param: List[List[FlatParamHandle]],
     ) -> None:
         """
-        Re-registers parameter handles from existing handles.
+        Re-registers parameter handles from existing handles, where the new
+        handle construction is specified by ``handles_per_flat_param``. This
+        only supports coalescing existing handles into handles that are at
+        least as large.
 
         TODO (awgu): This is the entry point for the execution-order based
-        construction of ``FlatParameter`` s.
-
-        For the current plan, every handle passed into this method manages only
-        a single original parameter.
+        construction of ``FlatParameter`` s, in which case each handle in the
+        input should manage singleton ``FlatParameter`` s. The interface may
+        be changed to not take handles, but it must take something that
+        uniquely identifies the original parameters to flatten into a new
+        ``FlatParameter``.
 
         Args:
+            handles_per_flat_param (List[List[FlatParamHandle]]): The ith
+                element in the outer :class:`list` is a :class`list` of
+                :class:`FlatParamHandle` s to combine into a single new
+                :class:`FlatParamHandle`, where the parameters are flattened
+                following that :class:`list` order.
         """
         # TODO (awgu): check no handle appears exactly once in the list of lists
         # singleton_handles: List[FlatParamHandle] = self._handles
@@ -1175,15 +1183,19 @@ class FullyShardedDataParallel(nn.Module):
                 for ctx in (handle.unflatten_as_params() for handle in handles):
                     stack.enter_context(ctx)
                 params = [
-                    _get_param_from_param_name(param_name, self._fsdp_wrapped_module)
+                    self._fsdp_wrapped_module.get_parameter(param_name)
                     for param_name in prefixed_param_names
                 ]
                 self._register_param_handle_from_params(params, self._fsdp_wrapped_module)
                 stack.close()
+            for handle in handles:
+                # TODO (awgu): Any way around manually removing existing
+                # registered parameters?
+                self._parameters.pop(handle.flat_param._flat_param_name)
         # TODO (awgu): De-dup with `_register_param_handles_from_module()`
         self.params = []
         for handle in self._handles:
-            self.params.append(handle.flat_param)    
+            self.params.append(handle.flat_param)
             self.register_parameter(handle.flat_param._flat_param_name, handle.flat_param)
         self._module_to_forward: Dict[nn.Module, Callable] = {}
         self._unsharded_params: Set[FlatParameter] = set()
@@ -1209,6 +1221,7 @@ class FullyShardedDataParallel(nn.Module):
             handles_per_flat_param.append(curr_bucket_handles)
         return handles_per_flat_param
 
+    # TODO (awgu): naming -> this will only get called once in ctor
     def _register_param_handles_from_module(
         self,
         root_module: nn.Module,
@@ -4367,19 +4380,21 @@ def _get_param_to_unflat_param_names(
     def module_fn(module, prefix, param_to_unflat_param_names):
         # For FSDP modules, only add the entry when considering the contained
         # `FlattenParamsWrapper` to avoid duplication
-        if not isinstance(module, FullyShardedDataParallel):
-            for param_name, param in module.named_parameters(recurse=False):
-                prefixed_param_names = [
-                    _clean_param_name(prefix, param_info)
-                    for param_info in param._param_infos
-                ] if isinstance(param, FlatParameter) else [prefix + param_name]
-                # If this parameter has already been visited, then it is a
-                # shared parameter; then, only take the first parameter name
-                is_shared_param = param in param_to_unflat_param_names
-                if not is_shared_param:
-                    param_to_unflat_param_names[param] = prefixed_param_names
-                elif not dedup_shared_params:
-                    param_to_unflat_param_names[param].extend(prefixed_param_names)
+        if isinstance(module, FullyShardedDataParallel) and \
+                not module._use_exec_order_policy:  # TODO (awgu): document...
+            return        
+        for param_name, param in module.named_parameters(recurse=False):
+            prefixed_param_names = [
+                _clean_param_name(prefix, param_info)
+                for param_info in param._param_infos
+            ] if isinstance(param, FlatParameter) else [prefix + param_name]
+            # If this parameter has already been visited, then it is a
+            # shared parameter; then, only take the first parameter name
+            is_shared_param = param in param_to_unflat_param_names
+            if not is_shared_param:
+                param_to_unflat_param_names[param] = prefixed_param_names
+            elif not dedup_shared_params:
+                param_to_unflat_param_names[param].extend(prefixed_param_names)
 
     def return_fn(param_to_unflat_param_names):
         return param_to_unflat_param_names

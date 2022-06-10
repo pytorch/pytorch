@@ -108,6 +108,9 @@ class FlatParameter(nn.Parameter):
             construct this flattened parameter via :class:`FlatParamHandle`;
             the prefixed names are guaranteed to be unique within the subtree
             rooted in that module.
+        _num_params (int): Number of parameters flattened into this flattened
+            parameter; this is the length of ``_param_infos``, ``_numels``,
+            ``_shapes``, and ``_prefixed_param_names``.
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
             info entries; see :class:`SharedParamInfo`.
 
@@ -163,6 +166,7 @@ class FlatParameter(nn.Parameter):
         assert len(param_infos) == len(numels)
         assert len(param_infos) == len(shapes)
         assert len(param_infos) == len(prefixed_param_names)
+        self._num_params = len(param_infos)
         self._param_infos = tuple(param_infos)
         self._numels = tuple(numels)
         self._shapes = tuple(shapes)
