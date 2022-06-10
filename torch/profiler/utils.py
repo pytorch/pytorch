@@ -2,6 +2,7 @@ from collections import deque
 from dataclasses import dataclass
 from torch.profiler import DeviceType
 from torch.autograd.profiler import profile
+import re
 
 
 class EventKey:
@@ -28,6 +29,10 @@ class EventMetrics:
         if self.duration_time_ns == 0:
             return 0.0
         return self.idle_time_ns / self.duration_time_ns
+
+    # heuristic to determine which event is more impactful and optimizable
+    def score(self):
+        return self.fraction_idle_time()
 
 
 def compute_event_metrics(prof: profile):
@@ -101,10 +106,25 @@ def compute_idle_time(prof: profile, metrics: dict[EventKey, EventMetrics]):
         metrics[EventKey(event)].idle_time_ns = idle_time
 
 
-def get_optimizable_events(prof: profile):
-    # metrics = compute_event_metrics(prof)
+def get_optimizable_events(prof: profile, length: int = 1):
+    metrics = compute_event_metrics(prof)
 
     # Compute a list of events that that long idle time
-
+    # H score: h(self_time, average fraction_idle_time, )
+    event_list = [e for e in metrics.keys()]
+    event_list.sort(key=lambda e: metrics[e].score(), reverse=True)
+    event_list = event_list[:length]
     # Print the list of events in human-friendly format
-    pass
+    print("Optimizable events:")
+    for event in event_list:
+        print(f"Event:                {event}\nSource code location: {source_code_location(event.event)}")
+    return event_list
+
+def source_code_location(event):
+    while(event is not None):
+        match = re.search(".py(.*)", event.name())
+        if (match is None):
+            event = event.parent
+            continue
+        return event.name()
+    return "No source code location found"
