@@ -41,7 +41,8 @@ using at::Tensor;
 //
 // All these cases can be handled by the following layout constraint on the forward grad:
 //   - A Tensor and its forward grad (for all levels) must have the same metadata (size, stride
-//     and storage offset). Storage offset must be in this metadata because of as_strided.
+//     conj/neg bit and storage offset). Storage offset must be in this metadata because of
+//     as_strided. conj/neg bit must be part of this metadata because of ops like `real`.
 //   - View operations must create a forward grad that is a view of the base's forward grad.
 //   - Inplace operations must modify the input's forward grad inplace.
 //
@@ -97,9 +98,11 @@ namespace {
     if (!at::_has_same_storage_numel(base, other)) {
       return false;
     }
+    if (base.is_conj() != other.is_conj() || base.is_neg() != other.is_neg()) {
+      return false;
+    }
     return true;
   }
-
 } // anonymous namespace
 
 // This function is will ensure that the fw_grad_ is properly a view of the base for inplace ops on
@@ -163,6 +166,8 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
             new_base_fw_grad = new_grad;
           } else {
             new_base_fw_grad = at::_new_zeros_with_same_feature_meta(new_grad, base);
+            new_base_fw_grad._set_conj(base.is_conj());
+            new_base_fw_grad._set_neg(base.is_neg());
 
             // Update new_grad to be a view of the base
             Tensor new_fw_grad_value;
@@ -189,6 +194,8 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
             "Expected the output of forward differentiable view operations to have the tangent have the same layout as primal")
       }
       auto res = at::_new_zeros_with_same_feature_meta(new_grad, self);
+      res._set_conj(self.is_conj());
+      res._set_neg(self.is_neg());
       res.copy_(new_grad);
       new_grad = res;
     }
