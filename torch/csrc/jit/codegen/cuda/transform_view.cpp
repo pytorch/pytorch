@@ -133,10 +133,12 @@ class MergeTransform final : public ViewTransform {
     auto merged_extent =
         mul(merged_id->extent(), new_root_domain[index_ + 1]->extent());
 
-    auto new_merged_id =
-        IterDomainBuilder(FusionGuard::getCurFusion()->zeroVal(), merged_extent)
-            .is_rfactor_domain(true)
-            .build();
+    auto new_merged_id = IrBuilder::create<IterDomain>(
+        FusionGuard::getCurFusion()->zeroVal(),
+        merged_extent,
+        ParallelType::Serial,
+        IterType::Iteration,
+        true);
 
     IrBuilder::create<Merge>(
         new_merged_id, merged_id, new_root_domain[index_ + 1]);
@@ -192,19 +194,20 @@ class SplitTransform final : public ViewTransform {
     Val* remainder = ceilDiv(id->extent(), factor);
 
     // outer loop IterDomain
-    IterDomain* factor_id =
-        IterDomainBuilder(FusionGuard::getCurFusion()->zeroVal(), factor)
-            .parallel_type(id->getParallelType())
-            .iter_type(id->getIterType())
-            .is_rfactor_domain(true)
-            .build();
+    IterDomain* factor_id = IrBuilder::create<IterDomain>(
+        FusionGuard::getCurFusion()->zeroVal(),
+        factor,
+        id->getParallelType(),
+        id->getIterType(),
+        true);
 
     // inner loop IterDomain
-    IterDomain* remainder_id =
-        IterDomainBuilder(
-            FusionGuard::getCurFusion()->zeroVal(), remainder->as<Int>())
-            .is_rfactor_domain(true)
-            .build();
+    IterDomain* remainder_id = IrBuilder::create<IterDomain>(
+        FusionGuard::getCurFusion()->zeroVal(),
+        remainder->as<Int>(),
+        ParallelType::Serial,
+        IterType::Iteration,
+        true);
 
     IrBuilder::create<Split>(factor_id, remainder_id, id, factor, false);
 

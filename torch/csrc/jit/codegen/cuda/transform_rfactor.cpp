@@ -117,26 +117,24 @@ class ReplayRFactor : public ReplayTransformations {
 
     // Manually replay the split, making reduction = false and rfactor = true
     // outer IterDomain
-    IterDomain* ido =
-        IterDomainBuilder(
-            s->container()->zeroVal(),
-            s->innerSplit() ? remainder->as<Int>() : s->factor())
-            .iter_type(
-                rfactor_axes_.count(s->outer()) ? IterType::Reduction
-                                                : IterType::Iteration)
-            .is_rfactor_domain(static_rfactor_outputs)
-            .build();
+    IterDomain* ido = IrBuilder::create<IterDomain>(
+        s->container(),
+        IrBuilder::create<Int>(s->container(), 0),
+        s->innerSplit() ? remainder->as<Int>() : s->factor(),
+        ParallelType::Serial,
+        rfactor_axes_.count(s->outer()) ? IterType::Reduction
+                                        : IterType::Iteration,
+        static_rfactor_outputs);
 
     // inner IterDomain
-    IterDomain* idi =
-        IterDomainBuilder(
-            s->container()->zeroVal(),
-            s->innerSplit() ? s->factor() : remainder->as<Int>())
-            .iter_type(
-                rfactor_axes_.count(s->inner()) ? IterType::Reduction
-                                                : IterType::Iteration)
-            .is_rfactor_domain(static_rfactor_outputs)
-            .build();
+    IterDomain* idi = IrBuilder::create<IterDomain>(
+        s->container(),
+        IrBuilder::create<Int>(s->container(), 0),
+        s->innerSplit() ? s->factor() : remainder->as<Int>(),
+        ParallelType::Serial,
+        rfactor_axes_.count(s->inner()) ? IterType::Reduction
+                                        : IterType::Iteration,
+        static_rfactor_outputs);
 
     // Generate the split node
     IrBuilder::create<Split>(
@@ -181,13 +179,14 @@ class ReplayRFactor : public ReplayTransformations {
     Val* merged_id_size =
         mul(id_outer_mapped->extent(), id_inner_mapped->extent());
 
-    IterDomain* merged_id =
-        IterDomainBuilder(m->container()->zeroVal(), merged_id_size->as<Int>())
-            .iter_type(
-                rfactor_axes_.count(m->out()) ? IterType::Reduction
-                                              : IterType::Iteration)
-            .is_rfactor_domain(static_rfactor_ids_.count(m->out()))
-            .build();
+    IterDomain* merged_id = IrBuilder::create<IterDomain>(
+        m->container(),
+        IrBuilder::create<Int>(m->container(), 0),
+        merged_id_size->as<Int>(),
+        ParallelType::Serial,
+        rfactor_axes_.count(m->out()) ? IterType::Reduction
+                                      : IterType::Iteration,
+        static_rfactor_ids_.count(m->out()));
 
     IrBuilder::create<Merge>(
         m->container(), merged_id, id_outer_mapped, id_inner_mapped);
@@ -330,17 +329,25 @@ std::pair<TensorDomain*, TensorDomain*> TransformRFactor::runReplay(
       auto id = original_td_root[i];
       // If this is an rfactor root, it will be a reduction in this stage
       if (rfactor_root_axes.find(id) != rfactor_root_axes.end()) {
-        new_producer_root[i] = IterDomainBuilder(id->start(), id->extent())
-                                   .stop_offset(id->stopOffset())
-                                   .iter_type(IterType::Reduction)
-                                   .is_rfactor_domain(true)
-                                   .build();
+        new_producer_root[i] = IrBuilder::create<IterDomain>(
+            id->container(),
+            id->start(),
+            id->extent(),
+            id->stopOffset(),
+            ParallelType::Serial,
+            IterType::Reduction,
+            true);
         // If this is not an rfactor root, but a reduction root, it should be
         // turned into an iteration domain
       } else if (id->isReduction()) {
-        new_producer_root[i] = IterDomainBuilder(id->start(), id->extent())
-                                   .stop_offset(id->stopOffset())
-                                   .build();
+        new_producer_root[i] = IrBuilder::create<IterDomain>(
+            id->container(),
+            id->start(),
+            id->extent(),
+            id->stopOffset(),
+            ParallelType::Serial,
+            IterType::Iteration,
+            false);
       } else {
         new_producer_root[i] = id->cloneWithoutRFactor();
       }
@@ -432,11 +439,13 @@ std::pair<TensorDomain*, TensorDomain*> TransformRFactor::runReplay(
         p2o_it != producer_to_original_map.end(),
         "Missing mapping from original tensor domain to producer tensor domain.");
     auto original_id = p2o_it->second;
-    auto new_consumer_root =
-        IterDomainBuilder(original_id->start(), original_id->extent())
-            .stop_offset(original_id->stopOffset())
-            .iter_type(original_id->getIterType())
-            .build();
+    auto new_consumer_root = IrBuilder::create<IterDomain>(
+        original_id->container(),
+        original_id->start(),
+        original_id->extent(),
+        original_id->stopOffset(),
+        ParallelType::Serial,
+        original_id->getIterType());
     new_consumer_root_domain.push_back(new_consumer_root);
     original_to_consumer_root_map[original_id] = new_consumer_root;
   }

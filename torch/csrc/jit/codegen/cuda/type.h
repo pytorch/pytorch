@@ -111,7 +111,6 @@ enum class ExprType {
   WelfordOp,
   MmaOp,
   TransposeOp,
-  ExpandOp,
   ShiftOp,
   GatherOp,
   ViewOp,
@@ -287,7 +286,8 @@ enum class MemoryType { Local, Shared, Global };
 enum class IterType {
   Iteration,
   Reduction,
-  Broadcast,
+  BroadcastWithStride,
+  BroadcastWithoutStride,
   Gather,
   Stride,
   VectorComponent

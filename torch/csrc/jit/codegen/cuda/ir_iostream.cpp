@@ -122,11 +122,7 @@ void IrPrinter::handle(const IterDomain* id) {
     print_inline(id->stop());
     os_ << " : ";
   }
-  if (id->isBroadcast() && id->hasExpandedExtent()) {
-    print_inline(id->expandedExtent());
-  } else {
-    print_inline(id->extent());
-  }
+  print_inline(id->extent());
   os_ << "}";
   if (id->isRFactorProduct())
     os_ << "rf";
@@ -474,18 +470,6 @@ void IrPrinter::handle(const Merge* m) {
 
 void IrPrinter::handle(const TransposeOp* top) {
   indent() << top->out() << " = transpose( " << top->in() << " )\n";
-}
-
-void IrPrinter::handle(const ExpandOp* eop) {
-  indent() << eop->out() << " = expand( " << eop->in() << ", {";
-  std::stringstream ss;
-  for (auto expanded_extent : eop->expanded_extents()) {
-    if (ss.tellp()) {
-      ss << ", ";
-    }
-    ss << expanded_extent;
-  }
-  os_ << ss.str() << "} )\n";
 }
 
 void IrPrinter::handle(const ShiftOp* sop) {

@@ -51,18 +51,28 @@ class ReplaySelf : public ReplayTransformations {
 
     // Manually replay the split, following the output of the operations.
     // This is so rfactor ops are replayed correctly.
-    IterDomain* ido =
-        IterDomainBuilder(s->outer())
-            .start(s->container()->zeroVal())
-            .extent(s->innerSplit() ? remainder->as<Int>() : s->factor())
-            .build();
+    IterDomain* ido = IrBuilder::create<IterDomain>(
+        s->container(),
+        s->container()->zeroVal(),
+        s->innerSplit() ? remainder->as<Int>() : s->factor(),
+        s->outer()->getParallelType(),
+        s->outer()->getIterType(),
+        s->outer()->isRFactorProduct(),
+        s->outer()->hasPaddingToMultipleOfWarp(),
+        s->outer()->getMaybeSizeAfterPadding(),
+        s->outer()->isMmaSwizzled());
 
     // inner IterDomain
-    IterDomain* idi =
-        IterDomainBuilder(s->inner())
-            .start(s->container()->zeroVal())
-            .extent(s->innerSplit() ? s->factor() : remainder->as<Int>())
-            .build();
+    IterDomain* idi = IrBuilder::create<IterDomain>(
+        s->container(),
+        s->container()->zeroVal(),
+        s->innerSplit() ? s->factor() : remainder->as<Int>(),
+        s->inner()->getParallelType(),
+        s->inner()->getIterType(),
+        s->inner()->isRFactorProduct(),
+        s->outer()->hasPaddingToMultipleOfWarp(),
+        s->outer()->getMaybeSizeAfterPadding(),
+        s->outer()->isMmaSwizzled());
 
     // Generate the split node
     IrBuilder::create<Split>(
@@ -113,10 +123,16 @@ class ReplaySelf : public ReplayTransformations {
     Val* merged_id_size =
         mul(id_outer_mapped->extent(), id_inner_mapped->extent());
 
-    IterDomain* merged_id = IterDomainBuilder(m->out())
-                                .start(m->container()->zeroVal())
-                                .extent(merged_id_size->as<Int>())
-                                .build();
+    IterDomain* merged_id = IrBuilder::create<IterDomain>(
+        m->container(),
+        m->container()->zeroVal(),
+        merged_id_size->as<Int>(),
+        m->out()->getParallelType(),
+        m->outer()->getIterType(),
+        m->out()->isRFactorProduct(),
+        m->out()->hasPaddingToMultipleOfWarp(),
+        m->out()->getMaybeSizeAfterPadding(),
+        m->out()->isMmaSwizzled());
 
     IrBuilder::create<Merge>(
         m->container(), merged_id, id_outer_mapped, id_inner_mapped);

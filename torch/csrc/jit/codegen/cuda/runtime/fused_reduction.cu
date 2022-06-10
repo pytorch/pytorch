@@ -258,13 +258,10 @@ class ParallelReduce {
           index_utils::
               maskedSize<isIter(X_BLOCK), isIter(Y_BLOCK), isIter(Z_BLOCK)>(
                   gridDim) *
-          index_utils::
-              maskedSize<isIter(X_THREAD), isIter(Y_THREAD), isIter(Z_THREAD)>(
-                  blockDim) *
           grid_red_size;
       global_work_buffer += global_buffer_size;
     }
-    flip = !flip;
+    flip = ~flip;
 
     // How many grid reductions have to be performed, in the grid dimension
     const auto num_block_iters = index_utils::
@@ -453,7 +450,9 @@ class ParallelReduce {
         // need of an additional grid_sync. Since we flip back and forth between
         // sections of the buffer, the one grid sync protects the other part of
         // the buffer.
+
       } else {
+        // Forward protect the smem used in this reduction
         if (grid_reduce_participate) {
           if (last_block && has_block_result && block_reduce_participate &&
               write_pred) {
@@ -461,9 +460,8 @@ class ParallelReduce {
                 out, shared_buf, block_reduction_idx * block_reduction_size_2);
           }
         }
+        block_sync::sync();
       }
-      // Forward protect the smem used in this reduction
-      block_sync::sync();
     }
   }
 
@@ -632,14 +630,11 @@ class ParallelReduce {
           index_utils::
               maskedSize<isIter(X_BLOCK), isIter(Y_BLOCK), isIter(Z_BLOCK)>(
                   gridDim) *
-          index_utils::
-              maskedSize<isIter(X_THREAD), isIter(Y_THREAD), isIter(Z_THREAD)>(
-                  blockDim) *
           grid_red_size;
       global_work_buffer1 += global_buffer_size;
       global_work_buffer2 += global_buffer_size;
     }
-    flip = !flip;
+    flip = ~flip;
 
     // Per-block partial reduction to global work buffer
     {
@@ -658,7 +653,6 @@ class ParallelReduce {
           copyTuple(global_work_buffer1, work_buf_offset, block_result);
         }
       }
-      block_sync::sync();
     }
     {
       const auto block_result = reduceBlock(
@@ -1091,7 +1085,9 @@ class ParallelReduce {
         // need of an additional grid_sync. Since we flip back and forth between
         // sections of the buffer, the one grid sync protects the other part of
         // the buffer.
+
       } else {
+        // Forward protect the smem used in this reduction
         if (grid_reduce_participate) {
           if (last_block && has_block_result && block_reduce_participate &&
               write_pred) {
@@ -1099,9 +1095,8 @@ class ParallelReduce {
                 out, shared_buf, block_reduction_idx * block_reduction_size_2);
           }
         }
+        block_sync::sync();
       }
-      // Forward protect the smem used in this reduction
-      block_sync::sync();
     }
   }
 
