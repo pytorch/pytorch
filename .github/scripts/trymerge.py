@@ -383,8 +383,8 @@ def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Merge PR into default branch")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--on-mandatory", action="store_true")
     parser.add_argument("--on-green", action="store_true")
+    parser.add_argument("--on-mandatory", action="store_true")
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--comment-id", type=int)
@@ -909,38 +909,32 @@ def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
 
-def merge(pr_num: int, repo: GitRepo,
-          dry_run: bool = False,
-          force: bool = False,
-          comment_id: Optional[int] = None,
-          mandatory_only: bool = False,
-          on_green: bool = False,
-          timeout_minutes: int = 400) -> None:
+def merge_on_green(pr_num: int, repo: GitRepo,
+                   dry_run: bool = False,
+                   mandatory_only: bool = False,
+                   timeout_minutes: int = 400) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
-    if force:
-        pr = GitHubPR(org, project, pr_num)
-        pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
-
     start_time = time.time()
     last_exception = ''
     elapsed_time = 0.0
     while elapsed_time < timeout_minutes * 60:
         current_time = time.time()
         elapsed_time = current_time - start_time
+
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
         try:
             find_matching_merge_rule(pr, repo)
             pending = pr_get_pending_checks(pr)
             failing = pr_get_failed_checks(pr)
-            if (not mandatory_only and on_green) and len(failing) > 0:
+            if not mandatory_only and len(failing) > 0:
                 raise RuntimeError(f"{len(failing)} additional jobs have failed, first few of them are: " +
                                    ' ,'.join(f"[{x[0]}]({x[1]})" for x in failing[:5]))
-            if (not mandatory_only and on_green) and len(pending) > 0:
+            if not mandatory_only and len(pending) > 0:
                 raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
                                                   f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
-            return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
+            return pr.merge_into(repo, dry_run=dry_run)
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min")
@@ -986,16 +980,16 @@ def main() -> None:
         gh_post_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
 
-    try:
-        merge(args.pr_num, repo,
-              dry_run=args.dry_run,
-              force=args.force,
-              comment_id=args.comment_id,
-              on_green=args.on_green,
-              mandatory_only=args.mandatory_only)
-    except Exception as e:
-        handle_exception(e)
-
+    if args.on_green or args.on_mandatory:
+        try:
+            merge_on_green(args.pr_num, repo, dry_run=args.dry_run, mandatory_only=args.on_mandatory)
+        except Exception as e:
+            handle_exception(e)
+    else:
+        try:
+            pr.merge_into(repo, dry_run=args.dry_run, force=args.force, comment_id=args.comment_id)
+        except Exception as e:
+            handle_exception(e)
 
 
 if __name__ == "__main__":
