@@ -41,7 +41,7 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: atalman/builder
+      BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -83,14 +83,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout atalman/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           ref: main
           submodules: recursive
-          repository: pytorch/builder
+          repository: atalman/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean atalman/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -216,7 +216,7 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: atalman/builder
+      BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -258,14 +258,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout atalman/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           ref: main
           submodules: recursive
-          repository: pytorch/builder
+          repository: atalman/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean atalman/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -391,7 +391,7 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: atalman/builder
+      BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -433,14 +433,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout atalman/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           ref: main
           submodules: recursive
-          repository: pytorch/builder
+          repository: atalman/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean atalman/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -566,7 +566,7 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: atalman/builder
+      BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -608,14 +608,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout atalman/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           ref: main
           submodules: recursive
-          repository: pytorch/builder
+          repository: atalman/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean atalman/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
