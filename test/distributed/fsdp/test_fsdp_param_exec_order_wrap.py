@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import (
 class Model(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        self.layer0 = torch.nn.Linear(5, 6)
+        self.layer0 = torch.nn.Linear(6, 6)
         self.layer1 = torch.nn.Linear(6, 6, bias=False)
         self.layer2 = torch.nn.Sequential(
             torch.nn.Linear(6, 3, bias=False),
@@ -32,13 +32,10 @@ class Model(torch.nn.Module):
         return z
 
     def get_input(self, device: torch.device):
-        return (torch.randn((8, 5)).to(device),)
+        return torch.randn((8, 6)).to(device)
 
     def get_loss(self, input, output):
-        return output.sum()
-
-    def run_backward(self, loss):
-        loss.backward()
+        return (output - input).sum()
 
     @staticmethod
     def wrap(sharding_strategy: ShardingStrategy, device: torch.device, init_policy=always_wrap_policy):
@@ -63,10 +60,10 @@ class TestFSDPExecOrder(FSDPTest):
         """Tests the basic APIs of FSDP with ParamExecOrderWrapPolicy"""
         fsdp_model = Model.wrap(sharding_strategy, self.device)
         for _ in range(iters):
-            inp = fsdp_model.module.get_input(self.device)
-            output = fsdp_model(*inp)
-            loss = fsdp_model.module.get_loss(inp, output).to(self.device)
-            fsdp_model.module.run_backward(loss)
+            input = fsdp_model.module.get_input(self.device)
+            output = fsdp_model(input)
+            loss = fsdp_model.module.get_loss(input, output).to(self.device)
+            loss.backward()
         assert set(fsdp_model.flatten_named_params_exec_order()) == set(list(fsdp_model.named_parameters()))
         # Since the forward execution order is NOT consistent with the model definition order,
         # the ordering in flatten_named_params_exec_order should be different from named_parameters
