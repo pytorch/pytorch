@@ -11,7 +11,7 @@ meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
 def toRealValueType(dtype):
     from_complex = {
-        torch.chalf: torch.half,
+        torch.complex32: torch.half,
         torch.cfloat: torch.float,
         torch.cdouble: torch.double,
     }
@@ -20,7 +20,7 @@ def toRealValueType(dtype):
 
 def toComplexValueType(dtype):
     to_complex = {
-        torch.half: torch.chalf,
+        torch.half: torch.complex32,
         torch.float: torch.cfloat,
         torch.double: torch.cdouble,
     }
