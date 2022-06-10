@@ -4507,6 +4507,10 @@ for shape in [(1,), ()]:
             @staticmethod
             def backward(ctx, grad_out):
                 x, y, z, w, out = ctx.saved_tensors
+                # This access is fine as entire saved_tensors is
+                # accessed, so storage dict in the hooks-based
+                # checkpoint is cleared, and repopulated during
+                # recomputation.
                 x_2, y_2, z_2, w_2, out_2 = ctx.saved_tensors
                 self.assertEqual(x.data_ptr(), x_2.data_ptr())
                 self.assertEqual(y.data_ptr(), y_2.data_ptr())
@@ -4519,11 +4523,31 @@ for shape in [(1,), ()]:
         x = torch.tensor(1., requires_grad=True)
         y = torch.tensor(2., requires_grad=True)
         z = torch.tensor(3., requires_grad=True)
-        x = x * y * z
-        y = y * y * z
-        z = z * z
         out = checkpoint(MyFunc.apply, x, y, z, use_reentrant=False)
         out.sum().backward()
+
+    def test_access_saved_tensor_twice_without_recomputation_raises(self):
+        """
+        If using saved tensor hooks based checkpointing and a saved tensor
+        is accessed multiple times without triggering recomputation in the
+        middle, error is raised indicating so.
+        """
+        def foo(a):
+            b = a * a
+            c = a * b
+            d = torch.exp(a)
+            return d
+
+        a = torch.randn(5, requires_grad=True)
+        d = checkpoint(foo, a, use_reentrant=False)
+        # First access
+        d.grad_fn._saved_result
+        # Second access raises error
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Attempt to retrieve a tensor saved by autograd multiple times"
+        ):
+            d.grad_fn._saved_result
 
     @slowTest
     @parametrize("input_requires_grad", [True, False])
