@@ -91,6 +91,19 @@ def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting
         mode_info.set_mode(old)
 
 
+def _restore_mode(mode, mode_info: _ModeInfo):
+    if not hasattr(mode, "ancestors"):
+        raise RuntimeError(f"{mode} does not have any ancestors. Use the standard version instead of restore")
+    old = mode_info.get_mode()
+    if old is not None and old not in mode.ancestors:
+        raise RuntimeError(f"{mode} is not valid in the current state because the current mode is not its ancestor")
+    mode_info.set_mode(mode)
+    try:
+        yield mode
+    finally:
+        mode_info.set_mode(old)
+
+
 # shared version of push_torch_function/push_torch_dispatch_mode in order to deduplicate the code.
 # The differences between the modes are captured by `mode_info` and then queried when they're
 # needed during the function's invocation
