@@ -857,9 +857,9 @@ def process_intentional_test_runs(runs: List[TestCase]) -> Tuple[int, int]:
                 f"{err_msg} There should be at most 1 successful run in an intentional rerun that stops"
                 f" at first success. The number of successful runs = {num_pass}"
             )
-        if num_skipped > 0:
+        if num_skipped > 1:
             raise RuntimeWarning(
-                f"{err_msg} No skips should occur in intentional reruns, but skips = {num_skipped}"
+                f"{err_msg} No more than 1 skip should occur in intentional reruns, but skips = {num_skipped}"
             )
     return (
         max(num_unexpected_success, num_pass),
