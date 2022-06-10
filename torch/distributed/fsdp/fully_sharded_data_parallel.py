@@ -1123,8 +1123,25 @@ class FullyShardedDataParallel(nn.Module):
         assert self._is_root is not None
         return self._is_root
 
+    @property
     def use_param_exec_order_policy(self) -> bool:
-        return hasattr(self, "_use_param_exec_order_policy") and self._use_param_exec_order_policy
+        return (
+            hasattr(self, "_use_param_exec_order_policy")
+            and self._use_param_exec_order_policy
+        )
+
+    @property
+    def is_param_exec_order_prep_stage(self) -> bool:
+        is_prep_stage = (
+            hasattr(self, "_param_exec_order_prep_stage")
+            and self._param_exec_order_prep_stage
+        )
+        if not is_prep_stage:
+            for p in self.parameters():
+                assert (
+                    not hasattr(p, "_params_exec_order_hook_handle")
+                ), "When not in execution order prep stage, all _params_exec_order_hook_handle should be removed."
+        return is_prep_stage
 
     @staticmethod
     def fsdp_modules(

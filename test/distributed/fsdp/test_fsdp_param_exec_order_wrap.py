@@ -70,12 +70,8 @@ class TestFSDPExecOrder(FSDPTest):
         assert set(fsdp_model.flatten_named_params_exec_order()) == set(list(fsdp_model.named_parameters()))
         # Since the forward execution order is NOT consistent with the model definition order,
         # the ordering in flatten_named_params_exec_order should be different from named_parameters
-        assert fsdp_model.flatten_named_params_exec_order() != list(fsdp_model.named_parameters())
-        assert fsdp_model._use_param_exec_order_policy
-        assert not fsdp_model._param_exec_order_prep_stage
-        # After the first iteration, all _params_exec_order_hook_handle should be removed.
-        for p in fsdp_model.parameters():
-            assert not hasattr(p, "_params_exec_order_hook_handle")
+        assert fsdp_model.use_param_exec_order_policy()
+        assert not fsdp_model.is_param_exec_order_prep_stage()
 
 
 instantiate_parametrized_tests(TestFSDPExecOrder)
