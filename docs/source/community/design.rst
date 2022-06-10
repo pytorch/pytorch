@@ -35,7 +35,7 @@ know we want them to be built first on PyTorch and that requires
 flexibility.
 
 In more concrete terms, we operate in a *usability-first* manner and try
-to avoid jumping to *restriction-first* regimes (for example, static shapes,
+to avoid jumping to *restriction-first* regimes (for example, static shapes,
 graph-mode only) without a clear-eyed view of the tradeoffs. Often there
 is a temptation to impose strict user restrictions upfront because it
 can simplify implementation, but this comes with risks:
