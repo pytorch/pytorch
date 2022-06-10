@@ -5,7 +5,7 @@ import sys
 import unittest
 import pathlib
 
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_LINUX, IS_CI
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_LINUX, IS_IN_CI
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -33,7 +33,7 @@ class TestImportTime(TestCase):
         )
 
     @unittest.skipIf(not IS_LINUX, "Memory test is only implemented for Linux")
-    @unittest.skipIf(not IS_CI, "Memory test only runs in CI")
+    @unittest.skipIf(not IS_IN_CI, "Memory test only runs in CI")
     @unittest.skipIf(rds_write is None, "Cannot import rds_write from tools.stats.scribe")
     def test_peak_memory(self):
         def profile(module, name):
@@ -58,7 +58,7 @@ class TestImportTime(TestCase):
 
 
 if __name__ == "__main__":
-    if register_rds_schema and IS_CI:
+    if register_rds_schema and IS_IN_CI:
         try:
             register_rds_schema(
                 "import_stats",

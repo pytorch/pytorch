@@ -27,6 +27,9 @@ on:
         value: ${{ jobs.build.outputs.docker-image }}
         description: The docker image containing the built PyTorch.
 
+env:
+  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
+
 jobs:
   build:
     # Don't run on forked repos.

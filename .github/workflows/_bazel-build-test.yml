@@ -13,6 +13,7 @@ on:
         description: Name of the base docker image to build with.
 
 env:
+  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
@@ -121,6 +122,7 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e GIT_DEFAULT_BRANCH="$GIT_DEFAULT_BRANCH" \
+            -e IN_CI \
             -e SHARD_NUMBER \
             -e NUM_TEST_SHARDS \
             -e JOB_BASE_NAME \

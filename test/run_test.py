@@ -17,8 +17,8 @@ import tempfile
 import torch
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import (
-    IS_CI,
     FILE_SCHEMA,
+    IS_IN_CI,
     TEST_WITH_ROCM,
     shell,
     set_cwd,
@@ -409,7 +409,7 @@ def run_test(
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
-    elif IS_CI:
+    elif IS_IN_CI:
         # use the downloaded test cases configuration, not supported in pytest
         unittest_args.extend(["--import-slow-tests", "--import-disabled-tests"])
 
@@ -1032,7 +1032,7 @@ def main():
     #     ]
     #     sys.path.remove(test_directory)
 
-    if IS_CI:
+    if IS_IN_CI:
         selected_tests = get_reordered_tests(
             selected_tests, ENABLE_PR_HISTORY_REORDERING
         )
