@@ -3315,7 +3315,8 @@ static inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
 } // modified_bessel_k1_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T scaled_modified_bessel_i0_forward(T x) {
+static inline C10_HOST_DEVICE std::enable_if<std::is_floating_point<T>::value, T>::type
+scaled_modified_bessel_i0_forward(T x) {
     static const T A[] = {
             -4.41534164647933937950e-18,
             +3.33079451882223809783e-17,

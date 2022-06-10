@@ -25,17 +25,15 @@
 
 namespace at {
     namespace native {
-        inline namespace CPU_CAPABILITY {
-            static void scaled_modified_bessel_i0_kernel(TensorIteratorBase& iterator) {
-                TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+        static void scaled_modified_bessel_i0_kernel(TensorIteratorBase& iterator) {
+            TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "scaled_modified_bessel_i0_cpu", [&]() {
-                    cpu_kernel(iterator, [](scalar_t x) {
-                        return scaled_modified_bessel_i0_forward(x);
-                    });
+            AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "scaled_modified_bessel_i0_cpu", [&]() {
+                cpu_kernel(iterator, [](scalar_t x) {
+                    return scaled_modified_bessel_i0_forward(x);
                 });
-            } // scaled_modified_bessel_i0_kernel(TensorIteratorBase& iterator)
-        } // namespace CPU_CAPABILITY
+            });
+        } // scaled_modified_bessel_i0_kernel(TensorIteratorBase& iterator)
 
         REGISTER_DISPATCH(special_scaled_modified_bessel_i0_stub, &CPU_CAPABILITY::scaled_modified_bessel_i0_kernel);
     } // namespace native
