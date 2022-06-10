@@ -5,6 +5,7 @@ import json
 import os
 import re
 import time
+from datetime import datetime
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
@@ -121,6 +122,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
             checkSuites(first: 10) {
               ...PRCheckSuites
             }
+            pushedDate
             oid
           }
         }
@@ -446,6 +448,13 @@ class GitHubPR:
 
     def get_changed_files_count(self) -> int:
         return int(self.info["changedFiles"])
+
+    def last_pushed_at(self) -> datetime:
+        print(self.info["commits"]["nodes"][-1]['commit']['pushedDate'])
+        return datetime.fromisoformat(self.info["commits"]["nodes"][-1]['commit']['pushedDate'][:-1])
+
+    def last_commit(self) -> Any:
+        return self.info["commits"]["nodes"][-1]["commit"]
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
@@ -915,12 +924,16 @@ def merge(pr_num: int, repo: GitRepo,
           comment_id: Optional[int] = None,
           mandatory_only: bool = False,
           on_green: bool = False,
-          timeout_minutes: int = 400) -> None:
+          timeout_minutes: int = 400,
+          stale_pr_days: int = 3) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
+    pr = GitHubPR(org, project, pr_num)
+    initial_commit_count = pr.last_commit()['oid']
     if force:
-        pr = GitHubPR(org, project, pr_num)
         pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
+    if (pr.last_pushed_at() - datetime.utcnow()).days > stale_pr_days:
+        raise RuntimeError("This PR is too stale; the last push is greater than 3 days. Please rebase and try again.")
 
     start_time = time.time()
     last_exception = ''
@@ -934,6 +947,8 @@ def merge(pr_num: int, repo: GitRepo,
             find_matching_merge_rule(pr, repo)
             pending = pr_get_pending_checks(pr)
             failing = pr_get_failed_checks(pr)
+            if initial_commit_count != pr.last_commit()['oid']:
+                raise RuntimeError("New commits were pushed so canceling merge. Please try running merge command again.")
             if (not mandatory_only and on_green) and len(failing) > 0:
                 raise RuntimeError(f"{len(failing)} additional jobs have failed, first few of them are: " +
                                    ' ,'.join(f"[{x[0]}]({x[1]})" for x in failing[:5]))
