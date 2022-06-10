@@ -59,7 +59,6 @@ jobs:
           MAX_JOBS: 8
           CUDA_VERSION: ${{ inputs.cuda-version }}
           PYTHON_VERSION: "3.8"
-          PYTORCH_RETRY_TEST_CASES: 1
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           SCCACHE_BUCKET: "ossci-compiler-cache"
           VC_PRODUCT: "BuildTools"
