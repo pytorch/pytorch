@@ -16,7 +16,45 @@
 
 namespace at { namespace functorch {
 
-std::tuple<std::vector<optional<Tensor>>, int64_t, int64_t> batchIndices(
+static bool any_has_value(ArrayRef<optional<int64_t>> bdims) {
+  for (const auto& bdim : bdims) {
+    if (bdim.has_value()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static int64_t get_num_leading_nones(ArrayRef<optional<Tensor>> indices) {
+  int64_t result = 0;
+  for (const auto& idx : indices) {
+    if (!idx.has_value() || !idx->defined()) {
+      result++;
+    } else {
+      return result;
+    }
+  }
+  return result;
+}
+
+static int64_t get_max_index_logical_dim(
+    ArrayRef<optional<Tensor>> indices,
+    ArrayRef<optional<int64_t>> indices_bdims) {
+  int64_t max_logical_dim = -1;
+  TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
+  TORCH_INTERNAL_ASSERT(indices.size() > 0);
+  for (const auto i : c10::irange(0, indices.size())) {
+    const auto& maybe_tensor = indices[i];
+    if (!maybe_tensor.has_value() || !maybe_tensor->defined()) {
+      continue;
+    }
+    auto logical_dim = rankWithoutBatchDim(maybe_tensor.value(), indices_bdims[i]);
+    max_logical_dim = std::max(logical_dim, max_logical_dim);
+  }
+  return max_logical_dim;
+}
+
+std::vector<optional<Tensor>> batchIndices(
   ArrayRef<optional<Tensor>> indices,
   ArrayRef<optional<int64_t>> indices_bdims,
   int64_t batch_size,
@@ -29,32 +67,24 @@ std::tuple<std::vector<optional<Tensor>>, int64_t, int64_t> batchIndices(
   //
   // 2. self is not batched, some indices are batched.
   // In this case, we don't need to do anything - indices will automatically
-  // broadcast to work with the unbatched self. If there are leading Nones or
-  // empty tensors in the indices, the batch dimension will appear after
-  // those leading blanks, so the 1st ret value captures that for the batching
-  // rules that use this
+  // broadcast to work with the unbatched self.
   //
   // 3. self is batched, some indices are batched.
   // In this case, we simply need to add an arange that indexes along the first
   // dimension (i.e. the batch dimension). We also need to make sure this
-  // broadcasts with the rest of the indices. If there are leading Nones or empty
-  // tensors, then this will mess us up because we will get [batch_dim, index_dim0, ...]
-  // instead of [batch_dim, self_dim0, ...] matching the number of leading Nones. By
-  // returning batchLoc (the number of leading Nones) and maxIndexDim (the maximum
-  // dim of any of the index), we can move dims of the result to make the right shape
+  // broadcasts with the rest of the indices.
+  //
+  // In all three cases, depending on if advanced indices are adjacent we will
+  // have to permute the output.
+  // See NOTE: [advanced indexing (index.Tensor) batch rule] for more details
   //
   // There is one more case worth mentioning - boolean tensor indices. If we
   // have "batched" boolean tensor indices, that is unrepresentable, as each
   // batch would result in a tensor with different values.
   std::vector<optional<Tensor>> indices_;
-  int64_t maxLogicalRank = 0;
-  bool indices_batched = false;
-  for (size_t i = 0; i < indices.size(); i++) {
-    if (indices[i].has_value()) {
-      maxLogicalRank = std::max(maxLogicalRank, rankWithoutBatchDim(indices[i].value(), indices_bdims[i]));
-    }
-    indices_batched = indices_batched || indices_bdims[i].has_value();
-  }
+
+  int64_t maxLogicalRank = get_max_index_logical_dim(indices, indices_bdims);
+  bool indices_batched = any_has_value(indices_bdims);
 
   for (size_t i = 0; i < indices.size(); i++) {
     auto index = indices[i];
@@ -74,14 +104,6 @@ std::tuple<std::vector<optional<Tensor>>, int64_t, int64_t> batchIndices(
     maxIndexDim += 1;
   }
 
-  size_t batchLoc = 0;
-  // If there's leading Nones ([:, :,...]) and indices is batched, the batch dimension will show up after the skipped dimensinos
-  if (indices_batched) {
-    while(!indices_[batchLoc].has_value() || indices_[batchLoc]->numel() == 0) {
-      batchLoc += 1;
-    }
-  }
-
   if (!indices_batched && self_bdim.has_value()) {
     indices_.insert(indices_.begin(), nullopt);
   } else if (indices_batched && !self_bdim.has_value()) {
@@ -91,9 +113,61 @@ std::tuple<std::vector<optional<Tensor>>, int64_t, int64_t> batchIndices(
     while (arange_index.dim() < maxIndexDim) {
       arange_index = arange_index.unsqueeze(-1);
     }
+    // TODO: this is O(N)
     indices_.insert(indices_.begin(), arange_index);
   }
-  return std::make_tuple(indices_, batchLoc, maxIndexDim);
+  return indices_;
+}
+
+// Define an "advanced index" to be a selection object that is
+// a non-trivial Tensor (i.e. it does not represent :).
+static bool is_advanced_index(const optional<Tensor>& idx) {
+  if (!idx.has_value()) {
+    return false;
+  }
+  if (!idx->defined()) {
+    return false;
+  }
+  return true;
+}
+
+// See NOTE: [advanced indices adjacent] for definition
+static bool are_advanced_indices_adjacent(ArrayRef<optional<Tensor>> indices) {
+  int64_t num_advanced_indices_regions = 0;
+  bool in_advanced_indices_region = false;
+  for (const auto& idx : indices) {
+    if (!in_advanced_indices_region && is_advanced_index(idx)) {
+      num_advanced_indices_regions++;
+      in_advanced_indices_region = true;
+      continue;
+    }
+    if (in_advanced_indices_region && !is_advanced_index(idx)) {
+      in_advanced_indices_region = false;
+      continue;
+    }
+  }
+  return num_advanced_indices_regions <= 1;
+}
+
+// Given a Tensor[B, <first_region>, <second_region>, ...]
+// Swaps the regions to produce Tensor[B, <second_region>, <first_region>, ...]
+//
+// Concretely speaking, given
+// - tensor: Tensor[B, 2, 3, 4, 5, 6, 7, 8]
+// - first_region_size: 2
+// - second_region_size: 3
+// Produces:
+// - result: Tensor[B, 4, 5, 6, 2, 3, 7, 8]
+//                     -------  ----
+//                     region2  region1
+static Tensor swap_regions(const Tensor& tensor, int64_t first_region_size, int64_t second_region_size) {
+  VmapDimVector permutation(tensor.dim(), 0);
+  std::iota(permutation.begin(), permutation.end(), 0);
+  std::rotate(
+      permutation.begin() + 1,
+      permutation.begin() + 1 + first_region_size,
+      permutation.begin() + 1 + first_region_size + second_region_size);
+  return tensor.permute(permutation);
 }
 
 std::tuple<Tensor,optional<int64_t>> index_batch_rule(
@@ -102,25 +176,142 @@ std::tuple<Tensor,optional<int64_t>> index_batch_rule(
     ArrayRef<optional<Tensor>> indices,
     ArrayRef<optional<int64_t>> indices_bdims) {
 
+  // NOTE: [advanced indexing (index.Tensor) batch rule]
+  //
+  // This is a three step procedure:
+  // 1. batch `indices`. Depends on self_bdim and indices_bdim.
+  // 2. call at::index
+  // 3. (maybe) reorder the dimensions in the result.
+  // Why is step 3 necessary? Let's take a detour first.
+  //
+  // NOTE: [advanced indices adjacent]
+  // Definition: In a list of optional<Tensor> indices,
+  // we say that "advanced indices are adjacent" if ALL advanced indices are
+  // not separated by a None (slice).
+  //
+  // So, for example,
+  // [:, :, (0, 1), (0, 1), :] -> True
+  // [:, (0, 1), :, (0, 1), :] -> False, the advanced indices are separated by a slice
+  //
+  // See https://numpy.org/doc/stable/user/basics.indexing.html#combining-advanced-and-basic-indexing
+  // for more details.
+  //
+  // NOTE: [Why is step 3 necessary?]
+  //
+  // In the original self[*indices] expression,
+  // depending on whether or not the "advanced indices inside `indices` are
+  // adjacent", something different happens.
+  //
+  // For example:
+  // - self: Tensor[4, 5, 6, 7]
+  // - indices: [:, (0, 1), (0, 1), :] (advanced indices are adjacent)
+  // - self[*indices]: Tensor[4, 2, 7]
+  // If advanced indices are adjacent, you get the output you would expect.
+  // (0, 1), (0, 1) says "please index these two dimensions at (0, 0) and (1, 1)
+  // to produce two elements".
+  //
+  // If advanced indices are not adjacent, it is ambiguous to where the new
+  // dimension of size 2 should go. The numpy spec says it should go at the very
+  // front of the Tensor.
+  //
+  // - self: Tensor[4, 5, 6, 7]
+  // - indices: [:, (0, 1), :, (0, 1)] (advanced indices not adjacent)
+  // - self[*indices]: Tensor[2, 4, 6]
+  //
+  // Now, this leads to some weird interactions with vmap.
+  // The indices might originally have adjacent advanced indices, but after
+  // batching them with "batchIndices", they may no longer be adjacent!
+  // - indices: [:, (0, 1), (0, 1)]
+  // - batched_indices (for example): [(0, 1), :, (0, 1), (0, 1)]
+  // This leads to the dimension of size 2 appearing somewhere else.
+  //
+  // There are a couple of different cases that we walk through in the code below.
+  //
+  // Background reading for why we care about if the advanced indices are adjacent:
+  // https://numpy.org/doc/stable/user/basics.indexing.html#combining-advanced-and-basic-indexing
   auto self_ = moveBatchDimToFront(self, self_bdim);
   TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
-  const auto ret = batchIndices(indices, indices_bdims, self_.size(0), self_bdim);
-  const std::vector<optional<Tensor>> indices_ = std::get<0>(ret);
-  auto res = at::index(self_, List<optional<Tensor>>(indices_));
-  auto outDim = std::get<1>(ret);
-  const auto maxIndexDim = std::get<2>(ret);
-  if (self_bdim.has_value() && outDim != 0) {
-    // this will only happen if at least one index is batched and there is at least one leading None.
-    // In this case, we will have [batch_dim, index_dim0, ..., self_dim0, ...] instead of [batch_dim, self_dim0, ..., index_dim0]
-    // so we move dims around until we get to the right shape. We know where self_dim0 is because maxIndexDim is
-    // how long the broadcasted indices will be and we know how many to move because outDim is the number of leading
-    // Nones
-    for (int i = 0; i < outDim; i ++) {
-      res = res.movedim(maxIndexDim + i, i + 1);
+  bool advanced_indices_are_adjacent = are_advanced_indices_adjacent(indices);
+
+  // Step 1
+  const auto batched_indices = batchIndices(indices, indices_bdims, self_.size(0), self_bdim);
+  auto num_leading_nones = get_num_leading_nones(indices);
+  auto max_index_dim = get_max_index_logical_dim(indices, indices_bdims);
+
+  // Step 2
+  auto res = at::index(self_, List<optional<Tensor>>(batched_indices));
+
+  // Step 3: There are three cases (these match the cases outlined in batchIndices)
+  bool self_batched = self_bdim.has_value();
+  bool indices_batched = any_has_value(indices_bdims);
+
+  TORCH_INTERNAL_ASSERT(self_batched || indices_batched, "Requires at least one batched to get here");
+
+  // Case 1
+  if (self_batched && !indices_batched) {
+    if (advanced_indices_are_adjacent) {
+      // self: Tensor[B, 5, 6, 7, 8]
+      // indices: [:, Tensor[2, 2], Tensor[2, 2], :]
+      // batched_indices: [:, :, Tensor[2, 2], Tensor[2, 2], :]
+      // res: Tensor[B, 5, 2, 2, 8]
+      return std::make_tuple(res, 0);
+    } else {
+      // self: Tensor[B, 5, 6, 7]
+      // indices: [Tensor[2, 2], :, Tensor[2, 2]]
+      // batched_indices: [:, Tensor[2, 2], :, Tensor[2, 2]]
+      // res: Tensor[2, 2, B, 6]
+      return std::make_tuple(res, max_index_dim);
     }
-    outDim = 0;
   }
-  return std::make_tuple(res, outDim);
+
+  // Case 2
+  if (!self_batched && indices_batched) {
+    if (advanced_indices_are_adjacent) {
+      // self: Tensor[5, 6, 7, 8]
+      // indices: [:, :, Tensor[B, 2, 2], Tensor[2, 2]]
+      // batched_indices: indices (no change)
+      // res: Tensor[5, 6, B, 2, 2]
+      return std::make_tuple(res, num_leading_nones);
+    } else {
+      // self: Tensor[5, 6, 7, 8, 9]
+      // indices: [:, :, Tensor[B, 2, 2], :, Tensor[2, 2]]
+      // batched_indices: indices (no change)
+      // res: Tensor[B, 2, 2, 5, 6, 8]
+      return std::make_tuple(res, 0);
+    }
+  }
+
+  // Case 3: self_batched and indices_batched
+  TORCH_INTERNAL_ASSERT(self_batched && indices_batched);
+  if (!advanced_indices_are_adjacent) {
+    // self: Tensor[B, 5, 6, 7, 8]
+    // indices: [:, Tensor[B, 2, 2], :, Tensor[2, 2]]
+    // batched_indices: [arange(B).expand(B, 2, 2), :, Tensor[B, 2, 2], :, Tensor[2, 2]]
+    // res: Tensor[B, 2, 2, 5, 7]
+    return std::make_tuple(res, 0);
+  }
+  // In other words, in batched_indices, advanced indices are adjacent
+  if (num_leading_nones == 0) {
+    // self: Tensor[B, 5, 6, 7, 8]
+    // indices: [Tensor[B, 2, 2], Tensor[2, 2], :, :]
+    // batched_indices: [arange(B).expand(B, 2, 2), Tensor[B, 2, 2], Tensor[2, 2], :, :]
+    // res: Tensor[B, 2, 2, 7, 8]
+    return std::make_tuple(res, 0);
+  }
+  // This is the tricky case. In indices, advanced indices are adjacent.
+  // In batched_indices, advanced indices are no longer adjacent
+  //
+  // self: Tensor[B, 5, 6, 7, 8, 9]
+  // indices: [:, :, Tensor[B, 2, 3], Tensor[2, 3], :]
+  // batched_indices: [arange(B).expand(B, 2, 3), :, :, Tensor[B, 2, 3], Tensor[2, 3], :]
+  // res: Tensor[B, 2, 3, 5, 6, 9]
+  // expected: Tensor[B, 5, 6, 2, 3, 9]
+  //
+  // The resolution is to move dims around until we get the right shape.
+  // The result is set up as [B, <maxIndexDim>, <leading_nones>, ...]
+  // we just have to move the <leading_nones> to before the <maxIndexDim> to produce
+  // [B, <leading_nones>, <maxIndexDim>, ...]
+  return std::make_tuple(swap_regions(res, max_index_dim, num_leading_nones), 0);
 }
 
 // plumbing done since we don't support List<optional<Tensor>> in codegen
@@ -230,8 +421,7 @@ namespace {
     TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
 
     // we've already made sure that self has bdim at 0.
-    // TODO(samdow): fix. We made changes to batchIndices that fixed index and probably show issues in index_put
-    std::vector<optional<Tensor>> indices_ = std::get<0>(batchIndices(indices, indices_bdims, batch_size, /*self_bdim=*/0, values_bdim));
+    const auto indices_ = batchIndices(indices, indices_bdims, batch_size, /*self_bdim=*/0, values_bdim);
 
     auto indexed_shape = get_indexed_shape(self_, List<optional<Tensor>>(indices_));
 
@@ -370,6 +560,62 @@ Tensor &_index_put_impl__plumbing(Tensor &self, const List<optional<Tensor>> &in
   return self;
 }
 
+static Tensor maybe_permute_values(
+    const Tensor& values,
+    ArrayRef<optional<Tensor>> orig_indices,
+    ArrayRef<optional<int64_t>> orig_indices_bdims) {
+  bool indices_batched = any_has_value(orig_indices_bdims);
+  bool advanced_indices_are_adjacent = are_advanced_indices_adjacent(orig_indices);
+  auto num_leading_nones = get_num_leading_nones(orig_indices);
+  auto max_index_dim = get_max_index_logical_dim(orig_indices, orig_indices_bdims);
+  TORCH_INTERNAL_ASSERT(values.dim() >= num_leading_nones + max_index_dim);
+
+  // NB: values has its B dimension at the front
+  if (!indices_batched) {
+    if (advanced_indices_are_adjacent) {
+      // self: Tensor[B, 5, 6, 7, 8]
+      // indices: [:, Tensor[2, 2], Tensor[2, 2], :]
+      // batched_indices: [:, :, Tensor[2, 2], Tensor[2, 2], :]
+      // required values: Tensor[B, 5, 2, 2, 8]
+      return values;
+    }
+    // self: Tensor[B, 5, 6, 7]
+    // indices: [Tensor[2, 2], :, Tensor[2, 2]]
+    // batched_indices: [:, Tensor[2, 2], :, Tensor[2, 2]]
+    // required values: Tensor[2, 2, B, 6]
+    return values.movedim(0, max_index_dim);
+  }
+  if (!advanced_indices_are_adjacent) {
+    // self: Tensor[B, 5, 6, 7, 8]
+    // indices: [:, Tensor[B, 2, 2], :, Tensor[2, 2]]
+    // batched_indices: [arange(B).expand(B, 2, 2), :, Tensor[B, 2, 2], :, Tensor[2, 2]]
+    // required values: Tensor[B, 2, 2, 5, 7]
+    return values;
+  }
+  // In other words, in batched_indices, advanced indices are adjacent
+  if (num_leading_nones == 0) {
+    // self: Tensor[B, 5, 6, 7, 8]
+    // indices: [Tensor[B, 2, 2], Tensor[2, 2], :, :]
+    // batched_indices: [arange(B).expand(B, 2, 2), Tensor[B, 2, 2], Tensor[2, 2], :, :]
+    // required values: Tensor[B, 2, 2, 7, 8]
+    return values;
+  }
+  // This is the tricky case. In indices, advanced indices are adjacent.
+  // In batched_indices, advanced indices are no longer adjacent
+  //
+  // self: Tensor[B, 5, 6, 7, 8, 9]
+  // indices: [:, :, Tensor[B, 2, 3], Tensor[2, 3], :]
+  // batched_indices: [arange(B).expand(B, 2, 3), :, :, Tensor[B, 2, 3], Tensor[2, 3], :]
+  // required values: Tensor[B, 2, 3, 5, 6, 9]
+  // actual values: Tensor[B, 5, 6, 2, 3, 9]
+  //
+  // The resolution is to move dims around until we get the right shape.
+  // The values is set up as [B, <leading_nones>, <maxIndexDim>, ...]
+  // we just have to move the <maxIndexDim> to before the <leading_nones> to produce
+  // [B, <maxIndexDim>, <leading_nones>, ...]
+  return swap_regions(values, num_leading_nones, max_index_dim);
+}
+
 std::tuple<Tensor,optional<int64_t>> index_put_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
@@ -379,6 +625,7 @@ std::tuple<Tensor,optional<int64_t>> index_put_batch_rule(
     optional<int64_t> values_bdim,
     bool accumulate) {
   TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
+
   // find the batch_size
   int64_t batch_size = 0;
   if (self_bdim || values_bdim) {
@@ -397,7 +644,21 @@ std::tuple<Tensor,optional<int64_t>> index_put_batch_rule(
   std::vector<optional<Tensor>> indices_;
   std::tie(self_, indices_, values_) = index_put_batch_rule_helper(
       self, self_bdim, indices, indices_bdims, values, values_bdim, batch_size);
-  return std::make_tuple(at::index_put(self_, List<optional<Tensor>>(indices_), values_, accumulate), 0);
+
+  // Why do we need to permute values?
+  // See NOTE [Advanced indexing (index.Tensor) batch rule] for details,
+  // but the gist is that index_put effectively does the following:
+  // - result = self_.clone()
+  // - result[indices_] = values
+  // - return result
+  // Now, the problem is, result[indices_] might return a Tensor whose shape is
+  // the shape of values, but permuted. This is because the shape of result[indices_]
+  // depends on if the original indices "have adjacent advanced indices"
+  // and the batched `indices_` might change the "have adjacent advanced indices" property
+  values_ = maybe_permute_values(values_, indices, indices_bdims);
+
+  auto result = at::index_put(self_, List<optional<Tensor>>(indices_), values_, accumulate);
+  return std::make_tuple(result, 0);
 }
 
 // plumbing done since we don't support List<optional<Tensor>> in codegen

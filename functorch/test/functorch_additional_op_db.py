@@ -216,28 +216,47 @@ additional_op_db.append(
     ))
 
 
+# TODO: upstream sample inputs to pytorch/pytorch.
+# We are more comprehensive.
 def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
+    # Short for "advanced index"
+    adv_idx = torch.LongTensor([[0, 1], [2, 3]])
     S = 5
+    # self_dim, indices
     test_args = [
-        ([1, 2],),
-        (slice(0, 3),),
-        ([slice(0, 3), 1],),
-        ([[0, 2, 3], [1, 3, 3], [0, 0, 2]],),
-        ([[0, 0, 3], [1, 1, 3], [0, 0, 2]],),
-        ([slice(None), slice(None), [0, 3]],),
-        ([slice(None), [0, 3], slice(None)],),
-        ([[0, 3], slice(None), slice(None)],),
-        ([[0, 3], [1, 2], slice(None)],),
-        ([[0, 3], ],),
-        ([[0, 3], slice(None)],),
-        ([[0, 3], Ellipsis],),
-        ([[0, 2, 3], [1, 3, 3], torch.LongTensor([0, 0, 2])],),
+        (3, ([1, 2],)),
+        (3, (slice(0, 3),)),
+        (3, ([slice(0, 3), 1],)),
+        (3, ([[0, 2, 3], [1, 3, 3], [0, 0, 2]],)),
+        (3, ([[0, 0, 3], [1, 1, 3], [0, 0, 2]],)),
+        (3, ([slice(None), slice(None), [0, 3]],)),
+        (3, ([slice(None), [0, 3], slice(None)],)),
+        (3, ([[0, 3], slice(None), slice(None)],)),
+        (3, ([[0, 3], [1, 2], slice(None)],)),
+        (3, ([[0, 3], ],)),
+        (3, ([[0, 3], slice(None)],)),
+        (3, ([[0, 3], Ellipsis],)),
+        (3, ([[0, 2, 3], [1, 3, 3], torch.LongTensor([0, 0, 2])],)),
+        (4, ([slice(None), adv_idx, adv_idx, slice(None)],)),
+        (4, ([slice(None), adv_idx, slice(None), adv_idx],)),
+        (4, ([adv_idx, slice(None), slice(None), adv_idx],)),
+        (4, ([slice(None), slice(None), adv_idx, adv_idx],)),
+        (4, ([Ellipsis, adv_idx, adv_idx],)),
+        (5, ([slice(None), slice(None), adv_idx, slice(None), adv_idx],)),
+        (5, ([slice(None), slice(None), adv_idx, adv_idx, slice(None)],)),
+        (5, ([slice(None), slice(None), adv_idx, None, adv_idx, slice(None)],)),
+        (6, ([slice(None), slice(None), slice(None), adv_idx, adv_idx],)),
+        (6, ([slice(None), slice(None), adv_idx, adv_idx, adv_idx],)),
+        (6, ([slice(None), slice(None), None, adv_idx, adv_idx, adv_idx],)),
     ]
 
+    def get_shape(dim):
+        return tuple(S + i for i in range(dim))
+
     return tuple(SampleInput(
-        make_tensor((S, S, S), device=device, dtype=dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor(get_shape(self_dim), device=device, dtype=dtype, low=None, high=None, requires_grad=requires_grad),
         args=args)
-        for args in test_args)
+        for self_dim, args in test_args)
 
 
 # TODO: split PyTorch's __getitem__. The problem is we don't support indexing
@@ -251,7 +270,38 @@ additional_op_db.append(
            supports_scripting=False,
            op=torch.Tensor.__getitem__,
            assert_jit_shape_analysis=False,  # TODO: support index.Tensor()
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_getitem,))
+
+
+# Turns out at::index_put is different from torch.index_put...
+# TODO: figure out how to upstream this
+def sample_inputs_aten_index_put(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    inputs = []
+    adv_idx = torch.LongTensor([[0, 1], [2, 3]])
+    # self_shape, indices
+    additional = [
+        ((5, 6, 7, 8), [None, adv_idx, adv_idx, None]),
+        ((5, 6, 7, 8), [None, adv_idx, None, adv_idx]),
+        ((5, 6, 7, 8), [adv_idx, None, None, adv_idx]),
+        ((5, 6, 7, 8), [None, None, adv_idx, adv_idx]),
+        ((5, 6, 7, 8, 9), [None, None, adv_idx, None, adv_idx]),
+        ((5, 6, 7, 8, 9), [None, None, adv_idx, adv_idx, None]),
+        ((5, 6, 7, 8, 9, 10), [None, None, None, adv_idx, adv_idx]),
+        ((5, 6, 7, 8, 9, 10), [None, None, adv_idx, adv_idx, adv_idx]),
+    ]
+    for self_shape, indices in additional:
+        for broadcast_value in [False, True]:
+            inp = make_arg(self_shape)
+
+            tmp_indices = [slice(None) if idx is None else idx for idx in indices]
+            values_shape = inp[tmp_indices].shape
+            if broadcast_value:
+                values_shape = values_shape[3:]
+            values = make_arg(values_shape)
+            inputs.append(SampleInput(inp, args=(tuple(indices), values)))
+    return inputs
 
 
 def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
@@ -303,7 +353,18 @@ additional_op_db.append(
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_index_put,
+        supports_forward_ad=True,
     ))
+additional_op_db.append(
+    OpInfo(
+        "ops.aten.index_put",
+        variant_test_name='functorch',
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_aten_index_put,
+        supports_forward_ad=True,
+    ))
+
 
 
 def sample_inputs_new_zeros_with_same_feature_meta(op_info, device, dtype, requires_grad, **kwargs):
