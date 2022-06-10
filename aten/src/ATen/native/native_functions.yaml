@@ -11857,20 +11857,13 @@
 - func: linalg_qr(Tensor A, str mode='reduced') -> (Tensor Q, Tensor R)
   python_module: linalg
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_qr
+  structured_delegate: linalg_qr.out
 
 - func: linalg_qr.out(Tensor A, str mode='reduced', *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
   python_module: linalg
-  variants: function
+  structured: True
   dispatch:
-    CompositeExplicitAutograd: linalg_qr_out
-
-- func: _linalg_qr_helper(Tensor self, str mode) -> (Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU: _linalg_qr_helper_default
-    CUDA: _linalg_qr_helper_cuda
+    CPU, CUDA: linalg_qr_out
 
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
   python_module: linalg
