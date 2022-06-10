@@ -1583,8 +1583,9 @@ def lerp(
           lambda: f"expected dtype {input.dtype} for `end` but got dtype {end.dtype}")
 
     if isinstance(weight, TensorLike):
-        check(input.dtype == weight.dtype,
-              lambda: f"expected dtype {input.dtype} for `weight` but got dtype {weight.dtype}")
+        weight_dtype = weight.dtype
+        check(input.dtype == weight_dtype,
+              lambda: f"expected dtype {input.dtype} for `weight` but got dtype {weight_dtype}")
 
     # Computation should occur in higher-precision for half and float.
     @elementwise_type_promotion_wrapper(
