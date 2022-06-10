@@ -1579,23 +1579,27 @@ def lerp(
     end: TensorLikeType,
     weight: Union[float, complex, TensorLikeType],
 ):
-    check(input.dtype == end.dtype,
-          lambda: f"expected dtype {input.dtype} for `end` but got dtype {end.dtype}")
+    check(
+        input.dtype == end.dtype,
+        lambda: f"expected dtype {input.dtype} for `end` but got dtype {end.dtype}",
+    )
 
     if isinstance(weight, TensorLike):
         weight_dtype = weight.dtype
-        check(input.dtype == weight_dtype,
-              lambda: f"expected dtype {input.dtype} for `weight` but got dtype {weight_dtype}")
+        check(
+            input.dtype == weight_dtype,
+            lambda: f"expected dtype {input.dtype} for `weight` but got dtype {weight_dtype}",
+        )
 
     # Computation should occur in higher-precision for half and float.
     @elementwise_type_promotion_wrapper(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-        type_promoting_args=("input", "end", "weight")
+        type_promoting_args=("input", "end", "weight"),
     )
     def _lerp_computation(
         input: TensorLikeType,
         end: TensorLikeType,
-        weight: Union[float, complex, TensorLikeType]
+        weight: Union[float, complex, TensorLikeType],
     ):
         if isinstance(weight, (float, complex)):
             if builtins.abs(weight) < 0.5:
