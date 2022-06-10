@@ -70,12 +70,6 @@ void maybe_initialize_cuda(const Device device) {
 // options.
 // TODO: Refactor this so we just pass everything in via options
 
-Tensor dispatch_ones(c10::TensorOptions options, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
-  maybe_initialize_cuda(options.device());
-  pybind11::gil_scoped_release no_gil;
-  return torch::ones(sizes, build_options(options, scalar_type, device));
-}
-
 Tensor new_with_sizes(c10::TensorOptions options, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
   maybe_initialize_cuda(options.device());
   pybind11::gil_scoped_release no_gil;
@@ -467,14 +461,6 @@ Tensor legacy_sparse_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::
     return new_with_sizes(options, scalar_type, r.deviceOptional(1), r.intlist(0));
   }
   throw std::runtime_error("new(): invalid arguments");
-}
-
-Tensor legacy_sparse_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  return legacy_sparse_tensor_generic_ctor_new(dispatch_key, scalar_type, args, kwargs, CtorOrNew::CTOR);
-}
-
-Tensor legacy_sparse_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  return legacy_sparse_tensor_generic_ctor_new(dispatch_key, scalar_type, args, kwargs, CtorOrNew::NEW);
 }
 
 // NB: device_idx here is NOT a DeviceIndex, but index into PythonArgs
