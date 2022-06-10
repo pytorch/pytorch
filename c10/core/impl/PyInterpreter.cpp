@@ -53,7 +53,7 @@ static c10::IntArrayRef noop_strides_fn(
     const TensorImpl*) {
   TORCH_INTERNAL_ASSERT(
       0,
-      "attempted to strides Tensor with nontrivial PyObject after corresponding interpreter died");
+      "attempted to call `strides` on Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
 void PyInterpreter::disarm() noexcept {
