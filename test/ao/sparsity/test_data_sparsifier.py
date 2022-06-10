@@ -29,20 +29,32 @@ class TestBaseDataSparsifier(TestCase):
 
         # Test for nn.Parameters
         param1, param2 = nn.Parameter(torch.randn(4, 4)), nn.Parameter(torch.randn(5, 5))
-        data_list = [('tensor1', tensor1), ('tensor2', tensor2), ('param1', param1)]
+
+        # Test for embeddings
+        emb1, emb2 = nn.Embedding(10, 2), nn.Embedding(20, 2)
+        emb1_bag, emb2_bag = nn.EmbeddingBag(10, 2), nn.EmbeddingBag(20, 2)
+        data_list = [('tensor1', tensor1), ('tensor2', tensor2), ('param1', param1),
+                     ('emb1', emb1), ('emb1_bag', emb1_bag)]
         defaults = {'test': 2}
 
         sparsifier = ImplementedSparsifier(data_list=data_list, **defaults)
-        assert len(sparsifier.data_groups) == 3
+        assert len(sparsifier.data_groups) == 5
 
         sparsifier.add_data(name='tensor3', data=tensor3, test=3)
-        assert len(sparsifier.data_groups) == 4  # should now be 4
+        assert len(sparsifier.data_groups) == 6  # should now be 6
 
         sparsifier.add_data(name='param2', data=param2, test=4)
-        assert len(sparsifier.data_groups) == 5  # should now be 5
+        assert len(sparsifier.data_groups) == 7  # should now be 7
+
+        sparsifier.add_data(name='emb2', data=emb2, test=5)
+        assert len(sparsifier.data_groups) == 8  # should now be 8
+
+        sparsifier.add_data(name='emb2_bag', data=emb2_bag, test=5)
+        assert len(sparsifier.data_groups) == 9  # should now be 9
 
         # data names that should be present in the sparsifier
-        name_list = ['tensor1', 'tensor2', 'tensor3', 'param1', 'param2']
+        name_list = ['tensor1', 'tensor2', 'tensor3', 'param1', 'param2',
+                     'emb1', 'emb2', 'emb1_bag', 'emb2_bag']
         assert all(name in sparsifier.data_groups for name in name_list)
 
         # check if the configs are loaded correctly
@@ -51,13 +63,20 @@ class TestBaseDataSparsifier(TestCase):
         assert sparsifier.data_groups['tensor3']['test'] == 3
         assert sparsifier.data_groups['param1']['test'] == 2
         assert sparsifier.data_groups['param2']['test'] == 4
+        # For embeddings
+        assert sparsifier.data_groups['emb1']['test'] == 2
+        assert sparsifier.data_groups['emb1_bag']['test'] == 2
+        assert sparsifier.data_groups['emb2']['test'] == 5
+        assert sparsifier.data_groups['emb2_bag']['test'] == 5
 
     def test_step(self):
         # Test for torch tensors
         tensor1 = torch.randn(3, 3)
         # Test for nn.Parameters
         param1 = nn.Parameter(torch.randn(4, 4))
-        data_dict = {'tensor1': tensor1, 'param1': param1}
+        # Test for embeddings
+        emb1, emb1_bag = nn.Embedding(10, 2), nn.EmbeddingBag(10, 2)
+        data_dict = {'tensor1': tensor1, 'param1': param1, 'emb1': emb1, 'emb1_bag': emb1_bag}
 
         sparsifier = ImplementedSparsifier()
         for name, data in data_dict.items():
@@ -67,6 +86,8 @@ class TestBaseDataSparsifier(TestCase):
             sparsified_data = sparsifier.get_data(name=name, return_sparsified=True)
             original_data = sparsifier.get_data(name=name, return_sparsified=False)
             mask = sparsifier.get_mask(name=name)
+            if type(data) in [nn.Embedding, nn.EmbeddingBag]:
+                data = data.weight
             assert original_data.requires_grad is False  # does not have the gradient
             assert sparsified_data.requires_grad is False  # does not track the gradient
             assert torch.all(sparsified_data == data)  # should not be sparsified before step
@@ -80,6 +101,8 @@ class TestBaseDataSparsifier(TestCase):
         for name, data in data_dict.items():
             sparsified_data = sparsifier.get_data(name=name, return_sparsified=True)
             original_data = sparsifier.get_data(name=name, return_sparsified=False)
+            if type(data) in [nn.Embedding, nn.EmbeddingBag]:
+                data = data.weight
             assert original_data.requires_grad is False  # does not have the gradient
             assert sparsified_data.requires_grad is False  # does not track the gradient
             assert torch.all(sparsified_data[0] == 0)
@@ -93,7 +116,9 @@ class TestBaseDataSparsifier(TestCase):
         tensor1 = torch.randn(3, 3)
         # Test for nn.Parameters
         param1 = nn.Parameter(torch.randn(4, 4))
-        data_dict = {'tensor1': tensor1, 'param1': param1}
+        # Test for embeddings
+        emb1, emb1_bag = nn.Embedding(10, 2), nn.EmbeddingBag(10, 2)
+        data_dict = {'tensor1': tensor1, 'param1': param1, 'emb1': emb1, 'emb1_bag': emb1_bag}
 
         sparsifier = ImplementedSparsifier()
         # adding data into the sparsifier
@@ -131,7 +156,10 @@ class TestBaseDataSparsifier(TestCase):
         tensor1, tensor2, tensor3 = torch.randn(3, 3), torch.randn(4, 4), torch.randn(5, 5)
         # Test for nn params
         param1, param2 = nn.Parameter(torch.randn(6, 6)), nn.Parameter(torch.randn(7, 7))
-        data_list = [('tensor1', tensor1), ('param1', param1)]
+        # Test for embeddings
+        emb1, emb2 = nn.Embedding(10, 2), nn.Embedding(20, 2)
+        emb1_bag, emb2_bag = nn.EmbeddingBag(10, 2), nn.EmbeddingBag(20, 2)
+        data_list = [('tensor1', tensor1), ('param1', param1), ('emb1', emb1), ('emb1_bag', emb1_bag)]
         defaults = {'test': 2}
 
         sparsifier = ImplementedSparsifier(data_list=data_list, **defaults)
@@ -144,9 +172,13 @@ class TestBaseDataSparsifier(TestCase):
         sparsifier_new.add_data('tensor2', tensor2)
         sparsifier_new.add_data('param1', param1)
         sparsifier_new.add_data('param2', param2)
+        sparsifier_new.add_data('emb1', data=emb1)
+        sparsifier_new.add_data('emb1_bag', data=emb1_bag)
+        sparsifier_new.add_data('emb2', data=emb2)
+        sparsifier_new.add_data('emb2_bag', data=emb2_bag)
 
         assert sparsifier_new.state != sparsifier.state
-        mask_test_names = ['tensor1', 'param1']
+        mask_test_names = ['tensor1', 'param1', 'emb1', 'emb1_bag']
         for name in mask_test_names:
             mask, mask_new = sparsifier.get_mask(name), sparsifier_new.get_mask(name)
             self.assertNotEqual(mask, mask_new)
