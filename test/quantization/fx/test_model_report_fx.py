@@ -708,3 +708,9 @@ class TestModelReportObserver(QuantizationTestCase):
 
         # run it through the model and do general tests
         self.run_model_and_common_checks(model, ex_input, num_epochs, num_batches)
+
+
+class TestModelReportDetectDynamicStatic(QuantizationTestCase):
+
+    def run_simple_pass(self):
+        pass
