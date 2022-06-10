@@ -265,7 +265,11 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
 
     # TODO: Replace with refs.logical_not when it exists!
     def logical_not(x):
+<<<<<<< HEAD
         return refs.eq(x, False)
+=======
+        return refs.logical_xor(refs.full_like(x, True), x)
+>>>>>>> b033b900e053cca977f8efa83f63704554dc6c16
 
     zero_mask = logical_not(refs.logical_or(ge_mask, le_mask))
     return refs.where(zero_mask, 0, a)
