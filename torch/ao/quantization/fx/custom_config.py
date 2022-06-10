@@ -55,10 +55,10 @@ class PrepareCustomConfig:
     def set_standalone_module_name(
             self,
             module_name: str,
-            qconfig_mapping: QConfigMapping,
+            qconfig_mapping: Optional[QConfigMapping],
             example_inputs: Tuple[Any, ...],
-            prepare_custom_config: PrepareCustomConfig,
-            backend_config_dict: Dict[str, Any]) -> PrepareCustomConfig:
+            prepare_custom_config: Optional[PrepareCustomConfig],
+            backend_config_dict: Optional[Dict[str, Any]]) -> PrepareCustomConfig:
         """
         TODO: write this
         """
@@ -69,10 +69,10 @@ class PrepareCustomConfig:
     def set_standalone_module_class(
             self,
             module_class: Type,
-            qconfig_mapping: QConfigMapping,
+            qconfig_mapping: Optional[QConfigMapping],
             example_inputs: Tuple[Any, ...],
-            prepare_custom_config: PrepareCustomConfig,
-            backend_config_dict: Dict[str, Any]) -> PrepareCustomConfig:
+            prepare_custom_config: Optional[PrepareCustomConfig],
+            backend_config_dict: Optional[Dict[str, Any]]) -> PrepareCustomConfig:
         """
         TODO: write this
         """
@@ -134,7 +134,7 @@ class PrepareCustomConfig:
         """
         TODO: write this
         """
-        def _get_qconfig_mapping(obj: Any, dict_key: str) -> QConfigMapping:
+        def _get_qconfig_mapping(obj: Any, dict_key: str) -> Optional[QConfigMapping]:
             """
             Convert the given object into a QConfigMapping if possible, else throw an exception.
             """
@@ -145,11 +145,11 @@ class PrepareCustomConfig:
             raise ValueError("Expected QConfigMapping in prepare_custom_config_dict[\"%s\"], got '%s'" %
                              (dict_key, type(obj)))
 
-        def _get_prepare_custom_config(obj: Any, dict_key: str) -> PrepareCustomConfig:
+        def _get_prepare_custom_config(obj: Any, dict_key: str) -> Optional[PrepareCustomConfig]:
             """
             Convert the given object into a PrepareCustomConfig if possible, else throw an exception.
             """
-            if isinstance(obj, PrepareCustomConfig):
+            if isinstance(obj, PrepareCustomConfig) or obj is None:
                 return obj
             if isinstance(obj, Dict):
                 return PrepareCustomConfig.from_dict(obj)
@@ -157,16 +157,16 @@ class PrepareCustomConfig:
                              (dict_key, type(obj)))
 
         conf = cls()
-        for (module_name, qconfig_dict, example_inputs, prepare_custom_config_dict, backend_config_dict) in\
+        for (module_name, qconfig_dict, example_inputs, _prepare_custom_config_dict, backend_config_dict) in\
                 prepare_custom_config_dict.get(STANDALONE_MODULE_NAME_DICT_KEY, []):
             qconfig_mapping = _get_qconfig_mapping(qconfig_dict, STANDALONE_MODULE_NAME_DICT_KEY)
-            prepare_custom_config = _get_prepare_custom_config(prepare_custom_config_dict, STANDALONE_MODULE_NAME_DICT_KEY)
+            prepare_custom_config = _get_prepare_custom_config(_prepare_custom_config_dict, STANDALONE_MODULE_NAME_DICT_KEY)
             conf.set_standalone_module_name(
                 module_name, qconfig_mapping, example_inputs, prepare_custom_config, backend_config_dict)
-        for (module_class, qconfig_dict, example_inputs, prepare_custom_config_dict, backend_config_dict) in\
+        for (module_class, qconfig_dict, example_inputs, _prepare_custom_config_dict, backend_config_dict) in\
                 prepare_custom_config_dict.get(STANDALONE_MODULE_CLASS_DICT_KEY, []):
             qconfig_mapping = _get_qconfig_mapping(qconfig_dict, STANDALONE_MODULE_CLASS_DICT_KEY)
-            prepare_custom_config = _get_prepare_custom_config(prepare_custom_config_dict, STANDALONE_MODULE_CLASS_DICT_KEY)
+            prepare_custom_config = _get_prepare_custom_config(_prepare_custom_config_dict, STANDALONE_MODULE_CLASS_DICT_KEY)
             conf.set_standalone_module_class(
                 module_class, qconfig_mapping, example_inputs, prepare_custom_config, backend_config_dict)
         for quant_type_name, custom_module_mapping in prepare_custom_config_dict.get(FLOAT_TO_OBSERVED_DICT_KEY, {}).items():
@@ -186,7 +186,9 @@ class PrepareCustomConfig:
         TODO: write this
         """
         def _make_tuple(key: Any, e: StandaloneModuleConfigEntry):
-            return (key, e.qconfig_mapping, e.example_inputs, e.prepare_custom_config, e.backend_config_dict)
+            qconfig_dict = e.qconfig_mapping.to_dict() if e.qconfig_mapping else None
+            prepare_custom_config_dict = e.prepare_custom_config.to_dict() if e.prepare_custom_config else None
+            return (key, qconfig_dict, e.example_inputs, prepare_custom_config_dict, e.backend_config_dict)
 
         d: Dict[str, Any] = {}
         for module_name, sm_config_entry in self.standalone_module_names.items():
