@@ -45,7 +45,8 @@ def meta_min(self):
 
 @torch.library.impl(meta_lib, "angle")
 def meta_angle(self):
-    _, result_dtype = elementwise_dtypes(self, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+    _, result_dtype = elementwise_dtypes(self,
+                                         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
     return self.new_empty(self.size(), dtype=result_dtype)
 
 @torch.library.impl(meta_lib, "angle.out")
