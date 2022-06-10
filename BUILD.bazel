@@ -1872,3 +1872,13 @@ test_suite(
         "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
     ]
 ]
+
+cc_binary(
+    name = "bazel_cuda_stuck_repro",
+    srcs = [
+        "test/bazel_cuda_stuck_repro.cpp",
+    ],
+    deps = [
+        ":torch",
+    ],
+)
