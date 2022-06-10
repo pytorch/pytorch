@@ -5158,19 +5158,9 @@ TEST_F(NVFuserTest, FusionSimpleBCast3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  // Set up your input tensor views
-  std::vector<IterDomain*> dom;
-  dom.push_back(IrBuilder::create<IterDomain>(
-      IrBuilder::create<Int>(0), IrBuilder::create<Int>()));
-  dom.push_back(IrBuilder::create<IterDomain>(
-      IrBuilder::create<Int>(0),
-      IrBuilder::create<Int>(1),
-      ParallelType::Serial,
-      IterType::BroadcastWithStride));
-
+  // Set up input tensor views
   // tv0[I1, B{1}]
-  TensorView* tv0 = IrBuilder::create<TensorView>(
-      IrBuilder::create<TensorDomain>(dom), DataType::Float);
+  TensorView* tv0 = makeConcreteTensor({-1, 1});
   fusion.addInput(tv0);
 
   // tv1[I0, I1, I2]
@@ -5213,16 +5203,7 @@ TEST_F(NVFuserTest, FusionSimpleBCast4_CUDA) {
   FusionGuard fg(&fusion);
 
   // Set up your input tensor views
-  std::vector<IterDomain*> dom;
-  dom.push_back(IrBuilder::create<IterDomain>(
-      IrBuilder::create<Int>(0),
-      IrBuilder::create<Int>(1),
-      ParallelType::Serial,
-      IterType::BroadcastWithStride));
-  dom.push_back(IrBuilder::create<IterDomain>(
-      IrBuilder::create<Int>(0), IrBuilder::create<Int>()));
-  TensorView* tv0 = IrBuilder::create<TensorView>(
-      IrBuilder::create<TensorDomain>(dom), DataType::Float);
+  TensorView* tv0 = makeConcreteTensor({1, -1});
 
   TensorView* tv1 = makeSymbolicTensor(3);
   fusion.addInput(tv0);
@@ -5270,23 +5251,8 @@ TEST_F(NVFuserTest, FusionSimpleBCast5_CUDA) {
   FusionGuard fg(&fusion);
 
   constexpr int m = 2, k = 3, n = 4;
-
-  auto zero = IrBuilder::create<Int>(0);
-  auto M = IrBuilder::create<IterDomain>(zero, IrBuilder::create<Int>(m));
-  auto K = IrBuilder::create<IterDomain>(zero, IrBuilder::create<Int>(k));
-  auto N = IrBuilder::create<IterDomain>(zero, IrBuilder::create<Int>(n));
-
-  // Set up your input tensor views
-  TensorView* tv0 = IrBuilder::create<TensorView>(
-      IrBuilder::create<TensorDomain>(
-          std::vector<IterDomain*>({M, K}), std::vector<bool>({true, true})),
-      DataType::Float);
-  // Note: IterDomain must not be reused, so K needs to be cloned.
-  TensorView* tv1 = IrBuilder::create<TensorView>(
-      IrBuilder::create<TensorDomain>(
-          std::vector<IterDomain*>({K->cloneWithoutRFactor(), N}),
-          std::vector<bool>({true, true})),
-      DataType::Float);
+  auto tv0 = makeConcreteTensor({m, k});
+  auto tv1 = makeConcreteTensor({k, n});
 
   fusion.addInput(tv0);
   fusion.addInput(tv1);
@@ -13051,7 +13017,7 @@ TEST_F(NVFuserTest, FusionTranspose1_CUDA) {
   constexpr int N = 20;
 
   auto tv0 = makeSymbolicTensor(2);
-  auto tv1 = transpose(tv0, {{0, 1}});
+  auto tv1 = transpose(tv0);
   fusion.addInput(tv0);
   fusion.addOutput(tv1);
 
@@ -13081,7 +13047,7 @@ TEST_F(NVFuserTest, FusionTranspose2_CUDA) {
   constexpr int N = 20;
 
   auto tv0 = makeSymbolicTensor(2);
-  auto tv1 = transpose(tv0, {{0, 1}});
+  auto tv1 = transpose(tv0);
   fusion.addInput(tv0);
   fusion.addOutput(tv1);
 
@@ -13117,8 +13083,8 @@ TEST_F(NVFuserTest, FusionSimpleGemmTransposed_CUDA) {
   fusion.addInput(tv0);
   fusion.addInput(tv1);
 
-  TensorView* tv0_t = transpose(tv0, {{0, 1}});
-  TensorView* tv1_t = transpose(tv1, {{0, 1}});
+  TensorView* tv0_t = transpose(tv0);
+  TensorView* tv1_t = transpose(tv1);
 
   TensorView* tv2 = broadcast(tv0_t, {false, false, true});
   // tv2[I0, I1, B] = tv0[I0, I1]
@@ -13204,7 +13170,7 @@ TEST_F(NVFuserTest, FusionSoftmax3DTransposed_CUDA) {
   TensorView* input_tv0 = makeSymbolicTensor(3);
   fusion.addInput(input_tv0);
 
-  TensorView* input_t = transpose(input_tv0, {{1, 2}});
+  TensorView* input_t = transpose(input_tv0, 1, 2);
 
   TensorView* exp_tv1 = unaryOp(UnaryOpType::Exp, input_t);
   TensorView* sum_exp_tv2 = sum(exp_tv1, {-1});
@@ -13212,7 +13178,7 @@ TEST_F(NVFuserTest, FusionSoftmax3DTransposed_CUDA) {
 
   // Replicate exp_tv4 as exp_tv4_copy because exp_tv4 is going to be
   // computed at sum_exp_rf_tv8.
-  TensorView* input_t_copy = transpose(input_tv0, {{1, 2}});
+  TensorView* input_t_copy = transpose(input_tv0, 1, 2);
   TensorView* exp_tv1_copy = unaryOp(UnaryOpType::Exp, input_t_copy);
 
   TensorView* output_tv4 = div(exp_tv1_copy, bcast_sum_tv3);
@@ -13269,7 +13235,7 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed1_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  tv0 = transpose(tv0, {{0, 1}});
+  tv0 = transpose(tv0);
 
   TensorView* tv1 = mul(tv0, IrBuilder::create<Double>(0.5));
   TensorView* tv2 = mul(tv1, IrBuilder::create<Double>(-1.0));
@@ -13351,7 +13317,7 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed2_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  tv0 = transpose(tv0, {{0, 1}});
+  tv0 = transpose(tv0);
 
   TensorView* tv1 = mul(tv0, IrBuilder::create<Double>(-1.0));
   TensorView* tv2 = add(tv0, IrBuilder::create<Double>(3.0));
@@ -13413,12 +13379,12 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed3_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(4);
   fusion.addInput(tv0);
 
-  tv0 = transpose(tv0, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv0 = permute(tv0, {3, 0, 1, 2});
 
   TensorView* tv1 = makeSymbolicTensor(4);
   fusion.addInput(tv1);
 
-  tv1 = transpose(tv1, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv1 = permute(tv1, {3, 0, 1, 2});
 
   TensorView* tv2 = mul(tv1, IrBuilder::create<Double>(.979361));
   TensorView* tv3 = mul(tv2, tv0);
@@ -13476,22 +13442,22 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed4_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(4);
   fusion.addInput(tv0);
 
-  tv0 = transpose(tv0, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv0 = permute(tv0, {3, 0, 1, 2});
 
   TensorView* tv1 = makeSymbolicTensor(4);
   fusion.addInput(tv1);
 
-  tv1 = transpose(tv1, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv1 = permute(tv1, {3, 0, 1, 2});
 
   TensorView* tv2 = makeSymbolicTensor(4);
   fusion.addInput(tv2);
 
-  tv2 = transpose(tv2, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv2 = permute(tv2, {3, 0, 1, 2});
 
   TensorView* tv3 = makeSymbolicTensor(4);
   fusion.addInput(tv3);
 
-  tv3 = transpose(tv3, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv3 = permute(tv3, {3, 0, 1, 2});
 
   TensorView* tv4 = sub(tv2, tv3);
   TensorView* tv5 = add(tv1, tv4);
@@ -13556,10 +13522,10 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed5_CUDA) {
   // Set up your input tensor views
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  tv0 = transpose(tv0, {{0, 1}});
+  tv0 = transpose(tv0);
   TensorView* tv1 = makeSymbolicTensor(2);
   fusion.addInput(tv1);
-  tv1 = transpose(tv1, {{0, 1}});
+  tv1 = transpose(tv1);
   TensorView* tv2 = add(tv0, IrBuilder::create<Double>(2.0));
   TensorView* tv3 = mul(tv1, tv2);
   fusion.addOutput(tv3);
@@ -13595,10 +13561,10 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed6_CUDA) {
 
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  tv0 = transpose(tv0, {{0, 1}});
+  tv0 = transpose(tv0);
   TensorView* tv1 = makeSymbolicTensor(2);
   fusion.addInput(tv1);
-  tv1 = transpose(tv1, {{0, 1}});
+  tv1 = transpose(tv1);
   TensorView* tv2 = add(tv0, IrBuilder::create<Double>(2.0));
   TensorView* tv3 = mul(tv1, tv2);
   fusion.addOutput(tv3);
@@ -13989,7 +13955,7 @@ TEST_F(NVFuserTest, FusionTransposeWithSwizzle_CUDA) {
 
   auto tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  auto tv1 = transpose(tv0, {{0, 1}});
+  auto tv1 = transpose(tv0);
   fusion.addOutput(tv1);
 
   // tv0: [I0, I1]
@@ -14051,7 +14017,7 @@ TEST_F(NVFuserTest, FusionTransposeWithSwizzle1DThreadBlock_CUDA) {
 
   auto tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  auto tv1 = transpose(tv0, {{0, 1}});
+  auto tv1 = transpose(tv0);
   fusion.addOutput(tv1);
 
   // tv0: [I0, I1]
@@ -22911,7 +22877,7 @@ TEST_F(NVFuserTest, FusionExactRootDomainMap_CUDA) {
   fusion.addInput(tv1);
 
   auto tv2 = broadcast(tv0, {false, true});
-  auto tv3 = transpose(tv2, {{0, 1}});
+  auto tv3 = transpose(tv2);
   auto tv4 = add(tv2, tv1);
   auto tv5 = add(tv2, tv3);
   auto tv6 = add(tv3, tv1);
@@ -23392,6 +23358,220 @@ TEST_F(NVFuserTest, FusionRepro1713_CUDA) {
       {t4, t6},
       __LINE__,
       __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionExpand_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto w = 2, x = 3, y = 4, z = 5;
+
+  // Test
+  // a simple expand
+  // Expand that's propagated
+  // expand_as
+  // symbolic expand
+
+  // x
+  auto tv0 = makeSymbolicTensor(1);
+  fusion->addInput(tv0);
+
+  auto tv1 = broadcast(tv0, {false, true});
+  auto tv2 = expand(tv1, {tv0->axis(0)->extent(), IrBuilder::create<Int>(y)});
+
+  // x
+  auto tv3 = makeSymbolicTensor(1);
+  fusion->addInput(tv3);
+  auto tv4 = broadcast(tv3, {false, true});
+  auto tv5 = add(tv4, tv2);
+  // [x, e_y]
+
+  // [x, y, z]
+  auto tv6 = makeSymbolicTensor(3);
+  fusion->addInput(tv6);
+
+  // Disjoint set op will cause a segmentation for just this op.
+  auto tmp_7 = set(tv6);
+  fusion->addOutput(tmp_7);
+
+  auto tv7 = broadcast(tv5, {false, false, true});
+
+  auto tv8 = expand_as(tv7, tv6);
+  // [x, e_y, e_z]
+
+  auto w_symbolic = IrBuilder::create<Int>();
+  fusion->addInput(w_symbolic);
+
+  auto tv9 = broadcast(tv8, {true, false, false, false});
+  //[1, x, e_y, e_z]
+
+  auto tv10 = expand(
+      tv9,
+      {w_symbolic,
+       tv9->axis(1)->extent(),
+       tv9->axis(2)->expandedExtent(),
+       tv9->axis(3)->expandedExtent()});
+
+  fusion->addOutput(tv10);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({x}, options);
+  at::Tensor t3 = at::randn({x}, options);
+  at::Tensor t6 = at::randn({x, y, z}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0, t3, t6, w});
+  auto cg_out = cg_outputs[1];
+
+  TORCH_INTERNAL_ASSERT(cg_out.size(0) == w);
+  TORCH_INTERNAL_ASSERT(cg_out.size(1) == x);
+  TORCH_INTERNAL_ASSERT(cg_out.size(2) == y);
+  TORCH_INTERNAL_ASSERT(cg_out.size(3) == z);
+  TORCH_INTERNAL_ASSERT(cg_out.stride(0) == 0);
+  TORCH_INTERNAL_ASSERT(cg_out.stride(1) == 1);
+  TORCH_INTERNAL_ASSERT(cg_out.stride(2) == 0);
+  TORCH_INTERNAL_ASSERT(cg_out.stride(3) == 0);
+
+  auto t10 = t0.unsqueeze(-1)
+                 .expand({x, y})
+                 .add(t3.unsqueeze(-1))
+                 .unsqueeze(-1)
+                 .expand_as(t6)
+                 .unsqueeze(0)
+                 .expand({w, x, y, z});
+
+  testValidate(
+      executor_cache.fusion(),
+      cg_outputs,
+      {t0, t3, t6, w},
+      {t6, t10},
+      __LINE__,
+      __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionExpandIssue1751_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto x = 3, y = 4, z = 5;
+
+  // y, z
+  auto tv0 = makeSymbolicTensor(2);
+  fusion->addInput(tv0);
+
+  auto tv1 = broadcast(tv0, {true, false, false});
+
+  // Two ways to propagate extents as is: use -1 or explicitly pass
+  // the extent vals.
+
+  auto tv2 = expand(
+      tv1,
+      {IrBuilder::create<Int>(x),
+       IrBuilder::create<Int>(-1),
+       IrBuilder::create<Int>(-1)});
+
+  auto tv3 = expand(
+      tv1,
+      {IrBuilder::create<Int>(x),
+       tv0->axis(0)->extent(),
+       tv0->axis(1)->extent()});
+
+  fusion->addOutput(tv2);
+  fusion->addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({y, z}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+
+  for (const auto& cg_out : cg_outputs) {
+    TORCH_INTERNAL_ASSERT(cg_out.size(0) == x);
+    TORCH_INTERNAL_ASSERT(cg_out.size(1) == y);
+    TORCH_INTERNAL_ASSERT(cg_out.size(2) == z);
+  }
+
+  auto t2 = t0.expand({x, y, z});
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0}, {t2, t2}, __LINE__, __FILE__);
+}
+
+// TODO: Make sure the kernel uses the expanded concrete size instead
+// of the symbolic size
+TEST_F(NVFuserTest, FusionExpandToConcrete_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto x = 3, y = 4;
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion->addInput(tv0);
+
+  auto tv1 = broadcast(tv0, {true, false});
+
+  auto tv2 =
+      expand(tv1, {IrBuilder::create<Int>(x), IrBuilder::create<Int>(y)});
+
+  fusion->addOutput(tv2);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({y}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+
+  for (const auto& cg_out : cg_outputs) {
+    TORCH_INTERNAL_ASSERT(cg_out.size(0) == x);
+    TORCH_INTERNAL_ASSERT(cg_out.size(1) == y);
+  }
+
+  auto t2 = t0.expand({x, y});
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0}, {t2}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionReproNoncontigBroadcast_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({4, 32, 16, 112, 112}, options).transpose(-1, -2);
+  at::Tensor t1 = at::randn({32, 1, 112, 1}, options).transpose(-1, -2);
+
+  auto tv0 = TensorViewBuilder()
+                 .ndims(5)
+                 .contiguity({true, true, false, false, false}) // ttfff
+                 .shape({-1, -1, -1, -1, -1})
+                 .dtype(DataType::Half)
+                 .build();
+  auto tv1 = TensorViewBuilder()
+                 .ndims(4)
+                 .contiguity({true, false, false, true}) // tfft
+                 .shape({-1, 1, 1, -1})
+                 .dtype(DataType::Half)
+                 .build();
+
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+
+  auto tv2 = add(tv0, tv1);
+
+  fusion->addOutput(tv2);
+
+  std::vector<IValue> aten_inputs({t0, t1});
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+
+  auto t2 = t0 + t1;
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0, t1}, {t2}, __LINE__, __FILE__);
 }
 
 } // namespace jit

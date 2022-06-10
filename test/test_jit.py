@@ -605,6 +605,19 @@ class TestJit(JitTestCase):
         # a_copy is modified
         torch.testing.assert_close(orig_res, a_copy)
 
+    def test_repeat_interleave_script(self):
+        def fn(input: torch.Tensor, repeats: torch.Tensor) -> torch.Tensor:
+            output = input.repeat_interleave(repeats)
+            return output
+        fn_scripted = torch.jit.script(fn)
+
+        input = torch.tensor([5, 7], dtype=torch.int64)
+        repeats = torch.tensor([3, 6], dtype=torch.int64)
+
+        output = fn(input, repeats)
+        output_scripted = fn_scripted(input, repeats)
+        self.assertEqual(output_scripted, output)
+
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple executor doesn't have shape information")
     def test_peephole_optimize_shape_ops(self):
         def test_input(func, input, result):
