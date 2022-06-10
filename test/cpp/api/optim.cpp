@@ -173,7 +173,7 @@ TEST(OptimTest, OptimizerAccessors) {
   const auto& optimizer_ = Adagrad(params, options);
   optimizer_.defaults();
   // test for param_groups() with const reference return
-  const auto& params_2 = optimizer_.param_groups();
+  (void)optimizer_.param_groups();
   // test for state() with const reference return
   optimizer_.state();
 }

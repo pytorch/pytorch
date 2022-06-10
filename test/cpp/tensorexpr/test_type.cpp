@@ -68,15 +68,14 @@ TEST(Type, BitCasting) {
     ASSERT_EQ(y.dtype(), kShort);
   }
 
-  constexpr int16_t ref16 = 1337;
   constexpr int32_t ref32 = 1337;
   constexpr int64_t ref64 = 1337;
-  at::Half reff16 = 1337.0f;
   constexpr float reff32 = 1337.0f;
   constexpr double reff64 = 1337.0f;
   using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
   // this is broken
   /*{
+    constexpr int16_t ref16 = 1337;
     at::Half k_;
     at::Half* k = &k_;
     *reinterpret_cast<int16_t*>(k) = ref16;

@@ -97,8 +97,7 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
 Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs) {
   auto new_node = block->appendNode(block->owningGraph()->create(kind));
   for (auto input : inputs) {
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-    auto new_input = new_node->addInput(input);
+    new_node->addInput(input);
   }
   return new_node;
 }
