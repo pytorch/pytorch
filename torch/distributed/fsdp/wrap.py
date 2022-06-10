@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import contextlib
+from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
@@ -239,6 +240,7 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
     return module
 
 
+@dataclass
 class ParamExecOrderWrapPolicy:
     """
     This is the class used for the wrapping policy that wraps parameters and performs
@@ -260,8 +262,7 @@ class ParamExecOrderWrapPolicy:
             forward and backward iteration, init_policy is used. Parameter execution order is also recorded
             in the first iteration. Starting from second iteration, ParamExecOrderWrapPolicy will be used.
     """
-    def __init__(self, init_policy=always_wrap_policy):
-        self.init_policy = init_policy
+    init_policy : Callable = always_wrap_policy
 
 
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:
