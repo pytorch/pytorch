@@ -19,22 +19,36 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
         if isinstance(obj, torch.Tensor):
             if obj.device == torch.device("cuda", target_gpu):
                 return (obj,)
+            elif hasattr(torch, "xpu") and obj.device == torch.device("xpu", target_gpu):
+                return (obj,)
             if not use_side_stream_for_tensor_copies:
                 return (obj.to(target_gpu),)
             else:
                 # Perform CPU -> GPU copies in a background stream. This code is
                 # motivated from similar logic in torch/nn/parallel/_functions.py
                 stream = _get_stream(target_gpu)
-                with torch.cuda.stream(stream):
-                    output = obj.to(target_gpu)
-                # synchronize with the copy stream
-                with torch.cuda.device(target_gpu):
-                    current_stream = torch.cuda.current_stream()
-                    # Sync the current stream with the copy stream
-                    current_stream.wait_stream(stream)
-                    # Ensure tensor memory is not reused until work on
-                    # main stream is complete
-                    output.record_stream(current_stream)  # type: ignore[arg-type]
+                if torch.cuda.is_available():
+                    with torch.cuda.stream(stream):
+                        output = obj.to(target_gpu)
+                    # synchronize with the copy stream
+                    with torch.cuda.device(target_gpu):
+                        current_stream = torch.cuda.current_stream()
+                        # Sync the current stream with the copy stream
+                        current_stream.wait_stream(stream)
+                        # Ensure tensor memory is not reused until work on
+                        # main stream is complete
+                        output.record_stream(current_stream)  # type: ignore[arg-type]
+                elif hasattr(torch, "xpu") and torch.xpu.is_available():  # type: ignore[attr-defined]
+                    with torch.xpu.stream(stream):  # type: ignore[attr-defined]
+                        output = obj.to(target_gpu)
+                    # synchronize with the copy stream
+                    with torch.xpu.device(target_gpu):  # type: ignore[attr-defined]
+                        current_stream = torch.xpu.current_stream()  # type: ignore[attr-defined]
+                        # Sync the current stream with the copy stream
+                        current_stream.wait_stream(stream)
+                        # Ensure tensor memory is not reused until work on
+                        # main stream is complete
+                        output.record_stream(current_stream)  # type: ignore[arg-type]
                 return (output,)
         if _is_namedtuple(obj):
             return [type(obj)(*args) for args in zip(*map(to_map, obj))]

@@ -93,14 +93,24 @@ class Scatter(Function):
         if torch.cuda.is_available() and ctx.input_device == -1:
             # Perform CPU to GPU copies in a background stream
             streams = [_get_stream(device) for device in target_gpus]
+        elif hasattr(torch, "xpu") and torch.xpu.is_available() and ctx.input_device == -1:
+            # Perform CPU to GPU copies in a background stream
+            streams = [_get_stream(device) for device in target_gpus]
         outputs = comm.scatter(input, target_gpus, chunk_sizes, ctx.dim, streams)
         # Synchronize with the copy stream
         if streams is not None:
-            for i, output in enumerate(outputs):
-                with torch.cuda.device(target_gpus[i]):
-                    main_stream = torch.cuda.current_stream()
-                    main_stream.wait_stream(streams[i])
-                    output.record_stream(main_stream)
+            if torch.cuda.is_available():
+                for i, output in enumerate(outputs):
+                    with torch.cuda.device(target_gpus[i]):
+                        main_stream = torch.cuda.current_stream()
+                        main_stream.wait_stream(streams[i])
+                        output.record_stream(main_stream)
+            elif hasattr(torch, "xpu") and torch.xpu.is_available():
+                for i, output in enumerate(outputs):
+                    with torch.xpu.device(target_gpus[i]):
+                        main_stream = torch.xpu.current_stream()
+                        main_stream.wait_stream(streams[i])
+                        output.record_stream(main_stream)
         return outputs
 
     @staticmethod
@@ -117,8 +127,14 @@ def _get_stream(device: int):
     global _streams
     if device == -1:
         return None
-    if _streams is None:
-        _streams = [None] * torch.cuda.device_count()
-    if _streams[device] is None:
-        _streams[device] = torch.cuda.Stream(device)
+    if torch.cuda.is_available():
+        if _streams is None:
+            _streams = [None] * torch.cuda.device_count()
+        if _streams[device] is None:
+            _streams[device] = torch.cuda.Stream(device)
+    elif hasattr(torch, "xpu") and torch.xpu.is_available():
+        if _streams is None:
+            _streams = [None] * torch.xpu.device_count()
+        if _streams[device] is None:
+            _streams[device] = torch.xpu.Stream(device)
     return _streams[device]
