@@ -1607,24 +1607,34 @@ def lerp(
     end: TensorLikeType,
     weight: Union[float, complex, TensorLikeType],
 ):
-    if input.dtype != end.dtype:
-        raise RuntimeError(
-            f"expected dtype {input.dtype} for `end` but got dtype {end.dtype}"
-        )
+    check(input.dtype == end.dtype,
+          lambda: f"expected dtype {input.dtype} for `end` but got dtype {end.dtype}")
 
-    if isinstance(weight, (float, complex)):
-        if builtins.abs(weight) < 0.5:
-            return input + (weight * (end - input))
-        return end - ((1.0 - weight) * (end - input))
-    else:  # weight is TensorLikeType
-        if input.dtype != weight.dtype:
-            raise RuntimeError(
-                f"expected dtype {input.dtype} for `weight` but got dtype {weight.dtype}"
-            )
-        ge_half = ge(abs(weight), 0.5)
-        le_half_computation = input + (weight * (end - input))
-        ge_half_computation = end - (sub(1.0, weight) * (end - input))
-        return where(ge_half, ge_half_computation, le_half_computation)
+    if isinstance(weight, TensorLike):
+        check(input.dtype == weight.dtype,
+              lambda: f"expected dtype {input.dtype} for `weight` but got dtype {weight.dtype}")
+
+    # Computation should occur in higher-precision for half and float.
+    @elementwise_type_promotion_wrapper(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        type_promoting_args=("input", "end", "weight")
+    )
+    def _lerp_computation(
+        input: TensorLikeType,
+        end: TensorLikeType,
+        weight: Union[float, complex, TensorLikeType]
+    ):
+        if isinstance(weight, (float, complex)):
+            if builtins.abs(weight) < 0.5:
+                return input + (weight * (end - input))
+            return end - ((1.0 - weight) * (end - input))
+        else:  # weight is TensorLikeType
+            ge_half = ge(abs(weight), 0.5)
+            le_half_computation = input + (weight * (end - input))
+            ge_half_computation = end - (sub(1.0, weight) * (end - input))
+            return where(ge_half, ge_half_computation, le_half_computation)
+
+    return _lerp_computation(input, end, weight)
 
 
 def atleast_1d(

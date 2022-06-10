@@ -20765,6 +20765,15 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.lerp",
         torch_opinfo_name="lerp",
+        skips=(
+            # NotImplementedError: argument of type: <class 'complex'>
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.cfloat, torch.cdouble)),
+            # mul(): incompatible function arguments.
+            DecorateInfo(unittest.skip("Fails on aten executor but not on nvFuser executor"),
+                         'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.float,)),
+        )
     ),
     #
     # Reduction Reference OpInfos
