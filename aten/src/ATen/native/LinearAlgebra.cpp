@@ -556,10 +556,12 @@ Tensor matrix_power(const Tensor& self, int64_t n) {
   return at::native::linalg_matrix_power(self, n);
 }
 
-// Computes the rank of 'input' and saves the result in-place in 'result'
+namespace {
+
+// Computes the rank of 'input' and saves the result in-place in 'result'.
 // 'hermitian' controls whether SVD or eigendecomposition is used for computing the singular values
 // 'atol' and 'rtol' are the absolute and relative tolerances, respectively.
-Tensor& linalg_matrix_rank_out(
+Tensor& matrix_rank_impl(
     const Tensor& input,
     const optional<Tensor>& atol_opt,
     const optional<Tensor>& rtol_opt,
@@ -574,17 +576,8 @@ Tensor& linalg_matrix_rank_out(
   ScalarType output_type = ScalarType::Long;
   checkLinalgCompatibleDtype("torch.linalg.matrix_rank", result.scalar_type(), output_type);
 
-  // Matrices or batch of matrices are allowed
-  TORCH_CHECK(input.dim() >= 2, "torch.linalg.matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", input.sizes());
-
   checkNotComplexTolerance(atol, "torch.linalg.matrix_rank", "atol");
   checkNotComplexTolerance(rtol, "torch.linalg.matrix_rank", "rtol");
-
-  // matrix_rank assigns a scalar value for each matrix in the batch so
-  // result's shape is equal to input.shape[0:input.ndim-2]
-  // for single matrix result_shape = {}
-  auto result_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
-  at::native::resize_output(result, result_shape);
 
   // NumPy doesn't take into account possible input with no elements and it errors on max not defined for this case
   // Let's output 0 for this case, since that kind of matrices have zero number of non-zero rows, hence rank is 0.
@@ -613,6 +606,36 @@ Tensor& linalg_matrix_rank_out(
   return result;
 }
 
+Tensor get_matrix_rank_result_tensor(const Tensor& input) {
+  // Matrices or batch of matrices are allowed
+  checkIsMatrix(input, "torch.linalg.matrix_rank", "input");
+  // For Composite Compliance, allocate `result` of correct shape to
+  // avoid resizing in `out` variant.
+  // See also `NOTE [matrix rank output shape]`
+  auto result_shape =
+      IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
+  Tensor result =
+      at::empty(result_shape, input.options().dtype(ScalarType::Long));
+
+  return result;
+}
+
+}  // anonymous namespace
+
+Tensor& linalg_matrix_rank_out(
+    const Tensor& input,
+    const optional<Tensor>& atol_opt,
+    const optional<Tensor>& rtol_opt,
+    bool hermitian,
+    Tensor& result) {
+  // Matrices or batch of matrices are allowed
+  checkIsMatrix(input, "torch.linalg.matrix_rank", "input");
+  auto result_shape =
+    IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
+  at::native::resize_output(result, result_shape);
+  return matrix_rank_impl(input, atol_opt, rtol_opt, hermitian, result);
+}
+
 Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian, Tensor& result) {
   Tensor atol_tensor, rtol_tensor;
   std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
@@ -621,15 +644,17 @@ Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> atol, optio
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, const optional<Tensor>& atol, const optional<Tensor>& rtol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
-  result = at::linalg_matrix_rank_outf(input, atol, rtol, hermitian, result);
-  return result;
+  auto result = get_matrix_rank_result_tensor(input);
+  return matrix_rank_impl(input, atol, rtol, hermitian, result);
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
-  result = at::linalg_matrix_rank_outf(input, atol, rtol, hermitian, result);
-  return result;
+  auto result = get_matrix_rank_result_tensor(input);
+
+  Tensor atol_tensor, rtol_tensor;
+  std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
+
+  return matrix_rank_impl(input, atol_tensor, rtol_tensor, hermitian, result);
 }
 
 Tensor& linalg_matrix_rank_out(const Tensor& input, const Tensor& tol, bool hermitian, Tensor& result) {
@@ -648,15 +673,17 @@ Tensor& linalg_matrix_rank_out(const Tensor& input, double tol, bool hermitian, 
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, const Tensor& tol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
-  result = at::linalg_matrix_rank_outf(input, tol, hermitian, result);
-  return result;
+  auto result = get_matrix_rank_result_tensor(input);
+  return matrix_rank_impl(input, tol, at::zeros({}, tol.options()), hermitian, result);
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, double tol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
-  result = at::linalg_matrix_rank_outf(input, tol, hermitian, result);
-  return result;
+  auto result = get_matrix_rank_result_tensor(input);
+
+  Tensor atol_tensor, rtol_tensor;
+  std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, tol, 0.0);
+
+  return matrix_rank_impl(input, atol_tensor, rtol_tensor, hermitian, result);
 }
 
 Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
