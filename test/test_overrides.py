@@ -1303,7 +1303,7 @@ class TestTorchFunctionMode(TestCase):
 
         x = A()
         with x:
-            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode"):
+            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
                 with x:
                     pass
 
@@ -1317,6 +1317,56 @@ class TestTorchFunctionMode(TestCase):
         with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
             with A():
                 x + x
+
+    def test_error_with_ancestor(self):
+        class A(TorchFunctionMode):
+            pass
+
+        x = A()
+        with x:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
+            with x:
+                pass
+
+    def test_restore_errors(self):
+        class A(TorchFunctionMode):
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "does not have any ancestors. Use the standard version instead"):
+            with A().restore():
+                pass
+
+        x = A()
+        with A():
+            with x:
+                pass
+
+        with A():  # a different mode instance than the one above
+            with self.assertRaisesRegex(RuntimeError, "the current mode is not its ancestor"):
+                with x.restore():
+                    pass
+
+
+    def test_restore_ancestor_mode(self):
+        class A(TorchFunctionMode):
+            pass
+
+        x = A()
+        y = A()
+        with x:
+            with y:
+                pass
+
+        z = A()
+        with y.restore():
+            with z:
+                pass
+
+        with x.restore():
+            with z.restore():
+                pass
 
     def test_reentrant_mode_idiom(self):
         log = []
