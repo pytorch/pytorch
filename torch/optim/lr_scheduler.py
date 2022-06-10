@@ -5,6 +5,7 @@ from functools import wraps
 import warnings
 import weakref
 from collections import Counter
+from contextlib import contextmanager
 from bisect import bisect_right
 
 from .optimizer import Optimizer
@@ -74,12 +75,30 @@ class _LRScheduler(object):
         self._step_count = 0
         self.verbose = verbose
 
-        self.reset_optimizer_lr()
-        self.step()
+        # Increment LR registration count
+        # Tracks the number of schedulers which this optimizer is registered to
+        self._scheduler_id = getattr(self.optimizer, "_lr_registration_count", 0)
+        self._scheduler_id += 1
+        setattr(self.optimizer, "_lr_registration_count", self._scheduler_id)
 
-    def reset_optimizer_lr(self):
-        for group in self.optimizer.param_groups:
-            group["lr"] = group["initial_lr"]
+        with self.init_optimizer_lr():
+            self.step()
+
+    @contextmanager
+    def init_optimizer_lr(self):
+        # Save the current learning rate values for all schedulers except the first
+        if self._scheduler_id > 1:
+            for group in self.optimizer.param_groups:
+                group["prev_lr"] = group["lr"]
+
+        try:
+            yield
+        finally:
+            # Reset the learning rates to the previous value for all but the first scheduler
+            if self._scheduler_id > 1:
+                for group in self.optimizer.param_groups:
+                    group["lr"] = group.pop("prev_lr")
+
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
@@ -661,8 +680,8 @@ class SequentialLR(_LRScheduler):
         # decrement the last epoch, so that it remains the same after the step
         self.last_epoch -= 1
         # Call the step
-        self.reset_optimizer_lr()
-        self.step()
+        with self.init_optimizer_lr():
+            self.step()
 
     def step(self):
         self.last_epoch += 1
