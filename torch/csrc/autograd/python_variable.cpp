@@ -1869,7 +1869,6 @@ bool isPythonTensor(const Tensor& tensor) {
 py::object torchDispatchFromTensorImpl(const c10::TensorImpl* self, const char* func_name, PyObject* torch_api_function, const char* module_name) {
   TORCH_CHECK(PyGILState_Check(), "GIL must be held before you call parseIValuesToPyArgsKwargs");
 
-  // Setup the arguments expected for the detach call
   std::vector<py::handle> overloaded_args;
   // TODO: there should be a shorter way to spell this
   // TODO: fix the constness of target
@@ -2052,7 +2051,27 @@ c10::IntArrayRef concrete_strides_fn(const c10::impl::PyInterpreter*, const c10:
           .ptr(),
       "torch.ops.aten");
 
-  return c10::IntArrayRef(THPUtils_unpackLongs(out.ptr()));
+  if (out == Py_None) {
+    return self->strides_default();
+  }
+
+  py::object values = py::reinterpret_steal<py::object>(out.ptr());
+
+  c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
+  c10::optional<PyObject*> mb_obj = ptr->check_pyobj(getPyInterpreter());
+  TORCH_CHECK(mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
+  PyObject* subclass = *mb_obj;
+  Py_INCREF(subclass);
+  py::object sub = py::reinterpret_steal<py::object>(subclass);
+
+  py::object os = py::module_::import("torch").attr("overrides");
+  py::function get_buffer = py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
+  auto buffer = get_buffer(sub, values);
+  auto result = THPUtils_unpackLongs(buffer.ptr());
+  int64_t* start = (int64_t*) result[0];
+  int64_t len = result[1];
+
+  return c10::IntArrayRef(start, len);
 }
 
 } // anonymous namespace
