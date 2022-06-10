@@ -560,7 +560,6 @@ class TestModelReportObserver(QuantizationTestCase):
         self.assertEqual(getattr(model, "obs1").epoch_activation_max, 0)
         self.assertEqual(getattr(model, "obs1").average_batch_activation_range, 0)
 
-
         # we should get an error if we try to calculate the ratio
         with self.assertRaises(ValueError):
             ratio_val = getattr(model, "obs1").get_batch_to_epoch_ratio()
@@ -683,7 +682,9 @@ class TestModelReportObserver(QuantizationTestCase):
         self.run_model_and_common_checks(model, ex_input, 1, 1)
 
         # make sure final values are all 0
-        self.assertTrue(getattr(getattr(model, "nested"), "obs2").epoch_activation_min >= 0)
+        self.assertTrue(
+            getattr(getattr(model, "nested"), "obs2").epoch_activation_min >= 0
+        )
 
         # make sure final values are all 0 except for range
         self.assertEqual(
