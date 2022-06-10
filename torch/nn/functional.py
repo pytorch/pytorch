@@ -1494,8 +1494,7 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:
 
 
 def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
-    r"""Applies element-wise,
-    :math:`\text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))`.
+    r"""Applies the Exponential Linear Unit (ELU) function element-wise.
 
     See :class:`~torch.nn.ELU` for more details.
     """
