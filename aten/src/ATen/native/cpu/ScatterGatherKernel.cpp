@@ -128,7 +128,8 @@ struct _cpu_scatter_gather_dim_loop {
   }
 };
 
-
+// dim loop for scatter when called on an index tensor
+// that has at least one dimension with index.size(d) > src.size(d)
 struct _cpu_scatter_large_index_dim_loop {
   template <typename scalar_t, typename func_t>
   void operator()(
@@ -153,6 +154,8 @@ struct _cpu_scatter_large_index_dim_loop {
         " with size ", index_upper_bound
       );
 
+      // calculate the equivalent indices in the source tensor based on
+      // the index tensor offset and the index and source tensor shapes
       int ndim = index_shape.size();
       int64_t src_offset = 0;
       int64_t absolute_index_offset = (int64_t)((int64_t*)(index_data + i * index_dim_stride) - index_starting_ptr);
@@ -291,6 +294,11 @@ struct cpu_scatter_gather_base_kernel {
 
     int ndim = index.dim();
 
+    // The scatter version of this works differently
+    // if any dimension of the index tensor is
+    // larger than that same dimension in the
+    // source tensor, so we create a variable to
+    // keep track of that possibility.
     bool index_larger_than_src_in_scatter = false;
     if (is_scatter_like) {
       for (int i = 0; i < ndim; i++) {
@@ -374,6 +382,8 @@ struct cpu_scatter_gather_base_kernel {
                             " is out of bounds for dimension ", dim,
                             " with size ", index_upper_bound);
 
+                // calculate the equivalent indices in the source tensor based on
+                // the index tensor offset and the index and source tensor shapes
                 if (index_larger_than_src_in_scatter) {
                   int64_t src_offset = 0;
                   int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr);
@@ -429,6 +439,11 @@ struct cpu_scatter_gather_base_kernel {
 
     int ndim = index.dim();
 
+    // The scatter version of this works differently
+    // if any dimension of the index tensor is
+    // larger than that same dimension in the
+    // source tensor, so we create a variable to
+    // keep track of that possibility.
     bool index_larger_than_src_in_scatter = false;
     if (is_scatter_like) {
       for (int i = 0; i < ndim; i++) {
@@ -512,6 +527,8 @@ struct cpu_scatter_gather_base_kernel {
                             " is out of bounds for dimension ", dim,
                             " with size ", index_upper_bound);
 
+                // calculate the equivalent indices in the source tensor based on
+                // the index tensor offset and the index and source tensor shapes
                 if (index_larger_than_src_in_scatter) {
                   int64_t src_offset = 0;
                   int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr);
@@ -567,6 +584,11 @@ struct cpu_scatter_gather_base_kernel {
 
     int ndim = index.dim();
 
+    // The scatter version of this works differently
+    // if any dimension of the index tensor is
+    // larger than that same dimension in the
+    // source tensor, so we create a variable to
+    // keep track of that possibility.
     bool index_larger_than_src_in_scatter = false;
     if (is_scatter_like) {
       for (int i = 0; i < ndim; i++) {
@@ -650,6 +672,8 @@ struct cpu_scatter_gather_base_kernel {
                             " is out of bounds for dimension ", dim,
                             " with size ", index_upper_bound);
 
+                // calculate the equivalent indices in the source tensor based on
+                // the index tensor offset and the index and source tensor shapes
                 if (index_larger_than_src_in_scatter) {
                   int64_t src_offset = 0;
                   int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr);
@@ -705,6 +729,11 @@ struct cpu_scatter_gather_base_kernel {
 
     int ndim = index.dim();
 
+    // The scatter version of this works differently
+    // if any dimension of the index tensor is
+    // larger than that same dimension in the
+    // source tensor, so we create a variable to
+    // keep track of that possibility.
     bool index_larger_than_src_in_scatter = false;
     if (is_scatter_like) {
       for (int i = 0; i < ndim; i++) {
@@ -788,6 +817,8 @@ struct cpu_scatter_gather_base_kernel {
                             " is out of bounds for dimension ", dim,
                             " with size ", index_upper_bound);
 
+                // calculate the equivalent indices in the source tensor based on
+                // the index tensor offset and the index and source tensor shapes
                 if (index_larger_than_src_in_scatter) {
                   int64_t src_offset = 0;
                   int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr);
