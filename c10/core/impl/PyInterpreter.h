@@ -130,6 +130,7 @@ struct C10_API PyInterpreter {
       const std::shared_ptr<SafePyObject>& type);
   using is_contiguous_sig = bool(const PyInterpreter*, const TensorImpl*);
   using device_sig = c10::Device(const PyInterpreter*, const TensorImpl*);
+  using dim_sig = int64_t(const PyInterpreter*, const TensorImpl*);
   using strides_sig = c10::IntArrayRef(const PyInterpreter*, const TensorImpl*);
 
   PyInterpreter(
@@ -139,6 +140,7 @@ struct C10_API PyInterpreter {
       dispatch_sig* dispatch,
       is_contiguous_sig* is_contiguous,
       device_sig* device_fn,
+      dim_sig* dim_fn,
       strides_sig* strides)
       : name_fn_(name_fn),
         decref_fn_(decref_fn),
@@ -146,6 +148,7 @@ struct C10_API PyInterpreter {
         dispatch_fn_(dispatch),
         is_contiguous_fn_(is_contiguous),
         device_fn_(device_fn),
+        dim_fn_(dim_fn),
         strides_fn_(strides) {}
 
   name_sig* name_fn_;
@@ -154,6 +157,7 @@ struct C10_API PyInterpreter {
   dispatch_sig* dispatch_fn_;
   is_contiguous_sig* is_contiguous_fn_;
   device_sig* device_fn_;
+  dim_sig* dim_fn_;
   strides_sig* strides_fn_;
 
   // UBSAN suppression fixes: "call to function
@@ -196,6 +200,9 @@ struct C10_API PyInterpreter {
   __ubsan_ignore_function__ c10::Device device(const TensorImpl* self) const {
     return (*device_fn_)(this, self);
   }
+
+  __ubsan_ignore_function__ int64_t dim(const TensorImpl* self) const {
+    return (*dim_fn_)(this, self);
 
   __ubsan_ignore_function__ c10::IntArrayRef strides(
       const TensorImpl* self) const {
