@@ -25,7 +25,6 @@
 #else
 #include <ATen/ops/_cholesky_solve_helper_native.h>
 #include <ATen/ops/_linalg_inv_out_helper_native.h>
-#include <ATen/ops/_linalg_qr_helper_native.h>
 #include <ATen/ops/_symeig_helper_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
@@ -162,11 +161,6 @@ template<class scalar_t>
 void magmaGeqrf(
     magma_int_t m, magma_int_t n, scalar_t* dA, magma_int_t ldda,
     scalar_t* tau, scalar_t* dT, magma_int_t* info, bool is_v2);
-
-template<class scalar_t>
-void magmaOrgqr(
-    magma_int_t m, magma_int_t n, magma_int_t k, scalar_t* dA,
-    magma_int_t ldda, scalar_t* tau, scalar_t* dT, magma_int_t nb, magma_int_t* info);
 
 template<class scalar_t, class value_t=scalar_t>
 void magmaSyevd(
@@ -850,74 +844,6 @@ void magmaGeqrf<c10::complex<float>>(
         reinterpret_cast<magmaFloatComplex*>(tau),
         info);
   }
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaOrgqr<double>(
-    magma_int_t m, magma_int_t n, magma_int_t k, double* dA, magma_int_t ldda,
-    double* tau, double* dT, magma_int_t nb, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_dorgqr_gpu(m, n, k, dA, ldda, tau, dT, nb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaOrgqr<float>(
-    magma_int_t m, magma_int_t n, magma_int_t k, float* dA, magma_int_t ldda,
-    float* tau, float* dT, magma_int_t nb, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_sorgqr_gpu(m, n, k, dA, ldda, tau, dT, nb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template <>
-void magmaOrgqr<c10::complex<double>>(
-    magma_int_t m,
-    magma_int_t n,
-    magma_int_t k,
-    c10::complex<double>* dA,
-    magma_int_t ldda,
-    c10::complex<double>* tau,
-    c10::complex<double>* dT,
-    magma_int_t nb,
-    magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_zungqr_gpu(
-      m,
-      n,
-      k,
-      reinterpret_cast<magmaDoubleComplex*>(dA),
-      ldda,
-      reinterpret_cast<magmaDoubleComplex*>(tau),
-      reinterpret_cast<magmaDoubleComplex*>(dT),
-      nb,
-      info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template <>
-void magmaOrgqr<c10::complex<float>>(
-    magma_int_t m,
-    magma_int_t n,
-    magma_int_t k,
-    c10::complex<float>* dA,
-    magma_int_t ldda,
-    c10::complex<float>* tau,
-    c10::complex<float>* dT,
-    magma_int_t nb,
-    magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_cungqr_gpu(
-    m,
-    n,
-    k,
-    reinterpret_cast<magmaFloatComplex*>(dA),
-    ldda,
-    reinterpret_cast<magmaFloatComplex*>(tau),
-    reinterpret_cast<magmaFloatComplex*>(dT),
-    nb,
-    info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -2232,167 +2158,44 @@ void geqrf_magma(const Tensor& input, const Tensor& tau) {
   });
 }
 
-// This is a backend library dispatching helper function for calling looped batch implementation
-void geqrf_looped(const Tensor& input, const Tensor& tau) {
-#if defined(USE_CUSOLVER)
+void geqrf_kernel(const Tensor& input, const Tensor& tau) {
+#ifdef CUDART_VERSION
+  auto geqrf_cusolver_backend = [](const Tensor& input, const Tensor& tau) {
+    #if defined(USE_CUSOLVER)
+      // For the benchmarks see
+      // https://github.com/pytorch/pytorch/pull/56253#discussion_r622851107
+      if (input.size(-2) <= 256 && batchCount(input) >= std::max<int64_t>(2, input.size(-2) / 16)) {
+        return geqrf_batched_cublas(input, tau);
+      } else {
+        return geqrf_cusolver(input, tau);
+      }
+    #endif
+      return geqrf_batched_cublas(input, tau);
+  };
+
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
+  // TODO Investigate whether the following magma bug is still occuring.
+  // It may be the case that geqrf followed by orgqr is wrong for the magma backend
+  // geqrf_magma currently uses geqrf2_gpu
+  //
+  // We require to perform ?geqrf_gpu again due to this bug in MAGMA:
+  // - ?geqrf_gpu allows fast computation of Q via ?orgqr_gpu, but doesn't give R properly.
+  // - ?geqrf2_gpu gives correct R, but doesn't allow computation of Q via ?orgqr_gpu
+  // Refer to the below link for more details:
+  // http://icl.cs.utk.edu/magma/forum/viewtopic.php?f=2&t=1015&p=2800&hilit=geqrf_gpu#p2800
     case at::LinalgBackend::Magma:
       return geqrf_magma(input, tau);
     case at::LinalgBackend::Cusolver:
     default:
-      return geqrf_cusolver(input, tau);
+      return geqrf_cusolver_backend(input, tau);
   }
 #else
   return geqrf_magma(input, tau);
 #endif
 }
 
-// This is a backend library dispatching helper function for calling specialized batched implementation
-void geqrf_batched(const Tensor& input, const Tensor& tau) {
-#ifdef CUDART_VERSION
-  // if cuBLAS is available
-  return geqrf_batched_cublas(input, tau);
-#else
-  // TODO: implement MAGMA-based path using magma_zgeqrf_expert_batched
-  return geqrf_looped(input, tau);
-#endif
-}
-
-void geqrf_kernel(const Tensor& input, const Tensor& tau) {
-  // if number of rows is smaller than 32 batched is always faster for batch size > 1
-  // for larger number of rows number of batches condition
-  if (input.size(-2) <= 256 && batchCount(input) >= std::max<int64_t>(2, input.size(-2) / 16)) {
-    return geqrf_batched(input, tau);
-  } else {
-    return geqrf_looped(input, tau);
-  }
-}
-
 REGISTER_CUDA_DISPATCH(geqrf_stub, &geqrf_kernel);
-
-template <typename scalar_t>
-static void apply_qr(Tensor& Q, Tensor& R, int64_t q_size_minus_2, int64_t r_size_minus_1, int64_t n_columns,
-                     bool compute_q) {
-#if !AT_MAGMA_ENABLED()
-AT_ERROR("qr: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
-#else
-
-  magma_int_t m = magma_int_cast(q_size_minus_2, "Q.size(-2)");
-  magma_int_t n = magma_int_cast(r_size_minus_1, "R.size(-1)");
-
-  auto r_data = R.data_ptr<scalar_t>();
-  auto r_matrix_stride = matrixStride(R);
-  magma_int_t k = m < n ? m : n;
-  magma_int_t nb = magmaGeqrfOptimalBlocksize<scalar_t>(m, n);
-  int64_t batch_size = batchCount(R);
-
-  // magmaGeqrf uses a hybrid CPU-GPU algorithm to compute the elementary reflectors.
-  // The driver routine magma_(d/s)geqrf2_gpu accepts a tensor on the CPU for elementary reflectors.
-  Tensor tau = at::empty({k}, Q.options().device(at::kCPU));
-  Tensor work = at::empty({(2 * k + magma_roundup(n, 32)) * nb}, R.options());
-  scalar_t* tau_data = tau.data_ptr<scalar_t>();
-  scalar_t* work_data = work.data_ptr<scalar_t>();
-
-  // This phase computes R (the raw version)
-  // This uses MAGMA's ?geqrf2_gpu function
-  magma_int_t info = 0;
-  for (int64_t i = 0; i < batch_size; i++) {
-    scalar_t* r_working_ptr = &r_data[i * r_matrix_stride];
-    magmaGeqrf<scalar_t>(m, n, r_working_ptr, m, tau_data, work_data, &info, /*is_v2=*/true);
-    checkMagmaInternalError(info, "geqrf");
-  }
-  if (!compute_q) {
-    // this is for mode='r'
-    return;
-  }
-
-  // This phase computes Q (the raw version)
-  // We require to perform ?geqrf_gpu again due to this bug in MAGMA:
-  // - ?geqrf_gpu allows fast computation of Q via ?orgqr_gpu, but doesn't give R properly.
-  // - ?geqrf2_gpu gives correct R, but doesn't allow computation of Q via ?orgqr_gpu
-  // Refer to the below link for more details:
-  // http://icl.cs.utk.edu/magma/forum/viewtopic.php?f=2&t=1015&p=2800&hilit=geqrf_gpu#p2800
-  auto q_data = Q.data_ptr<scalar_t>();
-  auto q_matrix_stride = matrixStride(Q);
-  for (int64_t i = 0; i < batch_size; i++) {
-    scalar_t* q_working_ptr = &q_data[i * q_matrix_stride];
-    magmaGeqrf<scalar_t>(m, n, q_working_ptr, m, tau_data, work_data, &info, /*is_v2=*/false);
-    checkMagmaInternalError(info, "geqrf");
-
-    magmaOrgqr<scalar_t>(m, n_columns, k, q_working_ptr, m, tau_data, work_data, nb, &info);
-    checkMagmaInternalError(info, "orgqr");
-  }
-#endif
-}
-
-std::tuple<Tensor, Tensor> linalg_qr_helper_magma(const Tensor& self, c10::string_view mode) {
-  bool compute_q, reduced;
-  std::tie(compute_q, reduced) = _parse_qr_mode(mode);
-
-  // Setup input geometry and inputs for apply_qr
-  DimVector q_sizes, q_strides;
-  int64_t n_columns_q;
-  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, reduced);
-  Tensor q_working_copy, r_working_copy;
-
-  // If there are no elements, then we simply return a pair of tensors of required dimensions
-  if (self.numel() == 0) {
-    int64_t n = self.size(-1);
-    auto r_shape = self.sizes().vec();
-    r_shape.end()[-2] = n_columns_q;
-    r_shape.end()[-1] = n;
-    r_working_copy = at::empty(r_shape, self.options());
-    if (compute_q) {
-        auto q_shape = q_sizes;
-        q_shape.end()[-1] = n_columns_q;
-        q_working_copy = at::zeros(q_shape, self.options());
-        q_working_copy.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
-    } else {
-      q_working_copy = at::empty({0}, self.options());
-    }
-    return std::make_tuple(q_working_copy, r_working_copy);
-  }
-
-  if (compute_q) {
-    q_working_copy = at::empty_strided(q_sizes, q_strides, self.options());
-    q_working_copy.narrow(-1, 0, self.size(-1)).copy_(self);
-  } else {
-    q_working_copy = at::empty({0}, self.options());
-  }
-  r_working_copy = cloneBatchedColumnMajor(self);
-
-  int64_t m = q_sizes[self.dim() - 2];
-  int64_t n = r_working_copy.size(-1);
-
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "qr_cuda", [&]{
-    apply_qr<scalar_t>(q_working_copy, r_working_copy, m, n, n_columns_q, compute_q);
-  });
-
-  if (compute_q) {
-    q_working_copy = q_working_copy.narrow(-1, 0, n_columns_q);
-  }
-  r_working_copy = r_working_copy.narrow(-2, 0, n_columns_q).triu();
-  return std::make_tuple(q_working_copy, r_working_copy);
-}
-
-std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::string_view mode) {
-#if defined(USE_CUSOLVER)
-  auto preferred_backend = at::globalContext().linalgPreferredBackend();
-  switch (preferred_backend) {
-    case at::LinalgBackend::Magma:
-      return linalg_qr_helper_magma(input, mode);
-    case at::LinalgBackend::Cusolver:
-    default:
-      // _linalg_qr_helper_default is a generic function that is implemented using
-      // geqrf_stub and orgqr_stub. It dispatches to cuSOLVER for CUDA inputs if USE_CUSOLVER is defined
-      return _linalg_qr_helper_default(input, mode);
-  }
-#else
-  return linalg_qr_helper_magma(input, mode);
-#endif
-}
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -3432,7 +3235,6 @@ std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
 struct DispatchInitializer {
   DispatchInitializer() {
     cuda::detail::LinalgDispatch disp{ _symeig_helper_cuda,
-                                       _linalg_qr_helper_cuda,
                                        _cholesky_solve_helper_cuda,
                                        legacy_lstsq_cuda,
                                        _linalg_inv_out_helper_cuda};

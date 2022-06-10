@@ -98,6 +98,7 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::MmaOp ||
        expr->getExprType().value() == ExprType::BroadcastOp ||
        expr->getExprType().value() == ExprType::TransposeOp ||
+       expr->getExprType().value() == ExprType::ExpandOp ||
        expr->getExprType().value() == ExprType::ShiftOp ||
        expr->getExprType().value() == ExprType::GatherOp ||
        expr->getExprType().value() == ExprType::ViewAsScalar ||
@@ -263,8 +264,8 @@ c10::optional<IterDomain*> getMaybeWarpReductionDim(
     return c10::optional<IterDomain*>(reduction_on_xdim);
   }
 
-  if (reduction_on_xdim->extent()->isConst()) {
-    auto extent_value = reduction_on_xdim->extent()->getInt().value();
+  if (reduction_on_xdim->extent()->isConstInt()) {
+    auto extent_value = reduction_on_xdim->extent()->evaluateInt();
     if (extent_value % at::cuda::warp_size() == 0) {
       return c10::optional<IterDomain*>(reduction_on_xdim);
     }
@@ -365,8 +366,8 @@ kir::Allocate* allocGlobalBufferForGridComm(
     DataType dtype,
     bool zero_init) {
   const std::vector<IterDomain*> new_buffer_ids = {
-      IrBuilder::create<IterDomain>(
-          GpuLower::current()->kernel()->zeroVal(), buffer_size)};
+      IrBuilder::create<IterDomain>(IterDomainBuilder(
+          GpuLower::current()->kernel()->zeroVal(), buffer_size))};
   const auto buffer_domain = IrBuilder::create<TensorDomain>(new_buffer_ids);
   const auto buffer_tv =
       IrBuilder::create<TensorView>(buffer_domain, dtype, MemoryType::Global);
