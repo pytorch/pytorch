@@ -1,6 +1,6 @@
 import torch
 from torch import Tensor
-from torch._prims import ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND, utils
+from torch._prims import utils
 from torch._prims.utils import ELEMENTWISE_TYPE_PROMOTION_KIND, check, elementwise_dtypes
 from torch._prims.wrappers import out_wrapper_multi, out_wrapper
 
