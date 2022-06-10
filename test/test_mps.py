@@ -741,7 +741,46 @@ class TestMPS(TestCase):
                         helper(shape, eps=3, momentum=0.67, wts=True, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
 
-    # Test forward instance norm
+    def test_layer_norm(self):
+        # TODO: Test non-contiguous
+        def helper(input_shape, normalized_shape, eps=1e-05, elementwise_affine=True, dtype=torch.float32):
+            cpu_x = torch.randn(input_shape, device='cpu', dtype=dtype, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            cpu_op = torch.nn.LayerNorm(normalized_shape, eps=eps, elementwise_affine=elementwise_affine, device='cpu', dtype=dtype)
+            mps_op = torch.nn.LayerNorm(normalized_shape, eps=eps, elementwise_affine=elementwise_affine, device='mps', dtype=dtype)
+            cpu_wt = torch.randn(normalized_shape, device='cpu', dtype=dtype, requires_grad=True)
+            wt = cpu_wt.detach().clone().to('mps').requires_grad_()
+            cpu_bias = torch.randn(normalized_shape, device='cpu', dtype=dtype, requires_grad=True)
+            bias = cpu_bias.detach().clone().to('mps').requires_grad_()
+
+            if(elementwise_affine):
+                cpu_op.weight = torch.nn.Parameter(cpu_wt)
+                mps_op.weight = torch.nn.Parameter(wt)
+                cpu_op.bias = torch.nn.Parameter(cpu_bias)
+                mps_op.bias = torch.nn.Parameter(bias)
+
+            cpu_result = cpu_op(cpu_x)
+            result = mps_op(x)
+
+            cpu_grad = torch.randn(cpu_result.shape)
+            grad = cpu_grad.to('mps')
+
+            cpu_result.backward(cpu_grad)
+            result.backward(grad)
+
+            self.assertEqual(result, cpu_result)
+            self.assertEqual(x.grad, cpu_x.grad)
+            if(elementwise_affine):
+                self.assertEqual(mps_op.weight.grad, cpu_op.weight.grad)
+                self.assertEqual(mps_op.bias.grad, cpu_op.bias.grad)
+
+        for elementwise_affine in [True, False]:
+            helper((2, 2, 2, 2), (2, 2), elementwise_affine=elementwise_affine)
+            helper((2, 3, 4, 5), (4, 5), elementwise_affine=elementwise_affine)
+            helper((2, 3, 4, 5, 6), (4, 5, 6), elementwise_affine=elementwise_affine)
+
+
     def test_instance_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, channels_last=False, track_running_stats=True, test_module=False):
 
