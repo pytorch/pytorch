@@ -2,13 +2,12 @@
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/TensorIndexing.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/core/Tensor.h>
+#include <c10/core/Scalar.h>
 #include <c10/util/ArrayRef.h>
-#include <numeric>
-#include "ATen/TensorIterator.h"
-#include "c10/core/Scalar.h"
-#include "c10/util/Exception.h"
+#include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
