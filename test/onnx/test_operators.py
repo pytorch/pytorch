@@ -206,6 +206,10 @@ class TestOperators(TestCase):
         x = torch.tensor([[0.0, 1.0], [2.0, 3.0]], requires_grad=True)
         self.assertONNX(lambda x: x.transpose(0, 1).transpose(1, 0), x)
 
+    def test_numpy_T(self):
+        x = torch.tensor([[0.0, 1.0], [2.0, 3.0]], requires_grad=True)
+        self.assertONNX(lambda x: x.T.T, x)
+
     def test_chunk(self):
         x = torch.tensor([0.0, 1.0, 2.0], requires_grad=True)
         self.assertONNX(lambda x: x.chunk(2), x)

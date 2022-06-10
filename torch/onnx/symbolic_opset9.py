@@ -767,6 +767,12 @@ def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
+def numpy_T(g, input):
+    ndim = symbolic_helper._get_tensor_rank(input)
+    perm = list(reversed(range(0, ndim)))
+    return g.op("Transpose", input, perm_i=perm)
+
+
 def expand(g, self, size, implicit):
     size = symbolic_helper._maybe_get_const(size, "is")
     if not symbolic_helper._is_value(size):
