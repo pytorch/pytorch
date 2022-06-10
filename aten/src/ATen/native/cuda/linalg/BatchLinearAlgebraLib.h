@@ -54,6 +54,7 @@ void ldl_solve_cusolver(
     const Tensor& pivots,
     const Tensor& B,
     bool upper);
+void lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots, const Tensor& infos, bool get_pivots);
 void lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose);
 
 #ifdef USE_CUSOLVER
