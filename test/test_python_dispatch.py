@@ -1549,6 +1549,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
     def test_sizes_slow_path(self):
         for use_wrapper_subclass in [True, False]:
             data = torch.randn(6, 2)
+
             class SizesNotImplemented(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
