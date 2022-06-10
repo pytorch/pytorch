@@ -1989,7 +1989,7 @@ void ONNXShapeTypeInference(
 
       // infer shape
       try {
-        // TODO: add data propagation supports for more operators
+        // TODO(#79208): Enable more operators to support data propagation
         switch (n->kind()) {
           case ::c10::onnx::Shape:
           case ::c10::onnx::Gather: {
