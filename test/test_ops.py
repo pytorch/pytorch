@@ -8,14 +8,13 @@ import itertools
 import torch
 import contextlib
 from importlib import import_module
+from torch.utils._pytree import tree_map
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     all_types_and_complex_and,
 )
-from torch._subclasses.fake_tensor import FakeTensor
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
 
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -48,12 +47,17 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
     onlyCUDA,
+    onlyCPU,
     onlyNativeDeviceTypes,
     OpDTypes,
     skipCUDAIfRocm,
     skipMeta,
 )
-from torch.utils._pytree import tree_map
+from torch._subclasses.fake_tensor import (
+    FakeTensor,
+    FakeTensorMode,
+)
+from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch._prims as prims
 from torch._prims.context import TorchRefsMode
 
@@ -363,7 +367,8 @@ class TestCommon(TestCase):
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
-                return FakeTensor.from_tensor(x, mode)
+                out = FakeTensor.from_tensor(x, mode)
+                return out
             return x
 
         # TODO: iterate over requires_grad true/false
@@ -376,6 +381,8 @@ class TestCommon(TestCase):
                 with enable_torch_dispatch_mode(mode):
                     meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
             except torch._subclasses.fake_tensor.ComplexInputException:
+                continue
+            except torch._subclasses.fake_tensor.SparseInputException:
                 continue
 
             if isinstance(result, torch.Tensor):
@@ -1460,10 +1467,115 @@ class TestRefsOpsInfo(TestCase):
         self.assertIn(op, self.ref_db_names)
 
 
+fake_skips = (
+    "cholesky",  # Could not run 'aten::cholesky' with arguments from the 'Meta' backend
+    "cholesky_inverse",  # Could not run 'aten::cholesky' with arguments from the 'Meta' backend
+    "cov",  # aweights cannot be negtaive
+    "istft",  # window overlap add min: 0
+    "linalg.eigvals",  # The tensor has a non-zero number of elements, but its data is not allocated yet
+    "linalg.eigvalsh",  # aten::linalg_eigvalsh.out' with arguments from the 'Meta' backend
+    "linalg.matrix_power",  # Could not run 'aten::eye.m_out' with arguments from the 'Meta' backend
+    # "linalg.pinv",  # Could not run 'aten::pinv.out' with arguments from the 'Meta' backen
+    "linalg.matrix_rank.hermitian",  # Could not run 'aten::linalg_eigvalsh.out' with arguments from the 'Meta' backend
+    "linalg.pinv.hermitian",  # tensor.mH is only supported on matrices or batches of matrices. Got 1-D tensor
+    "linalg.solve",  # Could not run 'aten::linalg_solve' with arguments from the 'Meta' backend
+    "linalg.tensorsolve",  # Could not run 'aten::linalg_solve' with arguments from the 'Meta'
+    "lu_solve",  # MALLOC ERROR: debug
+    "multinomial",  # Could not run 'aten::multinomial' with arguments from the 'Meta' backend
+    "mvlgamma.mvlgamma_p_1",  # Could not run 'aten::_local_scalar_dense' with arguments from the 'Meta' backend
+    "mvlgamma.mvlgamma_p_3",  # Could not run 'aten::_local_scalar_dense' with arguments from the 'Meta' backend
+    "mvlgamma.mvlgamma_p_5",  # Could not run 'aten::_local_scalar_dense' with arguments from the 'Meta' backend
+    "nanmean",  # logical_not() got an unexpected keyword argument 'out'
+    "quantile",  # quantile() q values must be in the range [0, 1]
+    "nanquantile",  # quantile() q values must be in the range [0, 1]
+    "nn.functional.ctc_loss",  # The tensor has a non-zero number of elements, but its data is not allocated yet
+    "nn.functional.embedding_bag",  # sometimes errors
+    "nn.functional.nll_loss",  # sometimes errors
+    "nn.functional.max_pool1d",  # The tensor has a non-zero number of elements
+    "to_sparse",  # Could not run 'aten::to_sparse' with arguments from the 'Meta' backend
+    "tensor_split",  # The tensor has a non-zero number of elements, but its data is not allocated yet
+    "repeat_interleave",  # cannot repeat_interleave a meta tensor without output_size
+    "segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
+    "sparse.sampled.addmm",  # sparsity not supported
+    # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
+    "nn.functional.one_hot",
+)
+
+dynamic_output_op_tests = (
+    "argwhere",
+    "bincount",
+    "index_select",
+    "combinations",
+    "linalg.lstsq",
+    "masked_select",
+    "nonzero",
+    "unique_consecutive",
+    "unique",
+    "linalg.lstsq.grad_oriented",
+)
+
+# some inputs invoke dynamic output shape operators, some do not
+sometimes_dynamic_output_op_test = (
+    "__getitem__",
+)
+
+class TestFakeTensorNonErroring(TestCase):
+    @onlyCPU
+    @ops(op_db, dtypes=OpDTypes.any_one)
+    def test_fake(self, device, dtype, op):
+        name = op.name
+        if op.variant_test_name:
+            name += "." + op.variant_test_name
+        if name in fake_skips or "sparse" in name:
+            self.skipTest("Skip failing test")
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample in samples:
+            try:
+                mode = FakeTensorMode(inner=None)
+
+                def map_to_fake(e):
+                    if isinstance(e, torch.Tensor):
+                        return mode.from_tensor(e)
+                    else:
+                        return e
+
+                input = tree_map(map_to_fake, sample.input)
+                args = tree_map(map_to_fake, sample.args)
+                kwargs = tree_map(map_to_fake, sample.kwargs)
+
+                with enable_torch_dispatch_mode(mode):
+                    res_fake = op(input, *args, **kwargs)
+
+                res = op(sample.input, *sample.args, **sample.kwargs)
+
+                for fake_out, real_out in zip(
+                    tree_flatten(res_fake)[0], tree_flatten(res)[0]
+                ):
+                    if not isinstance(fake_out, torch.Tensor):
+                        self.assertTrue(not isinstance(real_out, torch.Tensor))
+                        continue
+
+                    self.assertTrue(isinstance(fake_out, FakeTensor))
+                    # if you see a shape exception here, you may need to add
+                    # a `dynamic_output_shape` tag to an operator
+                    prims.utils.compare_tensor_meta(fake_out, real_out)
+                self.assertTrue(name not in dynamic_output_op_tests)
+
+            except torch._subclasses.fake_tensor.ComplexInputException:
+                pass
+            except torch._subclasses.fake_tensor.SparseInputException:
+                pass
+            except torch._subclasses.fake_tensor.DynamicOutputShapeException:
+                self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
+
+
 instantiate_device_type_tests(TestCommon, globals())
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
+instantiate_device_type_tests(TestFakeTensorNonErroring, globals())
+
+
 
 if __name__ == "__main__":
     run_tests()
