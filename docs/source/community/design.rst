@@ -115,7 +115,7 @@ Principle 3: Python First with Best In Class Language Interoperability
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This principle began as **Python First**:
-  
+
   PyTorch is not a Python binding into a monolithic C++ framework.
   It is built to be deeply integrated into Python. You can use it
   naturally like you would use `NumPy <https://www.numpy.org/>`__,
