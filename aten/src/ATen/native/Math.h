@@ -2947,7 +2947,7 @@ gamma_forward(T x) {
                 return std::numeric_limits<T>::infinity();
             }
 
-            return z / ((T(1.0) + T(0.5772156649015329) * x) * x);
+            return z / ((T(1.0) + c10::euler<T> * x) * x);
         }
 
         z = z / x;
@@ -2961,7 +2961,7 @@ gamma_forward(T x) {
                 return std::numeric_limits<T>::infinity();
             }
 
-            return z / ((T(1.0) + T(0.5772156649015329) * x) * x);
+            return z / ((T(1.0) + c10::euler<T> * x) * x);
         }
 
         z = z / x;
