@@ -530,21 +530,22 @@ const   auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
 }
 
 bool is_float_or_complex_list(PyObject* obj) {
-  auto tuple = six::isTuple(obj);
-  if (!(tuple || PyList_Check(obj))) {
+  if (!(PyTuple_Check(obj) || PyList_Check(obj))) {
     return false;
   }
 
-  // NOLINTNEXTLINE(bugprone-branch-clone)
-  const auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
-  if (size > 0) {
-    PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, 0) : PyList_GET_ITEM(obj, 0);
-    if (!THPUtils_checkDouble(iobj) && !PyComplex_Check(iobj)) {
-      return false;
-    }
+  // Only examine the first element.
+  auto item = py::reinterpret_steal<py::object>(PySequence_GetItem(obj, 0));
+
+  // Python scalars
+  if (THPUtils_checkDouble(item.ptr()) || PyComplex_Check(item.ptr())) {
+    return true;
   }
 
-  return true;
+  // Tensor scalers when tracing
+  return (
+      jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
+      THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
 }
 
 static bool is_int_list_(PyObject* obj, int broadcast_size) {
