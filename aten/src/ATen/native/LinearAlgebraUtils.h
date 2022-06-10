@@ -122,28 +122,23 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
   return batched_matrices.size(-1) * batched_matrices.size(-2);
 }
 
-static inline void checkIsMatrix(const Tensor& t,
-                                 const char* const f_name,
-                                 const char* const t_name) {
-  TORCH_CHECK(t.dim() >= 2, f_name, ": Expected ", t_name,
-                            " to be a tensor of at least 2 dimensions.");
+// Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig, eig)
+static inline void checkIsMatrix(const Tensor& A, const char* const f_name, const char* const arg_name = "A") {
+  TORCH_CHECK(A.dim() >= 2, f_name, ": The input tensor ", arg_name, " must have at least 2 dimensions.");
 }
-
-static inline void checkIsSquareMatrix(const Tensor& t,
-                                       const char* const f_name,
-                                       const char* const t_name) {
-  checkIsMatrix(t, f_name, t_name);
-  TORCH_CHECK(t.size(-1) == t.size(-2),
-              f_name, ": Expected ", t_name,
-              " to be a square matrix or batch of square matrices. "
-              "Got matrices of size (", t.size(-2), ", ", t.size(-1), ").");
+static inline void squareCheckInputs(const Tensor& self, const char* const f_name, const char* const arg_name = "A") {
+  checkIsMatrix(self, f_name, arg_name);
+  TORCH_CHECK(self.size(-1) == self.size(-2),
+              f_name,
+              ": ", arg_name, " must be batches of square matrices, "
+              "but they are ", self.size(-2), " by ", self.size(-1), " matrices");
 }
 
 static inline void checkInputsSolver(const Tensor& A,
                                      const Tensor& B,
                                      const bool left,
                                      const char* const f_name) {
-  checkIsSquareMatrix(A, f_name, "A");
+  squareCheckInputs(A, f_name, "A");
   checkIsMatrix(B, f_name, "B");
   TORCH_CHECK(left ? A.size(-2) == B.size(-2) : A.size(-1) == B.size(-1),
               f_name, ": Incompatible shapes of A and B for the equation ",
@@ -297,15 +292,6 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
               "Incompatible matrix sizes for ", name, ": each A "
               "matrix is ", A.size(-1), " by ", A.size(-1),
               " but each b matrix is ", self.size(-2), " by ", self.size(-1));
-}
-
-// Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig, eig)
-static inline void squareCheckInputs(const Tensor& self, const char* const f_name) {
-  TORCH_CHECK(self.dim() >= 2, f_name, ": The input tensor must have at least 2 dimensions.");
-  TORCH_CHECK(self.size(-1) == self.size(-2),
-              f_name,
-              ": A must be batches of square matrices, "
-              "but they are ", self.size(-2), " by ", self.size(-1), " matrices");
 }
 
 static inline void checkFloatingOrComplex(const Tensor& t, const char* const f_name) {
