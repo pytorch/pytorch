@@ -1227,12 +1227,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
     const auto in1_l =
         at::native::toListOfOptionalTensors(p_node->Input(1).toListRef());
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::native::index(in0_t, in1_l);
+      p_node->Output(0) = at::cpu::index(in0_t, in1_l);
       return;
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::index_out(out_t, in0_t, in1_l);
+    at::cpu::index_out(out_t, in0_t, in1_l);
   };
 });
 

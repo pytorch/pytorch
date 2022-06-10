@@ -29,7 +29,6 @@ on:
 
 env:
   IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
 
 jobs:
   build:
@@ -102,7 +101,6 @@ jobs:
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
-            -e IS_GHA \
             -e PR_NUMBER \
             -e SHA1 \
             -e BRANCH \
@@ -125,19 +123,6 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t "${container_name}" sh -c '.jenkins/pytorch/build.sh'
-
-      - name: Display and upload binary build size statistics (Click Me)
-        # temporary hack: set CIRCLE_* vars, until we update
-        # tools/stats/print_test_stats.py to natively support GitHub Actions
-        env:
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: ${{ github.run_id }}
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26 boto3==1.16.34
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts
