@@ -35,6 +35,6 @@ namespace at {
             });
         } // gamma_kernel(TensorIteratorBase& iterator)
 
-        REGISTER_DISPATCH(special_gamma_stub, &CPU_CAPABILITY::gamma_kernel);
+        REGISTER_DISPATCH(special_gamma_stub, &gamma_kernel);
     } // namespace native
 } // namespace at
