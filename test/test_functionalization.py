@@ -392,7 +392,7 @@ $9 = torch._ops.aten.add.Tensor($7, tensor([[1., 1.],
         [1., 1.]]))
 $10 = torch._ops.aten.select_copy.int($3, 0, 0)
 $11 = torch._ops.aten.clone.default($9, memory_format=torch.contiguous_format)
-$12 = torch._ops.aten._unsafe_view_copy.default($11, [4])
+$12 = torch._ops.aten._unsafe_view.default($11, [4])
 $13 = torch._ops.aten.view_copy.default($1, [8])
 $14 = torch._ops.aten._reshape_alias_copy.default($13, [2, 4], [4, 1])
 $15 = torch._ops.aten.transpose_copy.int($14, 1, 0)

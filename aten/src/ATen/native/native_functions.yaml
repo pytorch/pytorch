@@ -4990,7 +4990,7 @@
     CUDA: _unique2_cuda
   tags: dynamic_output_shape
 
-- func: _unsafe_view(Tensor(a) self, int[] size) -> Tensor(a)
+- func: _unsafe_view(Tensor self, int[] size) -> Tensor
   dispatch:
     CompositeExplicitAutograd: _unsafe_view
 
@@ -12126,12 +12126,6 @@
     CompositeExplicitAutograd: transpose_copy_int
   tags: view_copy
 
-- func: _unsafe_view_copy(Tensor self, int[] size) -> Tensor
-  variants: function
-  dispatch:
-    CompositeExplicitAutograd: _unsafe_view_copy
-  tags: view_copy
-
 - func: unsqueeze_copy(Tensor self, int dim) -> Tensor
   variants: function
   dispatch:
@@ -12346,12 +12340,6 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: transpose_copy_int_out
-
-
-- func: _unsafe_view_copy.out(Tensor self, int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-  dispatch:
-    CompositeExplicitAutograd: _unsafe_view_copy_out
 
 
 - func: unsqueeze_copy.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
