@@ -9,7 +9,7 @@ class SimpleMegatronLM(nn.Module):
         self.fc1 = nn.Linear(*linear_size[0])
         self.gelu = nn.GELU()
         self.fc2 = nn.Linear(*linear_size[1])
-        if rank:
+        if rank is not None:
             self.fc1.cuda(rank)
             self.fc2.cuda(rank)
 
