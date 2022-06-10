@@ -1500,6 +1500,7 @@ BaseTy = Enum(
         "Tensor",
         "int",
         "Dimname",
+        "DimVector",
         "float",
         "str",
         "bool",
@@ -2332,6 +2333,15 @@ class Precompute:
         r = Precompute(replace=replace, add=add_args)
         assert r.to_list() == src, "r.to_list() != src"
         return r
+
+    def __post_init__(self) -> None:
+        # the template parameters are upper so if these are the
+        # same then it is ambiguous
+        for a in self.add:
+            assert a.name.upper() != a.name
+        for args in self.replace.values():
+            for a in args:
+                assert a.name.upper() != a.name
 
     def to_list(self) -> List[str]:
         replace_list = []
