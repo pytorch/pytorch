@@ -13,6 +13,7 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_autograd.h>
 #endif
 
 #include <cstdint>
@@ -68,7 +69,7 @@ struct InputMetadata {
 
   at::Tensor zeros_like() const {
     // TODO: add the SymInt at::zeros overload
-    return at::zeros(asIntArrayRefSlow(shape()), options_);
+    return at::zeros_autograd(shape(), options_);
   }
 
 private:
