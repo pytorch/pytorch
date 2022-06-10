@@ -356,6 +356,10 @@ struct MemoryCompare {
   }
 };
 
+bool operator==(const MemoryFormat& a, const MemoryFormat& b) {
+  return a.permutation_ == b.permutation_;
+};
+
 typedef std::map<MemoryFormat, CgValue, MemoryCompare> MemoryFormatMap;
 
 MemoryFormat operator+(const MemoryFormat& a, const MemoryFormat& b) {
