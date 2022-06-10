@@ -369,6 +369,14 @@
     "Any",
     "List"
   ],
+  "torch.ao.sparsity.experimental.data_sparsifier.base_data_sparsifier": [
+    "Any",
+    "Optional",
+    "Tuple",
+    "List",
+    "Dict",
+    "defaultdict"
+  ],
   "torch.ao.sparsity.scheduler.base_scheduler": [
     "BaseSparsifier",
     "wraps"
