@@ -203,22 +203,24 @@ struct C10_API PyInterpreter {
 
   __ubsan_ignore_function__ int64_t dim(const TensorImpl* self) const {
     return (*dim_fn_)(this, self);
+  }
 
-    __ubsan_ignore_function__ c10::IntArrayRef strides(const TensorImpl* self)
-        const {
-      return (*strides_fn_)(this, self);
-    }
+  __ubsan_ignore_function__ c10::IntArrayRef strides(
+      const TensorImpl* self) const {
+    return (*strides_fn_)(this, self);
+  }
 
-    // Disarm this PyInterpreter, making all of its methods noops.
-    // Because the function pointers are raw pointers (not atomics),
-    // a disarm() invocation that is concurrent with active destructors
-    // is not thread safe and will trigger TSAN.  My hope is that this
-    // situations doesn't ever actually happen; tensor destruction should
-    // quiesce when a dlclose happens, and any long lived tensors whose
-    // destructors would be disarmed here only begin the destruction process
-    // on process shutdown (long after the dlclose has occurred).
-    void disarm() noexcept;
-  };
+  // Disarm this PyInterpreter, making all of its methods noops.
+
+  // Because the function pointers are raw pointers (not atomics),
+  // a disarm() invocation that is concurrent with active destructors
+  // is not thread safe and will trigger TSAN.  My hope is that this
+  // situations doesn't ever actually happen; tensor destruction should
+  // quiesce when a dlclose happens, and any long lived tensors whose
+  // destructors would be disarmed here only begin the destruction process
+  // on process shutdown (long after the dlclose has occurred).
+  void disarm() noexcept;
+};
 
 } // namespace impl
 } // namespace c10
