@@ -1,6 +1,7 @@
 from collections import defaultdict
 import logging
 import math
+import copy
 from typing import Dict
 
 import numpy as np
@@ -8,6 +9,7 @@ import torch
 import torch.distributed as dist
 
 from . import default_hooks as default
+from torch.distributed import distributed_c10d
 
 __all__ = [
     "PowerSGDState", "powerSGD_hook", "batched_powerSGD_hook"
@@ -263,6 +265,22 @@ class PowerSGDState(object):
         # due to stacking tensors.
         # Turn on if compression / decompression computation is a bottleneck.
         self.batch_tensors_with_same_shape = batch_tensors_with_same_shape
+
+    def __getstate__(self):
+        slots = copy.copy(self.__slots__)
+        slots.remove("process_group")
+        return {
+            slot: getattr(self, slot)
+            for slot in slots if hasattr(self, slot)
+        }
+
+    def __setstate__(self, state):
+        self.process_group = distributed_c10d._get_default_group()
+        logger.warning(
+            "NOTE: State is set to use the default process group."
+        )
+        for slot, value in state.items():
+            setattr(self, slot, value)
 
     def maybe_increase_iter(self, bucket):
         # Since bucket 0 is the last bucket to allreduce in an iteration.
