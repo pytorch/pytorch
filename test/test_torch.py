@@ -1663,6 +1663,7 @@ else:
             res = torch.gather(src, dim, idx)
             weight = torch.rand_like(res, device=device) * 10 ** 6
             res.backward(weight)
+            assert src.grad is not None
             grad = src.grad.detach().clone()
 
             if torch.device(device).type == 'cuda':
