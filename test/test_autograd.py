@@ -4497,6 +4497,10 @@ for shape in [(1,), ()]:
         backward pass with non-reentrant checkpoint currently throws due to
         saved tensors not being recomputed in between the accesses.
         """
+        # For verifying first access to ctx.saved_tensors succeeded.
+
+        _first_saved_tensor_access_succeeded = False
+
         class MyFunc(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x, y, z):
@@ -4508,10 +4512,11 @@ for shape in [(1,), ()]:
             @staticmethod
             def backward(ctx, grad_out):
                 x, y, z, w, out = ctx.saved_tensors
-                # This access is fine as entire saved_tensors is
-                # accessed, so storage dict in the hooks-based
-                # checkpoint is cleared, and repopulated during
-                # recomputation.
+                nonlocal _first_saved_tensor_access_succeeded
+                _first_saved_tensor_access_succeeded = True
+                # Raises issue in non-reentrant checkpointing where
+                # second access to saved tensors raises because they were
+                # not recomputed.
                 x_2, y_2, z_2, w_2, out_2 = ctx.saved_tensors
 
         x = torch.tensor(1., requires_grad=True)
@@ -4531,6 +4536,8 @@ for shape in [(1,), ()]:
             "Attempt to retrieve a tensor saved by autograd multiple times"
         ):
             out.sum().backward()
+
+        self.assertTrue(_first_saved_tensor_access_succeeded)
 
     def test_access_saved_tensor_twice_without_recomputation_raises(self):
         """
