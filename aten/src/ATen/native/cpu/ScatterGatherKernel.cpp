@@ -155,7 +155,7 @@ struct _cpu_scatter_large_index_dim_loop {
 
       int ndim = index_shape.size();
       int64_t src_offset = 0;
-      int64_t absolute_index_offset = (int64_t)((int64_t*)(index_data + i * index_dim_stride) - index_starting_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
+      int64_t absolute_index_offset = (int64_t)((int64_t*)(index_data + i * index_dim_stride) - index_starting_ptr);
       int64_t index_idx;
       for (int d = ndim - 1; d >= 0; d--) {
         index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
@@ -167,7 +167,7 @@ struct _cpu_scatter_large_index_dim_loop {
 
       f(
         self_data + idx_dim * self_dim_stride,
-        src_starting_ptr + src_offset // * sizeof(scalar_t); // source tensor has word size dependent on type
+        src_starting_ptr + src_offset
       );
     }
   }
@@ -376,7 +376,7 @@ struct cpu_scatter_gather_base_kernel {
 
                 if (index_larger_than_src_in_scatter) {
                   int64_t src_offset = 0;
-                  int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
+                  int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr);
                   int64_t index_idx;
                   for (int d = ndim - 1; d >= 0; d--) {
                     index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
@@ -385,7 +385,7 @@ struct cpu_scatter_gather_base_kernel {
                     index_idx %= src_shape[d];
                     src_offset += src_strides[d] * index_idx;
                   }
-                  absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
+                  absolute_src_ptr = (scalar_t*)src_ptr + src_offset;
                 }
 
                 kernel_func(
@@ -514,7 +514,7 @@ struct cpu_scatter_gather_base_kernel {
 
                 if (index_larger_than_src_in_scatter) {
                   int64_t src_offset = 0;
-                  int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
+                  int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr);
                   int64_t index_idx;
                   for (int d = ndim - 1; d >= 0; d--) {
                     index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
@@ -523,7 +523,7 @@ struct cpu_scatter_gather_base_kernel {
                     index_idx %= src_shape[d];
                     src_offset += src_strides[d] * index_idx;
                   }
-                  absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
+                  absolute_src_ptr = (scalar_t*)src_ptr + src_offset;
                 }
 
                 kernel_func(
@@ -652,7 +652,7 @@ struct cpu_scatter_gather_base_kernel {
 
                 if (index_larger_than_src_in_scatter) {
                   int64_t src_offset = 0;
-                  int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
+                  int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr);
                   int64_t index_idx;
                   for (int d = ndim - 1; d >= 0; d--) {
                     index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
@@ -661,7 +661,7 @@ struct cpu_scatter_gather_base_kernel {
                     index_idx %= src_shape[d];
                     src_offset += src_strides[d] * index_idx;
                   }
-                  absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
+                  absolute_src_ptr = (scalar_t*)src_ptr + src_offset;
                 }
 
                 kernel_func(
@@ -790,7 +790,7 @@ struct cpu_scatter_gather_base_kernel {
 
                 if (index_larger_than_src_in_scatter) {
                   int64_t src_offset = 0;
-                  int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
+                  int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr);
                   int64_t index_idx;
                   for (int d = ndim - 1; d >= 0; d--) {
                     index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
@@ -799,7 +799,7 @@ struct cpu_scatter_gather_base_kernel {
                     index_idx %= src_shape[d];
                     src_offset += src_strides[d] * index_idx;
                   }
-                  absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
+                  absolute_src_ptr = (scalar_t*)src_ptr + src_offset;
                 }
 
                 kernel_func(
