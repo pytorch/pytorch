@@ -211,7 +211,6 @@ struct C10_API PyInterpreter {
   }
 
   // Disarm this PyInterpreter, making all of its methods noops.
-
   // Because the function pointers are raw pointers (not atomics),
   // a disarm() invocation that is concurrent with active destructors
   // is not thread safe and will trigger TSAN.  My hope is that this
