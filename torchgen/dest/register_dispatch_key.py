@@ -231,9 +231,6 @@ class RegisterDispatchKey:
     # Whether or not we are actually code-genning for ROCm
     rocm: bool
 
-    # The namespace that the kernels are written in. This is just `at::native` for in-tree kernels.
-    cpp_namespace: str
-
     # The class that all unstructured native functions live under. This is used to improve
     # compiler error messages when a kernel writer adds a native function with the wrong signature.
     # This is only used in unstructured kernels, since structured kernels already live in a class.
@@ -342,13 +339,11 @@ class RegisterDispatchKey:
             )
         elif metadata is None or not metadata.structured:
             return list(mapMaybe(lambda f: self.gen_unstructured(f, g), g.functions()))
-
         structured_gen = StructuredRegisterDispatchKey(
             self.backend_index,
             self.target,
             self.selector,
             self.rocm,
-            self.cpp_namespace,
             self.class_method_name,
             self.skip_dispatcher_op_registration,
             g,
@@ -443,9 +438,9 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 if metadata is None:
                     return None
                 if self.class_method_name is None:
-                    impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
+                    impl_name = f"{metadata.cpp_namespace}::{metadata.kernel}"
                 else:
-                    impl_name = f"{self.cpp_namespace}::{self.class_method_name}::{metadata.kernel}"
+                    impl_name = f"{metadata.cpp_namespace}::{self.class_method_name}::{metadata.kernel}"
 
                 args_exprs_str = ", ".join(a.name for a in args)
 
@@ -780,7 +775,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 metadata = self.backend_index.get_kernel(self.g)
                 assert metadata is not None
                 class_name = f"structured_{metadata.kernel}_{k.name}"
-                parent_class = f"{self.cpp_namespace}::structured_{metadata.kernel}"
+                parent_class = f"{metadata.cpp_namespace}::structured_{metadata.kernel}"
 
             if self.backend_index.device_guard:
                 device_check_args = itertools.chain(

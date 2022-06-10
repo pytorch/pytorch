@@ -53,7 +53,6 @@ import torchgen.api.native as native
 import torchgen.api.meta as meta
 import torchgen.api.structured as structured
 from torchgen.api.translate import translate
-from torchgen.code_template import CodeTemplate
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import (
     Target,
@@ -1492,7 +1491,6 @@ def gen_aggregated_headers(
                                 Target.NAMESPACED_DECLARATION,
                                 selector,
                                 rocm=rocm,
-                                cpp_namespace="at::native",
                                 class_method_name=None,
                                 skip_dispatcher_op_registration=False,
                             ),
@@ -1652,7 +1650,6 @@ def gen_per_operator_headers(
                         Target.NAMESPACED_DECLARATION,
                         selector,
                         rocm=rocm,
-                        cpp_namespace="at::native",
                         class_method_name=None,
                         skip_dispatcher_op_registration=False,
                     ),
@@ -1925,36 +1922,41 @@ def gen_source_files(
                 return headers
 
         backend_index = backend_indices[dispatch_key]
-        dispatch_registrations_body = (
-            ""
-            if skip_dispatcher_op_registration
-            else "\n".join(
-                list(
-                    concatMap(
-                        dest.RegisterDispatchKey(
-                            backend_index,
-                            Target.REGISTRATION,
-                            selector,
-                            rocm=rocm,
-                            cpp_namespace="at::native",
-                            class_method_name=None,
-                            skip_dispatcher_op_registration=skip_dispatcher_op_registration,
-                        ),
-                        grouped_native_functions,
+        ns_grouped_native_functions = defaultdict(list)
+        for grouped_native_function in grouped_native_functions:
+            namespace = (
+                grouped_native_function.namespace
+                if isinstance(grouped_native_function, NativeFunction)
+                else grouped_native_function.functional.namespace
+            )
+            ns_grouped_native_functions[namespace].append(grouped_native_function)
+
+        static_init_dispatch_registrations = ""
+        for namespace, functions in ns_grouped_native_functions.items():
+            dispatch_registrations_body = (
+                ""
+                if skip_dispatcher_op_registration
+                else "\n".join(
+                    list(
+                        concatMap(
+                            dest.RegisterDispatchKey(
+                                backend_index,
+                                Target.REGISTRATION,
+                                selector,
+                                rocm=rocm,
+                                class_method_name=None,
+                                skip_dispatcher_op_registration=skip_dispatcher_op_registration,
+                            ),
+                            functions,
+                        )
                     )
                 )
             )
-        )
-        static_template = CodeTemplate(
-            """\
-TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
-    $dispatch_registrations_body
-};"""
-        )
-        static_init_dispatch_registrations = static_template.substitute(
-            dispatch_key=dispatch_key,
-            dispatch_registrations_body=dispatch_registrations_body,
-        )
+
+            static_init_dispatch_registrations += f"""
+TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
+    {dispatch_registrations_body}
+}};"""
         dispatch_namespace = str(dispatch_key).lower()
         fm.write_with_template(
             f"Register{dispatch_key}.cpp",
@@ -1978,7 +1980,6 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                             Target.NAMESPACED_DEFINITION,
                             selector,
                             rocm=rocm,
-                            cpp_namespace="at::native",
                             class_method_name=None,
                             skip_dispatcher_op_registration=skip_dispatcher_op_registration,
                         ),
@@ -1992,7 +1993,6 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                             Target.ANONYMOUS_DEFINITION,
                             selector,
                             rocm=rocm,
-                            cpp_namespace="at::native",
                             class_method_name=None,
                             skip_dispatcher_op_registration=skip_dispatcher_op_registration,
                         ),
@@ -2077,12 +2077,42 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
     schema_selector = selector
     if force_schema_registration:
         schema_selector = SelectiveBuilder.get_nop_selector()
+
+    ns_native_functions: Dict[str, List[NativeFunction]] = defaultdict(list)
+    for native_function in native_functions:
+        ns_native_functions[native_function.namespace].append(native_function)
+    schema_registrations = ""
+    aten_schema_registrations = []
+    custom_namespace = None
+    for namespace, funcs in ns_native_functions.items():
+
+        schema_registrations_body = list(
+            mapMaybe(RegisterSchema(schema_selector), funcs)
+        )
+        # NB: we have to separate aten namespace registration from other namespaces,
+        # because in the template we hardcoded an operator for ATen already.
+        if namespace == "aten":
+            aten_schema_registrations = schema_registrations_body
+        else:
+            assert custom_namespace is None or namespace == custom_namespace, (
+                "Only one custom namespace (other than 'aten') is currently supported, "
+                f" but getting {namespace} and {custom_namespace}"
+            )
+            custom_namespace = namespace
+            tab = "\t"
+            schema_registrations += f"""
+TORCH_LIBRARY({custom_namespace}, m) {{
+  {tab.join(schema_registrations_body)}
+}};"""
     cpu_fm.write(
         "RegisterSchema.cpp",
         lambda: {
+            "aten_schema_registrations": []
+            if skip_dispatcher_op_registration
+            else aten_schema_registrations,
             "schema_registrations": []
             if skip_dispatcher_op_registration
-            else list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
+            else schema_registrations,
         },
     )
 
