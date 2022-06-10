@@ -426,7 +426,7 @@
 
 - name: _neg_view(Tensor(a) self) -> Tensor(a)
   self: grad.neg()
-  result: self_t.neg()
+  result: self_t._neg_view()
 
 - name: _conj_physical(Tensor self) -> Tensor
   self: grad.conj_physical()
@@ -496,6 +496,10 @@
 - name: _det_lu_based_helper(Tensor self) -> (Tensor det, Tensor lu, Tensor pivs)
   self: _det_lu_based_helper_backward(grad, det, self, lu, pivs)
   output_differentiability: [True, False, False]
+
+- name: block_diag(Tensor[] tensors) -> Tensor
+  tensors: block_diag_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors))
+  result: block_diag_jvp(tensors)
 
 - name: diag_embed(Tensor self, int offset=0, int dim1=-2, int dim2=-1) -> Tensor
   self: grad.diagonal(offset, dim1, dim2)
@@ -605,7 +609,7 @@
   result: auto_linear
 
 - name: expand.SymInt(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
-  self: at::sum_to(grad, c10::expectIntArrayRef(self.sym_sizes()))
+  self: at::sum_to(grad, c10::asIntArrayRefSlow(self.sym_sizes()))
   result: auto_linear
 
 - name: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
@@ -725,6 +729,12 @@
 - name: hardswish(Tensor self) -> Tensor
   self: hardswish_backward(grad, self)
   result: auto_element_wise
+
+- name: hardswish_backward(Tensor grad_output, Tensor self) -> Tensor
+  grad_output: hardswish_backward(grad, self)
+  self: at::where(at::logical_and(-3.0 < self, self < 3.0), grad * grad_output / 3.0, at::zeros({}, self.options()))
+  result: "hardswish_backward(grad_output_t, self_p)
+         + at::where(at::logical_and(-3.0 < self_p, self_p < 3.0), self_t * grad_output_p / 3.0, at::zeros({}, self_p.options()))"
 
 - name: hypot(Tensor self, Tensor other) -> Tensor
   self: grad * self / result
@@ -964,9 +974,10 @@
   U: std::get<1>(linalg_lu_jvp(A_t, P, L, U, pivot))
   output_differentiability: [False, True, True]
 
-- name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
-  self, LU_data: lu_solve_backward(grad, result, LU_data, LU_pivots, grad_input_mask)
-  result: lu_solve_jvp(result, LU_data_p, LU_data_t, self_t, LU_pivots)
+- name: linalg_lu_solve(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False) -> Tensor
+  LU: linalg_lu_solve_LU(grad, LU, pivots, result, left, adjoint)
+  B: "at::linalg_lu_solve(LU, pivots, grad, left, !adjoint)"
+  result: linalg_lu_solve_jvp(result, LU_p, pivots, LU_t, B_t, left, adjoint)
 
 - name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
   LU_data: lu_unpack_backward(grad_L, grad_U, LU_data.size(-2), LU_data.size(-1))
@@ -1514,7 +1525,7 @@
   self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
 
 # We never call _linalg_svd with compute_uv=False in an autograd context, so we don't even consider it here
-- name: _linalg_svd(Tensor A, bool full_matrices=False, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor Vh)
+- name: _linalg_svd(Tensor A, bool full_matrices=False, bool compute_uv=True, *, str? driver=None) -> (Tensor U, Tensor S, Tensor Vh)
   A: "svd_backward(full_matrices && grad_U.defined() ? grad_U.narrow(-1, 0, S.size(-1)) : grad_U,
                    grad_S,
                    full_matrices && grad_Vh.defined() ? grad_Vh.narrow(-2, 0, S.size(-1)) : grad_Vh,
@@ -1756,6 +1767,9 @@
   self: binary_cross_entropy_double_backward(grad_output, grad, self, target, weight, reduction)
   target: binary_cross_entropy_double_backward_target(grad, grad_output, self, target, weight, reduction)
   grad_output: binary_cross_entropy_double_backward_grad_output(grad, self, target, weight, reduction)
+  result: " binary_cross_entropy_double_backward(grad_output_p, self_t, self_p, target_p, weight, reduction)
+          + binary_cross_entropy_double_backward_target(target_t, grad_output_p, self_p, target_p, weight, reduction)
+          + binary_cross_entropy_double_backward_grad_output(grad_output_t, self_p, target_p, weight, reduction)"
 
 - name: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_with_logits_backward(grad, self, target, weight, pos_weight, reduction)
@@ -1920,6 +1934,8 @@
 
 - name: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   grad_output, self, weight: prelu_double_backward(grads[0], grads[1], grad_output, self, weight)
+  result0: prelu_backward_self_jvp(self_p, weight_p, weight_t, grad_output_p, grad_output_t)
+  result1: prelu_backward_weight_jvp(weight_p, self_p, self_t, grad_output_p, grad_output_t)
 
 - name: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   self: rrelu_with_noise_backward(grad, self, noise, lower, upper, training, false)
@@ -2282,6 +2298,11 @@
   grad_output: l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
   self: l1_loss_double_backward(grad, grad_output, self, target, reduction)
   target: l1_loss_double_backward(grad, grad_output, target, target, reduction)
+  result: "self_p.is_complex()
+          ?  l1_loss_double_backward_grad_output(grad_output_t, grad_output_p, self_p, target_p, reduction)
+           + l1_loss_double_backward(self_t, grad_output_p, self_p, target_p, reduction)
+           + l1_loss_double_backward(target_t, grad_output_p, target_p, target_p, reduction)
+          : l1_loss_double_backward_grad_output(grad_output_t, grad_output_p, self_p, target_p, reduction)"
 
 - name: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   grad_output: log_sigmoid_backward(grad, self, buffer)
@@ -2327,9 +2348,13 @@
   result: auto_linear
 
 - name: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
-  grad_output: mse_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
+  grad_output: mse_loss_backward(grad, self, target, reduction)
   self: mse_loss_double_backward(grad * grad_output, self, reduction)
   target: -mse_loss_double_backward(grad * grad_output, target, reduction)
+  result: "  mse_loss_double_backward(self_t * grad_output_p, self_p, reduction)
+           - mse_loss_double_backward(target_t * grad_output_p, target_p, reduction)
+           + mse_loss_backward(grad_output_t, self_p, target_p, reduction)
+          "
 
 - name: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
   grad_output: nll_loss(grad, target, weight, reduction, ignore_index)
@@ -2382,9 +2407,13 @@
   mat2: maybe_multiply(mat1.mH().mm(grad.sparse_mask(self)), alpha.conj())
 
 - name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta) -> Tensor
-  grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction, beta)
+  grad_output: smooth_l1_loss_backward(grad, self, target, reduction, beta)
   self: smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction, beta)
   target: -smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction, beta)
+  result: "  smooth_l1_loss_double_backward(self_t * grad_output_p, self_p, target_p, reduction, beta)
+           - smooth_l1_loss_double_backward(target_t * grad_output_p, self_p, target_p, reduction, beta)
+           + smooth_l1_loss_backward(grad_output_t, self_p, target_p, reduction, beta)
+          "
 
 - name: huber_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float delta) -> Tensor
   grad_output: huber_loss_double_backward_grad_output(grad, grad_output, self, target, reduction, delta)
@@ -2394,6 +2423,8 @@
 - name: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold) -> Tensor
   grad_output: softplus_backward(grad, self, beta, threshold)
   self: softplus_double_backward(grad * grad_output, self, beta, threshold)
+  result: "softplus_backward(grad_output_t, self_p, beta, threshold)
+         + softplus_double_backward(self_t * grad_output_p, self_p, beta, threshold)"
 
 - name: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor
   grad_output: _softmax_backward_data(grad.to(output.dtype()), output, dim, input_dtype)
@@ -2715,7 +2746,7 @@
   output_differentiability: [False]
 
 - name: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
-  data: _segment_reduce_backward(grad, result, data, reduce, lengths)
+  data: _segment_reduce_backward(grad, result, data, reduce, lengths, axis, initial)
 
 - name: _pin_memory(Tensor self, Device? device=None) -> Tensor
   self: grad
@@ -2749,3 +2780,147 @@
 - name: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
+
+- name: special_bessel_j0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_bessel_j1(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_bessel_y0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_bessel_y1(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_chebyshev_polynomial_t.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_chebyshev_polynomial_t.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_chebyshev_polynomial_u(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_chebyshev_polynomial_u.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_chebyshev_polynomial_u.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_chebyshev_polynomial_v(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_chebyshev_polynomial_v.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_chebyshev_polynomial_v.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_chebyshev_polynomial_w(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_chebyshev_polynomial_w.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_hermite_polynomial_h(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_hermite_polynomial_h.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_hermite_polynomial_h.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_hermite_polynomial_he(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_hermite_polynomial_he.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_hermite_polynomial_he.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_laguerre_polynomial_l(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_laguerre_polynomial_l.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_laguerre_polynomial_l.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_legendre_polynomial_p(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_legendre_polynomial_p.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_legendre_polynomial_p.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_modified_bessel_i0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_modified_bessel_i1(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_modified_bessel_k0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_modified_bessel_k1(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_t.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_t.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_u(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_u.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_u.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_v(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_v.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_v.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_w(Tensor x, Tensor n) -> Tensor
+  x: non_differentiable
+  n: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_w.x_scalar(Scalar x, Tensor n) -> Tensor
+  n: non_differentiable
+
+- name: special_shifted_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
