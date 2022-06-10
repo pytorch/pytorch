@@ -244,7 +244,8 @@ class TestPublicBindings(TestCase):
             "Tag",
             "inplace_view",
             "view_copy",
-            "generated"
+            "generated",
+            "dynamic_output_shape",
         }
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
 
