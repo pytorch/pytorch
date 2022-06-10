@@ -33,6 +33,7 @@ def torch_to_refs_map():
         torch.Tensor.__and__: torch._refs.bitwise_and,
         torch.Tensor.__or__: torch._refs.bitwise_or,
     }
+
     for mod_torch, mod_refs in modules:
         for s in mod_refs.__all__:  # type: ignore[attr-defined]
             r[mod_torch.__dict__.get(s)] = mod_refs.__dict__.get(s)
@@ -41,6 +42,7 @@ def torch_to_refs_map():
     for s in dir(torch.Tensor):
         if s in torch._refs.__all__:
             r[getattr(torch.Tensor, s)] = torch._refs.__dict__.get(s)
+
     return r
 
 
