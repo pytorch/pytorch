@@ -1175,8 +1175,9 @@ class TestProfiler(TestCase):
 
         metrics = utils.compute_event_metrics(p.profiler)
         tree = p.profiler.kineto_results.experimental_event_tree()
-        self.assertEqual(metrics[utils.EventKey(tree[0])].self_time_ns, tree[0].duration_time_ns -
-                         sum([child.duration_time_ns for child in tree[0].children]))
+        for event_key, event_metrics in metrics.items():
+            self.assertEqual(event_metrics.self_time_ns, event_key.event.duration_time_ns -
+                         sum([child.duration_time_ns for child in event_key.event.children]))
 
     @ProfilerTree.test
     def test_profiler_experimental_tree(self):

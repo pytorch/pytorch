@@ -1,7 +1,7 @@
 from collections import deque
 from dataclasses import dataclass
-from torch.profiler import profile, DeviceType
-import torch
+from torch.profiler import DeviceType
+from torch.autograd.profiler import profile
 
 
 class EventKey:
@@ -24,55 +24,53 @@ class EventMetrics:
     self_time_ns: int = 0
     idle_time_ns: int = 0
 
-    def percent_idle_time(self):
+    def fraction_idle_time(self):
         if self.duration_time_ns == 0:
-            return 0
+            return 0.0
         return self.idle_time_ns / self.duration_time_ns
 
 
-def compute_event_metrics(prof: torch.autograd.profiler.profile):
+def compute_event_metrics(prof: profile):
     metrics = dict()
     compute_self_time(prof, metrics)
     compute_idle_time(prof, metrics)
     return metrics
 
 
-def compute_self_time(prof, metrics):
+def compute_self_time(prof: profile, metrics: dict[EventKey, EventMetrics]):
     '''
-   Computes event's self time(total time - time in child ops).
+    Computes event's self time(total time - time in child ops).
 
-       Parameters:
-            event_tree: Profiler's kineto_results.experimental_event_tree
+        Parameters:
+            prof: profile object that we call kineto_results.experimental_event_tree() on
+            metrics: dictionary of event key and event metrics
     '''
-    stack = deque()
-    event_tree = prof.kineto_results.experimental_event_tree()
-    for event in event_tree:
-        stack.append(event)
+    assert(prof.kineto_results is not None)
+    stack = deque(prof.kineto_results.experimental_event_tree())
 
     # standard iterating dfs
     while stack:
         curr_event = stack.pop()
         self_time = curr_event.duration_time_ns
-        if curr_event.children:
-            for child_event in curr_event.children:
-                self_time - child_event.duration_time_ns
-                stack.append(child_event)
-        if EventKey(curr_event) in metrics:
-            metrics[EventKey(curr_event)].self_time_us = self_time
-        else:
-            metrics[EventKey(curr_event)] = EventMetrics(self_time_ns=self_time)
+        for child_event in curr_event.children:
+            self_time - child_event.duration_time_ns
+            stack.append(child_event)
+        
+        assert EventKey(curr_event) not in metrics, f"Duplicate id: {curr_event.id}, {curr_event.name()}"
+        metrics[EventKey(curr_event)] = EventMetrics(self_time_ns=self_time)
         metrics[EventKey(curr_event)].duration_time_ns = curr_event.duration_time_ns
 
 
-def compute_idle_time(prof: torch.autograd.profiler.profile, metrics):
-    event_tree = prof.kineto_results.experimental_event_tree()
+def compute_idle_time(prof: profile, metrics: dict[EventKey, EventMetrics]):
+    assert(prof.kineto_results is not None)
     event_list = prof.kineto_results.events()
 
     def is_cuda_launch_kernel(e):
+        # TODO: find a better way to identify cudaLaunchKernel
         return e.name() == "cudaLaunchKernel"
 
     def is_cuda_kernel(e):
-        # TODO: find a better way to identify cudaLaunchKernel
+        # TODO: find a better way to identify CUDA Kernel
         return e.device_type() == DeviceType.CUDA and e.name() != "[memory]" and e.name() != "Memset (Device)"
 
     # Record All the idle intervals
@@ -81,11 +79,7 @@ def compute_idle_time(prof: torch.autograd.profiler.profile, metrics):
     cuda_kernel_events = [event for event in event_list if is_cuda_launch_kernel(event) or is_cuda_kernel(event)]
     cuda_kernel_events.sort(key=lambda e: e.start_us())
 
-    if len(cuda_kernel_events) == 1:
-        return
-    for i in range(1, len(cuda_kernel_events)):
-        prev_event = cuda_kernel_events[i - 1]
-        curr_event = cuda_kernel_events[i]
+    for prev_event, curr_event in zip(cuda_kernel_events, cuda_kernel_events[1:]):
         if (is_cuda_launch_kernel(prev_event)):
             queue_depth += 1
         if (is_cuda_kernel(prev_event)):
@@ -107,8 +101,8 @@ def compute_idle_time(prof: torch.autograd.profiler.profile, metrics):
         metrics[EventKey(event)].idle_time_ns = idle_time
 
 
-def get_optimizable_events(prof: torch.autograd.profiler.profile):
-    metrics = compute_event_metrics(prof)
+def get_optimizable_events(prof: profile):
+    # metrics = compute_event_metrics(prof)
 
     # Compute a list of events that that long idle time
 
