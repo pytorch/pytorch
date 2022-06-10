@@ -273,7 +273,7 @@ def _update_param_kwargs(param_kwargs, name, value):
     if isinstance(value, list) or isinstance(value, tuple):
         # Make name plural (e.g. devices / dtypes) if the value is composite.
         param_kwargs['{}s'.format(name)] = value
-    elif value:
+    elif value is not None:
         param_kwargs[name] = value
 
     # Leave param_kwargs as-is when value is None.
