@@ -1850,24 +1850,30 @@ class TestFXGraphPartitioner(JitTestCase):
 
                 add_5 = linear_2 + add_4
                 add_6 = add_5 + a
+                relu = add_6.relu()
 
-                return add_4, add_6
+                return add_4, add_6, relu
 
         m = TestModule()
         traced = symbolic_trace(m)
+
+        print(traced.graph)
 
 
         # TODO: support for arbitrate node order
         test_cases = [
             [ ['add', 'add_1'], ['add_5', 'add_6'] ],
-            [ ['add', 'add_1', 'add_2'] ],
-            [ ['add_1', 'add_2'] ],
-            [ ['add_2', 'add_3'] ],
+            [ ['add', 'add_1', 'add_2'] ],  # vertical fusion
+            [ ['add_2', 'add_3'] ],         # horizontal fusion
             [ ['add_3', 'add_4'] ],
             [ ['add_5', 'add_6'], ['add_1', 'add_2', 'add_3', 'add_4'] ],  # arbitray partition order
-
             [ ['add_6', 'add_5'] ],     # arbitray node order
             [ ['add_4', 'add_1', 'add_3', 'add_2'] ],           # arbitray node order
+            [ ['add_5', 'linear2' ] ],   # includes call_function + call_module node
+            [ ['add_6', 'relu' ] ],   # includes call_function + call_module node
+            [ ['param', 'add_2' ] ],   # includes get_attr + call_module nodes
+            [ ['param', 'add_1', 'linear' ] ],   # includes get_attr + call_function + call_module nodes
+            [ ["add", "linear", "add_1", "param", "add_2", "add_3", "add_4", "linear2", "add_5", "add_6", "relu"] ] # full graph
         ]
 
         # expected failing cases

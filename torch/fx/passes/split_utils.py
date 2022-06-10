@@ -342,6 +342,41 @@ def topo_sort(nodes: NodeList) -> NodeList:
 
     return sorted_nodes
 
+# TODO: copied from split_by_tags's impl, refactor split_by_tags to use this function
+def copy_module_attributes(gm: torch.fx.GraphModule, subgraph: torch.fx.Graph) -> HolderModule:
+    # Loop through all module calls (call_module) and param fetches (get_attr)
+    # in this component, creating HolderModules as necessary to match the path.
+    # e.g. if in the original module there's a get_attr node fetches "conv.weight".
+    # We create a HolderModule as root -> add a HolderModule named "conv" ->
+    # make "weight" a attribute of "conv" HolderModule and point to conv.weight in
+    # the original module.
+    root = HolderModule({})
+    for n in subgraph.nodes:
+        if n.op not in ("call_module", "get_attr"):
+            continue
+
+        target = n.target
+        assert isinstance(target, str)
+        target_name_parts = target.split(".")
+        curr = root
+        orig_gm = gm
+
+        for name in target_name_parts[:-1]:
+            if not hasattr(curr, name):
+                curr.add_module(name, HolderModule({}))
+
+            curr = getattr(curr, name)
+            orig_gm = getattr(orig_gm, name)
+
+        leaf_node_name = target_name_parts[-1]
+        leaf_node = getattr(orig_gm, leaf_node_name)
+
+        # Relies on custom __setattr__ magic.
+        setattr(curr, leaf_node_name, leaf_node)
+
+    return root
+
+
 def fuse_partition(gm: torch.fx.GraphModule,
                    nodes: NodeList,
                    partition_name: str) -> torch.fx.GraphModule:
@@ -413,7 +448,9 @@ def fuse_partition(gm: torch.fx.GraphModule,
     # lint to ensure correctness
     subgraph.lint()
 
-    sub_gm = torch.fx.GraphModule(nn.Module(), subgraph, class_name=partition_name)
+    submodule = copy_module_attributes(gm, subgraph)
+
+    sub_gm = torch.fx.GraphModule(submodule, subgraph, class_name=partition_name)
 
     # TODO: fix this
     sub_gm.name = partition_name
