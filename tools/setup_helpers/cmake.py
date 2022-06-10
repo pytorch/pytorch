@@ -307,7 +307,6 @@ class CMake:
                     "WERROR",
                     "OPENSSL_ROOT_DIR",
                     "STATIC_DISPATCH_BACKEND",
-                    "SELECTED_OP_LIST",
                 )
             }
         )
@@ -338,6 +337,7 @@ class CMake:
                 key = low_priority_aliases[var]
                 if key not in build_options:
                     build_options[key] = val
+
         # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
         py_lib_path = sysconfig.get_path("purelib")
         cmake_prefix_path = build_options.get("CMAKE_PREFIX_PATH", None)
