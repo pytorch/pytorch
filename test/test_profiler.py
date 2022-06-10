@@ -1428,7 +1428,7 @@ class TestProfiler(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler.py(1422): test_profiler_experimental_tree_with_memory_and_stack
+            test_profiler.py(...): test_profiler_experimental_tree_with_memory_and_stack
               torch/profiler/profiler.py(...): __enter__
                 torch/profiler/profiler.py(...): start
                   torch/profiler/profiler.py(...): _transit_action
@@ -1574,7 +1574,7 @@ class TestProfiler(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler.py(1546): test_profiler_experimental_tree_with_stack_and_modules
+            test_profiler.py(...): test_profiler_experimental_tree_with_stack_and_modules
               torch/profiler/profiler.py(...): __enter__
                 torch/profiler/profiler.py(...): start
                   torch/profiler/profiler.py(...): _transit_action
@@ -1591,7 +1591,7 @@ class TestProfiler(TestCase):
                   aten::fill_
               nn.Module: MyModule_0
                 <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler.py(1540): forward
+                test_profiler.py(...): forward
                   nn.Module: ReLU_0
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward
@@ -1632,7 +1632,7 @@ class TestProfiler(TestCase):
                   aten::fill_
               nn.Module: MyModule_0
                 <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler.py(1540): forward
+                test_profiler.py(...): forward
                   nn.Module: ReLU_0
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward
