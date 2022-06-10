@@ -388,14 +388,12 @@ meta_function_expected_failures = {
     torch.fft.fft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
     torch.fft.fft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
     torch.fft.fftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
-    torch.fft.fftshift: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::roll
     torch.fft.hfft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
     torch.fft.hfft: {b8, f32, f64, i16, i32, i64, i8, u8},
     torch.fft.hfftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
     torch.fft.ifft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
     torch.fft.ifft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
     torch.fft.ifftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
-    torch.fft.ifftshift: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::roll
     torch.fft.ihfft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
     torch.fft.ihfft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
     torch.fft.ihfftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
@@ -449,7 +447,6 @@ meta_function_expected_failures = {
     torch.nonzero: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero, aten::nonzero.out
     torch.polar: {f32, f64},  # aten::polar.out
     torch.repeat_interleave: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::repeat_interleave.Tensor
-    torch.roll: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::roll
     torch.segment_reduce: {bf16, f16, f32, f64},  # aten::segment_reduce
     torch.searchsorted: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::searchsorted.Tensor, aten::searchsorted.Tensor_out
     torch.symeig: {f32, f64},
@@ -692,7 +689,6 @@ meta_dispatch_expected_failures = {
     aten.nonzero.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.polar.default: {f64, f32},
     aten.prelu.default: {bf16, f64, f32},
-    aten.roll.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.rrelu_with_noise.default: {bf16, f64, f32},
     aten.searchsorted.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.searchsorted.Tensor_out: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
