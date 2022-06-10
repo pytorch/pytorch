@@ -318,7 +318,9 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
 
     return torch.fx.GraphModule(main_root, main_g)
 
-def fuse_partition(gm: torch.fx.GraphModule, partition_name, nodes) -> torch.fx.GraphModule:
+def fuse_partition(gm: torch.fx.GraphModule,
+                   nodes: List[torch.fx.Node],
+                   partition_name: str) -> torch.fx.GraphModule:
     # returns a graph module that is a copy of `nodes` in gm
     # assumption: nodes are already sorted in topo order
 
@@ -354,18 +356,21 @@ def fuse_partition(gm: torch.fx.GraphModule, partition_name, nodes) -> torch.fx.
 
     outs = set()
     original_outputs = set()
+
+    output_mapping = {}  # mapping from old output to new outputs
+
     for node in nodes:
         for user_node in node.users:
             if user_node not in nodes:
                 # external user node, need to expose as an output
-                outs.add(node_map[node])
-                original_outputs.add(node)
+                output_mapping[node] = node_map[node]
 
     # outs = tuple(map(node_remapping.__getitem__, comp.orig_outputs))
 
     # outs contain nodes in the new subgraph
-    outs = tuple(outs)
-    original_outputs = tuple(original_outputs)
+    original_outputs = tuple(output_mapping.keys())
+    outs = tuple(output_mapping.values())
+
     # Take care of the args of FX output node. If there's a single
     # output then the output node args is like (output_single), else
     # if there're multiple outputs then the output node args is like
@@ -380,7 +385,7 @@ def fuse_partition(gm: torch.fx.GraphModule, partition_name, nodes) -> torch.fx.
     # TODO: fix this
     sub_gm.name = partition_name
     sub_gm.orig_inputs = tuple(original_inputs)
-    sub_gm.orig_outputs = original_outputs   # todo: fix here
+    sub_gm.orig_outputs = original_outputs
 
     return sub_gm
 
@@ -413,25 +418,23 @@ def insert_subgm(gm, sub_gm, original_nodes):
 
     return gm
 
-
-def fuse_by_partitions(gm: torch.fx.GraphModule, partitions) -> torch.fx.GraphModule:
-    for partition_id, nodes in partitions.items():
+def fuse_by_partitions(gm: torch.fx.GraphModule, partitions: List[List[torch.fx.Node]]) -> torch.fx.GraphModule:
+    for partition_id, nodes in enumerate(partitions):
         partition_name = "fused_" + str(partition_id)
-        sub_gm = fuse_partition(gm, partition_name, nodes)
+        sub_gm = fuse_partition(gm, nodes, partition_name)
 
         print(partition_name)
         print(sub_gm.graph)
 
         insert_subgm(gm, sub_gm, nodes)
 
-        # break
-    print("before")
-    print(gm)
-
+    # print("before")
+    # print(gm)
     from torch.fx.passes.tools_common import legalize_graph
     legalize_graph(gm)
-    print("after")
-    print(gm)
+
+    # print("after")
+    # print(gm)
 
     return gm
 

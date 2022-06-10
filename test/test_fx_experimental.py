@@ -36,7 +36,7 @@ from torch.fx.partitioner.nvfuser_operator_support import NvFuserOperatorSupport
 import torch._prims as prims
 from torch._prims.executor import make_traced
 from torch.fx.passes.graph_drawer import FxGraphDrawer
-
+import copy
 
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
@@ -1792,12 +1792,10 @@ class TestFXGraphPartitioner(JitTestCase):
                 add_5 = linear_2 + add_4
                 add_6 = add_5 + a
 
-                return add_4, add_5, add_6
+                return add_4, add_6
 
         m = TestModule2()
         traced = symbolic_trace(m)
-        # a, b = torch.rand(4), torch.rand(4)
-        # graph_manipulation.get_size_of_all_nodes(traced, [a, b])
 
         supported_ops = NvFuserOperatorSupport()
         partitioner = CapabilityBasedPartitioner(traced, supported_ops)
@@ -1806,8 +1804,6 @@ class TestFXGraphPartitioner(JitTestCase):
 
         partitions = partitioner.partition(candidates)
 
-        partitions[1].extend(partitions[0])
-        partitions.pop(0)
 
         print(partitions)
 
@@ -1831,6 +1827,68 @@ class TestFXGraphPartitioner(JitTestCase):
 
         torch.testing.assert_close(expected, result)
 
+
+    def test_fuser_util(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.linear2 = torch.nn.Linear(4, 4)
+                self.param = torch.nn.Parameter(torch.rand(4, 4))
+
+            def forward(self, a, b, c):
+                add = a + b
+
+                linear_1 = self.linear(add)
+
+                add_1 = add + c
+                add_2 = add_1 + self.param
+                add_3 = add_1 + linear_1
+                add_4 = add_2 + add_3
+
+                linear_2 = self.linear2(add_4)
+
+                add_5 = linear_2 + add_4
+                add_6 = add_5 + a
+
+                return add_4, add_6
+
+        m = TestModule()
+        traced = symbolic_trace(m)
+
+        test_cases = [
+            [ ['add', 'add_1'], ['add_5', 'add_6'] ],
+            [ ['add', 'add_1', 'add_2'] ],
+            [ ['add_1', 'add_2'] ],
+            [ ['add_1', 'add_2', 'add_3', 'add_4'] ],
+            [ ['add_5', 'add_6'] ],
+        ]
+
+        drawer = FxGraphDrawer(traced, "test")
+        dot_graph = drawer.get_dot_graph()
+        dot_graph.write_png("before.png")
+
+        for id, test_case in enumerate(test_cases):
+            gm = copy.deepcopy(traced)
+            nodes = gm.graph.nodes
+            nodes_by_name = {node.name : node for node in nodes}
+
+            partitions = []
+            for names in test_case:
+                partitions.append([nodes_by_name[name] for name in names])
+
+            fused_graph = fuse_by_partitions(gm, partitions)
+
+            drawer = FxGraphDrawer(fused_graph, "test")
+            dot_graph = drawer.get_dot_graph()
+            dot_graph.write_png(f"after_{id}.png")
+
+            a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
+
+            expected = m(a, b, c)
+            result = fused_graph(a, b, c)
+
+            torch.testing.assert_close(expected, result)
 
     def test_nvfuser_operator_support(self):
         def _wrapper(a, b, broadcast_dimensions):

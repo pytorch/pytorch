@@ -80,19 +80,16 @@ class CapabilityBasedPartitioner:
                 assignment[node] = partition_id
                 partition_id += 1
 
-        partitions = defaultdict(list)
+        partitions_by_id = defaultdict(list)
         # current assigment contains nodes from bottom to the top
         # reverser the list, so that in each partitions, nodes are sorted from top to bottom
         for node, partition_id in reversed(assignment.items()):
-            partitions[partition_id].append(node)
+            partitions_by_id[partition_id].append(node)
 
-        return partitions
-
-        # return assignment
-
+        return partitions_by_id.values()
 
     def fuse_partitions(self, partitions):
-        # partitions: {1 : [node0, node1], 2: [node2, node3]}
+        # partitions: [ [node0, node1], [node2, node3] ]
 
         all_components: List[Component] = []
 
@@ -112,13 +109,4 @@ class CapabilityBasedPartitioner:
             for node in nodes:
                 node_to_component[node] = comp
 
-
-
             comp.graph.node_copy(node, )
-
-
-
-        pass
-
-
-
