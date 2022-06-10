@@ -55,6 +55,7 @@ runs:
           -e JOB_BASE_NAME \
           -e MAX_JOBS="$(nproc --ignore=2)" \
           -e AWS_DEFAULT_REGION \
+          -e IS_GHA \
           -e PR_NUMBER \
           -e SHA1 \
           -e BRANCH \

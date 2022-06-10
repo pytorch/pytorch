@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Union, Optional
 _lambda_client = None
 
 
-IS_GHA = os.getenv("GITHUB_ACTIONS", "0") == "1"
+IS_GHA = os.getenv("IS_GHA", "0") == "1"
 
 
 def sprint(*args: Any) -> None:
