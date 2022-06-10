@@ -261,6 +261,21 @@ class Module:
     _load_state_dict_post_hooks: Dict[int, Callable]
     _modules: Dict[str, Optional['Module']]
 
+    __slots__ = (
+        "training",
+        "_parameters",
+        "_buffers",
+        "_non_persistent_buffers_set",
+        "_backward_hooks",
+        "_is_full_backward_hook",
+        "_forward_hooks",
+        "_forward_pre_hooks",
+        "_load_state_dict_pre_hooks",
+        "_load_state_dict_post_hooks",
+        "_modules",
+        "__dict__",
+    )
+
     def __init__(self) -> None:
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
@@ -279,6 +294,7 @@ class Module:
         object.__setattr__(self, '_load_state_dict_pre_hooks', OrderedDict())
         object.__setattr__(self, '_load_state_dict_post_hooks', OrderedDict())
         object.__setattr__(self, '_modules', OrderedDict())
+        object.__setattr__(self, '__dict__', OrderedDict())
 
     forward: Callable[..., Any] = _forward_unimplemented
 
@@ -313,10 +329,11 @@ class Module:
         if persistent is False and isinstance(self, torch.jit.ScriptModule):
             raise RuntimeError("ScriptModule does not support non-persistent buffers")
 
-        if '_buffers' not in self.__dict__:
-            raise AttributeError(
-                "cannot assign buffer before Module.__init__() call")
-        elif not isinstance(name, torch._six.string_classes):
+        #if '_buffers' not in self.__dict__:
+        #    raise AttributeError(
+                #"cannot assign buffer before Module.__init__() call")
+        #elif not isinstance(name, torch._six.string_classes):
+        if not isinstance(name, torch._six.string_classes):
             raise TypeError("buffer name should be a string. "
                             "Got {}".format(torch.typename(name)))
         elif '.' in name:
@@ -349,11 +366,12 @@ class Module:
                 are ignored. If ``None``, the parameter is **not** included in the
                 module's :attr:`state_dict`.
         """
-        if '_parameters' not in self.__dict__:
-            raise AttributeError(
-                "cannot assign parameter before Module.__init__() call")
+        #if '_parameters' not in self.__dict__:
+            #raise AttributeError(
+                #"cannot assign parameter before Module.__init__() call")
 
-        elif not isinstance(name, torch._six.string_classes):
+        #elif not isinstance(name, torch._six.string_classes):
+        if not isinstance(name, torch._six.string_classes):
             raise TypeError("parameter name should be a string. "
                             "Got {}".format(torch.typename(name)))
         elif '.' in name:
@@ -1187,6 +1205,7 @@ class Module:
     __call__ : Callable[..., Any] = _call_impl
 
     def __setstate__(self, state):
+        """
         self.__dict__.update(state)
         # Support loading old checkpoints that don't have the following attrs:
         if '_forward_pre_hooks' not in self.__dict__:
@@ -1201,20 +1220,30 @@ class Module:
             self._non_persistent_buffers_set = set()
         if '_is_full_backward_hook' not in self.__dict__:
             self._is_full_backward_hook = None
+        """
+        pass
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
-        if '_parameters' in self.__dict__:
-            _parameters = self.__dict__['_parameters']
-            if name in _parameters:
-                return _parameters[name]
-        if '_buffers' in self.__dict__:
-            _buffers = self.__dict__['_buffers']
-            if name in _buffers:
-                return _buffers[name]
-        if '_modules' in self.__dict__:
-            modules = self.__dict__['_modules']
-            if name in modules:
-                return modules[name]
+        if name in self._parameters:
+            return self._parameters[name]
+        #if '_parameters' in self.__dict__:
+            #_parameters = self.__dict__['_parameters']
+            #if name in _parameters:
+                #return _parameters[name]
+        if name in self._buffers:
+            return self._buffers[name]
+        #if '_buffers' in self.__dict__:
+            #_buffers = self.__dict__['_buffers']
+            #if name in _buffers:
+                #return _buffers[name]
+        if name in self._modules:
+            return self._modules[name]
+        #if '_modules' in self.__dict__:
+            #modules = self.__dict__['_modules']
+            #if name in modules:
+            #    return modules[name]
+        if name in self.__dict__:
+            return self.__dict__[name]
         raise AttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
@@ -1227,7 +1256,8 @@ class Module:
                     else:
                         d.discard(name)
 
-        params = self.__dict__.get('_parameters')
+        params = self._parameters
+        #params = self.__dict__.get('_parameters')
         if isinstance(value, Parameter):
             if params is None:
                 raise AttributeError(
@@ -1241,7 +1271,8 @@ class Module:
                                 .format(torch.typename(value), name))
             self.register_parameter(name, value)
         else:
-            modules = self.__dict__.get('_modules')
+            modules = self._modules
+            #modules = self.__dict__.get('_modules')
             if isinstance(value, Module):
                 if modules is None:
                     raise AttributeError(
@@ -1255,7 +1286,8 @@ class Module:
                                     .format(torch.typename(value), name))
                 modules[name] = value
             else:
-                buffers = self.__dict__.get('_buffers')
+                buffers = self._buffers
+                #buffers = self.__dict__.get('_buffers')
                 if buffers is not None and name in buffers:
                     if value is not None and not isinstance(value, torch.Tensor):
                         raise TypeError("cannot assign '{}' as buffer '{}' "
@@ -1263,7 +1295,8 @@ class Module:
                                         .format(torch.typename(value), name))
                     buffers[name] = value
                 else:
-                    object.__setattr__(self, name, value)
+                    self.__dict__[name] = value
+                    #object.__setattr__(self, name, value)
 
     def __delattr__(self, name):
         if name in self._parameters:

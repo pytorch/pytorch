@@ -72,17 +72,17 @@ def _reparametrize_module(
 ) -> Iterator[None]:
     for name, tensor in parameters_and_buffers.items():
         _apply_func_submodules(
-            #_create_swap_params(parameters_and_buffers),
-            #module, name.split("."), name, (tensor,))
-            torch.nn.utils.parametrize.register_parametrization,
-            module, name.split("."), name, (_ReparametrizedTensor(tensor),))
+            _create_swap_params(parameters_and_buffers),
+            module, name.split("."), name, (tensor,))
+            #torch.nn.utils.parametrize.register_parametrization,
+            #module, name.split("."), name, (_ReparametrizedTensor(tensor),))
     yield
     for name in parameters_and_buffers:
         _apply_func_submodules(
-            #_remove_swap,
-            #module, name.split("."), name, ())
-            torch.nn.utils.parametrize.remove_parametrizations,
-            module, name.split("."), name, (False,))
+            _remove_swap,
+            module, name.split("."), name, ())
+            #torch.nn.utils.parametrize.remove_parametrizations,
+            #module, name.split("."), name, (False,))
 
 def _apply_func_submodules(
     func: Callable[..., None],
@@ -148,13 +148,8 @@ def functional_call(
     if kwargs is None:
         kwargs = {}
     with _reparametrize_module(module, parameters_and_buffers):
-        pass
-        #if isinstance(args, tuple):
-            #out = module(*args, **kwargs)
-        #else:
-            #out = module(args, **kwargs)
-    if isinstance(args, tuple):
-        out = module(*args, **kwargs)
-    else:
-        out = module(args, **kwargs)
+        if isinstance(args, tuple):
+            out = module(*args, **kwargs)
+        else:
+            out = module(args, **kwargs)
     return out
