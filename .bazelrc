@@ -61,8 +61,8 @@ build --per_file_copt='^//.*\.cu$'@--compiler-options=-Werror=all
 # sign-compare has a tremendous amount of violations in the
 # codebase. It will be a lot of work to fix them, just disable it for
 # now.
-build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-error=sign-compare
-build --per_file_copt='^//.*\.cu$'@--compiler-options=-Wno-error=sign-compare
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-sign-compare
+build --per_file_copt='^//.*\.cu$'@--compiler-options=-Wno-sign-compare
 # We intentionally use #pragma unroll, which is compiler specific.
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-error=unknown-pragmas
 build --per_file_copt='^//.*\.cu$'@--compiler-options=-Wno-error=unknown-pragmas
