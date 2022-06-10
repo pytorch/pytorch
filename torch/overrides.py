@@ -1945,10 +1945,12 @@ class enable_reentrant_dispatch():
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         del self._raii_guard
 
-def get_buffer(tensor_subclass, data):
+def get_buffer(tensor_subclass, data, prefix):
     import ctypes
-    if not hasattr(tensor_subclass, "_stride_buffer"):
+    assert prefix in {"stride", "size"}
+    buffer_name = f"_{prefix}_buffer"
+    if not hasattr(tensor_subclass, buffer_name):
         SizeType = ctypes.c_longlong * len(data)
-        tensor_subclass._stride_buffer = SizeType(*data)
-    ptr = ctypes.addressof(tensor_subclass._stride_buffer)
+        setattr(tensor_subclass, buffer_name, SizeType(*data))
+    ptr = ctypes.addressof(getattr(tensor_subclass, buffer_name))
     return (ptr, len(data))

@@ -379,6 +379,9 @@ bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->sizes(this);
+  }
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
 }
