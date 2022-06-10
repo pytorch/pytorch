@@ -32,6 +32,7 @@ on:
 
 env:
   IN_CI: 1
+  IS_GHA: 1
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
   BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
   IOS_PLATFORM: ${{ inputs.ios-platform }}
