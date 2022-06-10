@@ -197,7 +197,8 @@ struct C10_API PyInterpreter {
     return (*device_fn_)(this, self);
   }
 
-  __ubsan_ignore_function__ c10::IntArrayRef strides(const TensorImpl* self) const {
+  __ubsan_ignore_function__ c10::IntArrayRef strides(
+      const TensorImpl* self) const {
     return (*strides_fn_)(this, self);
   }
 

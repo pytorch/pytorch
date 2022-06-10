@@ -42,7 +42,9 @@ static c10::Device noop_device_fn(const PyInterpreter*, const TensorImpl*) {
       "attempted to device Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
-static c10::IntArrayRef noop_strides_fn(const PyInterpreter*, const TensorImpl*) {
+static c10::IntArrayRef noop_strides_fn(
+    const PyInterpreter*,
+    const TensorImpl*) {
   TORCH_INTERNAL_ASSERT(
       0,
       "attempted to strides Tensor with nontrivial PyObject after corresponding interpreter died");
