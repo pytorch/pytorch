@@ -1,11 +1,11 @@
 import argparse
 import os
 import requests
-import shutil
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, List, Any
+from tempfile import TemporaryDirectory
 
 import rockset  # type: ignore[import]
 import boto3  # type: ignore[import]
@@ -17,7 +17,6 @@ REQUEST_HEADERS = {
     "Authorization": "token " + GITHUB_TOKEN,
 }
 S3_RESOURCE = boto3.resource("s3")
-TEMP_DIR = Path(os.environ["RUNNER_TEMP"]) / "tmp-test-stats"
 
 
 def parse_xml_report(
@@ -155,12 +154,19 @@ def download_and_extract_s3_reports(
         Prefix=f"pytorch/pytorch/{workflow_run_id}/{workflow_run_attempt}/artifact/test-reports"
     )
 
+    found_one = False
     for obj in objs:
+        found_one = True
         p = Path(Path(obj.key).name)
         print(f"Downloading and extracting {p}")
         with open(p, "wb") as f:
             f.write(obj.get()["Body"].read())
         unzip(p)
+
+    if not found_one:
+        raise RuntimeError(
+            "Didn't find any test reports in s3, there is probably a bug!"
+        )
 
 
 if __name__ == "__main__":
@@ -178,34 +184,31 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if TEMP_DIR.exists():
-        print("rm: ", TEMP_DIR)
-        shutil.rmtree(TEMP_DIR)
+    with TemporaryDirectory() as temp_dir:
+        print("Using temporary directory:", temp_dir)
+        os.chdir(temp_dir)
 
-    print("mkdir: ", TEMP_DIR)
-    TEMP_DIR.mkdir()
-    print("cd to ", TEMP_DIR)
-    os.chdir(TEMP_DIR)
+        # Download and extract all the reports (both GHA and S3)
+        download_and_extract_s3_reports(args.workflow_run_id, args.workflow_run_attempt)
+        artifact_urls = get_artifact_urls(args.workflow_run_id)
+        for name, url in artifact_urls.items():
+            download_and_extract_artifact(Path(name), url, args.workflow_run_attempt)
 
-    # Download and extract all the reports (both GHA and S3)
-    download_and_extract_s3_reports(args.workflow_run_id, args.workflow_run_attempt)
-    artifact_urls = get_artifact_urls(args.workflow_run_id)
-    for name, url in artifact_urls.items():
-        download_and_extract_artifact(Path(name), url, args.workflow_run_attempt)
-
-    # Parse the reports and transform them to JSON
-    test_cases = []
-    for xml_report in Path(".").glob("**/*.xml"):
-        test_cases.extend(
-            parse_xml_report(
-                xml_report, int(args.workflow_run_id), int(args.workflow_run_attempt)
+        # Parse the reports and transform them to JSON
+        test_cases = []
+        for xml_report in Path(".").glob("**/*.xml"):
+            test_cases.extend(
+                parse_xml_report(
+                    xml_report,
+                    int(args.workflow_run_id),
+                    int(args.workflow_run_attempt),
+                )
             )
-        )
 
-    # Write the JSON to rockset
-    print(f"Writing {len(test_cases)} test cases to Rockset")
-    client = rockset.Client(
-        api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-    )
-    client.Collection.retrieve("test_run").add_docs(test_cases)
-    print("Done!")
+        # Write the JSON to rockset
+        print(f"Writing {len(test_cases)} test cases to Rockset")
+        client = rockset.Client(
+            api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+        )
+        client.Collection.retrieve("test_run").add_docs(test_cases)
+        print("Done!")
