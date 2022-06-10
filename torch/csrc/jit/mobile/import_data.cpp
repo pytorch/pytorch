@@ -252,9 +252,33 @@ std::map<std::string, at::Tensor> _load_parameters(
       std::shared_ptr<char> data;
       size_t size = 0;
       std::tie(data, size) = get_stream_content(in);
-      mobile::Module module =
-          parse_and_initialize_mobile_module(std::move(data), size, device);
-      map = mobile_module_to_parameter_map(module);
+      TORCH_CHECK(
+          mobile::serialization::ModuleBufferHasIdentifier(data.get()),
+          "Format error");
+      auto* flatbuffer_module =
+          mobile::serialization::GetMutableModule(data.get());
+      FlatbufferLoader loader;
+      // replace parserObject with to handle only class with field case
+      // function.
+      loader.registerIValueParser(
+          mobile::serialization::IValueUnion::Object,
+          +[](FlatbufferLoader& loader,
+              const mobile::serialization::IValue& ivalue) {
+            const mobile::serialization::Object* object =
+                ivalue.val_as_Object();
+            auto cls = loader.getOrCreateClassTypeForObject(object);
+            auto obj = c10::ivalue::Object::create(
+                at::StrongTypePtr(loader.cu_, cls), object->attrs()->size());
+            for (uint32_t i = 0; i < object->attrs()->size(); i++) {
+              IValue val = loader.getIValue(object->attrs()->Get(i));
+              obj->setSlot(i, std::move(val));
+            }
+            return static_cast<c10::IValue>(obj);
+          });
+
+      mobile::Module m = loader.parseModule(flatbuffer_module);
+      m.set_delete_memory(std::move(data));
+      map = mobile_module_to_parameter_map(m);
 #else // !defined(ENABLE_FLATBUFFER)
       TORCH_CHECK(
           false,
