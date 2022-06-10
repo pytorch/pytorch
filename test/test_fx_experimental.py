@@ -1856,12 +1856,24 @@ class TestFXGraphPartitioner(JitTestCase):
         m = TestModule()
         traced = symbolic_trace(m)
 
+
+        # TODO: support for arbitrate node order
+
         test_cases = [
             [ ['add', 'add_1'], ['add_5', 'add_6'] ],
             [ ['add', 'add_1', 'add_2'] ],
             [ ['add_1', 'add_2'] ],
-            [ ['add_1', 'add_2', 'add_3', 'add_4'] ],
+            [ ['add_2', 'add_3'] ],
+            [ ['add_3', 'add_4'] ],
+            [ ['add_5', 'add_6'], ['add_1', 'add_2', 'add_3', 'add_4'] ],
             [ ['add_5', 'add_6'] ],
+
+
+        ]
+
+        x_test_cases = [
+            [ ['add', 'add_1'], ['add_1', 'add_5', 'add_6'] ],  # add_1 exists in multiple partitions
+            # [ ['add', 'add_1', 'add_2', 'add_3', 'add_4'] ],    # invalid partition: circular dependency
         ]
 
         drawer = FxGraphDrawer(traced, "test")

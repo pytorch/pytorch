@@ -324,9 +324,14 @@ def fuse_partition(gm: torch.fx.GraphModule,
     # returns a graph module that is a copy of `nodes` in gm
     # assumption: nodes are already sorted in topo order
 
+    for node in nodes:
+        assert node.graph.owning_module is gm, f"{node} doesn't belong to passed in graph module {gm._get_name()}"
+        assert not node._erased, f"{node} has been removed from owning graph"
+        assert node in gm.graph.nodes, f"{node} is not found in graph module {gm._get_name()}"
+
     subgraph = torch.fx.Graph()
 
-    original_inputs = []
+    node_to_placeholder = {}  # mapping of nodes from old graph to placeholder in new graph
     node_map = {}       # mapping of nodes from old graph to new graph
 
     # handles inputs throught graph.node_copy's arg_transform functions
@@ -341,11 +346,12 @@ def fuse_partition(gm: torch.fx.GraphModule,
             # the node should have been copied aleady, as we are copying graph in the topological order
             return node_map[x]
 
-        # x is not in subgraph, create a new placeholder for subgraph
-        input = subgraph.placeholder(x.name, type_expr=x.type)
-        original_inputs.append(x)
+        if x not in node_to_placeholder:
+            # x is not in subgraph, create a new placeholder for subgraph
+            placeholder = subgraph.placeholder(x.name, type_expr=x.type)
+            node_to_placeholder[x] = placeholder
 
-        return input
+        return node_to_placeholder[x]
 
     # copy nodes in topological order
     for node in nodes:
@@ -384,7 +390,7 @@ def fuse_partition(gm: torch.fx.GraphModule,
 
     # TODO: fix this
     sub_gm.name = partition_name
-    sub_gm.orig_inputs = tuple(original_inputs)
+    sub_gm.orig_inputs = tuple(node_to_placeholder.keys())
     sub_gm.orig_outputs = original_outputs
 
     return sub_gm
