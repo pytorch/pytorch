@@ -663,6 +663,17 @@ void initJITBindings(PyObject* module) {
       .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
 #endif
       .def(
+          "_jit_set_tracer_state_warn",
+          [](bool new_warn) {
+            jit::tracer::getTracerStateWarnMode() = new_warn;
+          })
+      .def(
+          "_jit_get_tracer_state_warn",
+          []() {
+            bool current_tracer_warn = jit::tracer::getTracerStateWarnMode();
+            return current_tracer_warn;
+          })
+      .def(
           "_jit_set_nvfuser_skip_node_kind",
           // Args:
           //     `op_name`: Symbol of op;
@@ -811,6 +822,12 @@ void initJITBindings(PyObject* module) {
               std::cerr << "ERROR: only `stdout` and `stderr`"
                         << "are supported as output options" << std::endl;
             }
+          })
+      .def(
+          "_storage_id",
+          [](const at::Tensor& ten) -> int64_t {
+            return reinterpret_cast<int64_t>(
+                ten.storage().unsafeGetStorageImpl());
           })
       .def(
           "_jit_try_infer_type",
@@ -1471,6 +1488,14 @@ void initJITBindings(PyObject* module) {
           "has_default_value",
           [](Argument& self) -> py::bool_ {
             return self.default_value().has_value();
+          })
+      .def_property_readonly(
+          "is_out", [](Argument& self) { return self.is_out(); })
+      .def_property_readonly(
+          "is_mutable",
+          [](Argument& self) {
+            const AliasInfo* aliasInfo = self.alias_info();
+            return aliasInfo && aliasInfo->isWrite();
           })
       .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
         return self.kwarg_only();
