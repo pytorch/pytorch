@@ -153,7 +153,7 @@ if __name__ == "__main__":
     if len(sys.argv) == 2:
         file_dir = sys.argv[1]
 
-    if os.getenv("GITHUB_ACTIONS", "0") == "1":
+    if os.getenv("GITHUB_ACTIONS"):
         sample_lib = {
             "library": "abcd",
             "size": 1234,
@@ -167,7 +167,7 @@ if __name__ == "__main__":
     if "-android" in os.environ.get("BUILD_ENVIRONMENT", ""):
         report_android_sizes(file_dir)
     else:
-        if os.getenv("GITHUB_ACTIONS", "0") == "1":
+        if os.getenv("GITHUB_ACTIONS"):
             build_path = pathlib.Path("build") / "lib"
             libraries = [
                 (path.name, os.stat(path).st_size) for path in build_path.glob("*")
