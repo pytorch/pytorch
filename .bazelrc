@@ -48,10 +48,6 @@ build:cpu-only --@rules_cuda//cuda:enable_cuda=False
 #
 # On the bright side, this means we don't have to more broadly apply
 # the exceptions to an entire target.
-build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=type-limits
-build --per_file_copt='^//.*\.cu$'@--compiler-options=-Werror=type-limits
-build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-but-set-variable
-build --per_file_copt='^//.*\.cu$'@--compiler-options=-Werror=unused-but-set-variable
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=all
 build --per_file_copt='^//.*\.cu$'@--compiler-options=-Werror=all
 
@@ -66,6 +62,34 @@ build --per_file_copt='^//.*\.cu$'@--compiler-options=-Wno-sign-compare
 # We intentionally use #pragma unroll, which is compiler specific.
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-error=unknown-pragmas
 build --per_file_copt='^//.*\.cu$'@--compiler-options=-Wno-error=unknown-pragmas
+
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=extra
+build --per_file_copt='^//.*\.cu$'@--compiler-options=-Werror=extra
+
+# The following warnings come from -Wextra. We downgrade them from error
+# to warnings here.
+#
+# unused-parameter-compare has a tremendous amount of violations in the
+# codebase. It will be a lot of work to fix them, just disable it for
+# now.
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-unused-parameter
+build --per_file_copt='^//.*\.cu$'@--compiler-options=-Wno-unused-parameter
+# missing-field-parameters has both a large number of violations in
+# the codebase, but it also is used pervasively in the Python C
+# API. There are a couple of catches though:
+# * we use multiple versions of the Python API and hence have
+#   potentially multiple different versions of each relevant
+#   struct. They may have different numbers of fields. It will be
+#   unwieldy to support multiple versions in the same source file.
+# * Python itself for many of these structs recommends only
+#   initializing a subset of the fields. We should respect the API
+#   usage conventions of our dependencies.
+#
+# Hence, we just disable this warning altogether. We may want to clean
+# up some of the clear-cut cases that could be risky, but we still
+# likely want to have this disabled for the most part.
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-missing-field-initializers
+build --per_file_copt='^//.*\.cu$'@--compiler-options=-Wno-missing-field-initializers
 
 build --per_file_copt='//:aten/src/ATen/RegisterCompositeExplicitAutograd\.cpp$'@-Wno-error=unused-function
 build --per_file_copt='//:aten/src/ATen/RegisterCompositeImplicitAutograd\.cpp$'@-Wno-error=unused-function
