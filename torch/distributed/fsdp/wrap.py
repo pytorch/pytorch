@@ -55,9 +55,9 @@ def lambda_auto_wrap_policy(
        unwrapped_params (int):
            The number of parameters yet to be wrapped in this module.
 
-       transformer_layer_cls (int):
-           Submodules with one of the `transformer_layer_cls` names
-           will be wrapped as seperated FSDP units
+       lambda_fn (Callable[nn.Module] -> bool):
+           If this returns ``True``, this module will be wrapped by
+           wrapper_cls individually.
     """
     if recurse:
         # always recurse
