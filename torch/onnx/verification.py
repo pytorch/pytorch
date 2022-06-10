@@ -119,7 +119,7 @@ def _compare_ort_pytorch_outputs(ort_outs, pt_outs, rtol, atol):
 
     for ort_out, pt_out in zip(ort_outs, pt_outs):
         torch.testing.assert_close(
-            ort_out, pt_out, rtol=rtol, atol=atol, check_dtype=True
+            ort_out, pt_out, rtol=rtol, atol=atol, check_dtype=True, equal_nan=True
         )
 
 
