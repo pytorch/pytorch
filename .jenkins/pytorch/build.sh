@@ -6,9 +6,6 @@ set -ex
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-# shellcheck disable=SC2034
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
-
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -20,7 +17,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.3* || "$BUILD_ENVIRONMENT" == *linux-bionic-cuda11.5* || "$BUILD_ENVIRONMENT" == *linux-bionic-cuda11.6* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *deploy* ]]; then
   # Enabling DEPLOY build (embedded torch python interpreter, experimental)
   # only on one config for now, can expand later
   export USE_DEPLOY=ON
@@ -168,10 +165,6 @@ if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda11.1*build ]]; then
   export TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST";7.5"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
-  export TORCH_CUDA_ARCH_LIST="6.0"
-fi
-
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CC=clang
   export CXX=clang++
@@ -203,10 +196,10 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 
   get_bazel
 
-  # first build torch, the Python module, and tests for CPU-only
-  tools/bazel build --config=no-tty :torch :_C.so :all_tests
-  # then build everything with CUDA
-  tools/bazel build --config=no-tty --config=gpu :all
+  tools/bazel build --config=no-tty //...
+  # Build torch, the Python module, and tests for CPU-only
+  tools/bazel build --config=no-tty --config=cpu-only :torch :_C.so :all_tests
+
 else
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
@@ -216,12 +209,11 @@ else
 
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
-    # ppc64le, rocm builds fail when WERROR=1
+    # rocm builds fail when WERROR=1
     # XLA test build fails when WERROR=1
     # set only when building other architectures
     # or building non-XLA tests.
-    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* &&
-          "$BUILD_ENVIRONMENT" != *rocm*  &&
+    if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
       WERROR=1 python setup.py bdist_wheel
     else
