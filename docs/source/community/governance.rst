@@ -111,7 +111,7 @@ Nominating, Confirming and Removing Maintainers
 -----------------------------------------------
 
 The Principles
-++++++++++++++
+~~~~~~~~~~~~~~
 
 * Membership in module maintainer groups is given to **individuals**
   on **merit basis** after they demonstrated strong expertise of the
@@ -128,7 +128,7 @@ The Principles
 * The membership is for an individual, not a company.
 
 The Process for Nomination
-++++++++++++++++++++++++++
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 * We will have a nomination form, where anyone in the community can
   nominate a person to a Module maintainer position
@@ -151,7 +151,7 @@ The Process for Nomination
   and would be public.
 
 The Process for Removal
-+++++++++++++++++++++++
+~~~~~~~~~~~~~~~~~~~~~~~
 
 * Similar to the process for nomination, anyone in the community
   can nominate a person to be removed from a Module maintainer
@@ -175,7 +175,7 @@ The Process for Removal
   public.
 
 Nominating Core Maintainers
-+++++++++++++++++++++++++++
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 * Any core or module maintainer can nominate someone to become a
   core maintainer
@@ -194,7 +194,7 @@ Nominating Core Maintainers
   articulation of their reasoning behind the decision.
 
 Removing the Lead Core Maintainer and Nominating a New Lead Core Maintainer
-+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 * A super-majority of core maintainers (75%) can choose to
   remove the Lead Core Maintainer
