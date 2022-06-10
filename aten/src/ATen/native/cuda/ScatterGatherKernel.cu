@@ -448,7 +448,7 @@ struct cuda_scatter_gather_base_kernel {
     auto src_sizes = src.sizes();
     auto src_strides = src.strides();
     auto src_strides_vec = ensure_nonempty_vec(src_strides.vec());
-    
+
     auto ndim = index_sizes.size();
 
     // The scatter version of this works differently
