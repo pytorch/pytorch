@@ -2,6 +2,39 @@
 
 # Common util **functions** that can be sourced in other scripts.
 
+# note: printf is used instead of echo to avoid backslash
+# processing and to properly handle values that begin with a '-'.
+
+log() { printf '%s\n' "$*"; }
+error() { log "ERROR: $*" >&2; }
+fatal() { error "$@"; exit 1; }
+
+# compositional trap taken from https://stackoverflow.com/a/7287873/23845
+# appends a command to a trap
+#
+# - 1st arg:  code to add
+# - remaining args:  names of traps to modify
+#
+trap_add() {
+    trap_add_cmd=$1; shift || fatal "${FUNCNAME[0]} usage error"
+    for trap_add_name in "$@"; do
+        trap -- "$(
+            # helper fn to get existing trap command from output
+            # of trap -p
+            extract_trap_cmd() { printf '%s\n' "$3"; }
+            # print existing trap command with newline
+            eval "extract_trap_cmd $(trap -p "${trap_add_name}")"
+            # print the new trap command
+            printf '%s\n' "${trap_add_cmd}"
+        )" "${trap_add_name}" \
+            || fatal "unable to add to trap ${trap_add_name}"
+    done
+}
+# set the trace attribute for the above function.  this is
+# required to modify DEBUG or RETURN traps because functions don't
+# inherit them unless the trace attribute is set
+declare -f -t trap_add
+
 # NB: define this function before set -x, so that we don't
 # pollute the log with a premature EXITED_USER_LAND ;)
 function cleanup {
@@ -81,16 +114,23 @@ function install_monkeytype {
   pip_install MonkeyType
 }
 
-TORCHVISION_COMMIT="$(cat .github/ci_commit_pins/vision.txt)"
+
+function get_torchvision_commit() {
+  cat .github/ci_commit_pins/vision.txt
+}
 
 function install_torchvision() {
-  pip_install --user "git+https://github.com/pytorch/vision.git@$TORCHVISION_COMMIT"
+  local commit
+  commit=$(get_torchvision_commit)
+  pip_install --user "git+https://github.com/pytorch/vision.git@${commit}"
 }
 
 function checkout_install_torchvision() {
+  local commit
+  commit=$(get_torchvision_commit)
   git clone https://github.com/pytorch/vision
   pushd vision
-  git checkout "$TORCHVISION_COMMIT"
+  git checkout "${commit}"
   time python setup.py install
   popd
 }
@@ -105,17 +145,23 @@ function clone_pytorch_xla() {
   fi
 }
 
-TORCHDYNAMO_COMMIT="$(cat .github/ci_commit_pins/torchdynamo.txt)"
+function get_torchdynamo_commit() {
+  cat .github/ci_commit_pins/vision.txt
+}
 
 function install_torchdynamo() {
-  pip_install --user "git+https://github.com/pytorch/torchdynamo.git@$TORCHDYNAMO_COMMIT"
+  local commit
+  commit=$(get_torchdynamo_commit)
+  pip_install --user "git+https://github.com/pytorch/torchdynamo.git@${commit}"
 }
 
 function checkout_install_torchdynamo() {
+  local commit
+  commit=$(get_torchdynamo_commit)
   pushd ..
   git clone https://github.com/pytorch/torchdynamo
   pushd torchdynamo
-  git checkout "$TORCHDYNAMO_COMMIT"
+  git checkout "${commit}"
   time python setup.py develop
   popd
   popd
