@@ -134,10 +134,10 @@ struct _cpu_scatter_large_index_dim_loop {
   void operator()(
     scalar_t* self_data, int64_t self_dim_stride,
     int64_t* index_data, int64_t index_dim_stride,
-    int64_t* index_starting_ptr, int* index_shape,
-    int* index_strides,
-    scalar_t* src_starting_ptr, int* src_shape,
-    int* src_strides,
+    int64_t* index_starting_ptr, IntArrayRef index_shape,
+    IntArrayRef* index_strides,
+    scalar_t* src_starting_ptr, IntArrayRef src_shape,
+    IntArrayRef src_strides,
     int64_t dim, int64_t index_dim_size,
     int64_t index_upper_bound,
     func_t& f
