@@ -276,7 +276,6 @@ __global__ void segment_reduce_backward_kernel(
     }
   }
 }
-
 } // namespace
 
 Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
