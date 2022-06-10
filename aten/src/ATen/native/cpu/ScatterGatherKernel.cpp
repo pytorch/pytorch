@@ -364,20 +364,6 @@ struct cpu_scatter_gather_base_kernel {
               auto* src_data = src_data_bytes;
 
               scalar_t* absolute_src_ptr;
-              if (index_larger_than_src_in_scatter) {
-                int64_t src_offset = 0;
-                int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
-                int64_t index_idx;
-                for (int d = ndim - 1; d >= 0; d--) {
-                  index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
-                  absolute_index_offset -= index_idx * index_strides[d];
-
-                  index_idx %= src_shape[d];
-                  src_offset += src_strides[d] * index_idx;
-                }
-                absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
-              }
-
               for (const auto nelem : c10::irange(n)) {
                 (void)nelem; //Suppress unused variable warning
                 int64_t idx_dim = *(int64_t*)index_data;
@@ -387,6 +373,20 @@ struct cpu_scatter_gather_base_kernel {
                             "index ", *(int64_t*)index_data,
                             " is out of bounds for dimension ", dim,
                             " with size ", index_upper_bound);
+
+                if (index_larger_than_src_in_scatter) {
+                  int64_t src_offset = 0;
+                  int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
+                  int64_t index_idx;
+                  for (int d = ndim - 1; d >= 0; d--) {
+                    index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
+                    absolute_index_offset -= index_idx * index_strides[d];
+
+                    index_idx %= src_shape[d];
+                    src_offset += src_strides[d] * index_idx;
+                  }
+                  absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
+                }
 
                 kernel_func(
                   (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
@@ -502,20 +502,6 @@ struct cpu_scatter_gather_base_kernel {
               auto* src_data = src_data_bytes;
 
               scalar_t* absolute_src_ptr;
-              if (index_larger_than_src_in_scatter) {
-                int64_t src_offset = 0;
-                int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
-                int64_t index_idx;
-                for (int d = ndim - 1; d >= 0; d--) {
-                  index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
-                  absolute_index_offset -= index_idx * index_strides[d];
-
-                  index_idx %= src_shape[d];
-                  src_offset += src_strides[d] * index_idx;
-                }
-                absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
-              }
-
               for (const auto nelem : c10::irange(n)) {
                 (void)nelem; //Suppress unused variable warning
                 int64_t idx_dim = *(int64_t*)index_data;
@@ -525,6 +511,20 @@ struct cpu_scatter_gather_base_kernel {
                             "index ", *(int64_t*)index_data,
                             " is out of bounds for dimension ", dim,
                             " with size ", index_upper_bound);
+
+                if (index_larger_than_src_in_scatter) {
+                  int64_t src_offset = 0;
+                  int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
+                  int64_t index_idx;
+                  for (int d = ndim - 1; d >= 0; d--) {
+                    index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
+                    absolute_index_offset -= index_idx * index_strides[d];
+
+                    index_idx %= src_shape[d];
+                    src_offset += src_strides[d] * index_idx;
+                  }
+                  absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
+                }
 
                 kernel_func(
                   (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
@@ -640,20 +640,6 @@ struct cpu_scatter_gather_base_kernel {
               auto* src_data = src_data_bytes;
 
               scalar_t* absolute_src_ptr;
-              if (index_larger_than_src_in_scatter) {
-                int64_t src_offset = 0;
-                int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
-                int64_t index_idx;
-                for (int d = ndim - 1; d >= 0; d--) {
-                  index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
-                  absolute_index_offset -= index_idx * index_strides[d];
-
-                  index_idx %= src_shape[d];
-                  src_offset += src_strides[d] * index_idx;
-                }
-                absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
-              }
-
               for (const auto nelem : c10::irange(n)) {
                 (void)nelem; //Suppress unused variable warning
                 int64_t idx_dim = *(int64_t*)index_data;
@@ -663,6 +649,20 @@ struct cpu_scatter_gather_base_kernel {
                             "index ", *(int64_t*)index_data,
                             " is out of bounds for dimension ", dim,
                             " with size ", index_upper_bound);
+
+                if (index_larger_than_src_in_scatter) {
+                  int64_t src_offset = 0;
+                  int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
+                  int64_t index_idx;
+                  for (int d = ndim - 1; d >= 0; d--) {
+                    index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
+                    absolute_index_offset -= index_idx * index_strides[d];
+
+                    index_idx %= src_shape[d];
+                    src_offset += src_strides[d] * index_idx;
+                  }
+                  absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
+                }
 
                 kernel_func(
                   (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
@@ -778,20 +778,6 @@ struct cpu_scatter_gather_base_kernel {
               auto* src_data = src_data_bytes;
 
               scalar_t* absolute_src_ptr;
-              if (index_larger_than_src_in_scatter) {
-                int64_t src_offset = 0;
-                int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
-                int64_t index_idx;
-                for (int d = ndim - 1; d >= 0; d--) {
-                  index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
-                  absolute_index_offset -= index_idx * index_strides[d];
-
-                  index_idx %= src_shape[d];
-                  src_offset += src_strides[d] * index_idx;
-                }
-                absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
-              }
-
               for (const auto nelem : c10::irange(n)) {
                 (void)nelem; //Suppress unused variable warning
                 int64_t idx_dim = *(int64_t*)index_data;
@@ -801,6 +787,20 @@ struct cpu_scatter_gather_base_kernel {
                             "index ", *(int64_t*)index_data,
                             " is out of bounds for dimension ", dim,
                             " with size ", index_upper_bound);
+
+                if (index_larger_than_src_in_scatter) {
+                  int64_t src_offset = 0;
+                  int64_t absolute_index_offset = (int64_t)((int64_t*)index_data - (int64_t*)index_ptr); //  / sizeof(int64_t); // index tensor has word size = 8
+                  int64_t index_idx;
+                  for (int d = ndim - 1; d >= 0; d--) {
+                    index_idx = (absolute_index_offset / index_strides[d]) % index_shape[d];
+                    absolute_index_offset -= index_idx * index_strides[d];
+
+                    index_idx %= src_shape[d];
+                    src_offset += src_strides[d] * index_idx;
+                  }
+                  absolute_src_ptr = (scalar_t*)src_ptr + src_offset; // * sizeof(scalar_t); // source tensor has word size dependent on type
+                }
 
                 kernel_func(
                   (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
