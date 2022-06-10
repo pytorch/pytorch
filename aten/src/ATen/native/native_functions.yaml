@@ -6975,6 +6975,7 @@
   variants: method
   dispatch:
     CPU, CUDA: exponential_
+    MPS: exponential_mps_
   autogen: exponential.functional, exponential.out
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
