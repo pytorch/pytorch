@@ -7805,6 +7805,20 @@ def sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
                       broadcasts_input=True)
 
 
+def error_inputs_masked_fill(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
+    # `value` is not a 0-D tensor.
+    yield ErrorInput(SampleInput(make_arg((2, 2)), args=(make_arg(()) > 0, make_arg((1,)))),
+                     error_regex="only supports a 0-dimensional value tensor, but got tensor with 1 dimension")
+    # downcasting complex value (scalar overload)
+    yield ErrorInput(SampleInput(make_arg((2, 2)), args=(make_arg(()) > 0, 1j)),
+                     error_regex=r"value cannot be converted to type .* without overflow")
+    # downcasting complex value (tensor overload)
+    yield ErrorInput(SampleInput(torch.ones(2, dtype=torch.long, device=device),
+                                 args=(make_arg(()) > 0, torch.tensor(1j, device=device))),
+                     error_regex=r"value cannot be converted to type .* without overflow")
+
+
 def sample_inputs_masked_select(op_info, device, dtype, requires_grad, **kwargs):
     samples = (
         SampleInput(make_tensor((M, M), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
@@ -12792,6 +12806,7 @@ op_db: List[OpInfo] = [
     OpInfo('masked_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_masked_fill,
+           error_inputs_func=error_inputs_masked_fill,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
@@ -20870,6 +20885,18 @@ python_ref_db = [
     #
     # Conditional Reference OpInfos
     #
+    PythonRefInfo(
+        "_refs.masked_fill",
+        torch_opinfo_name="masked_fill",
+        skips=(
+            # NotImplementedError: argument of type: <class 'complex'>
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.cfloat, torch.cdouble)),
+            # TypeError: where(): incompatible function arguments.
+            DecorateInfo(unittest.skip("Passes for aten executor but not nvfuser"), 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.float32, torch.int32)),
+        )
+    ),
     PythonRefInfo(
         "_refs.where",
         torch_opinfo_name="where",
