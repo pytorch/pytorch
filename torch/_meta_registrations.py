@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
-from torch._prims import utils
-from torch._prims.utils import check
+from torch._prims import ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND, utils
+from torch._prims.utils import ELEMENTWISE_TYPE_PROMOTION_KIND, check, elementwise_dtypes
 from torch._prims.wrappers import out_wrapper_multi, out_wrapper
 
 from typing import List, Optional
@@ -41,6 +41,17 @@ def meta_max(self):
 @torch.library.impl(meta_lib, "min")
 def meta_min(self):
     return self.new_empty(())
+
+
+@torch.library.impl(meta_lib, "angle")
+def meta_angle(self):
+    _, result_dtype = elementwise_dtypes(self, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+    return self.new_empty(self.size(), dtype=result_dtype)
+
+@torch.library.impl(meta_lib, "angle.out")
+def meta_angle_out(self, out):
+    torch._resize_output_(out, self.size(), self.device)
+    return out.copy_(torch.angle(self))
 
 
 def squareCheckInputs(self, f_name):
