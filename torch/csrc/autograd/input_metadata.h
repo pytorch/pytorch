@@ -85,7 +85,7 @@ struct InputMetadata {
     TORCH_CHECK(
         !is_nested_tensor(),
         "Zeros is not currently supported for nested tensors.")
-    return at::zeros(c10::asIntArrayRefSlow(shape_as_dim_vector()), options_);
+    return at::zeros(shape_as_dim_vector(), options_);
   }
 
   bool is_same_shape(const at::Tensor& grad) const {
