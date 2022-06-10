@@ -85,7 +85,7 @@ class TestScatterGather(TestCase):
         self.assertEqual(grad, expected_grad, atol=0, rtol=0)
 
     def _test_scatter_base(self, fn, *, device, dtype, is_scalar, reduction,
-                           unique_indices=True, include_self=True):
+                           unique_indices=True, include_self=True, src_smaller_than_index = False):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
         elems_per_row = random.randint(1, 10)
         dim = random.randrange(3)
@@ -98,7 +98,10 @@ class TestScatterGather(TestCase):
         if is_scalar:
             src = random.random()
         else:
-            src_size = [random.randint(1, 5) + s for s in idx_size]
+            sign = [1, 1, 1]
+            if src_smaller_than_index:
+                while(min(sign) > 0): sign = [random.choice([-1, 1]) if s > 1 else 1 for s in idx_size]
+            src_size = [max(idx_size[i] + sign[i] * random.randint(1, 5), 1) for i in range(3)]
             src = make_tensor(tuple(src_size), device=device, dtype=dtype)
 
         base = make_tensor((m, n, o), device=device, dtype=dtype)
@@ -118,12 +121,12 @@ class TestScatterGather(TestCase):
                     ii = [i, j, k]
                     ii[dim] = idx[i, j, k]
                     if fn is torch.Tensor.scatter_add_:
-                        expected[tuple(ii)] += src[i, j, k]
+                        expected[tuple(ii)] += src[i % src_size[0], j % src_size[1], k % src_size[2]] if src_smaller_than_index else src[i, j, k]
                     else:
                         # method may be 'scatter_', 'scatter', 'scatter_reduce'
                         # or 'scatter_reduce_', the former two might have a reduction argument
                         # while the latter two always do
-                        value = src if is_scalar else src[i, j, k]
+                        value = src if is_scalar else src[i % src_size[0], j % src_size[1], k % src_size[2]] if src_smaller_than_index else src[i, j, k]
 
                         if ((not include_self) and counts[tuple(ii)] == 0):
                             expected[tuple(ii)] = value
@@ -166,6 +169,8 @@ class TestScatterGather(TestCase):
     def test_scatter_(self, device, dtype):
         self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
                                 is_scalar=False, reduction=None)
+        self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
+                                is_scalar=False, reduction=None, src_smaller_than_index=True)
 
     @dtypes(torch.float16, torch.float32, torch.complex64)
     def test_scatter__scalar(self, device, dtype):
@@ -181,12 +186,16 @@ class TestScatterGather(TestCase):
             self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
                                     is_scalar=False, reduction=reduction)
             self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
+                                    is_scalar=False, reduction=reduction, src_smaller_than_index=True)
+            self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
                                     is_scalar=True, reduction=reduction)
 
     @dtypes(torch.float16, torch.float32, torch.complex64)
     def test_scatter_add_(self, device, dtype):
         self._test_scatter_base(torch.Tensor.scatter_add_, device=device, dtype=dtype,
                                 is_scalar=False, reduction=None)
+        self._test_scatter_base(torch.Tensor.scatter_add_, device=device, dtype=dtype,
+                                is_scalar=False, reduction=None, src_smaller_than_index=True)
 
     @dtypes(torch.float32)
     def test_scatter_add_mult_index_base(self, device, dtype):
@@ -206,6 +215,9 @@ class TestScatterGather(TestCase):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
                                     is_scalar=False, reduction='sum', unique_indices=False,
                                     include_self=include_self)
+            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                    is_scalar=False, reduction='sum', unique_indices=False,
+                                    include_self=include_self, src_smaller_than_index=True)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True))
     @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
@@ -214,6 +226,9 @@ class TestScatterGather(TestCase):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
                                     is_scalar=False, reduction='prod', unique_indices=False,
                                     include_self=include_self)
+            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                    is_scalar=False, reduction='prod', unique_indices=False,
+                                    include_self=include_self, src_smaller_than_index=True)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
     @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
@@ -222,6 +237,9 @@ class TestScatterGather(TestCase):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
                                     is_scalar=False, reduction='mean', unique_indices=False,
                                     include_self=include_self)
+            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                    is_scalar=False, reduction='mean', unique_indices=False,
+                                    include_self=include_self, src_smaller_than_index=True)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
@@ -230,6 +248,9 @@ class TestScatterGather(TestCase):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
                                     is_scalar=False, reduction='amax', unique_indices=False,
                                     include_self=include_self)
+            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                    is_scalar=False, reduction='amax', unique_indices=False,
+                                    include_self=include_self, src_smaller_than_index=True)
             # simple test for nan/inf propagation
             if (dtype.is_floating_point):
                 input = torch.zeros(3, device=device, dtype=dtype)
@@ -249,6 +270,9 @@ class TestScatterGather(TestCase):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
                                     is_scalar=False, reduction='amin', unique_indices=False,
                                     include_self=include_self)
+            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                    is_scalar=False, reduction='amin', unique_indices=False,
+                                    include_self=include_self, src_smaller_than_index=True)
             # simple test for nan/inf propagation
             if (dtype.is_floating_point):
                 input = torch.zeros(3, device=device, dtype=dtype)
