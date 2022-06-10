@@ -533,14 +533,14 @@ class TestLinalg(TestCase):
 
         # dtypes should be safely castable
         out = torch.empty(*A.shape, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "but got int instead"):
             torch.linalg.cholesky(A, out=out)
 
         # device should match
         if torch.cuda.is_available():
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             out = torch.empty(0, device=wrong_device, dtype=dtype)
-            with self.assertRaisesRegex(RuntimeError, "Expected result and input tensors to be on the same device"):
+            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.cholesky(A, out=out)
 
     # NOTE: old_cholesky* tests were moved here from test_torch.py and test_autograd.py
@@ -707,7 +707,7 @@ class TestLinalg(TestCase):
         A = random_hermitian_pd_matrix(3, dtype=dtype, device=device)
         L = torch.empty(A.shape, dtype=dtype, device=device)
         info = torch.empty(A.shape[:-2], dtype=torch.int64, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got info with dtype Long"):
+        with self.assertRaisesRegex(RuntimeError, "but got long int instead"):
             torch.linalg.cholesky_ex(A, out=(L, info))
 
     def _test_addr_vs_numpy(self, device, dtype, beta=1, alpha=1):
