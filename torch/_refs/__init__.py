@@ -145,6 +145,7 @@ __all__ = [
     #
     # Conditional references
     #
+    "masked_fill",
     "where",
     #
     # Data conversion and movement references
@@ -1108,8 +1109,8 @@ def clamp(
 )
 def where(
     pred: Tensor,
-    a: Optional[Union[TensorLikeType, NumberType]] = None,
-    b: Optional[Union[TensorLikeType, NumberType]] = None,
+    a: Optional[TensorOrNumberLikeType] = None,
+    b: Optional[TensorOrNumberLikeType] = None,
 ):
     """ """
 
@@ -2376,6 +2377,39 @@ def uniform(
     device = utils.canonicalize_device(device)
 
     return prims.uniform(shape, low=low, high=high, dtype=dtype, device=device)
+
+
+def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType):
+    python_type = utils.dtype_to_type(a.dtype)
+    if isinstance(value, Number):
+        value_type = type(value)
+    else:
+        # NOTE: Could not use value = item(value) as it resulted in
+        # RuntimeError: Cannot cast FakeTensor(cpu) to number
+        value_ndim = value.ndim
+        check(
+            value_ndim == 0,
+            lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value_ndim} dimension",
+        )
+        value_type = utils.dtype_to_type(value.dtype)
+
+    if value_type is complex:
+        # only downcasting from complex to lower type is not allowed.
+        # We allow casting `value` to lower type for other case
+        # Eg. float -> int.
+        # Ref: https://github.com/pytorch/pytorch/issues/79195
+        check(
+            utils.is_weakly_lesser_type(value_type, python_type),
+            lambda: f"could not convert to type {python_type} without overflow",
+        )
+
+    # Since `where` allows type-promotion,
+    # cast value to correct type before passing to `where`
+    if isinstance(value, Number):
+        return where(mask, python_type(value), a)
+
+    assert isinstance(value, TensorLike)
+    return where(mask, prims.to_dtype(value, a.dtype), a)
 
 
 # TODO: add OpInfo for torch.equal and refs.equal
