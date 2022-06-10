@@ -118,7 +118,9 @@ def _compare_ort_pytorch_outputs(ort_outs, pt_outs, rtol, atol):
     assert len(pt_outs) == len(ort_outs), "number of outputs differ"
 
     for ort_out, pt_out in zip(ort_outs, pt_outs):
-        np.testing.assert_allclose(ort_out, pt_out, rtol=rtol, atol=atol)
+        torch.testing.assert_close(
+            ort_out, pt_out, rtol=rtol, atol=atol, check_dtype=True
+        )
 
 
 def _prepare_input_for_pytorch(args, kwargs):
