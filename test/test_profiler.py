@@ -109,31 +109,31 @@ class ProfilerTree:
 
 class TestProfilerTree(TestCase):
     def assertTreesMatch(self, actual: str, expected: str):
-          # Warning: Here be dragons
-          #   Different platforms will have subtly different behavior for Python
-          #   tracing. Observed differences include:
-          #     1) Windows symbolicates names differently from posix
-          #     2) The profile callback for c_call does not fire for Tensor.__pow__
-          #        on certain platforms. This is not caused by the function tracer,
-          #        but by cPython itself.
-          #
-          # The purpose of these unit tests is to ensure that the profiler is
-          # doing reasonable things. When these platform dependent variations occur
-          # simply coerce them into a platform independent form. If you made a
-          # change in the codebase which changes the trace produced, simply use
-          # EXPECTTEST_ACCEPT=1 to update the tests to reflect the new structure.
+        # Warning: Here be dragons
+        #   Different platforms will have subtly different behavior for Python
+        #   tracing. Observed differences include:
+        #     1) Windows symbolicates names differently from posix
+        #     2) The profile callback for c_call does not fire for Tensor.__pow__
+        #        on certain platforms. This is not caused by the function tracer,
+        #        but by cPython itself.
+        #
+        # The purpose of these unit tests is to ensure that the profiler is
+        # doing reasonable things. When these platform dependent variations occur
+        # simply coerce them into a platform independent form. If you made a
+        # change in the codebase which changes the trace produced, simply use
+        # EXPECTTEST_ACCEPT=1 to update the tests to reflect the new structure.
 
-          replicate = getattr(self, "tree_replicate", None)
-          self.assertIsNotNone(replicate, "Please annotate test with `@ProfilerTree.test`")
+        replicate = getattr(self, "tree_replicate", None)
+        self.assertIsNotNone(replicate, "Please annotate test with `@ProfilerTree.test`")
 
-          # The profiler should produce deterministic results and should return
-          # to a clean state after each run. As a result, only the first
-          # replicate is allowed to update `expected`. If subsequent runs do not
-          # match it is a bug in the profiler.
-          if replicate:
-              self.assertEqual(actual, expected)
-          else:
-              self.assertExpectedInline(actual, expected, skip=1)
+        # The profiler should produce deterministic results and should return
+        # to a clean state after each run. As a result, only the first
+        # replicate is allowed to update `expected`. If subsequent runs do not
+        # match it is a bug in the profiler.
+        if replicate:
+            self.assertEqual(actual, expected)
+        else:
+            self.assertExpectedInline(actual, expected, skip=1)
 
     @ProfilerTree.test
     def test_profiler_experimental_tree(self):
