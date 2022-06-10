@@ -3,7 +3,7 @@ import os
 
 IN_CI = os.environ.get("CI")
 
-from tools.stats.upload_test_stats import get_test_cases
+from tools.stats.upload_test_stats import get_tests
 
 
 class TestUploadTestStats(unittest.TestCase):
@@ -13,8 +13,9 @@ class TestUploadTestStats(unittest.TestCase):
     )
     def test_existing_job(self) -> None:
         """Run on a known-good job and make sure we don't error and get basically okay reults."""
-        test_cases = get_test_cases(2465214458, 1)
+        test_cases, test_suites = get_tests(2465214458, 1)
         self.assertEqual(len(test_cases), 731457)
+        self.assertEqual(len(test_suites), 7781)
 
 
 if __name__ == "__main__":
