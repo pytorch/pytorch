@@ -85,7 +85,7 @@ class TestScatterGather(TestCase):
         self.assertEqual(grad, expected_grad, atol=0, rtol=0)
 
     def _test_scatter_base(self, fn, *, device, dtype, is_scalar, reduction,
-                           unique_indices=True, include_self=True, src_smaller_than_index = False):
+                           unique_indices=True, include_self=True, src_smaller_than_index=False):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
         elems_per_row = random.randint(1, 10)
         dim = random.randrange(3)
@@ -100,7 +100,8 @@ class TestScatterGather(TestCase):
         else:
             sign = [1, 1, 1]
             if src_smaller_than_index:
-                while(min(sign) > 0): sign = [random.choice([-1, 1]) if s > 1 else 1 for s in idx_size]
+                while(min(sign) > 0):
+                    sign = [random.choice([-1, 1]) if s > 1 else 1 for s in idx_size]
             src_size = [max(idx_size[i] + sign[i] * random.randint(1, 5), 1) for i in range(3)]
             src = make_tensor(tuple(src_size), device=device, dtype=dtype)
 
@@ -121,12 +122,14 @@ class TestScatterGather(TestCase):
                     ii = [i, j, k]
                     ii[dim] = idx[i, j, k]
                     if fn is torch.Tensor.scatter_add_:
-                        expected[tuple(ii)] += src[i % src_size[0], j % src_size[1], k % src_size[2]] if src_smaller_than_index else src[i, j, k]
+                        expected[tuple(ii)] += (src[i, j, k] if not src_smaller_than_index
+                                                else src[i % src_size[0], j % src_size[1], k % src_size[2]])
                     else:
                         # method may be 'scatter_', 'scatter', 'scatter_reduce'
                         # or 'scatter_reduce_', the former two might have a reduction argument
                         # while the latter two always do
-                        value = src if is_scalar else src[i % src_size[0], j % src_size[1], k % src_size[2]] if src_smaller_than_index else src[i, j, k]
+                        value = src if is_scalar else (src[i, j, k] if not src_smaller_than_index
+                                                       else src[i % src_size[0], j % src_size[1], k % src_size[2]])
 
                         if ((not include_self) and counts[tuple(ii)] == 0):
                             expected[tuple(ii)] = value
