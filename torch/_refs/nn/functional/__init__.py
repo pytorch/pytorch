@@ -33,7 +33,7 @@ __all__ = [
     "relu",
     "selu",
     "softplus",
-    "softshrink"
+    "softshrink",
     "tanhshrink",
 ]
 
@@ -259,13 +259,14 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     #               = x + lambd if x < -lambd
     #               = 0 otherwise
     ge_mask = refs.ge(a, lambd)
-    a = refs.where(ge_mask, refs.sub(a, lambd), a)
+    a = refs.where(ge_mask, a - lambd, a)
     le_mask = refs.le(a, -lambd)
-    a = refs.where(le_mask, refs.add(a, lambd), a)
+    a = refs.where(le_mask, a + lambd, a)
 
     # TODO: Replace with refs.logical_not when it exists!
     def logical_not(x):
-        return refs.logical_xor(refs.full_like(x, True), x)
+        return refs.eq(x, False)
+
     zero_mask = logical_not(refs.logical_or(ge_mask, le_mask))
     return refs.where(zero_mask, 0, a)
 
