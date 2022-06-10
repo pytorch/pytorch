@@ -680,7 +680,7 @@ class SequentialLR(_LRScheduler):
         # decrement the last epoch, so that it remains the same after the step
         self.last_epoch -= 1
         # Call the step
-        with self.init_optimizer_lr():
+        with scheduler.init_optimizer_lr():
             self.step()
 
     def step(self):
