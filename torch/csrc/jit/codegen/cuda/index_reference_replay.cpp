@@ -41,8 +41,9 @@ IterDomain* IndexReferenceReplay::idCopy(IterDomain* id) {
   // reduction. All we care about are the transformations, and trying to make
   // sure we track correctly a replaying with consistent reduction/broadcast
   // domains is challenging and unnecessary.
-  auto copied_id = SimplifyingIrBuilder::create<IterDomain>(
-      id->container(), id->start(), id->extent(), id->getParallelType());
+  auto copied_id = IterDomainBuilder(id->start(), id->extent())
+                       .parallel_type(id->getParallelType())
+                       .build();
   replayed_ids_.emplace_back(copied_id);
   return copied_id;
 }
