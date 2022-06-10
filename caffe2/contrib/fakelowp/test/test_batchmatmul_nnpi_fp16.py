@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import numpy as np
 import unittest
 import caffe2.python.fakelowp.init_shared_libs  # noqa
@@ -11,6 +6,7 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
+import datetime
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -20,35 +16,31 @@ core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
 
 class TestBatchMatMul(serial.SerializedTestCase):
     @given(
-        # C=0, #st.integers(min_value=0, max_value=3),  # number of batch dims
+        C=st.integers(min_value=1, max_value=10),
         M=st.integers(min_value=1, max_value=50),
-        K=st.integers(min_value=1, max_value=50),
+        K=st.integers(min_value=1, max_value=512),
         N=st.integers(min_value=1, max_value=50),
         rand_seed=st.integers(0, 65534),
         trans_a=st.booleans(),
         trans_b=st.booleans(),
         run_ints=st.booleans()
     )
-    @settings(deadline=None)
-    def test_batch_matmul(self, M, K, N, rand_seed, trans_a, trans_b, run_ints):
+    @settings(deadline=datetime.timedelta(seconds=10))
+    def test_batch_matmul(self, M, K, N, C, rand_seed, trans_a, trans_b, run_ints):
         np.random.seed(rand_seed)
         workspace.ResetWorkspace()
-        C = 0  # TODO
-        batch_dims = np.random.randint(
-            low=1,
-            high=3,
-            size=C,
-            dtype=np.int64).tolist()
+
+        batch_dims = [C]
 
         if run_ints:
-            X = np.random.randint(low=1, high=3, size=((1, M, K))).astype(np.float32)
+            X = np.random.randint(low=1, high=3, size=((C, M, K))).astype(np.float32)
         else:
             X = 100 * (np.random.rand(*(batch_dims + [M, K])).astype(np.float32) - 0.5)
         if trans_a:
             X = X.swapaxes(-1, -2)
 
         if run_ints:
-            Y = np.random.randint(low=1, high=3, size=((1, K, N))).astype(np.float32)
+            Y = np.random.randint(low=1, high=3, size=((C, K, N))).astype(np.float32)
         else:
             Y = 100 * (np.random.rand(*(batch_dims + [K, N])).astype(np.float32) - 0.5)
         if trans_b:
@@ -93,8 +85,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
         workspace.RunNet(pred_net_ref)
         out_c2_fakefp16 = workspace.FetchBlob('out')
 
-        diff = np.abs((out_c2_fakefp16 - out_glow) / (out_c2_fakefp16 + 1e-8))
-        rowdiff = np.max(diff, axis=1)
+        diff = np.abs(out_c2_fakefp16 - out_glow)
 
         if not np.allclose(out_glow, out_c2_fakefp16):
             print_test_debug_info("bmm", {

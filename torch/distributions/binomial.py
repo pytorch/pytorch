@@ -1,4 +1,3 @@
-from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
@@ -42,18 +41,13 @@ class Binomial(Distribution):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
             self.total_count, self.probs, = broadcast_all(total_count, probs)
-            self.total_count = self.total_count.type_as(self.logits)
-            is_scalar = isinstance(self.probs, Number)
+            self.total_count = self.total_count.type_as(self.probs)
         else:
             self.total_count, self.logits, = broadcast_all(total_count, logits)
             self.total_count = self.total_count.type_as(self.logits)
-            is_scalar = isinstance(self.logits, Number)
 
         self._param = self.probs if probs is not None else self.logits
-        if is_scalar:
-            batch_shape = torch.Size()
-        else:
-            batch_shape = self._param.size()
+        batch_shape = self._param.size()
         super(Binomial, self).__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
@@ -73,13 +67,17 @@ class Binomial(Distribution):
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=True, event_dim=0)
     def support(self):
         return constraints.integer_interval(0, self.total_count)
 
     @property
     def mean(self):
         return self.total_count * self.probs
+
+    @property
+    def mode(self):
+        return ((self.total_count + 1) * self.probs).floor().clamp(max=self.total_count)
 
     @property
     def variance(self):
@@ -117,6 +115,14 @@ class Binomial(Distribution):
                           + self.total_count * torch.log1p(torch.exp(-torch.abs(self.logits)))
                           - log_factorial_n)
         return value * self.logits - log_factorial_k - log_factorial_nmk - normalize_term
+
+    def entropy(self):
+        total_count = int(self.total_count.max())
+        if not self.total_count.min() == total_count:
+            raise NotImplementedError("Inhomogeneous total count not supported by `entropy`.")
+
+        log_prob = self.log_prob(self.enumerate_support(False))
+        return -(torch.exp(log_prob) * log_prob).sum(0)
 
     def enumerate_support(self, expand=True):
         total_count = int(self.total_count.max())

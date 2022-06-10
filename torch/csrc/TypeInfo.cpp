@@ -21,7 +21,7 @@ PyObject* THPFInfo_New(const at::ScalarType& type) {
   if (!self)
     throw python_error();
   auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
-  self_->type = c10::toValueType(type);
+  self_->type = c10::toRealValueType(type);
   return self.release();
 }
 
@@ -107,6 +107,7 @@ PyObject* THPDTypeInfo_compare(THPDTypeInfo* a, THPDTypeInfo* b, int op) {
 }
 
 static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
   int bits = elementSize(self->type) * 8;
   return THPUtils_packInt64(bits);
 }
@@ -141,7 +142,7 @@ static PyObject* THPIInfo_max(THPIInfo* self, void*) {
     });
   }
   // Quantized Type
-  return AT_DISPATCH_QINT_TYPES(self->type, "max", [] {
+  return AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(self->type, "max", [] {
       return THPUtils_packInt64(std::numeric_limits<underlying_t>::max());
   });
 }
@@ -153,7 +154,7 @@ static PyObject* THPIInfo_min(THPIInfo* self, void*) {
     });
   }
   // Quantized Type
-  return AT_DISPATCH_QINT_TYPES(self->type, "min", [] {
+  return AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(self->type, "min", [] {
       return THPUtils_packInt64(std::numeric_limits<underlying_t>::lowest());
   });
 }
@@ -161,16 +162,22 @@ static PyObject* THPIInfo_min(THPIInfo* self, void*) {
 static PyObject* THPIInfo_dtype(THPIInfo* self, void*) {
   std::string primary_name, legacy_name;
   std::tie(primary_name, legacy_name) = torch::utils::getDtypeNames(self->type);
+  // NOLINTNEXTLINE(clang-diagnostic-unused-local-typedef)
   return AT_DISPATCH_INTEGRAL_TYPES(self->type, "dtype", [primary_name] {
     return PyUnicode_FromString((char*)primary_name.data());
   });
 }
 
-static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
+static PyObject* THPFInfo_smallest_normal(THPFInfo* self, void*) {
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::kHalf, at::ScalarType::BFloat16, self->type, "min", [] {
     return PyFloat_FromDouble(
         std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min());
   });
+}
+
+static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
+  // see gh-70909, essentially the array_api prefers smallest_normal over tiny
+  return THPFInfo_smallest_normal(self, nullptr);
 }
 
 static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
@@ -183,6 +190,7 @@ static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
 static PyObject* THPFInfo_dtype(THPFInfo* self, void*) {
   std::string primary_name, legacy_name;
   std::tie(primary_name, legacy_name) = torch::utils::getDtypeNames(self->type);
+  // NOLINTNEXTLINE(clang-diagnostic-unused-local-typedef)
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::kHalf, at::ScalarType::BFloat16, self->type, "dtype", [primary_name] {
     return PyUnicode_FromString((char*)primary_name.data());
   });
@@ -194,6 +202,7 @@ PyObject* THPFInfo_str(THPFInfo* self) {
   oss << ", min=" << PyFloat_AsDouble(THPFInfo_min(self, nullptr));
   oss << ", max=" << PyFloat_AsDouble(THPFInfo_max(self, nullptr));
   oss << ", eps=" << PyFloat_AsDouble(THPFInfo_eps(self, nullptr));
+  oss << ", smallest_normal=" << PyFloat_AsDouble(THPFInfo_smallest_normal(self, nullptr));
   oss << ", tiny=" << PyFloat_AsDouble(THPFInfo_tiny(self, nullptr));
   oss << ", dtype=" << PyUnicode_AsUTF8(THPFInfo_dtype(self, nullptr)) << ")";
 
@@ -213,60 +222,64 @@ PyObject* THPIInfo_str(THPIInfo* self) {
   return THPUtils_packString(oss.str().c_str());
 }
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays)
 static struct PyGetSetDef THPFInfo_properties[] = {
     {"bits", (getter)THPDTypeInfo_bits, nullptr, nullptr, nullptr},
     {"eps", (getter)THPFInfo_eps, nullptr, nullptr, nullptr},
     {"max", (getter)THPFInfo_max, nullptr, nullptr, nullptr},
     {"min", (getter)THPFInfo_min, nullptr, nullptr, nullptr},
+    {"smallest_normal", (getter)THPFInfo_smallest_normal, nullptr, nullptr, nullptr},
     {"tiny", (getter)THPFInfo_tiny, nullptr, nullptr, nullptr},
     {"resolution", (getter)THPFInfo_resolution, nullptr, nullptr, nullptr},
     {"dtype", (getter)THPFInfo_dtype, nullptr, nullptr, nullptr},
     {nullptr}};
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef THPFInfo_methods[] = {
     {nullptr} /* Sentinel */
 };
 
 PyTypeObject THPFInfoType = {
     PyVarObject_HEAD_INIT(nullptr, 0) "torch.finfo", /* tp_name */
-    sizeof(THPFInfo), /* tp_basicsize */
-    0, /* tp_itemsize */
-    nullptr, /* tp_dealloc */
-    0, /* tp_vectorcall_offset */
-    nullptr, /* tp_getattr */
-    nullptr, /* tp_setattr */
-    nullptr, /* tp_reserved */
-    (reprfunc)THPFInfo_str, /* tp_repr */
-    nullptr, /* tp_as_number */
-    nullptr, /* tp_as_sequence */
-    nullptr, /* tp_as_mapping */
-    nullptr, /* tp_hash  */
-    nullptr, /* tp_call */
-    (reprfunc)THPFInfo_str, /* tp_str */
-    nullptr, /* tp_getattro */
-    nullptr, /* tp_setattro */
-    nullptr, /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT, /* tp_flags */
-    nullptr, /* tp_doc */
-    nullptr, /* tp_traverse */
-    nullptr, /* tp_clear */
-    (richcmpfunc)THPDTypeInfo_compare, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
-    nullptr, /* tp_iter */
-    nullptr, /* tp_iternext */
-    THPFInfo_methods, /* tp_methods */
-    nullptr, /* tp_members */
-    THPFInfo_properties, /* tp_getset */
-    nullptr, /* tp_base */
-    nullptr, /* tp_dict */
-    nullptr, /* tp_descr_get */
-    nullptr, /* tp_descr_set */
-    0, /* tp_dictoffset */
-    nullptr, /* tp_init */
-    nullptr, /* tp_alloc */
-    THPFInfo_pynew, /* tp_new */
+    sizeof(THPFInfo),                                /* tp_basicsize */
+    0,                                               /* tp_itemsize */
+    nullptr,                                         /* tp_dealloc */
+    0,                                               /* tp_vectorcall_offset */
+    nullptr,                                         /* tp_getattr */
+    nullptr,                                         /* tp_setattr */
+    nullptr,                                         /* tp_reserved */
+    (reprfunc)THPFInfo_str,                          /* tp_repr */
+    nullptr,                                         /* tp_as_number */
+    nullptr,                                         /* tp_as_sequence */
+    nullptr,                                         /* tp_as_mapping */
+    nullptr,                                         /* tp_hash  */
+    nullptr,                                         /* tp_call */
+    (reprfunc)THPFInfo_str,                          /* tp_str */
+    nullptr,                                         /* tp_getattro */
+    nullptr,                                         /* tp_setattro */
+    nullptr,                                         /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT,                              /* tp_flags */
+    nullptr,                                         /* tp_doc */
+    nullptr,                                         /* tp_traverse */
+    nullptr,                                         /* tp_clear */
+    (richcmpfunc)THPDTypeInfo_compare,               /* tp_richcompare */
+    0,                                               /* tp_weaklistoffset */
+    nullptr,                                         /* tp_iter */
+    nullptr,                                         /* tp_iternext */
+    THPFInfo_methods,                                /* tp_methods */
+    nullptr,                                         /* tp_members */
+    THPFInfo_properties,                             /* tp_getset */
+    nullptr,                                         /* tp_base */
+    nullptr,                                         /* tp_dict */
+    nullptr,                                         /* tp_descr_get */
+    nullptr,                                         /* tp_descr_set */
+    0,                                               /* tp_dictoffset */
+    nullptr,                                         /* tp_init */
+    nullptr,                                         /* tp_alloc */
+    THPFInfo_pynew,                                  /* tp_new */
 };
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays)
 static struct PyGetSetDef THPIInfo_properties[] = {
     {"bits", (getter)THPDTypeInfo_bits, nullptr, nullptr, nullptr},
     {"max", (getter)THPIInfo_max, nullptr, nullptr, nullptr},
@@ -274,6 +287,7 @@ static struct PyGetSetDef THPIInfo_properties[] = {
     {"dtype", (getter)THPIInfo_dtype, nullptr, nullptr, nullptr},
     {nullptr}};
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef THPIInfo_methods[] = {
     {nullptr} /* Sentinel */
 };

@@ -1,13 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import copy
 import logging
 import os
 import re
-import six
 
 from tensorboard.compat.proto.graph_pb2 import GraphDef
 from tensorboard.compat.proto.node_def_pb2 import NodeDef
@@ -17,9 +11,11 @@ from builtins import bytes
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 
+from typing import Set, Dict, Tuple, List
 
-def _make_unique_name(seen, name, min_version=0):
-    '''
+
+def _make_unique_name(seen: Set[str], name: str, min_version: int = 0):
+    """
     Make the name unique by appending a unique number to the name. Used for SSA.
 
     Args:
@@ -31,19 +27,19 @@ def _make_unique_name(seen, name, min_version=0):
 
     Returns:
         x (string): A version of name that is not in seen.
-    '''
+    """
     assert name is not None
     i = min_version
-    x = '%s_%d' % (name, i) if i else name
+    x = "%s_%d" % (name, i) if i else name
     while x in seen:
         i += 1
-        x = '%s_%d' % (name, i)
+        x = "%s_%d" % (name, i)
     seen.add(x)
     return x
 
 
 def _rename_tensorflow_style(shapes, blob_name_tracker, ops):
-    '''
+    """
     Convert some of the common names in Caffe2 to tensorflow.
     NOTE: The common names in both Caffe2 and Tensorflow are currently
         hardcoded, if either side changes at some point, then this code should
@@ -57,7 +53,7 @@ def _rename_tensorflow_style(shapes, blob_name_tracker, ops):
 
     Returns:
         None. The _rename_all() call modifies blob_name_tracker and ops in-place.
-    '''
+    """
     WEIGHT = re.compile(r"(_w)$")
     WEIGHT_ = re.compile(r"(_w_)")
     BN = re.compile(r"(_bn)$")
@@ -71,18 +67,19 @@ def _rename_tensorflow_style(shapes, blob_name_tracker, ops):
     BRANCH = re.compile(r"(_branch)")
 
     def f(name):
-        inter_name = WEIGHT_.sub('/weight_', WEIGHT.sub('/weight', name))
-        inter_name = BN_.sub('/batchnorm_', BN.sub('/batchnorm', inter_name))
-        inter_name = BIAS_.sub('/bias_', BIAS.sub('/bias', inter_name))
-        inter_name = SCALE_.sub('/scale_', SCALE.sub('/scale', inter_name))
-        inter_name = SUM_.sub('/sum_', SUM.sub('/sum', inter_name))
-        new_name = BRANCH.sub('/branch', inter_name)
+        inter_name = WEIGHT_.sub("/weight_", WEIGHT.sub("/weight", name))
+        inter_name = BN_.sub("/batchnorm_", BN.sub("/batchnorm", inter_name))
+        inter_name = BIAS_.sub("/bias_", BIAS.sub("/bias", inter_name))
+        inter_name = SCALE_.sub("/scale_", SCALE.sub("/scale", inter_name))
+        inter_name = SUM_.sub("/sum_", SUM.sub("/sum", inter_name))
+        new_name = BRANCH.sub("/branch", inter_name)
         return new_name
+
     _rename_all(shapes, blob_name_tracker, ops, f)
 
 
 def _convert_to_ssa(shapes, blob_name_tracker, ops):
-    '''
+    """
     Convert an operator graph to SSA (i.e. out-of-place).
     i.e. blobs will be renamed so that each blob is produced only once.
 
@@ -94,14 +91,14 @@ def _convert_to_ssa(shapes, blob_name_tracker, ops):
 
     Returns:
         None. Modifies blob_name_tracker and ops in-place.
-    '''
+    """
     ir = core.IR(ops)
-    seen = set()
-    versioned = {}
+    seen: Set[str] = set()
+    versioned: Dict[Tuple[str, int], int] = {}
     new_shapes = {}
     new_blob_name_tracker = {}
 
-    def ssa_name(name, versions):
+    def ssa_name(name: str, versions: Dict[str, int]) -> int:
         assert name in versions
         version = versions[name]
         if (name, version) in versioned:
@@ -136,7 +133,7 @@ def _convert_to_ssa(shapes, blob_name_tracker, ops):
 
 
 def _get_blob_names(ops):
-    '''
+    """
     Get all the operator input and output blobs and perform dedup on their names.
 
     Args:
@@ -144,7 +141,7 @@ def _get_blob_names(ops):
 
     Returns:
         set containing distinct inputs and outputs from 'ops'
-    '''
+    """
     names = set()
     for op in ops:
         names.update(op.input)
@@ -153,7 +150,7 @@ def _get_blob_names(ops):
 
 
 def _remap_keys(old_dict, rename_fn):
-    '''
+    """
     Rename keys of 'old_dict' according to 'rename_fn'.
 
     Args:
@@ -163,15 +160,14 @@ def _remap_keys(old_dict, rename_fn):
 
     Returns:
         None. Modifies old_dict in-place.
-    '''
-    new_dict = {rename_fn(key): value for key,
-                value in six.iteritems(old_dict)}
+    """
+    new_dict = {rename_fn(key): value for key, value in old_dict.items()}
     old_dict.clear()
     old_dict.update(new_dict)
 
 
 def _rename_all(shapes, blob_name_tracker, ops, rename_fn):
-    '''
+    """
     Rename all the names in the operators.
 
     Args:
@@ -184,13 +180,12 @@ def _rename_all(shapes, blob_name_tracker, ops, rename_fn):
     Returns:
         None. Modifies shapes, blob_name_tracker and ops in-place using the
             specified 'rename_fn'.
-    '''
-    seen = set()
-    renamed = {}
+    """
+    seen: Set[str] = set()
+    renamed: Dict[Tuple[str, int], int] = {}
 
     def g(name):
-        """ Collision-free version of f.
-        """
+        """Collision-free version of f."""
         if name is None:
             return None
         if name in renamed:
@@ -234,16 +229,18 @@ def _add_gradient_scope(shapes, blob_name_tracker, ops):
     Returns:
         None. Modifies shapes, blob_name_tracker and ops in-place by renaming.
     """
+
     def f(name):
-        if '_grad' in name:
-            return 'GRADIENTS/{}'.format(name)
+        if "_grad" in name:
+            return "GRADIENTS/{}".format(name)
         else:
             return name
+
     _rename_all(shapes, blob_name_tracker, ops, f)
 
 
 def _replace_colons(shapes, blob_name_tracker, ops, repl):
-    '''
+    """
     `:i` has a special meaning in Tensorflow. This function replaces all colons
     with $ to avoid any possible conflicts.
 
@@ -258,14 +255,16 @@ def _replace_colons(shapes, blob_name_tracker, ops, repl):
     Returns:
         None. Modifies blob_name_tracker in-place.
 
-    '''
+    """
+
     def f(name):
-        return name.replace(':', repl)
+        return name.replace(":", repl)
+
     _rename_all(shapes, blob_name_tracker, ops, f)
 
 
 def _fill_missing_operator_names(ops):
-    '''
+    """
     Give missing operators a name.
     We expect C2 operators to be generally unnamed. This gives them a scope
     (inferred from their outputs) and a name after their type. Duplicates will
@@ -276,7 +275,7 @@ def _fill_missing_operator_names(ops):
 
     Returns:
         None: Modifies 'ops' in-place.
-    '''
+    """
     seen = set()
     for op in ops:
         # Make sure operator names don't collide with blobs.
@@ -286,18 +285,17 @@ def _fill_missing_operator_names(ops):
         if op.name:
             name = op.name
         elif op.output or op.input:
-            name_list = [os.path.dirname(name)
-                         for name in op.output or op.input]
+            name_list = [os.path.dirname(name) for name in op.output or op.input]
             scope = os.path.commonprefix(name_list)
             name = os.path.join(scope, op.type)
         else:
             name = op.type
-        assert(name)
+        assert name
         op.name = _make_unique_name(seen, name)
 
 
 def _tf_device(device_option):
-    '''
+    """
     Handle the devices.
 
     Args:
@@ -310,10 +308,13 @@ def _tf_device(device_option):
     Returns:
         Formatted string representing device information contained in
             device_option.
-    '''
+    """
     if not device_option.HasField("device_type"):
         return ""
-    if device_option.device_type == caffe2_pb2.CPU or device_option.device_type == caffe2_pb2.MKLDNN:
+    if (
+        device_option.device_type == caffe2_pb2.CPU
+        or device_option.device_type == caffe2_pb2.MKLDNN
+    ):
         return "/cpu:*"
     if device_option.device_type == caffe2_pb2.CUDA:
         return "/gpu:{}".format(device_option.device_id)
@@ -321,7 +322,7 @@ def _tf_device(device_option):
 
 
 def _add_tf_shape(attr_dict, ints):
-    '''
+    """
     Converts a list of ints to a TensorShapeProto representing the dimensions of
     a blob/object.
 
@@ -331,17 +332,17 @@ def _add_tf_shape(attr_dict, ints):
 
     Returns:
         None. Modifies attr_dict in-place.
-    '''
+    """
     shape_proto = TensorShapeProto()
     for i in ints:
         dim = TensorShapeProto.Dim()
         dim.size = i
         shape_proto.dim.extend([dim])
-    attr_dict['_output_shapes'].list.shape.extend([shape_proto])
+    attr_dict["_output_shapes"].list.shape.extend([shape_proto])
 
 
 def _set_tf_attr(attr_dict, arg):
-    '''
+    """
     Add attributes to a node. Key is the arg.name, and values can be shape,
         floats, strings, ints or an empty list.
 
@@ -351,9 +352,9 @@ def _set_tf_attr(attr_dict, arg):
 
     Returns:
         None. Modifies attr_dict in-place.
-    '''
+    """
     k = arg.name
-    if k == 'shape' and arg.ints:
+    if k == "shape" and arg.ints:
         _add_tf_shape(attr_dict, arg.ints)
         return
     # Float
@@ -367,7 +368,7 @@ def _set_tf_attr(attr_dict, arg):
     # String
     if arg.HasField("s"):
         attr_dict[k].s = (
-            arg.s if isinstance(arg.s, bytes) else str(arg.s).encode('utf-8')
+            arg.s if isinstance(arg.s, bytes) else str(arg.s).encode("utf-8")
         )
         return
     if arg.floats:
@@ -378,8 +379,7 @@ def _set_tf_attr(attr_dict, arg):
         return
     if arg.strings:
         attr_dict[k].list.s.extend(
-            s if isinstance(s, bytes) else str(s).encode('utf-8')
-            for s in arg.strings
+            s if isinstance(s, bytes) else str(s).encode("utf-8") for s in arg.strings
         )
         return
     # The value is an empty list.
@@ -387,7 +387,7 @@ def _set_tf_attr(attr_dict, arg):
 
 
 def _operator_to_node(shapes, op):
-    '''
+    """
     Converts an operator to a node in a TF graph.
 
     Args:
@@ -396,7 +396,7 @@ def _operator_to_node(shapes, op):
 
     Returns:
         n: The TF graph node created from op.
-    '''
+    """
     assert op.name, op
     n = NodeDef()
     n.name = op.name
@@ -415,7 +415,7 @@ def _operator_to_node(shapes, op):
 
 
 def _operator_to_node_simp(op, inter_blobs, seen):
-    '''
+    """
     Convert the operators to nodes.
 
     Args:
@@ -425,7 +425,7 @@ def _operator_to_node_simp(op, inter_blobs, seen):
 
     Returns:
         nodes: Nodes representing 'op' and the outputs of 'op'
-    '''
+    """
     assert op
     nodes = []
     outputs = [o for o in op.output if o not in inter_blobs]
@@ -449,7 +449,7 @@ def _operator_to_node_simp(op, inter_blobs, seen):
             name_list = list(outputs)
             scope = os.path.commonprefix(name_list)
             name = os.path.join(scope, op.type)
-        assert(name)
+        assert name
         op.name = _make_unique_name(seen, name)
         device = _tf_device(op.device_option)
 
@@ -458,7 +458,7 @@ def _operator_to_node_simp(op, inter_blobs, seen):
             n = NodeDef()
             n.name = output
             n.input.extend([op.name])
-            n.op = 'Blob'
+            n.op = "Blob"
             n.device = device
             nodes.append(n)
 
@@ -476,7 +476,7 @@ def _operator_to_node_simp(op, inter_blobs, seen):
 
 
 def _blob_to_node(producing_ops, shapes, name):
-    '''
+    """
     Converts a blob (operator input or output) to a node in a TF graph.
 
     Args:
@@ -487,7 +487,7 @@ def _blob_to_node(producing_ops, shapes, name):
 
     Returns:
         n: The TF graph node created from this blob.
-    '''
+    """
     assert name
     n = NodeDef()
     n.name = name
@@ -495,15 +495,15 @@ def _blob_to_node(producing_ops, shapes, name):
     # outputs. See _operators_to_graph_def.
     produced_by = producing_ops.get(name, [])
     if len(produced_by) > 0:
-        n.op = 'Blob'
+        n.op = "Blob"
     else:
         # This blob is not produced but is instead a TF Placeholder where a
         # value is passed in.
-        n.op = 'Placeholder'
-    n.input.extend('%s:%d' % (p_op.name, i) for p_op, i in produced_by)
+        n.op = "Placeholder"
+    n.input.extend("%s:%d" % (p_op.name, i) for p_op, i in produced_by)
     if produced_by:
         device = produced_by[0][0].device_option
-        if (all(producer[0].device_option == device for producer in produced_by)):
+        if all(producer[0].device_option == device for producer in produced_by):
             n.device = _tf_device(device)
     if shapes and name in shapes:
         _add_tf_shape(n.attr, shapes[name])
@@ -511,7 +511,7 @@ def _blob_to_node(producing_ops, shapes, name):
 
 
 def _clear_debug_info(ops, perform_clear):
-    '''
+    """
     Removes debug information from operators, they are copious.
 
     Args:
@@ -524,17 +524,17 @@ def _clear_debug_info(ops, perform_clear):
         None. Modifies the list of Caffe2 operators in-place and removes the
         'debug_info' field.
 
-    '''
+    """
     if not perform_clear:
         return
 
     for op in ops:
-        if op.HasField('debug_info'):
-            op.ClearField('debug_info')
+        if op.HasField("debug_info"):
+            op.ClearField("debug_info")
 
 
 def _check_if_forward(blob):
-    '''
+    """
     Blobs with names containing '_m' or 'grad' are part of the backward pass.
         This function references facebookresearch/Detectron/detectron/utils/net.py.
 
@@ -543,13 +543,13 @@ def _check_if_forward(blob):
 
     Returns:
         Boolean representing whether this blob is part of the forward pass
-    '''
+    """
     #
-    return (blob.find('__m') < 0 or blob.find('grad') < 0)
+    return blob.find("__m") < 0 or blob.find("grad") < 0
 
 
 def _check_if_cpu(blob):
-    '''
+    """
     Check if the blob's name starts with '_gpu'.
 
     Args:
@@ -557,12 +557,12 @@ def _check_if_cpu(blob):
 
     Returns:
         Boolean representing whether this blob is associated with a gpu
-    '''
-    return not blob.startswith('_gpu')
+    """
+    return not blob.startswith("_gpu")
 
 
 def _compute_in_out(ops):
-    '''
+    """
     Find the input, intermediate and output nodes of a set of operators.
 
     Args:
@@ -572,7 +572,7 @@ def _compute_in_out(ops):
         input_blobs: The input nodes of the set of operators
         inter_blobs: The intermediate nodes of the set of operators
         output_blobs: The output nodes of the set of operators
-    '''
+    """
     in_blobs = set()
     out_blobs = set()
 
@@ -584,14 +584,14 @@ def _compute_in_out(ops):
 
     input_blobs = list(in_blobs.difference(out_blobs))
     output_blobs = list(out_blobs.difference(in_blobs))
-    inter_blobs = {b for b in output_blobs if b.startswith('_')}
+    inter_blobs = {b for b in output_blobs if b.startswith("_")}
     output_blobs = [b for b in output_blobs if b not in inter_blobs]
 
     return input_blobs, inter_blobs, output_blobs
 
 
 def _filter_ops(ops, filter_fn, perform_filter):
-    '''
+    """
     Filter unwanted operators based on criteria in 'filter_fn'.
 
     Args:
@@ -603,7 +603,7 @@ def _filter_ops(ops, filter_fn, perform_filter):
 
     Returns:
         new_ops: Subset of ops containing a subset of their inputs and outputs.
-    '''
+    """
     if not perform_filter:
         return ops
 
@@ -628,14 +628,14 @@ def _filter_ops(ops, filter_fn, perform_filter):
 def _operators_to_graph_def(
     shapes,
     ops,
-    colon_replacement='$',
+    colon_replacement="$",
     with_ssa=True,
     with_gradient_scope=True,
     blob_name_tracker=None,
     show_simplified=False,
-    custom_rename=None
+    custom_rename=None,
 ):
-    '''
+    """
     Main function to convert set of operators to a graph.
 
     Args:
@@ -665,7 +665,7 @@ def _operators_to_graph_def(
     Returns:
         current_graph: GraphDef representing the computation graph formed by the
             set of operators.
-    '''
+    """
     if blob_name_tracker is not None:
         blob_name_tracker.clear()
     else:
@@ -674,8 +674,7 @@ def _operators_to_graph_def(
     blob_name_tracker.update(_get_blob_names(ops))
 
     _clear_debug_info(ops, show_simplified)  # clear_debug_info
-    ops = _filter_ops(ops, _check_if_forward,
-                      show_simplified)  # show_forward_only
+    ops = _filter_ops(ops, _check_if_forward, show_simplified)  # show_forward_only
     ops = _filter_ops(ops, _check_if_cpu, show_simplified)  # show_cpu_only
     if custom_rename:
         _rename_all(shapes, blob_name_tracker, ops, custom_rename)
@@ -688,15 +687,17 @@ def _operators_to_graph_def(
     _fill_missing_operator_names(ops)
     if show_simplified:  # use_tensorflow_naming
         _rename_tensorflow_style(shapes, blob_name_tracker, ops)
-    producing_ops = {}
+    producing_ops: Dict[caffe2_pb2.OperatorDef, List] = {}
     blobs = set()
     input_blobs, inter_blobs, _ = _compute_in_out(ops)
     current_graph = GraphDef()
     seen = set(input_blobs)
     for op in ops:
-        nodes_from_op = _operator_to_node_simp(op, inter_blobs, seen) if \
-            show_simplified else \
-            [_operator_to_node(shapes, op)]  # .extend() expects an iterable
+        nodes_from_op = (
+            _operator_to_node_simp(op, inter_blobs, seen)
+            if show_simplified
+            else [_operator_to_node(shapes, op)]
+        )  # .extend() expects an iterable
         current_graph.node.extend(nodes_from_op)
         for input_blob in op.input:
             blobs.add(input_blob)
@@ -715,7 +716,7 @@ def _operators_to_graph_def(
 
 
 def _propagate_device_option(net_def):
-    '''
+    """
     Propagate the device options from net to operators.
 
     Args:
@@ -727,7 +728,7 @@ def _propagate_device_option(net_def):
             modifies the op device_option in-place to be the net device_option
             if the op has no pre-existing device_option, and leaves the op as-is
             if it already has a device_option.
-    '''
+    """
     if not net_def.HasField("device_option"):
         return
     for op in net_def.op:
@@ -736,7 +737,7 @@ def _propagate_device_option(net_def):
 
 
 def _try_get_shapes(nets):
-    '''
+    """
     Get missing shapes for all blobs contained in the nets.
 
     Args:
@@ -746,19 +747,19 @@ def _try_get_shapes(nets):
         Dictionary containing blob name to shape/dimensions mapping. The net
             is a computation graph that is composed of operators, and the
             operators have input and output blobs, each with their own dims.
-    '''
+    """
     try:
         # Note: this will inspect the workspace for better or worse.
         # We don't care about the types, only the shapes
         shapes, _ = workspace.InferShapesAndTypes(nets)
         return shapes
     except Exception as e:
-        logging.warning('Failed to compute shapes: %s', e)
+        logging.warning("Failed to compute shapes: %s", e)
         return {}
 
 
 def model_to_graph_def(model, **kwargs):
-    '''
+    """
     Convert a Caffe2 model to a Tensorflow graph. This function extracts
     'param_init_net' and 'net' from the model and passes it to nets_to_graph()
     for further processing.
@@ -770,13 +771,13 @@ def model_to_graph_def(model, **kwargs):
     Returns:
         Call to nets_to_graph_def() with extracted 'param_init_net', 'net' and
             **kwargs. See _operators_to_graph_def for detailed **kwargs.
-    '''
+    """
     nets = [model.param_init_net, model.net]
     return nets_to_graph_def(nets, **kwargs)
 
 
 def nets_to_graph_def(nets, shapes=None, **kwargs):
-    '''
+    """
     Convert a set of Caffe2 nets to a Tensorflow graph.
 
     Args:
@@ -787,7 +788,7 @@ def nets_to_graph_def(nets, shapes=None, **kwargs):
     Returns:
         Call to protos_to_graph_def() with the extracted NetDef protobufs and
             **kwargs. See _operators_to_graph_def for detailed **kwargs.
-    '''
+    """
     # if shapes is None:
     #     shapes = _try_get_shapes(nets)
     # _try_get_shapes(nets) depends on workspace.InferShapesAndTypes(nets),
@@ -799,7 +800,7 @@ def nets_to_graph_def(nets, shapes=None, **kwargs):
 
 
 def protos_to_graph_def(net_defs, shapes=None, **kwargs):
-    '''
+    """
     Convert a set of Caffe2 net definitions to a Tensorflow graph.
 
     Args:
@@ -811,7 +812,7 @@ def protos_to_graph_def(net_defs, shapes=None, **kwargs):
         Call to _operators_to_graph_def() with the extracted operators from the
             NetDefs and **kwargs. See _operators_to_graph_def for detailed
             **kwargs.
-    '''
+    """
     for net in net_defs:
         _propagate_device_option(net)
     shapes = copy.deepcopy(shapes or {})

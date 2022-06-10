@@ -12,6 +12,7 @@
 
 #include <c10/hip/impl/HIPGuardImpl.h>
 
+#include <ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h>
 #include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 
 // Use of c10::hip namespace here makes hipification easier, because
@@ -62,7 +63,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     return DeviceType::CUDA;
   }
   Device exchangeDevice(Device d) const override {
-    TORCH_INTERNAL_ASSERT(d.type() == DeviceType::CUDA);
+    TORCH_INTERNAL_ASSERT(d.is_cuda());
     Device old_device = getDevice();
     if (old_device.index() != d.index()) {
       C10_HIP_CHECK(hipSetDevice(d.index()));
@@ -75,7 +76,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     return Device(DeviceType::CUDA, device);
   }
   void setDevice(Device d) const override {
-    TORCH_INTERNAL_ASSERT(d.type() == DeviceType::CUDA);
+    TORCH_INTERNAL_ASSERT(d.is_cuda());
     C10_HIP_CHECK(hipSetDevice(d.index()));
   }
   void uncheckedSetDevice(Device d) const noexcept override {
@@ -86,6 +87,9 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
   }
   Stream getDefaultStream(Device d) const override {
     return getDefaultHIPStreamMasqueradingAsCUDA(d.index());
+  }
+  Stream getStreamFromGlobalPool(Device d, bool isHighPriority = false) const override {
+    return getStreamFromPoolMasqueradingAsCUDA(isHighPriority, d.index());
   }
   Stream exchangeStream(Stream s) const noexcept override {
     HIPStreamMasqueradingAsCUDA cs(s);
@@ -183,7 +187,29 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     hipEvent_t hip_event = static_cast<hipEvent_t>(event);
     const hipError_t err = hipEventQuery(hip_event);
     if (err != hipErrorNotReady) C10_HIP_CHECK(err);
+    else {
+      // ignore and clear the error if not ready
+      hipGetLastError();
+    }
     return (err == hipSuccess);
+  }
+
+  // Stream-related functions
+  bool queryStream(const Stream& stream) const override {
+    HIPStreamMasqueradingAsCUDA hip_stream{stream};
+    return hip_stream.query();
+  }
+
+  void synchronizeStream(const Stream& stream) const override {
+    HIPStreamMasqueradingAsCUDA hip_stream{stream};
+    hip_stream.synchronize();
+  }
+
+  void recordDataPtrOnStream(
+    const c10::DataPtr& data_ptr,
+    const Stream& stream) const override {
+    HIPStreamMasqueradingAsCUDA hip_stream{stream};
+    HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA(data_ptr, hip_stream);
   }
 };
 
@@ -293,6 +319,28 @@ struct OptionalHIPStreamGuardMasqueradingAsCUDA {
 
 private:
   c10::impl::InlineOptionalStreamGuard<HIPGuardImplMasqueradingAsCUDA> guard_;
+};
+
+struct HIPMultiStreamGuardMasqueradingAsCUDA {
+  explicit HIPMultiStreamGuardMasqueradingAsCUDA(ArrayRef<HIPStreamMasqueradingAsCUDA> streams)
+    : guard_(unwrapStreams(streams)) {}
+
+  HIPMultiStreamGuardMasqueradingAsCUDA(const HIPMultiStreamGuardMasqueradingAsCUDA&) = delete;
+  HIPMultiStreamGuardMasqueradingAsCUDA& operator=(const HIPMultiStreamGuardMasqueradingAsCUDA&) = delete;
+  HIPMultiStreamGuardMasqueradingAsCUDA(HIPMultiStreamGuardMasqueradingAsCUDA&& other) = delete;
+  HIPMultiStreamGuardMasqueradingAsCUDA& operator=(HIPMultiStreamGuardMasqueradingAsCUDA&& other) = delete;
+
+private:
+  c10::impl::InlineMultiStreamGuard<HIPGuardImplMasqueradingAsCUDA> guard_;
+
+  static std::vector<Stream> unwrapStreams(ArrayRef<HIPStreamMasqueradingAsCUDA> hipStreams) {
+    std::vector<Stream> streams;
+    streams.reserve(hipStreams.size());
+    for (const HIPStreamMasqueradingAsCUDA& hipStream : hipStreams) {
+      streams.push_back(hipStream);
+    }
+    return streams;
+  }
 };
 
 }} // namespace c10::hip

@@ -60,6 +60,10 @@ class NegativeBinomial(Distribution):
         return self.total_count * torch.exp(self.logits)
 
     @property
+    def mode(self):
+        return ((self.total_count - 1) * self.logits.exp()).floor().clamp(min=0.)
+
+    @property
     def variance(self):
         return self.mean / torch.sigmoid(-self.logits)
 
@@ -77,8 +81,10 @@ class NegativeBinomial(Distribution):
 
     @lazy_property
     def _gamma(self):
+        # Note we avoid validating because self.total_count can be zero.
         return torch.distributions.Gamma(concentration=self.total_count,
-                                         rate=torch.exp(-self.logits))
+                                         rate=torch.exp(-self.logits),
+                                         validate_args=False)
 
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():
@@ -94,5 +100,6 @@ class NegativeBinomial(Distribution):
 
         log_normalization = (-torch.lgamma(self.total_count + value) + torch.lgamma(1. + value) +
                              torch.lgamma(self.total_count))
+        log_normalization[self.total_count + value == 0.] = 0.
 
         return log_unnormalized_prob - log_normalization

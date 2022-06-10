@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from hypothesis import given, settings
@@ -28,7 +28,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
         return [np.array(output).astype(np.int32)]
 
     @given(**hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_length_split_edge(self, gc, dc):
         input_lengths = np.array([3, 4, 5]).astype(np.int32)
         n_split_ = np.array([5]).astype(np.int32)

@@ -12,15 +12,18 @@
 
 #ifndef _WIN32
 
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/python_numbers.h>
+
+#include <c10/util/irange.h>
+#include <fmt/format.h>
+
 #include <atomic>
 #include <map>
 #include <set>
 #include <csignal>
 #include <sstream>
 #include <sys/wait.h>
-
-#include <torch/csrc/Exceptions.h>
-#include <torch/csrc/utils/python_numbers.h>
 
 using namespace torch;
 
@@ -100,8 +103,11 @@ static std::map<int64_t, std::set<pid_t>> worker_pids = {};
 
 static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *noargs) {
   HANDLE_TH_ERRORS
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int error;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::set<pid_t> *pid_set;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   pid_t worker_pid;
   siginfo_t infop;
 
@@ -165,7 +171,7 @@ static PyObject *THPModule_setWorkerPIDs(PyObject *module, PyObject *args) {
 
   std::set<pid_t> pids_set = {};
   auto size = PyTuple_GET_SIZE(child_pids);
-  for (int idx = 0; idx < size; idx++) {
+  for(const auto idx : c10::irange(size)) {
     PyObject* obj = PyTuple_GET_ITEM(child_pids, idx);
     pids_set.insert(static_cast<pid_t>(THPUtils_unpackLong(obj)));
   }
@@ -182,7 +188,7 @@ static PyObject *THPModule_removeWorkerPIDs(PyObject *module, PyObject *loader_i
   int64_t key = THPUtils_unpackLong(loader_id);
   auto it = worker_pids.find(key);
   if (it == worker_pids.end()) {
-    throw ValueError("Cannot find worker information for _BaseDataLoaderIter with id %" PRId64, key);
+    throw ValueError(fmt::format("Cannot find worker information for _BaseDataLoaderIter with id {}", key));
   }
   worker_pids.erase(it);
 
@@ -213,10 +219,11 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *_ig
 
 #endif
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 PyMethodDef DataLoaderMethods[] = {
-  {"_set_worker_signal_handlers",  (PyCFunction)THPModule_setWorkerSignalHandlers,  METH_NOARGS,   nullptr},
-  {"_set_worker_pids",             (PyCFunction)THPModule_setWorkerPIDs,            METH_VARARGS,  nullptr},
-  {"_remove_worker_pids",          (PyCFunction)THPModule_removeWorkerPIDs,         METH_O,        nullptr},
-  {"_error_if_any_worker_fails",   (PyCFunction)THPModule_errorIfAnyWorkerFails,    METH_NOARGS,   nullptr},
+  {"_set_worker_signal_handlers",  THPModule_setWorkerSignalHandlers,  METH_NOARGS,   nullptr},
+  {"_set_worker_pids",             THPModule_setWorkerPIDs,            METH_VARARGS,  nullptr},
+  {"_remove_worker_pids",          THPModule_removeWorkerPIDs,         METH_O,        nullptr},
+  {"_error_if_any_worker_fails",   THPModule_errorIfAnyWorkerFails,    METH_NOARGS,   nullptr},
   {nullptr, nullptr, 0, nullptr}
 };

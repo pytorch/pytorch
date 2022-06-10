@@ -118,6 +118,7 @@ class GetGatherByKeyGradient : public GradientMakerBase {
     Argument packArg = MakeArgument<int>("pack_first_input", pack_first_input);
     if (g_output_[0].IsDense()) {
       std::vector<std::string> inputs;
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 1; i < g_input_.size(); ++i) {
         inputs.push_back("_" + GI(i) + "_keys");
         inputs.push_back(GI(i));
@@ -130,6 +131,7 @@ class GetGatherByKeyGradient : public GradientMakerBase {
           std::vector<Argument>{packArg});
     } else {
       std::vector<std::string> inputs;
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 1; i < g_input_.size(); ++i) {
         inputs.push_back("_" + GI_I(i) + "_keys");
         inputs.push_back(GI_I(i));

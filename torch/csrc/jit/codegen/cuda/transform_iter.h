@@ -1,16 +1,18 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <unordered_map>
 #include <vector>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace {
 
@@ -38,14 +40,21 @@ struct id_int_lt {
 //
 // If error_on_failure = false, replay will replay everything it can, and ignore
 // operations it can't.
-class TORCH_CUDA_API ReplayTransformations : public IterVisitor {
+class TORCH_CUDA_CU_API ReplayTransformations : public IterVisitor {
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::vector<IterDomain*>& target_domain_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<IterDomain*, IterDomain*> id_map_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<IterDomain*, size_t> leaf_ids_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<IterDomain*> leaf_vec_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   size_t counter = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool error_on_failure_ = true;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool ran_replay = false; // Mark if replay has been run
   using IterVisitor::handle;
 
@@ -147,23 +156,71 @@ class TORCH_CUDA_API ReplayTransformations : public IterVisitor {
  * history replay_domain
  */
 
-class TORCH_CUDA_API BestEffortReplay {
+class TORCH_CUDA_CU_API BestEffortReplay {
  private:
-  std::unordered_map<IterDomain*, IterDomain*> id_map_;
+  std::unordered_map<IterDomain*, IterDomain*> target2replay_id_map_;
+  std::unordered_map<IterDomain*, IterDomain*> replay_forward_id_map_;
+  std::unordered_map<IterDomain*, IterDomain*> target_forward_id_map_;
   std::unordered_map<IterDomain*, size_t> leaf_ids_;
+  std::vector<IterDomain*> forwarded_ids_;
+
+  // Need to track which id's have been forwarded. Later need to make sure leaf
+  // nodes to produce compliment axes are properly tracked. i.e.
+  // T[i0, b1, b2, i3]
+  // -> T[i0, b1o, b1i, b2o, b2i, i3]
+  // -> T[i0*b1i*b2o, b1o, b2i, i3]
+  // -> T[i0*b1i*b2o*i3, b1o, b2i]
+  // If we forwarded i0 -> i0*b1i*b2o*i3, we need to know that b1o and b2i
+  // are leaf nodes even though their split wasn't part of targets replay.
+
+  // Counter to make sure best effort replay leaf_ids can be grabbed
+  // deterministicly
   size_t counter = 0;
+
+  bool inReplayForwardMap(IterDomain* id) const {
+    return replay_forward_id_map_.find(id) != replay_forward_id_map_.end();
+  }
+
+  bool inTargetForwardMap(IterDomain* id) const {
+    return target_forward_id_map_.find(id) != target_forward_id_map_.end();
+  }
+
+  IterDomain* getReplayForwardedId(IterDomain* id) const {
+    auto forwarded_id_it = replay_forward_id_map_.find(id);
+    if (forwarded_id_it == replay_forward_id_map_.end()) {
+      return id;
+    } else {
+      return getReplayForwardedId(forwarded_id_it->second);
+    }
+  }
+
+  IterDomain* getTargetForwardedId(IterDomain* id) const {
+    auto forwarded_id_it = target_forward_id_map_.find(id);
+    if (forwarded_id_it == target_forward_id_map_.end()) {
+      return id;
+    } else {
+      return getTargetForwardedId(forwarded_id_it->second);
+    }
+  }
+
+  //! Adds complimenting IDs of forwarded IDs to the leaf map
+  void addComplimentLeafIDs(
+      const std::unordered_map<IterDomain*, IterDomain*>& forwarding_map,
+      const std::unordered_map<IterDomain*, std::vector<IterDomain*>>&
+          compliment_map);
 
  public:
   BestEffortReplay(
       const std::vector<IterDomain*>& replay_domain,
       const std::vector<IterDomain*>& target_domain,
-      std::unordered_map<IterDomain*, IterDomain*> replay_map,
-      bool forward_bcast_mismatch = false);
+      std::unordered_map<IterDomain*, IterDomain*> target2replay_map,
+      std::unordered_map<IterDomain*, IterDomain*> replay_forward_id_map = {},
+      std::unordered_map<IterDomain*, IterDomain*> target_forward_id_map = {});
 
   // Return iter domain map from target_domain IDs to their "replayed"
   // replay_domain IDs. If not in map, was not replayed.
   const std::unordered_map<IterDomain*, IterDomain*>& getReplay() const {
-    return id_map_;
+    return target2replay_id_map_;
   }
 
   // ids in replay that did not have matching transforms in target_domain
@@ -187,13 +244,32 @@ class TORCH_CUDA_API BestEffortReplay {
     return leaf_vec_;
   }
 
+  // Runs a best effort replay that ignores broadcast axes that appear in
+  // consumer that are not mapped to producer in root_map.
+  static BestEffortReplay replayCasP(
+      const TensorView* consumer,
+      const TensorView* producer,
+      int producer_compute_at_axis,
+      const RootDomainMap& root_map);
+
+  // Runs a best effort replay that ignores broadcast axes that appear in
+  // consumer that are not mapped to producer in root_map.
+  static BestEffortReplay replayPasC(
+      const TensorView* producer,
+      const TensorView* consumer,
+      int consumer_compute_at_axis,
+      const RootDomainMap& root_map);
+
   // Find the first position i where td1[i] is not the same as td2[i]. "Same"
   // means the DAG and input IDs to generate td1[i] and td2[i] are the same.
+  // td1 and td2 are assumed to have some matching iter domains, as this is a
+  // strict same-ness check.
   static int findFirstMismatchedID(
       const TensorDomain* td1,
       const TensorDomain* td2);
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

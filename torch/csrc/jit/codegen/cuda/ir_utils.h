@@ -1,14 +1,22 @@
 #pragma once
 
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
 #include <iterator>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace ir_utils {
+
+// Replace values in fusion using ValReplacementMutator
+void replaceValue(
+    Fusion*,
+    const std::unordered_map<Val*, Val*>& replacement_map);
 
 template <typename FilterType, typename Iterator>
 class FilterIterator {
@@ -64,7 +72,7 @@ class FilterIterator {
 
  private:
   Iterator current_;
-  const Iterator end_;
+  Iterator end_;
 };
 
 // An iterable view to a given container of Val pointers. Only returns
@@ -94,6 +102,10 @@ class FilteredView {
     return cend();
   }
 
+  bool empty() const {
+    return begin() == end();
+  }
+
  private:
   const InputIt input_it_;
   const InputIt last_;
@@ -105,11 +117,164 @@ auto filterByType(InputIt first, InputIt last) {
 }
 
 template <typename FilterType, typename ContainerType>
+auto filterByType(const ContainerType&& inputs) = delete;
+
+template <typename FilterType, typename ContainerType>
 auto filterByType(const ContainerType& inputs) {
   return filterByType<FilterType>(inputs.cbegin(), inputs.cend());
 }
 
+//! Returns a list of new-to-old mappings.
+//!
+//! The input map does not need to be complete. Missing axes are
+//! assumed not to be affected.
+//!
+//! This is used to preprocess broadcast and transpose arguments.
+//!
+//! Example: (N := ndims)
+//!   {{0, 1}} -> [1, 0, ...., N-1]
+//!   Transposes the first two axes with no other change.
+//!
+//!   {{0, -1}} -> [N-1, ...., 0]
+//!   Swaps the first and last axes.
+std::vector<int> normalizeOld2New(
+    const std::unordered_map<int, int>& old2new_in,
+    size_t ndims);
+
+// Replace all uses of reference with substitute in expr. Return the Expr.
+// Warning: Invalidates provided Expr.
+// Warning: Removes connection of reference through provided Expr.
+// Warning: Creates new Expr connecting substitue.
+// Reference is found through direct pointer comparison.
+Expr* replaceValInExpr(Expr* expr, Val* reference, Val* substitute);
+
+// Makes rfactor generic with reduction ops and Welford
+TORCH_CUDA_CU_API TensorView* rfactorHelper(
+    TensorView* red_tv,
+    const std::vector<int>& axes);
+
+// Return immediate producers of val, this function can be used on any Val and
+// will return producers through Exprs.
+//
+// Warning: returned val's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses val->definition() or val->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(Val* val);
+
+// Return immediate consumers of val, this function can be used on any Val and
+// will return consumers through Exprs.
+//
+// Warning: returned val's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses val->definition() or val->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(Val* val);
+
+// Return immediate producers of vals, this function can be used on any vals and
+// will return producers through Exprs.
+//
+// Warning: returned val's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses val->definition() or val->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(
+    const std::vector<Val*>& vals);
+
+// Return immediate consumers of vals, this function can be used on any vals and
+// will return consumers through Exprs.
+//
+// Warning: returned val's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses val->definition() or val->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(
+    const std::vector<Val*>& vals);
+
+// Return immediate producers of tv, this function will return all immediate
+// producers of tv through Exprs.
+//
+// Warning: returned tv's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses tv->definition() or tv->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<TensorView*> producerTvsOf(TensorView* tv);
+
+// Return immediate consumers of tv, this function will return all immediate
+// consumers of tv through Exprs.
+//
+// Warning: returned tv's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses tv->definition() or tv->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<TensorView*> consumerTvsOf(TensorView* tv);
+
+// Return immediate producers of tvs, this function will return all immediate
+// producers of tvs through Exprs.
+//
+// Warning: returned tv's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses tv->definition() or tv->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<TensorView*> producerTvsOf(
+    const std::vector<TensorView*>& tvs);
+
+// Return immediate consumers of tvs, this function will return all immediate
+// consumers of tvs through Exprs.
+//
+// Warning: returned tv's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses tv->definition() or tv->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<TensorView*> consumerTvsOf(
+    const std::vector<TensorView*>& tvs);
+
+// Returns producers of tv that are inputs of fusion
+TORCH_CUDA_CU_API std::vector<TensorView*> inputTvsOf(TensorView* tv);
+
+// Returns consumers of tv that are outputs of fusion
+TORCH_CUDA_CU_API std::vector<TensorView*> outputTvsOf(TensorView* tv);
+
+// Returns producers of tvs that are inputs of fusion
+TORCH_CUDA_CU_API std::vector<TensorView*> inputTvsOf(
+    std::vector<TensorView*> tvs);
+
+// Returns consumers of tvs that are outputs of fusion
+TORCH_CUDA_CU_API std::vector<TensorView*> outputTvsOf(
+    std::vector<TensorView*> tvs);
+
+// returns all tensor views in fusion that are used between outputs and inputs.
+TORCH_CUDA_CU_API std::vector<TensorView*> allTvs(Fusion* fusion);
+
+TORCH_CUDA_CU_API std::vector<Expr*> getReductionOps(
+    Fusion* fusion,
+    bool ignore_trivial = true);
+
+// Returns the initialization value of tv or nullptr if not initialized.
+TORCH_CUDA_CU_API Val* getReductionInitValOf(TensorView* tv);
+
+template <typename T>
+std::string toString(const T& nodes) {
+  std::stringstream ss;
+  for (Statement* stmt : nodes) {
+    if (ss.tellp() != 0) {
+      ss << ", ";
+    }
+    ss << stmt->toString();
+  }
+  return ss.str();
+}
+
 } // namespace ir_utils
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

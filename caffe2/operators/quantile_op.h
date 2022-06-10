@@ -1,8 +1,10 @@
 #pragma once
 
+#include "caffe2/core/operator.h"
+#include "c10/util/irange.h"
+
 #include <cmath>
 #include <limits>
-#include "caffe2/core/operator.h"
 
 namespace caffe2 {
 
@@ -42,7 +44,7 @@ class QuantileOp final : public Operator<Context> {
 
     auto& input_zero = Input(0);
     int64_t numel = input_zero.numel();
-    for (int i = 1; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(1, InputSize())) {
       CAFFE_ENFORCE_EQ(
           Input(i).dtype(),
           input_zero.dtype(),
@@ -116,9 +118,9 @@ class QuantileOp final : public Operator<Context> {
   void GetRangeFromInputs(T* lo, T* hi) {
     *hi = std::numeric_limits<T>::lowest();
     *lo = std::numeric_limits<T>::max();
-    for (int i = 0; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(InputSize())) {
       const auto* input = Input(i).template data<T>();
-      for (int j = 0; j < Input(i).numel(); j++) {
+      for (const auto j : c10::irange(Input(i).numel())) {
         const T val = abs_ ? std::abs(input[j]) : input[j];
         if (*hi < val) {
           *hi = val;
@@ -133,9 +135,9 @@ class QuantileOp final : public Operator<Context> {
   template <typename T>
   int64_t CountLowerEq(const T& thd) {
     int64_t count = 0;
-    for (int i = 0; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(InputSize())) {
       const auto* input = Input(i).template data<T>();
-      for (int j = 0; j < Input(i).numel(); j++) {
+      for (const auto j : c10::irange(Input(i).numel())) {
         const T val = abs_ ? std::abs(input[j]) : input[j];
         if (val <= thd) {
           count++;

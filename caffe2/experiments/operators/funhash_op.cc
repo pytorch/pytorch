@@ -46,33 +46,39 @@ randomly mapped from the weight vector, provided the input
 )DOC")
     .Input(0, "scalars", "Values of the non-zero entries of the sparse data.")
     .Input(1, "indices", "Indices to the non-zero valued features.")
-    .Input(2, "segment_ids",
+    .Input(
+        2,
+        "segment_ids",
         "Segment IDs corresponding to the non-zero entries.")
     .Input(3, "weight", "Weight vector")
-    .Input(4, "alpha",
+    .Input(
+        4,
+        "alpha",
         "Optional coefficients for linear combination of hashed weights.")
-    .Output(0, "output",
+    .Output(
+        0,
+        "output",
         "Output tensor with the first dimension equal to the number "
         "of segments.")
     .Arg("num_outputs", "Number of outputs")
     .Arg("num_segments", "Number of segments");
 
-OPERATOR_SCHEMA(FunHashGradient)
-    .NumInputs(5, 6)
-    .NumOutputs(1, 2);
+OPERATOR_SCHEMA(FunHashGradient).NumInputs(5, 6).NumOutputs(1, 2);
 
 class GetFunHashGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     if (def_.input_size() == 4) {
       return SingleGradientDef(
-          "FunHashGradient", "",
+          "FunHashGradient",
+          "",
           vector<string>{GO(0), I(0), I(1), I(2), I(3)},
           vector<string>{GI(3)});
     }
     // def_.input_size() == 5
     return SingleGradientDef(
-        "FunHashGradient", "",
+        "FunHashGradient",
+        "",
         vector<string>{GO(0), I(0), I(1), I(2), I(3), I(4)},
         vector<string>{GI(3), GI(4)});
   }

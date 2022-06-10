@@ -1,12 +1,12 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import os
 import uuid
 
-from caffe2.distributed.python import StoreHandlerTimeoutError  # type: ignore[import]
+from caffe2.distributed.python import StoreHandlerTimeoutError
 from caffe2.distributed.store_ops_test_util import StoreOpsTests
 from caffe2.python import core, workspace, dyndep
 from caffe2.python.test_util import TestCase

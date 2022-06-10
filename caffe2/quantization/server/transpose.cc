@@ -6,6 +6,7 @@ namespace fbgemm {
 
 void transpose_4rows(int N, const std::uint8_t* src, std::uint8_t* dst) {
   constexpr int M = 4;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int j;
   // vectorized loop
   for (j = 0; j < N / 32 * 32; j += 32) {

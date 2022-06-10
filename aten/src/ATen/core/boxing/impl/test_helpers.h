@@ -7,13 +7,14 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/irange.h>
 
 template<class... Inputs>
 inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
   return {std::forward<Inputs>(inputs)...};
 }
 
-inline at::Tensor dummyTensor(c10::DispatchKeySet ks) {
+inline at::Tensor dummyTensor(c10::DispatchKeySet ks, bool requires_grad=false) {
   auto* allocator = c10::GetCPUAllocator();
   int64_t nelements = 1;
   auto dtype = caffe2::TypeMeta::Make<float>();
@@ -24,11 +25,18 @@ inline at::Tensor dummyTensor(c10::DispatchKeySet ks) {
       allocator->allocate(size_bytes),
       allocator,
       /*resizable=*/true);
-  return at::detail::make_tensor<c10::TensorImpl>(storage_impl, ks, dtype);
+  at::Tensor t = at::detail::make_tensor<c10::TensorImpl>(storage_impl, ks, dtype);
+  // TODO: We add this to simulate the ideal case where we only have Autograd backend keys
+  //       on Tensor when it requires grad. But currently Autograd keys are added in TensorImpl
+  //       constructor by default.
+  if (!requires_grad) {
+    t.unsafeGetTensorImpl()->remove_autograd_key();
+  }
+  return t;
 }
 
-inline at::Tensor dummyTensor(c10::DispatchKey dispatch_key) {
-  return dummyTensor(c10::DispatchKeySet(dispatch_key));
+inline at::Tensor dummyTensor(c10::DispatchKey dispatch_key, bool requires_grad=false) {
+  return dummyTensor(c10::DispatchKeySet(dispatch_key), requires_grad);
 }
 
 template<class... Args>
@@ -46,6 +54,11 @@ inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
 template<class Result, class... Args>
 inline Result callOpUnboxedWithDispatchKey(const c10::OperatorHandle& op, c10::DispatchKey dispatchKey, Args... args) {
   return op.typed<Result(Args...)>().callWithDispatchKey(dispatchKey, std::forward<Args>(args)...);
+}
+
+template<class Result, class... Args>
+inline Result callOpUnboxedWithPrecomputedDispatchKeySet(const c10::OperatorHandle& op, c10::DispatchKeySet ks, Args... args) {
+  return op.typed<Result(Args...)>().redispatch(ks, std::forward<Args>(args)...);
 }
 
 inline void expectDoesntFindKernel(const char* op_name, c10::DispatchKey dispatch_key) {
@@ -75,7 +88,7 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
 template<class T, size_t N>
 void expectListEquals(c10::ArrayRef<T> expected, std::array<T, N> actual) {
   EXPECT_EQ(expected.size(), actual.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     EXPECT_EQ(expected[i], actual[i]);
   }
 }
@@ -83,7 +96,7 @@ void expectListEquals(c10::ArrayRef<T> expected, std::array<T, N> actual) {
 template<class T>
 void expectListEquals(c10::ArrayRef<T> expected, c10::ArrayRef<T> actual) {
   EXPECT_EQ(expected.size(), actual.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     EXPECT_EQ(expected[i], actual[i]);
   }
 }
@@ -91,7 +104,7 @@ void expectListEquals(c10::ArrayRef<T> expected, c10::ArrayRef<T> actual) {
 template<class T>
 void expectListEquals(c10::ArrayRef<T> expected, c10::List<T> actual) {
   EXPECT_EQ(expected.size(), actual.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     EXPECT_EQ(expected[i], actual.get(i));
   }
 }
@@ -99,7 +112,7 @@ void expectListEquals(c10::ArrayRef<T> expected, c10::List<T> actual) {
 template<class T>
 void expectListEquals(c10::ArrayRef<T> expected, std::vector<T> actual) {
   EXPECT_EQ(expected.size(), actual.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     EXPECT_EQ(expected[i], actual[i]);
   }
 }

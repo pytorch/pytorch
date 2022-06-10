@@ -1,5 +1,6 @@
 import math
 
+import torch
 from torch._six import inf
 from torch.distributions import constraints
 from torch.distributions.transforms import AbsTransform
@@ -24,11 +25,11 @@ class HalfNormal(TransformedDistribution):
         scale (float or Tensor): scale of the full Normal distribution
     """
     arg_constraints = {'scale': constraints.positive}
-    support = constraints.positive
+    support = constraints.nonnegative
     has_rsample = True
 
     def __init__(self, scale, validate_args=None):
-        base_dist = Normal(0, scale)
+        base_dist = Normal(0, scale, validate_args=False)
         super(HalfNormal, self).__init__(base_dist, AbsTransform(),
                                          validate_args=validate_args)
 
@@ -45,15 +46,23 @@ class HalfNormal(TransformedDistribution):
         return self.scale * math.sqrt(2 / math.pi)
 
     @property
+    def mode(self):
+        return torch.zeros_like(self.scale)
+
+    @property
     def variance(self):
         return self.scale.pow(2) * (1 - 2 / math.pi)
 
     def log_prob(self, value):
+        if self._validate_args:
+            self._validate_sample(value)
         log_prob = self.base_dist.log_prob(value) + math.log(2)
         log_prob[value.expand(log_prob.shape) < 0] = -inf
         return log_prob
 
     def cdf(self, value):
+        if self._validate_args:
+            self._validate_sample(value)
         return 2 * self.base_dist.cdf(value) - 1
 
     def icdf(self, prob):

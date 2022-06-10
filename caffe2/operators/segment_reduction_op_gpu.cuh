@@ -1,10 +1,11 @@
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_reduce.cuh>
 #include <cub/device/device_reduce.cuh>
 #include <cub/device/device_scan.cuh>
 #include "caffe2/core/context_gpu.h"
 
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #define SEGREDUCE_MINBLOCKS 8
 #else
 #define SEGREDUCE_MINBLOCKS 16
@@ -39,17 +40,29 @@ struct SharedMemory<at::Half> {
   }
 };
 
+
+template <typename InType, typename OutType>
+__device__ inline OutType convert_type(const InType in) {
+  return in;
+}
+
+template <>
+__device__ inline float convert_type<at::Half, float>(const at::Half in) {
+  return __half2float(in);
+}
+
 template <
-    typename T,
+    typename InType,
+    typename OutType,
     typename IndexType,
     bool ExactBlock = false,
     bool Average = false>
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(1024,SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void sparse_length_sum_kernel(
-    const T* __restrict__ in,
-    T* __restrict__ out,
+    const InType* __restrict__ in,
+    OutType* __restrict__ out,
     const int* __restrict__ prefix_sum_length_data,
     const IndexType* __restrict__ indices,
     int N,
@@ -64,22 +77,22 @@ __global__ void sparse_length_sum_kernel(
   CUDA_KERNEL_ASSERT(start <= len_indices);
   CUDA_KERNEL_ASSERT(end <= len_indices);
 
-  struct SharedMemory<T> smem;
-  T* reduceVals = smem.getPointer();
+  struct SharedMemory<OutType> smem;
+  OutType* reduceVals = smem.getPointer();
 
   if (ExactBlock) {
-    T sum = (T)0;
+    OutType sum = (OutType)0;
 
     in += threadIdx.x;
     for (int line = start + threadIdx.y; line < end; line += blockDim.y) {
-      sum += in[indices[line] * post];
+      sum += convert_type<InType, OutType>(in[indices[line] * post]);
     }
 
     reduceVals[threadIdx.y * blockDim.x + threadIdx.x] = sum;
     __syncthreads();
 
     if (threadIdx.y == 0) {
-      sum = (T)0;
+      sum = (OutType)0;
       for (int i = 0; i < blockDim.y; ++i) {
         sum += reduceVals[i * blockDim.x + threadIdx.x];
       }
@@ -91,9 +104,9 @@ __global__ void sparse_length_sum_kernel(
     }
   } else {
     for (int i = threadIdx.x; i < post; i += blockDim.x) {
-      T sum = (T)0;
+      OutType sum = (OutType)0;
       for (int line = start; line < end; ++line) {
-        sum += in[indices[line] * post + i];
+        sum += convert_type<InType, OutType>(in[indices[line] * post + i]);
       }
       if (Average && (end - start) > 1) {
         sum /= (end - start);

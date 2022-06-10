@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
@@ -17,7 +18,7 @@ bool IsAGeZeroAndALtB(int64_t a, int64_t b) {
 
 template <typename T>
 void MatCopy(int64_t M, int64_t N, int64_t lda, int64_t ldb, const T* A, T* B) {
-  for (int64_t i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
     std::memcpy(B + i * ldb, A + i * lda, N * sizeof(T));
   }
 }
@@ -32,10 +33,10 @@ void MatCopy(
     int64_t strideb,
     const T* A,
     T* B) {
-  for (int64_t i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
     const T* A_ptr = A + i * lda;
     T* B_ptr = B + i * ldb;
-    for (int64_t j = 0; j < N; ++j) {
+    for (const auto j : c10::irange(N)) {
       B_ptr[j * strideb] = A_ptr[j * stridea];
     }
   }
@@ -44,8 +45,8 @@ void MatCopy(
 // Y += X
 template <typename T>
 void MatAdd(int64_t M, int64_t N, int64_t ldx, int64_t ldy, const T* X, T* Y) {
-  for (int64_t i = 0; i < M; ++i) {
-    for (int64_t j = 0; j < N; ++j) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
       Y[i * ldy + j] += X[i * ldx + j];
     }
   }
@@ -62,8 +63,8 @@ void MatAdd(
     int64_t stridey,
     const T* X,
     T* Y) {
-  for (int64_t i = 0; i < M; ++i) {
-    for (int64_t j = 0; j < N; ++j) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
       Y[i * ldy + j * stridey] += X[i * ldx + j * stridex];
     }
   }
@@ -151,7 +152,7 @@ void MatAdd(
     int64_t stridey,
     const float* X,
     float* Y) {
-  for (int64_t i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
     cblas_saxpy(N, 1.0f, X + i * ldx, stridex, Y + i * ldy, stridey);
   }
 }
@@ -166,7 +167,7 @@ void MatAdd(
     int64_t stridey,
     const double* X,
     double* Y) {
-  for (int64_t i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
     cblas_daxpy(N, 1.0, X + i * ldx, stridex, Y + i * ldy, stridey);
   }
 }
@@ -194,7 +195,7 @@ void Unfold3dZeroPaddingCopyKernelImpl(
   const int64_t X_size = X_D * X_H * X_W;
   const int64_t Y_size = Y_D * Y_H * Y_W;
   at::parallel_for(0, n, 0, [=](int64_t begin, int64_t end) {
-    for (int64_t p = begin; p < end; ++p) {
+    for (const auto p : c10::irange(begin, end)) {
       int64_t c = p;
       const int64_t kw = c % kernel_w;
       c /= kernel_w;
@@ -202,7 +203,7 @@ void Unfold3dZeroPaddingCopyKernelImpl(
       c /= kernel_h;
       const int64_t kd = c % kernel_d;
       c /= kernel_d;
-      for (int64_t yd = 0; yd < Y_D; ++yd) {
+      for (const auto yd : c10::irange(Y_D)) {
         const int64_t xd = yd * stride_d + kd;
         const T* src_ptr = src + c * X_size + xd * X_H * X_W + kh * X_W + kw;
         T* dst_ptr = dst + p * Y_size + yd * Y_H * Y_W;
@@ -261,7 +262,7 @@ void Unfold3dCopyKernelImpl(
   const int64_t X_size = X_D * X_H * X_W;
   const int64_t Y_size = Y_D * Y_H * Y_W;
   at::parallel_for(0, n, 0, [=](int64_t begin, int64_t end) {
-    for (int64_t p = begin; p < end; ++p) {
+    for (const auto p : c10::irange(begin, end)) {
       int64_t c = p;
       const int64_t kw = c % kernel_w;
       c /= kernel_w;
@@ -271,20 +272,20 @@ void Unfold3dCopyKernelImpl(
       c /= kernel_d;
       const T* src_ptr = src + c * X_size;
       T* dst_ptr = dst + p * Y_size;
-      for (int64_t yd = 0; yd < Y_D; ++yd) {
+      for (const auto yd : c10::irange(Y_D)) {
         const int64_t xd = yd * stride_d - pad_d + kd;
         if (!IsAGeZeroAndALtB(xd, X_D)) {
           std::memset(dst_ptr + yd * Y_H * Y_W, 0, Y_H * Y_W * sizeof(T));
           continue;
         }
-        for (int64_t yh = 0; yh < Y_H; ++yh) {
+        for (const auto yh : c10::irange(Y_H)) {
           const int64_t xh = yh * stride_h - pad_h + kh;
           if (!IsAGeZeroAndALtB(xh, X_H)) {
             std::memset(
                 dst_ptr + yd * Y_H * Y_W + yh * Y_W, 0, Y_W * sizeof(T));
             continue;
           }
-          for (int64_t yw = 0; yw < Y_W; ++yw) {
+          for (const auto yw : c10::irange(Y_W)) {
             const int64_t xw = yw * stride_w - pad_w + kw;
             dst_ptr[yd * Y_H * Y_W + yh * Y_W + yw] = IsAGeZeroAndALtB(xw, X_W)
                 ? src_ptr[xd * X_H * X_W + xh * X_W + xw]
@@ -318,13 +319,13 @@ void Unfold3dZeroPaddingAccKernelImpl(
   const int64_t kernel_size = kernel_d * kernel_h * kernel_w;
   at::parallel_for(0, C, 0, [=](int64_t begin, int64_t end) {
     std::memset(dst + begin * X_size, 0, (end - begin) * X_size * sizeof(T));
-    for (int64_t c = begin; c < end; ++c) {
-      for (int64_t kd = 0; kd < kernel_d; ++kd) {
-        for (int64_t kh = 0; kh < kernel_h; ++kh) {
-          for (int64_t kw = 0; kw < kernel_w; ++kw) {
+    for (const auto c : c10::irange(begin, end)) {
+      for (const auto kd : c10::irange(kernel_d)) {
+        for (const auto kh : c10::irange(kernel_h)) {
+          for (const auto kw : c10::irange(kernel_w)) {
             const int64_t p =
                 c * kernel_size + kd * kernel_h * kernel_w + kh * kernel_w + kw;
-            for (int64_t yd = 0; yd < Y_D; ++yd) {
+            for (const auto yd : c10::irange(Y_D)) {
               const int64_t xd = yd * stride_d + kd;
               const T* src_ptr = src + p * Y_size + yd * Y_H * Y_W;
               T* dst_ptr = dst + c * X_size + xd * X_H * X_W + kh * X_W + kw;
@@ -393,25 +394,25 @@ void Unfold3dAccKernelImpl(
   const int64_t kernel_size = kernel_d * kernel_h * kernel_w;
   at::parallel_for(0, C, 0, [=](int64_t begin, int64_t end) {
     std::memset(dst + begin * X_size, 0, (end - begin) * X_size * sizeof(T));
-    for (int64_t c = begin; c < end; ++c) {
+    for (const auto c : c10::irange(begin, end)) {
       T* dst_ptr = dst + c * X_size;
-      for (int64_t kd = 0; kd < kernel_d; ++kd) {
-        for (int64_t kh = 0; kh < kernel_h; ++kh) {
-          for (int64_t kw = 0; kw < kernel_w; ++kw) {
+      for (const auto kd : c10::irange(kernel_d)) {
+        for (const auto kh : c10::irange(kernel_h)) {
+          for (const auto kw : c10::irange(kernel_w)) {
             const int64_t p =
                 c * kernel_size + kd * kernel_h * kernel_w + kh * kernel_w + kw;
             const T* src_ptr = src + p * Y_size;
-            for (int64_t yd = 0; yd < Y_D; ++yd) {
+            for (const auto yd : c10::irange(Y_D)) {
               const int64_t xd = yd * stride_d - pad_d + kd;
               if (!IsAGeZeroAndALtB(xd, X_D)) {
                 continue;
               }
-              for (int64_t yh = 0; yh < Y_H; ++yh) {
+              for (const auto yh : c10::irange(Y_H)) {
                 const int64_t xh = yh * stride_h - pad_h + kh;
                 if (!IsAGeZeroAndALtB(xh, X_H)) {
                   continue;
                 }
-                for (int64_t yw = 0; yw < Y_W; ++yw) {
+                for (const auto yw : c10::irange(Y_W)) {
                   const int64_t xw = yw * stride_w - pad_w + kw;
                   if (IsAGeZeroAndALtB(xw, X_W)) {
                     dst_ptr[xd * X_H * X_W + xh * X_W + xw] +=
@@ -430,7 +431,8 @@ void Unfold3dAccKernelImpl(
 } // namespace
 
 void Unfold3dCopyCPU(
-    const Tensor& src,
+    ScalarType dtype,
+    const void *src,
     int64_t C,
     int64_t X_D,
     int64_t X_H,
@@ -447,10 +449,10 @@ void Unfold3dCopyCPU(
     int64_t pad_d,
     int64_t pad_h,
     int64_t pad_w,
-    Tensor* dst) {
+    void* dst) {
   AT_DISPATCH_ALL_TYPES_AND(
       at::ScalarType::BFloat16,
-      src.scalar_type(),
+      dtype,
       "Unfold3dCopyCPU",
       [=, &src]() {
         Unfold3dCopyKernelImpl<scalar_t>(
@@ -470,13 +472,14 @@ void Unfold3dCopyCPU(
             pad_d,
             pad_h,
             pad_w,
-            src.data_ptr<scalar_t>(),
-            dst->data_ptr<scalar_t>());
+            static_cast<const scalar_t*>(src),
+            static_cast<scalar_t*>(dst));
       });
 }
 
 void Unfold3dAccCPU(
-    const Tensor& src,
+    ScalarType dtype,
+    const void *src,
     int64_t C,
     int64_t X_D,
     int64_t X_H,
@@ -493,10 +496,10 @@ void Unfold3dAccCPU(
     int64_t pad_d,
     int64_t pad_h,
     int64_t pad_w,
-    Tensor* dst) {
+    void* dst) {
   AT_DISPATCH_ALL_TYPES_AND(
       at::ScalarType::BFloat16,
-      src.scalar_type(),
+      dtype,
       "Unfold3dAccCPU",
       [=, &src]() {
         Unfold3dAccKernelImpl<scalar_t>(
@@ -516,8 +519,8 @@ void Unfold3dAccCPU(
             pad_d,
             pad_h,
             pad_w,
-            src.data_ptr<scalar_t>(),
-            dst->data_ptr<scalar_t>());
+            static_cast<const scalar_t*>(src),
+            static_cast<scalar_t*>(dst));
       });
 }
 

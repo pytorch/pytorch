@@ -1,116 +1,64 @@
-#include <ATen/NativeFunctions.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/native/Lerp.h>
 #include <ATen/Dispatch.h>
-#include <ATen/ExpandUtils.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/TensorIterator.h>
-
-namespace {
-
-inline void lerp_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, const at::Tensor& weights) {
-  TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
-  TORCH_CHECK(self.dtype() == weights.dtype(), "expected dtype ", self.dtype(), " for `weights` but got dtype ", weights.dtype());
-  at::TensorIterator iter = at::TensorIteratorConfig()
-      .add_output(ret)
-      .add_input(self)
-      .add_input(end)
-      .add_input(weights)
-      .build();
-  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "lerp_cuda", [&]{
-    at::native::gpu_kernel(iter,
-      [] GPU_LAMBDA (
-          scalar_t self_val,
-          scalar_t end_val,
-          scalar_t weight_val) -> scalar_t {
-          return (weight_val < 0.5) ?
-              self_val + weight_val * (end_val - self_val) : end_val - (end_val - self_val) * (1 - weight_val);
-        });
-      });
-}
-
-template <typename scalar_t>
-void lerp_scalar_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, scalar_t weight_val) {
-  TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
-  at::TensorIterator iter = at::TensorIteratorConfig()
-      .add_output(ret)
-      .add_input(self)
-      .add_input(end)
-      .build();
-  at::native::gpu_kernel(iter,
-    [=] GPU_LAMBDA (scalar_t self_val, scalar_t end_val) {
-      return (weight_val < 0.5) ? self_val + weight_val * (end_val - self_val) : end_val - (end_val - self_val) * (1 - weight_val);
-    });
-}
-} // namespace
+#include <ATen/OpMathType.h>
 
 namespace at {
 namespace native {
+namespace {
 
-Tensor& lerp_cuda_tensor_out(Tensor& result, const Tensor& self,
-                            const Tensor& end, const Tensor& weight) {
-  Tensor b_self, b_end, b_weight;
-  TORCH_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
-           "weight should be of dimension max(self.dim(), end.dim()) or lesser");
-  std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_out_cuda");
-  result.resize_as_(b_self);
-  lerp_cuda(result, b_self, b_end, b_weight);
-  return result;
+void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      iter.common_dtype(), "lerp_cuda",
+      [&] {
+        using opmath_t = at::opmath_type<scalar_t>;
+        at::native::gpu_kernel(
+            iter,
+            [] GPU_LAMBDA(
+                scalar_t self_val,
+                scalar_t end_val,
+                scalar_t weight_val) -> scalar_t {
+              opmath_t self_val_f = self_val;
+              opmath_t end_val_f = end_val;
+              opmath_t weight_val_f = weight_val;
+              // Conditional for better numeric. This has been discussed in
+              // https://github.com/pytorch/pytorch/pull/18871
+              return (std::abs(weight_val_f) < 0.5)
+                  ? self_val_f + weight_val_f * (end_val_f - self_val_f)
+                  : end_val_f -
+                      (end_val_f - self_val_f) *
+                          (opmath_t{1} - weight_val_f);
+            });
+      });
 }
 
-Tensor& lerp_cuda_scalar_out(Tensor& result, const Tensor& self,
-                            const Tensor& end, Scalar weight) {
-  Tensor b_self, b_end;
-  std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_out_cuda");
-  result.resize_as_(b_self);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lerp_out_cuda", [&]{
-    lerp_scalar_cuda<scalar_t>(result, b_self, b_end, weight.to<scalar_t>());
-  });
-  return result;
-}
+void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      iter.common_dtype(), "lerp_cuda",
+      [&]{
+        using opmath_t = at::opmath_type<scalar_t>;
+        auto weight_val = weight.to<opmath_t>();
+        at::native::gpu_kernel(
+            iter, [=] GPU_LAMBDA(scalar_t self_val, scalar_t end_val) {
+              opmath_t self_val_f = self_val;
+              opmath_t end_val_f = end_val;
+              // Conditional for better numeric. This has been discussed in
+              // https://github.com/pytorch/pytorch/pull/18871
+              return (std::abs(weight_val) < 0.5)
+                  ? self_val_f + weight_val * (end_val_f - self_val_f)
+                  : end_val_f -
+                      (end_val_f - self_val_f) * (opmath_t{1} - weight_val);
+            });
+      });
+    }
+} // anonymous namespace
 
-Tensor& lerp_cuda_tensor_(Tensor& self, const Tensor& end, const Tensor& weight) {
-  Tensor b_self, b_end, b_weight;
-  std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp__cuda");
-  TORCH_CHECK(b_self.sizes() == self.sizes(),
-           "output with shape ", self.sizes(),
-           " doesn't match the broadcast shape ", b_self.sizes());
-  TORCH_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
-           "weight should be of dimension max(self.dim(), end.dim()) or lesser");
-  lerp_cuda(self, b_self, b_end, b_weight);
-  return self;
-}
-
-Tensor& lerp_cuda_scalar_(Tensor& self, const Tensor& end, Scalar weight) {
-  Tensor b_self, b_end;
-  std::tie(b_self, b_end) = expand_outplace(self, end, "lerp__cuda");
-  TORCH_CHECK(b_self.sizes() == self.sizes(),
-           "output with shape ", self.sizes(),
-           " doesn't match the broadcast shape ", b_self.sizes());
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lerp__cuda", [&]{
-    lerp_scalar_cuda<scalar_t>(self, b_self, b_end, weight.to<scalar_t>());
-  });
-  return self;
-}
-
-Tensor lerp_cuda_tensor(const Tensor& self, const Tensor& end, const Tensor& weight) {
-  Tensor b_self, b_end, b_weight;
-  TORCH_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
-           "weight should be of dimension max(self.dim(), end.dim()) or lesser");
-  std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_cuda");
-  Tensor result = at::empty_like(b_self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  lerp_cuda(result, b_self, b_end, b_weight);
-  return result;
-}
-
-Tensor lerp_cuda_scalar(const Tensor& self, const Tensor& end, Scalar weight) {
-  Tensor b_self, b_end;
-  std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_cuda");
-  Tensor result = at::empty_like(b_self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lerp_cuda", [&]{
-    lerp_scalar_cuda<scalar_t>(result, b_self, b_end, weight.to<scalar_t>());
-  });
-  return result;
-}
+REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_kernel);
+REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_kernel);
 
 } // namespace native
 } // namespace at

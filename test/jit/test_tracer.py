@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import unittest
 import io
 import os
@@ -15,17 +17,17 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import suppress_warnings, \
     skipIfCompiledWithoutNumpy, enable_profiling_mode_for_profiling_tests, \
-    IS_SANDCASTLE, IS_WINDOWS
+    IS_SANDCASTLE, TemporaryFileName, skipIfCrossRef
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, \
-    _tmp_donotuse_dont_inline_everything, _trace, RUN_CUDA, RUN_CUDA_MULTI_GPU
-from typing import List, Tuple
+    _tmp_donotuse_dont_inline_everything, _trace, RUN_CUDA, \
+    RUN_CUDA_MULTI_GPU, make_global
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch import Tensor
 
 # Standard library
 from collections import namedtuple
 from itertools import chain
-import tempfile
-from typing import Dict
+from typing import Dict, List, Optional, Tuple
 import warnings
 
 if __name__ == '__main__':
@@ -149,6 +151,28 @@ class TestTracer(JitTestCase):
         p = Point(torch.randn(1), torch.randn(1))
         traced = torch.jit.trace(f, (p,))
         self.assertEqual(f(p), traced(p))
+
+    def test_trace_topk(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x.topk(y, dim=1)[1]
+
+        mod = M()
+        inputs = (torch.randint(0, 10, (20, 20)), torch.tensor(17))
+        traced_func = torch.jit.trace(mod, inputs)
+
+        test_inputs = (torch.randint(0, 9, (9, 9)), torch.tensor(8))
+        eager_out = mod(*test_inputs)
+        traced_out = traced_func(*test_inputs)
+        self.assertNotWarn(lambda: traced_func(*test_inputs), "Shouldn't throw slicing related warn here")
+        self.assertEqual(eager_out, traced_out)
+
+        test_inputs = (torch.randint(0, 50, (50, 50)), torch.tensor(12))
+        eager_out = mod(*test_inputs)
+        traced_out = traced_func(*test_inputs)
+        self.assertNotWarn(lambda: traced_func(*test_inputs), "Shouldn't throw slicing related warn here")
+        self.assertEqual(eager_out, traced_out)
+
 
     def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
@@ -353,6 +377,17 @@ class TestTracer(JitTestCase):
     def test_trace_size_with_grad(self):
         self.do_trace_size(True)
 
+    def test_trace_numel(self):
+        def fn(x):
+            return x.numel()
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(4, 5, 6)
+
+        traced_fn = torch.jit.trace(fn, x)
+        self.assertEqual(traced_fn(y), fn(y))
+        self.assertEqual(traced_fn(x), fn(x))
+
     def do_trace_arange(self, requires_grad):
         def arange(x):
             return torch.arange(x.shape[0])
@@ -397,6 +432,18 @@ class TestTracer(JitTestCase):
         y = torch.randn(2, 7)
         self.assertEqual(ge(y).shape, y.shape)
         self.assertEqual(ge(x).shape, x.shape)
+
+    # Test that the trace of setitem doesn't store shapes as constants
+    # Fix https://github.com/pytorch/pytorch/issues/43548
+    def test_trace_slice_setitem_dynamic_shape(self):
+        def slice_setitem(x, y):
+            x[:, 2] = y + 1
+            return x
+
+        x = torch.randn(3, 4)
+        traced = torch.jit.trace(slice_setitem, (x, x[:, 0]))
+        x = torch.randn(10, 5)
+        self.assertEqual(traced(x.clone(), x[:, 0]), slice_setitem(x.clone(), x[:, 0]))
 
     # Suppression: we are intentionally slicing a tensor, we don't care that it
     # will be constantified
@@ -464,6 +511,7 @@ class TestTracer(JitTestCase):
         self.assertEqual(to_tensor_trace(x, y), to_tensor(x, y))
 
     @skipIfCompiledWithoutNumpy
+    @skipIfCrossRef
     def test_trace_warn(self):
         def fn(x):
             int(x)  # Warning 1.
@@ -471,24 +519,25 @@ class TestTracer(JitTestCase):
             if y:   # Warning 2.
                 pass
             q = [x, x * 4]
-            z = q[y]  # Warning 3.
-            float(z)  # Warning 4.
-            z.tolist()  # Warning 5.
-            z.numpy()  # Warning 6.
-            for _ in torch.ones(4, 4):  # Warning 7.
+            z = q[y]
+            float(z)  # Warning 3.
+            z.tolist()  # Warning 4.
+            z.numpy()  # Warning 5.
+            for _ in torch.ones(4, 4):  # Warning 6.
                 pass
             return z + 4
 
         with warnings.catch_warnings(record=True) as warns:
             traced_fn = torch.jit.trace(fn, torch.tensor([1]))
+        for warn in warns:
+            self.assertIs(warn.category, torch.jit.TracerWarning)
         warns = [str(w.message) for w in warns]
         self.assertIn('a Python integer', warns[0])
         self.assertIn('a Python boolean', warns[1])
-        self.assertIn('a Python index', warns[2])
-        self.assertIn('a Python float', warns[3])
-        self.assertIn('a Python list', warns[4])
-        self.assertIn('a NumPy array', warns[5])
-        self.assertIn('Iterating over', warns[6])
+        self.assertIn('a Python float', warns[2])
+        self.assertIn('a Python list', warns[3])
+        self.assertIn('a NumPy array', warns[4])
+        self.assertIn('Iterating over', warns[5])
 
     def test_trace_tuple(self):
         def fn(x, y):
@@ -799,7 +848,7 @@ class TestTracer(JitTestCase):
     def test_trace_c10_ops(self):
         try:
             _ = torch.ops._caffe2.GenerateProposals
-        except RuntimeError:
+        except AttributeError:
             self.skipTest("Skip the test since c2 ops are not registered.")
 
         class MyModel(torch.nn.Module):
@@ -900,6 +949,9 @@ class TestTracer(JitTestCase):
         self.assertEqual(foo(x), x + x + x)
 
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")
+    # By default, on Ampere or later GPUs, nn.Linear computes float tensors at TF32 precision.
+    # We want float tensors to be computed at full precision in order to use the default precision
+    @with_tf32_off
     def test_traced_module_cuda(self):
         class Model(nn.Module):
             def __init__(self, num_features, num_layers):
@@ -1077,9 +1129,8 @@ class TestTracer(JitTestCase):
             def forward(self, x, w):
                 return torch.matmul(x, w).detach()
 
-        f = io.BytesIO()
         torch.onnx.export_to_pretty_string(
-            Mod(), (torch.rand(3, 4), torch.rand(4, 5)), f)
+            Mod(), (torch.rand(3, 4), torch.rand(4, 5)))
 
     def test_trace_slice_full_dim(self):
         def foo(x):
@@ -1188,15 +1239,25 @@ class TestTracer(JitTestCase):
             torch.tensor([15])
         )
 
-    @unittest.skipIf(IS_WINDOWS, "temp file name on windows")
+        @torch.jit.script
+        def use_device(x):
+            return torch.zeros_like(x, device=x.device)
+
+        def foo(x):
+            return use_device(x)
+
+        traced_tensor_size = torch.jit.trace(foo, torch.rand(7,))
+        self.run_pass('inline', traced_tensor_size.graph)
+        FileCheck().check("prim::device").run(traced_tensor_size.graph)
+
     def test_trace_save(self):
         def fn(x):
             return x + 2
 
         def check(func):
-            with tempfile.NamedTemporaryFile() as f:
-                func.save(f.name)
-                loaded = torch.jit.load(f.name)
+            with TemporaryFileName() as fname:
+                func.save(fname)
+                loaded = torch.jit.load(fname)
                 input = torch.randn(2, 2)
                 self.assertEqual(func(input), loaded(input))
 
@@ -1299,6 +1360,39 @@ class TestTracer(JitTestCase):
         imported = self.getExportImportCopy(traced)
         check(imported.foo)
 
+        # Note that Bar's forward can only be traced, but not scripted
+        class Bar(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch.jit.export
+            def addTwo(self, x):
+                return x + 2
+
+            def forward(self, input):
+                return (lambda a: a + 1)(input)
+
+        # When tracing Bar as a submodule, we only want to script the
+        # exported methods, and we want to keep the forwards still
+        # being traced.
+        class WrapperExports(torch.nn.Module):
+            def __init__(self):
+                super(WrapperExports, self).__init__()
+                self.bar = Bar()
+
+            @torch.jit.export
+            def addOne(self, x):
+                return x + 1
+
+            def forward(self, x):
+                return self.bar(x)
+
+        f = WrapperExports()
+
+        traced = torch.jit.trace(f, (torch.rand(3, 4),))
+        expected_names = ['addOne']
+        check(traced)
+
     def test_trace_autograd_function(self):
         class TestFunc(torch.autograd.Function):
             @staticmethod
@@ -1308,7 +1402,6 @@ class TestTracer(JitTestCase):
             @staticmethod
             def backward(ctx, grad_output):
                 return torch.neg(grad_output)
-
 
 
         class TracedModule(torch.nn.Module):
@@ -1325,6 +1418,47 @@ class TestTracer(JitTestCase):
                 return self.tm(x)
 
         traced = torch.jit.trace(Wrapper(), (torch.rand(3, 4),))
+
+    def test_trace_multi_output_function(self):
+        # An autograd.Function with two outputs.
+        # It swaps inputs so we can check if shape
+        # handling is correct in TorchScript.
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return y, x
+
+            @staticmethod
+            def backward(ctx, du, dv):
+                return dv, du
+
+        class Bar(torch.nn.Module):
+            def forward(self, x, y):
+                x = x.relu()
+                y = y.relu()
+                z = Foo.apply(x, y)
+                return z
+
+        x = torch.rand(3, 2, dtype=torch.double)
+        y = torch.rand(1, 2, dtype=torch.double)
+
+        # Generate JIT IR.
+        traced = torch.jit.trace(Bar(), (x, y))
+        print(traced.graph)
+
+        # Expected output schema of the custom autograd.Function.
+        schema = '(Double(1, 2, strides=[2, 1], requires_grad=0, device=cpu), '\
+            'Double(3, 2, strides=[2, 1], requires_grad=0, device=cpu)) '\
+            '= ^Foo'
+
+        # See if expected schema exists.
+        FileCheck().check(schema).run(traced.graph)
+
+        # Also examine if the graph is runnable and produces
+        # the right result.
+        u, v = traced(x, y)
+        self.assertEqual(u, y)
+        self.assertEqual(v, x)
 
     def test_interpolate_trace(self):
         class test(nn.Module):
@@ -1347,8 +1481,7 @@ class TestTracer(JitTestCase):
     @_tmp_donotuse_dont_inline_everything
     def test_trace_optional(self):
         @torch.jit.script
-        def test(x):
-            # type: (Optional[Tensor])
+        def test(x: Optional[Tensor]):
             if x is None:
                 return torch.zeros(1)
             else:
@@ -1478,7 +1611,7 @@ class TestTracer(JitTestCase):
                 x[i, :] = torch.zeros(4)
             return x
 
-        self.checkTrace(foo, (torch.rand(3, 4),))
+        self.checkTrace(foo, (torch.rand(3, 4),), inputs_require_grads=False)
 
     def test_trace_checker_inplace_on_view(self):
         def foo(x):
@@ -1647,6 +1780,7 @@ class TestTracer(JitTestCase):
 
         torch.jit.trace(Mod(), (torch.rand(3, 4),))
 
+    @skipIfCrossRef
     def test_trace_records_names(self):
         def foo(bar, baz):
             baz = bar + 3
@@ -1786,17 +1920,85 @@ class TestTracer(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, r"Type 'Tuple\[int\]' cannot be traced"):
             torch.jit.trace(f, (1,))
 
+    def test_trace_skip_none_submodule(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = torch.nn.Linear(3, 4)
+                self.submod = None
+
+            def forward(self, inputs):
+                return inputs
+
+        m = TestModule()
+        tm = torch.jit.trace(m, torch.tensor(1.))
+        self.assertFalse(hasattr(tm, "submod"))
+
+    def test_trace_with_conditional_property(self):
+        class Net(nn.Module):
+            def __init__(self, attr=None):
+                super(Net, self).__init__()
+                if attr is not None:
+                    self._attr = attr
+                self.attr_name = '_attr'
+
+            @property
+            def attr(self):
+                return getattr(self, self.attr_name)
+
+            def forward(self, x):
+                return x
+
+        x = torch.ones(1)
+        torch.jit.trace(Net(), x)
+
+    def test_trace_func_argument_names_captured(self):
+        def fn(first_arg: torch.Tensor, second_arg: torch.Tensor) -> torch.Tensor:
+            return first_arg + second_arg
+
+        traced_fn = torch.jit.trace(fn, (torch.ones(1), torch.ones(1)))
+        FileCheck().check("first_arg").check_next("second_arg") \
+            .run(str(traced_fn.graph))
+
+    def test_trace_partial_func_argument_names_captured(self):
+        def fn(first_arg: torch.Tensor, second_arg=1) -> torch.Tensor:
+            return first_arg + second_arg
+
+        traced_fn = torch.jit.trace(fn, (torch.ones(1),))
+        FileCheck().check("first_arg").check_not("second_arg") \
+            .run(str(traced_fn.graph))
+
+    def test_trace_module_argument_names_captured(self):
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.conv = nn.Conv2d(1, 1, 3)
+
+            def forward(self, first_arg: torch.Tensor, second_arg: torch.Tensor):
+                return self.conv(first_arg) + second_arg
+
+        m = TestModule()
+        example_input = (torch.ones(1, 1, 3, 3), torch.ones(1, 1, 3, 3))
+
+        # Explicitly tracing module's forward method
+        traced_module_forward = torch.jit.trace(m.forward, example_input)
+        FileCheck().check("first_arg").check_next("second_arg") \
+            .run(str(traced_module_forward.graph))
+
+        # Tracing module's directly
+        traced_module = torch.jit.trace(m, example_input)
+        FileCheck().check("first_arg").check_next("second_arg") \
+            .run(str(traced_module.graph))
+
 
 class TestMixTracingScripting(JitTestCase):
     def test_trace_script(self):
         @torch.jit.script
-        def func1(x):
-            # type: (Tuple[Tensor, Tensor]) -> Tensor
+        def func1(x: Tuple[Tensor, Tensor]) -> Tensor:
             return x[0] + x[1]
 
         @torch.jit.script
-        def func2(x):
-            # type: (List[Tensor]) -> Tensor
+        def func2(x: List[Tensor]) -> Tensor:
             return x[0] + x[1]
 
         a = torch.randn(5)
@@ -1806,8 +2008,7 @@ class TestMixTracingScripting(JitTestCase):
         self.checkTrace(func2, ((a, b),))
 
         @torch.jit.script
-        def func3(x, method='bilinear', align_corners=True):
-            # type: (Tensor, str, bool) -> Tensor
+        def func3(x: Tensor, method: str = 'bilinear', align_corners: bool = True) -> Tensor:
             hw = x.shape[2:4]
             return F.interpolate(x, hw, mode=method, align_corners=align_corners)
 
@@ -1815,8 +2016,7 @@ class TestMixTracingScripting(JitTestCase):
         self.checkTrace(func3, (inp,))
 
         @torch.jit.script
-        def func4(x, a):
-            # type: (Tensor, List[Optional[str]]) -> Tensor
+        def func4(x: Tensor, a: List[Optional[str]]) -> Tensor:
             if len(a) == 2:
                 return x + 2
             else:
@@ -1864,7 +2064,7 @@ class TestMixTracingScripting(JitTestCase):
         @torch.jit.script
         def bar(x):
             y = int(foo(x))
-            if True:
+            if 1 == 1:
                 y = 7
             return y + 1
 
@@ -1962,7 +2162,7 @@ class TestMixTracingScripting(JitTestCase):
         class Param(nn.Module):
             def __init__(self):
                 super(Param, self).__init__()
-                self.register_parameter("bias", nn.Parameter(torch.Tensor(4, 4)))
+                self.register_parameter("bias", nn.Parameter(torch.empty(4, 4)))
 
             def forward(self, x):
                 return x
@@ -2219,3 +2419,132 @@ class TestMixTracingScripting(JitTestCase):
         traced_module = torch.jit.trace(eager_module, input1)
         self.assertEqual(traced_module(input1), eager_module(input1))
         self.assertEqual(traced_module(input2), eager_module(input2))
+
+    def test_trace_returning_dict_with_tensor_tuples(self):
+        """Tracing over a module returning a dictionary whose values are tuples of tensors
+        should work.
+        """
+        class ReturnsDict(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self, k: torch.Tensor, v: torch.Tensor
+            ) -> Dict[str, Tuple[torch.Tensor, torch.Tensor]]:
+                x = 2 * k
+                y = 3 * v
+                result = {
+                    "imakey": (x, y)
+                }
+                return result
+
+        class ReturnsBadDict(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self, k: torch.Tensor, v: torch.Tensor
+            ) -> Dict[str, Tuple[torch.Tensor, float]]:
+                x = 2 * k
+                result = {
+                    "imakey": (x, 1)
+                }
+                return result
+
+        mod = ReturnsDict()
+        traced_module = torch.jit.trace(mod, [torch.ones(1), torch.ones(1)], strict=False)
+        out = traced_module(torch.ones(1), torch.ones(1))
+        expected = {
+            "imakey": (torch.tensor([2.]), torch.tensor([3.]))
+        }
+        self.assertEqual(out, expected)
+
+        with self.assertRaisesRegex(RuntimeError, "cannot be understood by the tracer, only outputs matching"):
+            mod = ReturnsBadDict()
+            traced_module = torch.jit.trace(mod, [torch.ones(1), torch.ones(1)], strict=False)
+
+    def test_trace_linear(self):
+        m = torch.nn.Linear(20, 20)
+        inp = torch.rand([20, 20])
+        self.checkTrace(m, (inp,))
+        g = torch.jit.trace(m, (inp,)).graph
+        FileCheck().check("aten::linear").run(g)
+
+    def test_traced_module_implements_interface(self):
+        @torch.jit.interface
+        class TestModuleInterface(nn.Module):
+            def forward(self, first_arg: torch.Tensor, second_arg: torch.Tensor) -> torch.Tensor:
+                pass
+
+        make_global(TestModuleInterface)
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.conv = nn.Conv2d(1, 1, 3)
+
+            def forward(self, first_arg: torch.Tensor, second_arg: torch.Tensor) -> torch.Tensor:
+                return self.conv(first_arg) + second_arg
+
+        def fn_takes_interface(x: TestModuleInterface):
+            ones = torch.ones(1, 1, 3, 3)
+            return x.forward(ones, ones)
+
+        scripted_test_module = torch.jit.script(TestModule())
+        self.checkScript(fn_takes_interface, (scripted_test_module,))
+
+    def test_traced_module_contains_scripted_interface_types(self):
+
+        class LeafModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.rand(19))
+
+            def forward(self, input: torch.Tensor):
+                return input + self.weight
+
+        class LowerModuleImpl(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.leaf = LeafModule()
+
+            def forward(self, input: torch.Tensor) -> torch.Tensor:
+                return self.leaf(input)
+
+        @torch.jit.interface
+        class LowerModuleInterface(torch.nn.Module):
+            def forward(self, input: torch.Tensor) -> torch.Tensor:
+                pass
+
+        class MiddleModule(torch.nn.Module):
+            lower: LowerModuleInterface
+
+            def __init__(self, feature_processor_modules=None):
+                super().__init__()
+                self.lower = LowerModuleImpl()
+
+            def forward(self, input):
+                return self.lower(input)
+
+        class WrapperModule(torch.nn.Module):
+            def __init__(self, m):
+                super().__init__()
+                self.middle = m
+
+            def forward(self, input):
+                return self.middle(input)
+
+        class TopModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                m = MiddleModule()
+                m = torch.jit.script(m)
+                self.sub1 = m
+                self.sub2 = WrapperModule(m)
+
+            def forward(self, input: torch.Tensor):
+                return self.sub1(input) + self.sub2(input)
+
+        top = TopModule()
+        top_example_input = torch.ones(1)
+        torch.jit.trace(top, top_example_input)

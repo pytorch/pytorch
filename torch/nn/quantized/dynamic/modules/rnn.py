@@ -1,18 +1,36 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import numbers
 import warnings
 
 import torch
 import torch.nn as nn
 from torch import Tensor  # noqa: F401
-from torch._jit_internal import Tuple, Optional, List  # noqa: F401
+from torch._jit_internal import Tuple, Optional, List, Union, Dict  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
 from torch.nn.quantized.modules.utils import _quantize_weight
 
-def apply_permutation(tensor, permutation, dim=1):
-    # type: (Tensor, Tensor, int) -> Tensor
+def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     return tensor.index_select(dim, permutation)
+
+def pack_weight_bias(qweight, bias, dtype):
+
+    if dtype == torch.qint8:
+        # for each layer, for each direction we need to quantize and pack
+        # weights and pack parameters in this order:
+        #
+        #   w_ih, w_hh
+        packed_weight = \
+            torch.ops.quantized.linear_prepack(qweight, bias)
+
+        return packed_weight
+    else:
+        # for each layer, for each direction we need to quantize and pack
+        # weights and pack parameters in this order:
+        #
+        #   packed_ih, packed_hh, b_ih, b_hh
+        packed_weight = torch.ops.quantized.linear_prepack_fp16(
+            qweight, bias)
+
+        return packed_weight
 
 class PackedParameter(torch.nn.Module):
     def __init__(self, param):
@@ -53,12 +71,14 @@ class RNNBase(torch.nn.Module):
         self.training = False
         num_directions = 2 if bidirectional else 1
 
-        if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
-                isinstance(dropout, bool):
+        # "type: ignore" is required since ints and Numbers are not fully comparable
+        # https://github.com/python/mypy/issues/8566
+        if not isinstance(dropout, numbers.Number) \
+                or not 0 <= dropout <= 1 or isinstance(dropout, bool):  # type: ignore[operator]
             raise ValueError("dropout should be a number in range [0, 1] "
                              "representing the probability of an element being "
                              "zeroed")
-        if dropout > 0 and num_layers == 1:
+        if dropout > 0 and num_layers == 1:  # type: ignore[operator]
             warnings.warn("dropout option adds dropout after all but last "
                           "recurrent layer, so non-zero dropout expects "
                           "num_layers greater than 1, but got dropout={} and "
@@ -66,6 +86,8 @@ class RNNBase(torch.nn.Module):
 
         if mode == 'LSTM':
             gate_size = 4 * hidden_size
+        elif mode == 'GRU':
+            gate_size = 3 * hidden_size
         else:
             raise ValueError("Unrecognized RNN mode: " + mode)
 
@@ -91,9 +113,7 @@ class RNNBase(torch.nn.Module):
                     else:
                         cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
                             packed_ih, packed_hh, b_ih, b_hh, True)
-
                 else:
-
                     packed_ih = torch.ops.quantized.linear_prepack_fp16(w_ih, b_ih)
                     packed_hh = torch.ops.quantized.linear_prepack_fp16(w_hh, b_hh)
                     cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
@@ -149,8 +169,7 @@ class RNNBase(torch.nn.Module):
         main_str += ')'
         return main_str
 
-    def check_input(self, input, batch_sizes):
-        # type: (Tensor, Optional[Tensor]) -> None
+    def check_input(self, input: Tensor, batch_sizes: Optional[Tensor]) -> None:
         expected_input_dim = 2 if batch_sizes is not None else 3
         if input.dim() != expected_input_dim:
             raise RuntimeError(
@@ -161,11 +180,9 @@ class RNNBase(torch.nn.Module):
                 'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
                     self.input_size, input.size(-1)))
 
-    def get_expected_hidden_size(self, input, batch_sizes):
-        # type: (Tensor, Optional[Tensor]) -> Tuple[int, int, int]
+    def get_expected_hidden_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
         if batch_sizes is not None:
-            mini_batch = batch_sizes[0]
-            mini_batch = int(mini_batch)
+            mini_batch = int(batch_sizes[0])
         else:
             mini_batch = input.size(0) if self.batch_first else input.size(1)
         num_directions = 2 if self.bidirectional else 1
@@ -173,21 +190,21 @@ class RNNBase(torch.nn.Module):
                                 mini_batch, self.hidden_size)
         return expected_hidden_size
 
-    def check_hidden_size(self, hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
-        # type: (Tensor, Tuple[int, int, int], str) -> None
+    def check_hidden_size(
+        self, hx: Tensor, expected_hidden_size: Tuple[int, int, int],
+        msg: str = 'Expected hidden size {}, got {}'
+    ) -> None:
         if hx.size() != expected_hidden_size:
             raise RuntimeError(msg.format(
                 expected_hidden_size, list(hx.size())))
 
-    def check_forward_args(self, input, hidden, batch_sizes):
-        # type: (Tensor, Tensor, Optional[Tensor]) -> None
+    def check_forward_args(self, input: Tensor, hidden: Tensor, batch_sizes: Optional[Tensor]) -> None:
         self.check_input(input, batch_sizes)
         expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
         self.check_hidden_size(hidden, expected_hidden_size,
                                msg='Expected hidden size {}, got {}')
 
-    def permute_hidden(self, hx, permutation):
-        # type: (Tensor, Optional[Tensor]) -> Tensor
+    def permute_hidden(self, hx: Tensor, permutation: Optional[Tensor]) -> Tensor:
         if permutation is None:
             return hx
         return apply_permutation(hx, permutation)
@@ -198,6 +215,43 @@ class RNNBase(torch.nn.Module):
         self.version = version
         super(RNNBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                    missing_keys, unexpected_keys, error_msgs)
+
+    def set_weight_bias(self, weight_bias_dict):
+
+        def weight_bias_name(ihhh, layer, suffix):
+            weight_name = "weight_{}_l{}{}".format(ihhh, layer, suffix)
+            bias_name = "bias_{}_l{}{}".format(ihhh, layer, suffix)
+            return weight_name, bias_name
+
+        num_directions = 2 if self.bidirectional else 1
+        # TODO: dedup with __init__ of RNNBase
+        _all_weight_values = []
+        for layer in range(self.num_layers):
+            for direction in range(num_directions):
+                suffix = "_reverse" if direction == 1 else ""
+                w_ih_name, b_ih_name = weight_bias_name("ih", layer, suffix)
+                w_hh_name, b_hh_name = weight_bias_name("hh", layer, suffix)
+                w_ih = weight_bias_dict[w_ih_name]
+                b_ih = weight_bias_dict[b_ih_name]
+                w_hh = weight_bias_dict[w_hh_name]
+                b_hh = weight_bias_dict[b_hh_name]
+                if w_ih.dtype == torch.qint8:
+                    packed_ih = torch.ops.quantized.linear_prepack(w_ih, b_ih)
+                    packed_hh = torch.ops.quantized.linear_prepack(w_hh, b_hh)
+                    if self.version is None or self.version < 2:
+                        cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                            packed_ih, packed_hh, b_ih, b_hh)
+                    else:
+                        cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                            packed_ih, packed_hh, b_ih, b_hh, True)
+                else:
+                    packed_ih = torch.ops.quantized.linear_prepack_fp16(w_ih, b_ih)
+                    packed_hh = torch.ops.quantized.linear_prepack_fp16(w_hh, b_hh)
+                    cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
+                        packed_ih, packed_hh)
+
+                _all_weight_values.append(PackedParameter(cell_params))
+        self._all_weight_values = torch.nn.ModuleList(_all_weight_values)
 
     @classmethod
     def from_float(cls, mod):
@@ -216,19 +270,23 @@ class RNNBase(torch.nn.Module):
             # We have the circular import issues if we import the qconfig in the beginning of this file:
             # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
             # import until we need it.
-            from torch.quantization.qconfig import default_dynamic_qconfig
+            from torch.ao.quantization.qconfig import default_dynamic_qconfig
             weight_observer_method = default_dynamic_qconfig.weight
 
         dtype = weight_observer_method().dtype
         supported_scalar_types = [torch.qint8, torch.float16]
         if dtype not in supported_scalar_types:
             raise RuntimeError('Unsupported dtype for dynamic RNN quantization: {}'.format(dtype))
-
+        # RNNBase can be either LSTM or GRU
+        qRNNBase: Union[LSTM, GRU]
         if mod.mode == 'LSTM':
             qRNNBase = LSTM(mod.input_size, mod.hidden_size, mod.num_layers,
                             mod.bias, mod.batch_first, mod.dropout, mod.bidirectional, dtype)
+        elif mod.mode == 'GRU':
+            qRNNBase = GRU(mod.input_size, mod.hidden_size, mod.num_layers,
+                           mod.bias, mod.batch_first, mod.dropout, mod.bidirectional, dtype)
         else:
-            raise NotImplementedError('Only LSTM is supported for QuantizedRNN for now')
+            raise NotImplementedError('Only LSTM/GRU is supported for QuantizedRNN for now')
 
         num_directions = 2 if mod.bidirectional else 1
 
@@ -237,8 +295,6 @@ class RNNBase(torch.nn.Module):
         _all_weight_values = []
         for layer in range(qRNNBase.num_layers):
             for direction in range(num_directions):
-                layer_input_size = qRNNBase.input_size if layer == 0 else qRNNBase.hidden_size * num_directions
-
                 suffix = '_reverse' if direction == 1 else ''
 
                 def retrieve_weight_bias(ihhh):
@@ -287,7 +343,7 @@ class RNNBase(torch.nn.Module):
 
     def _weight_bias(self):
         # Returns a dict of weights and biases
-        weight_bias_dict = {'weight' : {}, 'bias' : {}}
+        weight_bias_dict: Dict[str, Dict] = {'weight' : {}, 'bias' : {}}
         count = 0
         num_directions = 2 if self.bidirectional else 1
         for layer in range(self.num_layers):
@@ -337,8 +393,11 @@ class LSTM(RNNBase):
     def _get_name(self):
         return 'DynamicQuantizedLSTM'
 
-    def forward_impl(self, input, hx, batch_sizes, max_batch_size, sorted_indices):
-        # type: (Tensor, Optional[Tuple[Tensor, Tensor]], Optional[Tensor], int, Optional[Tensor]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]  # noqa
+    def forward_impl(
+        self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]],
+        batch_sizes: Optional[Tensor], max_batch_size: int,
+        sorted_indices: Optional[Tensor]
+    ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
             zeros = torch.zeros(self.num_layers * num_directions,
@@ -367,8 +426,9 @@ class LSTM(RNNBase):
         return output, hidden
 
     @torch.jit.export
-    def forward_tensor(self, input, hx=None):
-        # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
+    def forward_tensor(
+        self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None
+    ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
         batch_sizes = None
         max_batch_size = input.size(0) if self.batch_first else input.size(1)
         sorted_indices = None
@@ -380,27 +440,32 @@ class LSTM(RNNBase):
         return output, self.permute_hidden(hidden, unsorted_indices)
 
     @torch.jit.export
-    def forward_packed(self, input, hx=None):
-        # type: (PackedSequence, Optional[Tuple[Tensor, Tensor]]) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]  # noqa
-        input, batch_sizes, sorted_indices, unsorted_indices = input
+    def forward_packed(
+        self, input: PackedSequence, hx: Optional[Tuple[Tensor, Tensor]] = None
+    ) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]:
+        input_, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = batch_sizes[0]
         max_batch_size = int(max_batch_size)
 
-        output, hidden = self.forward_impl(
-            input, hx, batch_sizes, max_batch_size, sorted_indices)
+        output_, hidden = self.forward_impl(
+            input_, hx, batch_sizes, max_batch_size, sorted_indices)
 
-        output = PackedSequence(output, batch_sizes,
+        output = PackedSequence(output_, batch_sizes,
                                 sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
 
-    def permute_hidden(self, hx, permutation):
-        # type: (Tuple[Tensor, Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
+    # "type: ignore" is required due to issue #43072
+    def permute_hidden(  # type: ignore[override]
+        self, hx: Tuple[Tensor, Tensor], permutation: Optional[Tensor]
+    ) -> Tuple[Tensor, Tensor]:
         if permutation is None:
             return hx
         return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
 
-    def check_forward_args(self, input, hidden, batch_sizes):
-        # type: (Tensor, Tuple[Tensor, Tensor], Optional[Tensor])->None
+    # "type: ignore" is required due to issue #43072
+    def check_forward_args(  # type: ignore[override]
+        self, input: Tensor, hidden: Tuple[Tensor, Tensor], batch_sizes: Optional[Tensor]
+    ) -> None:
         self.check_input(input, batch_sizes)
         expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
 
@@ -420,6 +485,236 @@ class LSTM(RNNBase):
     def from_float(cls, mod):
         return super(LSTM, cls).from_float(mod)
 
+    @classmethod
+    def from_reference(cls, ref_mod):
+        assert hasattr(ref_mod, "weight_ih_l0_dtype"), "We are assuming weight_ih_l0 "
+        "exists in LSTM, may need to relax the assumption to support the use case"
+        qmod = cls(
+            ref_mod.input_size,
+            ref_mod.hidden_size,
+            ref_mod.num_layers,
+            ref_mod.bias,
+            ref_mod.batch_first,
+            ref_mod.dropout,
+            ref_mod.bidirectional,
+            # assuming there is layer 0, which should be OK
+            ref_mod.weight_ih_l0_dtype,
+        )
+        qmod.set_weight_bias(ref_mod.get_quantized_weight_bias_dict())
+        return qmod
+
+
+class GRU(RNNBase):
+    r"""Applies a multi-layer gated recurrent unit (GRU) RNN to an input sequence.
+
+
+    For each element in the input sequence, each layer computes the following
+    function:
+
+    .. math::
+        \begin{array}{ll}
+            r_t = \sigma(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
+            z_t = \sigma(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\
+            n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn})) \\
+            h_t = (1 - z_t) * n_t + z_t * h_{(t-1)}
+        \end{array}
+
+    where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the input
+    at time `t`, :math:`h_{(t-1)}` is the hidden state of the layer
+    at time `t-1` or the initial hidden state at time `0`, and :math:`r_t`,
+    :math:`z_t`, :math:`n_t` are the reset, update, and new gates, respectively.
+    :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product.
+
+    In a multilayer GRU, the input :math:`x^{(l)}_t` of the :math:`l` -th layer
+    (:math:`l >= 2`) is the hidden state :math:`h^{(l-1)}_t` of the previous layer multiplied by
+    dropout :math:`\delta^{(l-1)}_t` where each :math:`\delta^{(l-1)}_t` is a Bernoulli random
+    variable which is :math:`0` with probability :attr:`dropout`.
+
+    Args:
+        input_size: The number of expected features in the input `x`
+        hidden_size: The number of features in the hidden state `h`
+        num_layers: Number of recurrent layers. E.g., setting ``num_layers=2``
+            would mean stacking two GRUs together to form a `stacked GRU`,
+            with the second GRU taking in outputs of the first GRU and
+            computing the final results. Default: 1
+        bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
+            Default: ``True``
+        batch_first: If ``True``, then the input and output tensors are provided
+            as (batch, seq, feature). Default: ``False``
+        dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
+            GRU layer except the last layer, with dropout probability equal to
+            :attr:`dropout`. Default: 0
+        bidirectional: If ``True``, becomes a bidirectional GRU. Default: ``False``
+
+    Inputs: input, h_0
+        - **input** of shape `(seq_len, batch, input_size)`: tensor containing the features
+          of the input sequence. The input can also be a packed variable length
+          sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
+          for details.
+        - **h_0** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
+          containing the initial hidden state for each element in the batch.
+          Defaults to zero if not provided. If the RNN is bidirectional,
+          num_directions should be 2, else it should be 1.
+
+    Outputs: output, h_n
+        - **output** of shape `(seq_len, batch, num_directions * hidden_size)`: tensor
+          containing the output features h_t from the last layer of the GRU,
+          for each `t`. If a :class:`torch.nn.utils.rnn.PackedSequence` has been
+          given as the input, the output will also be a packed sequence.
+          For the unpacked case, the directions can be separated
+          using ``output.view(seq_len, batch, num_directions, hidden_size)``,
+          with forward and backward being direction `0` and `1` respectively.
+
+          Similarly, the directions can be separated in the packed case.
+        - **h_n** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
+          containing the hidden state for `t = seq_len`
+
+          Like *output*, the layers can be separated using
+          ``h_n.view(num_layers, num_directions, batch, hidden_size)``.
+
+    Shape:
+        - Input1: :math:`(L, N, H_{in})` tensor containing input features where
+          :math:`H_{in}=\text{input\_size}` and `L` represents a sequence length.
+        - Input2: :math:`(S, N, H_{out})` tensor
+          containing the initial hidden state for each element in the batch.
+          :math:`H_{out}=\text{hidden\_size}`
+          Defaults to zero if not provided. where :math:`S=\text{num\_layers} * \text{num\_directions}`
+          If the RNN is bidirectional, num_directions should be 2, else it should be 1.
+        - Output1: :math:`(L, N, H_{all})` where :math:`H_{all}=\text{num\_directions} * \text{hidden\_size}`
+        - Output2: :math:`(S, N, H_{out})` tensor containing the next hidden state
+          for each element in the batch
+
+    Attributes:
+        weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer
+            (W_ir|W_iz|W_in), of shape `(3*hidden_size, input_size)` for `k = 0`.
+            Otherwise, the shape is `(3*hidden_size, num_directions * hidden_size)`
+        weight_hh_l[k] : the learnable hidden-hidden weights of the :math:`\text{k}^{th}` layer
+            (W_hr|W_hz|W_hn), of shape `(3*hidden_size, hidden_size)`
+        bias_ih_l[k] : the learnable input-hidden bias of the :math:`\text{k}^{th}` layer
+            (b_ir|b_iz|b_in), of shape `(3*hidden_size)`
+        bias_hh_l[k] : the learnable hidden-hidden bias of the :math:`\text{k}^{th}` layer
+            (b_hr|b_hz|b_hn), of shape `(3*hidden_size)`
+
+    .. note::
+        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
+        where :math:`k = \frac{1}{\text{hidden\_size}}`
+
+    .. include:: ../cudnn_persistent_rnn.rst
+
+    Examples::
+
+        >>> rnn = nn.GRU(10, 20, 2)
+        >>> input = torch.randn(5, 3, 10)
+        >>> h0 = torch.randn(2, 3, 20)
+        >>> output, hn = rnn(input, h0)
+    """
+    _FLOAT_MODULE = nn.GRU
+
+    __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
+
+    def __init__(self, *args, **kwargs):
+        super(GRU, self).__init__('GRU', *args, **kwargs)
+
+    def _get_name(self):
+        return 'DynamicQuantizedGRU'
+
+    def check_forward_args(self, input: Tensor, hidden: Tensor, batch_sizes: Optional[Tensor]) -> None:
+        self.check_input(input, batch_sizes)
+        expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
+
+        self.check_hidden_size(hidden, expected_hidden_size,
+                               'Expected hidden size {}, got {}')
+
+    def forward_impl(
+        self, input: Tensor, hx: Optional[Tensor],
+        batch_sizes: Optional[Tensor], max_batch_size: int,
+        sorted_indices: Optional[Tensor]
+    ) -> Tuple[Tensor, Tensor]:
+        if hx is None:
+            num_directions = 2 if self.bidirectional else 1
+            zeros = torch.zeros(self.num_layers * num_directions,
+                                max_batch_size, self.hidden_size,
+                                dtype=input.dtype, device=input.device)
+            hx = zeros
+        else:
+            # Each batch of the hidden state should match the input sequence that
+            # the user believes he/she is passing in.
+            hx = self.permute_hidden(hx, sorted_indices)
+
+        self.check_forward_args(input, hx, batch_sizes)
+
+        _all_params = ([m.param for m in self._all_weight_values])
+        if batch_sizes is None:
+            result = torch.quantized_gru(input,
+                                         hx,
+                                         _all_params,
+                                         self.bias,
+                                         self.num_layers,
+                                         self.dropout,
+                                         self.training,
+                                         self.bidirectional,
+                                         self.batch_first)
+        else:
+            result = torch.quantized_gru(input,
+                                         batch_sizes,
+                                         hx,
+                                         _all_params,
+                                         self.bias,
+                                         self.num_layers,
+                                         self.dropout,
+                                         self.training,
+                                         self.bidirectional)
+        output = result[0]
+        hidden = result[1]
+
+        return output, hidden
+
+
+    @torch.jit.export
+    def forward_tensor(
+        self, input: Tensor, hx: Optional[Tensor] = None
+    ) -> Tuple[Tensor, Tensor]:
+        batch_sizes = None
+        max_batch_size = input.size(0) if self.batch_first else input.size(1)
+        sorted_indices = None
+        unsorted_indices = None
+
+        output, hidden = self.forward_impl(
+            input, hx, batch_sizes, max_batch_size, sorted_indices)
+
+        return output, self.permute_hidden(hidden, unsorted_indices)
+
+    @torch.jit.export
+    def forward_packed(
+        self, input: PackedSequence, hx: Optional[Tensor] = None
+    ) -> Tuple[PackedSequence, Tensor]:
+        input_, batch_sizes, sorted_indices, unsorted_indices = input
+        max_batch_size = batch_sizes[0]
+        max_batch_size = int(max_batch_size)
+        output_, hidden = self.forward_impl(
+            input_, hx, batch_sizes, max_batch_size, sorted_indices)
+
+        output = PackedSequence(output_, batch_sizes,
+                                sorted_indices, unsorted_indices)
+        return output, self.permute_hidden(hidden, unsorted_indices)
+
+    def permute_hidden(
+        self, hx: Tensor, permutation: Optional[Tensor]
+    ) -> Tensor:
+        if permutation is None:
+            return hx
+        return apply_permutation(hx, permutation)
+
+    @torch.jit.ignore
+    def forward(self, input, hx=None):
+        if isinstance(input, PackedSequence):
+            return self.forward_packed(input, hx)
+        else:
+            return self.forward_tensor(input, hx)
+
+    @classmethod
+    def from_float(cls, mod):
+        return super(GRU, cls).from_float(mod)
 
 
 class RNNCellBase(torch.nn.Module):
@@ -431,6 +726,7 @@ class RNNCellBase(torch.nn.Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
+        self.weight_dtype = dtype
         if bias:
             self.bias_ih = torch.randn(num_chunks * hidden_size).to(dtype=torch.float)
             self.bias_hh = torch.randn(num_chunks * hidden_size).to(dtype=torch.float)
@@ -483,8 +779,7 @@ class RNNCellBase(torch.nn.Module):
                 "input has inconsistent input_size: got {}, expected {}".format(
                     input.size(1), self.input_size))
 
-    def check_forward_hidden(self, input, hx, hidden_label=''):
-        # type: (Tensor, Tensor, str) -> None
+    def check_forward_hidden(self, input: Tensor, hx: Tensor, hidden_label: str = '') -> None:
         if input.size(0) != hx.size(0):
             raise RuntimeError(
                 "Input batch size {} doesn't match hidden{} batch size {}".format(
@@ -510,13 +805,15 @@ class RNNCellBase(torch.nn.Module):
             # We have the circular import issues if we import the qconfig in the beginning of this file:
             # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
             # import until we need it.
-            from torch.quantization.qconfig import default_dynamic_qconfig
+            from torch.ao.quantization.qconfig import default_dynamic_qconfig
             weight_observer_method = default_dynamic_qconfig.weight
 
         dtype = weight_observer_method().dtype
         supported_scalar_types = [torch.qint8, torch.float16]
         if dtype not in supported_scalar_types:
             raise RuntimeError('Unsupported dtype for dynamic RNN quantization: {}'.format(dtype))
+
+        qRNNCellBase: Union[LSTMCell, GRUCell, RNNCell]
 
         if type(mod) == torch.nn.LSTMCell:
             qRNNCellBase = LSTMCell(mod.input_size, mod.hidden_size, bias=mod.bias, dtype=dtype)
@@ -528,42 +825,60 @@ class RNNCellBase(torch.nn.Module):
             raise NotImplementedError('Only LSTMCell, GRUCell and RNNCell \
             are supported for QuantizedRNN for now')
 
-
         assert mod.bias
 
-        def process_weights(weight, bias, dtype):
-
+        def _observe_and_quantize_weight(weight):
             if dtype == torch.qint8:
-                # for each layer, for each direction we need to quantize and pack
-                # weights and pack parameters in this order:
-                #
-                #   w_ih, w_hh
                 weight_observer = weight_observer_method()
                 weight_observer(weight)
                 qweight = _quantize_weight(weight.float(), weight_observer)
-                packed_weight = \
-                    torch.ops.quantized.linear_prepack(qweight, bias)
-
-                return packed_weight
+                return qweight
             else:
-                # for each layer, for each direction we need to quantize and pack
-                # weights and pack parameters in this order:
-                #
-                #   packed_ih, packed_hh, b_ih, b_hh
-                packed_weight = torch.ops.quantized.linear_prepack_fp16(
-                    weight.float(), bias)
+                return weight.float()
 
-                return packed_weight
-
-        qRNNCellBase._packed_weight_ih = process_weights(mod.weight_ih, mod.bias_ih, dtype)
-        qRNNCellBase._packed_weight_hh = process_weights(mod.weight_hh, mod.bias_hh, dtype)
+        qRNNCellBase._packed_weight_ih = pack_weight_bias(_observe_and_quantize_weight(mod.weight_ih), mod.bias_ih, dtype)
+        qRNNCellBase._packed_weight_hh = pack_weight_bias(_observe_and_quantize_weight(mod.weight_hh), mod.bias_hh, dtype)
         return qRNNCellBase
+
+    @classmethod
+    def from_reference(cls, ref_mod):
+        assert hasattr(ref_mod, "weight_ih_dtype"), "We are assuming weight_ih "
+        "exists in reference module, may need to relax the assumption to support the use case"
+        if hasattr(ref_mod, "nonlinearity"):
+            qmod = cls(
+                ref_mod.input_size,
+                ref_mod.hidden_size,
+                ref_mod.bias,
+                ref_mod.nonlinearity,
+                dtype=ref_mod.weight_ih_dtype
+            )
+        else:
+            qmod = cls(
+                ref_mod.input_size,
+                ref_mod.hidden_size,
+                ref_mod.bias,
+                dtype=ref_mod.weight_ih_dtype
+            )
+        weight_bias_dict = {
+            "weight": {
+                "weight_ih": ref_mod.get_quantized_weight_ih(),
+                "weight_hh": ref_mod.get_quantized_weight_hh(),
+            },
+            "bias": {
+                "bias_ih": ref_mod.bias_ih,
+                "bias_hh": ref_mod.bias_hh,
+            }
+        }
+        qmod.set_weight_bias(weight_bias_dict)
+        return qmod
 
     def _weight_bias(self):
         # Returns a dict of weights and biases
-        weight_bias_dict = {'weight' : {}, 'bias' : {}}
+        weight_bias_dict: Dict[str, Dict] = {'weight' : {}, 'bias' : {}}
         w1, b1 = self._packed_weight_ih.__getstate__()[0]
         w2, b2 = self._packed_weight_hh.__getstate__()[0]
+        # TODO: these can be simplified to one level? e.g. using weight_ih as key
+        # directly
         weight_bias_dict['weight']['weight_ih'] = w1
         weight_bias_dict['weight']['weight_hh'] = w2
         weight_bias_dict['bias']['bias_ih'] = b1
@@ -576,11 +891,22 @@ class RNNCellBase(torch.nn.Module):
     def get_bias(self):
         return self._weight_bias()['bias']
 
+    def set_weight_bias(self, weight_bias_dict):
+        # TODO: these can be simplified to one level? e.g. using weight_ih as key
+        # directly
+        self._packed_weight_ih = pack_weight_bias(
+            weight_bias_dict["weight"]["weight_ih"],
+            weight_bias_dict["bias"]["bias_ih"],
+            self.weight_dtype)
+        self._packed_weight_hh = pack_weight_bias(
+            weight_bias_dict["weight"]["weight_hh"],
+            weight_bias_dict["bias"]["bias_hh"],
+            self.weight_dtype)
+
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(RNNCellBase, self)._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + '_packed_weight_ih'] = self._packed_weight_ih
         destination[prefix + '_packed_weight_hh'] = self._packed_weight_hh
-
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
@@ -614,8 +940,7 @@ class RNNCell(RNNCellBase):
     def _get_name(self):
         return 'DynamicQuantizedRNNCell'
 
-    def forward(self, input, hx=None):
-        # type: (Tensor, Optional[Tensor]) -> Tensor
+    def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
         self.check_forward_input(input)
         if hx is None:
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
@@ -661,13 +986,12 @@ class LSTMCell(RNNCellBase):
     """
 
     def __init__(self, *args, **kwargs):
-        super(LSTMCell, self).__init__(*args, num_chunks=4, **kwargs)
+        super(LSTMCell, self).__init__(*args, num_chunks=4, **kwargs)  # type: ignore[misc]
 
     def _get_name(self):
         return 'DynamicQuantizedLSTMCell'
 
-    def forward(self, input, hx=None):
-        # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]
+    def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
         self.check_forward_input(input)
         if hx is None:
             zeros = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
@@ -707,8 +1031,7 @@ class GRUCell(RNNCellBase):
     def _get_name(self):
         return 'DynamicQuantizedGRUCell'
 
-    def forward(self, input, hx=None):
-        # type: (Tensor, Optional[Tensor]) -> Tensor
+    def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
         self.check_forward_input(input)
         if hx is None:
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)

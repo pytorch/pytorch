@@ -2,6 +2,8 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace distributed {
 namespace autograd {
@@ -18,7 +20,7 @@ PropagateGradientsReq::PropagateGradientsReq(
       grads_(std::move(grads)),
       retainGraph_(retainGraph) {}
 
-Message PropagateGradientsReq::toMessageImpl() && {
+c10::intrusive_ptr<Message> PropagateGradientsReq::toMessageImpl() && {
   std::vector<at::IValue> ivalues;
   // Add all the grad tensors.
   for (const auto& grad : grads_) {
@@ -37,7 +39,7 @@ Message PropagateGradientsReq::toMessageImpl() && {
   std::vector<char> payload =
       jit::pickle(c10::ivalue::Tuple::create(std::move(ivalues)), &tensorTable);
 
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(tensorTable),
       MessageType::BACKWARD_AUTOGRAD_REQ);
@@ -52,33 +54,31 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
       payload,
       payload_size,
       *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
-      &message.tensors());
-  std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
+      message.tensors());
+  const auto& tupleElements = tuple.toTupleRef().elements();
 
   // Build PropagateGradientsReq.
   TORCH_INTERNAL_ASSERT(tupleElements.size() >= 3);
 
   // Retrieve retainGraph.
   bool retainGraph = tupleElements.back().toBool();
-  tupleElements.pop_back();
 
   // Build AutogradMetadata.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t autogradContextId, autogradMessageId;
-  autogradMessageId = tupleElements.back().toInt();
-  tupleElements.pop_back();
-  autogradContextId = tupleElements.back().toInt();
-  tupleElements.pop_back();
+  autogradMessageId = tupleElements[tupleElements.size() - 2].toInt();
+  autogradContextId = tupleElements[tupleElements.size() - 3].toInt();
 
   AutogradMetadata autogradMetadata(autogradContextId, autogradMessageId);
 
   // Retrieve the gradient tensors.
-  std::vector<Variable> grads(tupleElements.size());
-  for (size_t i = 0; i < tupleElements.size(); i++) {
+  std::vector<Variable> grads(tupleElements.size() - 3);
+  for(const auto i : c10::irange(tupleElements.size() - 3)) {
     grads[i] = tupleElements[i].toTensor();
   }
 
-  return std::unique_ptr<PropagateGradientsReq>(
-      new PropagateGradientsReq(autogradMetadata, grads, retainGraph));
+  return std::make_unique<PropagateGradientsReq>(
+    autogradMetadata, grads, retainGraph);
 }
 
 const AutogradMetadata& PropagateGradientsReq::getAutogradMetadata() {

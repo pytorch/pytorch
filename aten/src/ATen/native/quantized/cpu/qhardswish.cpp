@@ -2,9 +2,9 @@
 #include <ATen/NativeFunctions.h>
 #include <torch/library.h>
 #include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
@@ -19,6 +19,11 @@ namespace {
 #ifdef USE_PYTORCH_QNNPACK
 Tensor qnnpack_hardswish(const Tensor& qx, Tensor& qy) {
   TORCH_CHECK(qx.ndimension() > 0, "qnnpack_hardswish(): Got empty input tensor");
+  TORCH_CHECK(qx.scalar_type() == c10::kQUInt8,
+                "qnnpack_hardswish(): Expected input data type to be ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(qx.scalar_type()));
   initQNNPACK();
 
   size_t num_elems = qx.numel() / qx.size(0);
@@ -38,6 +43,10 @@ Tensor qnnpack_hardswish(const Tensor& qx, Tensor& qy) {
     std::numeric_limits<uint8_t>::max(), // output max
     0, // flags
     &hardswish_op);
+
+  std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
+      qnnpack_uniq_ptr(hardswish_op);
+
   TORCH_INTERNAL_ASSERT(createStatus == pytorch_qnnp_status_success,
                         "failed to create QNNPACK Hardswish operator");
 
@@ -85,7 +94,7 @@ Tensor quantized_hardswish(const Tensor& qx, double output_scale, int64_t output
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("hardswish", TORCH_FN(quantized_hardswish));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::hardswish"), TORCH_FN(quantized_hardswish));
 }
 
 }}  // namespace at::native

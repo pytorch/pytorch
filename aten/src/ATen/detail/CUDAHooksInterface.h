@@ -10,9 +10,6 @@
 #include <functional>
 #include <memory>
 
-// Forward-declares THCState
-struct THCState;
-
 // Forward-declares at::cuda::NVRTC
 namespace at { namespace cuda {
 struct NVRTC;
@@ -67,25 +64,26 @@ constexpr const char* CUDA_HELP =
 // TODO: Consider putting the stub definitions in another class, so that one
 // never forgets to implement each virtual function in the real implementation
 // in CUDAHooks.  This probably doesn't buy us much though.
-struct CAFFE2_API CUDAHooksInterface {
+struct TORCH_API CUDAHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
   virtual ~CUDAHooksInterface() {}
 
   // Initialize THCState and, transitively, the CUDA state
-  virtual std::unique_ptr<THCState, void (*)(THCState*)> initCUDA() const {
+  virtual void initCUDA() const {
     TORCH_CHECK(false, "Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual const Generator& getDefaultCUDAGenerator(DeviceIndex device_index = -1) const {
+    (void)device_index; // Suppress unused variable warning
     TORCH_CHECK(false, "Cannot get default CUDA generator without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual Device getDeviceFromPtr(void* data) const {
+  virtual Device getDeviceFromPtr(void* /*data*/) const {
     TORCH_CHECK(false, "Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual bool isPinnedPtr(void* data) const {
+  virtual bool isPinnedPtr(void* /*data*/) const {
     return false;
   }
 
@@ -105,20 +103,24 @@ struct CAFFE2_API CUDAHooksInterface {
     return false;
   }
 
-  virtual const at::cuda::NVRTC& nvrtc() const {
-    TORCH_CHECK(false, "NVRTC requires CUDA. ", CUDA_HELP);
+  virtual bool hasCuSOLVER() const {
+    return false;
   }
 
-  virtual int64_t current_device() const {
-    return -1;
+  virtual bool hasROCM() const {
+    return false;
+  }
+
+  virtual const at::cuda::NVRTC& nvrtc() const {
+    TORCH_CHECK(false, "NVRTC requires CUDA. ", CUDA_HELP);
   }
 
   virtual bool hasPrimaryContext(int64_t device_index) const {
     TORCH_CHECK(false, "Cannot call hasPrimaryContext(", device_index, ") without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual c10::optional<int64_t> getDevceIndexWithPrimaryContext() const {
-    return c10::nullopt;
+  virtual int64_t current_device() const {
+    return -1;
   }
 
   virtual Allocator* getPinnedMemoryAllocator() const {
@@ -162,36 +164,40 @@ struct CAFFE2_API CUDAHooksInterface {
         "Cannot query batchnormMinEpsilonCuDNN() without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual int64_t cuFFTGetPlanCacheMaxSize(int64_t device_index) const {
+  virtual int64_t cuFFTGetPlanCacheMaxSize(int64_t /*device_index*/) const {
     TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual void cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size) const {
+  virtual void cuFFTSetPlanCacheMaxSize(int64_t /*device_index*/, int64_t /*max_size*/) const {
     TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual int64_t cuFFTGetPlanCacheSize(int64_t device_index) const {
+  virtual int64_t cuFFTGetPlanCacheSize(int64_t /*device_index*/) const {
     TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual void cuFFTClearPlanCache(int64_t device_index) const {
+  virtual void cuFFTClearPlanCache(int64_t /*device_index*/) const {
     TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual int getNumGPUs() const {
     return 0;
   }
+
+  virtual void deviceSynchronize(int64_t /*device_index*/) const {
+    TORCH_CHECK(false, "Cannot synchronize CUDA device without ATen_cuda library. ", CUDA_HELP);
+  }
 };
 
 // NB: dummy argument to suppress "ISO C++11 requires at least one argument
 // for the "..." in a variadic macro"
-struct CAFFE2_API CUDAHooksArgs {};
+struct TORCH_API CUDAHooksArgs {};
 
 C10_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs);
 #define REGISTER_CUDA_HOOKS(clsname) \
   C10_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
 
 namespace detail {
-CAFFE2_API const CUDAHooksInterface& getCUDAHooks();
+TORCH_API const CUDAHooksInterface& getCUDAHooks();
 } // namespace detail
 } // namespace at

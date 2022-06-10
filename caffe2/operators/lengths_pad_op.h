@@ -3,6 +3,7 @@
 
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -56,7 +57,7 @@ class LengthsPadOp : public Operator<Context> {
 
     math::Set(
         output->numel(), static_cast<T>(padding_value_), out_data, &context_);
-    for (int64_t i = 0; i < lengths_size; ++i) {
+    for (const auto i : c10::irange(lengths_size)) {
       auto length = lengths_data[i];
       CAFFE_ENFORCE_GE(length, 0);
       CAFFE_ENFORCE_GE(

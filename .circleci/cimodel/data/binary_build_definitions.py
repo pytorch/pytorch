@@ -6,10 +6,10 @@ import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
 
 class Conf(object):
-    def __init__(self, os, cuda_version, pydistro, parms, smoke, libtorch_variant, gcc_config_variant, libtorch_config_variant):
+    def __init__(self, os, gpu_version, pydistro, parms, smoke, libtorch_variant, gcc_config_variant, libtorch_config_variant):
 
         self.os = os
-        self.cuda_version = cuda_version
+        self.gpu_version = gpu_version
         self.pydistro = pydistro
         self.parms = parms
         self.smoke = smoke
@@ -18,7 +18,7 @@ class Conf(object):
         self.libtorch_config_variant = libtorch_config_variant
 
     def gen_build_env_parms(self):
-        elems = [self.pydistro] + self.parms + [binary_build_data.get_processor_arch_name(self.cuda_version)]
+        elems = [self.pydistro] + self.parms + [binary_build_data.get_processor_arch_name(self.gpu_version)]
         if self.gcc_config_variant is not None:
             elems.append(str(self.gcc_config_variant))
         if self.libtorch_config_variant is not None:
@@ -27,7 +27,19 @@ class Conf(object):
 
     def gen_docker_image(self):
         if self.gcc_config_variant == 'gcc5.4_cxx11-abi':
-            return miniutils.quote("pytorch/pytorch-binary-docker-image-ubuntu16.04:latest")
+            if self.gpu_version is None:
+                return miniutils.quote("pytorch/libtorch-cxx11-builder:cpu")
+            else:
+                return miniutils.quote(
+                    f"pytorch/libtorch-cxx11-builder:{self.gpu_version}"
+                )
+        if self.pydistro == "conda":
+            if self.gpu_version is None:
+                return miniutils.quote("pytorch/conda-builder:cpu")
+            else:
+                return miniutils.quote(
+                    f"pytorch/conda-builder:{self.gpu_version}"
+                )
 
         docker_word_substitution = {
             "manywheel": "manylinux",
@@ -37,9 +49,12 @@ class Conf(object):
         docker_distro_prefix = miniutils.override(self.pydistro, docker_word_substitution)
 
         # The cpu nightlies are built on the pytorch/manylinux-cuda102 docker image
-        alt_docker_suffix = self.cuda_version or "102"
-        docker_distro_suffix = "" if self.pydistro == "conda" else alt_docker_suffix
-        return miniutils.quote("pytorch/" + docker_distro_prefix + "-cuda" + docker_distro_suffix)
+        # TODO cuda images should consolidate into tag-base images similar to rocm
+        alt_docker_suffix = "cuda102" if not self.gpu_version else (
+            "rocm:" + self.gpu_version.strip("rocm") if self.gpu_version.startswith("rocm") else self.gpu_version)
+        docker_distro_suffix = alt_docker_suffix if self.pydistro != "conda" else (
+            "cuda" if alt_docker_suffix.startswith("cuda") else "rocm")
+        return miniutils.quote("pytorch/" + docker_distro_prefix + "-" + docker_distro_suffix)
 
     def get_name_prefix(self):
         return "smoke" if self.smoke else "binary"
@@ -85,14 +100,15 @@ class Conf(object):
             if not (self.smoke and self.os == "macos") and self.os != "windows":
                 job_def["docker_image"] = self.gen_docker_image()
 
-            if self.os != "windows" and self.cuda_version:
+            # fix this. only works on cuda not rocm
+            if self.os != "windows" and self.gpu_version:
                 job_def["use_cuda_docker_runtime"] = miniutils.quote("1")
         else:
             if self.os == "linux" and phase != "upload":
                 job_def["docker_image"] = self.gen_docker_image()
 
         if phase == "test":
-            if self.cuda_version:
+            if self.gpu_version:
                 if self.os == "windows":
                     job_def["executor"] = "windows-with-nvidia-gpu"
                 else:
@@ -108,9 +124,9 @@ class Conf(object):
         Output looks similar to:
 
       - binary_upload:
-          name: binary_linux_manywheel_3_7m_cu92_devtoolset7_nightly_upload
+          name: binary_linux_manywheel_3_7m_cu113_devtoolset7_nightly_upload
           context: org-member
-          requires: binary_linux_manywheel_3_7m_cu92_devtoolset7_nightly_test
+          requires: binary_linux_manywheel_3_7m_cu113_devtoolset7_nightly_test
           filters:
             branches:
               only:
@@ -118,7 +134,7 @@ class Conf(object):
             tags:
               only: /v[0-9]+(\\.[0-9]+)*-rc[0-9]+/
           package_type: manywheel
-          upload_subfolder: cu92
+          upload_subfolder: cu113
         """
         return {
             "binary_upload": OrderedDict({
@@ -134,7 +150,7 @@ class Conf(object):
                 ),
                 "package_type": self.pydistro,
                 "upload_subfolder": binary_build_data.get_processor_arch_name(
-                    self.cuda_version
+                    self.gpu_version,
                 ),
             })
         }
@@ -157,10 +173,10 @@ def gen_build_env_list(smoke):
     for c in config_list:
         conf = Conf(
             c.find_prop("os_name"),
-            c.find_prop("cu"),
+            c.find_prop("gpu"),
             c.find_prop("package_format"),
             [c.find_prop("pyver")],
-            c.find_prop("smoke"),
+            c.find_prop("smoke") and not (c.find_prop("os_name") == "macos_arm64"),  # don't test arm64
             c.find_prop("libtorch_variant"),
             c.find_prop("gcc_config_variant"),
             c.find_prop("libtorch_config_variant"),
@@ -212,7 +228,9 @@ def get_jobs(toplevel_key, smoke):
     configs = gen_build_env_list(smoke)
     phase = "build" if toplevel_key == "binarybuilds" else "test"
     for build_config in configs:
-        jobs_list.append(build_config.gen_workflow_job(phase, nightly=True))
+        # don't test for macos_arm64 as it's cross compiled
+        if phase != "test" or build_config.os != "macos_arm64":
+            jobs_list.append(build_config.gen_workflow_job(phase, nightly=True))
 
     return jobs_list
 

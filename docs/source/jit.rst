@@ -16,6 +16,13 @@ TorchScript
 
     jit_language_reference
 
+
+.. toctree::
+    :maxdepth: 1
+
+    jit_language_reference_v2
+
+
 .. contents:: :local:
     :depth: 2
 
@@ -42,18 +49,29 @@ Creating TorchScript Code
 
 .. autosummary::
     :toctree: generated
+    :nosignatures:
 
     script
     trace
+    script_if_tracing
     trace_module
     fork
     wait
     ScriptModule
     ScriptFunction
+    freeze
+    optimize_for_inference
+    enable_onednn_fusion
+    onednn_fusion_enabled
+    set_fusion_strategy
+    strict_fusion
     save
     load
     ignore
     unused
+    isinstance
+    Attribute
+    annotate
 
 Mixing Tracing and Scripting
 ----------------------------
@@ -204,8 +222,8 @@ Disable JIT for Debugging
 
 Setting the environment variable ``PYTORCH_JIT=0`` will disable all script
 and tracing annotations. If there is hard-to-debug error in one of your
-TorchScript model, you can use this flag to force everything to run using native
-Python. Since TorchScript (scripting and tracing) are disabled with this flag,
+TorchScript models, you can use this flag to force everything to run using native
+Python. Since TorchScript (scripting and tracing) is disabled with this flag,
 you can use tools like ``pdb`` to debug the model code.  For example::
 
     @torch.jit.script
@@ -462,7 +480,7 @@ In this case, data-dependent control flow like this can be captured using
     #print(str(scripted_fn.graph).strip())
 
     for input_tuple in [inputs] + check_inputs:
-        torch.testing.assert_allclose(fn(*input_tuple), scripted_fn(*input_tuple))
+        torch.testing.assert_close(fn(*input_tuple), scripted_fn(*input_tuple))
 
 .. testoutput::
     :hide:
@@ -544,18 +562,18 @@ best practices?
 
       cpu_model = gpu_model.cpu()
       sample_input_cpu = sample_input_gpu.cpu()
-      traced_cpu = torch.jit.trace(traced_cpu, sample_input_cpu)
-      torch.jit.save(traced_cpu, "cpu.pth")
+      traced_cpu = torch.jit.trace(cpu_model, sample_input_cpu)
+      torch.jit.save(traced_cpu, "cpu.pt")
 
-      traced_gpu = torch.jit.trace(traced_gpu, sample_input_gpu)
-      torch.jit.save(traced_gpu, "gpu.pth")
+      traced_gpu = torch.jit.trace(gpu_model, sample_input_gpu)
+      torch.jit.save(traced_gpu, "gpu.pt")
 
       # ... later, when using the model:
 
       if use_gpu:
-        model = torch.jit.load("gpu.pth")
+        model = torch.jit.load("gpu.pt")
       else:
-        model = torch.jit.load("cpu.pth")
+        model = torch.jit.load("cpu.pt")
 
       model(input)
 
@@ -616,6 +634,15 @@ Q: I would like to trace module's method but I keep getting this error:
       - On the other hand, invoking ``trace`` with module's instance (e.g. ``my_module``) creates a new module and correctly copies parameters into the new module, so they can accumulate gradients if required.
 
     To trace a specific method on a module, see :func:`torch.jit.trace_module <torch.jit.trace_module>`
+
+Known Issues
+---------------
+
+If you're using ``Sequential`` with TorchScript, the inputs of some
+of the ``Sequential`` submodules may be falsely inferred to be
+``Tensor``, even if they're annotated otherwise. The canonical
+solution is to subclass ``nn.Sequential`` and redeclare ``forward``
+with the input typed correctly.
 
 Appendix
 --------
@@ -847,6 +874,11 @@ now supported.
             b = 2
         return x, b
 
+Fusion Backends
+~~~~~~~~~~~~~~~
+There are a couple of fusion backends available to optimize TorchScript execution. The default fuser on CPUs is NNC, which can perform fusions for both CPUs and GPUs. The default fuser on GPUs is NVFuser, which supports a wider range of operators and has demonstrated generated kernels with improved throughput. See the  `NVFuser documentation <https://github.com/pytorch/pytorch/blob/release/1.12/torch/csrc/jit/codegen/cuda/README.md>`_ for more details on usage and debugging.
+
+
 References
 ~~~~~~~~~~
 .. toctree::
@@ -854,3 +886,7 @@ References
 
     jit_python_reference
     jit_unsupported
+
+.. This package is missing doc. Adding it here for coverage
+.. This does not add anything to the rendered page.
+.. py:module:: torch.jit.mobile

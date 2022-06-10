@@ -1,24 +1,18 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import sys
 
+import onnx
+from test_pytorch_common import flatten
+
+import caffe2.python.onnx.backend as c2
 import torch
 import torch.jit
 from torch.autograd import Variable
 
-import onnx
-import caffe2.python.onnx.backend as c2
-from test_pytorch_common import flatten
-
-
-torch.set_default_tensor_type('torch.FloatTensor')
+torch.set_default_tensor_type("torch.FloatTensor")
 try:
     import torch
 except ImportError:
-    print('Cannot import torch, hence caffe2-torch test will not run.')
+    print("Cannot import torch, hence caffe2-torch test will not run.")
     sys.exit(0)
 
 
@@ -28,9 +22,9 @@ def run_embed_params(proto, model, input, state_dict=None, use_gpu=True):
     case as well on pytorch front
     This should likely be removed from the release version of the code
     """
-    device = 'CPU'
+    device = "CPU"
     if use_gpu:
-        device = 'CUDA'
+        device = "CUDA"
     model_def = onnx.ModelProto.FromString(proto)
     onnx.checker.check_model(model_def)
     prepared = c2.prepare(model_def, device=device)

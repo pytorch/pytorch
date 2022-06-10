@@ -62,7 +62,7 @@ class GPUFallbackOpEx final : public Operator<CUDAContext> {
   }
 
   bool RunOnDevice() override {
-    for (int i = 0; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(InputSize())) {
       if (this->InputIsTensorType(i, CUDA)) {
         // use sync copy
         BlobGetMutableTensor(local_input_blobs_[i], CPU)->CopyFrom(Input(i));
@@ -82,7 +82,7 @@ class GPUFallbackOpEx final : public Operator<CUDAContext> {
                  << ProtoDebugString(this->debug_def());
       return false;
     }
-    for (int i = 0; i < OutputSize(); ++i) {
+    for (const auto i : c10::irange(OutputSize())) {
       if (SkipOutputCopy::Contains(i)) {
         VLOG(1) << "Copy output: index " << i << " skipped.";
         continue;

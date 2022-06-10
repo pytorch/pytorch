@@ -16,7 +16,10 @@ void setDeviceOption(NNGraph::NodeRef n, caffe2::DeviceOption& d) {
 void addBlobDeviceOptions(
     std::map<std::string, caffe2::DeviceOption> blobMap,
     NNModule* nn) {
-  // Names we've seen in the NNModule
+  // Names we've seen in the NNModule. Uniqueness within inputs or outputs is ensured
+  // but same blob can exist across inputs and outputs
+  std::unordered_set<std::string> seen_inputs;
+  std::unordered_set<std::string> seen_outputs;
   std::unordered_set<std::string> seen;
 
   auto declareNodes = nn::filter<Declare>(*nn);
@@ -30,9 +33,9 @@ void addBlobDeviceOptions(
     }
 
     CAFFE_ENFORCE(
-        !seen.count(input->getName()),
-        "Ambiguous name->deviceOption map.  Please do this manually.");
-
+        !seen_inputs.count(input->getName()),
+        "Ambiguous name->deviceOption map.  Please do this manually. Affected blob: " + input->getName());
+    seen_inputs.insert(input->getName());
     seen.insert(input->getName());
     setDeviceOption(declareNode, blobMap[input->getName()]);
   }
@@ -48,9 +51,10 @@ void addBlobDeviceOptions(
     }
 
     CAFFE_ENFORCE(
-        !seen.count(output->getName()),
-        "Ambiguous name->deviceOption map.  Please do this manually.");
+        !seen_outputs.count(output->getName()),
+        "Ambiguous name->deviceOption map.  Please do this manually. Affected blob: " + output->getName());
 
+    seen_outputs.insert(output->getName());
     seen.insert(output->getName());
     setDeviceOption(exportNode, blobMap[output->getName()]);
   }
@@ -72,12 +76,12 @@ void addBlobDeviceOptions(
 void injectDataEdgeIndicators(nom::repr::NNModule* nn) {
   for (auto& input : nn->inputs) {
     auto declareNode =
-        nn->dataFlow.createNode(nom::util::make_unique<Declare>());
+        nn->dataFlow.createNode(std::make_unique<Declare>());
     nn->dataFlow.createEdge(declareNode, input);
   }
 
   for (auto& output : nn->outputs) {
-    auto exportNode = nn->dataFlow.createNode(nom::util::make_unique<Export>());
+    auto exportNode = nn->dataFlow.createNode(std::make_unique<Export>());
     nn->dataFlow.createEdge(output, exportNode);
   }
 

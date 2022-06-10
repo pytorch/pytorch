@@ -1,12 +1,31 @@
 import bisect
 import warnings
+from typing import (
+    Generic,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+)
 
-from torch._utils import _accumulate
-from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
-from torch import default_generator  # type: ignore
-from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple
-from ... import Tensor, Generator
+from torch import default_generator, randperm
+from torch._utils import _accumulate
+
+from ... import Generator, Tensor
+
+__all__ = [
+    "Dataset",
+    "IterableDataset",
+    "TensorDataset",
+    "ConcatDataset",
+    "ChainDataset",
+    "Subset",
+    "random_split",
+]
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
@@ -141,14 +160,13 @@ class IterableDataset(Dataset[T_co]):
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20, worker_init_fn=worker_init_fn)))
         [3, 4, 5, 6]
     """
-
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
 
     def __add__(self, other: Dataset[T_co]):
         return ChainDataset([self, other])
 
-    # No `def __len__(self)` default?
+    # No `def __len__(self)` default? Subclasses raise `TypeError` when needed.
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
 
 
@@ -157,13 +175,13 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
 
     Each sample will be retrieved by indexing tensors along the first dimension.
 
-    Arguments:
+    Args:
         *tensors (Tensor): tensors that have the same size of the first dimension.
     """
     tensors: Tuple[Tensor, ...]
 
     def __init__(self, *tensors: Tensor) -> None:
-        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors)
+        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors), "Size mismatch between tensors"
         self.tensors = tensors
 
     def __getitem__(self, index):
@@ -178,7 +196,7 @@ class ConcatDataset(Dataset[T_co]):
 
     This class is useful to assemble different existing datasets.
 
-    Arguments:
+    Args:
         datasets (sequence): List of datasets to be concatenated
     """
     datasets: List[Dataset[T_co]]
@@ -195,9 +213,8 @@ class ConcatDataset(Dataset[T_co]):
 
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super(ConcatDataset, self).__init__()
-        # Cannot verify that datasets is Sized
-        assert len(datasets) > 0, 'datasets should not be an empty iterable'  # type: ignore
         self.datasets = list(datasets)
+        assert len(self.datasets) > 0, 'datasets should not be an empty iterable'  # type: ignore[arg-type]
         for d in self.datasets:
             assert not isinstance(d, IterableDataset), "ConcatDataset does not support IterableDataset"
         self.cumulative_sizes = self.cumsum(self.datasets)
@@ -225,13 +242,13 @@ class ConcatDataset(Dataset[T_co]):
 
 
 class ChainDataset(IterableDataset):
-    r"""Dataset for chainning multiple :class:`IterableDataset` s.
+    r"""Dataset for chaining multiple :class:`IterableDataset` s.
 
     This class is useful to assemble different existing dataset streams. The
-    chainning operation is done on-the-fly, so concatenating large-scale
+    chaining operation is done on-the-fly, so concatenating large-scale
     datasets with this class will be efficient.
 
-    Arguments:
+    Args:
         datasets (iterable of IterableDataset): datasets to be chained together
     """
     def __init__(self, datasets: Iterable[Dataset]) -> None:
@@ -248,8 +265,7 @@ class ChainDataset(IterableDataset):
         total = 0
         for d in self.datasets:
             assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
-            # Cannot verify that all self.datasets are Sized
-            total += len(d)  # type: ignore
+            total += len(d)  # type: ignore[arg-type]
         return total
 
 
@@ -257,7 +273,7 @@ class Subset(Dataset[T_co]):
     r"""
     Subset of a dataset at specified indices.
 
-    Arguments:
+    Args:
         dataset (Dataset): The whole Dataset
         indices (sequence): Indices in the whole set selected for subset
     """
@@ -269,6 +285,8 @@ class Subset(Dataset[T_co]):
         self.indices = indices
 
     def __getitem__(self, idx):
+        if isinstance(idx, list):
+            return self.dataset[[self.indices[i] for i in idx]]
         return self.dataset[self.indices[idx]]
 
     def __len__(self):
@@ -283,13 +301,13 @@ def random_split(dataset: Dataset[T], lengths: Sequence[int],
 
     >>> random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(42))
 
-    Arguments:
+    Args:
         dataset (Dataset): Dataset to be split
         lengths (sequence): lengths of splits to be produced
         generator (Generator): Generator used for the random permutation.
     """
     # Cannot verify that dataset is Sized
-    if sum(lengths) != len(dataset):  # type: ignore
+    if sum(lengths) != len(dataset):    # type: ignore[arg-type]
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
     indices = randperm(sum(lengths), generator=generator).tolist()

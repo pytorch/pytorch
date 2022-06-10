@@ -1,86 +1,35 @@
+# flake8: noqa: F401
+r"""
+This file is in the process of migration to `torch/ao/quantization`, and
+is kept here for compatibility while the migration process is ongoing.
+If you are adding a new entry/functionality, please, add it to the
+appropriate files under `torch/ao/quantization/fx/`, while adding an import statement
+here.
+"""
+from torch.ao.quantization.fx.pattern_utils import (
+    QuantizeHandler,
+    MatchResult,
+    register_fusion_pattern,
+    get_default_fusion_patterns,
+    register_quant_pattern,
+    get_default_quant_patterns,
+    get_default_output_activation_post_process_map
+)
 
-import torch
-import sys
-from collections import OrderedDict
+# QuantizeHandler.__module__ = _NAMESPACE
+MatchResult.__module__ = "torch.quantization.fx.pattern_utils"
+register_fusion_pattern.__module__ = "torch.quantization.fx.pattern_utils"
+get_default_fusion_patterns.__module__ = "torch.quantization.fx.pattern_utils"
+register_quant_pattern.__module__ = "torch.quantization.fx.pattern_utils"
+get_default_quant_patterns.__module__ = "torch.quantization.fx.pattern_utils"
+get_default_output_activation_post_process_map.__module__ = "torch.quantization.fx.pattern_utils"
 
-# pattern for conv bn fusion
-FUSION_PATTERNS = OrderedDict()
-def register_fusion_pattern(pattern):
-    def insert(fn):
-        FUSION_PATTERNS[pattern] = fn
-        return fn
-    return insert
-
-def get_fusion_patterns():
-    return FUSION_PATTERNS
-
-# pattern for both static quantization and qat
-QUANTIZATION_PATTERNS = OrderedDict()
-def register_quant_pattern(pattern):
-    def insert(fn):
-        QUANTIZATION_PATTERNS[pattern] = fn
-        return fn
-    return insert
-
-def get_quant_patterns():
-    return QUANTIZATION_PATTERNS
-
-# pattern for dynamic quantization
-DYNAMIC_QUANTIZATION_PATTERNS = OrderedDict()
-def register_dynamic_pattern(pattern):
-    def insert(fn):
-        DYNAMIC_QUANTIZATION_PATTERNS[pattern] = fn
-        return fn
-    return insert
-
-def get_dynamic_quant_patterns():
-    return DYNAMIC_QUANTIZATION_PATTERNS
-
-# Example use of register pattern function:
-# @register_fusion_pattern(torch.nn.ReLU, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
-# class ConvBNReLUFusion():
-#     def __init__(...):
-#         ...
-#
-# Note: The order of patterns is important! match function will take whatever is matched first, so we'll
-# need to put the fusion patterns before single patterns. For example, add_relu should be registered come before relu.
-# decorators are applied in the reverse order we see. Also when we match the nodes in the graph with these patterns,
-# we'll start from the last node of the graph and traverse back.
-
-
-def matches(modules, node, pattern, max_uses=sys.maxsize):
-    """ Matches a node in fx against a pattern
-    """
-    if isinstance(pattern, tuple):
-        self_match, *arg_matches = pattern
-        if self_match is getattr:
-            assert len(pattern) == 2, 'Expecting getattr pattern to have two elements'
-            arg_matches = []
-    else:
-        self_match = pattern
-        arg_matches = []
-
-    if node.uses > max_uses:
-        return False
-
-    if isinstance(self_match, type) and issubclass(self_match, torch.nn.Module):
-        if node.op != 'call_module':
-            return False
-        if not type(modules[node.target]) == self_match:
-            return False
-    elif callable(self_match):
-        if node.op != 'call_function' or node.target is not self_match:
-            return False
-        elif node.target is getattr:
-            if node.args[1] != pattern[1]:
-                return False
-    elif node.target != self_match:
-        return False
-
-    if not arg_matches:
-        return True
-
-    if len(arg_matches) != len(node.args):
-        return False
-
-    return all(matches(modules, node, arg_match, max_uses=1) for node, arg_match in zip(node.args, arg_matches))
+# __all__ = [
+#     "QuantizeHandler",
+#     "MatchResult",
+#     "register_fusion_pattern",
+#     "get_default_fusion_patterns",
+#     "register_quant_pattern",
+#     "get_default_quant_patterns",
+#     "get_default_output_activation_post_process_map",
+# ]

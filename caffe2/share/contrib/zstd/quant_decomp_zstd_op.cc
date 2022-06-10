@@ -21,10 +21,11 @@ namespace {
 uint8_t* GetMutableData(int type_index, TensorCPU* tensor) {
   // see COMP_DATA_TYPE_MAPPER in mutils.py for the mapping
   static const std::map<int, std::function<uint8_t*(TensorCPU * tensor)>>
-      gTypeMapper = {REGISTER_TYPE(TensorProto::UINT8, uint8_t),
-                     REGISTER_TYPE(TensorProto::UINT16, uint16_t),
-                     REGISTER_TYPE(TensorProto::INT32, int32_t),
-                     REGISTER_TYPE(TensorProto::FLOAT, float)};
+      gTypeMapper = {
+          REGISTER_TYPE(TensorProto::UINT8, uint8_t),
+          REGISTER_TYPE(TensorProto::UINT16, uint16_t),
+          REGISTER_TYPE(TensorProto::INT32, int32_t),
+          REGISTER_TYPE(TensorProto::FLOAT, float)};
 
   CAFFE_ENFORCE_EQ(
       gTypeMapper.count(type_index),

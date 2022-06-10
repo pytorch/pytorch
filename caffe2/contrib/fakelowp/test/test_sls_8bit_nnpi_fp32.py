@@ -1,9 +1,8 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import unittest
 
 # Must happen before importing caffe2.python.*
 import caffe2.python.fakelowp.init_shared_libs  # noqa
+import datetime
 import numpy as np
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -32,7 +31,7 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(serial.SerializedTestCase):
         batch_size=st.integers(1, 5),
         max_weight=st.integers(0, 100),
     )
-    @settings(max_examples=100, deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_slws_fused_8bit_rowwise_acc32_nnpi(
         self, seed, num_rows, embedding_dim, batch_size, max_weight
     ):
@@ -50,10 +49,10 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(serial.SerializedTestCase):
         data = np.random.rand(num_rows, embedding_dim).astype(np.float32)
         lengths = np.random.choice(np.arange(1, num_rows), batch_size).astype(np.int32)
 
-        indices = []
+        _indices = []
         for length in lengths:
-            indices.extend(np.random.choice(np.arange(1, num_rows), length))
-        indices = np.asarray(indices).astype(np.int64)
+            _indices.extend(np.random.choice(np.arange(1, num_rows), length))
+        indices = np.asarray(_indices).astype(np.int64)
 
         weights = np.random.uniform(
             low=0,
@@ -101,11 +100,15 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(serial.SerializedTestCase):
             pred_net,
             {},
             max_batch_size=batch_size,
-            max_seq_size=batch_size * np.max(lengths),
+            max_seq_size=np.max(lengths),
             debug=True,
             adjust_batch=True,
             use_onnx=False,
         )
+        num_onnxified_ops = sum(
+            1 if o.type == "Onnxifi" else 0 for o in onnxified_net.op)
+        np.testing.assert_equal(num_onnxified_ops, 1)
+
         workspace.FeedBlob("indices", indices)
         workspace.FeedBlob("lengths", lengths)
         workspace.FeedBlob("weights", weights)
@@ -144,7 +147,7 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(serial.SerializedTestCase):
 
 
     @given(seed=st.integers(0, 65535))
-    @settings(deadline=None, max_examples=100)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_small_sls_acc32(self, seed):
         workspace.GlobalInit(
             [
@@ -211,6 +214,10 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(serial.SerializedTestCase):
             adjust_batch=True,
             use_onnx=False,
         )
+        num_onnxified_ops = sum(
+            1 if o.type == "Onnxifi" else 0 for o in onnxified_net.op)
+        np.testing.assert_equal(num_onnxified_ops, 1)
+
         workspace.FeedBlob("indices", indices)
         workspace.FeedBlob("lengths", lengths)
         workspace.FeedBlob("weights", weights)
@@ -239,9 +246,6 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(serial.SerializedTestCase):
                 "test_small_sls_acc32",
                 {
                     "seed": seed,
-                    "num_rows": num_rows,
-                    "embedding_dim": embedding_dim,
-                    "batch_size": batch_size,
                     "indices": indices,
                     "data": data,
                     "quantized_data": quantized_data,

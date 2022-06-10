@@ -9,9 +9,12 @@
 #include <torch/csrc/utils/cuda_enabled.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/Storage.h>
+#include <torch/csrc/Device.h>
 
 #include <ATen/ATen.h>
 
+#include <array>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -19,20 +22,11 @@
 #include <unordered_map>
 #include <vector>
 
-#ifdef USE_CUDA
-#include <THC/THC.h>
-#endif
-
 namespace torch {
 namespace {
-std::unordered_map<at::DeprecatedTypeProperties*, PyTypeObject*> attype_to_py_storage_type;
-std::unordered_map<PyTypeObject*, at::DeprecatedTypeProperties*> py_storage_type_to_attype;
+std::array<THPDtype*, static_cast<int>(at::ScalarType::NumOptions)> dtype_registry = {};
 
-THPDtype* dtype_registry
-  [static_cast<int>(at::ScalarType::NumOptions)] = {};
-
-THPLayout* layout_registry
-  [static_cast<int>(at::Layout::NumOptions)] = {};
+std::array<THPLayout*, static_cast<int>(at::Layout::NumOptions)> layout_registry = {};
 
 at::Backend get_backend(bool is_cuda, bool is_sparse) {
   if (is_cuda) {
@@ -50,36 +44,20 @@ at::Backend get_backend(bool is_cuda, bool is_sparse) {
   }
 }
 
-at::DeprecatedTypeProperties* get_type(at::Backend backend, at::ScalarType scalarType) {
-  if (isSparse(backend) && scalarType == at::kHalf) {
-    return nullptr;
+at::DeprecatedTypeProperties* get_type_properties(at::DeviceType device_type, at::ScalarType scalarType) {
+  at::Backend backend;
+  if (device_type == at::kCPU) {
+    backend = at::Backend::CPU;
+  } else if (device_type == at::kCUDA) {
+    backend = at::Backend::CUDA;
+  } else if (device_type == at::DeviceType::Meta) {
+    backend = at::Backend::Undefined;
+  } else {
+    TORCH_CHECK(false, "Invalid device for storage: ", device_type);
   }
   return &at::getDeprecatedTypeProperties(backend, scalarType);
 }
-
-PyTypeObject* getPyTypeObject(
-    const at::Storage& storage,
-    const caffe2::TypeMeta& dtype) {
-  at::ScalarType scalarType = at::typeMetaToScalarType(dtype);
-  at::TensorOptions options = at::TensorOptions(storage.device_type()).dtype(scalarType);
-  auto attype = &at::getDeprecatedTypeProperties(
-      at::dispatchKeyToBackend(at::computeDispatchKey(options)),
-      scalarType);
-  auto it = attype_to_py_storage_type.find(attype);
-  if (it != attype_to_py_storage_type.end()) {
-    return it->second;
-  }
-  throw std::invalid_argument("unsupported Storage type");
-}
 } // namespace
-
-void registerStoragePyTypeObject(PyTypeObject *pytype, at::Backend backend, at::ScalarType scalarType) {
-  auto attype = get_type(backend, scalarType);
-  if (attype) {
-    attype_to_py_storage_type[attype] = pytype;
-    py_storage_type_to_attype[pytype] = attype;
-  }
-}
 
 void registerDtypeObject(THPDtype *dtype, at::ScalarType scalarType) {
   dtype_registry[static_cast<int>(scalarType)] = dtype;
@@ -105,28 +83,84 @@ THPLayout* getTHPLayout(at::Layout layout) {
   return thp_layout;
 }
 
-PyObject* createPyObject(
-    const at::Storage& storage,
-    const caffe2::TypeMeta& data_type) {
-  auto type = getPyTypeObject(storage, data_type);
+PyObject* createPyObject(const at::Storage& storage) {
+  if (storage.device_type() != at::DeviceType::Meta && storage.data() == nullptr && storage.nbytes() != 0) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "python bindings to nullptr storage (e.g., from torch.Tensor._make_wrapper_subclass) are currently unsafe and thus disabled.  See https://github.com/pytorch/pytorch/issues/61669 for more details");
+  }
+  PyTypeObject* type = reinterpret_cast<PyTypeObject*>(THPStorageClass);
   auto obj = THPObjectPtr(type->tp_alloc(type, 0));
   if (!obj) throw python_error();
-  ((THPVoidStorage*)obj.get())->cdata = (THVoidStorage *)at::Storage(/* copy */ storage).unsafeReleaseStorageImpl();
+  ((THPVoidStorage*)obj.get())->cdata = at::Storage(/* copy */ storage).unsafeReleaseStorageImpl();
   return obj.release();
+}
+
+PyTypeObject* loadTypedStorageTypeObject() {
+  PyObject* storage_module = PyImport_ImportModule("torch.storage");
+  TORCH_INTERNAL_ASSERT(storage_module && PyModule_Check(storage_module));
+
+  PyObject* typed_storage_obj = PyObject_GetAttrString(storage_module, "_TypedStorage");
+  TORCH_INTERNAL_ASSERT(typed_storage_obj && PyType_Check(typed_storage_obj));
+  return reinterpret_cast<PyTypeObject*>(
+      PyObject_GetAttrString(storage_module, "_TypedStorage"));
+}
+
+PyTypeObject* getTypedStorageTypeObject() {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+  static PyTypeObject* typed_storage_type_obj = loadTypedStorageTypeObject();
+  return typed_storage_type_obj;
 }
 
 bool isStorage(PyObject* obj)
 {
-  return py_storage_type_to_attype.count(Py_TYPE(obj));
+  if (PyObject_TypeCheck(obj, getTypedStorageTypeObject())) {
+    return true;
+  }
+  auto obj_type = Py_TYPE(obj);
+
+  return obj_type == reinterpret_cast<PyTypeObject*>(THPStorageClass);
 }
-at::Storage createStorage(PyObject* obj)
+
+at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type, bool& is_typed_storage)
 {
-  auto it = py_storage_type_to_attype.find(Py_TYPE(obj));
-  if (it == py_storage_type_to_attype.end()) {
+  is_typed_storage = PyObject_TypeCheck(obj, getTypedStorageTypeObject());
+  PyObject* untyped_storage_obj;
+
+  if (is_typed_storage) {
+    // NOTE: `PyObject_GetAttrString` increments the refcounts to `dtype` and
+    // `_storage`, so we must decrement them. The refcounts will still stay
+    // nonzero since the `_TypedStorage` maintains a reference.
+    PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
+    TORCH_INTERNAL_ASSERT(dtype_obj);
+    Py_DECREF(dtype_obj);
+
+    TORCH_INTERNAL_ASSERT(THPDtype_Check(dtype_obj));
+    scalar_type = reinterpret_cast<THPDtype*>(dtype_obj)->scalar_type;
+
+    untyped_storage_obj = PyObject_GetAttrString(obj, "_storage");
+    TORCH_INTERNAL_ASSERT(untyped_storage_obj);
+    Py_DECREF(untyped_storage_obj);
+
+  } else {
+    scalar_type = at::kByte;
+    untyped_storage_obj = obj;
+  }
+
+  if (Py_TYPE(untyped_storage_obj) != reinterpret_cast<PyTypeObject*>(THPStorageClass)) {
     throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
   }
-  auto& type = *it->second;
-  return type.unsafeStorageFromTH(((THPVoidStorage*)obj)->cdata, true);
+
+  c10::StorageImpl* impl = static_cast<c10::StorageImpl*>(((THPVoidStorage*)untyped_storage_obj)->cdata);
+  c10::DeviceType device_type = impl->device().type();
+
+  auto type_properties = get_type_properties(device_type, at::kByte);
+
+  return type_properties->unsafeStorageFromTH(((THPVoidStorage*)untyped_storage_obj)->cdata, true);
+}
+
+at::Storage createStorage(PyObject* obj) {
+  at::ScalarType scalar_type;
+  bool is_typed_storage = false;
+  return createStorageGetType(obj, scalar_type, is_typed_storage);
 }
 
 }  // namespace

@@ -20,9 +20,23 @@ int getSizeFromDims(const std::vector<int>& dims) {
   return tot;
 }
 
-template <class OP>
-struct FP16PairWiseCPUFunctor : public OP {
+template <class Functor>
+struct FP16PairWiseCPUFunctor {
+  template <typename TIn, typename TOut>
   bool Forward(
+      const std::vector<int>& A_dims,
+      const std::vector<int>& B_dims,
+      const TIn* A,
+      const TIn* B,
+      TOut* C,
+      CPUContext* context) const {
+    functor.Forward(A_dims, B_dims, A, B, C, context);
+
+    return true;
+  }
+
+  template<>
+  bool Forward<float, float>(
       const std::vector<int>& A_dims,
       const std::vector<int>& B_dims,
       const float* A,
@@ -40,11 +54,13 @@ struct FP16PairWiseCPUFunctor : public OP {
     fbgemm::RoundToFloat16(
         B, B_fp16.data(), B_sz, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
 
-    OP::Forward(A_dims, B_dims, A_fp16.data(), B_fp16.data(), C, context);
+    functor.Forward(A_dims, B_dims, A_fp16.data(), B_fp16.data(), C, context);
     fbgemm::RoundToFloat16(C, C, A_sz, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
 
     return true;
   }
+
+  Functor functor;
 };
 } // namespace
 
@@ -54,7 +70,7 @@ OPERATOR_SCHEMA(SumFakeFp16).NumInputs(1, INT_MAX).NumOutputs(1, INT_MAX);
 REGISTER_CPU_OPERATOR(
     AddFakeFp16,
     BinaryElementwiseOp<
-        TensorTypes<float>,
+        TensorTypes<float, int, long>,
         CPUContext,
         FP16PairWiseCPUFunctor<AddFunctor<CPUContext>>>);
 OPERATOR_SCHEMA(AddFakeFp16).NumInputs(2).NumOutputs(1);
@@ -62,7 +78,7 @@ OPERATOR_SCHEMA(AddFakeFp16).NumInputs(2).NumOutputs(1);
 REGISTER_CPU_OPERATOR(
     DivFakeFp16,
     BinaryElementwiseOp<
-        TensorTypes<float>,
+        TensorTypes<float, double>,
         CPUContext,
         FP16PairWiseCPUFunctor<DivFunctor<CPUContext>>>);
 OPERATOR_SCHEMA(DivFakeFp16).NumInputs(2).NumOutputs(1);

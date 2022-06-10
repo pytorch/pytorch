@@ -7,8 +7,6 @@
 
 #include <ATen/ATen.h>
 
-#include <THC/THC.h>
-
 #include <cstddef>
 #include <vector>
 

@@ -15,10 +15,10 @@ Examples of possible Readers and Writers:
 
 See `dataset.py` for an example of implementation.
 """
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from caffe2.python.schema import Field, Struct, from_blob_list

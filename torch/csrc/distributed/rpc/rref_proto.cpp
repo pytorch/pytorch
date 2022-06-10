@@ -1,5 +1,5 @@
-#include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
 #include <limits>
@@ -10,7 +10,7 @@ namespace rpc {
 
 namespace {
 
-std::vector<IValue> toIValues(const Message& message, MessageType type) {
+c10::ivalue::TupleElements toIValues(const Message& message, MessageType type) {
   TORCH_INTERNAL_ASSERT(
       type == message.type(),
       "Expecting message of type ",
@@ -24,15 +24,18 @@ std::vector<IValue> toIValues(const Message& message, MessageType type) {
       payload,
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
-      &message.tensors());
-  return value.toTuple()->elements();
+      message.tensors());
+  return std::move(*std::move(value).toTuple()).elements();
 }
 
-Message fromIValues(std::vector<IValue> ivalues, MessageType type) {
+c10::intrusive_ptr<Message> fromIValues(
+    std::vector<IValue> ivalues,
+    MessageType type) {
   std::vector<torch::Tensor> tensor_table;
   auto payload = jit::pickle(
       c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
-  return Message(std::move(payload), std::move(tensor_table), type);
+  return c10::make_intrusive<Message>(
+      std::move(payload), std::move(tensor_table), type);
 }
 
 } // namespace
@@ -43,27 +46,13 @@ const RRefId& RRefMessageBase::rrefId() {
   return rrefId_;
 }
 
-Message RRefMessageBase::toMessageImpl() && {
-  return fromIValues({rrefId_.toIValue()}, type_);
-}
-
-at::IValue RRefMessageBase::fromMessage(
-    const Message& message,
-    MessageType type) {
-  auto values = toIValues(message, type);
-
-  TORCH_INTERNAL_ASSERT(
-      values.size() == 1, "ScriptUserDelete expects 1 IValue from message.");
-  return std::move(values.back());
-}
-
 /////////////////////////// ForkMessageBase //////////////////////////////////
 
 const ForkId& ForkMessageBase::forkId() {
   return forkId_;
 }
 
-Message ForkMessageBase::toMessageImpl() && {
+c10::intrusive_ptr<Message> ForkMessageBase::toMessageImpl() && {
   return fromIValues({rrefId_.toIValue(), forkId_.toIValue()}, type_);
 }
 
@@ -73,7 +62,7 @@ std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
   auto ivalues = toIValues(message, type);
 
   TORCH_INTERNAL_ASSERT(
-      ivalues.size() == 2, "ScriptUserDelete expects 2 IValue from message.");
+      ivalues.size() == 2, "ForkMessageBase expects 2 IValue from message.");
 
   return std::make_pair(
       RRefId::fromIValue(ivalues[0]), ForkId::fromIValue(ivalues[1]));
@@ -81,7 +70,7 @@ std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
 
 /////////////////////////// RRef Protocol //////////////////////////////////
 
-Message ScriptRRefFetchCall::toMessageImpl() && {
+c10::intrusive_ptr<Message> ScriptRRefFetchCall::toMessageImpl() && {
   std::vector<at::IValue> ivalues;
   ivalues.reserve(2);
   ivalues.emplace_back(rrefId_.toIValue());
@@ -103,7 +92,7 @@ std::unique_ptr<ScriptRRefFetchCall> ScriptRRefFetchCall::fromMessage(
       worker_id_t(id), RRefId::fromIValue(values[0]));
 }
 
-Message PythonRRefFetchCall::toMessageImpl() && {
+c10::intrusive_ptr<Message> PythonRRefFetchCall::toMessageImpl() && {
   std::vector<at::IValue> ivalues;
   ivalues.reserve(2);
   ivalues.emplace_back(rrefId_.toIValue());
@@ -129,12 +118,8 @@ const std::vector<at::IValue>& RRefFetchRet::values() {
   return values_;
 }
 
-Message RRefFetchRet::toMessageImpl() && {
-  std::vector<at::IValue> ivalues = values_;
-  std::vector<torch::Tensor> tensor_table;
-  auto payload =
-      jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
-  return Message(std::move(payload), std::move(tensor_table), type_);
+c10::intrusive_ptr<Message> RRefFetchRet::toMessageImpl() && {
+  return fromIValues(values_, type_);
 }
 
 std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(
@@ -144,13 +129,13 @@ std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(
       values.size() == 1,
       "RRef of IValue should contain a single IValue, but got ",
       values.size());
-  return std::make_unique<ScriptRRefFetchRet>(std::move(values));
+  return std::make_unique<ScriptRRefFetchRet>(std::move(values).vec());
 }
 
 std::unique_ptr<PythonRRefFetchRet> PythonRRefFetchRet::fromMessage(
     const Message& message) {
   return std::make_unique<PythonRRefFetchRet>(
-      toIValues(message, MessageType::PYTHON_RREF_FETCH_RET));
+      toIValues(message, MessageType::PYTHON_RREF_FETCH_RET).vec());
 }
 
 std::unique_ptr<RRefUserDelete> RRefUserDelete::fromMessage(
@@ -170,7 +155,7 @@ const ForkId& RRefChildAccept::forkId() const {
   return forkId_;
 }
 
-Message RRefChildAccept::toMessageImpl() && {
+c10::intrusive_ptr<Message> RRefChildAccept::toMessageImpl() && {
   return fromIValues({forkId_.toIValue()}, MessageType::RREF_CHILD_ACCEPT);
 }
 
@@ -189,8 +174,9 @@ std::unique_ptr<RRefForkRequest> RRefForkRequest::fromMessage(
   return std::make_unique<RRefForkRequest>(pair.first, pair.second);
 }
 
-Message RRefAck::toMessageImpl() && {
-  return Message({}, {}, MessageType::RREF_ACK);
+c10::intrusive_ptr<Message> RRefAck::toMessageImpl() && {
+  return c10::make_intrusive<Message>(
+      std::vector<char>{}, std::vector<torch::Tensor>{}, MessageType::RREF_ACK);
 }
 
 std::unique_ptr<RRefAck> RRefAck::fromMessage(const Message& message) {

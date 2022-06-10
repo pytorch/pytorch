@@ -28,6 +28,7 @@ TEST(MakeUniqueTest, ForwardLvaluesCorrectly) {
 }
 
 TEST(MakeUniqueTest, CanConstructUniquePtrOfArray) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   auto ptr = torch::make_unique<int[]>(3);
   // Value initialization is required by the standard.
   ASSERT_EQ(ptr[0], 0);

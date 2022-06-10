@@ -1,14 +1,15 @@
 import math
 import torch
 from torch._six import inf
+from typing import Optional
 
 
 class __PrinterOptions(object):
-    precision = 4
-    threshold = 1000
-    edgeitems = 3
-    linewidth = 80
-    sci_mode = None
+    precision: int = 4
+    threshold: float = 1000
+    edgeitems: int = 3
+    linewidth: int = 80
+    sci_mode: Optional[bool] = None
 
 
 PRINT_OPTS = __PrinterOptions()
@@ -41,6 +42,16 @@ def set_printoptions(
             None (default) is specified, the value is defined by
             `torch._tensor_str._Formatter`. This value is automatically chosen
             by the framework.
+
+    Example::
+
+        >>> torch.set_printoptions(precision=2)
+        >>> torch.tensor([1.12345])
+        tensor([1.12])
+        >>> torch.set_printoptions(threshold=5)
+        >>> torch.arange(10)
+        tensor([0, 1, 2, ..., 7, 8, 9])
+
     """
     if profile is not None:
         if profile == "default":
@@ -69,6 +80,9 @@ def set_printoptions(
         PRINT_OPTS.linewidth = linewidth
     PRINT_OPTS.sci_mode = sci_mode
 
+def tensor_totype(t):
+    dtype = torch.float if t.is_mps else torch.double
+    return t.to(dtype=dtype)
 
 class _Formatter(object):
     def __init__(self, tensor):
@@ -93,9 +107,9 @@ class _Formatter(object):
                 return
 
             # Convert to double for easy calculation. HalfTensor overflows with 1e8, and there's no div() on CPU.
-            nonzero_finite_abs = nonzero_finite_vals.abs().double()
-            nonzero_finite_min = nonzero_finite_abs.min().double()
-            nonzero_finite_max = nonzero_finite_abs.max().double()
+            nonzero_finite_abs = tensor_totype(nonzero_finite_vals.abs())
+            nonzero_finite_min = tensor_totype(nonzero_finite_abs.min())
+            nonzero_finite_max = tensor_totype(nonzero_finite_abs.max())
 
             for value in nonzero_finite_vals:
                 if value != torch.ceil(value):
@@ -152,11 +166,12 @@ class _Formatter(object):
 def _scalar_str(self, formatter1, formatter2=None):
     if formatter2 is not None:
         real_str = _scalar_str(self.real, formatter1)
-        imag_str = _scalar_str(self.imag, formatter2) + "j"
-        if self.imag < 0:
-            return real_str + imag_str.lstrip()
+        imag_str = (_scalar_str(self.imag, formatter2) + "j").lstrip()
+        # handles negative numbers, +0.0, -0.0
+        if imag_str[0] == '+' or imag_str[0] == '-':
+            return real_str + imag_str
         else:
-            return real_str + "+" + imag_str.lstrip()
+            return real_str + "+" + imag_str
     else:
         return formatter1.format(self.item())
 
@@ -173,11 +188,12 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
     def _val_formatter(val, formatter1=formatter1, formatter2=formatter2):
         if formatter2 is not None:
             real_str = formatter1.format(val.real)
-            imag_str = formatter2.format(val.imag) + "j"
-            if val.imag < 0:
-                return real_str + imag_str.lstrip()
+            imag_str = (formatter2.format(val.imag) + "j").lstrip()
+            # handles negative numbers, +0.0, -0.0
+            if imag_str[0] == '+' or imag_str[0] == '-':
+                return real_str + imag_str
             else:
-                return real_str + "+" + imag_str.lstrip()
+                return real_str + "+" + imag_str
         else:
             return formatter1.format(val)
 
@@ -230,10 +246,23 @@ def _tensor_str(self, indent):
         self = self.rename(None)
 
     summarize = self.numel() > PRINT_OPTS.threshold
+
+    if self._is_zerotensor():
+        self = self.clone()
+
+    # handle the negative bit
+    if self.is_neg():
+        self = self.resolve_neg()
+
     if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
         self = self.float()
 
+    if self.dtype is torch.complex32:
+        self = self.cfloat()
+
     if self.dtype.is_complex:
+        # handle the conjugate bit
+        self = self.resolve_conj()
         real_formatter = _Formatter(get_summarized_data(self.real) if summarize else self.real)
         imag_formatter = _Formatter(get_summarized_data(self.imag) if summarize else self.imag)
         return _tensor_str_with_formatter(self, indent, summarize, real_formatter, imag_formatter)
@@ -274,10 +303,24 @@ def get_summarized_data(self):
     else:
         return torch.stack([get_summarized_data(x) for x in self])
 
-def _str_intern(self):
-    prefix = 'tensor('
+def _str_intern(inp, *, tensor_contents=None):
+    is_plain_tensor = type(inp) is torch.Tensor or type(inp) is torch.nn.Parameter
+    if inp.is_nested:
+        prefix = "nested_tensor("
+    elif is_plain_tensor:
+        prefix = 'tensor('
+    else:
+        prefix = f"{type(inp).__name__}("
     indent = len(prefix)
     suffixes = []
+    custom_contents_provided = tensor_contents is not None
+    if custom_contents_provided:
+        tensor_str = tensor_contents
+
+    # This is used to extract the primal value and thus disable the forward AD
+    # within this function.
+    # TODO(albanD) This needs to be updated when more than one level is supported
+    self, tangent = torch.autograd.forward_ad.unpack_dual(inp)
 
     # Note [Print tensor device]:
     # A general logic here is we only print device when it doesn't match
@@ -287,8 +330,15 @@ def _str_intern(self):
     # In other cases, we don't have a way to set them as default yet,
     # and we should always print out device for them.
     if self.device.type != torch._C._get_default_device()\
-            or (self.device.type == 'cuda' and torch.cuda.current_device() != self.device.index):
+            or (self.device.type == 'cuda' and torch.cuda.current_device() != self.device.index)\
+            or (self.device.type == 'mps'):
         suffixes.append('device=\'' + str(self.device) + '\'')
+
+    # Tensor printing performs tensor operations like slice, indexing, etc to make it in a
+    # representable format. These operations on xla/lazy tensor results in compilations. Hence,
+    # to avoid compilations, copying the tensor to cpu before printing.
+    if self.device.type == 'xla' or self.device.type == 'lazy':
+        self = self.to('cpu')
 
     # TODO: add an API to map real -> complex dtypes
     _default_complex_dtype = torch.cdouble if torch.get_default_dtype() == torch.double else torch.cfloat
@@ -298,17 +348,52 @@ def _str_intern(self):
         suffixes.append('nnz=' + str(self._nnz()))
         if not has_default_dtype:
             suffixes.append('dtype=' + str(self.dtype))
-        indices_prefix = 'indices=tensor('
-        indices = self._indices().detach()
-        indices_str = _tensor_str(indices, indent + len(indices_prefix))
-        if indices.numel() == 0:
-            indices_str += ', size=' + str(tuple(indices.shape))
-        values_prefix = 'values=tensor('
-        values = self._values().detach()
-        values_str = _tensor_str(values, indent + len(values_prefix))
-        if values.numel() == 0:
-            values_str += ', size=' + str(tuple(values.shape))
-        tensor_str = indices_prefix + indices_str + '),\n' + ' ' * indent + values_prefix + values_str + ')'
+        if not custom_contents_provided:
+            indices_prefix = 'indices=tensor('
+            indices = self._indices().detach()
+            indices_str = _tensor_str(indices, indent + len(indices_prefix))
+            if indices.numel() == 0:
+                indices_str += ', size=' + str(tuple(indices.shape))
+            values_prefix = 'values=tensor('
+            values = self._values().detach()
+            values_str = _tensor_str(values, indent + len(values_prefix))
+            if values.numel() == 0:
+                values_str += ', size=' + str(tuple(values.shape))
+            tensor_str = indices_prefix + indices_str + '),\n' + ' ' * indent + values_prefix + values_str + ')'
+    elif self.layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+        suffixes.append('size=' + str(tuple(self.shape)))
+        suffixes.append('nnz=' + str(self._nnz()))
+        if not has_default_dtype:
+            suffixes.append('dtype=' + str(self.dtype))
+        if not custom_contents_provided:
+            compressed_indices_method, plain_indices_method = {
+                torch.sparse_csr: (torch.Tensor.crow_indices, torch.Tensor.col_indices),
+                torch.sparse_csc: (torch.Tensor.ccol_indices, torch.Tensor.row_indices),
+                torch.sparse_bsr: (torch.Tensor.crow_indices, torch.Tensor.col_indices),
+                torch.sparse_bsc: (torch.Tensor.ccol_indices, torch.Tensor.row_indices),
+            }[self.layout]
+            if self.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                cdimname, pdimname = 'row', 'column'
+            else:
+                cdimname, pdimname = 'column', 'row'
+            compressed_indices_prefix = f'c{cdimname[:3]}_indices=tensor('
+            compressed_indices = compressed_indices_method(self).detach()
+            compressed_indices_str = _tensor_str(compressed_indices, indent + len(compressed_indices_prefix))
+            if compressed_indices.numel() == 0:
+                compressed_indices_str += ', size=' + str(tuple(compressed_indices.shape))
+            plain_indices_prefix = f'{pdimname[:3]}_indices=tensor('
+            plain_indices = plain_indices_method(self).detach()
+            plain_indices_str = _tensor_str(plain_indices, indent + len(plain_indices_prefix))
+            if plain_indices.numel() == 0:
+                plain_indices_str += ', size=' + str(tuple(plain_indices.shape))
+            values_prefix = 'values=tensor('
+            values = self.values().detach()
+            values_str = _tensor_str(values, indent + len(values_prefix))
+            if values.numel() == 0:
+                values_str += ', size=' + str(tuple(values.shape))
+            tensor_str = compressed_indices_prefix + compressed_indices_str + '),\n' + ' ' * indent +\
+                plain_indices_prefix + plain_indices_str + '),\n' + ' ' * indent +\
+                values_prefix + values_str + ')'
     elif self.is_quantized:
         suffixes.append('size=' + str(tuple(self.shape)))
         if not has_default_dtype:
@@ -322,7 +407,14 @@ def _str_intern(self):
             suffixes.append('scale=' + str(self.q_per_channel_scales()))
             suffixes.append('zero_point=' + str(self.q_per_channel_zero_points()))
             suffixes.append('axis=' + str(self.q_per_channel_axis()))
-        tensor_str = _tensor_str(self.dequantize(), indent)
+        if not custom_contents_provided:
+            tensor_str = _tensor_str(self.dequantize(), indent)
+    elif self.is_nested:
+        if not custom_contents_provided:
+            def indented_str(s, indent):
+                return "\n".join(f"  {line}" for line in s.split("\n"))
+            strs = ",\n".join(indented_str(str(t), indent + 1) for t in torch.ops.aten.unbind.int(self, 0))
+            tensor_str = f"[\n{strs}\n]"
     else:
         if self.is_meta:
             suffixes.append('size=' + str(tuple(self.shape)))
@@ -330,7 +422,8 @@ def _str_intern(self):
                 suffixes.append('dtype=' + str(self.dtype))
             # TODO: This implies that ellipses is valid syntax for allocating
             # a meta tensor, which it could be, but it isn't right now
-            tensor_str = '...'
+            if not custom_contents_provided:
+                tensor_str = '...'
         else:
             if self.numel() == 0 and not self.is_sparse:
                 # Explicitly print the shape if it is not (0,), to match NumPy behavior
@@ -341,32 +434,48 @@ def _str_intern(self):
                 # should be int64, so it must be shown explicitly.
                 if self.dtype != torch.get_default_dtype():
                     suffixes.append('dtype=' + str(self.dtype))
-                tensor_str = '[]'
+                if not custom_contents_provided:
+                    tensor_str = '[]'
             else:
                 if not has_default_dtype:
                     suffixes.append('dtype=' + str(self.dtype))
 
-                if self.layout != torch.strided:
-                    tensor_str = _tensor_str(self.to_dense(), indent)
-                else:
-                    tensor_str = _tensor_str(self, indent)
+                if not custom_contents_provided:
+                    if self.layout != torch.strided:
+                        tensor_str = _tensor_str(self.to_dense(), indent)
+                    else:
+                        tensor_str = _tensor_str(self, indent)
 
     if self.layout != torch.strided:
         suffixes.append('layout=' + str(self.layout))
 
-    if self.grad_fn is not None:
-        name = type(self.grad_fn).__name__
+    # Use inp here to get the original grad_fn and not the one generated by the forward grad
+    # unpacking.
+    if inp.grad_fn is not None:
+        name = type(inp.grad_fn).__name__
         if name == 'CppFunction':
-            name = self.grad_fn.name().rsplit('::', 1)[-1]
+            name = inp.grad_fn.name().rsplit('::', 1)[-1]
         suffixes.append('grad_fn=<{}>'.format(name))
-    elif self.requires_grad:
+    elif inp.requires_grad:
         suffixes.append('requires_grad=True')
 
     if self.has_names():
         suffixes.append('names={}'.format(self.names))
 
-    return _add_suffixes(prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse)
+    if tangent is not None:
+        suffixes.append('tangent={}'.format(tangent))
 
-def _str(self):
+    string_repr = _add_suffixes(prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse)
+
+    # Check if this instance is flagged as a parameter and change the repr accordingly.
+    # Unfortunately, this function has to be aware of this detail.
+    # NB: This is currently skipped for plain tensor parameters to maintain BC. In the future,
+    # this should be done for those as well to produce a valid repr.
+    if isinstance(self, torch.nn.Parameter) and not is_plain_tensor:
+        string_repr = f"Parameter({string_repr})"
+
+    return string_repr
+
+def _str(self, *, tensor_contents=None):
     with torch.no_grad():
-        return _str_intern(self)
+        return _str_intern(self, tensor_contents=tensor_contents)

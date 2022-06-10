@@ -1,14 +1,16 @@
 #pragma once
 
+#include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <algorithm>
+#include <unordered_map>
 #include <vector>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 /*
  * compute_at is a relative property between two TensorViews which marks at what
@@ -118,32 +120,32 @@ namespace fuser {
 
 class TensorDomain;
 class TensorView;
+class RootDomainMap;
 
-class TORCH_CUDA_API TransformReplay {
+class TORCH_CUDA_CU_API TransformReplay {
  public:
   // Replay producer as consumer, returns {producer, producer_compute_at_axis}.
   static std::pair<TensorDomain*, unsigned int> replayPasC(
-      const TensorDomain* producer,
-      const TensorDomain* consumer,
+      const TensorView* producer,
+      const TensorView* consumer,
       int consumer_compute_at_axis);
+  static std::pair<TensorDomain*, unsigned int> replayPasC(
+      const TensorView* producer,
+      const TensorView* consumer,
+      int consumer_compute_at_axis,
+      const RootDomainMap& root_map);
 
-  // Replay producer as consumer, returns {producer, producer_compute_at_axis}.
-  static std::pair<TensorView*, unsigned int> replayPasC(
-      TensorView* producer,
-      TensorView* consumer,
-      int consumer_compute_at_axis);
-
-  // Replay producer as consumer, returns {consumer, consumer_compute_at_axis}.
+  // Replay producer as consumer, returns {replayed_consumer_domain,
+  // consumer_compute_at_axis}.
   static std::pair<TensorDomain*, unsigned int> replayCasP(
-      const TensorDomain* consumer,
-      const TensorDomain* producer,
+      const TensorView* consumer,
+      const TensorView* producer,
       int producer_compute_at_axis);
-
-  // Replay producer as consumer, returns {consumer, consumer_compute_at_axis}.
-  static std::pair<TensorView*, unsigned int> replayCasP(
-      TensorView* consumer,
-      TensorView* producer,
-      int producer_compute_at_axis);
+  static std::pair<TensorDomain*, unsigned int> replayCasP(
+      const TensorView* consumer,
+      const TensorView* producer,
+      int producer_compute_at_axis,
+      const RootDomainMap& root_map);
 
   // Self replay.
   static TensorDomain* fullSelfReplay(
@@ -151,6 +153,42 @@ class TORCH_CUDA_API TransformReplay {
       const TensorDomain* self);
 };
 
+class TORCH_CUDA_CU_API TransformPropagator {
+ private:
+  bool replayPasC(TensorView* producer_tv, TensorView* consumer_tv = nullptr);
+  bool replayCasP(TensorView* consumer_tv, TensorView* producer_tv = nullptr);
+
+  TransformPropagator(TensorView* from);
+
+ private:
+  std::unordered_map<TensorView*, unsigned int> replayed_pos;
+
+  // This example comes from a BN kernel, the domain:
+  //
+  // [ iS{ceilDiv(ceilDiv(ceilDiv(i4, 128), 4), 1)}, iS{1}, iS{4}, iS{128},
+  // iS{i0}, iS{i2}, iS{i3} ]
+  //
+  // and
+  //
+  // [ iS{ceilDiv(ceilDiv(ceilDiv(i5*i6*i7*i8, 128), 4), 1)}, iS252{1},
+  // iS250{4}, iS248{128} ]
+  //
+  // Have the same number of replayed dimensions, however the second one
+  // involves more root domains. The second one is also likely the prefered
+  // replay. Therefore keep track of how many root domains were part of the
+  // replay and prefer transformations with more root domains. We could probably
+  // fix this instances of this occuring by changing the traversal pattern so
+  // that once propagating towards roots through broadcast axes, it can't come
+  // back through another broadcast, losing the transformation on those axes.
+  // However, this should work for existing cases.
+  std::unordered_map<TensorView*, unsigned int> n_replayed_root_dims;
+  TensorView* starting_tv = nullptr;
+
+ public:
+  static void from(TensorView* tv);
+};
+
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

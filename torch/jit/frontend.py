@@ -1,9 +1,13 @@
 import torch
 import sys
 import ast
+import dataclasses
 import inspect
 import string
+import re
+from collections import namedtuple
 from textwrap import dedent
+from typing import List, Tuple  # noqa: F401
 from torch._C._jit_tree_views import (
     ClassDef, Ident, Stmt, Decl, Def, Var,
     EmptyTypeAnnotation, Param, ExprStmt, Assign,
@@ -13,11 +17,22 @@ from torch._C._jit_tree_views import (
     ListLiteral, TupleLiteral, DictLiteral, Const,
     StringLiteral, ListComp, Attribute, BinOp, UnaryOp,
     SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
+    DictComp,
 )
-from torch._utils_internal import get_source_lines_and_file
-
-from torch._jit_internal import SourceContext, should_drop, is_static_fn
+from torch._sources import get_source_lines_and_file, parse_def, make_source_context
+from torch._sources import ParsedDef as _ParsedDef
+from torch.jit._dataclass_impls import DATACLASS_MAGIC_METHODS
+from torch.jit._monkeytype_config import monkeytype_trace, get_qualified_name
+from torch._jit_internal import should_drop, is_static_fn, FunctionModifiers  # noqa: F401
+from torch import _jit_internal
 import torch.jit.annotations
+
+_IS_ASTUNPARSE_INSTALLED = False
+try:
+    import astunparse  # type: ignore[import]
+    _IS_ASTUNPARSE_INSTALLED = True
+except ImportError:
+    pass
 
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
@@ -132,7 +147,7 @@ def get_class_properties(cls, self_name):
     """
     Get a list of Property objects representing the properties of a class.
 
-    Arguments:
+    Args:
         cls:  The class to get properties of.
         self_name: The name of the class that the properties should belong to.
     Returns:
@@ -141,15 +156,35 @@ def get_class_properties(cls, self_name):
     """
     props = inspect.getmembers(
         cls, predicate=lambda m: isinstance(m, property))
+    # Any property that should not compiled must be in this list on the Module.
+    unused_properties = getattr(cls, "__jit_unused_properties__", [])
 
     # Create Property TreeView objects from inspected property objects.
     properties = []
     for prop in props:
-        getter = get_jit_def(prop[1].fget, f"__{prop[0]}_getter", self_name=self_name)
-        setter = get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name) if prop[1].fset else None
-        properties.append(Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter))
+        if prop[0] not in unused_properties and not should_drop(prop[1].fget):
+            getter = get_jit_def(prop[1].fget, f"__{prop[0]}_getter", self_name=self_name)
+            setter = get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name) if prop[1].fset else None
+            properties.append(Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter))
 
     return properties
+
+
+def get_class_assigns(ctx, cls_ast):
+    assigns = []
+
+    def maybe_build_assign(builder, entry):
+        nonlocal assigns
+        try:
+            assigns.append(builder(ctx, entry))
+        except NotSupportedError:
+            pass
+    for entry in cls_ast.body:
+        if isinstance(entry, ast.Assign):
+            maybe_build_assign(StmtBuilder.build_Assign, entry)
+        elif isinstance(entry, ast.AnnAssign):
+            maybe_build_assign(StmtBuilder.build_AnnAssign, entry)
+    return assigns
 
 
 def get_jit_class_def(cls, self_name):
@@ -161,27 +196,60 @@ def get_jit_class_def(cls, self_name):
         and not is_static_fn(cls, m.__name__)
         and m.__name__ in cls.__dict__
     )
-    methods = [get_jit_def(method[1],
-                           method[0],
-                           self_name=self_name) for method in methods]
 
-    properties = get_class_properties(cls, self_name)
+    def is_classmethod(fn):
+        return inspect.ismethod(fn) and getattr(fn, "__self__", None) == cls
 
+    # Get and parse the source code for this class
     sourcelines, file_lineno, filename = get_source_lines_and_file(cls, torch._C.ErrorReport.call_stack())
     source = ''.join(sourcelines)
+
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
+
+    class_ast = py_ast.body[0]
+    assert isinstance(class_ast, ast.ClassDef)
+
+    # Special case for dataclasses. In general we need access to the source code for
+    # an object in order to JIT compile it. But the dataclasses module dynamically synthesizes
+    # magic methods for classes, and we can't get the source code for these methods. As a
+    # workaround, we synthesize TorchScript-friendly implementations ourselves.
+    if dataclasses.is_dataclass(cls):
+        # Detect whether the user manually implemented any of the magic methods. If they did,
+        # we don't want to synthesize/override them.
+        overrides = {
+            method.name
+            for method in class_ast.body
+            if isinstance(method, ast.FunctionDef) and method.name in DATACLASS_MAGIC_METHODS
+        }
+        for i, (name, _) in enumerate(methods):
+            # Is this a magic method we can synthesize?
+            synthesizer_fn = DATACLASS_MAGIC_METHODS.get(name)
+            if synthesizer_fn and name not in overrides:
+                parsed_def = synthesizer_fn(cls)
+                methods[i] = name, parsed_def
+                func = getattr(cls, name)
+                _jit_internal.loader.cache(func, parsed_def.source)
+
+    method_defs = [
+        get_jit_def(obj, name, self_name=self_name, is_classmethod=is_classmethod(obj))
+        for (name, obj) in methods
+    ]
+    properties = get_class_properties(cls, self_name)
+
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
-    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
-    return build_class_def(ctx, py_ast.body[0], methods, properties, self_name)
+    ctx = make_source_context(source, filename, file_lineno, leading_whitespace_len, False)
+    assigns = get_class_assigns(ctx, class_ast)
+
+    return build_class_def(ctx, class_ast, method_defs, properties, self_name, assigns)
 
 
-def get_jit_def(fn, def_name, self_name=None):
+def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     """
     Build a JIT AST (TreeView) from the given function.
 
-    Arguments:
-        fn: A function object to compile
+    Args:
+        fn: A function object to compile or a pre-parsed ParsedDef object
         def_name: The name to give to the resulting AST object. This is not
             always the same as `fn.__name__`, for example:
                 def _forward(self):
@@ -191,29 +259,54 @@ def get_jit_def(fn, def_name, self_name=None):
             but we want the result AST to have the name "forward".
         self_name: If this function is a method, what the type name of `self` is.
     """
-    sourcelines, file_lineno, filename = get_source_lines_and_file(fn, torch._C.ErrorReport.call_stack())
-    source = ''.join(sourcelines)
-    dedent_src = dedent(source)
-    py_ast = ast.parse(dedent_src)
-    if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-        raise RuntimeError("Expected a single top-level function")
-    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
-    type_line = torch.jit.annotations.get_type_line(source)
-    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, True)
-    fn_def = py_ast.body[0]
+    parsed_def = parse_def(fn) if not isinstance(fn, _ParsedDef) else fn
+    type_line = torch.jit.annotations.get_type_line(parsed_def.source)
+    fn_def = parsed_def.ast.body[0]
+
+    if is_classmethod:
+        arg_name = fn_def.args.args[0].arg
+        # Insert a statement that assigns the first argument to the class
+        assign_stmt = ast.parse(f"{arg_name} = {self_name}").body[0]
+        fn_def.body.insert(0, assign_stmt)
 
     # Swap out the function signature and body if it is unused
     if should_drop(fn):
-        unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")").body[0]
-        fn_def.body = unused_fn_def.body
+        unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")")
+        if len(unused_fn_def.body) != 1 or not isinstance(unused_fn_def.body[0], ast.FunctionDef):
+            raise RuntimeError(f"Expected a single top-level function: {parsed_def.filename}:{parsed_def.file_lineno}")
+        unused_def = unused_fn_def.body[0]
+        fn_def.body = unused_def.body
         # kwarg/vararg not supported by `build_def`
         fn_def.args.kwarg = fn_def.args.vararg = None
         for arg in fn_def.args.args + fn_def.args.kwonlyargs:
             # Replace potentially unsupported type annotations by "Any"
-            arg.annotation = unused_fn_def.args.args[0].annotation
+            arg.annotation = unused_def.args.args[0].annotation
 
-    return build_def(ctx, fn_def, type_line, def_name, self_name=self_name)
+    # If MonkeyType is installed, get all the consolidated type traces
+    # for the arguments from type_trace_db
+    type_trace_db = torch.jit._script._get_type_trace_db()
+    pdt_arg_types = None
+    if monkeytype_trace and not isinstance(fn, _ParsedDef):
+        qualname = get_qualified_name(fn)
+        pdt_arg_types = type_trace_db.get_args_types(qualname)
 
+    return build_def(parsed_def.ctx, fn_def, type_line, def_name, self_name=self_name, pdt_arg_types=pdt_arg_types)
+
+# TODO: more robust handling of recognizing ignore context manager
+def is_torch_jit_ignore_context_manager(stmt):
+    # checks if the statement is torch.jit.ignore context manager
+    if isinstance(stmt.items[0].context_expr, ast.Call):
+        # extract torch part
+        function = stmt.items[0].context_expr.func
+        if isinstance(function, ast.Attribute):
+            attr_name = function.attr
+            attr_value = function.value
+            if attr_name == "_IgnoreContextManager" and isinstance(attr_value, ast.Attribute):
+                # there should be at most two nested attributes (e.g torch.jit._IgnoreContextManager)
+                if attr_value.attr == "jit" and isinstance(attr_value.value, ast.Name):
+                    if attr_value.value.id == "torch":
+                        return True
+    return False
 
 class Builder(object):
     def __call__(self, ctx, node):
@@ -223,21 +316,23 @@ class Builder(object):
         return method(ctx, node)
 
 
-def build_class_def(ctx, py_def, methods, properties, self_name):
+def build_class_def(ctx, py_def, methods, properties, self_name, assigns):
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("class"))
-    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods], properties)
+    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods], properties, assigns)
 
 
-def build_def(ctx, py_def, type_line, def_name, self_name=None):
+def build_def(ctx, py_def, type_line, def_name, self_name=None, pdt_arg_types=None):
     body = py_def.body
     r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
                        py_def.col_offset,
                        py_def.col_offset + len("def"))
-    param_list = build_param_list(ctx, py_def.args, self_name)
+
+    param_list = build_param_list(ctx, py_def.args, self_name, pdt_arg_types)
     return_type = None
     if getattr(py_def, 'returns', None) is not None:
         return_type = build_expr(ctx, py_def.returns)
+
     decl = Decl(r, param_list, return_type)
     is_method = self_name is not None
     if type_line is not None:
@@ -253,7 +348,7 @@ _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments
                      "or use keyword-only arguments with defaults")
 
 
-def build_param_list(ctx, py_args, self_name):
+def build_param_list(ctx, py_args, self_name, pdt_arg_types=None):
     if py_args.kwarg is not None:
         expr = py_args.kwarg
         ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
@@ -269,29 +364,125 @@ def build_param_list(ctx, py_args, self_name):
             if arg is not None:
                 ctx_range = build_expr(ctx, arg).range()
                 raise NotSupportedError(ctx_range, _vararg_kwarg_err)
-    result = [build_param(ctx, arg, self_name, False) for arg in py_args.args]
-    result += [build_param(ctx, arg, self_name, True) for arg in py_args.kwonlyargs]
+
+    # List of Tuple of args and type as inferred by profile directed typing
+    arg_and_types = [(arg, pdt_arg_types[arg.arg] if pdt_arg_types and bool(pdt_arg_types[arg.arg]) else None)
+                     for arg in py_args.args]
+    arg_and_types_kwonlyargs = [(arg, pdt_arg_types[arg.arg] if pdt_arg_types and bool(pdt_arg_types[arg.arg])
+                                else None) for arg in py_args.kwonlyargs]
+
+    result = [build_param(ctx, arg, self_name, kwarg_only=False, pdt_arg_type=arg_type)
+              for arg, arg_type in arg_and_types]
+    result += [build_param(ctx, arg, self_name, kwarg_only=True, pdt_arg_type=arg_type)
+               for arg, arg_type in arg_and_types_kwonlyargs]
     return result
 
 
-def build_param(ctx, py_arg, self_name, kwarg_only):
+def build_param(ctx, py_arg, self_name, kwarg_only, pdt_arg_type=None):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     name = py_arg.arg
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
     if getattr(py_arg, 'annotation', None) is not None:
         annotation_expr = build_expr(ctx, py_arg.annotation)
+    elif pdt_arg_type:
+        annotation_expr = Var(Ident(r, pdt_arg_type))
     elif self_name is not None and name == 'self':
         annotation_expr = Var(Ident(r, self_name))
     else:
         annotation_expr = EmptyTypeAnnotation(r)
     return Param(annotation_expr, Ident(r, name), kwarg_only)
 
+def build_ignore_context_manager(ctx, stmt):
+    InputType = namedtuple('InputType', ['name', 'ann'])
+    OutputType = namedtuple('OutputType', ['name', 'ann'])
+
+    def process_ins_outs(args):
+        # parse the context manager to figure out inputs and outputs
+        # with their annotated types
+        # TODO: add input, output validator
+        inputs = []
+        outputs = []
+        for arg in args:
+            var_name = arg.arg
+            if sys.version_info < (3, 8):
+                # Starting python3.8 ast.Str is deprecated
+                var_ann = arg.value.s
+            else:
+                var_ann = arg.value.value
+            var_decl_type, var_ann = var_ann.split(":")
+            if var_decl_type == "inp":
+                inputs.append(InputType(var_name, var_ann))
+            if var_decl_type == "out":
+                outputs.append(OutputType(var_name, var_ann))
+        return inputs, outputs
+
+    def create_unique_name_ext(ctx, stmt):
+        # extension will be based on the full path filename plus
+        # the line number of original context manager
+        fn = re.sub(r'[^a-zA-Z0-9_]', '_', ctx.filename)
+        return f"{fn}_{stmt.lineno}"
+
+    def build_return_ann_stmt(outputs):
+        return_type_ann = ""
+        return_statement_str = "return "
+        if len(outputs) == 0:
+            return_type_ann += " -> None"
+        if len(outputs) == 1:
+            return_type_ann = " -> " + outputs[0].ann
+            return_statement_str += outputs[0].name
+        if len(outputs) > 1:
+            return_type_ann = " -> Tuple"
+            return_type_ann += "[" + ", ".join([var.ann for var in outputs]) + "]"
+            return_statement_str += ", ".join([var.name for var in outputs])
+        return return_type_ann, return_statement_str
+
+    def build_args(args):
+        return ", ".join([arg.name for arg in args])
+
+    inputs, outputs = process_ins_outs(stmt.items[0].context_expr.keywords)
+
+    # build the replacement function str with given inputs and outputs
+    ignore_function_name = "func_ignore_" + create_unique_name_ext(ctx, stmt)
+    ignore_function_str = "\ndef " + ignore_function_name
+    ignore_function_str += "(" + ", ".join([var.name + " :" + var.ann for var in inputs]) + ")"
+
+    return_ann, return_stmt = build_return_ann_stmt(outputs)
+    ignore_function_str += return_ann + ": pass"
+
+    # first create the functionDef object from just declaration
+    ignore_function = ast.parse(ignore_function_str).body[0]
+
+    # dump the body of context manager to dummy function
+    ignore_function.body = stmt.body  # type: ignore[attr-defined]
+
+    # insert return statement to the function
+    return_stmt = ast.parse(return_stmt).body[0]
+    ignore_function.body.append(return_stmt)  # type: ignore[attr-defined]
+
+    # registers the custom function in the global context
+    ignore_func_str = "@torch.jit.ignore\n" + astunparse.unparse(ignore_function)
+    ignore_func_str += "\nglobals()[\"{}\"] = {}".format(ignore_function_name, ignore_function_name)
+    exec(ignore_func_str)  # noqa: P204
+
+    # build the statements as:
+    # <out_1>, <out_2>, ... = torch.jit.frontend.<func>(<in_1>, <in_2>)
+    assign_str_lhs = build_args(outputs)
+    # this function will be registered in torch.jit.frontend module by default
+    assign_str_rhs = "torch.jit.frontend.{}(".format(ignore_function_name) + build_args(inputs) + ")"
+
+    if len(outputs) > 0:
+        assign_str = assign_str_lhs + " = " + assign_str_rhs
+    else:
+        assign_str = assign_str_rhs
+    assign_ast = ast.parse(assign_str).body[0]
+    return assign_ast
 
 def get_default_args(fn):
     if fn is None:
         return {}
 
     signature = inspect.signature(fn)
+
     return {
         k: v.default
         for k, v in signature.parameters.items()
@@ -299,18 +490,39 @@ def get_default_args(fn):
     }
 
 
+def get_default_args_for_class(cls):
+    """
+    Get default arguments for all methods in a class (except for static methods).
+
+    Args:
+        cls: type - The class type to inspect for default arguments.
+    Returns:
+        A Dict[str, Dict[str, Any]] which maps each method name to a Dict[str, Any]
+        that maps each argument name to its default value.
+    """
+    # Get methods (except static methods because those are compiled separately as
+    # if they were independent script functions).
+    methods = inspect.getmembers(
+        cls,
+        predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m))
+        and not is_static_fn(cls, m.__name__)
+        and m.__name__ in cls.__dict__
+    )
+
+    # Get method defaults. Property defaults do not need to be considered
+    # because setters cannot be invoked without a value.
+    defaults = {method_name: get_default_args(method_impl) for method_name, method_impl in methods}
+
+    return defaults
+
+
 class WithItemBuilder(Builder):
     @staticmethod
     def build_withitem(ctx, item):
         lineno = item.context_expr.lineno
         start = item.context_expr.col_offset
+        end = start + len(pretty_node_names[ast.With])
         op_vars = item.optional_vars
-
-        if op_vars:
-            end = op_vars.col_offset + len(op_vars.id)
-        else:
-            end = start + len(item.context_expr.id)
-
         r = ctx.make_range(lineno, start, end)
 
         return WithItem(r, build_expr(ctx, item.context_expr), build_expr(ctx, op_vars) if op_vars else None)
@@ -323,6 +535,12 @@ class StmtBuilder(Builder):
         ast.Mult: '*',
         ast.Div: '/',
         ast.Mod: '%',
+        ast.BitOr: '|',
+        ast.BitAnd: '&',
+        ast.BitXor: '^',
+        ast.LShift: '<<',
+        ast.RShift: '>>',
+        ast.Pow: '**',
     }
 
     @staticmethod
@@ -338,13 +556,25 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_Assign(ctx, stmt):
         rhs = build_expr(ctx, stmt.value)
-        lhs = list(map(lambda x: build_expr(ctx, x), stmt.targets))
+        lhs = [build_expr(ctx, x) for x in stmt.targets]
         return Assign(lhs, rhs)
 
     @staticmethod
     def build_AnnAssign(ctx, stmt):
         if stmt.value is None:
             raise UnsupportedNodeError(ctx, stmt, reason='without assigned value')
+
+        # Disallow type annotations on instance attributes outside of __init__
+        if type(stmt.target) == ast.Attribute and \
+                stmt.target.value.id == "self" and ctx.funcname != "__init__":  # type: ignore[attr-defined]
+            start = stmt.col_offset
+            end = start + len(f"self.{stmt.target.attr}")
+            if hasattr(stmt.annotation, 'id'):
+                end += len(f": {stmt.annotation.id}")
+            sr = ctx.make_range(stmt.lineno, start, end)
+            raise ValueError("Type annotations on instance attributes must be declared in "
+                             f"__init__, not '{ctx.funcname}': {sr}")
+
         rhs = build_expr(ctx, stmt.value)
         lhs = build_expr(ctx, stmt.target)
         the_type = build_expr(ctx, stmt.annotation)
@@ -352,12 +582,9 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_Delete(ctx, stmt):
-        if len(stmt.targets) > 1:
-            source_range = ctx.make_range(stmt.lineno, stmt.col_offset,
-                                          stmt.col_offset + len("del"))
-            raise NotSupportedError(
-                source_range, 'del with more than one operand is not supported')
-        return Delete(build_expr(ctx, stmt.targets[0]))
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("del"))
+
+        return Delete(r, [build_expr(ctx, target) for target in stmt.targets])
 
     @staticmethod
     def build_Return(ctx, stmt):
@@ -403,6 +630,9 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_For(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("for"))
+        if stmt.orelse:
+            raise NotSupportedError(r, "else branches of for loops aren't supported")
+
         return For(
             r, [build_expr(ctx, stmt.target)],
             [build_expr(ctx, stmt.iter)], build_stmts(ctx, stmt.body))
@@ -440,6 +670,13 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_With(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("with"))
+        # Handle ignore context manager
+        if is_torch_jit_ignore_context_manager(stmt):
+            if not _IS_ASTUNPARSE_INSTALLED:
+                raise RuntimeError("torch.jit._IgnoreContextManager requires installing Python library `astunparse`,\
+                                   please install it in your Python environment")
+            assign_ast = build_ignore_context_manager(ctx, stmt)
+            return build_stmt(ctx, assign_ast)
         return With(r, build_withitems(ctx, stmt.items), build_stmts(ctx, stmt.body))
 
 class ExprBuilder(Builder):
@@ -534,6 +771,8 @@ class ExprBuilder(Builder):
             return FalseLiteral(r)
         elif expr.id == "None":
             return NoneLiteral(r)
+        elif expr.id == "Ellipsis":
+            return Dots(r)
         return Var(Ident(r, expr.id))
 
     @staticmethod
@@ -545,6 +784,8 @@ class ExprBuilder(Builder):
             return FalseLiteral(r)
         elif expr.value is None:
             return NoneLiteral(r)
+        elif expr.value == Ellipsis:
+            return Dots(r)
         else:
             raise ValueError("Name constant value unsupported: " + str(expr.value))
 
@@ -570,10 +811,9 @@ class ExprBuilder(Builder):
         sub_expr = build_expr(ctx, expr.operand)
         op = type(expr.op)
         op_token = ExprBuilder.unop_map.get(op)
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(op_token))
         if op_token is None:
-            err_range = ctx.make_raw_range(r.start, sub_expr.range().end)
-            raise NotSupportedError(err_range, "unsupported unary operator: " + op.__name__)
+            raise NotSupportedError(expr.range(), "unsupported unary operator: " + op.__name__)
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(op_token))
         return UnaryOp(r, op_token, sub_expr)
 
     @staticmethod
@@ -631,11 +871,10 @@ class ExprBuilder(Builder):
             return SliceExpr(base.range(), lower, upper, step)
 
         def build_Index(ctx, base, index_expr):
-            if isinstance(index_expr.value, ast.Tuple) or \
-                    isinstance(index_expr.value, ast.List):
+            if isinstance(index_expr.value, ast.Tuple):
                 raise NotSupportedError(base.range(),
                                         "slicing multiple dimensions with "
-                                        "sequences not supported yet")
+                                        "tuples not supported yet")
             return build_expr(ctx, index_expr.value)
 
         def build_ExtSlice(ctx, base, extslice):
@@ -653,16 +892,22 @@ class ExprBuilder(Builder):
                                             "slicing multiple dimensions with "
                                             "{} not supported".format(sub_type))
             return sub_exprs
-
         base = build_expr(ctx, expr.value)
         sub_type = type(expr.slice)
         if sub_type is ast.Index:
             if isinstance(expr.slice.value, ast.Tuple):
                 # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
                 # XXX: Indexing using a list is **different**! It triggers advanced indexing.
-                indices = []
-                for index_expr in expr.slice.value.elts:
-                    indices.append(build_expr(ctx, index_expr))
+                indices = [build_expr(ctx, index_expr) for index_expr in expr.slice.value.elts]
+                if not indices:
+                    # `col_offset` is an int, but `end_col_offset` is
+                    # `Optional[int]`. The magic number is here to make
+                    # sure we can parse `()` on any machine
+                    r = ctx.make_range(expr.lineno,
+                                       expr.slice.value.col_offset,
+                                       expr.slice.value.col_offset + 2)
+                    tup = TupleLiteral(r, [])
+                    indices.append(tup)
                 return Subscript(base, indices)
             else:
                 return Subscript(base, [build_expr(ctx, expr.slice.value)])
@@ -670,6 +915,25 @@ class ExprBuilder(Builder):
             return Subscript(base, [build_SliceExpr(ctx, base, expr.slice)])
         elif sub_type is ast.ExtSlice:
             return Subscript(base, build_ExtSlice(ctx, base, expr.slice))
+        elif sys.version_info >= (3, 9):  # In Python3.9 array indicies are not wrapped in ast.Index
+            if sub_type is ast.Tuple:
+                # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
+                indices = []
+                for index_expr in expr.slice.elts:
+                    if isinstance(index_expr, ast.Slice):
+                        indices.append(build_SliceExpr(ctx, base, index_expr))
+                    else:
+                        indices.append(build_expr(ctx, index_expr))
+                # Special-case logic for `typing.Tuple[()]`
+                if not indices:
+                    # See note above r.e. magic number
+                    r = ctx.make_range(expr.lineno,
+                                       expr.slice.col_offset,
+                                       expr.slice.col_offset + 2)
+                    tup = TupleLiteral(r, [])
+                    indices.append(tup)
+                return Subscript(base, indices)
+            return Subscript(base, [build_expr(ctx, expr.slice)])
         else:  # Ellipsis (can only happen in Python 2)
             raise NotSupportedError(base.range(), "ellipsis is not supported")
 
@@ -685,8 +949,11 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Dict(ctx, expr):
-        return DictLiteral(ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
-                           [build_expr(ctx, e) for e in expr.keys], [build_expr(ctx, e) for e in expr.values])
+        range = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        if expr.keys and not expr.keys[0]:
+            raise NotSupportedError(range, "Dict expansion (e.g. `{**dict}`) is not supported")
+        return DictLiteral(range, [build_expr(ctx, e) for e in expr.keys],
+                           [build_expr(ctx, e) for e in expr.values])
 
     @staticmethod
     def build_Num(ctx, expr):
@@ -701,7 +968,7 @@ class ExprBuilder(Builder):
             # NB: this check has to happen before the int check because bool is
             # a subclass of int
             return ExprBuilder.build_NameConstant(ctx, expr)
-        if isinstance(value, (int, float)):
+        if isinstance(value, (int, float, complex)):
             return ExprBuilder.build_Num(ctx, expr)
         elif isinstance(value, str):
             return ExprBuilder.build_Str(ctx, expr)
@@ -714,7 +981,7 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_Str(ctx, expr):
         value = str(expr.s)
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value) + 1)
         return StringLiteral(r, value)
 
     @staticmethod
@@ -741,17 +1008,33 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_ListComp(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset)
-        if (len(stmt.generators) > 1):
-            raise NotSupportedError(r, "multiple comprehension generators not supported yet")
+        if (len(stmt.generators) != 1):
+            raise NotSupportedError(r, "Only a single generator is currently supported")
 
         if (len(stmt.generators[0].ifs) != 0):
-            raise NotSupportedError(r, "comprehension ifs not supported yet")
+            raise NotSupportedError(r, "Comprehension ifs are not supported yet")
 
         elt_expr = build_expr(ctx, stmt.elt)
         target_expr = build_expr(ctx, stmt.generators[0].target)
-
         iter_expr = build_expr(ctx, stmt.generators[0].iter)
+
         return ListComp(r, elt_expr, target_expr, iter_expr)
+
+    @staticmethod
+    def build_DictComp(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset)
+        if (len(stmt.generators) != 1):
+            raise NotSupportedError(r, "Only a single generator is currently supported")
+
+        if (len(stmt.generators[0].ifs) != 0):
+            raise NotSupportedError(r, "Comprehension ifs are not supported yet")
+
+        key_expr = build_expr(ctx, stmt.key)
+        value_expr = build_expr(ctx, stmt.value)
+        target_expr = build_expr(ctx, stmt.generators[0].target)
+        iter_expr = build_expr(ctx, stmt.generators[0].iter)
+
+        return DictComp(r, key_expr, value_expr, target_expr, iter_expr)
 
     @staticmethod
     def build_Starred(ctx, expr):

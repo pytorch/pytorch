@@ -64,9 +64,11 @@ class Int8TensorCPUDeserializer : public TensorDeserializer {
   void Deserialize(const BlobProto& blob_proto, Blob* blob) override {
     const QTensorProto& proto = blob_proto.qtensor();
     Int8TensorCPU* tensor = blob->template GetMutable<Int8TensorCPU>();
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     tensor->scale = proto.scale();
     tensor->zero_point = proto.bias();
     vector<int> dims;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     for (const int d : proto.dims()) {
       dims.push_back(d);
     }

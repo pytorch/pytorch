@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import workspace, core, scope, gru_cell
 from caffe2.python.model_helper import ModelHelper
@@ -16,7 +16,6 @@ from hypothesis import settings as ht_settings
 import hypothesis.strategies as st
 import numpy as np
 import unittest
-import os
 
 
 def gru_unit(*args, **kwargs):

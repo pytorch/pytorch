@@ -175,4 +175,4 @@ void MPISetupPeers(
           << MPICommSize(GlobalMPIComm());
 }
 
-}  // namespace caffe2
+} // namespace caffe2

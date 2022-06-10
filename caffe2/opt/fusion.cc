@@ -18,7 +18,9 @@ using namespace nom;
 bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
   size_t convOrder = 0;
   for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     repr::NNGraph::NodeRef convNode;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     repr::Conv* conv;
     std::tie(conv, convNode) = node_pair;
 
@@ -63,6 +65,7 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
           dyn_cast<caffe2::Caffe2Annotation>(conv->getMutableAnnotation());
       NOM_REQUIRE_OR_CONT(annotation != nullptr);
       auto op = annotation->getOperatorDef();
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       auto convName = op.name();
 
       while (true) {

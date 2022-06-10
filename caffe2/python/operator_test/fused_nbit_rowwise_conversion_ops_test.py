@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import math
 import struct
@@ -46,7 +46,7 @@ def int8_to_bytes(int8s):
         if isinstance(as_bytes[0], int):
             byte_matrix[i] = list(as_bytes)
         else:
-            byte_matrix[i] = list(map(ord, as_bytes))
+            byte_matrix[i] = [ord(i) for i in as_bytes]
     return byte_matrix
 
 
@@ -205,7 +205,7 @@ def ErrorThresholdRow(X, bit_rate):
 
 class TestNBitFakeFused(hu.HypothesisTestCase):
     @given(bit_rate=st.sampled_from([2, 4]))
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def testNBit(self, bit_rate):
         # uncomment for debugging
         # np.random.seed(0)

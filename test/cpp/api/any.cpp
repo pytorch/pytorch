@@ -74,6 +74,7 @@ TEST_F(
 TEST_F(AnyModuleTest, WrongArgumentType) {
   struct M : torch::nn::Module {
     int forward(float x) {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       return x;
     }
   };
@@ -177,6 +178,7 @@ struct M : torch::nn::Module {
   explicit M(int value_) : torch::nn::Module("M"), value(value_) {}
   int value;
   int forward(float x) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return x;
   }
 };
@@ -225,6 +227,7 @@ TEST_F(AnyModuleTest, DefaultStateIsEmpty) {
     explicit M(int value_) : value(value_) {}
     int value;
     int forward(float x) {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       return x;
     }
   };
@@ -260,6 +263,7 @@ TEST_F(AnyModuleTest, CanMoveAssignDifferentModules) {
   };
   struct N : torch::nn::Module {
     int forward(float x) {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       return 3 + x;
     }
   };
@@ -278,6 +282,7 @@ TEST_F(AnyModuleTest, ConstructsFromModuleHolder) {
     explicit MImpl(int value_) : torch::nn::Module("M"), value(value_) {}
     int value;
     int forward(float x) {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       return x;
     }
   };
@@ -319,6 +324,7 @@ namespace torch {
 namespace nn {
 struct TestAnyValue {
   template <typename T>
+  // NOLINTNEXTLINE(bugprone-forwarding-reference-overload)
   explicit TestAnyValue(T&& value) : value_(std::forward<T>(value)) {}
   AnyValue operator()() {
     return std::move(value_);

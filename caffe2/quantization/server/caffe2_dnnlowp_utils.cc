@@ -58,6 +58,7 @@ TensorQuantizationParams GetInputTensorQuantizationParamsOf(
 
   if (op->InputIsType<Int8TensorCPU>(idx)) {
     const Int8TensorCPU& int8_tensor = op->Input<Int8TensorCPU>(idx);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     TensorQuantizationParams qparams;
     qparams.scale = int8_tensor.scale;
     qparams.zero_point = int8_tensor.zero_point;
@@ -68,6 +69,7 @@ TensorQuantizationParams GetInputTensorQuantizationParamsOf(
     CAFFE_ENFORCE(tensor->template IsType<float>());
     CAFFE_ENFORCE(tensor->numel() == 0 || tensor->template data<float>());
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     float min, max;
     fbgemm::FindMinMax(
         tensor->template data<float>(), &min, &max, tensor->numel());
@@ -136,6 +138,7 @@ TensorQuantizationParams GetStaticQuantizationParamsOf(
   LOG_IF(WARNING, !HasDNNLowPEngine_(*op));
   unique_ptr<QuantizationFactory> qfactory = GetQuantizationFactoryOf(op);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TensorQuantizationParams qparams;
   qparams.scale = op->GetSingleArgument<float>(OutputScaleArgumentName(idx), 0);
   qparams.zero_point =
@@ -233,6 +236,7 @@ void MeasureQuantizationError(
     const float* ref,
     size_t len,
     QuantizationErrorStats* stat) {
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < len; ++i) {
     stat->sum_sq += ref[i] * ref[i];
     float err = actual[i] - ref[i];
@@ -351,6 +355,7 @@ static unique_ptr<QuantizationFactory> GetQuantizationFactoryOf_(
   }
   VLOG(2) << ss.str();
 
+  // NOLINTNEXTLINE(modernize-make-unique)
   return unique_ptr<QuantizationFactory>(new QuantizationFactory(
       activation_precision,
       weight_precision,
@@ -476,8 +481,10 @@ NetDef AddScaleZeroOffsetArgumentsWithHistogram(
   ist.clear();
 
   bool new_format = true;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int op_index, i, nbins;
   string op_type, tensor_name;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float min, max;
   ist >> op_index >> op_type >> i >> tensor_name >> min >> max >> nbins;
   if (nwords_first_line != nbins + 7) {
@@ -499,6 +506,7 @@ NetDef AddScaleZeroOffsetArgumentsWithHistogram(
     ArgumentHelper arg_helper(op_def);
 
     for (i = 0; i < op_def.output().size(); ++i) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int op_index2, i2;
 
       if (new_format) {
@@ -522,6 +530,7 @@ NetDef AddScaleZeroOffsetArgumentsWithHistogram(
 
       vector<uint64_t> bins;
       for (int j = 0; j < nbins; ++j) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         uint64_t cnt;
         f >> cnt;
         bins.push_back(cnt);

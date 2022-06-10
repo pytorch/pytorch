@@ -3,16 +3,17 @@
 namespace caffe2 {
 
 template <>
+template <typename TLen, typename TInd>
 void BatchSparseToDenseOp<float, CPUContext>::FillInDenseValues(
     const int64_t batch_size,
     const int64_t indice_lengths,
-    const int64_t* lengths_data,
-    const int64_t* indices_data,
+    const TLen* lengths_data,
+    const TInd* indices_data,
     const float* values_data,
     float* output_data,
     CPUContext* /*context*/) {
-  int64_t lengths_sum = 0;
-  math::Sum<int64_t, CPUContext>(
+  TLen lengths_sum = 0;
+  math::Sum<TLen, CPUContext>(
       batch_size, lengths_data, &lengths_sum, &context_);
   CAFFE_ENFORCE_EQ(lengths_sum, indice_lengths);
 
@@ -33,16 +34,17 @@ void BatchSparseToDenseOp<float, CPUContext>::FillInDenseValues(
 }
 
 template <>
+template <typename TLen, typename TInd>
 void BatchDenseToSparseOp<float, CPUContext>::FillInSparseValues(
     const int64_t batch_size,
     const int64_t indice_lengths,
-    const int64_t* lengths_data,
-    const int64_t* indices_data,
+    const TLen* lengths_data,
+    const TInd* indices_data,
     const float* dense_data,
     float* output_data,
     CPUContext* /*context*/) {
-  int64_t lengths_sum = 0;
-  math::Sum<int64_t, CPUContext>(
+  TLen lengths_sum = 0;
+  math::Sum<TLen, CPUContext>(
       batch_size, lengths_data, &lengths_sum, &context_);
   CAFFE_ENFORCE_EQ(lengths_sum, indice_lengths);
 
@@ -113,6 +115,32 @@ after running this operator.
         "2-D dense tensor, with 1st dim = len(lengths), 2nd dim = dense_last_dim"
         "in the arg list, the tensor is of the same data type as `values`."
         "Missing values are filled with default_value")
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      ArgumentHelper helper(def);
+      vector<long> output_dims;
+      if (in.size() == 4) {
+        const auto& inference_dims = GetDimsVector(in[3]);
+        output_dims.insert(output_dims.end(), inference_dims.begin(), inference_dims.end());
+        const int dense_last_dim = helper.GetSingleArgument<int>("dense_last_dim", 0);
+        if(dense_last_dim > 0) {
+          CAFFE_ENFORCE(
+              output_dims.back() == dense_last_dim,
+              "The last dim of output_shape_inference should be consistent with dense_last_dim");
+        }
+      } else {
+        const int dense_last_dim = helper.GetSingleArgument<int>("dense_last_dim", 0);
+        CAFFE_ENFORCE(
+          dense_last_dim > 0,
+          "dense_last_dim must be set when output shape inference is unavailable");
+        const auto& lens_dims = GetDimsVector(in[0]);
+        output_dims.insert(output_dims.end(), lens_dims[0]);
+        output_dims.insert(output_dims.end(), dense_last_dim);
+      }
+      vector<TensorShape> out(1);
+      out[0] = CreateTensorShape(output_dims, in[2].data_type());
+      return out;
+    })
     .Arg(
         "dense_last_dim",
         "Optional, output dense last dimension. "

@@ -14,7 +14,7 @@ void load_serialized_lowered_module_and_execute(const std::string& path) {
   std::vector<torch::jit::IValue> inputs{tensor, tensor};
   auto output = module.forward(inputs);
   AT_ASSERT(output.isTuple());
-  auto output_elements = output.toTuple()->elements();
+  auto output_elements = output.toTupleRef().elements();
   for (auto& e : output_elements) {
     AT_ASSERT(e.isTensor());
   }

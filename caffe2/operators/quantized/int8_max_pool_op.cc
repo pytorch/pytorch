@@ -7,6 +7,7 @@ REGISTER_CPU_OPERATOR(
     Int8MaxPoolRelu,
     int8::Int8MaxPoolOp<int8::Activation::RELU>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 const char kMaxPoolDoc_int8[] = R"DOC(
 consumes an input blob X and applies max pooling across the
 the blob according to kernel sizes, stride sizes, and pad lengths defined by the

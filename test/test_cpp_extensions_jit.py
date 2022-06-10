@@ -1,3 +1,5 @@
+# Owner(s): ["module: cpp-extensions"]
+
 import os
 import shutil
 import sys
@@ -13,7 +15,7 @@ import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
-from torch.autograd.gradcheck import gradcheck
+from torch.testing._internal.common_utils import gradcheck
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
@@ -42,12 +44,14 @@ class TestCppExtensionJIT(common.TestCase):
     """
 
     def setUp(self):
+        super().setUp()
         # cpp extensions use relative paths. Those paths are relative to
         # this file, so we'll change the working directory temporarily
         self.old_working_dir = os.getcwd()
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
     def tearDown(self):
+        super().tearDown()
         # return the working directory (see setUp)
         os.chdir(self.old_working_dir)
 
@@ -130,7 +134,7 @@ class TestCppExtensionJIT(common.TestCase):
                                                           err, output))
 
             actual_arches = sorted(re.findall(r'sm_\d\d', output))
-            expected_arches = ['sm_' + xx for xx in expected_values]
+            expected_arches = sorted(['sm_' + xx for xx in expected_values])
             self.assertEqual(actual_arches, expected_arches,
                              msg="Flags: {},  Actual: {},  Expected: {}\n"
                                  "Stderr: {}\nOutput: {}".format(
@@ -180,11 +184,12 @@ class TestCppExtensionJIT(common.TestCase):
         #   - Architecture names
         #   - With/without '+PTX'
 
-        capability = torch.cuda.get_device_capability()
+        n = torch.cuda.device_count()
+        capabilities = {torch.cuda.get_device_capability(i) for i in range(n)}
         # expected values is length-2 tuple: (list of ELF, list of PTX)
         # note: there should not be more than one PTX value
         archflags = {
-            '': (['{}{}'.format(capability[0], capability[1])], None),
+            '': (['{}{}'.format(capability[0], capability[1]) for capability in capabilities], None),
             "Maxwell+Tegra;6.1": (['53', '61'], None),
             "Pascal 3.5": (['35', '60', '61'], None),
             "Volta": (['70'], ['70']),
@@ -285,6 +290,7 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.sin_add(x, y)
         self.assertEqual(z, x.sin() + y.sin())
 
+    @unittest.skip("Temporarily disabled")
     @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_inline_jit_compile_extension_cuda(self):
         cuda_source = """
@@ -327,6 +333,7 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.cos_add(x, y)
         self.assertEqual(z, x.cos() + y.cos())
 
+    @unittest.skip("Temporarily disabled")
     @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_inline_jit_compile_custom_op_cuda(self):
         cuda_source = """
@@ -401,6 +408,7 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.tanh_add(x, y).cpu()
         self.assertEqual(z, x.tanh() + y.tanh())
 
+    @unittest.skip("Temporarily disabled")
     @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_half_support(self):
         """
@@ -411,8 +419,6 @@ class TestCppExtensionJIT(common.TestCase):
         for the corresponding issue.
         """
         cuda_source = """
-        #include <THC/THCNumerics.cuh>
-
         template<typename T, typename U>
         __global__ void half_test_kernel(const T* input, U* output) {
             if (input[0] < input[1] || input[0] >= input[1]) {

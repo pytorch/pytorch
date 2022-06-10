@@ -2,7 +2,12 @@
 
 #include <algorithm>
 
-#if defined(__GLIBC__) && !defined(__APPLE__) && !defined(__ANDROID__)
+#ifndef __GLIBC_PREREQ
+#define __GLIBC_PREREQ(x, y) 0
+#endif
+
+#if defined(__GLIBC__) && __GLIBC_PREREQ(2, 12) && !defined(__APPLE__) && \
+    !defined(__ANDROID__)
 #define C10_HAS_PTHREAD_SETNAME_NP
 #endif
 

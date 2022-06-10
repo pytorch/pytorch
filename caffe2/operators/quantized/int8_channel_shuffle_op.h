@@ -16,7 +16,10 @@ namespace int8 {
 class Int8ChannelShuffleOp final : public ConvPoolOpBase<CPUContext> {
  public:
   explicit Int8ChannelShuffleOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws), ws_(ws) {
+      : ConvPoolOpBase<CPUContext>(operator_def, ws) {
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
+    this->ws_ = ws;
+#endif
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NHWC,
         "Int8ChannelShuffleOp only supports NHWC order");
@@ -47,7 +50,6 @@ class Int8ChannelShuffleOp final : public ConvPoolOpBase<CPUContext> {
     const auto C = X.t.dim32(3);
     const auto G = this->group_;
     CAFFE_ENFORCE(C % G == 0, "");
-    const auto B = X.t.numel() / C;
 
     initQNNPACK();
 
@@ -91,7 +93,9 @@ class Int8ChannelShuffleOp final : public ConvPoolOpBase<CPUContext> {
   }
 
  private:
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
   Workspace* ws_;
+#endif
   // QNNPACK channel shuffle operator
   qnnp_operator_t qnnpackOperator_{nullptr};
 };

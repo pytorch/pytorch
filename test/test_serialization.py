@@ -1,3 +1,5 @@
+# Owner(s): ["module: serialization"]
+
 import torch
 import unittest
 import io
@@ -11,13 +13,17 @@ import copy
 import pickle
 import shutil
 import pathlib
+from copy import deepcopy
+from itertools import product
 
 from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
 from torch.serialization import check_module_version_greater_or_equal
 
-from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
-    TEST_DILL, run_tests, download_file, BytesIOContext
+from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, TEST_DILL, \
+    run_tests, download_file, BytesIOContext, TemporaryFileName, parametrize, instantiate_parametrized_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_dtype import all_types_and_complex_and
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision
@@ -91,7 +97,8 @@ class SerializationMixin(object):
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
         self.assertTrue(isinstance(c[2], torch.FloatTensor))
         self.assertTrue(isinstance(c[3], torch.FloatTensor))
-        self.assertTrue(isinstance(c[4], torch.FloatStorage))
+        self.assertTrue(isinstance(c[4], torch.storage._TypedStorage))
+        self.assertEqual(c[4].dtype, torch.float)
         c[0].fill_(10)
         self.assertEqual(c[0], c[2], atol=0, rtol=0)
         self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), atol=0, rtol=0)
@@ -112,7 +119,6 @@ class SerializationMixin(object):
         rootview = c[8]
         self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
 
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_zipfile_utils(self):
         data = {
             'a': b'12039810948234589',
@@ -137,24 +143,22 @@ class SerializationMixin(object):
         with tempfile.NamedTemporaryFile() as f:
             test(f)
 
-        with tempfile.NamedTemporaryFile() as f:
-            test(f.name)
+        with TemporaryFileName() as fname:
+            test(fname)
 
         test(io.BytesIO())
 
     def test_serialization(self):
         # Test serialization with a real file
         b = self._test_serialization_data()
-        for use_name in (False, True):
-            # Passing filename to torch.save(...) will cause the file to be opened twice,
-            # which is not supported on Windows
-            if sys.platform == "win32" and use_name:
-                continue
-            with tempfile.NamedTemporaryFile() as f:
-                handle = f if not use_name else f.name
-                torch.save(b, handle)
-                f.seek(0)
-                c = torch.load(handle)
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(b, f)
+            f.seek(0)
+            c = torch.load(f)
+            self._test_serialization_assert(b, c)
+        with TemporaryFileName() as fname:
+            torch.save(b, fname)
+            c = torch.load(fname)
             self._test_serialization_assert(b, c)
         # test non-ascii encoding of bytes arrays/strings
         # The following bytes are produced by serializing
@@ -191,7 +195,6 @@ class SerializationMixin(object):
             c = torch.load(f)
         self._test_serialization_assert(b, c)
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_serialization_fake_zip(self):
         data = [
             ord('P'),
@@ -204,14 +207,15 @@ class SerializationMixin(object):
         t = torch.tensor(data, dtype=torch.uint8)
 
         with tempfile.NamedTemporaryFile() as f:
-            torch.save(t, f.name)
+            torch.save(t, f)
 
             # If this check is False for all Python versions (i.e. the fix
             # has been backported), this test and torch.serialization._is_zipfile
             # can be deleted
             self.assertTrue(zipfile.is_zipfile(f))
             self.assertFalse(torch.serialization._is_zipfile(f))
-            self.assertEqual(torch.load(f.name), t)
+            f.seek(0)
+            self.assertEqual(torch.load(f), t)
 
     def test_serialization_gzip(self):
         # Test serialization with gzip file
@@ -275,17 +279,19 @@ class SerializationMixin(object):
         self.assertTrue(torch.equal(a, b))
         self.assertEqual(i, j)
 
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_sparse(self):
-        x = torch.zeros(3, 3)
-        x[1][1] = 1
-        x = x.to_sparse()
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save({"tensor": x}, f.name)
-            y = torch.load(f.name)
-            self.assertEqual(x, y["tensor"])
+        def _test_serialization(conversion):
+            x = torch.zeros(3, 3)
+            x[1][1] = 1
+            x = conversion(x)
+            with tempfile.NamedTemporaryFile() as f:
+                torch.save({"tensor": x}, f)
+                f.seek(0)
+                y = torch.load(f)
+                self.assertEqual(x, y["tensor"])
+        _test_serialization(lambda x: x.to_sparse())
+        _test_serialization(lambda x: x.to_sparse_csr())
 
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_sparse_invalid(self):
         x = torch.zeros(3, 3)
         x[1][1] = 1
@@ -308,11 +314,42 @@ class SerializationMixin(object):
                             self.tensor.size())))
 
         with tempfile.NamedTemporaryFile() as f:
-            torch.save({"spoofed": TensorSerializationSpoofer(x)}, f.name)
+            torch.save({"spoofed": TensorSerializationSpoofer(x)}, f)
+            f.seek(0)
             with self.assertRaisesRegex(
                     RuntimeError,
                     "size is inconsistent with indices"):
-                y = torch.load(f.name)
+                y = torch.load(f)
+
+    def test_serialization_sparse_csr_invalid(self):
+        x = torch.zeros(3, 3)
+        x[1][1] = 1
+        x = x.to_sparse_csr()
+
+        class TensorSerializationSpoofer(object):
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def __reduce_ex__(self, proto):
+                invalid_crow_indices = self.tensor.crow_indices().clone()
+                invalid_crow_indices[0] = 3
+                return (
+                    torch._utils._rebuild_sparse_tensor,
+                    (
+                        self.tensor.layout,
+                        (
+                            invalid_crow_indices,
+                            self.tensor.col_indices(),
+                            self.tensor.values(),
+                            self.tensor.size())))
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save({"spoofed": TensorSerializationSpoofer(x)}, f)
+            f.seek(0)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "rebuilding sparse tensor for layout torch.sparse_csr"):
+                y = torch.load(f)
 
     def test_serialize_device(self):
         device_str = ['cpu', 'cpu:0', 'cuda', 'cuda:0']
@@ -333,7 +370,8 @@ class SerializationMixin(object):
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
         self.assertTrue(isinstance(c[2], torch.FloatTensor))
         self.assertTrue(isinstance(c[3], torch.FloatTensor))
-        self.assertTrue(isinstance(c[4], torch.FloatStorage))
+        self.assertTrue(isinstance(c[4], torch.storage._TypedStorage))
+        self.assertEqual(c[4].dtype, torch.float32)
         c[0].fill_(10)
         self.assertEqual(c[0], c[2], atol=0, rtol=0)
         self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), atol=0, rtol=0)
@@ -376,7 +414,7 @@ class SerializationMixin(object):
         with warnings.catch_warnings(record=True) as warns:
             with tempfile.NamedTemporaryFile() as checkpoint:
                 x = torch.save(torch.nn.Linear(2, 3), checkpoint)
-                self.assertEquals(len(warns), 0)
+                self.assertEqual(len(warns), 0)
 
     def test_serialization_map_location(self):
         test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
@@ -565,6 +603,65 @@ class SerializationMixin(object):
         with self.assertRaisesRegex(AttributeError, expected_err_msg):
             torch.load(resource)
 
+    def test_save_different_dtype_unallocated(self):
+        devices = ['cpu']
+        if torch.cuda.is_available():
+            devices.append('cuda')
+
+        def save_load_check(a, b):
+            with io.BytesIO() as f:
+                torch.save([a, b], f)
+                f.seek(0)
+                a_loaded, b_loaded = torch.load(f)
+            self.assertEqual(a, a_loaded)
+            self.assertEqual(b, b_loaded)
+
+        for device, dtype in product(devices, all_types_and_complex_and(torch.half,
+                                                                        torch.bfloat16, torch.bool)):
+            a = torch.tensor([], dtype=dtype, device=device)
+
+            for other_dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
+                s = torch._TypedStorage(
+                    wrap_storage=a.storage()._untyped(),
+                    dtype=other_dtype)
+                save_load_check(a, s)
+                save_load_check(a.storage(), s)
+                b = torch.tensor([], dtype=other_dtype, device=device)
+                save_load_check(a, b)
+
+    def test_save_different_dtype_error(self):
+        error_msg = r"Cannot save multiple tensors or storages that view the same data as different types"
+
+        devices = ['cpu']
+        if torch.cuda.is_available():
+            devices.append('cuda')
+
+        for device in devices:
+            a = torch.randn(10, dtype=torch.complex128, device=device)
+            f = io.BytesIO()
+
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.save([a, a.imag], f)
+
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.save([a.storage(), a.imag], f)
+
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.save([a, a.imag.storage()], f)
+
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.save([a.storage(), a.imag.storage()], f)
+
+            a = torch.randn(10, device=device)
+            s_bytes = torch._TypedStorage(
+                wrap_storage=a.storage()._untyped(),
+                dtype=torch.uint8)
+
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.save([a, s_bytes], f)
+
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.save([a.storage(), s_bytes], f)
 
 class serialization_method(object):
     def __init__(self, use_zip):
@@ -583,17 +680,24 @@ class serialization_method(object):
     def __exit__(self, *args, **kwargs):
         torch.save = self.torch_save
 
-class TestBothSerialization(TestCase, SerializationMixin):
-    def test_serialization_new_format_old_format_compat(self):
-        x = [torch.ones(200, 200) for i in range(30)]
-        torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=True)
-        x_new_load = torch.load("big_tensor.zip")
-        self.assertEqual(x, x_new_load)
+class TestBothSerialization(TestCase):
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_serialization_new_format_old_format_compat(self, device):
+        x = [torch.ones(200, 200, device=device) for i in range(30)]
 
-        torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=False)
-        x_old_load = torch.load("big_tensor.zip")
-        self.assertEqual(x_old_load, x_new_load)
-        os.remove("big_tensor.zip")
+        def test(f_new, f_old):
+            torch.save(x, f_new, _use_new_zipfile_serialization=True)
+            f_new.seek(0)
+            x_new_load = torch.load(f_new)
+            self.assertEqual(x, x_new_load)
+
+            torch.save(x, f_old, _use_new_zipfile_serialization=False)
+            f_old.seek(0)
+            x_old_load = torch.load(f_old)
+            self.assertEqual(x_old_load, x_new_load)
+
+        with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
+            test(f_new, f_old)
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
@@ -623,7 +727,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
-                    self.assertEquals(len(w), 0)
+                    self.assertEqual(len(w), 0)
 
             # Replace the module with different source
             fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
@@ -634,7 +738,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
-                    self.assertEquals(len(w), 1)
+                    self.assertEqual(len(w), 1)
                     self.assertTrue(w[0].category, 'SourceChangeWarning')
 
     def test_serialization_container(self):
@@ -693,7 +797,6 @@ class TestOldSerialization(TestCase, SerializationMixin):
 
 
 class TestSerialization(TestCase, SerializationMixin):
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_zipfile(self):
         data = self._test_serialization_data()
 
@@ -708,12 +811,12 @@ class TestSerialization(TestCase, SerializationMixin):
 
         with tempfile.NamedTemporaryFile() as f:
             test(f)
-        with tempfile.NamedTemporaryFile() as f:
-            test(f.name)
+
+        with TemporaryFileName() as fname:
+            test(fname)
 
         test(io.BytesIO())
 
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_zipfile_actually_jit(self):
         with tempfile.NamedTemporaryFile() as f:
             torch.jit.save(torch.jit.script(torch.nn.Linear(3, 4)), f)
@@ -729,19 +832,134 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             state = torch.load(f)
 
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_pathlike_serialization(self):
         model = torch.nn.Conv2d(20, 3200, kernel_size=3)
 
-        with tempfile.NamedTemporaryFile() as f:
-            path = pathlib.Path(f.name)
+        with TemporaryFileName() as fname:
+            path = pathlib.Path(fname)
             torch.save(model, path)
             torch.load(path)
+
+    def test_meta_serialization(self):
+        big_model = torch.nn.Conv2d(20000, 320000, kernel_size=3, device='meta')
+
+        with BytesIOContext() as f:
+            torch.save(big_model, f)
+            f.seek(0)
+            state = torch.load(f)
+
+        self.assertEqual(state.weight.size(), big_model.weight.size())
+
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super(TestSerialization, self).run(*args, **kwargs)
 
+
+class TestWrapperSubclass(torch.Tensor):
+    elem: torch.Tensor
+    __slots__ = ['elem', 'other']
+
+    @staticmethod
+    def __new__(cls, elem, *args, **kwargs):
+        # The wrapping tensor (TestSubclass) is just a meta tensor, so it
+        # doesn't hold any memory (meta tensor is generally the preferred type
+        # of tensor you want to make a subclass from)...
+        r = torch.Tensor._make_subclass(cls, elem.to('meta'), elem.requires_grad)
+        # ...the real tensor is held as an element on the tensor.
+        r.elem = elem
+        return r
+
+    def clone(self):
+        return type(self)(self.elem.clone())
+
+
+class TestGetStateSubclass(torch.Tensor):
+    elem: torch.Tensor
+    __slots__ = ['elem']
+
+    @staticmethod
+    def __new__(cls, elem, *args, **kwargs):
+        # The wrapping tensor (TestSubclass) is just a meta tensor, so it
+        # doesn't hold any memory (meta tensor is generally the preferred type
+        # of tensor you want to make a subclass from)...
+        r = torch.Tensor._make_subclass(cls, elem.to('meta'), elem.requires_grad)
+        # ...the real tensor is held as an element on the tensor.
+        r.elem = elem
+        return r
+
+    def __getstate__(self):
+        return ("foo", getattr(self, "elem", None), self.__dict__)
+
+    def __setstate__(self, state):
+        marker, self.elem, self.__dict__ = state
+        if not marker == "foo":
+            raise RuntimeError("Invalid state for TestGetStateSubclass")
+        self.reloaded = True
+
+
+class TestSubclassSerialization(TestCase):
+    def test_tensor_subclass_wrapper_serialization(self):
+        wrapped_tensor = torch.rand(2)
+        my_tensor = TestWrapperSubclass(wrapped_tensor)
+
+        foo_val = "bar"
+        my_tensor.foo = foo_val
+        self.assertEqual(my_tensor.foo, foo_val)
+
+        with BytesIOContext() as f:
+            torch.save(my_tensor, f)
+            f.seek(0)
+            new_tensor = torch.load(f)
+
+        self.assertIsInstance(new_tensor, TestWrapperSubclass)
+        self.assertEqual(new_tensor.elem, my_tensor.elem)
+        self.assertEqual(new_tensor.foo, foo_val)
+
+    def test_tensor_subclass_getstate_overwrite(self):
+        wrapped_tensor = torch.rand(2)
+        my_tensor = TestGetStateSubclass(wrapped_tensor)
+
+        foo_val = "bar"
+        my_tensor.foo = foo_val
+        self.assertEqual(my_tensor.foo, foo_val)
+
+        with BytesIOContext() as f:
+            torch.save(my_tensor, f)
+            f.seek(0)
+            new_tensor = torch.load(f)
+
+        self.assertIsInstance(new_tensor, TestGetStateSubclass)
+        self.assertEqual(new_tensor.elem, my_tensor.elem)
+        self.assertEqual(new_tensor.foo, foo_val)
+        self.assertTrue(new_tensor.reloaded)
+
+    def test_tensor_subclass_deepcopy(self):
+        wrapped_tensor = torch.rand(2)
+        my_tensor = TestWrapperSubclass(wrapped_tensor)
+
+        foo_val = "bar"
+        my_tensor.foo = foo_val
+        self.assertEqual(my_tensor.foo, foo_val)
+
+        new_tensor = deepcopy(my_tensor)
+
+        self.assertIsInstance(new_tensor, TestWrapperSubclass)
+        self.assertEqual(new_tensor.elem, my_tensor.elem)
+        self.assertEqual(new_tensor.foo, foo_val)
+
+    @parametrize('requires_grad', (True, False))
+    def test_cloned_deepcopy(self, requires_grad):
+        my_tensor = torch.rand(2, requires_grad=requires_grad, device='meta')
+
+        new_tensor = deepcopy(my_tensor)
+
+        self.assertEqual(new_tensor.requires_grad, my_tensor.requires_grad)
+
+
+
+instantiate_device_type_tests(TestBothSerialization, globals())
+instantiate_parametrized_tests(TestSubclassSerialization)
 
 if __name__ == '__main__':
     run_tests()

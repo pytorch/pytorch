@@ -24,24 +24,12 @@ check_android_sdk() {
 }
 
 check_gradle() {
-  GRADLE_PATH=gradle
-  GRADLE_NOT_FOUND_MSG="Unable to find gradle, please add it to PATH or set GRADLE_HOME"
-
-  if [ ! -x "$(command -v gradle)" ]; then
-    if [ -z "$GRADLE_HOME" ]; then
-      echo "$GRADLE_NOT_FOUND_MSG"
-      exit 1
-    fi
-    GRADLE_PATH=$GRADLE_HOME/bin/gradle
-    if [ ! -f "$GRADLE_PATH" ]; then
-      echo "$GRADLE_NOT_FOUND_MSG"
-      exit 1
-    fi
-  fi
+  GRADLE_PATH=$PYTORCH_DIR/android/gradlew
   echo "GRADLE_PATH:$GRADLE_PATH"
 }
 
 parse_abis_list() {
+  # sync with https://github.com/pytorch/pytorch/blob/0ca0e02685a9d033ac4f04e2fa5c8ba6dbc5ae50/android/gradle.properties#L1
   ABIS_LIST="armeabi-v7a,arm64-v8a,x86,x86_64"
   CUSTOM_ABIS_LIST=false
   if [ $# -gt 0 ]; then
@@ -72,7 +60,8 @@ build_android() {
     ANDROID_ABI="$abi" \
       BUILD_ROOT="$ANDROID_BUILD_ROOT" \
       "$PYTORCH_DIR/scripts/build_android.sh" \
-      -DANDROID_CCACHE="$(which ccache)"
+      -DANDROID_CCACHE="$(which ccache)" \
+      -DUSE_LITE_INTERPRETER_PROFILER="OFF"
 
     echo "$abi build output lib,include at $ANDROID_BUILD_ROOT/install"
     ln -s "$ANDROID_BUILD_ROOT/install/lib" "$LIB_DIR/$abi"

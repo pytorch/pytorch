@@ -138,8 +138,11 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
     const int num_rois = num_rois_per_batch[i];
     const auto& cur_iminfo = iminfo.row(i);
     const float scale_before = cur_iminfo(2);
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     const float scale_after = apply_scale_ ? cur_iminfo(2) : 1.0;
+    // NOLINTNEXTLINE(bugprone-incorrect-roundings,cppcoreguidelines-avoid-magic-numbers)
     int img_h = int(cur_iminfo(0) / scale_before + 0.5);
+    // NOLINTNEXTLINE(bugprone-incorrect-roundings,cppcoreguidelines-avoid-magic-numbers)
     int img_w = int(cur_iminfo(1) / scale_before + 0.5);
 
     EArrXXf cur_boxes =
@@ -205,24 +208,4 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
       "Tensor output_1"
     ")",
     BBoxTransformOpFloatCPU);
-
-  C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
-      BBoxTransform2,
-      "__caffe2::BBoxTransform("
-        "Tensor rois, "
-        "Tensor deltas, "
-        "Tensor im_info, "
-        "float[] weights, "
-        "bool apply_scale, "
-        "bool rotated, "
-        "bool angle_bound_on, "
-        "int angle_bound_lo, "
-        "int angle_bound_hi, "
-        "float clip_angle_thresh, "
-        "bool legacy_plus_one"
-      ") -> ("
-        "Tensor output_0, "
-        "Tensor output_1"
-      ")",
-      BBoxTransformOpFloatCPU);
 // clang-format on

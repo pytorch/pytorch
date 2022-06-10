@@ -1,4 +1,6 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
+
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -6,6 +8,7 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 
@@ -122,7 +125,7 @@ class ModuleCloneHelper {
     }
     // Copy slots. If a slot is a module - recursively clone it.
     size_t N = type->numAttributes();
-    for (size_t i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       IValue s = module._ivalue()->getSlot(i);
       std::string attr_name = type->getAttributeName(i);
       TypePtr attr_type = type->getAttribute(i);
@@ -163,6 +166,14 @@ class ModuleCloneHelper {
       for (auto& fn : type->methods()) {
         clone_method(module, r, *fn, module_qconfig_map, type_remap);
       }
+      // Execute __setstate__(__getstate__()) to initialize custom class
+      // members.
+      if (auto setstate_method = r.find_method("__setstate__")) {
+        auto getstate_method = r.find_method("__getstate__");
+        TORCH_INTERNAL_ASSERT(getstate_method, "expect __getstate__");
+        auto state = (*getstate_method)(Stack{});
+        (*setstate_method)(Stack{state});
+      }
     }
     return r;
   }
@@ -187,7 +198,7 @@ class ModuleCloneHelper {
     }
     for (Node* node : block->nodes()) {
       // remapping type for module instance
-      if (node->kind() == prim::CallMethod) {
+      if (node->kind() == prim::CallMethod || node->kind() == prim::GetAttr) {
         Value* instance = node->inputs()[0];
         auto child_opt = getInvokedModuleOpt(source, node, self);
         if (child_opt.has_value()) {
@@ -252,7 +263,7 @@ class ModuleCloneHelper {
       }
       return type_ptr;
     };
-    auto graph = method.graph()->copy();
+    auto graph = toGraphFunction(method).graph()->copy();
     remapTypes(graph.get(), source, target, module_qconfig_map, type_remap_fn);
     // remap self
     graph->inputs()[0]->setType(target.type());
@@ -385,7 +396,17 @@ class InsertObserversHelper {
   // are observed
   bool shouldObserve(
       Node* n,
-      const std::unordered_set<Value*>& block_observed_values) {
+      const std::unordered_set<Value*>& block_observed_values,
+      QuantType quant_type) {
+    // Check whether node output uses can be quantized, eg cat followed by
+    // linear op
+    for (Value* v : n->outputs()) {
+      for (const auto& use : v->uses()) {
+        if (useQuantizable(use, quant_type)) {
+          return true;
+        }
+      }
+    }
     if (isPropagateQuantSingleInputOp(n)) {
       return isObserved(n->input(0), block_observed_values);
     } else if (isPropagateQuantBinaryOp(n)) {
@@ -528,42 +549,6 @@ graph(%input, %linear, %relu):
     %second_output = aten::relu_(%first_output)
     return (%second_output) )",
       {is_linear_module});
-
-  // F.linear + nn.ReLU
-  const PatternInfo f_linear_nn_relu = PatternInfo::parse_from_str(
-      R"(
-graph(%input, %weight, %bias, %linear, %relu):
-    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
-    %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
-    return (%second_output) )",
-      {is_functional_linear, is_relu_module});
-
-  // F.linear + F.relu
-  const PatternInfo f_linear_f_relu = PatternInfo::parse_from_str(
-      R"(
-graph(%input, %weight, %bias, %linear, %relu, %inplace):
-    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
-    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
-    return (%second_output) )",
-      {is_functional_linear, is_functional_relu});
-
-  // F.linear + aten::relu
-  const PatternInfo f_linear_aten_relu = PatternInfo::parse_from_str(
-      R"(
-graph(%input, %weight, %bias, %linear, %relu):
-    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
-    %second_output = aten::relu(%first_output)
-    return (%second_output) )",
-      {is_functional_linear});
-
-  // F.linear + aten::relu_
-  const PatternInfo f_linear_aten_relu_ = PatternInfo::parse_from_str(
-      R"(
-graph(%input, %weight, %bias, %linear, %relu):
-    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
-    %second_output = aten::relu_(%first_output)
-    return (%second_output) )",
-      {is_functional_linear});
 
   // aten::linear + nn.ReLU
   const PatternInfo aten_linear_nn_relu = PatternInfo::parse_from_str(
@@ -875,8 +860,6 @@ graph(%self, %a, %b):
       {
           nn_linear_f_relu,      nn_linear_nn_relu,
           nn_linear_aten_relu,   nn_linear_aten_relu_,
-          f_linear_f_relu,       f_linear_nn_relu,
-          f_linear_aten_relu,    f_linear_aten_relu_,
           aten_linear_f_relu,    aten_linear_nn_relu,
           aten_linear_aten_relu, aten_linear_aten_relu_,
 
@@ -1064,6 +1047,7 @@ void InsertObserversHelper::fillBoundaryValueMap(
         // offset of input for the caller node, since the first
         // input of CallFunction is the function node and the graph
         // for CallFunction start with actual input
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         size_t input_offset;
         if (n->kind() == prim::CallMethod) {
           auto m_opt = getInvokedModuleOpt(module, n, self);
@@ -1133,6 +1117,8 @@ void InsertObserversHelper::preprocess(
 
   Method method = module.get_method(method_name);
   auto graph = method.graph();
+  // Inline fork-wait calls
+  InlineForkWait(graph);
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
   replaceConvolutionWithAtenConv(graph);
@@ -1161,15 +1147,17 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(
     Value* v,
     const QConfig& qconfig) {
   if (isBiasOfConvOrLinear(v) ||
-      !(v->type()->isSubtypeOf(TensorType::get()) ||
-        v->type()->isSubtypeOf(ListType::ofTensors()))) {
+      !(v->type()->isSubtypeOf(*TensorType::get()) ||
+        v->type()->isSubtypeOf(*ListType::ofTensors())) ||
+      isEmbeddingBagNonInput(v)) {
     return false;
   }
   // For dynamic quantization we only insert observers at the input
   // of the quantizable function.
   if (quant_type_ == QuantType::STATIC) {
     // Check whether producer is quantizable
-    if (nodeQuantizable(v->node()) || isPropagateQuantOp(v->node())) {
+    if (!isWeightOnlyStaticQuantOp(v->node()) &&
+        (nodeQuantizable(v->node()) || isPropagateQuantOp(v->node()))) {
       return true;
     }
   }
@@ -1394,6 +1382,7 @@ InsertObserversHelper::insertObserversFor(
       if (n->kind() == prim::CallMethod || userDefinedCallFunction(n)) {
         script::Module m;
         std::shared_ptr<Graph> g;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         size_t input_offset;
         bool is_udf_for_subblock = is_user_defined_function;
         if (n->kind() == prim::CallMethod) {
@@ -1515,7 +1504,8 @@ InsertObserversHelper::insertObserversFor(
           // If the node is one of the propagate quant node, e.g.
           // aten::cat, we should observe its output only
           // if the input of the node is observed
-          if (observer_opt && shouldObserve(n, block_observed_values)) {
+          if (observer_opt &&
+              shouldObserve(n, block_observed_values, quant_type_)) {
             recordObserved(
                 v, *observer_opt, values_to_observe, block_observed_values);
           }
@@ -1578,6 +1568,7 @@ Module InsertObservers(
   fillQConfigMap(input_module, qconfig_dict, map_before_clone);
   ModuleCloneHelper mh;
   Module module = mh.clone(input_module, map_before_clone, inplace);
+  SwapFunctionalLinear(module);
   ModuleQConfigMap module_qconfig_map;
   // Since the types are changed after clone, we need to fill
   // the qconfig map again

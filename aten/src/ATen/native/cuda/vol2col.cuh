@@ -1,15 +1,7 @@
 #pragma once
 
-#include <THC/THCGeneral.h>
-#include <THC/THCDeviceUtils.cuh>
-
-#include <ATen/ATen.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/Utils.h>
-
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 
@@ -104,7 +96,8 @@ void vol2col(
     T* data_col) {
   // We are going to launch channels * depth_col * height_col * width_col
   // kernels, each kernel responsible for copying a single-channel grid.
-  int num_kernels = channels * depth_col * height_col * width_col;
+  // We cast an operand to int64 so that the product will not overflow
+  const auto num_kernels = static_cast<int64_t>(channels) * depth_col * height_col * width_col;
   // Launch
   vol2col_kernel<<<GET_BLOCKS(num_kernels), CUDA_NUM_THREADS, 0, stream>>>(
       num_kernels,
@@ -128,7 +121,7 @@ void vol2col(
       height_col,
       width_col,
       data_col);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename T, typename accT>
@@ -263,7 +256,7 @@ void col2vol(
           output_height,
           output_width,
           data_vol);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 } // namespace native

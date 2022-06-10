@@ -1,6 +1,6 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 import numpy as np
 from hypothesis import given, settings
@@ -14,7 +14,7 @@ class TestAssert(hu.HypothesisTestCase):
         dtype=st.sampled_from(['bool_', 'int32', 'int64']),
         shape=st.lists(elements=st.integers(1, 10), min_size=1, max_size=4),
         **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_assert(self, dtype, shape, gc, dc):
         test_tensor = np.random.rand(*shape).astype(np.dtype(dtype))
 

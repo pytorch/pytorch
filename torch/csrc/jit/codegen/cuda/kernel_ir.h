@@ -1,18 +1,15 @@
-
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
-
-#include <torch/csrc/jit/codegen/cuda/type.h>
-
-// TODO(kir): remove these once the Kernel IR is separated from Fusion IR
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
+#include <torch/csrc/jit/codegen/cuda/type.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
+#include <c10/macros/Export.h>
 #include <c10/util/Optional.h>
 
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -20,455 +17,152 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
+
+class IrBuilderPasskey;
+
+// Abstract nodes
+class Val;
+class Expr;
+
+// Values
+class Bool;
+class Double;
+class Int;
+class NamedScalar;
+
+class IterDomain;
+class TensorDomain;
+class TensorView;
+
+// Expressions
+class UnaryOp;
+class BinaryOp;
+class TernaryOp;
+class ReductionOp;
+class WelfordOp;
+class BroadcastOp;
+
 namespace kir {
+class Kernel;
 
-class TORCH_CUDA_API NamedScalar : public Val {
+// Values
+class Predicate;
+class TensorIndex;
+
+// Expressions
+class Allocate;
+class BlockSync;
+class GridSync;
+class CpAsyncWait;
+class InitMagicZero;
+class UpdateMagicZero;
+class ForLoop;
+class IfThenElse;
+class GridReduction;
+class GroupedGridReduction;
+class GridBroadcast;
+class GridWelford;
+class AllocateFusedReduction;
+
+// Expr container
+class Scope;
+
+class TORCH_CUDA_CU_API Predicate final : public Val {
  public:
-  NamedScalar(std::string name, DataType dtype)
-      : Val(ValType::KirNamedScalar, dtype, true, true), name_(name) {}
+  explicit Predicate(
+      IrBuilderPasskey passkey,
+      PredicateType ptype,
+      const Expr* expr = nullptr,
+      Bool* thread_pred = nullptr);
 
-  explicit NamedScalar(const fuser::NamedScalar* node)
-      : Val(node), name_(node->name()) {}
+  explicit Predicate(IrBuilderPasskey passkey, ForLoop* unrolled_loop);
 
-  NamedScalar(const NamedScalar* src, IrCloner* ir_cloner)
-      : Val(src, ir_cloner), name_(src->name_) {}
+  explicit Predicate(IrBuilderPasskey passkey, Bool* value);
 
-  const std::string& name() const {
-    return name_;
+  PredicateType predicate_type() const {
+    return ptype_;
   }
 
-  // Return the named scalar extent of a parallel dimension (e.g. blockDim.x)
-  static NamedScalar* getParallelDim(ParallelType p_type);
+  const Expr* expr() const {
+    TORCH_INTERNAL_ASSERT(
+        ptype_ != PredicateType::Unswitch &&
+        ptype_ != PredicateType::Vectorize && ptype_ != PredicateType::Manual);
+    return expr_;
+  }
 
-  // Return the named scalar index of a parallel dimension (e.g. threadIdx.x)
-  static NamedScalar* getParallelIndex(ParallelType p_type);
+  Bool* thread_pred() {
+    TORCH_INTERNAL_ASSERT(
+        ptype_ == PredicateType::Inline ||
+        ptype_ == PredicateType::Misaligned || ptype_ == PredicateType::Shift ||
+        ptype_ == PredicateType::Padding ||
+        ptype_ == PredicateType::ReductionWrite);
+    return thread_pred_;
+  }
 
-  // Return the parallel type of this NamedScalar if it is an extent of a
-  // parallel dimension
-  c10::optional<ParallelType> getParallelDim() const;
+  ForLoop* unrolled_loop() const {
+    TORCH_INTERNAL_ASSERT(ptype_ == PredicateType::Unswitch);
+    return unrolled_loop_;
+  }
 
-  // Return the parallel type of this NamedScalar if it is an index of a
-  // parallel dimension
-  c10::optional<ParallelType> getParallelIndex() const;
+  bool hasValue() const {
+    return value_ != nullptr;
+  }
+
+  Bool* value() const {
+    TORCH_INTERNAL_ASSERT(
+        value_ != nullptr,
+        "The conditional expression for this Predicate is invalid.");
+    return value_;
+  }
+
+  void setValue(Bool* value) {
+    TORCH_INTERNAL_ASSERT(value != nullptr, "The Bool expression is invalid.");
+    value_ = value;
+  }
+
+  bool isConst() const final {
+    return hasValue() && value_->isConst();
+  }
 
  private:
-  std::string name_;
+  PredicateType ptype_ = PredicateType::Manual;
+
+  // For PredicateCompute::getInlinePredicate,
+  // ShiftPredicateInserter::getShiftPredicate and getPaddingPredicate
+  const Expr* expr_ = nullptr;
+
+  // For PredicateCompute::getInlinePredicate
+  Bool* thread_pred_ = nullptr;
+
+  // For ParallelType::Unswitch - UnswitchPredicate::get
+  ForLoop* unrolled_loop_ = nullptr;
+
+  // The Bool conditional value
+  // The value is nullptr until lower_predicate pass
+  Bool* value_ = nullptr;
 };
 
-class TORCH_CUDA_API Bool : public Val {
+class TORCH_CUDA_CU_API TensorIndex final : public Val {
  public:
-  explicit Bool(const c10::optional<bool>& value)
-      : Val(ValType::KirScalar, DataType::Bool, true, true),
-        maybe_value_(value) {}
-
-  explicit Bool(const fuser::Bool* node)
-      : Val(node), maybe_value_(node->value()) {}
-
-  Bool(const Bool* src, IrCloner* ir_cloner)
-      : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
-
-  bool isSymbolic() const {
-    return !(maybe_value_.has_value());
-  }
-  bool isConst() const {
-    return maybe_value_.has_value();
-  }
-  c10::optional<bool> value() const {
-    return maybe_value_;
-  }
-
- private:
-  const c10::optional<bool> maybe_value_;
-};
-
-class TORCH_CUDA_API Float : public Val {
- public:
-  using ScalarType = double;
-
-  explicit Float(const c10::optional<ScalarType>& value)
-      : Val(ValType::KirScalar, DataType::Float, true, true),
-        maybe_value_(value) {}
-
-  explicit Float(const fuser::Float* node)
-      : Val(node), maybe_value_(node->value()) {}
-
-  Float(const Float* src, IrCloner* ir_cloner)
-      : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
-
-  bool isSymbolic() const {
-    return !(maybe_value_.has_value());
-  }
-  bool isConst() const {
-    return maybe_value_.has_value();
-  }
-  c10::optional<ScalarType> value() const {
-    return maybe_value_;
-  }
-
- private:
-  const c10::optional<ScalarType> maybe_value_;
-};
-
-class TORCH_CUDA_API Half : public Val {
- public:
-  explicit Half(const c10::optional<float>& value)
-      : Val(ValType::KirScalar, DataType::Half, true, true),
-        maybe_value_(value) {}
-
-  explicit Half(const fuser::Half* node)
-      : Val(node), maybe_value_(node->value()) {}
-
-  Half(const Half* src, IrCloner* ir_cloner)
-      : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
-
-  bool isSymbolic() const {
-    return !(maybe_value_.has_value());
-  }
-  bool isConst() const {
-    return maybe_value_.has_value();
-  }
-  c10::optional<float> value() const {
-    return maybe_value_;
-  }
-
- private:
-  const c10::optional<float> maybe_value_;
-};
-
-class TORCH_CUDA_API Int : public Val {
- public:
-  using ScalarType = int64_t;
-
-  explicit Int(const c10::optional<ScalarType>& value)
-      : Val(ValType::KirScalar, DataType::Int, true, true),
-        maybe_value_(value) {}
-
-  explicit Int(const fuser::Int* node, bool /*avoid_zero_ambiguity*/)
-      : Val(node), maybe_value_(node->value()) {}
-
-  Int(const Int* src, IrCloner* ir_cloner)
-      : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
-
-  bool isSymbolic() const {
-    return !(maybe_value_.has_value());
-  }
-  bool isConst() const {
-    return maybe_value_.has_value();
-  }
-  c10::optional<ScalarType> value() const {
-    return maybe_value_;
-  }
-
- private:
-  const c10::optional<ScalarType> maybe_value_;
-};
-
-class TORCH_CUDA_API IterDomain : public Val {
- public:
-  IterDomain(Val* start, Val* extent);
-
-  explicit IterDomain(const fuser::IterDomain* iter_domain);
-
-  IterDomain(const IterDomain* src, IrCloner* ir_cloner);
-
-  bool isReduction() const {
-    return getIterType() == IterType::Reduction;
-  }
-
-  bool isRFactorProduct() const {
-    return is_rfactor_domain_;
-  }
-
-  bool isBroadcast() const {
-    return getIterType() == IterType::BroadcastWithStride ||
-        getIterType() == IterType::BroadcastWithoutStride;
-  }
-
-  bool isParallelized() const {
-    return getParallelType() != ParallelType::Serial;
-  }
-
-  // Return if this iter domain is mapped to a grid dimension
-  bool isBlockDim() const {
-    return (
-        getParallelType() == ParallelType::BIDz ||
-        getParallelType() == ParallelType::BIDy ||
-        getParallelType() == ParallelType::BIDx);
-  }
-
-  // Return if this iter domain is mapped to a block dimension
-  bool isThreadDim() const {
-    return (
-        getParallelType() == ParallelType::TIDz ||
-        getParallelType() == ParallelType::TIDy ||
-        getParallelType() == ParallelType::TIDx);
-  }
-
-  // Return if this iter domain is either mapped to a block or grid dimension
-  bool isThread() const {
-    return (isBlockDim() || isThreadDim());
-  }
-
-  ParallelType getParallelType() const {
-    return parallel_type_;
-  }
-
-  IterType getIterType() const {
-    return iter_type_;
-  }
-
-  Val* start() const {
-    return start_;
-  }
-
-  Val* extent() const;
-
- private:
-  Val* const start_ = nullptr;
-  Val* const extent_ = nullptr;
-  ParallelType parallel_type_ = ParallelType::Serial;
-  IterType iter_type_ = IterType::Iteration;
-  bool is_rfactor_domain_ = false;
-};
-
-class TORCH_CUDA_API TensorDomain : public Val {
- public:
-  explicit TensorDomain(std::vector<IterDomain*> domain);
-
-  explicit TensorDomain(const fuser::TensorDomain* tensor_domain);
-
-  TensorDomain(const TensorDomain* src, IrCloner* ir_cloner);
-
-  std::vector<IterDomain*>::size_type nDims() const {
-    return domain_.size();
-  }
-
-  const std::vector<IterDomain*>& domain() const {
-    return domain_;
-  }
-
-  const std::vector<bool>& contiguity() const {
-    return contiguity_;
-  }
-
-  std::string getContiguityString() const {
-    std::stringstream ss;
-    for (auto b : contiguity()) {
-      ss << (b ? "t" : "f");
-    }
-    return ss.str();
-  }
-
-  bool hasReduction() const;
-  bool hasBlockReduction() const;
-  bool hasGridReduction() const;
-  bool hasBroadcast() const;
-  bool hasRFactor() const;
-
-  const std::vector<IterDomain*>& noReductions() const {
-    return no_reduction_domain_;
-  }
-
-  const std::vector<IterDomain*>& noBroadcasts() const {
-    return no_bcast_domain_;
-  }
-
-  const std::vector<IterDomain*>& rootDomain() const {
-    return root_domain_;
-  };
-
-  const std::vector<IterDomain*>& rfactorDomain() const {
-    return rfactor_domain_;
-  };
-
-  void resetDomains() {
-    no_reduction_domain_ = noReductions(domain_);
-    no_bcast_domain_ = noBroadcasts(domain_);
-  }
-
-  IterDomain* axis(int i) const;
-
-  static std::vector<IterDomain*> noReductions(const std::vector<IterDomain*>&);
-  static std::vector<IterDomain*> noBroadcasts(const std::vector<IterDomain*>&);
-
- private:
-  std::vector<IterDomain*> root_domain_;
-  std::vector<IterDomain*> domain_;
-  std::vector<IterDomain*> no_bcast_domain_;
-  std::vector<IterDomain*> no_reduction_domain_;
-  std::vector<IterDomain*> rfactor_domain_;
-  const std::vector<bool> contiguity_;
-};
-
-class TORCH_CUDA_API TensorView : public Val {
- public:
-  explicit TensorView(const fuser::TensorView* tv);
-
-  TensorView(const TensorView* src, IrCloner* ir_cloner);
-
-  TensorDomain* domain() const {
-    return domain_;
-  }
-
-  MemoryType getMemoryType() const {
-    return memory_type_;
-  }
-
-  const fuser::TensorView* fuserTv() const {
-    TORCH_INTERNAL_ASSERT(fuser_tv_ != nullptr);
-    return fuser_tv_;
-  }
-
- private:
-  TensorDomain* domain_ = nullptr;
-  MemoryType memory_type_ = MemoryType::Global;
-
-  // TODO(kir): remove temporary hack
-  const fuser::TensorView* fuser_tv_ = nullptr;
-};
-
-class TORCH_CUDA_API UnaryOp : public Expr {
- public:
-  UnaryOp(UnaryOpType type, Val* out, Val* in);
-
-  UnaryOp(const UnaryOp* src, IrCloner* ir_cloner);
-
-  Val* out() const {
-    return out_;
-  }
-
-  Val* in() const {
-    return in_;
-  }
-
-  UnaryOpType getUnaryOpType() const {
-    return unary_op_type_;
-  }
-
- private:
-  const UnaryOpType unary_op_type_;
-  Val* const out_ = nullptr;
-  Val* const in_ = nullptr;
-};
-
-class TORCH_CUDA_API BinaryOp : public Expr {
- public:
-  BinaryOp(BinaryOpType type, Val* out, Val* lhs, Val* rhs);
-
-  BinaryOp(const BinaryOp* src, IrCloner* ir_cloner);
-
-  Val* out() const {
-    return out_;
-  }
-
-  Val* lhs() const {
-    return lhs_;
-  }
-
-  Val* rhs() const {
-    return rhs_;
-  }
-
-  BinaryOpType getBinaryOpType() const {
-    return binary_op_type_;
-  }
-
- private:
-  const BinaryOpType binary_op_type_;
-  Val* const out_ = nullptr;
-  Val* const lhs_ = nullptr;
-  Val* const rhs_ = nullptr;
-};
-
-class TORCH_CUDA_API TernaryOp : public Expr {
- public:
-  TernaryOp(TernaryOpType type, Val* out, Val* in1, Val* in2, Val* in3);
-
-  TernaryOp(const TernaryOp* src, IrCloner* ir_cloner);
-
-  Val* out() const {
-    return out_;
-  }
-
-  Val* in1() const {
-    return in1_;
-  }
-
-  Val* in2() const {
-    return in2_;
-  }
-
-  Val* in3() const {
-    return in3_;
-  }
-
-  TernaryOpType getTernaryOpType() const {
-    return ternary_op_type_;
-  }
-
- private:
-  const TernaryOpType ternary_op_type_;
-  Val* const out_ = nullptr;
-  Val* const in1_ = nullptr;
-  Val* const in2_ = nullptr;
-  Val* const in3_ = nullptr;
-};
-
-class TORCH_CUDA_API ReductionOp : public Expr {
- public:
-  ReductionOp(BinaryOpType reduction_op_type, Val* init, Val* out, Val* in);
-
-  ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
-
-  Val* out() const {
-    return out_;
-  }
-
-  Val* in() const {
-    return in_;
-  }
-
-  Val* init() const {
-    return init_;
-  }
-
-  BinaryOpType getReductionOpType() const {
-    return reduction_op_type_;
-  }
-
-  std::unordered_map<ParallelType, IterDomain*, TypeHash>
-  getParallelReductionDomains() const;
-
- private:
-  std::vector<IterDomain*> getReductionDomains() const;
-
- private:
-  const BinaryOpType reduction_op_type_;
-  Val* const init_ = nullptr;
-  Val* const out_ = nullptr;
-  Val* const in_ = nullptr;
-};
-
-class TORCH_CUDA_API TensorIndex : public Val {
- public:
-  TensorIndex(const fuser::TensorView* view, std::vector<Val*> indices);
-
-  TensorIndex(const TensorIndex* src, IrCloner* ir_cloner);
+  TensorIndex(
+      IrBuilderPasskey,
+      const TensorView* view,
+      std::vector<Val*> indices);
 
   std::vector<Val*>::size_type nDims() const {
     return indices_.size();
   }
 
-  // i here is int, as we want to accept negative value and ::size_type can be a
-  // uint.
   Val* index(int i) const;
 
   const std::vector<Val*>& indices() const {
     return indices_;
   }
 
-  const TensorView* view() const {
-    return view_;
+  TensorView* view() const {
+    TORCH_INTERNAL_ASSERT(view_ != nullptr);
+    return const_cast<TensorView*>(view_); // NOLINT
   }
 
  private:
@@ -476,46 +170,37 @@ class TORCH_CUDA_API TensorIndex : public Val {
   std::vector<Val*> indices_;
 };
 
-class TORCH_CUDA_API BroadcastOp : public Expr {
+//! Allocate is a lower level Node that describes a buffer of memory that
+//! is required as an intermediate within a kernel. The extent is the expression
+//! of the size of the buffer that is generated from the TensorView that
+//! describes the output of an operation.
+class TORCH_CUDA_CU_API Allocate final : public Expr {
  public:
-  BroadcastOp(Val* out, Val* in);
-
-  BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner);
-
-  Val* out() const {
-    return out_;
-  }
-
-  Val* in() const {
-    return in_;
-  }
-
- private:
-  Val* const out_ = nullptr;
-  Val* const in_ = nullptr;
-};
-
-// Allocate is a lower level Node that describes a buffer of memory that
-// is required as an intermediate within a kernel.  The extent is the expression
-// of the size of the buffer that is generated from the TensorView that
-// describes the output of an operation.
-//
-// TODO: The components of Allocate like Type and Name could be separated from
-// the the assocated TensorView.  Perhaps that is more appropriate?
-class TORCH_CUDA_API Allocate : public Expr {
- public:
+  //! Allocation of a multi-dimensional buffer
+  //!
+  //! param shape Size of each dimension
   explicit Allocate(
+      IrBuilderPasskey passkey,
       Val* buffer,
-      MemoryType memory_type = MemoryType::Local,
-      Val* size = nullptr);
+      MemoryType memory_type,
+      std::vector<Val*> shape = {},
+      bool zero_init = false);
 
-  Allocate(const Allocate* src, IrCloner* ir_cloner);
+  //! Allocation of a non-dimensional buffer
+  //!
+  //! param size Size of allocation
+  explicit Allocate(
+      IrBuilderPasskey passkey,
+      Val* buffer,
+      MemoryType memory_type,
+      Val* size,
+      bool zero_init = false);
 
   Val* buffer() const {
     return buffer_;
   }
 
-  MemoryType getMemoryType() const {
+  MemoryType memoryType() const {
     return memory_type_;
   }
 
@@ -523,42 +208,106 @@ class TORCH_CUDA_API Allocate : public Expr {
     return size_;
   }
 
-  DataType buffer_type() const {
-    return buffer_->getDataType().value();
+  const std::vector<Val*>& shape() const {
+    return shape_;
+  }
+
+  bool zeroInit() const {
+    return zero_init_;
+  }
+
+  const Allocate* alias() const {
+    return alias_;
+  }
+
+  void setAlias(const Allocate* alias) {
+    TORCH_INTERNAL_ASSERT(alias != this);
+    TORCH_INTERNAL_ASSERT(alias->memoryType() == memory_type_);
+    alias_ = alias;
   }
 
  private:
   Val* buffer_ = nullptr;
   MemoryType memory_type_ = MemoryType::Local;
+  //! Size of each dimension
+  std::vector<Val*> shape_;
+  bool zero_init_ = false;
+  //! Total size
   Val* size_ = nullptr;
+
+  // This alias tracks the next Allocate node in a linked chain of aliases
+  // If the alias is nullptr, then the Allocate node uses memory in the kernel
+  const Allocate* alias_ = nullptr;
 };
 
 // Sync represents __syncthreads barrier for block level coordination.
-class TORCH_CUDA_API Sync : public Expr {
+//
+// TODO(kir): change name to SyncThreads as we could have other barriers.
+//
+class TORCH_CUDA_CU_API BlockSync final : public Expr {
  public:
-  Sync();
-  Sync(const Sync* src, IrCloner* ir_cloner);
+  explicit BlockSync(IrBuilderPasskey passkey, bool war_sync = false);
+
+  bool isWarHazardSync() const {
+    return war_sync_;
+  }
+
+ private:
+  // TODO: war_sync_ is only used for testing/validation purposes.
+  bool war_sync_ = false;
 };
 
-class TORCH_CUDA_API Scope {
+// CpAsyncWait represents wait intrinsics for cp.async
+// TODO: expand to support different wait modes of the intrinsic
+//  as the analysis passes build out.
+class TORCH_CUDA_CU_API CpAsyncWait final : public Expr {
  public:
-  Scope() = default;
-  Scope(const Scope* src, IrCloner* ir_cloner);
+  explicit CpAsyncWait(IrBuilderPasskey passkey);
+};
+
+// Synchronize all blocks in device, implies cooperative group launch is
+// required.
+class TORCH_CUDA_CU_API GridSync final : public Expr {
+ public:
+  explicit GridSync(
+      IrBuilderPasskey passkey,
+      ParallelTypeBitmap sync_dims,
+      Val* sync_buffer);
+
+  ParallelTypeBitmap syncDims() const {
+    return sync_dims_;
+  }
+
+  Val* syncBuffer() const {
+    return sync_buffer_;
+  }
+
+ private:
+  ParallelTypeBitmap sync_dims_;
+  Val* sync_buffer_ = nullptr;
+};
+
+// Simply prints "DEFINE_MAGIC_ZERO" in the code in accordance with magic_zero
+// in helpers.cu
+class TORCH_CUDA_CU_API InitMagicZero final : public Expr {
+ public:
+  explicit InitMagicZero(IrBuilderPasskey passkey);
+};
+
+// Simply prints "UPDATE_MAGIC_ZERO" in the code in accordance with magic_zero
+// in helpers.cu
+class TORCH_CUDA_CU_API UpdateMagicZero final : public Expr {
+ public:
+  explicit UpdateMagicZero(IrBuilderPasskey passkey);
+};
+
+// TODO(kir): promote to IR node
+class TORCH_CUDA_CU_API Scope {
+ public:
+  explicit Scope(Expr* owner) : owner_(owner) {}
 
   const std::vector<Expr*>& exprs() const {
     return exprs_;
-  }
-
-  void push_back(Expr* e) {
-    exprs_.push_back(e);
-  }
-
-  void insert(size_t pos, Expr* expr) {
-    exprs_.insert(exprs_.begin() + pos, expr);
-  }
-
-  void erase(size_t pos) {
-    exprs_.erase(exprs_.begin() + pos);
   }
 
   bool empty() const {
@@ -577,96 +326,173 @@ class TORCH_CUDA_API Scope {
     return exprs_[i];
   }
 
+  // Insert expr before expression at pos
+  void insert(size_t pos, Expr* expr);
+
   // Insert expr before ref
   void insert_before(Expr* ref, Expr* expr);
 
   // Insert expr after ref
   void insert_after(Expr* ref, Expr* expr);
 
-  bool contains(Expr* expr) const;
+  void push_back(Expr* e) {
+    exprs_.push_back(e);
+  }
 
+  // Erase expr at pos
+  void erase(size_t pos);
+
+  // Erase expr ref
   void erase(Expr* ref);
+
+  bool contains(Expr* expr) const;
 
   void clear();
 
+  Expr* owner() const {
+    return owner_;
+  }
+
+ private:
+  // Insert expr before pos
+  void insert(std::vector<Expr*>::const_iterator pos, Expr* expr);
+
+  // Erase expr at pos
+  void erase(std::vector<Expr*>::const_iterator pos);
+
  private:
   std::vector<Expr*> exprs_;
+
+  //! Owner exprssion of this scope, e.g., IfThenElse
+  Expr* owner_ = nullptr;
 };
 
-// ForLoop provides scoping around an int iterator from 0 to range. Exprs placed
-// in its body are considered inside the scope of the for loop. In the future
-// the implementation should look quite different so that we can do proper
-// dependency annalysis like in Fusion.
-class TORCH_CUDA_API ForLoop : public Expr {
+//! ForLoop provides scoping around an int iterator from 0 to range. Exprs
+//! placed in its body are considered inside the scope of the for loop. In the
+//! future the implementation should look quite different so that we can do
+//! proper dependency annalysis like in Fusion.
+//!
+//! TODO(kir): this is not a real expression
+//!
+//! ForLoop may represent a part of an iteration domain representend
+//! by iter_domain_. In that case, the loop extent field, extent_, may
+//! be smaller than the extent of iter_domain_.
+class TORCH_CUDA_CU_API ForLoop final : public Expr {
  public:
-  explicit ForLoop(
-      Val* index,
+  //! By default, start and stop are the same as those of iter_domain.
+  //! Step is one by default.
+  //!
+  //! TODO: cleaner way to set options?
+  ForLoop(
+      IrBuilderPasskey passkey,
       IterDomain* iter_domain,
-      const std::vector<Expr*>& body = {},
-      Expr* parent_scope = nullptr);
+      Val* index,
+      Val* start,
+      Val* stop,
+      Val* step,
+      bool vectorize,
+      Val* vectorize_shift,
+      bool unroll_required);
 
-  ForLoop(const ForLoop* src, IrCloner* ir_cloner);
+  ForLoop(IrBuilderPasskey passkey, IterDomain* iter_domain);
+
+  ForLoop(IrBuilderPasskey passkey, const ForLoop* other);
 
   Val* index() const {
     return index_;
+  }
+
+  Val* start() const;
+
+  Val* stop() const;
+
+  Val* step() const;
+
+  Val* vectorize_shift() const {
+    return vectorize_shift_;
   }
 
   IterDomain* iter_domain() const {
     return iter_domain_;
   }
 
+  // TODO: Return pointer instead of reference to be more consistent
   Scope& body() {
     return body_;
   }
 
-  const Scope& constBody() const {
+  const Scope& body() const {
     return body_;
   }
 
-  Expr* parentScope() const {
-    return parent_scope_;
+  bool vectorize() const {
+    return vectorize_;
   }
 
-  void setParentScope(Expr* scope);
+  //! True if unrolled (i.e., "#pragma unroll" is attached)
+  bool isUnrolled() const;
+
+  //! True if unrolling is required
+  bool isUnrollRequired() const {
+    return unroll_required_;
+  }
+
+  //! Set unrolling required
+  void requireUnroll() {
+    unroll_required_ = true;
+  }
+
+  //! True if no actual for-loop is materialized
+  bool isTrivial() const;
 
  private:
-  Val* const index_ = nullptr;
-  IterDomain* const iter_domain_;
+  //! Returns if a loop could be unrolled.
+  bool isUnrollable() const;
+
+ private:
+  IterDomain* const iter_domain_ = nullptr;
+
+  Val* index_ = nullptr;
+  Val* start_ = nullptr;
+  Val* stop_ = nullptr;
+  Val* step_ = nullptr;
+
+  // vectorize is true when the for-loop contains a vectorize set
+  // the flag is used to omit the for-loop from the kernel
+  bool vectorize_ = false;
+  // [pre | vectorize | post] <= inner-most, merged root domain
+  // shift_ is applied to vectorize and post sections.
+  Val* vectorize_shift_ = nullptr;
+
+  //! True if unroll is required for avoiding stack allocation
+  bool unroll_required_ = false;
+
   Scope body_;
-  Expr* parent_scope_ = nullptr;
 };
 
-// IfThenElse provides scoping for an boolean operator. Exprs placed in its body
-// are considered inside the scope of the if statement. In the future the
-// implementation should look quite different so that we can do proper
-// dependency annalysis like in Fusion.
-class TORCH_CUDA_API IfThenElse : public Expr {
+//! IfThenElse provides scoping for an boolean operator. Exprs placed in its
+//! body are considered inside the scope of the if statement. In the future the
+//! implementation should look quite different so that we can do proper
+//! dependency annalysis like in Fusion.
+//!
+//! TODO(kir): this is not a real expression
+//!
+class TORCH_CUDA_CU_API IfThenElse final : public Expr {
  public:
-  explicit IfThenElse(
-      Bool* cond,
-      const std::vector<Expr*>& if_body = {},
-      const std::vector<Expr*>& else_body = {},
-      Expr* parent_scope = nullptr);
+  explicit IfThenElse(IrBuilderPasskey passkey, Predicate* cond);
 
-  IfThenElse(const IfThenElse* src, IrCloner* ir_cloner);
-
-  Bool* cond() const {
-    return cond_;
+  Scope& thenBody() {
+    return then_body_;
   }
-
-  const Scope& constBody() const {
-    return body_;
-  }
-
-  const Scope& constElseBody() const {
-    return else_body_;
-  }
-
-  Scope& body() {
-    return body_;
+  const Scope& thenBody() const {
+    return then_body_;
   }
 
   Scope& elseBody() {
+    return else_body_;
+  }
+
+  const Scope& elseBody() const {
     return else_body_;
   }
 
@@ -674,37 +500,31 @@ class TORCH_CUDA_API IfThenElse : public Expr {
     return !else_body_.empty();
   }
 
-  Expr* parentScope() const {
-    return parent_scope_;
-  }
-
-  void setParentScope(Expr* scope);
-
  private:
-  Bool* const cond_ = nullptr;
-  Scope body_;
+  Scope then_body_;
   Scope else_body_;
-  Expr* parent_scope_ = nullptr;
 };
 
-// Grid reduction operation, this node is used only after lowering a fusion to
-// explicitly mark a grid reduction and the buffer allocation needed to do it.
-// This node provides FusionExecutor the information it needs to allocate the
-// reduction and sync buffers.
-class TORCH_CUDA_API GridReduction : public Expr {
+//! Grid reduction operation
+//!
+//! This node is used only after lowering a fusion to explicitly mark a grid
+//! reduction and the buffer allocation needed to do it.
+//!
+//! This node provides FusionExecutor the information it needs to allocate the
+//! reduction and sync buffers.
+class TORCH_CUDA_CU_API GridReduction final : public ReductionOp {
  public:
-  explicit GridReduction(ReductionOp* reduction_op);
-
   GridReduction(
-      ReductionOp* reduction_op,
+      IrBuilderPasskey passkey,
+      BinaryOpType reduction_op_type,
+      Val* init,
+      Val* out,
+      Val* in,
       Allocate* reduction_buffer,
-      Allocate* sync_buffer);
-
-  GridReduction(const GridReduction* src, IrCloner* ir_cloner);
-
-  ReductionOp* reduction_op() const {
-    return reduction_op_;
-  }
+      Allocate* sync_buffer,
+      Val* entrance_index,
+      Val* entrances,
+      bool is_fused = false);
 
   Allocate* reduction_buffer() const {
     return reduction_buffer_;
@@ -714,34 +534,210 @@ class TORCH_CUDA_API GridReduction : public Expr {
     return sync_buffer_;
   }
 
-  static std::string getPredicateFlagName(const TensorView* val);
-  static std::string getPredicateFlagName(const fuser::TensorView* val);
+  // Which instance of entering this grid reduction is this iteration?
+  Val* entrance_index() const {
+    return entrance_index_;
+  }
+
+  // How many times will this grid reduction be entered
+  Val* entrances() const {
+    return entrances_;
+  }
+
+  const ParallelTypeBitmap& threadPredicate() const {
+    return thread_predicate_;
+  }
+
+  void setThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
+    thread_predicate_ = thread_predicate;
+  }
 
  private:
-  ReductionOp* reduction_op_ = nullptr;
   Allocate* reduction_buffer_ = nullptr;
+  Allocate* sync_buffer_ = nullptr;
+  // gridReduce has template flags for thread predicates. In order to
+  // use them, the thread predicate is held here separately from
+  // Expr::predicate_.
+  ParallelTypeBitmap thread_predicate_;
+  Val* entrance_index_ = nullptr;
+  Val* entrances_ = nullptr;
+};
+
+class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
+ public:
+  GroupedGridReduction(
+      IrBuilderPasskey passkey,
+      std::vector<BinaryOpType> reduction_op_type,
+      std::vector<Val*> init,
+      std::vector<Val*> out,
+      std::vector<Val*> in,
+      std::vector<Allocate*> reduction_buffers,
+      Allocate* sync_buffer,
+      bool is_allreduce = false);
+
+  const std::vector<Allocate*>& reduction_buffers() const {
+    return reduction_buffers_;
+  }
+
+  Allocate* reduction_buffer(size_t i) const {
+    return reduction_buffers_.at(i);
+  }
+
+  Allocate* sync_buffer() const {
+    return sync_buffer_;
+  }
+
+  const ParallelTypeBitmap& threadPredicate() const {
+    return thread_predicate_;
+  }
+
+  void setThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
+    thread_predicate_ = thread_predicate;
+  }
+
+ private:
+  std::vector<Allocate*> reduction_buffers_;
+  Allocate* sync_buffer_ = nullptr;
+  // gridReduce has template flags for thread predicates. In order to
+  // use them, the thread predicate is held here separately from
+  // Expr::predicate_.
+  ParallelTypeBitmap thread_predicate_;
+};
+
+//! Grid broadcast operation
+//!
+//! This node is used only after lowering a fusion to explicitly mark a grid
+//! broadcast and the buffer allocation needed to do it.
+//!
+//! This node provides FusionExecutor the information it needs to allocate the
+//! broadcast and sync buffers.
+class TORCH_CUDA_CU_API GridBroadcast final : public Expr {
+ public:
+  GridBroadcast(
+      IrBuilderPasskey passkey,
+      BroadcastOp* broadcast_op,
+      Allocate* broadcast_buffer,
+      Allocate* sync_buffer);
+
+  BroadcastOp* broadcast_op() const {
+    return broadcast_op_;
+  }
+
+  Allocate* broadcast_buffer() const {
+    return broadcast_buffer_;
+  }
+
+  Allocate* sync_buffer() const {
+    return sync_buffer_;
+  }
+
+ private:
+  BroadcastOp* broadcast_op_ = nullptr;
+  Allocate* broadcast_buffer_ = nullptr;
   Allocate* sync_buffer_ = nullptr;
 };
 
-// Simple classification helpers
-bool isLoweredScalar(const Val* val);
-bool isLoweredVal(const Val* val);
+//! Grid welford operation
+//!
+//! This node is used only after lowering a fusion to explicitly mark a grid
+//! reduction and the buffer allocation needed to do it.
+//!
+//! This node provides FusionExecutor the information it needs to allocate the
+//! reduction and sync buffers.
+class TORCH_CUDA_CU_API GridWelford final : public Expr {
+ public:
+  GridWelford(
+      IrBuilderPasskey passkey,
+      WelfordOp* welford_op,
+      Allocate* var_buffer,
+      Allocate* avg_buffer,
+      Allocate* n_buffer,
+      Allocate* sync_buffer,
+      Val* entrance_index,
+      Val* entrances);
 
-// Converts a Fusion IR value into the Kernel IR equivalent
-Val* lowerValue(const Val* val);
+  WelfordOp* welford_op() const {
+    return welford_op_;
+  }
 
-// A minimal builder interface
-Val* andExpr(Val* lhs, Val* rhs);
-Val* eqExpr(Val* lhs, Val* rhs);
-Val* ltExpr(Val* lhs, Val* rhs);
-Val* addExpr(Val* lhs, Val* rhs);
-Val* subExpr(Val* lhs, Val* rhs);
-Val* mulExpr(Val* lhs, Val* rhs);
-Val* divExpr(Val* lhs, Val* rhs);
-Val* ceilDivExpr(Val* lhs, Val* rhs);
-Val* modExpr(Val* lhs, Val* rhs);
+  Allocate* var_buffer() const {
+    return var_buffer_;
+  }
+
+  Allocate* avg_buffer() const {
+    return avg_buffer_;
+  }
+
+  Allocate* N_buffer() const {
+    return n_buffer_;
+  }
+
+  Allocate* sync_buffer() const {
+    return sync_buffer_;
+  }
+
+  // Which instance of entering this grid reduction is this iteration?
+  Val* entrance_index() const {
+    return entrance_index_;
+  }
+
+  // How many times will this grid reduction be entered
+  Val* entrances() const {
+    return entrances_;
+  }
+
+  const ParallelTypeBitmap& threadPredicate() const {
+    return thread_predicate_;
+  }
+
+  void setThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
+    thread_predicate_ = thread_predicate;
+  }
+
+ private:
+  WelfordOp* welford_op_ = nullptr;
+  Allocate* var_buffer_ = nullptr;
+  Allocate* avg_buffer_ = nullptr;
+  Allocate* n_buffer_ = nullptr;
+  Allocate* sync_buffer_ = nullptr;
+  Val* entrance_index_ = nullptr;
+  Val* entrances_ = nullptr;
+  // gridReduce has template flags for thread predicates. In order to
+  // use them, the thread predicate is held here separately from
+  // Expr::predicate_.
+  ParallelTypeBitmap thread_predicate_;
+};
+
+// Allocate an instance of the fused reduction class.
+class TORCH_CUDA_CU_API AllocateFusedReduction final : public Expr {
+ public:
+  explicit AllocateFusedReduction(
+      IrBuilderPasskey passkey,
+      GridReduction* grid_reduction);
+
+  explicit AllocateFusedReduction(
+      IrBuilderPasskey passkey,
+      GridWelford* grid_welford);
+
+  explicit AllocateFusedReduction(
+      IrBuilderPasskey passkey,
+      GroupedGridReduction* grouped_grid_reduction);
+
+  Expr* gridExpr() const {
+    return grid_expr_;
+  }
+
+  TensorIndex* out() const;
+
+  const ParallelTypeBitmap& threadPredicate() const;
+
+ private:
+  //! GridReduction, GridWelford or GroupedGridReduction
+  Expr* grid_expr_ = nullptr;
+};
 
 } // namespace kir
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

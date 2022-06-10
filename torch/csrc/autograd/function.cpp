@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/function.h>
 
+#include <c10/util/ThreadLocal.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/variable.h>
 
@@ -14,6 +15,25 @@
 #include <vector>
 
 namespace torch { namespace autograd {
+
+// The current evaluating node. This is useful to assign the current node as a
+// parent of new nodes created during the evaluation of this node in anomaly
+// mode.
+C10_DEFINE_TLS_static(std::shared_ptr<Node>, tls_current_evaluating_node);
+#define current_evaluating_node (tls_current_evaluating_node.get())
+
+NodeGuard::NodeGuard(std::shared_ptr<Node> node) {
+  last_evaluating_node_ = std::move(current_evaluating_node);
+  current_evaluating_node = std::move(node);
+}
+NodeGuard::~NodeGuard() {
+  // restore the previous evaluating node
+  current_evaluating_node = std::move(last_evaluating_node_);
+}
+
+void Node::assign_parent() {
+  metadata()->assign_parent(current_evaluating_node);
+}
 
 auto Node::name() const -> std::string {
   return c10::demangle(typeid(*this).name());

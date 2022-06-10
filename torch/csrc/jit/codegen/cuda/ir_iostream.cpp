@@ -1,14 +1,36 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/ir_printer.h>
+
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
-#include <iostream>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
+
+namespace {
+const char* boolLiteral(bool value) {
+  return value ? "true" : "false";
+}
+
+std::string varName(const Val* val) {
+  std::stringstream value_name;
+  if (val == nullptr) {
+    value_name << "$nullptr";
+  } else {
+    value_name << val->name();
+  }
+  return value_name.str();
+}
+
+} // namespace
 
 // Make sure we can inline something, before we attempt to.
 static void checkInlineable(const Expr* expr) {
@@ -25,950 +47,786 @@ static void checkInlineable(const Expr* expr) {
       "Printing inline computations involving values other than scalars is not currently supported.");
 }
 
-void IRPrinter::handle(const Statement* s) {
+void IrPrinter::handle(const Statement* s) {
   OptInConstDispatch::handle(s);
 }
 
-void IRPrinter::handle(const Val* v) {
+void IrPrinter::handle(const Val* v) {
   OptInConstDispatch::handle(v);
 }
 
-void IRPrinter::handle(const Expr* e) {
+void IrPrinter::handle(const Expr* e) {
   OptInConstDispatch::handle(e);
 }
 
-void IRPrinter::printHeader(
-    Fusion* fusion,
-    const std::string& kernel_name_,
-    const std::vector<Val*>& global_buffers) {
-  os << "__global__ void " << kernel_name_ << "(";
-
-  std::vector<Val*> vals;
-
-  for (auto val : fusion->inputs()) {
-    vals.push_back(val);
-  }
-  for (auto val : fusion->outputs()) {
-    vals.push_back(val);
-  }
-
-  for (auto val : global_buffers) {
-    vals.push_back(val);
-  }
-
-  for (Val* val : vals) {
-    switch (val->getValType().value()) {
-      case ValType::TensorView:
-        os << "Tensor<" << val->getDataType().value() << ", "
-           << TensorDomain::noReductions(val->as<TensorView>()->getRootDomain())
-                  .size()
-           << "> T" << val->name();
-        break;
-      case ValType::KirTensorView:
-        os << "Tensor<" << val->getDataType().value() << ", "
-           << kir::TensorDomain::noReductions(
-                  val->as<kir::TensorView>()->domain()->rootDomain())
-                  .size()
-           << "> T" << val->name();
-        break;
-      case ValType::Scalar:
-        os << val->getDataType().value() << " " << val;
-        break;
-      default:
-        TORCH_CHECK(
-            false,
-            "printHeader() found an input to the fusion of unexpected data type.");
-    }
-
-    if (val != vals.back())
-      os << ", ";
-  }
-
-  if (fusion->hasRNG())
-    os << ", unsigned long long seed, unsigned long long offset";
-
-  os << "){\n";
-  indent_size++;
-  if (fusion->hasRNG()) {
-    indent();
-    os << "int idx = blockIdx.x*blockDim.x + threadIdx.x;\n";
-    indent();
-    os << "Philox rnd(seed, idx, offset);\n";
-  }
-  if (fusion->hasBlockReduction() || fusion->hasGridReduction()) {
-    indent();
-    // TODO: Dynamic sizing possible? blockReduce originally used 1024
-    // values of a given type
-    os << "__shared__ float shared_mem[1024];\n";
-  }
-}
-
-void IRPrinter::handle(Fusion* fusion) {
+void IrPrinter::handle(Fusion* fusion) {
+  FUSER_PERF_SCOPE("IrPrinter");
   resetIndent();
   for (const Expr* expr : fusion->exprs()) {
     handle(expr);
   }
 }
 
-void IRPrinter::handle(const TensorDomain* td) {
+void IrPrinter::handle(const kir::Kernel* kernel) {
+  TORCH_CHECK(kernel != nullptr);
+
+  // kernel declaration
+  os_ << "\nKERNEL (";
+  for (auto in : kernel->inputs()) {
+    handle(in);
+    if (in != kernel->inputs().back()) {
+      os_ << ", ";
+    }
+  }
+  os_ << ") -> (";
+  for (auto out : kernel->outputs()) {
+    handle(out);
+    if (out != kernel->outputs().back()) {
+      os_ << ", ";
+    }
+  }
+  os_ << ") :\n";
+
+  // kernel body
+  indent_size_++;
+  for (auto expr : kernel->topLevelExprs()) {
+    handle(expr);
+  }
+  indent_size_--;
+  os_ << "END.\n\n";
+}
+
+void IrPrinter::handle(kir::Kernel& kernel) {
+  handle(&kernel);
+}
+
+void IrPrinter::handleScope(const kir::Scope& scope) {
+  // Save the uses of the parent scope
+  indent_size_++;
+  for (auto expr : scope.exprs()) {
+    handle(expr);
+  }
+  indent_size_--;
+}
+
+void IrPrinter::handle(const IterDomain* id) {
+  os_ << id->getIterType();
+  os_ << id->getParallelType();
+  os_ << varName(id);
+  os_ << "{";
+  if (!id->start()->isZeroInt()) {
+    print_inline(id->start());
+    os_ << " : ";
+  }
+  if (id->stop() != id->extent()) {
+    print_inline(id->stop());
+    os_ << " : ";
+  }
+  print_inline(id->extent());
+  os_ << "}";
+  if (id->isRFactorProduct())
+    os_ << "rf";
+  if (id->hasPaddingToMultipleOfWarp()) {
+    os_ << "_p";
+  }
+}
+
+void IrPrinter::handle(const TensorDomain* td) {
   if (td->nDims() == 0) {
-    os << "[ 0 ]";
+    os_ << "[ 0 ]";
     return;
   }
-  os << "[ ";
-  for (size_t i = 0; i < td->nDims(); i++) {
+  os_ << "[ ";
+  for (const auto i : c10::irange(td->nDims())) {
     handle(td->axis(i));
     if (i != td->nDims() - 1)
-      os << ", ";
+      os_ << ", ";
   }
-  os << " ]";
+  os_ << " ]";
 }
 
-void IRPrinter::handle(const TensorView* tv) {
-  if (tv->nDims() == 0) {
-    switch (tv->getDataType().value()) {
-      case DataType::Bool:
-        os << "b";
-        break;
-      case DataType::Float:
-        os << "f";
-        break;
-      case DataType::Half:
-        os << "h";
-        break;
-      case DataType::Int:
-        os << "i";
-        break;
-      default:
-        TORCH_INTERNAL_ASSERT(
-            false, "Did not recognize type ", tv->getDataType().value());
-    }
-    os << tv->name();
+void IrPrinter::handle(const TensorView* tv) {
+  os_ << "T" << varName(tv);
+  switch (tv->getMemoryType()) {
+    case MemoryType::Global:
+      os_ << "_g";
+      break;
+    case MemoryType::Shared:
+      os_ << "_s";
+      break;
+    case MemoryType::Local:
+      os_ << "_l";
+      break;
+  }
+  handle(tv->domain());
 
-  } else {
-    os << "T" << tv->name();
-    handle(tv->domain());
-
-    if (tv->getComputeAtView() != nullptr) {
-      os << " compute_at( ";
-      os << "T" << tv->getComputeAtView()->name();
-      os << ", " << tv->getRelativeComputeAtAxis() << " )";
-    }
+  if (tv->getComputeAtPosition() > 0) {
+    os_ << " ca_pos( ";
+    os_ << tv->getComputeAtPosition();
+    os_ << " )";
+  }
+  if (tv->getMaxProducerPosition() > 0) {
+    os_ << " produce_pos( ";
+    os_ << tv->getMaxProducerPosition();
+    os_ << ")";
   }
 }
 
-void IRPrinter::handle(const IterDomain* id) {
-  os << id->getIterType();
-  os << id->getParallelType();
-  os << "{";
-  if (!id->start()->isZeroInt()) {
-    print_inline(id->start());
-    os << " : ";
-  }
-  print_inline(id->extent());
-  os << "}";
-  if (id->isRFactorProduct())
-    os << "rf";
-}
-
-void IRPrinter::handle(const kir::TensorIndex* ti) {
-  os << "T" << ti->view()->name();
-  std::vector<Val*> non_zero_inds;
-  for (auto* ind : ti->indices()) {
-    if (!ind->isZeroInt()) {
-      non_zero_inds.push_back(ind);
-    }
-  }
-
-  if (non_zero_inds.size() == 0) {
-    os << "[ 0 ]";
+void IrPrinter::handle(const Bool* b) {
+  if (print_inline_ && b->definition() != nullptr) {
+    os_ << "( ";
+    handle(b->definition());
+    os_ << " )";
     return;
   }
 
-  os << "[ ";
-  bool first = true;
-  for (auto* ind : non_zero_inds) {
-    if (!first)
-      os << " + ";
-    print_inline(ind);
-    first = false;
+  os_ << "b" << varName(b);
+  if (b->isConst()) {
+    os_ << "(" << (b->value().value() ? "true" : "false") << ")";
   }
-  os << " ]";
 }
 
-void IRPrinter::handle(const Bool* b) {
-  if (print_inline_ && FusionGuard::getCurFusion()->origin(b) != nullptr) {
-    os << "( ";
-    handle(FusionGuard::getCurFusion()->origin(b));
-    os << " )";
+void IrPrinter::handle(const Double* d) {
+  if (print_inline_ && d->definition() != nullptr) {
+    os_ << "( ";
+    handle(d->definition());
+    os_ << " )";
     return;
   }
 
-  if (b->isSymbolic()) {
-    os << "b" << b->name();
+  if (d->isSymbolic()) {
+    os_ << "d" << varName(d);
   } else {
-    os << "bool(" << *(b->value()) << ")";
+    os_ << "double("
+        << std::setprecision(
+               std::numeric_limits<Double::ScalarType>::max_digits10)
+        << *(d->value()) << ")";
   }
 }
 
-void IRPrinter::handle(const Float* f) {
-  if (print_inline_ && FusionGuard::getCurFusion()->origin(f) != nullptr) {
-    os << "( ";
-    handle(FusionGuard::getCurFusion()->origin(f));
-    os << " )";
-    return;
-  }
-
-  if (f->isSymbolic()) {
-    os << "f" << f->name();
-  } else {
-    os << "float("
-       << std::setprecision(
-              std::numeric_limits<Float::ScalarType>::max_digits10)
-       << *(f->value()) << ")";
-  }
-}
-
-void IRPrinter::handle(const Half* h) {
-  if (print_inline_ && FusionGuard::getCurFusion()->origin(h) != nullptr) {
-    os << "( ";
-    handle(FusionGuard::getCurFusion()->origin(h));
-    os << " )";
-    return;
-  }
-
-  if (h->isSymbolic()) {
-    os << "h" << h->name();
-  } else {
-    os << "__float2half(" << *(h->value()) << ")";
-  }
-}
-
-void IRPrinter::handle(const Int* i) {
+void IrPrinter::handle(const Int* i) {
   if (print_inline_) {
-    if (auto def = FusionGuard::getCurFusion()->origin(i)) {
-      os << "( ";
+    if (auto def = i->definition()) {
+      os_ << "( ";
       handle(def);
-      os << " )";
+      os_ << " )";
       return;
     }
   }
 
   if (i->isSymbolic()) {
-    os << "i" << i->name();
+    os_ << "i" << varName(i);
   } else {
-    os << *(i->value());
+    os_ << *(i->value());
   }
 }
 
-void IRPrinter::handle(const NamedScalar* i) {
-  os << i->name();
-}
-
-void IRPrinter::handle(const kir::Bool* b) {
-  if (print_inline_ && FusionGuard::getCurFusion()->origin(b) != nullptr) {
-    os << "( ";
-    handle(FusionGuard::getCurFusion()->origin(b));
-    os << " )";
-    return;
-  }
-
-  if (b->isSymbolic()) {
-    os << "b" << b->name();
-  } else {
-    os << "bool(" << *(b->value()) << ")";
-  }
-}
-
-void IRPrinter::handle(const kir::Float* f) {
-  if (print_inline_ && FusionGuard::getCurFusion()->origin(f) != nullptr) {
-    os << "( ";
-    handle(FusionGuard::getCurFusion()->origin(f));
-    os << " )";
-    return;
-  }
-
-  if (f->isSymbolic()) {
-    os << "f" << f->name();
-  } else {
-    os << "float("
-       << std::setprecision(
-              std::numeric_limits<Float::ScalarType>::max_digits10)
-       << *(f->value()) << ")";
-  }
-}
-
-void IRPrinter::handle(const kir::Half* h) {
-  if (print_inline_ && FusionGuard::getCurFusion()->origin(h) != nullptr) {
-    os << "( ";
-    handle(FusionGuard::getCurFusion()->origin(h));
-    os << " )";
-    return;
-  }
-
-  if (h->isSymbolic()) {
-    os << "h" << h->name();
-  } else {
-    os << "__float2half(" << *(h->value()) << ")";
-  }
-}
-
-void IRPrinter::handle(const kir::Int* i) {
+void IrPrinter::handle(const ComplexDouble* c) {
   if (print_inline_) {
-    if (auto def = FusionGuard::getCurFusion()->origin(i)) {
-      os << "( ";
+    if (auto def = c->definition()) {
+      os_ << "( ";
       handle(def);
-      os << " )";
+      os_ << " )";
       return;
     }
   }
 
-  if (i->isSymbolic()) {
-    os << "i" << i->name();
+  if (c->isSymbolic()) {
+    os_ << "c" << varName(c);
   } else {
-    os << *(i->value());
+    os_ << "std::complex<double>"
+        << std::setprecision(std::numeric_limits<double>::max_digits10)
+        << *(c->value());
   }
 }
 
-void IRPrinter::handle(const kir::NamedScalar* i) {
-  os << i->name();
+void IrPrinter::handle(const NamedScalar* ns) {
+  os_ << ns->name();
 }
 
-void IRPrinter::handle(const kir::IterDomain* id) {
-  os << id->getIterType();
-  os << id->getParallelType();
-  os << "{";
-  if (!id->start()->isZeroInt()) {
-    print_inline(id->start());
-    os << " : ";
-  }
-  print_inline(id->extent());
-  os << "}";
-  if (id->isRFactorProduct())
-    os << "rf";
-}
-
-void IRPrinter::handle(const kir::TensorDomain*) {
-  TORCH_INTERNAL_ASSERT(false, "Unreachable");
-}
-
-void IRPrinter::handle(const kir::TensorView*) {
-  TORCH_INTERNAL_ASSERT(false, "Unreachable");
-}
-
-static bool isTV(const Val* val) {
-  return val->getValType().value() == ValType::TensorView ||
-      val->getValType().value() == ValType::TensorIndex;
-}
-
-// Check if we're a TensorView op that we can generate code for.
-static bool isTVOp(const Expr* expr) {
-  return expr->outputs().size() == 1 && isTV(expr->outputs().front());
-}
-
-void IRPrinter::handle(const UnaryOp* uop) {
-  bool istvop = isTVOp(uop);
+void IrPrinter::handle(const UnaryOp* uop) {
+  bool istvop = ir_utils::isTvOp(uop);
   if (!print_inline_) {
-    indent();
-    os << uop->out();
+    indent() << uop->out();
     if (istvop) {
-      os << "\n";
-      indent_size++;
+      os_ << "\n";
+      indent_size_++;
       indent();
     }
-    os << " = ";
+    os_ << " = ";
   } else {
     checkInlineable(uop);
   }
 
-  if (auto inline_uop = inline_op_str(uop->getUnaryOpType())) {
-    os << inline_uop.value();
+  auto op_type = uop->getUnaryOpType();
+
+  if (auto inline_uop = inline_op_str(op_type)) {
+    os_ << inline_uop.value();
     handle(uop->in());
   } else {
-    if (uop->getUnaryOpType() == UnaryOpType::Cast) {
+    if (op_type == UnaryOpType::Cast) {
       c10::optional<std::string> cast_str = cast_func_str(std::make_pair(
           uop->in()->getDataType().value(), uop->out()->getDataType().value()));
       TORCH_INTERNAL_ASSERT(cast_str != c10::nullopt, "Unsupported Cast");
-      os << cast_str.value();
+      os_ << cast_str.value();
     } else {
-      os << uop->getUnaryOpType();
+      if (alsoBooleanOperator(op_type) &&
+          uop->out()->getDataType().value() == DataType::Bool) {
+        os_ << stringifyBooleanOp(op_type);
+      } else {
+        os_ << op_type;
+      }
+      if (uop->out()->getDataType().value() == DataType::Float &&
+          needFloatSuffix(op_type)) {
+        os_ << "f";
+      }
     }
-    os << "(";
-    if (uop->getUnaryOpType() == UnaryOpType::RandLike)
-      os << "rnd";
-    else
-      handle(uop->in());
-    os << ")";
+    os_ << "(";
+    handle(uop->in());
+    os_ << ")";
   }
 
   if (istvop)
-    indent_size--;
+    indent_size_--;
 
   if (!print_inline_)
-    os << ";\n";
+    os_ << ";\n";
 }
 
-void IRPrinter::handle(const BinaryOp* bop) {
-  bool istvop = isTVOp(bop);
+void IrPrinter::handle(const BinaryOp* bop) {
+  bool istvop = ir_utils::isTvOp(bop);
   if (!print_inline_) {
-    indent();
-    os << bop->out();
+    indent() << bop->out();
 
     // tensor operations tend to be long, break them up into multiple lines
     if (istvop) {
-      os << "\n";
-      indent_size++;
+      os_ << "\n";
+      indent_size_++;
       indent();
     }
 
-    os << " = ";
+    os_ << " = ";
   } else {
     checkInlineable(bop);
   }
 
-  if (auto inline_bop = inline_op_str(bop->getBinaryOpType())) {
+  auto op_type = bop->getBinaryOpType();
+  if (auto inline_bop = inline_op_str(op_type)) {
     handle(bop->lhs());
     if (istvop) {
-      os << "\n";
+      os_ << "\n";
       indent();
     }
-    os << " " << inline_bop.value() << " ";
+    os_ << " " << inline_bop.value() << " ";
     handle(bop->rhs());
   } else {
-    os << bop->getBinaryOpType() << "(";
+    if (alsoBooleanOperator(op_type) &&
+        bop->out()->getDataType().value() == DataType::Bool) {
+      os_ << stringifyBooleanOp(op_type);
+    } else {
+      os_ << op_type;
+    }
+    if (bop->out()->getDataType().value() == DataType::Float &&
+        needFloatSuffix(op_type)) {
+      os_ << "f";
+    }
+    os_ << "(";
     handle(bop->lhs());
     if (istvop) {
-      os << "\n";
+      os_ << "\n";
       indent();
     }
-    os << ", ";
+    os_ << ", ";
     handle(bop->rhs());
-    os << ")";
+    os_ << ")";
   }
 
   if (istvop)
-    indent_size--;
+    indent_size_--;
 
   if (!print_inline_)
-    os << ";\n";
+    os_ << ";\n";
 }
 
-void IRPrinter::handle(const TernaryOp* top) {
-  bool istvop = isTVOp(top);
+void IrPrinter::handle(const TernaryOp* top) {
+  bool istvop = ir_utils::isTvOp(top);
   if (!print_inline_) {
     indent();
-    os << top->out();
+    os_ << top->out();
 
     // tensor operations tend to be long, break them up into multiple lines
     if (istvop) {
-      os << "\n";
-      indent_size++;
+      os_ << "\n";
+      indent_size_++;
       indent();
     }
 
-    os << " = ";
+    os_ << " = ";
   } else {
     checkInlineable(top);
   }
 
-  os << top->getTernaryOpType() << "(";
+  os_ << top->getTernaryOpType() << "(";
   handle(top->in1());
   if (istvop) {
-    os << "\n";
+    os_ << "\n";
     indent();
   }
-  os << ", ";
+  os_ << ", ";
   handle(top->in2());
   if (istvop) {
-    os << "\n";
+    os_ << "\n";
     indent();
   }
-  os << ", ";
+  os_ << ", ";
   handle(top->in3());
-  os << ")";
+  os_ << ")";
 
   if (istvop)
-    indent_size--;
+    indent_size_--;
 
   if (!print_inline_)
-    os << ";\n";
+    os_ << ";\n";
 }
 
-void IRPrinter::handle(const kir::UnaryOp* uop) {
-  bool istvop = isTVOp(uop);
-  if (!print_inline_) {
-    indent();
-    os << uop->out();
-    if (istvop) {
-      os << "\n";
-      indent_size++;
-      indent();
-    }
-    os << " = ";
+void IrPrinter::handle(const ReductionOp* rop) {
+  indent() << rop->out() << "\n";
+  indent() << "   = reduction( " << rop->in()
+           << ", op = " << rop->getReductionOpType()
+           << ", initial value = " << rop->init()
+           << ", allreduce = " << rop->isAllreduce() << " )\n";
+}
+
+void IrPrinter::handle(const GroupedReductionOp* grouped_rop) {
+  indent() << "Grouped reduction(\n";
+  ++indent_size_;
+  for (const auto i : c10::irange(grouped_rop->numReductions())) {
+    indent() << grouped_rop->output(i) << " = reduction( "
+             << grouped_rop->input(i)
+             << ", op = " << grouped_rop->getReductionOpType(i)
+             << ", initial value = " << grouped_rop->initVal(i) << " )\n";
+  }
+  indent() << "allreduce = " << (grouped_rop->isAllreduce() ? "true" : "false")
+           << " )\n";
+  --indent_size_;
+}
+
+void IrPrinter::handle(const WelfordOp* wop) {
+  indent() << wop->outAvg() << "(Avg),\n"
+           << wop->outVar() << "(Var),\n"
+           << wop->outN() << "(Count)"
+           << "\n = Welford ( ";
+  if (wop->singleValue()) {
+    os_ << wop->inAvg() << "(Avg), ";
   } else {
-    checkInlineable(uop);
+    os_ << wop->inAvg() << "(Avg)\n  " << wop->inVar() << "(Var)\n  "
+        << wop->inN() << "(Count)";
   }
-
-  if (auto inline_uop = inline_op_str(uop->getUnaryOpType())) {
-    os << inline_uop.value();
-    handle(uop->in());
-  } else {
-    if (uop->getUnaryOpType() == UnaryOpType::Cast) {
-      c10::optional<std::string> cast_str = cast_func_str(std::make_pair(
-          uop->in()->getDataType().value(), uop->out()->getDataType().value()));
-      TORCH_INTERNAL_ASSERT(cast_str != c10::nullopt, "Unsupported Cast");
-      os << cast_str.value();
-    } else {
-      os << uop->getUnaryOpType();
-    }
-    os << "(";
-    if (uop->getUnaryOpType() == UnaryOpType::RandLike)
-      os << "rnd";
-    else
-      handle(uop->in());
-    os << ")";
+  if (wop->hasInit()) {
+    os_ << "\n  initial value = " << wop->initAvg() << "(Avg)\n  "
+        << wop->initVar() << "(Var)\n  " << wop->initN() << "(N)";
   }
-
-  if (istvop)
-    indent_size--;
-
-  if (!print_inline_)
-    os << ";\n";
+  os_ << "\n  allreduce = " << wop->isAllreduce();
+  os_ << " )\n";
 }
 
-void IRPrinter::handle(const kir::BinaryOp* bop) {
-  bool istvop = isTVOp(bop);
-  if (!print_inline_) {
-    indent();
-    os << bop->out();
-
-    // tensor operations tend to be long, break them up into multiple lines
-    if (istvop) {
-      os << "\n";
-      indent_size++;
-      indent();
-    }
-
-    os << " = ";
-  } else {
-    checkInlineable(bop);
-  }
-
-  if (auto inline_bop = inline_op_str(bop->getBinaryOpType())) {
-    handle(bop->lhs());
-    if (istvop) {
-      os << "\n";
-      indent();
-    }
-    os << " " << inline_bop.value() << " ";
-    handle(bop->rhs());
-  } else {
-    os << bop->getBinaryOpType() << "(";
-    handle(bop->lhs());
-    if (istvop) {
-      os << "\n";
-      indent();
-    }
-    os << ", ";
-    handle(bop->rhs());
-    os << ")";
-  }
-
-  if (istvop)
-    indent_size--;
-
-  if (!print_inline_)
-    os << ";\n";
+void IrPrinter::handle(const LoadStoreOp* ldst) {
+  indent() << ldst->out() << " = " << ldst->opType() << "( " << ldst->in()
+           << " )\n";
 }
 
-void IRPrinter::handle(const kir::TernaryOp* top) {
-  bool istvop = isTVOp(top);
-  if (!print_inline_) {
-    indent();
-    os << top->out();
-
-    // tensor operations tend to be long, break them up into multiple lines
-    if (istvop) {
-      os << "\n";
-      indent_size++;
-      indent();
-    }
-
-    os << " = ";
-  } else {
-    checkInlineable(top);
-  }
-
-  os << top->getTernaryOpType() << "(";
-  handle(top->in1());
-  if (istvop) {
-    os << "\n";
-    indent();
-  }
-  os << ", ";
-  handle(top->in2());
-  if (istvop) {
-    os << "\n";
-    indent();
-  }
-  os << ", ";
-  handle(top->in3());
-  os << ")";
-
-  if (istvop)
-    indent_size--;
-
-  if (!print_inline_)
-    os << ";\n";
+void IrPrinter::handle(const BroadcastOp* bop) {
+  indent() << bop->out() << "\n";
+  indent() << "   = broadcast( " << bop->in() << " )\n";
 }
 
-void IRPrinter::handle(const ReductionOp* rop) {
-  TORCH_CHECK(rop->out()->getValType() != ValType::TensorIndex);
-  indent();
-  os << rop->out() << " = reduction( " << rop->in()
-     << ", op = " << rop->getReductionOpType()
-     << ", initial value = " << rop->init() << " )\n";
-}
-
-void IRPrinter::handle(const kir::ReductionOp* rop) {
-  TORCH_CHECK(rop->out()->getValType() == ValType::TensorIndex);
-
-  const auto out = rop->out()->as<kir::TensorIndex>();
-  const auto domain = out->view()->domain();
-
-  const bool has_block_reduce = domain->hasBlockReduction();
-  const bool has_grid_reduce = domain->hasGridReduction();
-
-  if (!has_block_reduce && !has_grid_reduce) {
-    FusionGuard fg(rop->fusion());
-    handle(new BinaryOp(rop->getReductionOpType(), out, out, rop->in()));
-    return;
-  }
-
-  auto par_domains = rop->getParallelReductionDomains();
-  bool tidx = par_domains.find(ParallelType::TIDx) != par_domains.end();
-  bool tidy = par_domains.find(ParallelType::TIDy) != par_domains.end();
-  bool tidz = par_domains.find(ParallelType::TIDz) != par_domains.end();
-
-  auto d_type = rop->out()->getDataType().value();
-  auto op_type = rop->getReductionOpType();
-  const std::string block_result = "block_result";
-  if (has_block_reduce) {
-    if (has_grid_reduce) {
-      indent();
-      os << d_type << " " << block_result << ";\n";
-    }
-    indent();
-    // Thread all reduce.
-    os << "blockReduce< " << (tidx ? "true" : "false") << ", "
-       << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false") << " >"
-       << " ( ";
-    if (has_grid_reduce) {
-      os << block_result;
-    } else {
-      handle(rop->out());
-    }
-    os << ", ";
-    handle(rop->in());
-    os << ", ";
-    os << "reduction_" << op_type << "_" << d_type;
-    os << ", threadIdx, blockDim";
-    os << ", reinterpret_cast<" << d_type << "*>(shared_mem)";
-    os << ");\n";
-  }
-}
-
-void IRPrinter::handle(const kir::GridReduction* gr) {
-  // Check if we've lowered yet.
-  const auto rop = gr->reduction_op();
-  TORCH_INTERNAL_ASSERT(
-      rop->out()->getValType() == ValType::TensorIndex,
-      "GridReduction node is a lowered node but did not find the output to be a TensorIndex.");
-
-  const auto out = rop->out()->as<kir::TensorIndex>();
-  const auto domain = out->view()->domain();
-  TORCH_INTERNAL_ASSERT(domain->hasGridReduction());
-
-  const auto par_domains = rop->getParallelReductionDomains();
-  const bool tidx = par_domains.find(ParallelType::TIDx) != par_domains.end();
-  const bool tidy = par_domains.find(ParallelType::TIDy) != par_domains.end();
-  const bool tidz = par_domains.find(ParallelType::TIDz) != par_domains.end();
-  const bool bidx = par_domains.find(ParallelType::BIDx) != par_domains.end();
-  const bool bidy = par_domains.find(ParallelType::BIDy) != par_domains.end();
-  const bool bidz = par_domains.find(ParallelType::BIDz) != par_domains.end();
-
-  const auto d_type = rop->out()->getDataType().value();
-  const auto op_type = rop->getReductionOpType();
-  TORCH_INTERNAL_ASSERT(
-      gr->reduction_buffer()->buffer()->getValType().value() ==
-      ValType::KirTensorView);
-  TORCH_INTERNAL_ASSERT(
-      gr->sync_buffer()->buffer()->getValType().value() ==
-      ValType::KirTensorView);
-  const auto work_buffer =
-      gr->reduction_buffer()->buffer()->as<kir::TensorView>();
-  const auto sync_buffer = gr->sync_buffer()->buffer()->as<kir::TensorView>();
-  indent();
-  // Since block-level reduction is already done, those dimensions
-  // with tidx/y/z being true do not participate in the grid reduction.
-  os << kir::GridReduction::getPredicateFlagName(out->view()) << " = "
-     << "reduction::gridReduce< " << (bidx ? "true" : "false") << ", "
-     << (bidy ? "true" : "false") << ", " << (bidz ? "true" : "false") << ", "
-     << (!tidx ? "true" : "false") << ", " << (!tidy ? "true" : "false") << ", "
-     << (!tidz ? "true" : "false") << " >"
-     << " ( ";
-  handle(rop->out());
-  os << ", ";
-  if (domain->hasBlockReduction()) {
-    os << "block_result";
-  } else {
-    handle(rop->in());
-  }
-  os << ", ";
-  os << "reduction_" << op_type << "_" << d_type;
-  os << ", &T" << work_buffer->name() << "[0]";
-  os << ", T" << sync_buffer->name() << "";
-  os << ", reinterpret_cast<" << d_type << "*>(shared_mem)";
-  os << ");\n";
-}
-
-void IRPrinter::handle(const BroadcastOp* bop) {
-  TORCH_CHECK(bop->out()->getValType() != ValType::TensorIndex);
-  indent();
-  os << bop->out() << " = broadcast( " << bop->in() << " )\n";
-}
-
-void IRPrinter::handle(const kir::BroadcastOp* bop) {
-  TORCH_CHECK(bop->out()->getValType() == ValType::TensorIndex);
-
-  const ir_utils::ParallelTypeBitmap domains =
-      ir_utils::getParallelBroadcastDomains(
-          bop->out(), getThreadPredicateMap());
-  const bool thread_x = domains.get(ParallelType::TIDx);
-  const bool thread_y = domains.get(ParallelType::TIDy);
-  const bool thread_z = domains.get(ParallelType::TIDz);
-  const bool block_x = domains.get(ParallelType::BIDx);
-  const bool block_y = domains.get(ParallelType::BIDy);
-  const bool block_z = domains.get(ParallelType::BIDz);
-
-  const bool grid_broadcast_needed = block_x || block_y || block_z;
-  const bool block_broadcast_needed = thread_x || thread_y || thread_z;
-
-  TORCH_INTERNAL_ASSERT(
-      !grid_broadcast_needed, "Parallel broadcast across blocks not supported");
-
-  if (block_broadcast_needed) {
-    indent();
-    os << "broadcast::blockBroadcast<";
-    os << (thread_x ? "true" : "false") << ", ";
-    os << (thread_y ? "true" : "false") << ", ";
-    os << (thread_z ? "true" : "false");
-    os << ">(";
-    handle(bop->out());
-    os << ", ";
-    handle(bop->in());
-    os << ");\n";
-  } else {
-    indent();
-    handle(bop->out());
-    os << "\n";
-    indent_size++;
-    indent();
-    os << " = ";
-    handle(bop->in());
-    indent_size--;
-    os << ";\n";
-  }
-}
-
-void IRPrinter::handle(const kir::ForLoop* fl) {
-  if (fl->iter_domain()->isThread() || fl->iter_domain()->isBroadcast()) {
-    for (auto& expr : fl->constBody().exprs())
-      handle(expr);
-    return;
-  }
-
-  indent();
-  os << "for(size_t ";
-  handle(fl->index());
-  os << " = ";
-  print_inline(fl->iter_domain()->start());
-  os << "; ";
-  handle(fl->index());
-  os << " < ";
-  print_inline(fl->iter_domain()->extent());
-  os << "; ++";
-  handle(fl->index());
-  os << " ) {\n";
-  indent_size++;
-  for (auto& expr : fl->constBody().exprs())
-    handle(expr);
-
-  indent_size--;
-  indent();
-  os << "}\n";
-}
-
-void IRPrinter::handle(const kir::IfThenElse* ite) {
-  indent();
-
-  // IF
-  os << "if ( ";
-  print_inline(ite->cond());
-  os << " ) {\n";
-
-  indent_size++;
-  for (auto& expr : ite->constBody().exprs()) {
-    handle(expr);
-  }
-  indent_size--;
-
-  // ELSE
-  if (ite->hasElse()) {
-    indent();
-    os << "} else {\n";
-    indent_size++;
-    for (auto& expr : ite->constElseBody().exprs()) {
-      handle(expr);
-    }
-    indent_size--;
-  }
-  indent();
-  os << "}\n";
-}
-
-void IRPrinter::handle(const kir::Allocate* a) {
-  indent();
-  if (a->buffer()->getValType().value() == ValType::KirTensorView) {
-    const auto tv = a->buffer()->as<kir::TensorView>();
-    TORCH_INTERNAL_ASSERT(tv->domain()->nDims() > 0);
-    TORCH_INTERNAL_ASSERT(a->size() != nullptr);
-    switch (tv->getMemoryType()) {
-      case MemoryType::Global:
-        os << "// Allocate global tensor ";
-        break;
-      case MemoryType::Shared:
-        os << "__shared__ ";
-        break;
-      case MemoryType::Local:
-        break;
-    }
-    os << a->buffer_type();
-    os << " T" << tv->name() << "[";
-    print_inline(a->size());
-    os << "];\n";
-  } else {
-    os << a->buffer_type() << " ";
-    handle(a->buffer());
-    os << ";\n";
-  }
-}
-
-void IRPrinter::handle(const kir::Sync* a) {
-  indent();
-  os << "__syncthreads();\n";
-}
-
-void IRPrinter::handle(const Split* s) {
-  os << "Split: ";
+void IrPrinter::handle(const Split* s) {
+  os_ << (s->innerSplit() ? "Split: " : "Outer split: ");
   handle(s->in());
-  os << " by factor " << s->factor() << " -> ";
+  os_ << " by factor " << s->factor() << " -> ";
   handle(s->outer());
-  os << ", ";
+  os_ << ", ";
   handle(s->inner());
-  os << "\n";
+  if (s->startOffset()) {
+    os_ << ", start offset: ";
+    handle(s->startOffset());
+  }
+  if (s->stopOffset()) {
+    os_ << ", stop offset: ";
+    handle(s->stopOffset());
+  }
+  os_ << "\n";
 }
 
-void IRPrinter::handle(const Merge* m) {
-  os << "Merge: ";
+void IrPrinter::handle(const Merge* m) {
+  os_ << "Merge: ";
   handle(m->outer());
-  os << " and ";
+  os_ << " and ";
   handle(m->inner());
-  os << " -> ";
+  os_ << " -> ";
   handle(m->out());
-  os << "\n";
+  os_ << "\n";
 }
 
-namespace {
+void IrPrinter::handle(const TransposeOp* top) {
+  indent() << top->out() << " = transpose( " << top->in() << " )\n";
+}
 
-class ReductionOps : OptOutDispatch {
- public:
-  std::set<std::pair<BinaryOpType, DataType>> rops;
-  void handle(ReductionOp* rop) override {
-    rops.emplace(std::pair<BinaryOpType, DataType>{
-        rop->getReductionOpType(), rop->in()->getDataType().value()});
-  }
+void IrPrinter::handle(const ShiftOp* sop) {
+  indent() << sop->out() << " = shift( " << sop->in() << ", {" << sop->offsets()
+           << "}, {" << sop->padWidth() << "} )\n";
+}
 
-  using OptOutDispatch::handle;
+void IrPrinter::handle(const MmaOp* mma) {
+  indent() << mma->out() << " = mma(" << mma->inA() << "," << mma->inB();
+  os_ << ")\n";
+}
 
-  static std::set<std::pair<BinaryOpType, DataType>> get(Fusion* fusion) {
-    ReductionOps ROPs;
-    for (auto expr : fusion->exprs(true)) {
-      ROPs.handle(expr);
+void IrPrinter::handle(const GatherOp* op) {
+  indent() << op->out() << " = gather( " << op->in() << ", {";
+  bool no_comma = true;
+  for (const auto& s : op->windowShape()) {
+    if (!no_comma) {
+      os_ << ", ";
     }
-    return ROPs.rops;
+    os_ << s;
+    no_comma = false;
   }
-};
+  os_ << "}, {";
+  no_comma = true;
+  for (const auto& pad : op->padWidth()) {
+    if (!no_comma) {
+      os_ << ", ";
+    }
+    os_ << "{" << pad[0] << ", " << pad[1] << "}";
+    no_comma = false;
+  }
+  os_ << "} )\n";
+}
 
-} // namespace
+void IrPrinter::handle(const ViewAsScalar* top) {
+  indent() << top->out() << " = view_as_scalar( " << top->in() << ", "
+           << top->vector_id() << " )\n";
+}
 
-void IRPrinter::printReductionOps(Fusion* fusion) {
-  FusionGuard fg(fusion);
-  auto a = new NamedScalar("a", DataType::Null);
-  auto b = new NamedScalar("b", DataType::Null);
-  for (auto rop_pair : ReductionOps::get(fusion)) {
-    auto op_type = rop_pair.first;
-    auto d_type = rop_pair.second;
+void IrPrinter::handle(const ViewOp* top) {
+  indent() << top->out() << " = view( " << top->in() << " )\n";
+}
 
-    indent();
-    os << "__device__ void reduction_" << op_type << "_" << d_type << "("
-       << d_type << "& a, "
-       << "const " << d_type << " b) {\n";
-    indent_size++;
-
-    handle(new BinaryOp(op_type, a, a, b));
-    indent_size--;
-    indent();
-    os << "}\n";
+void IrPrinter::handle(const kir::Predicate* node) {
+  switch (node->predicate_type()) {
+    case PredicateType::Manual: {
+      os_ << node->value();
+      break;
+    }
+    default:
+      os_ << node->predicate_type();
+      break;
   }
 }
 
-void IRPrinter::printKernel(
-    const std::vector<Expr*>& exprs,
-    const std::string& kernel_name,
-    const std::vector<Val*>& global_buffers) {
-  Fusion* fusion = FusionGuard::getCurFusion();
-  if (exprs.empty())
-    return;
-  TORCH_INTERNAL_ASSERT(
-      exprs[0]->fusion() == FusionGuard::getCurFusion(),
-      "Incorrect fusion set during printKernel.");
-
-  printReductionOps(fusion);
-  printHeader(fusion, kernel_name, global_buffers);
-
-  for (auto* expr : exprs) {
-    handle(expr);
+void IrPrinter::handle(const kir::TensorIndex* ti) {
+  os_ << "T" << varName(ti);
+  switch (ti->view()->getMemoryType()) {
+    case MemoryType::Global:
+      os_ << "_g";
+      break;
+    case MemoryType::Shared:
+      os_ << "_s";
+      break;
+    case MemoryType::Local:
+      os_ << "_l";
+      break;
   }
-  os << "}\n";
+  os_ << "[";
+  for (auto index : ti->indices()) {
+    print_inline(index);
+    if (index != ti->indices().back()) {
+      os_ << ", ";
+    }
+  }
+  os_ << "]";
+  os_ << " view( T" << varName(ti->view()) << " )";
 }
 
-const ThreadPredicateMap& IRPrinter::getThreadPredicateMap() {
-  if (thread_predicates_ == nullptr) {
-    Fusion* fusion = FusionGuard::getCurFusion();
-    thread_predicates_ = std::make_unique<ThreadPredicateMap>(fusion);
+void IrPrinter::handle(const kir::Allocate* node) {
+  indent();
+  handle(node->buffer());
+  os_ << " = ALLOCATE("
+      << "mem_type=" << node->memoryType() << ", "
+      << "size=";
+  print_inline(node->size());
+  os_ << ", "
+      << "zero_init=" << boolLiteral(node->zeroInit()) << ")\n";
+  if (node->alias() != nullptr) {
+    indent() << kTab << ".alias=";
+    handle(node->alias()->buffer());
+    os_ << "\n";
   }
-  return *thread_predicates_;
+}
+
+void IrPrinter::handle(const kir::BlockSync* node) {
+  indent() << "BLOCKSYNC(war_hazard=" << boolLiteral(node->isWarHazardSync())
+           << ")\n";
+}
+
+void IrPrinter::handle(const kir::CpAsyncWait* node) {
+  indent() << "CPASYNC_WAIT()\n";
+}
+
+void IrPrinter::handle(const kir::GridSync* node) {
+  indent() << "GRIDSYNC(" << node->syncDims().toString() << ", ";
+  handle(node->syncBuffer());
+  os_ << ")\n";
+}
+
+void IrPrinter::handle(const kir::ForLoop* node) {
+  indent() << "FOR ";
+  handle(node->index());
+  os_ << " in ";
+  handle(node->iter_domain());
+  os_ << ":\n";
+  handleScope(node->body());
+}
+
+void IrPrinter::handle(const kir::IfThenElse* node) {
+  indent() << "IF ";
+  handle(node->predicate());
+  os_ << ":\n";
+  handleScope(node->thenBody());
+  if (node->hasElse()) {
+    indent() << "ELSE:\n";
+    handleScope(node->elseBody());
+  }
+}
+
+void IrPrinter::handle(const kir::GridBroadcast* node) {
+  const auto* broadcast_op = node->broadcast_op();
+  indent();
+  handle(broadcast_op->out());
+  os_ << " = "
+      << "GRID_BROADCAST(in=";
+  handle(broadcast_op->in());
+  os_ << ")\n";
+  indent() << kTab << ".broadcast_buffer=";
+  handle(node->broadcast_buffer()->buffer());
+  os_ << "\n";
+  indent() << kTab << ".sync_buffer=";
+  handle(node->sync_buffer()->buffer());
+  os_ << "\n";
+}
+
+void IrPrinter::handle(const kir::GridReduction* node) {
+  indent();
+  handle(node->out());
+  os_ << " = "
+      << "GRID_REDUCTION(op='" << node->getReductionOpType() << "'"
+      << ", in=";
+  handle(node->in());
+  os_ << ", init=";
+  handle(node->init());
+  os_ << ", read_pred=";
+  if (node->predicate() != nullptr) {
+    handle(node->predicate());
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << ")\n";
+  os_ << ", write_pred=";
+  if (node->writePredicate() != nullptr) {
+    handle(node->writePredicate());
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << ")\n";
+  indent() << kTab << ".reduction_buffer=";
+  handle(node->reduction_buffer()->buffer());
+  os_ << "\n";
+  indent() << kTab << ".sync_buffer=";
+  handle(node->sync_buffer()->buffer());
+  os_ << "\n";
+}
+
+void IrPrinter::handle(const kir::GroupedGridReduction* node) {
+  indent() << "Grouped grid reduction(\n";
+  ++indent_size_;
+  for (const auto i : c10::irange(node->numReductions())) {
+    indent();
+    handle(node->output(i));
+    os_ << " = "
+        << "reduction(op='" << node->getReductionOpType(i) << "'"
+        << ", in=";
+    handle(node->input(i));
+    os_ << ", init=";
+    handle(node->initVal(i));
+    os_ << "\n";
+  }
+  indent() << kTab << ".read_pred=";
+  if (node->predicate() != nullptr) {
+    handle(node->predicate());
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << "\n";
+  indent() << kTab << ".write_pred=";
+  if (node->writePredicate() != nullptr) {
+    handle(node->writePredicate());
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << "\n";
+  for (const auto i : c10::irange(node->numReductions())) {
+    indent() << kTab << ".reduction_buffer=";
+    handle(node->reduction_buffers().at(i)->buffer());
+    os_ << "\n";
+  }
+  indent() << kTab << ".sync_buffer=";
+  handle(node->sync_buffer()->buffer());
+  os_ << "\n";
+}
+
+void IrPrinter::handle(const kir::GridWelford* node) {
+  const auto* welford_op = node->welford_op();
+  indent();
+  handle(welford_op->outVar());
+  os_ << ",";
+  handle(welford_op->outAvg());
+  os_ << ",";
+  handle(welford_op->outN());
+  os_ << " = "
+      << "GRID_WELFORD("
+      << "inAvg=";
+  handle(welford_op->inAvg());
+  if (!welford_op->inN()->isOneInt()) {
+    indent() << ", inVar=";
+    handle(welford_op->inVar());
+  }
+  indent() << ", inN=";
+  handle(welford_op->inN());
+  if (!welford_op->initN()->isZeroInt()) {
+    indent() << ", initVar=";
+    handle(welford_op->initVar());
+    os_ << " initAvg=";
+    handle(welford_op->initAvg());
+    os_ << " initN=";
+    handle(welford_op->initN());
+  }
+  indent() << ", read_pred=";
+  if (welford_op->predicate() != nullptr) {
+    handle(welford_op->predicate());
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << ")\n";
+  indent() << ", write_pred=";
+  if (welford_op->writePredicate() != nullptr) {
+    handle(welford_op->writePredicate());
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << ")\n";
+  indent() << kTab << ".var_buffer=";
+  handle(node->var_buffer()->buffer());
+  os_ << ".avg_buffer=";
+  handle(node->avg_buffer()->buffer());
+  os_ << ".n_buffer=";
+  handle(node->N_buffer()->buffer());
+  os_ << "\n";
+  indent() << kTab << ".sync_buffer=";
+  handle(node->sync_buffer()->buffer());
+  os_ << "\n";
+  indent() << kTab << ".grid_read_pred=";
+  if (node->predicate() != nullptr) {
+    handle(node->predicate());
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << "\n";
+  indent() << kTab << ".grid_write_pred=";
+  if (node->writePredicate() != nullptr) {
+    handle(node->writePredicate());
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << "\n";
+}
+
+void IrPrinter::handle(const kir::InitMagicZero* node) {
+  indent() << "NVFUSER_DEFINE_MAGIC_ZERO\n";
+}
+
+void IrPrinter::handle(const kir::UpdateMagicZero* node) {
+  indent() << "NVFUSER_UPDATE_MAGIC_ZERO\n";
+}
+
+void IrPrinter::handle(const kir::AllocateFusedReduction* node) {
+  indent() << "AllocateFusedReduction(reduction buffer=";
+  handle(node->out());
+  os_ << ")\n";
+}
+
+void IrTransformPrinter::handle(Fusion* f) {
+  auto all_vals = f->usedMathVals();
+
+  for (auto tv : ir_utils::filterByType<TensorView>(all_vals)) {
+    IrPrinter::handle(tv);
+    os() << "\n";
+    printTransforms(tv);
+  }
+}
+
+void IrTransformPrinter::printTransforms(TensorView* tv) {
+  auto root_domain = tv->domain()->getRootDomain();
+  os() << " root domain : (";
+  for (const auto root_idx : c10::irange(root_domain.size())) {
+    IrPrinter::handle(root_domain[root_idx]);
+    if (root_idx + 1 < root_domain.size()) {
+      os() << ",";
+    }
+  }
+  os() << ")\n";
+
+  if (tv->hasRFactor()) {
+    auto rfactor_domain = tv->domain()->getRFactorDomain();
+
+    auto all_exp = DependencyCheck::getAllExprsBetween(
+        {root_domain.begin(), root_domain.end()},
+        {rfactor_domain.begin(), rfactor_domain.end()});
+
+    for (auto exp : all_exp) {
+      os() << "  ";
+      IrPrinter::handle(exp);
+    }
+
+    os() << " rfactor domain : (";
+    for (const auto root_idx : c10::irange(rfactor_domain.size())) {
+      IrPrinter::handle(rfactor_domain[root_idx]);
+      if (root_idx + 1 < rfactor_domain.size()) {
+        os() << ",";
+      }
+    }
+    os() << ")\n";
+  }
+
+  auto from = tv->getMaybeRFactorDomain();
+  auto all_exp = DependencyCheck::getAllExprsBetween(
+      {from.begin(), from.end()},
+      {tv->domain()->domain().begin(), tv->domain()->domain().end()});
+
+  for (auto exp : all_exp) {
+    os() << "  ";
+    IrPrinter::handle(exp);
+  }
 }
 
 std::ostream& operator<<(std::ostream& os, const Statement* stmt) {
-  IRPrinter p(os);
+  IrPrinter p(os);
   p.handle(stmt);
   return os;
 }
 
 std::ostream& operator<<(std::ostream& os, Fusion* f) {
-  IRPrinter p(os);
+  IrPrinter p(os);
   FusionGuard guard(f);
   p.handle(f);
   return os;
@@ -978,6 +836,7 @@ std::ostream& operator<<(std::ostream& os, Fusion& f) {
   return os << &f;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

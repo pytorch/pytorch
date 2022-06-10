@@ -14,21 +14,13 @@ command -v doxygen >/dev/null 2>&1 || { echo >&2 "doxygen is not supported. Abor
 
 pushd "$(dirname "$0")/../../.."
 
-cp aten/src/ATen/common_with_cwrap.py tools/shared/cwrap_common.py
 cp torch/_utils_internal.py tools/shared
 
-python aten/src/ATen/gen.py \
-  -s aten/src/ATen \
-  -d build/aten/src/ATen \
-  aten/src/ATen/Declarations.cwrap \
-  aten/src/THCUNN/generic/THCUNN.h \
-  aten/src/ATen/nn.yaml \
-  aten/src/ATen/native/native_functions.yaml
+python -m torchgen.gen --source-path aten/src/ATen
 
 python tools/setup_helpers/generate_code.py                 \
-  --declarations-path build/aten/src/ATen/Declarations.yaml \
-  --nn-path aten/src
-
+  --native-functions-path aten/src/ATen/native/native_functions.yaml \
+  --tags-path aten/src/ATen/native/tags.yaml
 popd
 
 # Run doxygen and log all output.

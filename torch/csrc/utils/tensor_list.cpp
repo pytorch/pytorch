@@ -1,5 +1,6 @@
 #include <torch/csrc/utils/tensor_list.h>
 
+#include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_scalars.h>
@@ -19,24 +20,28 @@ static PyObject* recursive_to_list(
   auto n = sizes[dim];
   auto list = THPObjectPtr(PyList_New(n));
   if (!list) throw python_error();
-  for (int64_t i = 0; i < n; i++) {
+  for(const auto i : c10::irange(n)) {
     PyObject* obj = recursive_to_list(data, sizes, strides, dim + 1, scalarType, elementSize);
     if (!obj) throw python_error();
     PyList_SET_ITEM(list.get(), i, obj);
-    data += strides[dim] * elementSize;
+    auto advance_data_ptr = strides[dim] * elementSize;
+    TORCH_INTERNAL_ASSERT(data || (advance_data_ptr == 0));
+    data += advance_data_ptr;
   }
   return list.release();
 }
 
 PyObject* tensor_to_list(const Tensor& tensor) {
-  Tensor data = tensor;
-  if (data.options().backend() != Backend::CPU) {
+  TORCH_CHECK(!tensor.unsafeGetTensorImpl()->is_python_dispatch(), ".tolist() is not supported for tensor subclasses.");
+  Tensor data = tensor.resolve_conj().resolve_neg();
+  if (!data.device().is_cpu()) {
     pybind11::gil_scoped_release no_gil;
     data = data.toBackend(Backend::CPU);
   }
+  TORCH_CHECK(tensor.numel() == 0 || data.data_ptr(), "tolist() shouldn't be called on a tensor with unallocated storage");
   return recursive_to_list(
       (char*)data.data_ptr(), data.sizes(), data.strides(), 0,
-      data.scalar_type(), data.dtype().itemsize());
+      data.scalar_type(), tensor.numel() == 0 ? 0 : data.dtype().itemsize());
 }
 
 }}  // namespace torch::utils

@@ -1,7 +1,7 @@
 .. _amp-examples:
 
-Automatic Mixed Precision examples
-==================================
+CUDA Automatic Mixed Precision examples
+=======================================
 
 .. currentmodule:: torch.cuda.amp
 
@@ -18,6 +18,10 @@ gradients by minimizing gradient underflow, as explained :ref:`here<gradient-sca
 
 :class:`torch.cuda.amp.autocast` and :class:`torch.cuda.amp.GradScaler` are modular.
 In the samples below, each is used as its individual documentation suggests.
+
+(Samples here are illustrative.  See the
+`Automatic Mixed Precision recipe <https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html>`_
+for a runnable walkthrough.)
 
 .. contents:: :local:
 
@@ -169,7 +173,9 @@ Here's an ordinary example of an L2 penalty without gradient scaling or autocast
             loss = loss_fn(output, target)
 
             # Creates gradients
-            grad_params = torch.autograd.grad(loss, model.parameters(), create_graph=True)
+            grad_params = torch.autograd.grad(outputs=loss,
+                                              inputs=model.parameters(),
+                                              create_graph=True)
 
             # Computes the penalty term and adds it to the loss
             grad_norm = 0
@@ -184,8 +190,8 @@ Here's an ordinary example of an L2 penalty without gradient scaling or autocast
 
             optimizer.step()
 
-To implement a gradient penalty *with* gradient scaling, the loss passed to
-:func:`torch.autograd.grad` should be scaled.  The resulting gradients
+To implement a gradient penalty *with* gradient scaling, the ``outputs`` Tensor(s)
+passed to :func:`torch.autograd.grad` should be scaled.  The resulting gradients
 will therefore be scaled, and should be unscaled before being combined to create the
 penalty value.
 
@@ -203,8 +209,10 @@ Here's how that looks for the same L2 penalty::
                 output = model(input)
                 loss = loss_fn(output, target)
 
-            # Scales the loss for autograd.grad's backward pass, resulting in scaled grad_params
-            scaled_grad_params = torch.autograd.grad(scaler.scale(loss), model.parameters(), create_graph=True)
+            # Scales the loss for autograd.grad's backward pass, producing scaled_grad_params
+            scaled_grad_params = torch.autograd.grad(outputs=scaler.scale(loss),
+                                                     inputs=model.parameters(),
+                                                     create_graph=True)
 
             # Creates unscaled grad_params before computing the penalty. scaled_grad_params are
             # not owned by any optimizer, so ordinary division is used instead of scaler.unscale_:
@@ -288,42 +296,17 @@ The issues described here only affect :class:`autocast`.  :class:`GradScaler`\ '
 DataParallel in a single process
 --------------------------------
 
-:class:`torch.nn.DataParallel` spawns threads to run the forward pass on each device.
-The autocast state is thread local, so the following will not work::
+Even if :class:`torch.nn.DataParallel` spawns threads to run the forward pass on each device.
+The autocast state is propagated in each one and the following will work::
 
     model = MyModel()
     dp_model = nn.DataParallel(model)
 
     # Sets autocast in the main thread
     with autocast():
-        # dp_model's internal threads won't autocast.  The main thread's autocast state has no effect.
+        # dp_model's internal threads will autocast.
         output = dp_model(input)
-        # loss_fn still autocasts, but it's too late...
-        loss = loss_fn(output)
-
-The fix is simple.  Enable autocast as part of ``MyModel.forward``::
-
-    MyModel(nn.Module):
-        ...
-        @autocast()
-        def forward(self, input):
-           ...
-
-    # Alternatively
-    MyModel(nn.Module):
-        ...
-        def forward(self, input):
-            with autocast():
-                ...
-
-The following now autocasts in ``dp_model``'s threads (which execute ``forward``) and the main thread
-(which executes ``loss_fn``)::
-
-    model = MyModel()
-    dp_model = nn.DataParallel(model)
-
-    with autocast():
-        output = dp_model(input)
+        # loss_fn also autocast
         loss = loss_fn(output)
 
 DistributedDataParallel, one GPU per process

@@ -1,9 +1,9 @@
 ## @package predictor_exporter
 # Module caffe2.python.predictor.predictor_exporter
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.proto import caffe2_pb2
 from caffe2.proto import metanet_pb2
@@ -33,10 +33,11 @@ def get_predictor_exporter_helper(submodelNetName):
     return pred_meta
 
 
+# pyre-fixme[13]: Pyre can't detect the attribute initialization via cls.super() here
 class PredictorExportMeta(collections.namedtuple(
     'PredictorExportMeta',
-        'predict_net, parameters, inputs, outputs, shapes, name, \
-        extra_init_net, global_init_net, net_type, num_workers, trainer_prefix')):
+        'predict_net, parameters, inputs, outputs, shapes, name, '
+        'extra_init_net, global_init_net, net_type, num_workers, trainer_prefix')):
     """
     Metadata to be used for serializaing a net.
 
@@ -87,10 +88,11 @@ class PredictorExportMeta(collections.namedtuple(
             "Intersection: {}".format(set(parameters).intersection(outputs)))
         shapes = shapes or {}
 
-        if isinstance(predict_net, (core.Net, core.Plan)):
-            predict_net = predict_net.Proto()
+        if predict_net is not None:
+            if isinstance(predict_net, (core.Net, core.Plan)):
+                predict_net = predict_net.Proto()
 
-        assert isinstance(predict_net, (caffe2_pb2.NetDef, caffe2_pb2.PlanDef))
+            assert isinstance(predict_net, (caffe2_pb2.NetDef, caffe2_pb2.PlanDef))
         return super(PredictorExportMeta, cls).__new__(
             cls, predict_net, parameters, inputs, outputs, shapes, name,
             extra_init_net, global_init_net, net_type, num_workers, trainer_prefix)

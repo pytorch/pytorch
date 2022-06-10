@@ -13,6 +13,7 @@ namespace torch {
 namespace nn {
 
 LayerNormImpl::LayerNormImpl(const LayerNormOptions& options_) : options(options_) { // NOLINT(modernize-pass-by-value)
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -86,6 +87,7 @@ torch::Tensor CrossMapLRN2dImpl::forward(const torch::Tensor& input) {
 // ============================================================================
 
 GroupNormImpl::GroupNormImpl(const GroupNormOptions& options_) : options(options_) { // NOLINT(modernize-pass-by-value)
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 

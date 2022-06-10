@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import math
 
@@ -18,7 +18,7 @@ class TestErfOp(serial.SerializedTestCase):
     @given(
         X=hu.tensor(elements=hu.floats(min_value=-0.7, max_value=0.7)),
         **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_erf(self, X, gc, dc):
         op = core.CreateOperator('Erf', ["X"], ["Y"])
         self.assertReferenceChecks(gc, op, [X], lambda x: (np.vectorize(math.erf)(X),))

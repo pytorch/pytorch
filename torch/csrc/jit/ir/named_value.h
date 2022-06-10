@@ -1,5 +1,4 @@
 #pragma once
-#include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -35,6 +34,7 @@ struct NamedValue {
           (!std::is_same<decay_t<T>, NamedValue>::value &&
            !std::is_same<decay_t<T>, Value*>::value &&
            !std::is_same<decay_t<T>, IValue>::value)>>
+  // NOLINTNEXTLINE(bugprone-forwarding-reference-overload)
   NamedValue(T&& t) : NamedValue(IValue(std::forward<T>(t))) {}
 
   template <

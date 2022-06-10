@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
@@ -19,7 +19,7 @@ class TestClipTensorByScalingOp(serial.SerializedTestCase):
            use_additional_threshold=st.booleans(),
            inplace=st.booleans(),
            **hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_clip_tensor_by_scaling(self, n, d, threshold, additional_threshold,
                                     use_additional_threshold, inplace, gc, dc):
 

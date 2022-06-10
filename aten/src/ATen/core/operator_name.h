@@ -34,10 +34,15 @@ struct OperatorName final {
 
   // Returns true if we successfully set the namespace
   bool setNamespaceIfNotSet(const char* ns) {
-    std::ostringstream oss;
     if (!getNamespace().has_value()) {
-      oss << ns << "::" << name;
-      name = oss.str();
+      const auto ns_len = strlen(ns);
+      const auto old_name_size = name.size();
+      name.resize(ns_len + 2 + old_name_size);
+      // Shift current value of name to the end of the new space.
+      name.replace(name.size() - old_name_size, old_name_size, name, 0, old_name_size);
+      name.replace(0, ns_len, ns, ns_len);
+      name[ns_len] = ':';
+      name[ns_len + 1] = ':';
       return true;
     } else {
       return false;
@@ -72,8 +77,8 @@ inline bool operator!=(const OperatorName& lhs, const OperatorName& rhs) {
   return !operator==(lhs, rhs);
 }
 
-CAFFE2_API std::string toString(const OperatorName& opName);
-CAFFE2_API std::ostream& operator<<(std::ostream&, const OperatorName&);
+TORCH_API std::string toString(const OperatorName& opName);
+TORCH_API std::ostream& operator<<(std::ostream&, const OperatorName&);
 
 } // namespace c10
 

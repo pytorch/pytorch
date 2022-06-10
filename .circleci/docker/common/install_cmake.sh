@@ -4,6 +4,9 @@ set -ex
 
 [ -n "$CMAKE_VERSION" ]
 
+# Remove system cmake install so it won't get used instead
+apt-get remove cmake -y
+
 # Turn 3.6.3 into v3.6
 path=$(echo "${CMAKE_VERSION}" | sed -e 's/\([0-9].[0-9]\+\).*/v\1/')
 file="cmake-${CMAKE_VERSION}-Linux-x86_64.tar.gz"

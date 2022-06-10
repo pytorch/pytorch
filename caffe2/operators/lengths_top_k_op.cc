@@ -38,9 +38,11 @@ bool LengthsTopKOp<T, Context>::RunOnDevice() {
     // heap will hold the k_ largest values
     for (int64_t j = 0; j < input_len[i]; ++j) {
       const auto value = X_data[next_index++];
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (p_queue.size() < k_ || value > p_queue.top().first) {
         p_queue.push(std::make_pair(value, j));
       }
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (p_queue.size() > k_) {
         p_queue.pop();
       }

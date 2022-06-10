@@ -5,6 +5,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -84,7 +85,7 @@ class Im2ColOp final : public Operator<Context> {
 
         const size_t dx = X.numel() / N;
         const size_t dy = Y->numel() / N;
-        for (int n = 0; n < N; ++n) {
+        for (const auto n : c10::irange(N)) {
           const auto* xdata = X.template data<T>() + (n * dx);
           auto* ydata = Y->template mutable_data<T>() + (n * dy);
           math::Im2Col<T, Context, StorageOrder::NCHW>(
@@ -114,7 +115,7 @@ class Im2ColOp final : public Operator<Context> {
 
         const size_t dx = X.numel() / N;
         const size_t dy = Y->numel() / N;
-        for (int n = 0; n < N; ++n) {
+        for (const auto n : c10::irange(N)) {
           const auto* xdata = X.template data<T>() + (n * dx);
           auto* ydata = Y->template mutable_data<T>() + (n * dy);
           math::Im2Col<T, Context, StorageOrder::NHWC>(
@@ -230,7 +231,7 @@ class Col2ImOp final : public Operator<Context> {
     // could template-specialize this, but it's test code...
     switch (order_) {
       case StorageOrder::NCHW: {
-        for (int n = 0; n < N; ++n) {
+        for (const auto n : c10::irange(N)) {
           const auto* xdata = X.template data<T>() + (n * dx);
           auto* ydata = Y->template mutable_data<T>() + (n * dy);
           math::Col2Im<T, Context, StorageOrder::NCHW>(
@@ -253,7 +254,7 @@ class Col2ImOp final : public Operator<Context> {
         }
       }; break;
       case StorageOrder::NHWC: {
-        for (int n = 0; n < N; ++n) {
+        for (const auto n : c10::irange(N)) {
           const auto* xdata = X.template data<T>() + (n * dx);
           auto* ydata = Y->template mutable_data<T>() + (n * dy);
           math::Col2Im<T, Context, StorageOrder::NHWC>(

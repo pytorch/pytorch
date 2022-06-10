@@ -1,9 +1,9 @@
 ## @package core
 # Module caffe2.python.core
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from collections import namedtuple, OrderedDict, defaultdict
 from past.builtins import basestring
@@ -40,15 +40,36 @@ NameScope = scope.NameScope
 
 # Bring datatype enums to the main namespace
 class DataType:
-    pass
+    UNDEFINED = 0
+    FLOAT = 1
+    INT32 = 2
+    BYTE = 3
+    STRING = 4
+    BOOL = 5
+    UINT8 = 6
+    INT8 = 7
+    UINT16 = 8
+    INT16 = 9
+    INT64 = 10
+    FLOAT16 = 12
+    DOUBLE = 13
+    ZERO_COLLISION_HASH = 14
+    REBATCHING_BUFFER = 15
 
 
-def _InitDataType():
+def _CheckDataType():
+    # Verify that the DataType values defined above match the ones defined in
+    # the caffe2.proto file
     for name, value in caffe2_pb2.TensorProto.DataType.items():
-        setattr(DataType, name, value)
+        py_value = getattr(DataType, name, None)
+        if py_value != value:
+            raise AssertionError(
+                f"DataType {name} does not match the value defined in "
+                f"caffe2.proto: {py_value} vs {value}"
+            )
 
 
-_InitDataType()
+_CheckDataType()
 
 
 def _GetRegisteredOperators():
@@ -1307,7 +1328,7 @@ def recurrent_network_op_remap(op, prefix, blob_remap):
 
 def control_op_remap(op, prefix, blob_remap):
     net_arg_names = []
-    if op.type == "If":
+    if op.type == "If" or op.type == "AsyncIf":
         net_arg_names = ['then_net', 'else_net']
     else:
         net_arg_names = ['loop_net', 'cond_net']
@@ -1327,6 +1348,7 @@ DEFAULT_REMAP_FUNCS = {
     'RecurrentNetworkGradient': recurrent_network_op_remap,
     'If': control_op_remap,
     'While': control_op_remap,
+    'AsyncIf': control_op_remap,
 }
 
 
@@ -1447,12 +1469,15 @@ class Net(object):
         Net._net_names_used |= set([name])
         return name
 
-    def __init__(self, name_or_proto):
+    def __init__(self, name_or_proto, inplace=False):
         """
         Create a Net.
         Args:
-            name_or_proto:  If a NetDef is provided, clone it. Otherwise,
+            name_or_proto:  If a NetDef is provided, clone it (or take ownership,
+                            depending on the value of `inplace`). Otherwise,
                             create an empty net with the given name.
+            inplace: If a NetDef is provided, take ownership when `inplace` is True;
+                     otherwise, clone it.
         """
         self._input_record = None
         self._output_record = None
@@ -1465,23 +1490,25 @@ class Net(object):
         self._attr_dict = defaultdict(list)
         if type(name_or_proto) is caffe2_pb2.NetDef:
             proto = name_or_proto
-            # We rae initializing a network by a NetDef. In this case, we will
+            # We are initializing a network by a NetDef. In this case, we will
             # initialize our network with the given netdef.
-            self._net = caffe2_pb2.NetDef()
-            self._net.CopyFrom(proto)
+            if inplace:
+                self._net = proto
+            else:
+                self._net = caffe2_pb2.NetDef()
+                self._net.CopyFrom(proto)
 
             existing_outputs = [list(op.output) for op in self._net.op]
 
             self._external_input_map.update(list(self._net.external_input))
 
             # Set the next name index properly.
-            existing_names = set(
-                sum(
-                    [list(op.input) for op in self._net.op], []
-                ) + sum(
-                    existing_outputs, []
-                )
-            )
+            existing_names = set()
+            for op in self._net.op:
+                existing_names.update(list(op.input))
+            for output in existing_outputs:
+                existing_names.update(output)
+
             for outs in existing_outputs:
                 self._op_outputs.update(outs)
 
@@ -1506,6 +1533,10 @@ class Net(object):
         # make sure that this net name hasn't been used before
         self._net.name = Net._get_next_net_name(name)
 
+        # a map between prefix and ID for fast generation of blob names
+        self._next_blob_name_ids = {}
+
+
     def AppendNet(self, net, device_option=None):
         assert isinstance(net, Net)
         for i in net.Proto().external_input:
@@ -1524,7 +1555,8 @@ class Net(object):
         ops = net.Proto().op
         if device_option is not None:
             ops = [copy.deepcopy(op) for op in ops]
-            map(lambda x: x.device_option.CopyFrom(device_option), ops)
+            for op in ops:
+                op.device_option.CopyFrom(device_option)
             for op in ops:
                 if op.type == "RecurrentNetwork":
                     for arg in op.arg:
@@ -1936,12 +1968,14 @@ class Net(object):
             output_name = output_name_base
             if output_id is not None:
                 output_name += ':' + str(output_id)
-            index = 2
+            key = output_name
+            index = self._next_blob_name_ids.get(key, 2)
             while self.BlobIsDefined(str(ScopedBlobReference(output_name))):
                 output_name = output_name_base + '_' + str(index)
                 if output_id is not None:
                     output_name += ':' + str(output_id)
                 index += 1
+                self._next_blob_name_ids[key] = index
         else:
             output_name = self._net.name + '_blob_' + str(self._next_name_index)
             self._next_name_index += 1
@@ -2024,10 +2058,14 @@ class Net(object):
     def AddExternalInput(self, *inputs):
         assert len(inputs) > 0
         refs = []
+        input_name_set = set()
         for input in inputs:
             input_name = str(input)
-            assert str(input) not in self._external_input_map, (
-                'Net already contains an input named %s' % input_name)
+            assert (
+                input_name not in self._external_input_map
+                and input_name not in input_name_set
+            ), ("Net already contains an input named %s" % input_name)
+            input_name_set.add(input_name)
         for input in inputs:
             input_name = str(input)
             self._net.external_input.extend([input_name])
@@ -2087,7 +2125,7 @@ class Net(object):
             self._input_record = input_record
 
         for blob in self._input_record.field_blobs():
-            if blob not in self.external_inputs:
+            if not self.is_external_input(blob):
                 self.AddExternalInput(blob)
         return self._input_record
 
@@ -2332,6 +2370,9 @@ class Net(object):
         )
 
     def is_external_input(self, blob):
+        if self._recreate_lookup_tables:
+            self._RecreateLookupTables()
+
         name = str(blob)
         return name in self._external_input_map
 

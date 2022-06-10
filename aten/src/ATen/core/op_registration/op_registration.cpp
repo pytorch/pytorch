@@ -1,11 +1,17 @@
 #include <c10/macros/Macros.h>
 
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_registration.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #endif
 
 namespace c10 {
+namespace impl {
+void build_feature_required_feature_not_available(const char* feature) {
+    TORCH_CHECK(false, "Required feature '" + std::string(feature) + "' is not available");
+}
+}
 
 static_assert(std::is_nothrow_move_constructible<c10::optional<RegistrationHandleRAII>>::value, "");
 static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRAII>>::value, "");
@@ -97,6 +103,7 @@ void RegisterOperators::registerOp_(Options&& options) {
 
   for (auto& kernel : options.kernels) {
     registrars_.emplace_back(
+      // NOLINTNEXTLINE(performance-move-const-arg)
       Dispatcher::singleton().registerImpl(op_name, kernel.dispatch_key, std::move(kernel.func), std::move(kernel.cpp_signature), std::move(kernel.inferred_function_schema), "registered by RegisterOperators")
     );
   }
@@ -105,6 +112,7 @@ void RegisterOperators::registerOp_(Options&& options) {
 RegisterOperators::RegisterOperators() = default;
 RegisterOperators::~RegisterOperators() = default;
 RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
+// NOLINTNEXTLINE(bugprone-exception-escape)
 RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = default;
 
 } // namespace c10

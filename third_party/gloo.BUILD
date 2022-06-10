@@ -48,8 +48,8 @@ cc_library(
 cu_library(
     name = "gloo_cuda",
     srcs = [
-        "gloo/cuda.cu.cc",
-        "gloo/cuda_private.cu.cc",
+        "gloo/cuda.cu",
+        "gloo/cuda_private.cu",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -70,9 +70,10 @@ cc_library(
         ],
         exclude = [
             "gloo/cuda*.cc",
+            "gloo/common/win.cc",
             "gloo/rendezvous/redis_store.cc",
-        ],
-    ),
+        ]
+    ) + if_cuda(glob(["gloo/cuda*.cc"])),
     copts = [
         "-std=gnu++11",
         "-std=c++11",

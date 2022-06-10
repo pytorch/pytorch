@@ -73,7 +73,7 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
     H_out = Y->dim32(2);
     W_out = Y->ndim() > 3 ? Y->dim32(3) : 1;
 
-#if HIP_VERSION >= 303
+#if TORCH_HIP_VERSION >= 303
     CAFFE_ENFORCE(kernel_.size() == 2 || kernel_.size() == 3, "MIOpen supports only 2D and 3D pooling");
     MIOPEN_ENFORCE(miopenSetNdPoolingDescriptor(
         pooling_desc_,
@@ -107,7 +107,7 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
                     pad_l(),
                     stride_h(),
                     stride_w()));
-    
+
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(top_desc_, miopenTypeWrapper<T>::type, N_out, C_out, H_out, W_out));
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(bottom_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
 #endif
@@ -146,7 +146,7 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
 
  protected:
   size_t poolWsSize_;
-#if HIP_VERSION>=303
+#if TORCH_HIP_VERSION>=303
   int64_t* poolWs_;
   std::vector<int64_t> mio_input_dims;
   std::vector<int64_t> mio_output_dims;
@@ -228,7 +228,7 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
     const std::vector<int> X_HW_dims = GetDims(X);
     ConvPoolOpBase<HIPContext>::ComputePads(X_HW_dims);
 
-#if HIP_VERSION >= 303
+#if TORCH_HIP_VERSION >= 303
     CAFFE_ENFORCE(kernel_.size() == 2 || kernel_.size() == 3, "MIOpen supports only 2D and 3D pooling");
     MIOPEN_ENFORCE(miopenSetNdPoolingDescriptor(
         pooling_desc_,
@@ -237,11 +237,11 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
         kernel_.data(),
         pads_.data(),
         stride_.data()));
-    
+
     miopenIndexType_t index_type = miopenIndexUint64;
     MIOPEN_ENFORCE(miopenSetPoolingIndexType(
         pooling_desc_, index_type));
-    
+
     mio_input_dims = X.sizes().vec();
     std::vector<int> input_dims (begin(mio_input_dims), end(mio_input_dims));
     MIOPEN_ENFORCE(miopenSetTensorDescriptor(
@@ -276,7 +276,7 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
     T* dXdata = dX->template mutable_data<T>();
 
     if (mode_ == miopenPoolingMax) {
-#if HIP_VERSION>=303
+#if TORCH_HIP_VERSION>=303
       MIOPEN_ENFORCE(miopenPoolingGetWorkSpaceSizeV2(pooling_desc_, top_desc_, &poolWsSize_));
 #else
       MIOPEN_ENFORCE(miopenPoolingGetWorkSpaceSize(top_desc_, &poolWsSize_));
@@ -341,7 +341,7 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
 
  protected:
   size_t poolWsSize_;
-#if HIP_VERSION >= 303
+#if TORCH_HIP_VERSION >= 303
   int64_t* poolWs_;
   std::vector<int64_t> mio_input_dims;
   std::vector<int64_t> mio_output_dims;

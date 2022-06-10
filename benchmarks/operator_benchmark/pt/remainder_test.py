@@ -47,10 +47,15 @@ class RemainderOpBenchmark(op_bench.TorchBenchmarkBase):
         # +1 so we don't divide by zero
         self.divisor = (self.divisor * 40 + 1).to(dtype=dtype)
 
+        self.inputs = {
+            "dividend": self.dividend,
+            "divisor": self.divisor
+        }
+
         self.op_func = op_func
 
-    def forward(self):
-        return self.op_func(self.dividend, self.divisor)
+    def forward(self, dividend, divisor):
+        return self.op_func(dividend, divisor)
 
 
 op_bench.generate_pt_tests_from_op_list(remainder_ops_list,

@@ -7,6 +7,7 @@ using namespace at;
 std::vector<std::vector<int64_t>> sizes = {{1, 2, 3}, {1, 3, 2}, {2, 1, 3}, {3, 1, 2}, {3, 2, 1}, {2, 3, 1}};
 
 TEST(MemoryOverlapTest, TensorExpanded) {
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto size : sizes) {
     Tensor t = at::ones({1}).expand(size);
     EXPECT_FALSE(t.is_contiguous());
@@ -15,6 +16,7 @@ TEST(MemoryOverlapTest, TensorExpanded) {
 }
 
 TEST(MemoryOverlapTest, ScalarExpanded) {
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto size : sizes) {
     Tensor t = at::tensor(1).expand(size);
     EXPECT_FALSE(t.is_contiguous());
@@ -23,6 +25,7 @@ TEST(MemoryOverlapTest, ScalarExpanded) {
 }
 
 TEST(MemoryOverlapTest, NonContiguousTensor) {
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto size : sizes) {
     Tensor t = at::rand(size).transpose(1, 2).transpose(0, 2);
     if (!t.is_contiguous()) {
@@ -32,6 +35,7 @@ TEST(MemoryOverlapTest, NonContiguousTensor) {
 }
 
 TEST(MemoryOverlapTest, NonContiguousExpandedTensor) {
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto size : sizes) {
     Tensor t = at::rand(size).transpose(1, 2).transpose(0, 2);
     if (!t.is_contiguous()) {
@@ -52,6 +56,7 @@ TEST(MemoryOverlapTest, NonContiguousExpandedTensor) {
 }
 
 TEST(MemoryOverlapTest, ContiguousTensor) {
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto size : sizes) {
     Tensor t = at::rand(size);
     EXPECT_TRUE(t.is_contiguous());
@@ -60,6 +65,7 @@ TEST(MemoryOverlapTest, ContiguousTensor) {
 }
 
 TEST(MemoryOverlapTest, ContiguousExpandedTensor) {
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto size : sizes) {
     Tensor t = at::rand(size);
     for (auto size_to_add : {1, 2, 3, 4}) {

@@ -1,18 +1,24 @@
+# Owner(s): ["module: __torch_function__"]
+
 import torch
 import numpy as np
-import unittest
 import inspect
 import functools
 import pprint
+import pickle
+import collections
+import unittest
 
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
     get_overridable_functions,
     get_testing_overrides,
-    is_tensor_method_or_property
+    is_tensor_method_or_property,
+    TorchFunctionMode
 )
+from functools import partial
 
 Tensor = torch.Tensor
 
@@ -25,7 +31,7 @@ Tensor = torch.Tensor
 
 def foo(a, b, c=None):
     """A function multiple arguments and an optional argument"""
-    if any(type(t) is not Tensor for t in (a, b, c)) and has_torch_function((a, b, c)):
+    if has_torch_function((a, b, c)):
         return handle_torch_function(foo, (a, b, c), a, b, c=c)
     if c:
         return a + b + c
@@ -33,19 +39,19 @@ def foo(a, b, c=None):
 
 def bar(a):
     """A function with one argument"""
-    if type(a) is not Tensor and has_torch_function((a,)):
+    if has_torch_function((a,)):
         return handle_torch_function(bar, (a,), a)
     return a
 
 def baz(a, b):
     """A function with multiple arguments"""
-    if type(a) is not Tensor or type(b) is not Tensor and has_torch_function((a, b)):
+    if has_torch_function((a, b)):
         return handle_torch_function(baz, (a, b), a, b)
     return a + b
 
 def quux(a):
     """Used to test that errors raised in user implementations get propagated"""
-    if type(a) is not Tensor and has_torch_function((a,)):
+    if has_torch_function((a,)):
         return handle_torch_function(quux, (a,), a)
     return a
 
@@ -128,12 +134,13 @@ class DiagonalTensor(object):
     def tensor(self):
         return self._i * torch.eye(self._N)
 
-    def __torch_function__(self, func, types, args=(), kwargs=None):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-        if func not in self.handled_functions:
+        if func not in cls.handled_functions:
             return NotImplemented
-        return self.handled_functions[func](*args, **kwargs)
+        return cls.handled_functions[func](*args, **kwargs)
 
     def __eq__(self, other):
         if type(other) is type(self):
@@ -203,7 +210,8 @@ class SubTensor(torch.Tensor):
     This is useful for testing that the semantics for overriding torch
     functions are working correctly.
     """
-    def __torch_function__(self, func, types, args=(), kwargs=None):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
 
@@ -315,9 +323,16 @@ def generate_tensor_like_torch_implementations():
     torch_vars = vars(torch)
     untested_funcs = []
     testing_overrides = get_testing_overrides()
+    # test/test_cpp_api_parity.py monkeypatches torch.nn to have a new
+    # function sample_functional.  Depending on what order you run pytest
+    # collection, this may trigger the error here.  This is a hack to fix
+    # the problem.  A more proper fix is to make the "not tested" check
+    # a test on its own, and to make sure the monkeypatch is only installed
+    # for the span of the relevant test (and deleted afterwards)
+    testing_ignore = {"sample_functional"}
     for namespace, funcs in get_overridable_functions().items():
         for func in funcs:
-            if func not in testing_overrides:
+            if func not in testing_overrides and func.__name__ not in testing_ignore:
                 untested_funcs.append("{}.{}".format(namespace, func.__name__))
     msg = (
         "The following functions are not tested for __torch_function__ "
@@ -346,7 +361,8 @@ class TensorLike(object):
     This class is used to explicitly test that the full torch.tensor API
     can be overriden with a class that defines __torch_function__.
     """
-    def __torch_function__(self, func, types, args=(), kwargs=None):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
 
@@ -400,7 +416,7 @@ class TestTorchFunctionOverride(TestCase):
 
     def test_precedence_semantics(self):
         """Test semantics for __torch_function__ for functions that take
-        multiple arugments
+        multiple arguments
 
         For functions that take multiple arguments, the appropriate
         __torch_function__ implementation to call is determined by
@@ -533,6 +549,52 @@ class TestTorchFunctionOverride(TestCase):
         with self.assertRaises(TypeError):
             sn1 + s2
 
+    def test_base(self):
+        # https://github.com/szagoruyko/pytorchviz/issues/65
+        class DummyTensor(torch.Tensor):
+            pass
+
+        a = torch.ones(1)
+        c = DummyTensor(a)
+        self.assertTrue(c._is_view())
+        self.assertTrue(c._base is a)
+
+    def test_grad(self):
+        # Previously, Tensor-like objects that did not subclass from Tensor
+        # did not get wrapped into unary tuples before being passed into
+        # handle_torch_function, in contradiction with how Tensor-likes
+        # were handled
+        #
+        # NB: this asserts that the arguments get normalized into a tuple
+        # before entering the torch function handler; it could go the
+        # other way but beware https://github.com/pytorch/pytorch/issues/76037
+
+        class Dummy:
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                inputs, outputs = args
+                self.assertEqual(inputs, (x,))
+                self.assertEqual(outputs, (x,))
+                return -1
+
+        x = Dummy()
+        self.assertEqual(torch.autograd.grad(x, x), -1)
+
+    def test_pow_rpow(self):
+        class NothingImplemented(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return NotImplemented
+
+        class RPowOnly(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func is torch.Tensor.__rpow__:
+                    return -1
+                return NotImplemented
+
+        self.assertEqual(NothingImplemented() ** RPowOnly(), -1)
+
 
 def generate_tensor_like_override_tests(cls):
     from torch.testing._internal.generated.annotated_fn_args import annotated_args
@@ -548,7 +610,18 @@ def generate_tensor_like_override_tests(cls):
             def instance_gen():
                 return TensorLike()
 
+        # FIXME The following code does not support kwonly args without defaults.
+        # The fix is easy, as one just needs to save these args when generating the variable
+        # annotated_args. The problem is that, if one does so, one finds a number
+        # of functions that have problematic signatures in native_functions.yaml.
+        # Fixing these would be BC breaking, so hence this terrible hack
+        # https://github.com/pytorch/pytorch/issues/67008
+        kwargs = {}
+        if hasattr(func, "__name__") and "linalg_solve_triangular" in func.__name__:
+            kwargs = {"upper": True}
+
         func_args = []
+        is_method = is_tensor_method_or_property(func)
         if func in annotated_args:
             for arg in annotated_args[func]:
                 # Guess valid input to aten function based on type of argument
@@ -556,14 +629,16 @@ def generate_tensor_like_override_tests(cls):
                 if t.endswith('?'):
                     t = t[:-1]
                 if t == 'Tensor':
-                    if arg['name'] == 'self' and is_tensor_method_or_property(func):
+                    if is_method and arg['name'] == 'self':
                         # See "Note: properties and __get__"
                         func = func.__get__(instance_gen())
                         continue
                     func_args.append(instance_gen())
                 elif t == 'TensorList':
                     func_args.append([instance_gen(), instance_gen()])
-                elif t == 'IntArrayRef':
+                elif t == 'c10::List<c10::optional<Tensor>>':
+                    func_args.append([instance_gen(), instance_gen()])
+                elif t == 'IntArrayRef' or t == 'SymIntArrayRef':
                     size = arg.get('size', 2)
                     if size == 1:
                         func_args.append(1)
@@ -575,18 +650,33 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append(False)
                 elif t.startswith('int') or t in {'Dimname', 'DimnameList'}:
                     func_args.append(0)
+                elif t in {'Stream'}:
+                    func_args.append(torch.Stream())
                 elif t.startswith('float') or t == 'double':
                     func_args.append(1.0)
                 elif t in {'Generator', 'MemoryFormat', 'TensorOptions'}:
                     func_args.append(None)
                 elif t == 'ScalarType':
                     func_args.append(torch.float32)
-                elif t == 'std::string':
+                elif t == 'c10::string_view':
                     func_args.append('')
+                elif t == 'SymInt':
+                    # TODO: generate actual SymbolicInt
+                    func_args.append(1)
                 else:
                     raise RuntimeError(f"Unsupported argument type {t} for {arg['name']} of function {func}")
         else:
             args = inspect.getfullargspec(override)
+            try:
+                func_args = inspect.getfullargspec(func)
+                # Remove annotations from argspec
+                func_args = type(func_args)(**{**func_args, 'annotations': None})
+                if func_args != args:
+                    raise RuntimeError(f"Override for {func} doesn't match its argspec.\n"
+                                       + f"Original: {inspect.signature(func)}\n"
+                                       + f"Override: {inspect.signature(override)}")
+            except TypeError:
+                pass
             nargs = len(args.args)
             if args.defaults is not None:
                 nargs -= len(args.defaults)
@@ -595,12 +685,12 @@ def generate_tensor_like_override_tests(cls):
                 func_args += [instance_gen(), instance_gen()]
 
         def test(self):
-            ret = func(*func_args)
+            ret = func(*func_args, **kwargs)
             # ret is None for certain protocols, e.g., `__weakref__` and `__setitem__`
             # This is currently the best check but doesn't work for, for example,
             # Tensor.__add__ because it redirects to Tensor.add.
             # See note "_triggered wrapper"
-            if ret is None:
+            if not is_method or ret is None:
                 self.assertTrue(WRAPPED_TRIGGERED_IMPLS[func]._triggered)
                 return
 
@@ -644,39 +734,715 @@ def generate_tensor_like_override_tests(cls):
 
 generate_tensor_like_override_tests(TestTorchFunctionOverride)
 
+class Wrapper:
+    "Basic data container that knows how to unwrap itself"
+    def __init__(self, data):
+        self.__dict__["_data"] = data
+        self.__dict__["used_attrs"] = set()
+        self.__dict__["used_calls"] = set()
+
+    def __getattr__(self, name):
+        if name in self.__dict__:
+            return self.__dict__[name]
+        self.used_attrs.add(name)
+
+        val = getattr(self._data, name)
+
+        # If it's a method
+        if callable(val):
+            c = getattr(type(self._data), name)
+            # Don't append self to args if classmethod/staticmethod
+            if c is val:
+                return lambda *a, **kw: wrap(self.__torch_function__(c, (Wrapper,), args=a, kwargs=kw))
+            # Otherwise append self to args
+            return lambda *a, **kw: wrap(self.__torch_function__(c, (Wrapper,), args=(self,) + a, kwargs=kw))
+
+        return wrap(val)
+
+    def __setattr__(self, name, value):
+        if name in self.__dict__:
+            self.__dict__[name] = value
+
+        self.used_attrs.add(name)
+        setattr(self._data, name, unwrap(value))
+
+    def __setitem__(self, key, value):
+        self._data[unwrap(key)] = unwrap(value)
+
+    def __getitem__(self, key):
+        return wrap(self._data[unwrap(key)])
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        # Find an instance of this class in the arguments
+        args_of_this_cls = []
+        for a in args:
+            if isinstance(a, cls):
+                args_of_this_cls.append(a)
+            elif isinstance(a, collections.abc.Sequence):
+                args_of_this_cls.extend(el for el in a if isinstance(el, cls))
+        assert len(args_of_this_cls) > 0
+        for a in args_of_this_cls:
+            a.used_calls.add(func)
+        args = unwrap(tuple(args))
+        kwargs = {k: unwrap(v) for k, v in kwargs.items()}
+
+        return wrap(func(*args, **kwargs))
+
+    def __add__(self, other):
+        return self.__torch_function__(torch.add, (Wrapper,), (self, other))
+
+    def __mul__(self, other):
+        return self.__torch_function__(torch.mul, (Wrapper,), (self, other))
+
+    def __sub__(self, other):
+        return self.__torch_function__(torch.sub, (Wrapper,), (self, other))
+
+    def __truediv__(self, other):
+        return self.__torch_function__(torch.true_divide, (Wrapper,), (self, other))
+
+    def __floordiv__(self, other):
+        return self.__torch_function__(torch.floor_divide, (Wrapper,), (self, other))
+
+    def __ge__(self, other):
+        return self.__torch_function__(torch.ge, (Wrapper,), (self, other))
+
+    def __gt__(self, other):
+        return self.__torch_function__(torch.gt, (Wrapper,), (self, other))
+
+    def __lt__(self, other):
+        return self.__torch_function__(torch.lt, (Wrapper,), (self, other))
+
+    def __le__(self, other):
+        return self.__torch_function__(torch.le, (Wrapper,), (self, other))
+
+    def __eq__(self, other):
+        return self.__torch_function__(torch.eq, (Wrapper,), (self, other))
+
+    def __ne__(self, other):
+        return self.__torch_function__(torch.ne, (Wrapper,), (self, other))
+
+    def __bool__(self):
+        return self.__torch_function__(torch.Tensor.__bool__, (Wrapper,), (self,))
+
+    def __int__(self):
+        return self.__torch_function__(torch.Tensor.__int__, (Wrapper,), (self,))
+
+    def __len__(self):
+        return len(self._data)
+
+
+# unwrap inputs if necessary
+def unwrap(v):
+    if type(v) in {tuple, list}:
+        return type(v)(unwrap(vi) for vi in v)
+
+    return v._data if isinstance(v, Wrapper) else v
+
+# wrap inputs if necessary
+def wrap(v):
+    if type(v) in {tuple, list}:
+        return type(v)(wrap(vi) for vi in v)
+
+    return Wrapper(v) if isinstance(v, torch.Tensor) else v
+
 class TestEinsumOverride(TestCase):
     "Regression test for gh-38479"
     def test_wrapper(self):
-        class Wrapper():
-            "Basic data container that knows how to unwrap itself"
-            def __init__(self, data):
-                self.data = data
-
-            def __torch_function__(self, func, types, args=(), kwargs=None):
-                if kwargs is None:
-                    kwargs = {}
-
-                # unwrap inputs if necessary
-                def unwrap(v):
-                    return v.data if isinstance(v, Wrapper) else v
-
-                args = map(unwrap, args)
-                kwargs = {k: unwrap(v) for k, v in kwargs.items()}
-
-                return func(*args, **kwargs)
-
         x = Wrapper(torch.randn(5))
         y = Wrapper(torch.randn(4))
-        self.assertTrue(torch.allclose(torch.einsum('i,j->ij', x, y),
-                                       torch.ger(x, y)))
+        self.assertEqual(torch.einsum('i,j->ij', x, y)._data,
+                         torch.ger(x, y)._data)
 
         # in the old einsum interface, `operands` is a list
         a = Wrapper(torch.randn(2, 3))
         b = Wrapper(torch.randn(5, 3, 7))
         c = Wrapper(torch.randn(2, 7))
-        self.assertTrue(torch.allclose(torch.einsum('ik,jkl,il->ij', [a, b, c]),
-                                       torch.nn.functional.bilinear(a, c, b)))
+        self.assertEqual(torch.einsum('ik,jkl,il->ij', [a, b, c])._data,
+                         torch.nn.functional.bilinear(a, c, b)._data)
+
+class TestGradCheckOverride(TestCase):
+    "Test that wrappers work with gradcheck."
+    def test_gradcheck(self):
+        from torch.testing._internal.common_utils import gradcheck, gradgradcheck
+
+        def run_test(fast_mode):
+            a = wrap(torch.tensor(5.0, dtype=torch.double))
+            b = wrap(torch.tensor(6.0, dtype=torch.double))
+
+            a.requires_grad = True
+            b.requires_grad = True
+
+            gradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False, fast_mode=fast_mode)
+            gradgradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False, fast_mode=fast_mode)
+
+            total_used_attrs = a.used_attrs.union(b.used_attrs)
+            total_used_calls = a.used_calls.union(b.used_calls)
+
+            # These attributes (and the functions below) may change
+            # if the gradcheck implementation changes. It's best to
+            # aim for attributes that may be commonly present on other
+            # Tensor-likes.
+            expected_used_attrs = {
+                'data',
+                'dtype',
+                'is_floating_point',
+                'is_sparse',
+                'is_sparse_csr',
+                'layout',
+                'new_zeros',
+                'numel',
+                'requires_grad',
+                'requires_grad_',
+                'retain_grad',
+                'size',
+                'stride',
+            }
+            if fast_mode:
+                expected_used_attrs.add('is_complex')
+                expected_used_attrs.add('device')
+            self.assertEqual(expected_used_attrs, total_used_attrs)
+
+            expected_used_calls = {
+                torch.Tensor.new_zeros,
+                torch.Tensor.size,
+                torch.Tensor.is_floating_point,
+                torch.Tensor.numel,
+                torch.Tensor.retain_grad,
+                torch.Tensor.stride,
+                torch.Tensor.requires_grad_,
+                torch.autograd.grad,
+                torch.add,
+            }
+            if fast_mode:
+                expected_used_calls.add(torch.Tensor.is_complex)
+            self.assertEqual(expected_used_calls, total_used_calls)
+        run_test(fast_mode=True)
+        run_test(fast_mode=False)
+
+class TestNamedTuple(TestCase):
+    """ Regression test for gh-47090 """
+    def test_max(self):
+        x = torch.tensor([1, 2])
+        xs = x.as_subclass(SubTensor2)
+        r = torch.max(x, dim=0)
+        rs = torch.max(xs, dim=0)
+        self.assertEqual(type(r), type(rs))
+        self.assertEqual(r, rs)
+
+class TestGradNewOnesOverride(TestCase):
+    """ Regression test for gh-47069 """
+    def test_newones(self):
+        t = torch.tensor([1, 2]).as_subclass(SubTensor2)
+        n = t.new_ones((1, 2))
+        self.assertEqual(type(n), SubTensor2)
+
+class TestPickle(TestCase):
+    "Regression test for gh-47051"
+    def test_pickle(self):
+        t = torch.tensor([1]).as_subclass(SubTensor2)
+        t.abcd = "e"
+        t2 = pickle.loads(pickle.dumps(t))
+        self.assertIs(type(t2), SubTensor2)
+        self.assertEqual(t2.abcd, "e")
+
+class TestBroadcastAllOverride(TestCase):
+    """ test for gh-37141 """
+    def test_broadcast_all(self):
+        from torch.distributions.utils import broadcast_all
+        a = torch.tensor([1.2, 3.4, 5.6])
+        a_w = Wrapper(a)
+        b = torch.tensor(5.0)
+        b_w = Wrapper(b)
+        c = torch.tensor([5.0, 5.0, 5.0])
+
+        o_1 = broadcast_all(a_w, b_w)
+        self.assertTrue(isinstance(o_1[0], Wrapper))
+        self.assertTrue(isinstance(o_1[1], Wrapper))
+        self.assertEqual(o_1[0]._data, a)
+        self.assertEqual(o_1[1]._data, c)
+
+        o_2 = broadcast_all(a_w, b)
+        self.assertTrue(isinstance(o_2[0], Wrapper))
+        self.assertTrue(isinstance(o_2[1], Wrapper))
+        self.assertEqual(o_2[0]._data, a)
+        self.assertEqual(o_2[1]._data, c)
+
+class TestWrapTorchFunction(TestCase):
+    def test_wrap_torch_function(self):
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs):
+                return -1
+
+        def dispatcher(a):
+            return (a,)
+
+        @torch.overrides.wrap_torch_function(dispatcher)
+        def f(a):
+            return a
+
+        self.assertEqual(f(A()), -1)
+
+class TestIndexing(TestCase):
+    """ Regression tests for gh-46277 """
+    def test_getitem(self):
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                return -1
+
+        t = torch.tensor([5])
+        self.assertEqual(t[A()], -1)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_getitem_subclass(self):
+        class A(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                return -1
+
+        t = torch.tensor([5])
+        self.assertEqual(t[A()], -1)
+        self.assertEqual(t[5, A()], -1)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_setitem(self):
+        triggered = set()
+
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[A()] = 1
+        t[5, A()] = 1
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_setitem_val(self):
+        triggered = set()
+
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[0] = A()
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_setitem_subclass(self):
+        triggered = set()
+
+        class A(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[A()] = 1
+        t[5, A()] = 1
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
+
+
+class TestIterator(TestCase):
+    # Regression test for gh-54457
+    def test_iterator(self):
+        t = torch.tensor([5, 6, 7]).as_subclass(SubTensor2)
+        it = iter(t)
+        self.assertIs(type(next(it)), SubTensor2)
+        self.assertIs(type(next(it)), SubTensor2)
+        self.assertIs(type(next(it)), SubTensor2)
+
+
+class TestRNN(TestCase):
+    # Regression test for gh-55868
+    def test_rnn(self):
+        model = torch.nn.RNN(10, 20, 2)
+        input = Wrapper(torch.randn(1, 5, 10))
+        model(input)
+
+
+class TestDisabledTorchFunction(TestCase):
+    # Regression test for gh-64687
+    def test_parameter_does_not_prevent_dispatch(self):
+        class MyTensor():
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return "called"
+
+        t1 = MyTensor()
+        t2 = torch.nn.Parameter(torch.rand(2, 2))
+        self.assertEqual(torch.add(t2, t1), "called")
+
+        inp = torch.rand(10, 10)
+        self.assertEqual(torch.nn.functional.linear(inp, t1, t2), "called")
+        self.assertEqual(torch.nn.functional.linear(inp, t2, t1), "called")
+
+class TestResolveName(TestCase):
+    def test_resolve_name(self):
+        for cs in get_overridable_functions().values():
+            for c in cs:
+                self.assertEqual(
+                    eval(torch.overrides.resolve_name(c)),
+                    c,
+                    msg=f"{c}, {torch.overrides.resolve_name(c)}"
+                )
+
+class TestTorchFunctionWarning(TestCase):
+    def test_warn_on_invalid_torch_function(self):
+        class Bad1():
+            def __torch_function__(self, *args, **kwargs):
+                pass
+
+        class Bad2(torch.Tensor):
+            def __torch_function__(self, *args, **kwargs):
+                pass
+
+        a = Bad1()
+        for a in (Bad1(), Bad2()):
+            with self.assertWarnsRegex(DeprecationWarning, "as a plain method is deprecated"):
+                # Function that handles torch_function on the python side
+                torch.nn.functional.dropout(a)
+
+            with self.assertWarnsRegex(UserWarning, "as a plain method is deprecated"):
+                # Function that handles torch_function in C++
+                torch.abs(a)
+
+@unittest.skipIf(TEST_WITH_CROSSREF, "not run with crossref")
+class TestTorchFunctionMode(TestCase):
+    def test_basic(self):
+        class A(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                return -1
+        # NB: factory functions get overridden too!
+        x = torch.randn(1)
+        with torch.overrides.push_torch_function_mode(A):
+            self.assertEqual(torch.randn(3), -1)
+            self.assertEqual(torch.add(x, x), -1)
+            self.assertEqual(torch.split(None, [2]), -1)  # python side
+            self.assertEqual(bar(x), -1)
+
+    def test_factory_override(self):
+        class A(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                return -1
+
+        with torch.overrides.push_torch_function_mode(A):
+            self.assertEqual(torch.tensor([1]), -1)
+            self.assertEqual(torch.sparse_coo_tensor(1, 1, 1), -1)
+            self.assertEqual(torch.sparse_csr_tensor(1, 1, 1), -1)
+            self.assertEqual(torch._sparse_coo_tensor_unsafe(1, 1, (1, 1)), -1)
+            self.assertEqual(torch._sparse_csr_tensor_unsafe(1, 1, 1, (1, 1)), -1)
+            self.assertEqual(torch.as_tensor([1]), -1)
+
+    def test_enable_torch_function_mode_with_tensor_subclass(self):
+        x = torch.randn(1)
+        with torch.overrides.enable_torch_function_mode(SubTensor):
+            self.assertEqual(torch.mm(x, x), -1)
+
+    def test_modes_handle_first(self):
+        class A(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                return -40
+
+        x = SubTensor()
+        with torch.overrides.push_torch_function_mode(A):
+            self.assertEqual(torch.neg(x), -40)
+            self.assertEqual(torch.mean(x), -40)
+            self.assertEqual(torch.mm(x, x), -40)
+            self.assertEqual(bar(x), -40)
+
+    def test_modes_return_notimplemented(self):
+        class MyMode(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                return NotImplemented
+
+        x = SubTensor()
+        with torch.overrides.push_torch_function_mode(MyMode):
+            self.assertEqual(torch.mean(x), 0)
+            self.assertEqual(torch.mm(x, x), -1)
+            self.assertEqual(bar(x), 1)
+            self.assertRaisesRegex(
+                TypeError, r'SubTensor.+MyMode',
+                lambda: self.assertEqual(torch.max(x, x)))
+
+    def test_mode_stack(self):
+        logs = []
+
+        class Logger(TorchFunctionMode):
+            def __init__(self, name):
+                self.name = name
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                logs.append(self.name)
+                return func(*args, **kwargs)
+
+        x = torch.randn(1)
+        with torch.overrides.push_torch_function_mode(partial(Logger, "A")):
+            with torch.overrides.push_torch_function_mode(partial(Logger, "B")):
+                torch.mean(x)
+
+        self.assertEqual(logs, ["B", "A"])
+
+    def test_push_mode_instance_errors(self):
+        class A(TorchFunctionMode):
+            pass
+        with self.assertRaisesRegex(ValueError, 'instance of TorchFunctionMode'):
+            with torch.overrides.push_torch_function_mode(A()):
+                pass
+
+    def test_push_mode_returns_unrelated(self):
+        with self.assertRaisesRegex(ValueError, 'return a TorchFunctionMode'):
+            with torch.overrides.push_torch_function_mode(lambda *, inner: None):
+                pass
+
+    def test_enable_torch_function_mode_trivial(self):
+        class A(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                return -40
+        a = A()
+        with torch.overrides.enable_torch_function_mode(a):
+            with torch.overrides.enable_torch_function_mode(a):
+                self.assertEqual(bar(None), -40)
+
+    def test_enable_torch_function_mode_replace(self):
+        class A(TorchFunctionMode):
+            def __init__(self, val):
+                self.val = val
+
+            def __torch_function__(self, *args, **kwargs):
+                return self.val
+        a1 = A(-40)
+        a2 = A(-41)
+        with torch.overrides.enable_torch_function_mode(a1):
+            with torch.overrides.enable_torch_function_mode(a2, replace=a1):
+                self.assertEqual(bar(None), -41)
+
+    def test_enable_torch_function_mode_ignore_preexisting(self):
+        class A(TorchFunctionMode):
+            def __init__(self, val):
+                self.val = val
+
+            def __torch_function__(self, *args, **kwargs):
+                return self.val
+        a1 = A(-40)
+        a2 = A(-41)
+        with torch.overrides.enable_torch_function_mode(a1):
+            with torch.overrides.enable_torch_function_mode(a2, ignore_preexisting=True):
+                self.assertEqual(bar(None), -41)
+
+    def test_ctor_no_inner(self):
+        class A(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                return torch.zeros([])
+
+        with torch.overrides.enable_torch_function_mode(A()):
+            x = torch.randn((3, 4))
+
+        self.assertEqual(x, torch.zeros([]))
+
+    def test_with_mode(self):
+        class ErrorA(RuntimeError):
+            pass
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                raise ErrorA()
+
+        with self.assertRaises(ErrorA):
+            with A():
+                torch.empty([])
+
+    def test_with_mode_created_separately(self):
+        class ErrorA(RuntimeError):
+            pass
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                raise ErrorA()
+
+        x = A()
+        with self.assertRaises(ErrorA):
+            with x:
+                torch.empty([])
+
+    def test_with_nested_modes(self):
+        out = []
+
+        class A(TorchFunctionMode):
+            def __init__(self, msg):
+                self.msg = msg
+
+            def __torch_function__(self, func, _, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                out.append(self.msg)
+                return func(*args, **kwargs)
+
+        with A("layer1"):
+            with A("layer2"):
+                torch.empty([])
+
+        self.assertEqual(out, ["layer2", "layer1"])
+
+    def test_error_using_same_mode(self):
+        class A(TorchFunctionMode):
+            pass
+
+        x = A()
+        with x:
+            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode"):
+                with x:
+                    pass
+
+    def test_error_using_class_method_on_mode(self):
+        class A(TorchFunctionMode):
+            @classmethod
+            def __torch_function__(cls, func, _, args=(), kwargs=None):
+                return func(args, kwargs)
+
+        x = torch.tensor(5.)
+        with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
+            with A():
+                x + x
+
+    def test_reentrant_mode_idiom(self):
+        log = []
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                log.append(func)
+                if func is torch.sub:
+                    with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
+                        input, other = args
+                        assert not kwargs
+                        return torch.add(input, other, alpha=-1)
+                return func(*args, **kwargs)
+
+        x = torch.randn(1)
+        y = torch.randn(1)
+        with torch.overrides.push_torch_function_mode(A):
+            torch.sub(x, y)
+        # add hits the torch function again!
+        self.assertEqual(log, [torch.sub, torch.add])
+
+    def test_nn_parse_to(self):
+        # This failed because the parser thinks the function is called to()
+        # but it's actually called _parse_to()
+
+        called = False
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                nonlocal called
+                if kwargs is None:
+                    kwargs = {}
+                called = True
+                return func(*args, **kwargs)
+
+        with torch.overrides.push_torch_function_mode(A):
+            torch._C._nn._parse_to('cpu')
+
+        self.assertTrue(called)
+
+    def test_distributions_bernoulli(self):
+        # This failed because improper use of has_torch_function when
+        # is_tensor_like should have been used instead, inside the
+        # broadcasting logic called by distributions (Bernoulli doesn't
+        # matter per se)
+
+        called = False
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                nonlocal called
+                if kwargs is None:
+                    kwargs = {}
+                called = True
+                return func(*args, **kwargs)
+
+        with torch.overrides.push_torch_function_mode(A):
+            torch.distributions.Bernoulli(0.3)
+
+        self.assertTrue(called)
+
+    def test_mode_notimplemented_loop(self):
+        # Default tensor subclass implementation disables torch function;
+        # when we redispatch to mode we must not treat the objects as
+        # eligible
+
+        called = 0
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                nonlocal called
+                if kwargs is None:
+                    kwargs = {}
+                called += 1
+                # The first time we call, the mode sees an active type that
+                # it doesn't know how to deal with.  The second time, we're
+                # instructed to treat it "as if it were a tensor", and so
+                # we keep going.  I'm not entirely clear if the subclasses
+                # disappearing from types is the correct way to do it.
+                if any(t is not torch.Tensor for t in types):
+                    return NotImplemented
+                else:
+                    return func(*args, **kwargs)
+
+        class B(torch.Tensor):
+            pass
+
+        b = B()
+
+        with torch.overrides.push_torch_function_mode(A):
+            r = torch.neg(b)
+
+        self.assertIs(type(r), B)
+        self.assertEqual(called, 2)
+
+        called = 0
+
+        with torch.overrides.push_torch_function_mode(A):
+            r = bar(b)
+
+        self.assertIs(type(r), B)
+        self.assertEqual(called, 2)
+
+    def test_disable_subclass_not_mode(self):
+        called = False
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                nonlocal called
+                if kwargs is None:
+                    kwargs = {}
+                called = True
+                return func(*args, **kwargs)
+
+        class B(torch.Tensor):
+            pass
+
+        x = B(torch.randn(5))
+        with torch.overrides.push_torch_function_mode(A):
+            with torch._C.DisableTorchFunction():
+                self.assertNotIsInstance(torch.sum(x), B)
+
+        self.assertTrue(called)
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

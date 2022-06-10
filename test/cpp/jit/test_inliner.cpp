@@ -1,4 +1,4 @@
-#include <test/cpp/jit/test_base.h>
+#include <gtest/gtest.h>
 
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/module.h>
@@ -36,18 +36,16 @@ struct InlinerGuard {
   bool oldState_;
 };
 
-void testInliner() {
-  {
-    // disable automatic inlining so we can test it manually
-    InlinerGuard guard(/*shouldInline=*/false);
+TEST(InlinerTest, Basic) {
+  // disable automatic inlining so we can test it manually
+  InlinerGuard guard(/*shouldInline=*/false);
 
-    CompilationUnit cu(testSource);
-    auto& fn = cu.get_function("foo3");
+  CompilationUnit cu(testSource);
+  auto& fn = cu.get_function("foo3");
 
-    auto g = fn.graph();
-    Inline(*g);
-    FileCheck().check_count("prim::Print", 3)->run(*g);
-  }
+  auto g = toGraphFunction(fn).graph();
+  Inline(*g);
+  FileCheck().check_count("prim::Print", 3)->run(*g);
 }
 } // namespace jit
 } // namespace torch

@@ -1,9 +1,9 @@
 ## @package db_file_reader
 # Module caffe2.python.db_file_reader
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, scope, workspace, _import_c_extension as C
 from caffe2.python.dataio import Reader
@@ -118,7 +118,7 @@ class DBFileReader(Reader):
             )
         )
         col_names = [
-            blob_name[len(blob_prefix):] for blob_name in workspace.Blobs()
+            blob_name[len(blob_prefix):] for blob_name in sorted(workspace.Blobs())
             if blob_name.startswith(blob_prefix)
         ]
         schema = from_column_list(col_names)

@@ -32,7 +32,7 @@ constexpr auto kInternalModule = "torch.distributed.rpc.internal";
 struct PythonTypeResolver : public jit::Resolver {
   std::shared_ptr<jit::SugaredValue> resolveValue(
       const std::string& /* unused */,
-      torch::jit::Function& /* unused */,
+      torch::jit::GraphFunction& /* unused */,
       const jit::SourceRange& /* unused */) override {
     TORCH_INTERNAL_ASSERT(
         false, "RPC Type resolver does not need to resolve value");
@@ -81,6 +81,9 @@ void PythonRpcHandler::init() {
     pySerialize_ = getFunction(rpcInternal, "serialize");
     pyDeserialize_ = getFunction(rpcInternal, "deserialize");
     pyHandleException_ = getFunction(rpcInternal, "_handle_exception");
+
+    rrefTypeFunctions_.onOwner_ = getFunction(rpcApi, "_rref_typeof_on_owner");
+    rrefTypeFunctions_.onUser_ = getFunction(rpcApi, "_rref_typeof_on_user");
 
     rrefProxyFunctions_.rpcSync_ = getFunction(rpcApi, "rpc_sync");
     rrefProxyFunctions_.rpcAsync_ = getFunction(rpcApi, "rpc_async");
@@ -187,6 +190,11 @@ TypePtr PythonRpcHandler::parseTypeFromStr(const std::string& type_str) {
 const PythonRpcHandler::RRefProxyFunctions& PythonRpcHandler::
     getRRefProxyFunctions() const {
   return rrefProxyFunctions_;
+}
+
+const PythonRpcHandler::RRefTypeFunctions& PythonRpcHandler::
+    getRRefTypeFunctions() const {
+  return rrefTypeFunctions_;
 }
 
 } // namespace rpc

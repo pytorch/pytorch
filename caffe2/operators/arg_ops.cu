@@ -2,8 +2,8 @@
 
 #include <limits>
 
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_reduce.cuh>
-#include <cub/cub.cuh>
 
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
@@ -72,6 +72,8 @@ bool ArgMaxReducer<CUDAContext>::operator()(
       std::numeric_limits<T>::lowest(),
       X,
       Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -98,6 +100,8 @@ bool ArgMinReducer<CUDAContext>::operator()(
       std::numeric_limits<T>::max(),
       X,
       Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

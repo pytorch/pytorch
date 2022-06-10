@@ -249,6 +249,7 @@ template class MaxUnpoolImpl<3, MaxUnpool3dImpl>;
 
 FractionalMaxPool2dImpl::FractionalMaxPool2dImpl(const FractionalMaxPool2dOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -268,7 +269,7 @@ void FractionalMaxPool2dImpl::reset() {
     if (!(0 < output_ratio[0] && output_ratio[0] < 1 &&
           0 < output_ratio[1] && output_ratio[1] < 1)) {
       TORCH_CHECK(false, "output_ratio must be between 0 and 1 (got ", output_ratio, ")");
-    }           
+    }
   }
 }
 
@@ -290,6 +291,7 @@ void FractionalMaxPool2dImpl::pretty_print(std::ostream& stream) const {
 
 FractionalMaxPool3dImpl::FractionalMaxPool3dImpl(const FractionalMaxPool3dOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -306,11 +308,11 @@ void FractionalMaxPool3dImpl::reset() {
   }
   if (options.output_ratio() != c10::nullopt) {
     at::ArrayRef<double> output_ratio = at::ArrayRef<double>(options.output_ratio().value());
-    if (!(0 < output_ratio[0] && output_ratio[0] < 1 && 
+    if (!(0 < output_ratio[0] && output_ratio[0] < 1 &&
           0 < output_ratio[1] && output_ratio[1] < 1 &&
           0 < output_ratio[2] && output_ratio[2] < 1)) {
       TORCH_CHECK(false, "output_ratio must be between 0 and 1 (got ", output_ratio, ")");
-    }           
+    }
   }
 }
 

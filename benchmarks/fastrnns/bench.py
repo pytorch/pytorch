@@ -1,4 +1,3 @@
-from __future__ import print_function
 import argparse
 from collections import namedtuple
 import torch
@@ -7,7 +6,9 @@ import sys
 import json
 import copy
 import time
+from torch.autograd.profiler import record_function
 
+from .fuser import set_fuser
 from .runner import get_nn_runners
 
 
@@ -73,7 +74,8 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
         gc.collect()
 
         fwd_start_event.record()
-        forward_output = modeldef.forward(*modeldef.inputs)
+        with record_function("## forward ##"):
+            forward_output = modeldef.forward(*modeldef.inputs)
         fwd_end_event.record()
 
         # XXX: Use if need to print something
@@ -92,9 +94,10 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
         bwd_end_event.record()
 
         if modeldef.backward is not None:
-            for param in modeldef.params:
-                assert param.grad is not None
-                param.grad.data.zero_()
+            with torch.no_grad():
+                for param in modeldef.params:
+                    assert param.grad is not None
+                    param.grad.zero_()
 
         if device == 'cuda':
             torch.cuda.synchronize()
@@ -226,37 +229,7 @@ if __name__ == '__main__':
     parser.add_argument('--cuda_pointwise_block_size', default=None, type=int)
 
     args = parser.parse_args()
-    assert args.fuser in ['te', 'old', 'none']
-    if args.fuser == 'te':
-        torch._C._jit_set_profiling_executor(True)
-        torch._C._jit_set_profiling_mode(True)
-        torch._C._jit_set_bailout_depth(20)
-        torch._C._jit_override_can_fuse_on_cpu(False)
-        torch._C._jit_override_can_fuse_on_gpu(False)
-        torch._C._jit_set_texpr_fuser_enabled(True)
-    elif args.fuser == 'old':
-        torch._C._jit_set_profiling_executor(False)
-        torch._C._jit_set_profiling_mode(False)
-        torch._C._jit_override_can_fuse_on_gpu(True)
-        torch._C._jit_set_texpr_fuser_enabled(False)
-    elif args.fuser == 'none':
-        torch._C._jit_set_profiling_executor(False)
-        torch._C._jit_set_profiling_mode(False)
-        torch._C._jit_override_can_fuse_on_gpu(False)
-        torch._C._jit_override_can_fuse_on_cpu(False)
-        torch._C._jit_set_texpr_fuser_enabled(False)
-
-    # --executor overrides settings of --fuser
-    if args.executor == 'profiling':
-        torch._C._jit_set_profiling_executor(True)
-        torch._C._jit_set_profiling_mode(True)
-        torch._C._jit_set_bailout_depth(20)
-    elif args.executor == 'simple':
-        torch._C._jit_set_profiling_executor(True)
-        torch._C._jit_set_profiling_mode(False)
-    elif args.executor == 'legacy':
-        torch._C._jit_set_profiling_executor(False)
-        torch._C._jit_set_profiling_mode(False)
+    set_fuser(args.fuser, args.executor)
 
     if args.cuda_pointwise_loop_level:
         torch._C._jit_set_te_cuda_pointwise_loop_levels(args.cuda_pointwise_loop_level)
@@ -274,7 +247,7 @@ if __name__ == '__main__':
     vlrnns = ['vl_cudnn', 'vl_jit', 'vl_py']
 
     if args.print_json:
-        print_stderr = lambda *args, **kwargs: None    # noqa
+        print_stderr = lambda *args, **kwargs: None    # noqa: E731,F811
     print_stderr(args)
 
     bench_args = copy.deepcopy(vars(args))

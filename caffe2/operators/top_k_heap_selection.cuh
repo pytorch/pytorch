@@ -71,7 +71,7 @@ __device__ inline void warpHeapInsert(K k, V v, K* keyHeap, V* valueHeap) {
   // (0 12 3456)
   // log2(8 / 2) = 2 levels of interior nodes for heap size 8 (0 and 12)
   int i = 0;
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
   for (int levels = 0; levels < math::IntegerLog2(HeapSize / 2); ++levels) {
@@ -114,7 +114,7 @@ warpHeap(K k, V v, K& keyHeapHead, K* keyHeap, V* valueHeap) {
   bool wantInsert = Dir ? (k > keyHeapHead) : (k < keyHeapHead);
 
   // Find out all the lanes that have elements to add to the heap
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
   unsigned long long int vote = __ballot(wantInsert);
 
   if (!vote) {
@@ -138,7 +138,7 @@ warpHeap(K k, V v, K& keyHeapHead, K* keyHeap, V* valueHeap) {
   // that have elements
   int index = __popc(getLaneMaskLt() & vote);
   int total = __popc(vote);
-#endif  // __HIP_PLATFORM_HCC__
+#endif  // _USE_ROCM
 
   // FIXME: try switch statement and explicitly handle cases
   // FIXME: how do cases work?
@@ -261,14 +261,14 @@ __global__ void selectRowsViaHeap(
   V vals[Unroll];
 
   for (int i = threadIdx.x; i < n; i += blockDim.x * Unroll) {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
     for (int j = 0; j < Unroll; ++j) {
       vals[j] = inputStart[i + j * blockDim.x];
     }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
     for (int j = 0; j < Unroll; ++j) {

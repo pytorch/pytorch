@@ -1,8 +1,9 @@
 #include <torch/csrc/utils/invalid_arguments.h>
 
+#include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/python_strings.h>
 
-#include <torch/csrc/utils/memory.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <unordered_map>
@@ -61,7 +62,7 @@ struct TupleType: public Type {
     if (!PyTuple_Check(object)) return false;
     auto num_elements = PyTuple_GET_SIZE(object);
     if (num_elements != (long)types.size()) return false;
-    for (int i = 0; i < num_elements; i++) {
+    for(const auto i : c10::irange(num_elements)) {
       if (!types[i]->is_matching(PyTuple_GET_ITEM(object, i)))
         return false;
     }
@@ -78,7 +79,7 @@ struct SequenceType: public Type {
   bool is_matching(PyObject *object) override {
     if (!PySequence_Check(object)) return false;
     auto num_elements = PySequence_Length(object);
-    for (int i = 0; i < num_elements; i++) {
+    for(const auto i : c10::irange(num_elements)) {
       if (!type->is_matching(PySequence_GetItem(object, i)))
         return false;
     }
@@ -114,6 +115,7 @@ struct Option {
 std::vector<std::string> _splitString(const std::string &s, const std::string& delim) {
   std::vector<std::string> tokens;
   size_t start = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t end;
   while((end = s.find(delim, start)) != std::string::npos) {
     tokens.push_back(s.substr(start, end-start));
@@ -249,7 +251,7 @@ std::string _formattedArgDesc(
 
   auto num_args = arguments.size() + kwargs.size();
   std::string result = "(";
-  for (size_t i = 0; i < num_args; i++) {
+  for(const auto i : c10::irange(num_args)) {
     bool is_kwarg = i >= arguments.size();
     PyObject *arg = is_kwarg ? kwargs.at(option.arguments[i].name) : arguments[i];
 
@@ -295,7 +297,8 @@ std::string _argDesc(const std::vector<PyObject *>& arguments,
 std::vector<std::string> _tryMatchKwargs(const Option& option,
     const std::unordered_map<std::string, PyObject*>& kwargs) {
   std::vector<std::string> unmatched;
-  int start_idx = option.arguments.size() - kwargs.size();
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
+  int64_t start_idx = option.arguments.size() - kwargs.size();
   if (option.has_out && kwargs.count("out") == 0)
     start_idx--;
   if (start_idx < 0)
@@ -328,13 +331,14 @@ std::string format_invalid_args(
   error_msg += " received an invalid combination of arguments - ";
 
   Py_ssize_t num_args = PyTuple_Size(given_args);
-  for (int i = 0; i < num_args; i++) {
+  for(const auto i : c10::irange(num_args)) {
     PyObject *arg = PyTuple_GET_ITEM(given_args, i);
     args.push_back(arg);
   }
 
   bool has_kwargs = given_kwargs && PyDict_Size(given_kwargs) > 0;
   if (has_kwargs) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject *key, *value;
     Py_ssize_t pos = 0;
 

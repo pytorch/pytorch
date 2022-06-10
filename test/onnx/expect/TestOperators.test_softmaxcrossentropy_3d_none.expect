@@ -1,20 +1,25 @@
-ir_version: 6
+ir_version: 7
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "input"
-    input: "target.1"
+    input: "target"
     output: "2"
     name: "SoftmaxCrossEntropyLoss_0"
     op_type: "SoftmaxCrossEntropyLoss"
+    attribute {
+      name: "ignore_index"
+      i: -100
+      type: INT
+    }
     attribute {
       name: "reduction"
       s: "none"
       type: STRING
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "input"
     type {
@@ -35,7 +40,7 @@ graph {
     }
   }
   input {
-    name: "target.1"
+    name: "target"
     type {
       tensor_type {
         elem_type: 7

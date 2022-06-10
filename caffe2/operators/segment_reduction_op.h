@@ -2,6 +2,7 @@
 #define CAFFE2_OPERATORS_SEGMENT_REDUCTION_OP_H_
 
 #include "caffe2/core/export_caffe2_op_to_c10.h"
+#include <c10/util/irange.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -335,7 +336,7 @@ class AbstractReduceFrontOrBackOp : public Operator<Context> {
     const int num_blocks = block_size > 0 ? data.numel() / block_size : 0;
 
     Reducer r(ctx, out, &context_);
-    for (int64_t i = 0; i < num_blocks; ++i) {
+    for (const auto i : c10::irange(num_blocks)) {
       r.template process<FixedSize>(
           ctx, inputAccessor_.getBlockPtr(block_size, i), i, &context_);
     }
@@ -378,6 +379,7 @@ class AbstractReduceFrontOrBackGradientOp : public Operator<Context> {
     auto& source_shape = this->template Input<Tensor>(SOURCE_SHAPE, CPU);
 
     typename ReducerGradient::Meta ctx(reduction_grad, 0, FirstDim);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
       auto& aux_in = Input(i);
       ctx.observeOriginalInput(
@@ -405,7 +407,7 @@ class AbstractReduceFrontOrBackGradientOp : public Operator<Context> {
     T* out = data_grads->template mutable_data<T>();
 
     ReducerGradient r(ctx, r_grad, &context_);
-    for (int64_t i = 0; i < block_num; ++i) {
+    for (const auto i : c10::irange(block_num)) {
       r.template fillGrad<FixedSize>(
           ctx,
           out + block_size * i,
@@ -743,6 +745,7 @@ class AbstractSortedSegmentGradientOp : public Operator<Context> {
     int64_t N = segment_ids.size(0);
 
     typename ReducerGradient::Meta ctx(segment_grads, 1);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
       auto& aux_in = Input(i);
       CAFFE_ENFORCE_EQ(
@@ -1068,7 +1071,7 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
       K = num_segments_;
     } else {
       K = 0;
-      for (int64_t i = 0; i < N; ++i) {
+      for (const auto i : c10::irange(N)) {
         K = std::max(K, s_ids[i] + 1);
       }
     }
@@ -1084,11 +1087,11 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
 
     reducers_.clear();
     reducers_.reserve(K);
-    for (int64_t i = 0; i < K; ++i) {
+    for (const auto i : c10::irange(K)) {
       reducers_.emplace_back(ctx, out + out_block_size * i, &context_);
     }
 
-    for (int64_t i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       auto s_id = s_ids[i];
       CAFFE_ENFORCE(
           0 <= s_id && s_id < K,
@@ -1112,7 +1115,7 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
           ctx, inputAccessor_.getBlockPtr(in_block_size, idx), i, &context_);
     }
 
-    for (int64_t i = 0; i < K; ++i) {
+    for (const auto i : c10::irange(K)) {
       reducers_[i].template finish<FixedSize>(ctx, &context_);
     }
     // call reducers destructors (if there is any)
@@ -1158,6 +1161,7 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
     int64_t N = segment_ids.size(0);
 
     typename ReducerGradient::Meta ctx(segment_grads, 1);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
       auto& aux_in = Input(i);
       CAFFE_ENFORCE_EQ(
@@ -1185,7 +1189,7 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
 
     if (ReducerGradient::computeLength()) {
       segment_length_.resize(K, 0);
-      for (int i = 0; i < N; ++i) {
+      for (const auto i : c10::irange(N)) {
         auto s_id = s_ids[i];
         CAFFE_ENFORCE(
             0 <= s_id && s_id < K,
@@ -1203,7 +1207,7 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
       reducers_.emplace_back(ctx, s_grads + s_block_size * i, &context_);
     }
 
-    for (int64_t i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       auto s_id = s_ids[i];
       if (ReducerGradient::computeLength()) {
         reducers_[s_id].template fillGrad<FixedSize>(
@@ -1459,7 +1463,7 @@ class AbstractLengthsOp : public Operator<Context> {
     TData* out = output->template mutable_data<TData>();
 
     int64_t dataIndex = 0;
-    for (int64_t rangeIndex = 0; rangeIndex < outputSize; ++rangeIndex) {
+    for (const auto rangeIndex : c10::irange(outputSize)) {
       Reducer reducer(ctx, out + out_block_size * rangeIndex, &context_);
       for (int64_t start = dataIndex; dataIndex < start + lengths[rangeIndex];
            ++dataIndex) {
@@ -1548,7 +1552,7 @@ class AbstractLengthsGradientOp : public Operator<Context> {
     CAFFE_ENFORCE(segmentGradsInput.dim() > 0);
     CAFFE_ENFORCE(numSegments == segmentGradsInput.size(0));
     const TLengths* lengths = lengthsInput.template data<TLengths>();
-    for (int64_t i = 0; i < numSegments; ++i) {
+    for (const auto i : c10::irange(numSegments)) {
       reducedDataSize += lengths[i];
     }
 
@@ -1577,7 +1581,7 @@ class AbstractLengthsGradientOp : public Operator<Context> {
     T* dataGrads = dataGradsOutput->template mutable_data<T>();
 
     int64_t dataIndex = 0;
-    for (int64_t rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+    for (const auto rangeIndex : c10::irange(numSegments)) {
       ReducerGradient reducer(
           ctx, segmentGrads + segmentBlockSize * rangeIndex, &context_);
       for (int64_t start = dataIndex; dataIndex < start + lengths[rangeIndex];
@@ -1655,6 +1659,7 @@ class AbstractLengthsWithMainInputGradientOp : public Operator<Context> {
     const TLengths* lengths = lengthsInput.template data<TLengths>();
 
     typename ReducerGradient::Meta ctx(segmentGradsInput, 1);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
       int aux_num = ReducerGradient::originalInputs()[i];
       auto& aux_in = Input(i);
@@ -1686,7 +1691,7 @@ class AbstractLengthsWithMainInputGradientOp : public Operator<Context> {
 
     const Tembedding* data = dataInput.template data<Tembedding>();
     int64_t dataIndex = 0;
-    for (int64_t rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+    for (const auto rangeIndex : c10::irange(numSegments)) {
       ReducerGradient reducer(
           ctx, segmentGrads + segmentBlockSize * rangeIndex, &context_);
       for (int64_t start = dataIndex; dataIndex < start + lengths[rangeIndex];
@@ -1756,6 +1761,7 @@ class AbstractLengthsWithMainInputAndForwardOutputGradientOp
     const TLengths* lengths = lengthsInput.template data<TLengths>();
 
     typename ReducerGradient::Meta ctx(segmentGradsInput, 1);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
       int aux_num = ReducerGradient::originalInputs()[i];
       auto& aux_in = Input(i);
@@ -1783,7 +1789,7 @@ class AbstractLengthsWithMainInputAndForwardOutputGradientOp
     const T* data = dataInput.template data<T>();
 
     int64_t dataIndex = 0;
-    for (int64_t rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+    for (const auto rangeIndex : c10::irange(numSegments)) {
       ReducerGradient reducer(
           ctx, segmentGrads + segmentBlockSize * rangeIndex, &context_);
       for (int64_t start = dataIndex; dataIndex < start + lengths[rangeIndex];
@@ -2006,13 +2012,13 @@ i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
         "OUTPUT",
         "Aggregated output tensor. Has the first dimension of K "
         "(the number of segments).");
-    schema.TensorInferenceFunction(
+    schema.TensorInferenceFunction(OpSchema::NeedsAllInputShapes(
         [](const OperatorDef&, const std::vector<TensorShape>& input_types) {
           std::vector<TensorShape> out(1);
           out[0] = input_types[0];
           out[0].set_dims(0, input_types[Reducer::kInputCount + 1].dims(0));
           return out;
-        });
+        }));
     ReducerDef::PopulateSchema(schema);
 
     schema.CostInferenceFunction(

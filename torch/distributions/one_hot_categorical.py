@@ -11,8 +11,13 @@ class OneHotCategorical(Distribution):
 
     Samples are one-hot coded vectors of size ``probs.size(-1)``.
 
-    .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
-              and it will be normalized to sum to 1.
+    .. note:: The `probs` argument must be non-negative, finite and have a non-zero sum,
+              and it will be normalized to sum to 1 along the last dimension. :attr:`probs`
+              will return this normalized value.
+              The `logits` argument will be interpreted as unnormalized log probabilities
+              and can therefore be any real number. It will likewise be normalized so that
+              the resulting probabilities sum to 1 along the last dimension. :attr:`logits`
+              will return this normalized value.
 
     See also: :func:`torch.distributions.Categorical` for specifications of
     :attr:`probs` and :attr:`logits`.
@@ -25,11 +30,11 @@ class OneHotCategorical(Distribution):
 
     Args:
         probs (Tensor): event probabilities
-        logits (Tensor): event log probabilities
+        logits (Tensor): event log probabilities (unnormalized)
     """
     arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real}
-    support = constraints.simplex
+                       'logits': constraints.real_vector}
+    support = constraints.one_hot
     has_enumerate_support = True
 
     def __init__(self, probs=None, logits=None, validate_args=None):
@@ -66,6 +71,12 @@ class OneHotCategorical(Distribution):
         return self._categorical.probs
 
     @property
+    def mode(self):
+        probs = self._categorical.probs
+        mode = probs.argmax(axis=-1)
+        return torch.nn.functional.one_hot(mode, num_classes=probs.shape[-1]).to(probs)
+
+    @property
     def variance(self):
         return self._categorical.probs * (1 - self._categorical.probs)
 
@@ -96,3 +107,18 @@ class OneHotCategorical(Distribution):
         if expand:
             values = values.expand((n,) + self.batch_shape + (n,))
         return values
+
+class OneHotCategoricalStraightThrough(OneHotCategorical):
+    r"""
+    Creates a reparameterizable :class:`OneHotCategorical` distribution based on the straight-
+    through gradient estimator from [1].
+
+    [1] Estimating or Propagating Gradients Through Stochastic Neurons for Conditional Computation
+    (Bengio et al, 2013)
+    """
+    has_rsample = True
+
+    def rsample(self, sample_shape=torch.Size()):
+        samples = self.sample(sample_shape)
+        probs = self._categorical.probs  # cached via @lazy_property
+        return samples + (probs - probs.detach())

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/serialize.h>
@@ -30,7 +29,9 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const AdamWOptions& lhs, const AdamWOptions& rhs);
-  ~AdamWOptions() = default;
+  ~AdamWOptions() override = default;
+  double get_lr() const override;
+  void set_lr(const double lr) override;
 };
 
 struct TORCH_API AdamWParamState : public OptimizerCloneableParamState<AdamWParamState> {
@@ -43,7 +44,7 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const AdamWParamState& lhs, const AdamWParamState& rhs);
-  ~AdamWParamState() = default;
+  ~AdamWParamState() override = default;
 };
 
 class TORCH_API AdamW : public Optimizer {
@@ -59,6 +60,7 @@ class TORCH_API AdamW : public Optimizer {
    }
    explicit AdamW(
        std::vector<Tensor> params,
+       // NOLINTNEXTLINE(performance-move-const-arg)
        AdamWOptions defaults = {}) : AdamW({std::move(OptimizerParamGroup(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;

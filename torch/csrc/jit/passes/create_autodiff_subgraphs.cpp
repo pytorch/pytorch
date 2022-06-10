@@ -3,8 +3,10 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/remove_redundant_profiles.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 
@@ -12,66 +14,6 @@ namespace torch {
 namespace jit {
 
 namespace {
-
-std::vector<c10::optional<const Use>> gatherLastUses(
-    at::ArrayRef<Value*> values) {
-  return fmap(values, [&](Value* v) -> c10::optional<const Use> {
-    return firstOrLastUse(v, /*find_first*/ false);
-  });
-}
-
-// When merging a node into a subgraph, we wish to preserve all of the
-// aliasing properties of the node's outputs. It is difficult to track
-// the node or its contained nodes through all of the ir manipulation
-// involved in merging; it is pretty easy to uniquely identify the value
-// based on its uses. We can identify the value by its last use in the graph.
-// Values which do not have uses or which do not have a last use
-// outside of the subgraph to be merged into we do not need to track.
-struct ValueMapper {
-  ValueMapper(Node* n, AliasDb& db, size_t subgraph_num_outputs) {
-    last_uses_ = gatherLastUses(n->outputs());
-    subgraph_num_outputs_ = subgraph_num_outputs;
-    WithInsertPoint guard(n);
-    auto g = n->owningGraph();
-    // temporary node to put the aliasing properties of the node before its
-    // merged and destroyed
-    placeholder_node_ = g->insertNode(g->create(prim::Uninitialized, 0));
-    for (size_t i = 0; i < n->outputs().size(); ++i) {
-      Value* existing = n->outputs().at(i);
-      Value* new_value =
-          placeholder_node_->insertOutput(i)->copyMetadata(n->outputs().at(i));
-      db.replaceWithNewValue(existing, new_value);
-    }
-  }
-
-  bool usesEqual(const Use& a, const Use& b) {
-    return a.user == b.user && a.offset == b.offset;
-  }
-
-  void copyAliasing(Node* merged_node, AliasDb& db) {
-    auto num_outputs = merged_node->outputs().size();
-    auto new_outputs = merged_node->outputs().slice(
-        subgraph_num_outputs_, num_outputs - subgraph_num_outputs_);
-    for (Value* v : new_outputs) {
-      auto maybe_last_use = firstOrLastUse(v, /*find_first*/ false);
-      // if it doesnt have a use it shouldnt have been added as output
-      TORCH_INTERNAL_ASSERT(maybe_last_use);
-      const Use last_use = *maybe_last_use;
-      size_t i = 0;
-      while (i < last_uses_.size() && last_uses_.at(i).has_value() &&
-             !usesEqual(*last_uses_.at(i), last_use)) {
-        ++i;
-      }
-      TORCH_INTERNAL_ASSERT(i != last_uses_.size());
-      db.replaceWithNewValue(placeholder_node_->outputs().at(i), v);
-    }
-    placeholder_node_->destroy();
-  }
-
-  std::vector<c10::optional<const Use>> last_uses_;
-  size_t subgraph_num_outputs_;
-  Node* placeholder_node_;
-};
 
 struct WorkBlock : public std::pair<Node*, Node*> {
   using pair::pair;
@@ -104,6 +46,8 @@ class SubgraphSlicer {
     // un-inlining autodiff subgraphs. We first recursively construct all
     // subgraphs and then recursively cleanup & unmerge the small subgraphs
     buildupSubgraphs();
+    GRAPH_DUMP("before unfuseAliasedOutputs", graph_);
+    unfuseAliasedOutputs(block_);
     cleanupSubgraphs();
     // Run CSE globally onceto eliminate duplicates that may have occurred
     // while inlining subgraphs.
@@ -160,6 +104,7 @@ class SubgraphSlicer {
         any_changed = false;
         for (auto it = workblock.end()->reverseIterator();
              it != workblock.begin()->reverseIterator();) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           bool changed;
           std::tie(it, changed) = scanNode(*it);
           any_changed |= changed;
@@ -178,6 +123,37 @@ class SubgraphSlicer {
   }
 
  private:
+  void unfuseAliasedOutputs(Block* b) {
+    bool any_changed = true;
+    while (any_changed) {
+      any_changed = false;
+      // we walk in the reverse order, so we can skip
+      // nodes that might get unfused after the current
+      // prim::DifferentiableGraph
+      for (auto n : b->nodes().reverse()) {
+        if (n->kind() == prim::DifferentiableGraph) {
+          // aliased outputs in DifferentiableGraphs must be unfused
+          // since autodiff doesn't know how to handle them correctly
+          // N.B. Note, |= since we don't want `unfuseAliasedOutputs`
+          // to short-circuit
+          any_changed |= SubgraphUtils::unmergeAliasedOutputs(n);
+          any_changed |= SubgraphUtils::unmergeOutputsAlisingInputs(n);
+          GRAPH_DEBUG(
+              "any_changed on ",
+              any_changed,
+              " ",
+              n->g(attr::Subgraph)->toString(false));
+        }
+      }
+    }
+
+    for (Node* n : b->nodes()) {
+      for (Block* ib : n->blocks()) {
+        unfuseAliasedOutputs(ib);
+      }
+    }
+  }
+
   std::vector<WorkBlock> buildWorkBlocks() {
     // [workblocks]
     // the IR has many nodes which can never be reordered around, such as a
@@ -228,8 +204,7 @@ class SubgraphSlicer {
     size_t i = 0;
     for (auto it = subgraph->nodes().begin(); it != subgraph->nodes().end();
          ++it) {
-      // constants are not interpreted as instructions, ignore them
-      i += it->kind() != prim::Constant;
+      i += !it->notExecutedOp();
       if (i >= minSubgraphSize_) {
         return false;
       }
@@ -275,22 +250,21 @@ class SubgraphSlicer {
     if (node->kind() == prim::Constant) {
       return false;
     }
+
     // view ops as outputs of differentiable subgraphs can cause incorrect
     // differentiation for now, do not include them in the subgraph
     if (isViewOp(node)) {
       return false;
     }
+
     return isDifferentiable(node);
   }
 
   std::pair<graph_node_list::iterator, bool> scanNode(Node* consumer) {
     if (shouldConsiderForMerge(consumer)) {
       if (consumer->kind() != prim::DifferentiableGraph) {
-        // ValueMapper preserves the aliasing information of the node's outputs
-        ValueMapper vm(consumer, aliasDb_, 0);
-        consumer = SubgraphUtils::createSingletonSubgraph(
-            consumer, prim::DifferentiableGraph);
-        vm.copyAliasing(consumer, aliasDb_);
+        consumer = SubgraphUtils::createSingletonSubgraphAndUpdateAliasing(
+            consumer, prim::DifferentiableGraph, aliasDb_);
       }
       auto inputs = sortReverseTopological(consumer->inputs());
       for (auto input : inputs) {
@@ -316,10 +290,8 @@ class SubgraphSlicer {
       return c10::nullopt;
     }
 
-    ValueMapper vm(producer, aliasDb_, consumer->outputs().size());
-    SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
-    vm.copyAliasing(consumer, aliasDb_);
-
+    SubgraphUtils::mergeNodeIntoSubgraphAndUpdateAliasing(
+        producer, consumer, aliasDb_);
     return consumer;
   }
 
@@ -329,6 +301,94 @@ class SubgraphSlicer {
   AliasDb& aliasDb_;
   std::vector<Node*>& diff_nodes_;
 };
+
+c10::optional<bool> getProfileNodeRequiresGrad(Node* n) {
+  TORCH_INTERNAL_ASSERT(n->kind() == prim::profile);
+  if (!n->hasAttribute(attr::profiled_type)) {
+    return c10::nullopt;
+  }
+  auto& type = n->ty(attr::profiled_type);
+  if (type->castRaw<TensorType>() == nullptr) {
+    return c10::nullopt;
+  }
+  return type->expectRef<TensorType>().requiresGrad();
+}
+
+void AddRequiresGradToDifferentiableGraph(Node* diff_graph) {
+  TORCH_INTERNAL_ASSERT(diff_graph->kind() == prim::DifferentiableGraph);
+  const auto& subgraph = diff_graph->g(attr::Subgraph);
+  for (auto i : c10::irange(subgraph->outputs().size())) {
+    Value* output = subgraph->outputs()[i];
+    if (output->node()->kind() == prim::profile) {
+      // already have requires_grad info from this profile node
+      continue;
+    }
+    if (output->type()->castRaw<TensorType>() == nullptr) {
+      // non-tensors don't get profiled.
+      continue;
+    }
+    if (output->type()->expectRef<TensorType>().requiresGrad().has_value()) {
+      continue;
+    }
+
+    // this node doesn't have any requires_grad info.
+    // look at its uses to try to find a profile node.
+    c10::optional<bool> requiresGrad = c10::nullopt;
+    for (auto& use : diff_graph->output(i)->uses()) {
+      if (use.user->kind() == prim::profile) {
+        c10::optional<bool> req_grad_use;
+        if ((req_grad_use = getProfileNodeRequiresGrad(use.user)).has_value()) {
+          requiresGrad = req_grad_use;
+          break;
+        }
+      }
+
+      // maybe the profile node got absorbed into a differentiable graph
+      if (use.user->kind() == prim::DifferentiableGraph) {
+        const auto& dg = use.user->g(attr::Subgraph);
+        // check all the uses of this graph input to look for profile nodes.
+        Value* dg_value = dg->inputs()[use.offset];
+        for (auto& dg_use : dg_value->uses()) {
+          if (dg_use.user->kind() == prim::profile) {
+            c10::optional<bool> req_grad_use;
+            if ((req_grad_use = getProfileNodeRequiresGrad(dg_use.user))
+                    .has_value()) {
+              requiresGrad = req_grad_use;
+              break;
+            }
+          }
+        }
+        if (requiresGrad) {
+          break;
+        }
+      }
+    }
+
+    if (requiresGrad.has_value()) {
+      output->setType(output->type()->expectRef<TensorType>().withRequiresGrad(
+          requiresGrad));
+    }
+  }
+}
+
+// autodiff.cpp needs to know, for each output, whether or not it requires
+// grad. Sometimes a profile node will be present on the output, but sometimes
+// it won't be present. This might happen if there's a node with side effects
+// in between the definition of the output node and the profile node; in this
+// case the profile node and output node would be in different workblocks and
+// couldn't be merged into the same DifferentiableGraph. (see [workblocks])
+// Or it could happen if the output is profiled twice and the profile nodes get
+// removed by unfusedAliasedOutputs.
+void AddRequiresGradOnOutputNodes(Block* block) {
+  for (Node* n : block->nodes()) {
+    if (n->kind() == prim::DifferentiableGraph) {
+      AddRequiresGradToDifferentiableGraph(n);
+    }
+    for (Block* b : n->blocks()) {
+      AddRequiresGradOnOutputNodes(b);
+    }
+  }
+}
 } // anonymous namespace
 
 std::vector<Node*> CreateAutodiffSubgraphs(
@@ -336,7 +396,11 @@ std::vector<Node*> CreateAutodiffSubgraphs(
     size_t threshold) {
   std::vector<Node*> diff_nodes;
   AliasDb db(graph);
+  GRAPH_DEBUG("Before creating autodiff subgraphs", *graph);
   SubgraphSlicer(graph->block(), graph, threshold, db, diff_nodes).run();
+  GRAPH_DEBUG("After creating autodiff subgraphs", *graph);
+  AddRequiresGradOnOutputNodes(graph->block());
+  GRAPH_DEBUG("diff_nodes.size() ", diff_nodes.size());
   return diff_nodes;
 }
 } // namespace jit
