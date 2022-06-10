@@ -10,6 +10,14 @@ class ModelReportObserver(ObserverBase):
     Dynamic or Static Quantization is more appropriate for their model given the general
     distributions of their data.
 
+    * :attr:`num_batches_tracked` specifies number of batches passed through the observer
+
+    * :attr:`average_batch_activation_range` defines average across the ranges of each batch passed through
+
+    * :attr:`epoch_activation_min` defines the minimum value passed through the observer
+
+    * :attr:`epoch_activation_max` defines the maximum value passed through the observer
+
     Note: this tool is meant for FX Graph Mode Quantization
     """
 
@@ -23,10 +31,6 @@ class ModelReportObserver(ObserverBase):
         self.epoch_activation_max = torch.tensor(float("-inf"))
 
     def forward(self, x):
-        self.update_activation_range(x)
-        return x
-
-    def update_activation_range(self, x):
         x_copy = x.detach()  # avoid keeping autograd tape
         x_copy = x_copy.to(self.epoch_activation_min.dtype)
         min_val_cur, max_val_cur = torch.aminmax(x_copy)
@@ -47,6 +51,9 @@ class ModelReportObserver(ObserverBase):
 
         self.average_batch_activation_range = new_range
         self.num_batches_tracked += 1  # new batch was processed
+
+        # return the passed in the value
+        return x
 
     @torch.jit.export
     def get_batch_to_epoch_ratio(self):

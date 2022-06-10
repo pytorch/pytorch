@@ -471,22 +471,16 @@ class TestModelReportObserver(QuantizationTestCase):
             x = self.relu(x)
             return x
 
-    """ Go through model and reset all model report observers recursively """
-
-    def reset_model_report_observers(self, model):
-        # need to do recursively since it can be nested
-        if isinstance(model, ModelReportObserver):
-            model.reset_batch_and_epoch_values()  # call its reset func
-
-        for child in model.children():
-            self.reset_model_report_observers(child)
-
     def run_model_and_common_checks(self, model, ex_input, num_epochs, batch_size):
         # split up data into batches
         split_up_data = torch.split(ex_input, batch_size)
         for epoch in range(num_epochs):
             # reset all model report obs
-            self.reset_model_report_observers(model)
+            model.apply(
+                lambda module: module.reset_batch_and_epoch_values()
+                if isinstance(module, ModelReportObserver)
+                else None
+            )
 
             # quick check that a reset occurred
             self.assertEqual(
@@ -566,14 +560,10 @@ class TestModelReportObserver(QuantizationTestCase):
         self.assertEqual(getattr(model, "obs1").epoch_activation_max, 0)
         self.assertEqual(getattr(model, "obs1").average_batch_activation_range, 0)
 
-        # we should get an error if we try to calculate the ratio
-        properly_errored = False
-        try:
-            ratio_val = getattr(model, "obs1").get_batch_to_epoch_ratio()
-        except ValueError:
-            properly_errored = True
 
-        self.assertEqual(properly_errored, True)
+        # we should get an error if we try to calculate the ratio
+        with self.assertRaises(ValueError):
+            ratio_val = getattr(model, "obs1").get_batch_to_epoch_ratio()
 
     """Case includes:
     non-zero tensor
@@ -599,13 +589,8 @@ class TestModelReportObserver(QuantizationTestCase):
         self.assertEqual(getattr(model, "obs1").average_batch_activation_range, 0)
 
         # we should get an error if we try to calculate the ratio
-        properly_errored = False
-        try:
+        with self.assertRaises(ValueError):
             ratio_val = getattr(model, "obs1").get_batch_to_epoch_ratio()
-        except ValueError:
-            properly_errored = True
-
-        self.assertEqual(properly_errored, True)
 
     """Case includes:
     non-zero tensor
@@ -645,7 +630,7 @@ class TestModelReportObserver(QuantizationTestCase):
         self.run_model_and_common_checks(model, ex_input, 10, 15)
 
         # make sure final values are all 0
-        assert getattr(model, "obs2").epoch_activation_min >= 0
+        self.assertTrue(getattr(model, "obs2").epoch_activation_min >= 0)
 
     """Case includes:
     non-zero tensor
@@ -698,7 +683,7 @@ class TestModelReportObserver(QuantizationTestCase):
         self.run_model_and_common_checks(model, ex_input, 1, 1)
 
         # make sure final values are all 0
-        assert getattr(getattr(model, "nested"), "obs2").epoch_activation_min >= 0
+        self.assertTrue(getattr(getattr(model, "nested"), "obs2").epoch_activation_min >= 0)
 
         # make sure final values are all 0 except for range
         self.assertEqual(
