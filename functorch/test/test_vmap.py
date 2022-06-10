@@ -3135,6 +3135,8 @@ class TestVmapOperatorsOpInfo(TestCase):
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', (
         tol1('linalg.det',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cuda'),
+        tol1('nn.functional.conv_transpose3d',
+             {torch.float32: tol(atol=1.5e-04, rtol=1e-04)}, device_type='cuda'),
     ))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail)
