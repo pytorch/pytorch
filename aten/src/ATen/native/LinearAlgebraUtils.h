@@ -329,7 +329,7 @@ static inline void singleCheckErrors(int64_t info, const c10::string_view name, 
     } else if (name.find("solve") != name.npos) {
       // solve, linalg_solve, cholesky_solve, etc.
       TORCH_CHECK_LINALG(false, name, batch_string,
-          ": The diagonal element ", info, " is zero, the solve could not be completed because the input matrix is singular.");
+          ": The solver failed because the input matrix is singular.");
     } else if (name.find("cholesky") != name.npos) {
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The factorization could not be completed because the input is not positive-definite (the leading minor of order ", info, " is not positive-definite).");
