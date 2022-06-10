@@ -1497,8 +1497,27 @@ fake_skips = (
     "repeat_interleave",  # cannot repeat_interleave a meta tensor without output_size
     "segment_reduce",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
     "sparse.sampled.addmm",  # sparsity not supported
+    # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
+    "nn.functional.one_hot",
 )
 
+dynamic_output_op_tests = (
+    "argwhere",
+    "bincount",
+    "index_select",
+    "combinations",
+    "linalg.lstsq",
+    "masked_select",
+    "nonzero",
+    "unique_consecutive",
+    "unique",
+    "linalg.lstsq.grad_oriented",
+)
+
+# some inputs invoke dynamic output shape operators, some do not
+sometimes_dynamic_output_op_test = (
+    "__getitem__",
+)
 
 class TestFakeTensorNonErroring(TestCase):
     @onlyCPU
@@ -1525,16 +1544,29 @@ class TestFakeTensorNonErroring(TestCase):
                 kwargs = tree_map(map_to_fake, sample.kwargs)
 
                 with enable_torch_dispatch_mode(mode):
-                    res = op(input, *args, **kwargs)
+                    res_fake = op(input, *args, **kwargs)
 
-                for arg in tree_flatten(res)[0]:
-                    fake_output = (not isinstance(arg, torch.Tensor)) or isinstance(arg, FakeTensor)
-                    self.assertTrue(fake_output)
+                res = op(sample.input, *sample.args, **sample.kwargs)
+
+                for fake_out, real_out in zip(
+                    tree_flatten(res_fake)[0], tree_flatten(res)[0]
+                ):
+                    if not isinstance(fake_out, torch.Tensor):
+                        self.assertTrue(not isinstance(real_out, torch.Tensor))
+                        continue
+
+                    self.assertTrue(isinstance(fake_out, FakeTensor))
+                    # if you see a shape exception here, you may need to add
+                    # a `dynamic_output_shape` tag to an operator
+                    prims.utils.compare_tensor_meta(fake_out, real_out)
+                self.assertTrue(name not in dynamic_output_op_tests)
 
             except torch._subclasses.fake_tensor.ComplexInputException:
                 pass
             except torch._subclasses.fake_tensor.SparseInputException:
                 pass
+            except torch._subclasses.fake_tensor.DynamicOutputShapeException:
+                self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
 
 
 instantiate_device_type_tests(TestCommon, globals())
