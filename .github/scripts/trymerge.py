@@ -929,7 +929,7 @@ def merge(pr_num: int, repo: GitRepo,
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, pr_num)
-    initial_commit_count = pr.last_commit()['oid']
+    initial_commit_sha = pr.last_commit()['oid']
     if force:
         pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
     if (pr.last_pushed_at() - datetime.utcnow()).days > stale_pr_days:
@@ -947,7 +947,7 @@ def merge(pr_num: int, repo: GitRepo,
             find_matching_merge_rule(pr, repo)
             pending = pr_get_pending_checks(pr)
             failing = pr_get_failed_checks(pr)
-            if initial_commit_count != pr.last_commit()['oid']:
+            if initial_commit_sha != pr.last_commit()['oid']:
                 raise RuntimeError("New commits were pushed so canceling merge. Please try running merge command again.")
             if (not mandatory_only and on_green) and len(failing) > 0:
                 raise RuntimeError(f"{len(failing)} additional jobs have failed, first few of them are: " +
