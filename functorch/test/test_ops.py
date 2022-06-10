@@ -590,7 +590,7 @@ class TestOperators(TestCase):
 
         # All of the following are bugs and need to be fixed
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
-        xfail('__getitem__', ''),
+        xfail('__getitem__', ''),  # dynamic error
         xfail('_masked.prod'),  # calls aten::item
         xfail('eig'),  # calls aten::item
         xfail('linalg.det', ''),  # calls .item()
@@ -694,9 +694,6 @@ class TestOperators(TestCase):
         # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
         xfail('tensor_split'),
 
-        # https://github.com/pytorch/functorch/issues/859
-        xfail('__getitem__'),
-
         # Causing multiple forward mode AD issues, needs investigation
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
@@ -790,9 +787,6 @@ class TestOperators(TestCase):
 
         xfail('put'),  # calls put_ during vmap with only vmaps over other, not self
         xfail('nn.functional.prelu'),  # Call Tensor.as_strided
-
-        # https://github.com/pytorch/functorch/issues/859
-        xfail('__getitem__'),
     }
 
     @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
@@ -910,7 +904,6 @@ class TestOperators(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
         xfail('view_as_complex'),
-        xfail('__getitem__', ''),
         xfail('cholesky'),
         xfail('complex'),
         xfail('copysign'),
