@@ -173,6 +173,7 @@ Example::
         norm=(('ord', 'dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         var=(('dim', 'unbiased'), ('keepdim=False', 'dtype=None', 'mask=None')),
         std=(('dim', 'unbiased'), ('keepdim=False', 'dtype=None', 'mask=None')),
+        logsumexp=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
         log_softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
         softmin=(('dim__as_int',), ('dtype=None', 'mask=None')),
@@ -247,7 +248,8 @@ defined as ``prod(x[:i])``.''')
         median='median',
         norm='norm',
         var='variance',
-        std='standard_deviation')
+        std='standard_deviation',
+        logsumexp='logsumexp')
 
     normalization_names = dict(
         softmax='softmax',
@@ -367,7 +369,7 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
         return torch.tensor(0, dtype=dtype, device=device)
     elif op_name in {'prod', 'cumprod'}:
         return torch.tensor(1, dtype=dtype, device=device)
-    elif op_name in {'amax', 'argmax'}:
+    elif op_name in {'amax', 'argmax', 'logsumexp'}:
         if torch.is_floating_point(input):
             return torch.tensor(-torch.inf, dtype=dtype, device=device)
         elif torch.is_signed(input) or dtype == torch.uint8:
@@ -763,7 +765,7 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
     """
     if callable(op):
         is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin',
-                                       'argmax', 'argmin', 'mean', 'median', 'norm', 'var', 'std'}
+                                       'argmax', 'argmin', 'mean', 'median', 'norm', 'var', 'std', 'logsumexp'}
         is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize', 'cumsum', 'cumprod'}
         if is_reduction:
             if op.__name__ == 'norm':
@@ -1100,6 +1102,42 @@ elements, have ``nan`` values.
             raise ValueError("masked median expects no fully masked out rows if dtype is not floating point")
     else:
         raise ValueError(f'masked median expects strided tensor (got {input.layout} tensor)')
+
+
+@_apply_docstring_templates
+def logsumexp(input: Tensor,
+              dim: DimOrDims = None,
+              *,
+              keepdim: bool = False,
+              dtype: Optional[DType] = None,
+              mask: Optional[Tensor] = None) -> Tensor:
+    if dtype is None:
+        dtype = input.dtype
+    dim_ = _canonical_dim(dim, input.ndim)
+    mask_input = _combine_input_and_mask(logsumexp, input, mask)
+    if input.layout == torch.strided:
+        return torch.logsumexp(mask_input, dim_, keepdim=keepdim).to(dtype=dtype)
+    else:
+        raise ValueError(f'masked logsumexp expects strided tensor (got {input.layout} tensor)')
+
+
+# TODO: Add docstring; currently they're only set up for reductions and normalizations
+# @_apply_docstring_templates
+def logaddexp(input: Tensor,
+              other: Tensor,
+              *,
+              dtype: Optional[DType] = None,
+              input_mask: Optional[Tensor] = None,
+              other_mask: Optional[Tensor] = None) -> Tensor:
+    if dtype is None:
+        dtype = input.dtype
+    if input.layout == torch.strided and other.layout == torch.strided:
+        mask_input = _combine_input_and_mask(logsumexp, input, input_mask)
+        mask_other = _combine_input_and_mask(logsumexp, other, other_mask)
+        return torch.logaddexp(mask_input, mask_other).to(dtype=dtype)
+    else:
+        raise ValueError(
+            f'masked logaddexp expects strided tensors (got {input.layout} tensor for input, {other.layout} for other)')
 
 
 @_apply_docstring_templates
