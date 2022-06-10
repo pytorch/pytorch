@@ -177,6 +177,24 @@ void validateIr(Fusion* fusion) {
 
   fusion->validateInputs();
 
+  // Convert all input broadcast iterdomains to strided
+  for (auto tv : ir_utils::filterByType<TensorView>(fusion->inputs())) {
+    for (auto id : tv->getMaybeRFactorDomain()) {
+      if (id->isBroadcast()) {
+        id->toStridedBroadcast();
+      }
+    }
+  }
+
+  // Convert all output broadcast iterdomains to strided
+  for (auto tv : ir_utils::filterByType<TensorView>(fusion->outputs())) {
+    for (auto id : tv->getMaybeRFactorDomain()) {
+      if (id->isBroadcast()) {
+        id->toStridedBroadcast();
+      }
+    }
+  }
+
   // Validate Parallelization
   ValidateSiblings::validate(fusion);
 
@@ -888,8 +906,8 @@ void validateMmaTensors(MmaOp* mma) {
               GpuLower::current()->parallelDimensionMap();
           TORCH_INTERNAL_ASSERT(
               paralel_dim_map.isExact(ptype) &&
-                  paralel_dim_map.get(ptype)->isConstInt() &&
-                  paralel_dim_map.get(ptype)->evaluateInt() ==
+                  paralel_dim_map.get(ptype)->getInt().has_value() &&
+                  paralel_dim_map.get(ptype)->getInt().value() ==
                       at::cuda::warp_size(),
               "TIDx is reserved for lane id in mma kernels, and it needs to be exactly a warp");
           tidx_validated = true;
