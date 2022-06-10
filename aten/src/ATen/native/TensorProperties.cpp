@@ -17,7 +17,7 @@ bool is_same_size(const Tensor& self, const Tensor& other) {
 bool nested_is_same_size(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       self.is_nested() && other.is_nested(),
-      "Expected both self and other to be nested tensors ",
+      "Expected both self and other to be nested tensors. ",
       "Self ", self.is_nested()? "is " : "is not ",
       "nested. While Other ",
       other.is_nested()? "is " : "is not ",

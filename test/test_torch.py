@@ -5926,11 +5926,10 @@ class TestTorch(TestCase):
         self.assertFalse(nt1.is_same_size(nt2))
         self.assertFalse(nt1.is_same_size(nt3))
         self.assertTrue(nt1.is_same_size(nt4))
-
-        with self.assertRaisesRegex(RuntimeError, "Expected both self and other to be either nested or not nested tensors"):
+        with self.assertRaisesRegex(RuntimeError, "Expected both self and other to be nested tensors."):
             t1.is_same_size(nt1)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected both self and other to be either nested or not nested tensors"):
+        with self.assertRaisesRegex(RuntimeError, "Expected both self and other to be nested tensors."):
             nt1.is_same_size(t1)
 
     def test_tensor_set(self):
