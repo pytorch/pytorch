@@ -285,7 +285,7 @@ spdiags = _add_docstr(
     r"""
 sparse.spdiags(diagonals, offsets, shape, layout=None) -> Tensor
 
-Creates a sparse tensor by placing the values from rows of
+Creates a sparse 2D tensor by placing the values from rows of
 :attr:`diagonals` along specified diagonals of the output
 
 The :attr:`offsets` controls which diagonals are set.
@@ -294,16 +294,18 @@ The :attr:`offsets` controls which diagonals are set.
 - If :attr:`offsets[i]` < 0, it is below the main diagonal
 - If :attr:`offsets[i]` > 0, it is above the main diagonal
 
-The number of rows in :attr:`diagonals` must match the length of
-:attr:`offsets`, and an offset may not be repeated.
+The number of rows in :attr:`diagonals` must match the length of :attr:`offsets`,
+and an offset may not be repeated. Each individual offset must also be supported by :attr:`shape`.
+In general if the :attr:`shape` tuple is `(rows, cols)` an individual offset values `off_i` must satisfy
+`-rows < off_i < cols`.
 
 Args:
-    diagonals (Tensor): Maxtrix storing diagonals row-wise
+    diagonals (Tensor): Matrix storing diagonals row-wise
     offsets (Tensor): The diagonals to be set, stored as a vector
-    shape (tuple of ints): The desired shape of the result
+    shape (2-tuple of ints): The desired shape of the result
 Keyword args:
     layout (:class:`torch.layout`, optional): The desired layout of the
-        returned tensor. ``torch.sparse_coo`` and ``torch.sparse_csr``
+        returned tensor. ``torch.sparse_coo``, ``torch.sparse_csc`` and ``torch.sparse_csr``
         are supported. Default: ``torch.sparse_coo``
 
 Examples:
