@@ -20622,6 +20622,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.ravel",
         torch_opinfo_name="ravel",
+        skips=(
+            # TypeError: 'NoneType' object is not callable
+            DecorateInfo(unittest.skip("Passes on aten executor but fails on nvFuser executor"),
+                         'TestCommon', 'test_python_ref_executor', dtypes=(torch.float, torch.int32)),
+        ),
     ),
     PythonRefInfo(
         "_refs.reshape",
