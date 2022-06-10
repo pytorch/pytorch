@@ -113,6 +113,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -242,6 +243,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -447,6 +449,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -588,6 +591,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -797,6 +801,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -938,6 +943,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -1147,6 +1153,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -1288,6 +1295,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -1493,6 +1501,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -1622,6 +1631,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -1827,6 +1837,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -1968,6 +1979,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -2177,6 +2189,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -2318,6 +2331,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -2527,6 +2541,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -2668,6 +2683,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -2873,6 +2889,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -3002,6 +3019,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -3207,6 +3225,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -3348,6 +3367,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -3557,6 +3577,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -3698,6 +3719,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -3907,6 +3929,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -4048,6 +4071,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -4253,6 +4277,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -4382,6 +4407,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -4587,6 +4613,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -4728,6 +4755,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -4937,6 +4965,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -5078,6 +5107,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -5287,6 +5317,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \
@@ -5428,6 +5459,7 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
             -e LIBTORCH_VARIANT \

@@ -486,18 +486,6 @@ static PyObject * set_autocast_cpu_dtype(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static const char* scalarTypeName(const at::ScalarType type) {
-  switch (type) {
-#define DEFINE_CASE(ctype, name) \
-  case at::ScalarType::name:     \
-    return #ctype;
-    AT_FORAUTOCAST_SCALAR_TYPES(DEFINE_CASE)
-#undef DEFINE_CASE
-    default:
-      throw std::runtime_error("unknown scalar type for autocast");
-  }
-}
-
 static PyObject * get_autocast_gpu_dtype(PyObject* _unused, PyObject *arg){
   HANDLE_TH_ERRORS
   at::ScalarType current_dtype = at::autocast::get_autocast_gpu_dtype();
