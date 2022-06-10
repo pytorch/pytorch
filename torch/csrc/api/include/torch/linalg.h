@@ -196,12 +196,12 @@ inline std::tuple<Tensor&, Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& i
   return torch::linalg_qr_out(Q, R, input, mode);
 }
 
-inline Tensor solve(const Tensor& input, const Tensor& other) {
-  return torch::linalg_solve(input, other);
+inline Tensor solve(const Tensor& input, const Tensor& other, bool left) {
+  return torch::linalg_solve(input, other, left);
 }
 
-inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
-  return torch::linalg_solve_out(result, input, other);
+inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other, bool left) {
+  return torch::linalg_solve_out(result, input, other, left);
 }
 
 inline Tensor solve_triangular(const Tensor& input, const Tensor& other, bool upper, bool left, bool unitriangular) {
@@ -566,12 +566,12 @@ inline Tensor& ldl_solve_out(
 /// Computes a tensor `x` such that `matmul(input, x) = other`.
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.solve
-inline Tensor solve(const Tensor& input, const Tensor& other) {
-  return detail::solve(input, other);
+inline Tensor solve(const Tensor& input, const Tensor& other, bool left) {
+  return detail::solve(input, other, left);
 }
 
-inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
-  return detail::solve_out(result, input, other);
+inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other, bool left) {
+  return detail::solve_out(result, input, other, left);
 }
 
 /// Computes a solution of a linear system AX = B for input = A and other = B whenever A is square
