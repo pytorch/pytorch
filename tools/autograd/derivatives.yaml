@@ -1667,7 +1667,7 @@
   output_differentiability: [True, False, False]
   self: not_implemented("_unique2")
 
-- name: _unsafe_view(Tensor self, int[] size) -> Tensor
+- name: _unsafe_view(Tensor(a) self, int[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
   result: auto_linear
 
@@ -2290,11 +2290,9 @@
   result: at::where((self_p > min_val).logical_and(self_p < max_val), grad_output_t, at::zeros({}, result.options()).expand_as(result))
 
 - name: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  grad_output: kl_div_backward(grad, self, target, reduction, log_target)
-  self: at::zeros({}, self.options()).expand_as(self)
-  target: kl_div_double_backward_target(grad, result, target, grad_output, self, reduction, log_target)
-  result: "kl_div_backward(grad_output_t, self_p, target_p, reduction, log_target)
-         + kl_div_double_backward_target(target_t, result, target_p, grad_output_p, self_p, reduction, log_target)"
+  grad_output: kl_div_double_backward_grad_output(grad, self, target, reduction, log_target)
+  self: zeros_like(grad)
+  target: zeros_like(grad)
 
 - name: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   grad_output: l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
