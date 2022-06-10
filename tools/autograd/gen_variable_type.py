@@ -688,6 +688,16 @@ for (const auto& _t: ${arg}) {
 )
 
 
+_HASH_LINK_TREE = "#link-tree/"
+
+def _get_gen_source_path(template_path: str) -> str:
+    return (
+        template_path.split(_HASH_LINK_TREE)[1]
+        if _HASH_LINK_TREE in template_path
+        else template_path
+    )
+
+
 def gen_variable_type(
     out: str,
     native_yaml_path: str,
@@ -706,7 +716,8 @@ def gen_variable_type(
     fm.write(
         "VariableType.h",
         lambda: {
-            "generated_comment": "@" f"generated from {template_path}/VariableType.h"
+            "generated_comment": "@"
+            + f"generated from {_get_gen_source_path(template_path)}/VariableType.h"
         },
     )
 
@@ -717,7 +728,8 @@ def gen_variable_type(
         [fn for fn in fns_with_diff_infos if use_derived(fn)],
         key_fn=lambda fn: cpp.name(fn.func.func),
         base_env={
-            "generated_comment": "@" f"generated from {template_path}/VariableType.cpp",
+            "generated_comment": "@"
+            + f"generated from {_get_gen_source_path(template_path)}/VariableType.cpp",
         },
         env_callable=gen_variable_type_func,
         num_shards=5,

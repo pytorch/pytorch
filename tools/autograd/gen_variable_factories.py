@@ -16,6 +16,16 @@ from torchgen.model import NativeFunction, TensorOptionsArguments, Variant
 OPTIONAL_TYPE_PATTERN = re.compile(r"c10::optional<(.+)>")
 TYPE_PATTERN = re.compile(r"(?:const\s+)?([A-Z]\w+)")
 
+_HASH_LINK_TREE = "#link-tree/"
+
+def _get_gen_source_path(template_path: str) -> str:
+    return (
+        template_path.split(_HASH_LINK_TREE)[1]
+        if _HASH_LINK_TREE in template_path
+        else template_path
+    )
+
+
 # Add 'at::' to types defined in ATen namespace, e.g. Tensor, TensorList, IntArrayRef and etc.
 # TODO: maybe update the cpp argument API to take optional namespace argument?
 def fully_qualified_type(argument_type: str) -> str:
@@ -47,7 +57,7 @@ def gen_variable_factories(
         "variable_factories.h",
         lambda: {
             "generated_comment": "@"
-            + f"generated from {fm.template_dir}/variable_factories.h",
+            + f"generated from {_get_gen_source_path(fm.template_dir)}/variable_factories.h",
             "ops_headers": [
                 f"#include <ATen/ops/{fn.root_name}.h>" for fn in factory_functions
             ],
