@@ -385,28 +385,12 @@ meta_function_expected_failures = {
     torch.cov: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense
     torch.diag: {bf16, b8, f32, f64, i16, i32, i64, i8, u8},  # aten::diag.out
     torch.diagflat: {bf16, b8, f32, f64, i16, i32, i64, i8, u8},  # aten::diag.out
-    torch.fft.fft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
-    torch.fft.fft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.fft.fftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
     torch.fft.hfft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
     torch.fft.hfft: {b8, f32, f64, i16, i32, i64, i8, u8},
     torch.fft.hfftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
-    torch.fft.ifft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
-    torch.fft.ifft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.fft.ifftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
-    torch.fft.ihfft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.fft.ihfft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.fft.ihfftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.fft.irfft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2r, aten::_fft_c2r.out
-    torch.fft.irfft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2r, aten::_fft_c2r.out
-    torch.fft.irfftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2r, aten::_fft_c2r.out
-    torch.fft.rfft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.fft.rfft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.fft.rfftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
     torch.floor_divide: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::floor_divide, aten::floor_divide.out
     torch.frexp: {bf16, f16, f32, f64},  # aten::frexp.Tensor_out
     torch.functional.istft: {f32, f64},  # aten::view_as_complex
-    torch.functional.stft: {f32, f64},  # aten::_fft_r2c
     torch.functional.unique: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_unique2, aten::unique_dim
     torch.functional.unique_consecutive: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::unique_consecutive
     torch.histc: {bf16, f32, f64},  # aten::histc, aten::histc.out
@@ -630,7 +614,6 @@ meta_dispatch_expected_failures = {
     aten._conj_physical.default: {c32},
     aten._convolution.default: {c64, i64, f64, c128, bf16, f32},
     aten._ctc_loss.default: {f64, f32},
-    aten._fft_r2c.default: {i64, u8, b8, f32, i8, f64, i16, i32},
     aten._histogramdd_bin_edges.default: {f64, f32},
     aten._histogramdd_from_bin_cts.default: {f64, f32},
     aten._histogramdd_from_bin_tensors.default: {f64, f32},
@@ -751,12 +734,6 @@ meta_dispatch_device_skips = defaultdict(dict)
 meta_dispatch_device_expected_failures['cuda'] = {
     aten._conj_physical.default: {f16},  # aten::conj_physical.out
     aten._convolution.default: {f16, c32},
-    aten._fft_c2c.default: {c32, f16},  # aten::_fft_c2c
-    aten._fft_c2c.out: {c32, f16},  # aten::_fft_c2c.out
-    aten._fft_c2r.default: {c32, f16},  # aten::_fft_c2r
-    aten._fft_c2r.out: {c32, f16},  # aten::_fft_c2r.out
-    aten._fft_r2c.default: {f16},  # aten::_fft_r2c
-    aten._fft_r2c.out: {f16},  # aten::_fft_r2c.out
     aten._unique2.default: {f16},  # aten::_unique2
     aten._use_cudnn_ctc_loss.default: {f32, f64},  # aten::_use_cudnn_ctc_loss
     aten.convolution.default: {f16, c32},

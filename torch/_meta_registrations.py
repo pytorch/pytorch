@@ -11,11 +11,62 @@ meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
 def toRealValueType(dtype):
     from_complex = {
-        torch.complex32: torch.half,
+        torch.chalf: torch.half,
         torch.cfloat: torch.float,
         torch.cdouble: torch.double,
     }
     return from_complex.get(dtype, dtype)
+
+
+def toComplexValueType(dtype):
+    to_complex = {
+        torch.half: torch.chalf,
+        torch.float: torch.cfloat,
+        torch.double: torch.cdouble,
+    }
+    return to_complex[dtype]
+
+
+@torch.library.impl(meta_lib, "_fft_c2c")
+def meta_fft_c2c(self, dim, normalization, forward):
+    assert self.dtype.is_complex
+    return self.new_empty(list(self.size()))
+
+
+@torch.library.impl(meta_lib, "_fft_r2c")
+def meta_fft_r2c(self, dim, normalization, onesided):
+    assert self.dtype.is_floating_point
+    output_sizes = list(self.size())
+
+    if onesided:
+        last_dim = dim[-1]
+        last_dim_halfsize = int((output_sizes[last_dim] / 2) + 1)
+        output_sizes[last_dim] = last_dim_halfsize
+
+    return self.new_empty(output_sizes, dtype=toComplexValueType(self.dtype))
+
+
+@torch.library.impl(meta_lib, "_fft_c2r")
+def meta_fft_c2r(self, dim, normalization, lastdim):
+    assert self.dtype.is_complex
+    output_sizes = list(self.size())
+    output_sizes[dim[-1]] = lastdim
+    return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
+
+
+@torch.library.impl(meta_lib, "_fft_c2r.out")
+def meta_fft_c2r_out(self, dim, normalization, lastdim, out):
+    assert self.dtype.is_complex
+    output_sizes = list(self.size())
+    output_sizes[dim[-1]] = lastdim
+    torch._resize_output_(out, output_sizes, self.device)
+    return out.copy_(torch._fft_c2r(self, dim, normalization, lastdim))
+
+
+@torch.library.impl(meta_lib, "conj_physical.out")
+def meta_conj_physical_out(self, out):
+    torch._resize_output_(out, self.size(), self.device)
+    return out.copy_(self)
 
 
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
