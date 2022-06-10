@@ -4491,10 +4491,11 @@ for shape in [(1,), ()]:
         self.assertTrue(mem_reentrant_checkpoint < mem_no_checkpoint)
         self.assertTrue(mem_no_reentrant_checkpoint < mem_no_checkpoint)
 
-    def test_checkpointing_without_reentrant_custom_function(self):
+    def test_checkpointing_without_reentrant_custom_function_raises(self):
         """
-        Ensures that we can access saved tensors twice in custom functions
-        when using non-reentrant checkpoint.
+        Accessing ctx.saved_tensors multiple times in a custom function
+        backward pass with non-reentrant checkpoint currently throws due to
+        saved tensors not being recomputed in between the accesses.
         """
         class MyFunc(torch.autograd.Function):
             @staticmethod
@@ -4512,19 +4513,24 @@ for shape in [(1,), ()]:
                 # checkpoint is cleared, and repopulated during
                 # recomputation.
                 x_2, y_2, z_2, w_2, out_2 = ctx.saved_tensors
-                self.assertEqual(x.data_ptr(), x_2.data_ptr())
-                self.assertEqual(y.data_ptr(), y_2.data_ptr())
-                self.assertEqual(z.data_ptr(), z_2.data_ptr())
-                self.assertEqual(w, w_2)
-                self.assertEqual(out, out_2)
-                return x, x, x
-                return grad_out, grad_out, grad_out
 
         x = torch.tensor(1., requires_grad=True)
         y = torch.tensor(2., requires_grad=True)
         z = torch.tensor(3., requires_grad=True)
-        out = checkpoint(MyFunc.apply, x, y, z, use_reentrant=False)
-        out.sum().backward()
+
+        def foo(x, y, z):
+            x = x * y * z
+            y = y * y * z
+            z = z * z
+            out = MyFunc.apply(x, y, z)
+            return out
+
+        out = checkpoint(foo, x, y, z, use_reentrant=False)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Attempt to retrieve a tensor saved by autograd multiple times"
+        ):
+            out.sum().backward()
 
     def test_access_saved_tensor_twice_without_recomputation_raises(self):
         """
