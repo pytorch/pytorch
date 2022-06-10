@@ -450,8 +450,7 @@ class GitHubPR:
         return int(self.info["changedFiles"])
 
     def last_pushed_at(self) -> datetime:
-        print(self.info["commits"]["nodes"][-1]['commit']['pushedDate'])
-        return datetime.fromisoformat(self.info["commits"]["nodes"][-1]['commit']['pushedDate'][:-1])
+        return datetime.fromisoformat(self.last_commit()['pushedDate'][:-1])
 
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
