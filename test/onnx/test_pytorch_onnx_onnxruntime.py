@@ -2814,6 +2814,29 @@ class _TestONNXRuntime:
         x = torch.randn(2, 3, 4)
         self.run_test(Rand(), x)
 
+    def test_random_dtype(self):
+        class RandN(torch.nn.Module):
+            def forward(self, x):
+                return (
+                    x.to(torch.float32)
+                    * torch.randn(2, 3, 4, dtype=torch.double)
+                    * torch.tensor(0, dtype=torch.float32)
+                )
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandN(), x)
+
+        class Rand(torch.nn.Module):
+            def forward(self, x):
+                return (
+                    x.to(torch.float32)
+                    * torch.rand(2, 3, 4, dtype=torch.double)
+                    * torch.tensor(0, dtype=torch.float32)
+                )
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Rand(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_random_dynamic_size(self):
         class RandN(torch.nn.Module):
@@ -2850,8 +2873,10 @@ class _TestONNXRuntime:
     def test_random_like_dtype(self):
         class RandNLike(torch.nn.Module):
             def forward(self, x):
-                return torch.mul(
-                    x.to(torch.double), torch.randn_like(x, dtype=torch.double).size(0)
+                return (
+                    x.to(torch.float32)
+                    * torch.randn_like(x, dtype=torch.double)
+                    * torch.tensor(0, dtype=torch.float32)
                 )
 
         x = torch.randn(2, 3, 4)
@@ -2859,8 +2884,10 @@ class _TestONNXRuntime:
 
         class RandLike(torch.nn.Module):
             def forward(self, x):
-                return torch.mul(
-                    x.to(torch.double), torch.rand_like(x, dtype=torch.double).size(0)
+                return (
+                    x.to(torch.float32)
+                    * torch.rand_like(x, dtype=torch.double)
+                    * torch.tensor(0, dtype=torch.float32)
                 )
 
         x = torch.randn(2, 3, 4)
