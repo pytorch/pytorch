@@ -3118,9 +3118,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('pca_lowrank', ''),
         xfail('svd_lowrank', ''),
 
-        # https://github.com/pytorch/functorch/issues/859
-        xfail('__getitem__'),
-
         # required rank 4 tensor to use channels_last format
         xfail('bfloat16'),
         xfail('bool'),
