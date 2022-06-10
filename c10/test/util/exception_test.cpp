@@ -5,6 +5,9 @@
 using c10::Error;
 
 namespace {
+bool throw_func() {
+  throw std::runtime_error("I'm throwing...");
+}
 
 template <class Functor>
 inline void expectThrowsEq(Functor&& functor, const char* expectedMessage) {
@@ -23,10 +26,9 @@ TEST(ExceptionTest, TORCH_INTERNAL_ASSERT_DEBUG_ONLY) {
 #ifdef NDEBUG
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false));
-  // Does nothing - `throw ...` should not be evaluated
+  // Does nothing - `throw_func()` should not be evaluated
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  ASSERT_NO_THROW(TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      (throw std::runtime_error("I'm throwing..."), true)));
+  ASSERT_NO_THROW(TORCH_INTERNAL_ASSERT_DEBUG_ONLY(throw_func()));
 #else
   ASSERT_THROW(TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false), c10::Error);
   ASSERT_NO_THROW(TORCH_INTERNAL_ASSERT_DEBUG_ONLY(true));
