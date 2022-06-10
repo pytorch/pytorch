@@ -62,7 +62,7 @@ def mock_parse_args(revert: bool = False,
             self.pr_num = 76123
             self.dry_run = True
             self.comment_id = 0
-            self.mandatory_only = False
+            self.on_mandatory = False
             self.on_green = False
             self.reason = 'this is for testing'
 
