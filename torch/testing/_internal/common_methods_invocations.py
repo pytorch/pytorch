@@ -8327,7 +8327,7 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs
                           args=(1, idx, src, reduce),
                           kwargs={'include_self': True})
 
-def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode='lengths', **kwargs):
+def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, **kwargs):
     def _tensor(shape, dtype=dtype, low=None, high=None):
         return make_tensor(shape, dtype=dtype, device=device, low=low, high=high, requires_grad=requires_grad)
 
@@ -8340,11 +8340,6 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
         ((S, S), 0, [0, 1, 2, 2], False),
         # test when lengths do not sum to dim size
         ((M, S, S), 0, [1, 2, 0, 6, 0], True),
-        # test for higher dimensions
-        ((S, S), 1, [[0, 1, 2, 2] for _ in range(S)], False),
-        ((S, S), 1, [[2, 0, 3, 0], [0, 1, 2, 2], [3, 0, 2, 0], [1, 1, 1, 2], [0, 1, 2, 2]], False),
-        ((S, S, S), 1, [[0, 1, 2, 2] for _ in range(S)], False),
-        ((S, S, S), 1, [[2, 0, 3, 0], [0, 1, 2, 2], [3, 0, 2, 0], [1, 1, 1, 2], [0, 1, 2, 2]], False),
     )
 
     reductions = ["max", "mean", "min", "sum", "prod"]
@@ -19378,7 +19373,6 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         'segment_reduce',
-        variant_test_name='lengths',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
