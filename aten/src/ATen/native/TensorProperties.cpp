@@ -16,18 +16,15 @@ bool is_same_size(const Tensor& self, const Tensor& other) {
 
 bool nested_is_same_size(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
-      self.is_nested() == other.is_nested(),
-      "Expected both self and other to be either nested or not nested tensors. ",
+      self.is_nested() && other.is_nested(),
+      "Expected both self and other to be nested tensors ",
       "Self ", self.is_nested()? "is " : "is not ",
       "nested. While Other ",
       other.is_nested()? "is " : "is not ",
       "nested.")
-  if (self.is_nested()) {
-    const auto self_nt_size = get_nested_size_tensor(self);
-    const auto other_nt_size = get_nested_size_tensor(other);
-    return at::equal(self_nt_size, other_nt_size);
-  }
-  return self.sizes() == other.sizes();
+  const auto self_nt_size = get_nested_size_tensor(self);
+  const auto other_nt_size = get_nested_size_tensor(other);
+  return at::equal(self_nt_size, other_nt_size);
 }
 int64_t size(const Tensor& self, int64_t dim) {
   return self.size(dim);
