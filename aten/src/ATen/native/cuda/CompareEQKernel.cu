@@ -35,7 +35,7 @@ void eq_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void ne_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "ne_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBFloat16, kBool, iter.common_dtype(), "ne_cuda", [&]() {
     gpu_kernel_with_scalars(iter, CompareEqFunctor<scalar_t>(EqOpType::NE));
   });
 }
