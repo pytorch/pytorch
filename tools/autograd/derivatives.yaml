@@ -1437,10 +1437,10 @@
   self: slogdet_backward(grad, self, sign, logabsdet)
   output_differentiability: [false, true]
 
-- name: linalg_solve(Tensor input, Tensor other) -> Tensor
-  input: solve_backward_A(grad, other, input, result)
-  other: solve_backward_self(grad, other, input)
-  result: solve_jvp(result, input_p, input_t, other_t)
+- name: _linalg_solve(Tensor A, Tensor B, *, bool left=True) -> (Tensor result, Tensor LU, Tensor pivots)
+  A, B: linalg_solve_backward(grad, result, A, LU, pivots, left, grad_input_mask[1])
+  result: "linalg_solve_jvp(A_t, B_t, result, LU, pivots, left, A_p.is_contiguous() && !A_p.is_complex())"
+  output_differentiability: [True, False, False]  # LU is an auxiliary tensor not exposed to the user
 
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
@@ -1667,7 +1667,7 @@
   output_differentiability: [True, False, False]
   self: not_implemented("_unique2")
 
-- name: _unsafe_view(Tensor(a) self, int[] size) -> Tensor(a)
+- name: _unsafe_view(Tensor self, int[] size) -> Tensor
   self: grad.reshape(self.sizes())
   result: auto_linear
 
