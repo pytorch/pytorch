@@ -857,10 +857,15 @@ class TORCH_API ForkedSubgraphSRLauncher {
         future_(std::move(future)) {}
 
   void operator()() {
-    StaticModule smodule(graph_, opts_, {});
-    StaticRuntime runtime(smodule);
-    auto output = runtime(args_, {});
-    future_->markCompleted(output);
+    try {
+      StaticModule smodule(graph_, opts_, {});
+      StaticRuntime runtime(smodule);
+      auto output = runtime(args_, {});
+      future_->markCompleted(output);
+    } catch (const std::exception& e) {
+      future_->setErrorIfNeeded(
+          std::make_exception_ptr(c10::ivalue::Future::FutureError(e.what())));
+    }
   }
 
  private:
