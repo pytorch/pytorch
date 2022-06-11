@@ -4915,6 +4915,11 @@
     CPU: nested_from_padded_generic
     CUDA: nested_from_padded_cuda
 
+- func: _nested_tensor_size(Tensor self) -> Tensor
+  variants: method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_get_nested_size_tensor
+
 # _nested_from_padded is not usable from Python, so
 # _nested_from_padded_and_nested_example is available for testing.
 - func: _nested_from_padded_and_nested_example(Tensor padded, Tensor nt_example) -> Tensor
