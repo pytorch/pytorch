@@ -1,9 +1,10 @@
 import os
 import fnmatch
 import warnings
+import inspect
 
 from io import IOBase
-from typing import Dict, Iterable, List, Tuple, Union, Optional
+from typing import Dict, Iterable, List, Tuple, Union, Optional, Callable
 
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
@@ -14,6 +15,35 @@ __all__ = [
     "match_masks",
     "validate_pathname_binary_tuple",
 ]
+
+
+def ensure_map_fn_works(fn: Callable, input_col: Optional[Union[int, tuple, list]]):
+    """
+    Checks that function used in a map style datapipe works with the input column
+
+    Args:
+        fn: The function to check.
+        input_col: The input column to check.
+    Returns:
+        None.
+    Raises:
+        TypeError: If the function is not compatible with the input column.
+    """
+    sig = inspect.signature(fn)
+
+    if isinstance(input_col, int) or not input_col:
+        if len(sig.parameters) != 1:
+            raise TypeError(
+                f"The function {fn.__name__} takes {len(sig.parameters)} " f"arguments, "
+                f"" f"but 1 is required."
+            )
+    elif isinstance(input_col, (list, tuple)):
+        if len(sig.parameters) != len(input_col):
+            raise TypeError(
+                f"The function {fn.__name__} takes {len(sig.parameters)} "
+                f"arguments, "
+                f"but {len(input_col)} are required."
+            )
 
 
 def _check_lambda_fn(fn):
