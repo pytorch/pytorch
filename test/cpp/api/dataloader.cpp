@@ -1900,8 +1900,6 @@ TEST(DataLoaderTest, ChunkDatasetDoesNotHang) {
           datasets::ChunkDatasetOptions(
               prefetch_count, batch_size, cache_size));
 
-  samplers::SequentialSampler& chunk_sampler = dataset->chunk_sampler();
-
   auto data_loader = torch::data::make_data_loader(
       dataset.map(transforms::BatchLambda<DummyChunkDataReader::BatchType, DummyChunkDataReader::DataType>(
           [](DummyChunkDataReader::BatchType batch) {
@@ -2043,7 +2041,6 @@ TEST(DataLoaderTest, ChunkDatasetLoad) {
   const size_t prefetch_count = 1;
   const size_t batch_size = 10;
   const size_t dataloader_worker_count = 0;
-  const size_t save_interval = 2;
 
   DummyChunkDataReader data_reader;
   samplers::SequentialSampler sampler(0);
@@ -2223,8 +2220,6 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
       std::vector<int> expected_result;
       {
         // construct expected result
-        int offset = 0;
-
         for (const auto i : c10::irange((chunk_count + cross_chunk_shuffle_count - 1) /
                  cross_chunk_shuffle_count)) {
           for (const auto j : c10::irange(chunk_size)) {

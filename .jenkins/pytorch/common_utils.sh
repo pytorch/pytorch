@@ -115,19 +115,19 @@ function install_monkeytype {
 }
 
 
-function get_torchvision_commit() {
-  cat .github/ci_commit_pins/vision.txt
+function get_pinned_commit() {
+  cat .github/ci_commit_pins/"${1}".txt
 }
 
 function install_torchvision() {
   local commit
-  commit=$(get_torchvision_commit)
+  commit=$(get_pinned_commit vision)
   pip_install --user "git+https://github.com/pytorch/vision.git@${commit}"
 }
 
 function checkout_install_torchvision() {
   local commit
-  commit=$(get_torchvision_commit)
+  commit=$(get_pinned_commit vision)
   git clone https://github.com/pytorch/vision
   pushd vision
   git checkout "${commit}"
@@ -145,19 +145,15 @@ function clone_pytorch_xla() {
   fi
 }
 
-function get_torchdynamo_commit() {
-  cat .github/ci_commit_pins/vision.txt
-}
-
 function install_torchdynamo() {
   local commit
-  commit=$(get_torchdynamo_commit)
+  commit=$(get_pinned_commit torchdynamo)
   pip_install --user "git+https://github.com/pytorch/torchdynamo.git@${commit}"
 }
 
 function checkout_install_torchdynamo() {
   local commit
-  commit=$(get_torchdynamo_commit)
+  commit=$(get_pinned_commit torchdynamo)
   pushd ..
   git clone https://github.com/pytorch/torchdynamo
   pushd torchdynamo
