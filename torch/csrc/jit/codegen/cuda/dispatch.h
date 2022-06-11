@@ -78,7 +78,6 @@ class LoadStoreOp;
 class MmaOp;
 class BroadcastOp;
 class TransposeOp;
-class ExpandOp;
 class ShiftOp;
 class GatherOp;
 class ViewAsScalar;
@@ -146,7 +145,6 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const Split* stmt);
   virtual void handle(const Merge* stmt);
   virtual void handle(const TransposeOp* stmt);
-  virtual void handle(const ExpandOp* stmt);
   virtual void handle(const ShiftOp* stmt);
   virtual void handle(const GatherOp* stmt);
   virtual void handle(const ViewAsScalar* stmt);
@@ -204,7 +202,6 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(Split* stmt);
   virtual void handle(Merge* stmt);
   virtual void handle(TransposeOp* stmt);
-  virtual void handle(ExpandOp* stmt);
   virtual void handle(ShiftOp* stmt);
   virtual void handle(GatherOp* stmt);
   virtual void handle(ViewAsScalar* stmt);
@@ -303,7 +300,6 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual void mutate(Split*);
   virtual void mutate(Merge*);
   virtual void mutate(TransposeOp*);
-  virtual void mutate(ExpandOp*);
   virtual void mutate(ShiftOp*);
   virtual void mutate(GatherOp*);
   virtual void mutate(ViewAsScalar*);
