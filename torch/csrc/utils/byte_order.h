@@ -1,7 +1,7 @@
 #pragma once
 
-#include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
 #include <torch/csrc/Export.h>
 #include <cstddef>
 #include <cstdint>
@@ -9,10 +9,7 @@
 namespace torch {
 namespace utils {
 
-enum THPByteOrder {
-  THP_LITTLE_ENDIAN = 0,
-  THP_BIG_ENDIAN = 1
-};
+enum THPByteOrder { THP_LITTLE_ENDIAN = 0, THP_BIG_ENDIAN = 1 };
 
 TORCH_API THPByteOrder THP_nativeByteOrder();
 

@@ -83,7 +83,6 @@ class TORCH_API TSLoweringContext : public LoweringContext {
       size_t index,
       const Shape& shape,
       const std::string& name) override {
-
     TORCH_INTERNAL_ASSERT(false, "not implemented");
   }
 

@@ -3,8 +3,8 @@
 #include <torch/types.h>
 #include <torch/utils.h>
 
-#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/serialization/export.h>
 
 #include <c10/util/Exception.h>
 

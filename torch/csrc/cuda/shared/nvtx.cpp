@@ -1,7 +1,9 @@
-#include <torch/csrc/utils/pybind.h>
 #include <nvToolsExt.h>
+#include <torch/csrc/utils/pybind.h>
 
-namespace torch { namespace cuda { namespace shared {
+namespace torch {
+namespace cuda {
+namespace shared {
 
 void initNvtxBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();

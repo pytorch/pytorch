@@ -49,9 +49,8 @@ bool profilerEnabled() {
 
 TORCH_API ActiveProfilerType profilerType() {
   auto state_ptr = ProfilerThreadLocalStateBase::getTLS();
-  return state_ptr == nullptr
-      ? ActiveProfilerType::NONE
-      : state_ptr->profilerType();
+  return state_ptr == nullptr ? ActiveProfilerType::NONE
+                              : state_ptr->profilerType();
 }
 
 torch::profiler::impl::ProfilerConfig getProfilerConfig() {

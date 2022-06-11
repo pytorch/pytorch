@@ -37,10 +37,11 @@ class TORCH_API IMethod {
   const std::vector<std::string>& getArgumentNames() const;
 
  protected:
-  virtual void setArgumentNames(std::vector<std::string>& argumentNames) const = 0;
+  virtual void setArgumentNames(
+      std::vector<std::string>& argumentNames) const = 0;
 
  private:
-  mutable  bool isArgumentNamesInitialized_ { false };
+  mutable bool isArgumentNamesInitialized_{false};
   mutable std::vector<std::string> argumentNames_;
 };
 

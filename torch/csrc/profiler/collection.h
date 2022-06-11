@@ -270,7 +270,8 @@ class InputOutputEncoder final {
   void push(const at::Tensor& t);
 
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
-  AppendOnlyList<TensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_metadata_;
+  AppendOnlyList<TensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
+      tensor_metadata_;
   AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_;
 };
 
@@ -322,7 +323,9 @@ class TORCH_API ThreadLocalSubqueue {
  public:
   ThreadLocalSubqueue(const uint64_t tid, const ProfilerConfig& config);
 
-  std::unique_ptr<KinetoObserverContext> begin_op(const at::RecordFunction& fn, uint64_t correlation_id);
+  std::unique_ptr<KinetoObserverContext> begin_op(
+      const at::RecordFunction& fn,
+      uint64_t correlation_id);
 
   template <class... Args>
   void emplace_backend_event(Args&&... args) {
@@ -362,7 +365,8 @@ class TORCH_API ThreadLocalSubqueue {
 
   // with_stack
   AppendOnlyList<jit_stack_t, BlockSize> jit_stack_;
-  AppendOnlyList<std::pair<python_tracer::TraceKey, approx_time_t>, BlockSize> py_calls_;
+  AppendOnlyList<std::pair<python_tracer::TraceKey, approx_time_t>, BlockSize>
+      py_calls_;
 
   // with_modules
   AppendOnlyList<jit_modules_t, BlockSize> jit_modules_;
@@ -396,7 +400,8 @@ class TORCH_API RecordQueue {
   uint32_t id_;
   ProfilerConfig config_;
   std::set<ActivityType> activities_;
-  ska::flat_hash_map<uint64_t, std::unique_ptr<ThreadLocalSubqueue>> sub_queues_;
+  ska::flat_hash_map<uint64_t, std::unique_ptr<ThreadLocalSubqueue>>
+      sub_queues_;
   std::mutex sub_queue_mutex_;
 };
 

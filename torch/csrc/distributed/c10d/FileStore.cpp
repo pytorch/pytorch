@@ -358,8 +358,13 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - start);
       if (timeout_ != kNoTimeout && elapsed > timeout_) {
-          auto err = c10::str("Timeout waiting for key: ", key, " after ", timeout_.count(), " ms");
-          TORCH_CHECK(false, err);
+        auto err = c10::str(
+            "Timeout waiting for key: ",
+            key,
+            " after ",
+            timeout_.count(),
+            " ms");
+        TORCH_CHECK(false, err);
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;

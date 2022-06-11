@@ -61,21 +61,21 @@ C10_DEFINE_int(
     4096,
     "Set the size for the shape cache used for shape inference");
 
-
 namespace torch {
 namespace lazy {
 
 std::string& getLTCForceFallback() {
-    static std::string config;
-    static bool _ignore = [&]() {
-        char *envptr = std::getenv("LTC_FORCE_FALLBACK");
-        if (envptr) {
-            config = std::string(envptr);
-        }
-        return true;
-    }();
-    (void) _ignore;  // avoid unused variables warning
-    return config;
+  static std::string config;
+  static bool _ignore = [&]() {
+    char* envptr = std::getenv("LTC_FORCE_FALLBACK");
+    if (envptr) {
+      config = std::string(envptr);
+    }
+    return true;
+  }();
+  (void)_ignore; // avoid unused variables warning
+  return config;
 }
 
-} }
+} // namespace lazy
+} // namespace torch

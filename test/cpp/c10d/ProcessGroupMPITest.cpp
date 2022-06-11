@@ -170,7 +170,7 @@ void testAllgather(int iter = 10000) {
 
     // Queue the work.
     c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
-      pg->allgather(outputs, tensors);
+        pg->allgather(outputs, tensors);
     works.push_back(std::move(work));
   }
 
@@ -264,7 +264,7 @@ void testScatter(int iter = 1) {
 
     // Queue the work.
     c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
-      pg->scatter(tensors, inputs);
+        pg->scatter(tensors, inputs);
     works.push_back(std::move(work));
   }
 

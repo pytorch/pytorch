@@ -21,16 +21,16 @@ namespace libkineto {
 enum class ActivityType;
 struct CpuTraceBuffer;
 class ActivityTraceInterface;
-}
+} // namespace libkineto
 #endif
 
 namespace torch {
 namespace profiler {
 
 #ifdef USE_KINETO
-constexpr bool kKinetoAvailable {true};
+constexpr bool kKinetoAvailable{true};
 #else
-constexpr bool kKinetoAvailable {false};
+constexpr bool kKinetoAvailable{false};
 #endif
 
 namespace impl {
@@ -89,7 +89,7 @@ struct TraceWrapper {
   explicit operator bool() const;
 
   std::unique_ptr<trace_t>& get() {
-      return cpu_trace_;
+    return cpu_trace_;
   }
 
  private:
@@ -106,7 +106,7 @@ struct ActivityTraceWrapper {
   void save(const std::string& path);
 
   const std::unique_ptr<interface_trace_t>& get() {
-      return trace_;
+    return trace_;
   }
 
  private:
@@ -116,7 +116,8 @@ struct ActivityTraceWrapper {
 
 using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
 void prepareTrace(
-    const bool cpuOnly, const ActivitySet& activities,
+    const bool cpuOnly,
+    const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config);
 void startTrace();
 ActivityTraceWrapper stopTrace();

@@ -1,9 +1,9 @@
 #include <torch/csrc/python_headers.h>
 #include <system_error>
 
+#include <c10/core/CPUAllocator.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/serialization.h>
-#include <c10/core/CPUAllocator.h>
 
 template <class io>
 Py_ssize_t doPartialRead(io fildes, void* buf, size_t nbytes);
@@ -11,9 +11,18 @@ Py_ssize_t doPartialRead(io fildes, void* buf, size_t nbytes);
 template <class io>
 Py_ssize_t doPartialWrite(io fildes, void* buf, size_t nbytes);
 
-static Py_ssize_t doPartialPythonReadBuffered(PyObject* fildes, void* buf, size_t nbytes);
-static Py_ssize_t doPartialPythonReadInto(PyObject* fildes, void* buf, size_t nbytes);
-static Py_ssize_t doPartialPythonWrite(PyObject* fildes, void* buf, size_t nbytes);
+static Py_ssize_t doPartialPythonReadBuffered(
+    PyObject* fildes,
+    void* buf,
+    size_t nbytes);
+static Py_ssize_t doPartialPythonReadInto(
+    PyObject* fildes,
+    void* buf,
+    size_t nbytes);
+static Py_ssize_t doPartialPythonWrite(
+    PyObject* fildes,
+    void* buf,
+    size_t nbytes);
 
 template <>
 Py_ssize_t doPartialRead<int>(int fildes, void* buf, size_t nbytes) {
@@ -21,7 +30,10 @@ Py_ssize_t doPartialRead<int>(int fildes, void* buf, size_t nbytes) {
 }
 
 template <>
-Py_ssize_t doPartialRead<PyObject*>(PyObject* fildes, void* buf, size_t nbytes) {
+Py_ssize_t doPartialRead<PyObject*>(
+    PyObject* fildes,
+    void* buf,
+    size_t nbytes) {
   // Try to use fildes.readinto() instead of fildes.read()
   // because it is more memory efficient.
   // TODO: Stop calling PyObject_HasAttrString() in a loop on our read loop
@@ -38,20 +50,28 @@ Py_ssize_t doPartialWrite<int>(int fildes, void* buf, size_t nbytes) {
 }
 
 template <>
-Py_ssize_t doPartialWrite<PyObject*>(PyObject* fildes, void* buf, size_t nbytes) {
+Py_ssize_t doPartialWrite<PyObject*>(
+    PyObject* fildes,
+    void* buf,
+    size_t nbytes) {
   return doPartialPythonWrite(fildes, buf, nbytes);
 }
 
 static inline bool isUnsupportedOperation() {
   THPObjectPtr io(PyImport_ImportModule("io"));
-  if (!io) throw python_error();
+  if (!io)
+    throw python_error();
   THPObjectPtr exception(PyObject_GetAttrString(io, "UnsupportedOperation"));
-  if (!exception) throw python_error();
+  if (!exception)
+    throw python_error();
   return PyErr_ExceptionMatches(exception.get());
 }
 
 // Call Python fildes.read(nbytes) and copy it to buf.
-static inline Py_ssize_t doPartialPythonReadBuffered(PyObject* fildes, void* buf, size_t raw_nbytes) {
+static inline Py_ssize_t doPartialPythonReadBuffered(
+    PyObject* fildes,
+    void* buf,
+    size_t raw_nbytes) {
   // If we request a large amount of data, f.read() will internally try to
   // allocate a buffer of that size.  This is counterproductive, because
   // it's not the buffer we ultimately want to write the data into.  Read
@@ -60,7 +80,8 @@ static inline Py_ssize_t doPartialPythonReadBuffered(PyObject* fildes, void* buf
   const size_t nbytes = std::min<size_t>(raw_nbytes, 262144u); // 2^18 (~260 KB)
 
   THPObjectPtr r(PyObject_CallMethod(fildes, "read", "i", nbytes));
-  if (!r) throw python_error();
+  if (!r)
+    throw python_error();
 
   auto size = PyBytes_GET_SIZE(r.get());
   const void* py_buf = PyBytes_AsString(r.get());
@@ -77,22 +98,29 @@ static inline Py_ssize_t doPartialPythonReadBuffered(PyObject* fildes, void* buf
 }
 
 // Either does fildes.readinto(buf) or fildes.write(buf)
-static inline Py_ssize_t doPartialPythonIO(PyObject* fildes, void* buf, size_t nbytes, bool is_read) {
+static inline Py_ssize_t doPartialPythonIO(
+    PyObject* fildes,
+    void* buf,
+    size_t nbytes,
+    bool is_read) {
   auto rw_flag = is_read ? PyBUF_WRITE : PyBUF_READ;
-  THPObjectPtr memview(PyMemoryView_FromMemory(
-      reinterpret_cast<char*>(buf), nbytes, rw_flag));
-  if (!memview) throw python_error();
+  THPObjectPtr memview(
+      PyMemoryView_FromMemory(reinterpret_cast<char*>(buf), nbytes, rw_flag));
+  if (!memview)
+    throw python_error();
 
   std::string method = "write";
   if (is_read) {
     method = "readinto";
   }
-  THPObjectPtr r(PyObject_CallMethod(fildes, method.c_str(), "O", memview.get()));
+  THPObjectPtr r(
+      PyObject_CallMethod(fildes, method.c_str(), "O", memview.get()));
   if (r) {
     return PyLong_AsSsize_t(r.get());
   }
 
-  // fildes.readinto can return UnsupportedOperation so fall back to fildes.read.
+  // fildes.readinto can return UnsupportedOperation so fall back to
+  // fildes.read.
   if (is_read && isUnsupportedOperation()) {
     PyErr_Clear();
     return doPartialPythonReadBuffered(fildes, buf, nbytes);
@@ -101,12 +129,18 @@ static inline Py_ssize_t doPartialPythonIO(PyObject* fildes, void* buf, size_t n
 }
 
 // Call Python fildes.readinto(buf)
-static Py_ssize_t doPartialPythonReadInto(PyObject* fildes, void* buf, size_t nbytes) {
+static Py_ssize_t doPartialPythonReadInto(
+    PyObject* fildes,
+    void* buf,
+    size_t nbytes) {
   return doPartialPythonIO(fildes, buf, nbytes, /* is_read */ true);
 }
 
 // Call Python fildes.write(buf)
-static Py_ssize_t doPartialPythonWrite(PyObject* fildes, void* buf, size_t nbytes) {
+static Py_ssize_t doPartialPythonWrite(
+    PyObject* fildes,
+    void* buf,
+    size_t nbytes) {
   return doPartialPythonIO(fildes, buf, nbytes, /* is_read */ false);
 }
 
@@ -118,12 +152,17 @@ void doRead(io fildes, void* raw_buf, size_t nbytes) {
     errno = 0; // doPartialRead may not set errno
     // we read in 1GB blocks to avoid bugs on Mac OS X Lion
     // see https://github.com/pytorch/pytorch/issues/1031 for more details
-    Py_ssize_t r = doPartialRead(fildes, buf, std::min<size_t>(nbytes, 1073741824));
+    Py_ssize_t r =
+        doPartialRead(fildes, buf, std::min<size_t>(nbytes, 1073741824));
     if (r < 0) {
       int err = errno;
-      TORCH_INTERNAL_ASSERT(err != 0, "read(): impossible! r < 0, but no errno was set");
-      TORCH_INTERNAL_ASSERT(err != EAGAIN, "read(): non-blocking fd ", fildes,
-                                " read EAGAIN; cowardly refusing to spin-wait");
+      TORCH_INTERNAL_ASSERT(
+          err != 0, "read(): impossible! r < 0, but no errno was set");
+      TORCH_INTERNAL_ASSERT(
+          err != EAGAIN,
+          "read(): non-blocking fd ",
+          fildes,
+          " read EAGAIN; cowardly refusing to spin-wait");
       if (err == EINTR) {
         continue;
       } else {
@@ -139,7 +178,10 @@ void doRead(io fildes, void* raw_buf, size_t nbytes) {
     nbytes -= r;
   }
   if (nbytes != 0) {
-    AT_ERROR("unexpected EOF, expected ", nbytes, " more bytes. The file might be corrupted.");
+    AT_ERROR(
+        "unexpected EOF, expected ",
+        nbytes,
+        " more bytes. The file might be corrupted.");
   }
 }
 
@@ -150,12 +192,17 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
     errno = 0; // doPartialWrite may not set errno
     // we write in 1GB blocks to avoid bugs on Mac OS X Lion
     // see https://github.com/pytorch/pytorch/issues/1031 for more details
-    Py_ssize_t r = doPartialWrite(fildes, buf, std::min<size_t>(nbytes, 1073741824));
+    Py_ssize_t r =
+        doPartialWrite(fildes, buf, std::min<size_t>(nbytes, 1073741824));
     if (r < 0) {
       int err = errno;
-      TORCH_INTERNAL_ASSERT(err != 0, "write(): impossible! r < 0, but no errno was set");
-      TORCH_INTERNAL_ASSERT(err != EAGAIN, "write(): non-blocking fd ", fildes,
-                                " read EAGAIN; cowardly refusing to spin-wait");
+      TORCH_INTERNAL_ASSERT(
+          err != 0, "write(): impossible! r < 0, but no errno was set");
+      TORCH_INTERNAL_ASSERT(
+          err != EAGAIN,
+          "write(): non-blocking fd ",
+          fildes,
+          " read EAGAIN; cowardly refusing to spin-wait");
       if (err == EINTR) {
         continue;
       } else {
@@ -172,11 +219,14 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
 // [size + data], but the v1.5 eager format removes this since size is saved in
 // the filesize.
 template <class io>
-void THPStorage_writeFileRaw(c10::StorageImpl *self, io fd, bool save_size, uint64_t element_size)
-{
+void THPStorage_writeFileRaw(
+    c10::StorageImpl* self,
+    io fd,
+    bool save_size,
+    uint64_t element_size) {
   c10::DeviceGuard guard(self->device());
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  uint8_t *data;
+  uint8_t* data;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::unique_ptr<char[]> cpu_data;
   int64_t size_bytes = self->nbytes();
@@ -188,13 +238,11 @@ void THPStorage_writeFileRaw(c10::StorageImpl *self, io fd, bool save_size, uint
     cpu_data = std::unique_ptr<char[]>(new char[size_bytes]);
     data = (uint8_t*)cpu_data.get();
     C10_CUDA_CHECK(cudaMemcpy(
-        data,
-        self->data<uint8_t>(),
-        size_bytes,
-        cudaMemcpyDeviceToHost));
+        data, self->data<uint8_t>(), size_bytes, cudaMemcpyDeviceToHost));
 #endif
   } else {
-    TORCH_CHECK(false, "writeFileRaw: Device not recognized: ", self->device_type());
+    TORCH_CHECK(
+        false, "writeFileRaw: Device not recognized: ", self->device_type());
   }
   if (save_size) {
     if (torch::utils::THP_nativeByteOrder() ==
@@ -220,7 +268,8 @@ void THPStorage_writeFileRaw(c10::StorageImpl *self, io fd, bool save_size, uint
     int64_t buffer_size = std::min(numel, (int64_t)5000);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * element_size]);
+    std::unique_ptr<uint8_t[]> le_buffer(
+        new uint8_t[buffer_size * element_size]);
     for (int64_t i = 0; i < numel; i += buffer_size) {
       size_t to_convert = std::min(numel - i, buffer_size);
       // NOLINTNEXTLINE(bugprone-branch-clone)
@@ -248,19 +297,28 @@ void THPStorage_writeFileRaw(c10::StorageImpl *self, io fd, bool save_size, uint
   }
 }
 
-template void THPStorage_writeFileRaw<int>(c10::StorageImpl *self, int fd, bool save_size, uint64_t element_size);
-template void THPStorage_writeFileRaw<PyObject*>(c10::StorageImpl *self, PyObject* fd, bool save_size, uint64_t element_size);
+template void THPStorage_writeFileRaw<int>(
+    c10::StorageImpl* self,
+    int fd,
+    bool save_size,
+    uint64_t element_size);
+template void THPStorage_writeFileRaw<PyObject*>(
+    c10::StorageImpl* self,
+    PyObject* fd,
+    bool save_size,
+    uint64_t element_size);
 
 template <class io>
 c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
-    io file, c10::intrusive_ptr<c10::StorageImpl> storage, uint64_t element_size)
-{
+    io file,
+    c10::intrusive_ptr<c10::StorageImpl> storage,
+    uint64_t element_size) {
   c10::OptionalDeviceGuard guard;
   if (storage.defined()) {
     guard.reset_device(storage->device());
   }
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  uint8_t *data;
+  uint8_t* data;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t size;
   doRead(file, &size, sizeof(int64_t));
@@ -271,14 +329,17 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     int64_t nsize; // convert little endian storage to big endian cpu
     nsize = nbytes;
     torch::utils::THP_decodeInt64Buffer(
-        &nbytes, (const uint8_t*)&nsize, torch::utils::THP_nativeByteOrder(), 1);
+        &nbytes,
+        (const uint8_t*)&nsize,
+        torch::utils::THP_nativeByteOrder(),
+        1);
   }
   if (!storage.defined()) {
     storage = c10::make_intrusive<at::StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
-      nbytes,
-      c10::GetDefaultCPUAllocator(),
-      /*resizable=*/true);
+        c10::StorageImpl::use_byte_size_t(),
+        nbytes,
+        c10::GetDefaultCPUAllocator(),
+        /*resizable=*/true);
   } else {
     int64_t _storage_nbytes = storage->nbytes();
     TORCH_CHECK(
@@ -307,7 +368,8 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     int64_t buffer_size = std::min(size, (int64_t)5000);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * element_size]);
+    std::unique_ptr<uint8_t[]> le_buffer(
+        new uint8_t[buffer_size * element_size]);
 
     for (int64_t i = 0; i < size; i += buffer_size) {
       size_t to_convert = std::min(size - i, buffer_size);
@@ -338,13 +400,18 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
 
 #ifdef USE_CUDA
   if (storage->device_type() == at::kCUDA) {
-    C10_CUDA_CHECK(cudaMemcpy(storage->data<uint8_t>(), data, nbytes, cudaMemcpyHostToDevice));
+    C10_CUDA_CHECK(cudaMemcpy(
+        storage->data<uint8_t>(), data, nbytes, cudaMemcpyHostToDevice));
   }
 #endif
   return storage;
 }
 
 template c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw<int>(
-    int fd, c10::intrusive_ptr<c10::StorageImpl> storage, uint64_t element_size);
+    int fd,
+    c10::intrusive_ptr<c10::StorageImpl> storage,
+    uint64_t element_size);
 template c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw<PyObject*>(
-    PyObject* fd, c10::intrusive_ptr<c10::StorageImpl> storage, uint64_t element_size);
+    PyObject* fd,
+    c10::intrusive_ptr<c10::StorageImpl> storage,
+    uint64_t element_size);

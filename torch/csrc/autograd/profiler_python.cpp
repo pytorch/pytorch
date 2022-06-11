@@ -20,8 +20,8 @@
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
 #include <torch/csrc/profiler/util.h>
-#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_strings.h>
 
 namespace py = pybind11;
 
@@ -144,10 +144,10 @@ class CallTypeHelper final {
 //   2) Add a specialization of Config which defined key_t and cache_t.
 //   3) Add a specialization of ValueCache::store and ValueCache::load.
 
-template<CallType>
+template <CallType>
 struct Config;
 
-template<>
+template <>
 struct Config<CallType::PyCall> {
   using key_t = CodeLocation;
   using cache_t = ska::flat_hash_map<key_t, PyFrameState>;
@@ -165,7 +165,7 @@ struct Config<CallType::PyModuleCall> {
   static constexpr EventType event_type = EventType::PyCall;
 };
 
-template<>
+template <>
 struct Config<CallType::PyCCall> {
   using key_t = torch::profiler::impl::PyCFunction;
   using cache_t = ska::flat_hash_map<key_t, at::StringView>;
@@ -299,7 +299,8 @@ ExtraFields<EventType::PyCCall>::args_t ValueCache::load<CallType::PyCCall>(
 // TODO: Use re2.
 void ValueCache::trimPrefixes() {
   static auto prefixes = py::module::import("torch.profiler.python_tracer")
-    .attr("_prefix_regex")().cast<std::vector<std::string>>();
+                             .attr("_prefix_regex")()
+                             .cast<std::vector<std::string>>();
 
   for (auto& it : std::get<CallType::PyCall>(state_)) {
     std::string filename = it.second.filename_.str();
@@ -358,51 +359,50 @@ struct TraceKeyCacheState {
 // `PyEval_SetProfile`.
 struct ThreadLocalResults;
 struct TraceContext {
-  PyObject_HEAD
-  ThreadLocalResults* thread_local_results_;
+  PyObject_HEAD ThreadLocalResults* thread_local_results_;
 };
 
 // CPython boilerplate to define `TraceContext` as a proper python object.
 static PyTypeObject TraceContextType = {
-  PyVarObject_HEAD_INIT(nullptr, 0)
-  "TraceContext",             /* tp_name */
-  sizeof(TraceContext),       /* tp_basicsize */
-  0,                          /* tp_itemsize */
-  nullptr,                    /* tp_dealloc */
-  0,                          /* tp_vectorcall_offset */  // NOLINT: modernize-use-nullptr
-  nullptr,                    /* tp_getattr */
-  nullptr,                    /* tp_setattr */
-  nullptr,                    /* tp_reserved */
-  nullptr,                    /* tp_repr */
-  nullptr,                    /* tp_as_number */
-  nullptr,                    /* tp_as_sequence */
-  nullptr,                    /* tp_as_mapping */
-  nullptr,                    /* tp_hash  */
-  nullptr,                    /* tp_call */
-  nullptr,                    /* tp_str */
-  nullptr,                    /* tp_getattro */
-  nullptr,                    /* tp_setattro */
-  nullptr,                    /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT,         /* tp_flags */
-  "Python tracer TLS",        /* tp_doc */
-  nullptr,                    /* tp_traverse */
-  nullptr,                    /* tp_clear */
-  nullptr,                    /* tp_richcompare */
-  0,                          /* tp_weaklistoffset */
-  nullptr,                    /* tp_iter */
-  nullptr,                    /* tp_iternext */
-  nullptr,                    /* tp_methods */
-  nullptr,                    /* tp_members */
-  nullptr,                    /* tp_getset */
-  nullptr,                    /* tp_base */
-  nullptr,                    /* tp_dict */
-  nullptr,                    /* tp_descr_get */
-  nullptr,                    /* tp_descr_set */
-  0,                          /* tp_dictoffset */
-  nullptr,                    /* tp_init */
-  nullptr,                    /* tp_alloc */
-  PyType_GenericNew,          /* tp_new */
-  nullptr                     /* tp_free */
+    PyVarObject_HEAD_INIT(nullptr, 0) "TraceContext", /* tp_name */
+    sizeof(TraceContext), /* tp_basicsize */
+    0, /* tp_itemsize */
+    nullptr, /* tp_dealloc */
+    0,
+    /* tp_vectorcall_offset */ // NOLINT: modernize-use-nullptr
+    nullptr, /* tp_getattr */
+    nullptr, /* tp_setattr */
+    nullptr, /* tp_reserved */
+    nullptr, /* tp_repr */
+    nullptr, /* tp_as_number */
+    nullptr, /* tp_as_sequence */
+    nullptr, /* tp_as_mapping */
+    nullptr, /* tp_hash  */
+    nullptr, /* tp_call */
+    nullptr, /* tp_str */
+    nullptr, /* tp_getattro */
+    nullptr, /* tp_setattro */
+    nullptr, /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT, /* tp_flags */
+    "Python tracer TLS", /* tp_doc */
+    nullptr, /* tp_traverse */
+    nullptr, /* tp_clear */
+    nullptr, /* tp_richcompare */
+    0, /* tp_weaklistoffset */
+    nullptr, /* tp_iter */
+    nullptr, /* tp_iternext */
+    nullptr, /* tp_methods */
+    nullptr, /* tp_members */
+    nullptr, /* tp_getset */
+    nullptr, /* tp_base */
+    nullptr, /* tp_dict */
+    nullptr, /* tp_descr_get */
+    nullptr, /* tp_descr_set */
+    0, /* tp_dictoffset */
+    nullptr, /* tp_init */
+    nullptr, /* tp_alloc */
+    PyType_GenericNew, /* tp_new */
+    nullptr /* tp_free */
 };
 
 // ============================================================================
@@ -468,7 +468,10 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   PythonTracer();
 
   void recordPyCall(ThreadLocalResults& tls, PyFrameObject* frame);
-  void recordCCall(ThreadLocalResults& tls, PyFrameObject* frame, PyObject* arg);
+  void recordCCall(
+      ThreadLocalResults& tls,
+      PyFrameObject* frame,
+      PyObject* arg);
 
   torch::profiler::impl::RecordQueue* queue_;
   PyObject* module_call_code_;
@@ -560,7 +563,8 @@ void PythonTracer::stop() {
 }
 
 void PythonTracer::clear() {
-  TORCH_CHECK(queue_ == nullptr, "Cannot clear state while PythonTracer is active.");
+  TORCH_CHECK(
+      queue_ == nullptr, "Cannot clear state while PythonTracer is active.");
   thread_local_results_.clear();
   value_cache_ = ValueCache();
 }
@@ -643,9 +647,7 @@ class PostProcess {
   }
 
   template <EventType E, size_t N>
-  void addExits(
-      AppendOnlyList<approx_time_t, N>& exits,
-      size_t python_tid) {
+  void addExits(AppendOnlyList<approx_time_t, N>& exits, size_t python_tid) {
     for (const auto i : exits) {
       get_state<E>().exits_.push({time_converter_(i), python_tid});
     }
@@ -702,7 +704,7 @@ class PostProcess {
 
   template <EventType E>
   auto& get_state() {
-    return std::get<E == EventType::PyCall ? 0 : 1>(state_);
+    return std::get < E == EventType::PyCall ? 0 : 1 > (state_);
   }
 
   std::function<time_t(approx_time_t)> time_converter_;
@@ -738,10 +740,9 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
   PostProcess post_process(time_converter, thread_local_results_, value_cache_);
   auto out = post_process.run(enters);
 
-  std::stable_sort(
-    out.begin(), out.end(), [](const auto& a, const auto& b) {
-      return a->start_time_ns_ < b->start_time_ns_;
-    });
+  std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
+    return a->start_time_ns_ < b->start_time_ns_;
+  });
 
   PythonIDVisitor id_visitor;
   for (auto& i : out) {

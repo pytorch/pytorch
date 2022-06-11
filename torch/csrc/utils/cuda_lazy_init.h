@@ -29,5 +29,5 @@ static void maybe_initialize_cuda(const at::TensorOptions& options) {
   }
 }
 
-}
-}
+} // namespace utils
+} // namespace torch
