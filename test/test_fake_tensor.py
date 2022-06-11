@@ -4,7 +4,12 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import itertools
 from torch.testing._internal.jit_utils import RUN_CUDA
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, FakeTensorConverter
+from torch._subclasses.fake_tensor import (
+    FakeTensor,
+    FakeTensorMode,
+    FakeTensorConverter,
+    DynamicOutputShapeException,
+)
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import unittest
 
@@ -21,7 +26,6 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.shape, (4, 2, 2))
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
-
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_shape_take_not_device(self):
@@ -135,11 +139,19 @@ class FakeTensorTest(TestCase):
             self.assertEqual(out.device.type, "cuda")
             self.assertEqual(list(out.size()), [1, 8, 5, 5])
 
+    def test_data_dependent_operator(self):
+        with enable_torch_dispatch_mode(
+            FakeTensorMode(inner=None, allow_cpu_fallback=False)
+        ):
+            x = torch.rand([10, 10])
+            self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
+
 
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
         contains_type(e, maybe_contained_type) for e in type.containedTypes()
     )
+
 
 class FakeTensorConverterTest(TestCase):
     def test_memoized_conversion_to_meta(self):
@@ -148,7 +160,7 @@ class FakeTensorConverterTest(TestCase):
         self.assertTrue(mode.from_tensor(x) is mode.from_tensor(x))
 
     def test_memoized_conversion_from_meta(self):
-        x = torch.rand(2, 2).to(device='meta')
+        x = torch.rand(2, 2).to(device="meta")
         mode = FakeTensorMode(inner=None)
         converter = mode.fake_tensor_converter
         self.assertTrue(converter(mode, x, "cpu") is converter(mode, x, "cpu"))
@@ -260,6 +272,7 @@ class FakeTensorOperatorInvariants(TestCase):
             if "_like" == schema.name[-5:]:
                 op = self.get_aten_op(schema)
                 self.assertTrue(op in torch._subclasses.fake_tensor._like_tensor_constructors)
+
 
 if __name__ == "__main__":
     run_tests()
