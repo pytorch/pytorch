@@ -2469,11 +2469,9 @@ def _reference_inputs_elementwise_binary(op, device, dtype, requires_grad, exclu
         yield from generate_elementwise_binary_large_value_tensors(
             op, device=device, dtype=dtype, requires_grad=requires_grad
         )
-    # TODO: FIXME: RuntimeError: "index_select" not implemented for 'ComplexHalf'
-    if dtype not in (torch.chalf,):
-        yield from generate_elementwise_binary_broadcasting_tensors(
-            op, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
-        )
+    yield from generate_elementwise_binary_broadcasting_tensors(
+        op, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
+    )
     yield from generate_elementwise_binary_with_scalar_samples(
         op, device=device, dtype=dtype, requires_grad=requires_grad
     )
@@ -2500,10 +2498,6 @@ def reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwar
 
     # yields "normal" samples
     yield from gen()
-
-    # TODO: RuntimeError: "index_select" not implemented for 'ComplexHalf'
-    if dtype is torch.chalf:
-        return
 
     # yields noncontiguous samples
     for sample in gen():
@@ -7811,6 +7805,20 @@ def sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
                       broadcasts_input=True)
 
 
+def error_inputs_masked_fill(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
+    # `value` is not a 0-D tensor.
+    yield ErrorInput(SampleInput(make_arg((2, 2)), args=(make_arg(()) > 0, make_arg((1,)))),
+                     error_regex="only supports a 0-dimensional value tensor, but got tensor with 1 dimension")
+    # downcasting complex value (scalar overload)
+    yield ErrorInput(SampleInput(make_arg((2, 2)), args=(make_arg(()) > 0, 1j)),
+                     error_regex=r"value cannot be converted to type .* without overflow")
+    # downcasting complex value (tensor overload)
+    yield ErrorInput(SampleInput(torch.ones(2, dtype=torch.long, device=device),
+                                 args=(make_arg(()) > 0, torch.tensor(1j, device=device))),
+                     error_regex=r"value cannot be converted to type .* without overflow")
+
+
 def sample_inputs_masked_select(op_info, device, dtype, requires_grad, **kwargs):
     samples = (
         SampleInput(make_tensor((M, M), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
@@ -8327,7 +8335,7 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs
                           args=(1, idx, src, reduce),
                           kwargs={'include_self': True})
 
-def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode='lengths', **kwargs):
+def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, **kwargs):
     def _tensor(shape, dtype=dtype, low=None, high=None):
         return make_tensor(shape, dtype=dtype, device=device, low=low, high=high, requires_grad=requires_grad)
 
@@ -8340,11 +8348,6 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
         ((S, S), 0, [0, 1, 2, 2], False),
         # test when lengths do not sum to dim size
         ((M, S, S), 0, [1, 2, 0, 6, 0], True),
-        # test for higher dimensions
-        ((S, S), 1, [[0, 1, 2, 2] for _ in range(S)], False),
-        ((S, S), 1, [[2, 0, 3, 0], [0, 1, 2, 2], [3, 0, 2, 0], [1, 1, 1, 2], [0, 1, 2, 2]], False),
-        ((S, S, S), 1, [[0, 1, 2, 2] for _ in range(S)], False),
-        ((S, S, S), 1, [[2, 0, 3, 0], [0, 1, 2, 2], [3, 0, 2, 0], [1, 1, 1, 2], [0, 1, 2, 2]], False),
     )
 
     reductions = ["max", "mean", "min", "sum", "prod"]
@@ -8362,7 +8365,10 @@ def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
                                        requires_grad=requires_grad)),
                SampleInput(make_tensor((), dtype=dtype, device=device,
                                        low=None, high=None,
-                                       requires_grad=requires_grad)),)
+                                       requires_grad=requires_grad)),
+               SampleInput(make_tensor((S, S, S), dtype=dtype, device=device,
+                                       low=None, high=None,
+                                       requires_grad=requires_grad, noncontiguous=True)),)
 
     return samples
 
@@ -12803,6 +12809,7 @@ op_db: List[OpInfo] = [
     OpInfo('masked_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_masked_fill,
+           error_inputs_func=error_inputs_masked_fill,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
@@ -16004,8 +16011,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_invertible,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
-               # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
@@ -16023,6 +16028,7 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # Pre-existing condition; Needs to be fixed
+               # fails due to non composite compliance of `linalg_eigvalsh`.
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
@@ -16375,6 +16381,12 @@ op_db: List[OpInfo] = [
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_ravel,
+           skips=(
+               # the stride of the tensor was modified directly without going through the PyTorch dispatcher.
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               # the stride of the tensor was modified directly without going through the PyTorch dispatcher.
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+           )
            ),
     OpInfo('reshape',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -16526,7 +16538,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_index,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_select',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_index,
            error_inputs_func=error_inputs_index_select,
            supports_forward_ad=True,
@@ -16782,9 +16795,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients'),
                # use of lambda doesn't work with test_normalize_operator_exhaustive
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-               # RuntimeError: "index_select" not implemented for 'ComplexHalf'
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                            dtypes=(torch.float, torch.cfloat), device_type='cpu'),
                # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
                             device_type='cpu'),
@@ -19234,7 +19244,8 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "repeat_interleave",
-        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+        backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_repeat_interleave,
         supports_out=False,
         supports_forward_ad=True,
@@ -19378,7 +19389,6 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         'segment_reduce',
-        variant_test_name='lengths',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
@@ -20617,6 +20627,15 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.ravel",
+        torch_opinfo_name="ravel",
+        skips=(
+            # TypeError: 'NoneType' object is not callable
+            DecorateInfo(unittest.skip("Passes on aten executor but fails on nvFuser executor"),
+                         'TestCommon', 'test_python_ref_executor', dtypes=(torch.float, torch.int32)),
+        ),
+    ),
+    PythonRefInfo(
         "_refs.reshape",
         torch_opinfo_name="reshape",
         supports_nvfuser=False,
@@ -20884,6 +20903,18 @@ python_ref_db = [
     #
     # Conditional Reference OpInfos
     #
+    PythonRefInfo(
+        "_refs.masked_fill",
+        torch_opinfo_name="masked_fill",
+        skips=(
+            # NotImplementedError: argument of type: <class 'complex'>
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.cfloat, torch.cdouble)),
+            # TypeError: where(): incompatible function arguments.
+            DecorateInfo(unittest.skip("Passes for aten executor but not nvfuser"), 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.float32, torch.int32)),
+        )
+    ),
     PythonRefInfo(
         "_refs.where",
         torch_opinfo_name="where",
