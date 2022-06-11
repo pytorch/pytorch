@@ -73,6 +73,7 @@ generated_cpu_cpp = [
     "aten/src/ATen/NativeMetaFunctions.h",
     "aten/src/ATen/RegistrationDeclarations.h",
     "aten/src/ATen/core/aten_interned_strings.h",
+    "aten/src/ATen/core/enum_tag.h",
     "aten/src/ATen/core/TensorBody.h",
     "aten/src/ATen/core/TensorMethods.cpp",
     "aten/src/ATen/core/ATenOpList.cpp",
