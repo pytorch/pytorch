@@ -9,6 +9,8 @@ __all__ = [
     'bessel_y1',
     'chebyshev_polynomial_t',
     'chebyshev_polynomial_u',
+    'chebyshev_polynomial_v',
+    'chebyshev_polynomial_w',
     'digamma',
     'entr',
     'erf',
@@ -28,6 +30,7 @@ __all__ = [
     'i1',
     'i1e',
     'laguerre_polynomial_l',
+    'legendre_polynomial_p',
     'log1p',
     'log_ndtr',
     'log_softmax',
@@ -43,6 +46,10 @@ __all__ = [
     'polygamma',
     'psi',
     'round',
+    'shifted_chebyshev_polynomial_t',
+    'shifted_chebyshev_polynomial_u',
+    'shifted_chebyshev_polynomial_v',
+    'shifted_chebyshev_polynomial_w',
     'sinc',
     'softmax',
     'xlog1py',
@@ -942,6 +949,7 @@ is evaluated.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -970,6 +978,37 @@ is evaluated.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+chebyshev_polynomial_v = _add_docstr(_special.special_chebyshev_polynomial_v,
+                                     r"""
+chebyshev_polynomial_v(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the third kind :math:`V_{n}^{\ast}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+chebyshev_polynomial_w = _add_docstr(_special.special_chebyshev_polynomial_w,
+                                     r"""
+chebyshev_polynomial_w(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -992,6 +1031,7 @@ is evaluated.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -1014,6 +1054,7 @@ is evaluated.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -1036,6 +1077,30 @@ is evaluated.
 """ + r"""
 Args:
     {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+legendre_polynomial_p = _add_docstr(_special.special_legendre_polynomial_p,
+                                    r"""
+legendre_polynomial_p(input, n, *, out=None) -> Tensor
+
+Legendre polynomial :math:`P_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    P_{n + 1}(\text{input}) = 2 \times \text{input} \times P_{n}(\text{input}) - P_{n - 1}(\text{input})
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
 
 Keyword args:
     {out}
@@ -1049,10 +1114,10 @@ Modified Bessel function of the first kind of order :math:`0`.
 
 """ + r"""
 Args:
-{input}
+    {input}
 
 Keyword args:
-{out}
+    {out}
 """.format(**common_args))
 
 modified_bessel_i1 = _add_docstr(_special.special_modified_bessel_i1,
@@ -1063,10 +1128,10 @@ Modified Bessel function of the first kind of order :math:`1`.
 
 """ + r"""
 Args:
-{input}
+    {input}
 
 Keyword args:
-{out}
+    {out}
 """.format(**common_args))
 
 modified_bessel_k0 = _add_docstr(_special.special_modified_bessel_k0,
@@ -1077,10 +1142,10 @@ Modified Bessel function of the second kind of order :math:`0`.
 
 """ + r"""
 Args:
-{input}
+    {input}
 
 Keyword args:
-{out}
+    {out}
 """.format(**common_args))
 
 modified_bessel_k1 = _add_docstr(_special.special_modified_bessel_k1,
@@ -1091,8 +1156,68 @@ Modified Bessel function of the second kind of order :math:`1`.
 
 """ + r"""
 Args:
-{input}
+    {input}
 
 Keyword args:
-{out}
+    {out}
+""".format(**common_args))
+
+shifted_chebyshev_polynomial_t = _add_docstr(_special.special_shifted_chebyshev_polynomial_t,
+                                             r"""
+shifted_chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the first kind :math:`T_{n}^{\ast}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+shifted_chebyshev_polynomial_u = _add_docstr(_special.special_shifted_chebyshev_polynomial_u,
+                                             r"""
+shifted_chebyshev_polynomial_u(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the second kind :math:`U_{n}^{\ast}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+shifted_chebyshev_polynomial_v = _add_docstr(_special.special_shifted_chebyshev_polynomial_v,
+                                             r"""
+shifted_chebyshev_polynomial_v(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the third kind :math:`V_{n}^{\ast}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+shifted_chebyshev_polynomial_w = _add_docstr(_special.special_shifted_chebyshev_polynomial_w,
+                                             r"""
+shifted_chebyshev_polynomial_w(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
 """.format(**common_args))
