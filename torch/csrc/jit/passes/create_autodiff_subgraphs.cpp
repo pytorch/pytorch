@@ -301,6 +301,94 @@ class SubgraphSlicer {
   AliasDb& aliasDb_;
   std::vector<Node*>& diff_nodes_;
 };
+
+c10::optional<bool> getProfileNodeRequiresGrad(Node* n) {
+  TORCH_INTERNAL_ASSERT(n->kind() == prim::profile);
+  if (!n->hasAttribute(attr::profiled_type)) {
+    return c10::nullopt;
+  }
+  auto& type = n->ty(attr::profiled_type);
+  if (type->castRaw<TensorType>() == nullptr) {
+    return c10::nullopt;
+  }
+  return type->expectRef<TensorType>().requiresGrad();
+}
+
+void AddRequiresGradToDifferentiableGraph(Node* diff_graph) {
+  TORCH_INTERNAL_ASSERT(diff_graph->kind() == prim::DifferentiableGraph);
+  const auto& subgraph = diff_graph->g(attr::Subgraph);
+  for (auto i : c10::irange(subgraph->outputs().size())) {
+    Value* output = subgraph->outputs()[i];
+    if (output->node()->kind() == prim::profile) {
+      // already have requires_grad info from this profile node
+      continue;
+    }
+    if (output->type()->castRaw<TensorType>() == nullptr) {
+      // non-tensors don't get profiled.
+      continue;
+    }
+    if (output->type()->expectRef<TensorType>().requiresGrad().has_value()) {
+      continue;
+    }
+
+    // this node doesn't have any requires_grad info.
+    // look at its uses to try to find a profile node.
+    c10::optional<bool> requiresGrad = c10::nullopt;
+    for (auto& use : diff_graph->output(i)->uses()) {
+      if (use.user->kind() == prim::profile) {
+        c10::optional<bool> req_grad_use;
+        if ((req_grad_use = getProfileNodeRequiresGrad(use.user)).has_value()) {
+          requiresGrad = req_grad_use;
+          break;
+        }
+      }
+
+      // maybe the profile node got absorbed into a differentiable graph
+      if (use.user->kind() == prim::DifferentiableGraph) {
+        const auto& dg = use.user->g(attr::Subgraph);
+        // check all the uses of this graph input to look for profile nodes.
+        Value* dg_value = dg->inputs()[use.offset];
+        for (auto& dg_use : dg_value->uses()) {
+          if (dg_use.user->kind() == prim::profile) {
+            c10::optional<bool> req_grad_use;
+            if ((req_grad_use = getProfileNodeRequiresGrad(dg_use.user))
+                    .has_value()) {
+              requiresGrad = req_grad_use;
+              break;
+            }
+          }
+        }
+        if (requiresGrad) {
+          break;
+        }
+      }
+    }
+
+    if (requiresGrad.has_value()) {
+      output->setType(output->type()->expectRef<TensorType>().withRequiresGrad(
+          requiresGrad));
+    }
+  }
+}
+
+// autodiff.cpp needs to know, for each output, whether or not it requires
+// grad. Sometimes a profile node will be present on the output, but sometimes
+// it won't be present. This might happen if there's a node with side effects
+// in between the definition of the output node and the profile node; in this
+// case the profile node and output node would be in different workblocks and
+// couldn't be merged into the same DifferentiableGraph. (see [workblocks])
+// Or it could happen if the output is profiled twice and the profile nodes get
+// removed by unfusedAliasedOutputs.
+void AddRequiresGradOnOutputNodes(Block* block) {
+  for (Node* n : block->nodes()) {
+    if (n->kind() == prim::DifferentiableGraph) {
+      AddRequiresGradToDifferentiableGraph(n);
+    }
+    for (Block* b : n->blocks()) {
+      AddRequiresGradOnOutputNodes(b);
+    }
+  }
+}
 } // anonymous namespace
 
 std::vector<Node*> CreateAutodiffSubgraphs(
@@ -311,6 +399,7 @@ std::vector<Node*> CreateAutodiffSubgraphs(
   GRAPH_DEBUG("Before creating autodiff subgraphs", *graph);
   SubgraphSlicer(graph->block(), graph, threshold, db, diff_nodes).run();
   GRAPH_DEBUG("After creating autodiff subgraphs", *graph);
+  AddRequiresGradOnOutputNodes(graph->block());
   GRAPH_DEBUG("diff_nodes.size() ", diff_nodes.size());
   return diff_nodes;
 }

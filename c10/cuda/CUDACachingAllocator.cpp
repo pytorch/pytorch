@@ -279,6 +279,60 @@ struct AllocParams {
   cudaError_t err;
 };
 
+// Note: cudaEventCreate when concurrently invoked from multiple threads can be
+// very expensive (at least on certain device/driver combinations). Thus, we a)
+// serialize event creation at a per-device level, and b) pool the events to
+// avoid constantly calling cudaEventCreate/cudaEventDestroy. This results in
+// significant improvements in multithreaded workloads with high allocation
+// rates.
+class EventPool {
+ public:
+  using Event = std::unique_ptr<cudaEvent_t, std::function<void(cudaEvent_t*)>>;
+  // TODO: Explicit device count
+  EventPool() : pools_(at::cuda::device_count()) {}
+
+  Event get(int device) {
+    TORCH_INTERNAL_ASSERT(0 <= device);
+    TORCH_INTERNAL_ASSERT(device < static_cast<int>(pools_.size()));
+    auto& pool = pools_[device];
+    auto destructor = [&pool](cudaEvent_t* event) {
+      std::lock_guard<std::mutex> g(pool.mutex_);
+      pool.event_pool_.push_back(std::unique_ptr<cudaEvent_t>(event));
+    };
+
+    // Try to acquire an event from the per-device pool.
+    {
+      std::lock_guard<std::mutex> g(pool.mutex_);
+      if (!pool.event_pool_.empty()) {
+        auto* event = pool.event_pool_.back().release();
+        pool.event_pool_.pop_back();
+        return Event(event, destructor);
+      }
+    }
+    // otherwise, allocate a new event that will be returned to the pool on
+    // destruction.
+    auto new_ptr = std::make_unique<cudaEvent_t>();
+    C10_CUDA_CHECK(
+        cudaEventCreateWithFlags(new_ptr.get(), cudaEventDisableTiming));
+
+    return Event(new_ptr.release(), destructor);
+  }
+
+  void empty_cache() {
+    for (auto& pool : pools_) {
+      std::lock_guard<std::mutex> g(pool.mutex_);
+      pool.event_pool_.clear();
+    }
+  }
+
+ private:
+  struct PerDevicePool {
+    alignas(64) std::mutex mutex_;
+    std::vector<std::unique_ptr<cudaEvent_t>> event_pool_;
+  };
+  std::vector<PerDevicePool> pools_;
+};
+
 // CUDA graphs helper
 struct PrivatePool {
   PrivatePool()
@@ -455,7 +509,7 @@ class DeviceCachingAllocator {
   // outstanding cuda events
   ska::flat_hash_map<
       cuda::CUDAStream,
-      std::deque<std::pair<cudaEvent_t, Block*>>>
+      std::deque<std::pair<EventPool::Event, Block*>>>
       cuda_events;
 
   // record used memory.
@@ -1382,14 +1436,10 @@ class DeviceCachingAllocator {
     }
   }
 
-  cudaEvent_t create_event_internal() {
-    cudaEvent_t event;
-    C10_CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
-    return event;
-  }
-
-  void free_event_internal(cudaEvent_t event) {
-    C10_CUDA_CHECK(cudaEventDestroy(event));
+  EventPool::Event create_event_internal(int idx) {
+    // Leak the event pool to avoid shutdown issues.
+    static auto* event_pool = new EventPool();
+    return event_pool->get(idx);
   }
 
   void synchronize_and_free_events() {
@@ -1402,11 +1452,10 @@ class DeviceCachingAllocator {
 
     for (auto& st : cuda_events) {
       for (auto& e : st.second) {
-        cudaEvent_t event = e.first;
+        EventPool::Event event = std::move(e.first);
         Block* block = e.second;
 
-        C10_CUDA_CHECK(cudaEventSynchronize(event));
-        free_event_internal(event);
+        C10_CUDA_CHECK(cudaEventSynchronize(*event));
 
         block->event_count--;
         if (block->event_count == 0) {
@@ -1427,11 +1476,12 @@ class DeviceCachingAllocator {
     for (auto& stream : streams) {
       C10_CUDA_CHECK(cudaSetDevice(stream.device_index()));
 
-      cudaEvent_t event = create_event_internal();
-      C10_CUDA_CHECK(cudaEventRecord(event, stream.stream()));
+      EventPool::Event event =
+          create_event_internal(static_cast<int>(stream.device_index()));
+      C10_CUDA_CHECK(cudaEventRecord(*event, stream.stream()));
 
       block->event_count++;
-      cuda_events[stream].emplace_back(event, block);
+      cuda_events[stream].emplace_back(std::move(event), block);
     }
 
     C10_CUDA_CHECK(cudaSetDevice(prev_device));
@@ -1455,22 +1505,25 @@ class DeviceCachingAllocator {
     // corresponding allocation is decremented. We maintain a separate
     // list of events per stream to avoid head-of-line delays if one
     // or more streams has long-running operations.
+
+    // Iterate over different streams.
     for (auto it = cuda_events.begin(); it != cuda_events.end();) {
+      // Iterate over this stream's (event, block) pairs.
       while (!it->second.empty()) {
         auto& e = it->second.front();
-        cudaEvent_t event = e.first;
+        EventPool::Event event = std::move(e.first);
         Block* block = e.second;
 
-        cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaEventQuery(event));
+        cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaEventQuery(*event));
         if (err == cudaErrorNotReady) {
           // ignore and clear the error if not ready
           cudaGetLastError();
+          // Return the ownership of the Event (unique ptr)
+          e.first = std::move(event);
           break;
         } else if (err != cudaSuccess) {
           C10_CUDA_CHECK(err);
         }
-
-        free_event_internal(event);
 
         block->event_count--;
         if (block->event_count == 0) {

@@ -10,6 +10,7 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
+#include <ATen/core/TorchDispatchModeTLS.h>
 
 #include <vector>
 
@@ -148,6 +149,8 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
       TORCH_INTERNAL_ASSERT(impl_saved.at(idx_tensor) == t.getIntrusivePtr(), op_name);
   }, &stack_args_copy, 0, num_arguments);
   _foreach_tensor([&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
+    if (at::impl::tensor_has_dispatch(t) || at::impl::dispatch_mode_enabled())
+      return;
     if (!is_inplace_output[idx_ret])
       TORCH_INTERNAL_ASSERT(t.use_count() <= 1, op_name);  // Okay to return undefined tensor
     if (!is_aliased_output[idx_ret] && t.has_storage())
@@ -218,7 +221,6 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
   const auto num_arguments = arguments.size();
   const auto num_returns = returns.size();
   const auto stack_start = stack->size() - num_arguments;
-  bool any_is_inplace = false;
 
   at::Tensor aliased_input;
 
@@ -251,8 +253,6 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
         const c10::IValue& aliased_input_iv = (*stack)[stack_start + i]; // get a reference to an ivalue on the stack
         TORCH_CHECK(aliased_input_iv.isTensor());
         aliased_input = aliased_input_iv.toTensor();  // TODO: Can we avoid saving this tensor and incurring the refcount bump?
-      } else {
-        any_is_inplace = true;
       }
     }
   }

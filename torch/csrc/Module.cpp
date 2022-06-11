@@ -41,6 +41,7 @@
 #include <torch/csrc/autograd/python_sparse_functions.h>
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_return_types.h>
+#include <torch/csrc/autograd/python_enum_tag.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/multiprocessing/init.h>
@@ -828,6 +829,7 @@ PyObject* initModule() {
   // the export side of JIT, so this ONNX init needs to appear before the JIT
   // init.
   torch::onnx::initONNXBindings(module);
+  torch::autograd::initEnumTag(module);
   torch::jit::initJITBindings(module);
   torch::monitor::initMonitorBindings(module);
   torch::impl::dispatch::initDispatchBindings(module);
@@ -1057,6 +1059,9 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("_set_neg", [](const at::Tensor & x, bool neg) {
     x._set_neg(neg);
+  });
+  py_module.def("_dispatch_key_set", [](const at::Tensor & x) {
+    return toString(x.key_set());
   });
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();

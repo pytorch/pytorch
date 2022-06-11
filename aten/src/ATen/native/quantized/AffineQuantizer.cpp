@@ -1,4 +1,4 @@
-#include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
 #include <cfenv>
 
 #ifdef USE_FBGEMM
@@ -33,11 +33,6 @@ void checkRoundingMode(const std::string& fn_name) {
      (FE_TONEAREST). This will cause accuracy issues in quantized models.");
   */
   return;
-}
-
-void checkCPUTensor(const std::string& fn_name, const Tensor& t) {
-  TORCH_CHECK(
-      t.device().type() == kCPU, fn_name, " only supports CPU device type.");
 }
 
 void checkFloatTensor(const std::string& fn_name, const Tensor& t) {
