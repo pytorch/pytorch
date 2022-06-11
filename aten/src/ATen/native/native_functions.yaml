@@ -2648,6 +2648,9 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: nested_is_same_size
+    CompositeExplicitAutograd: is_same_size
 
 - func: is_signed(Tensor self) -> bool
   variants: function, method
@@ -11856,16 +11859,19 @@
   python_module: linalg
   variants: function
 
-- func: linalg_solve(Tensor input, Tensor other) -> Tensor
-  python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: linalg_solve
+- func: _linalg_solve(Tensor A, Tensor B, *, bool left=True) -> (Tensor result, Tensor LU, Tensor pivots)
+  structured_delegate: _linalg_solve.result
 
-- func: linalg_solve.out(Tensor input, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: linalg
+- func: _linalg_solve.result(Tensor A, Tensor B, *, bool left=True, Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots) -> (Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots)
+  structured: True
   dispatch:
-    CPU, CUDA: linalg_solve_out
+    CPU, CUDA: _linalg_solve_out
+
+- func: linalg_solve(Tensor A, Tensor B, *, bool left=True) -> Tensor
+  python_module: linalg
+
+- func: linalg_solve.out(Tensor A, Tensor B, *, bool left=True, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
 
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
   python_module: linalg
