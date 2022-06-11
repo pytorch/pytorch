@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# This script is helpful in entering an interactive shell from a bazel build 
+# This script is helpful in entering an interactive shell from a bazel build
 # before running a given bazel executable.
 # This can provide a quick way to explore the sandbox directory and filesystem.
 # Typical use is with
