@@ -2233,17 +2233,17 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(convert_custom_config.preserved_attributes, ["attr1", "attr2"])
 
     def _get_dummy_convert_custom_config_dict(self):
-        """  
+        """
         Return a dummy convert_custom_config_dict to test ConvertCustomConfig's to_dict and from_dict methods.
         """
         return {
             OBSERVED_TO_QUANTIZED_DICT_KEY: {
                 "static": {
                     self._DummyObservedModule: self._DummyQuantizedModule
-                },   
-            },   
+                },
+            },
             PRESERVED_ATTRIBUTES_DICT_KEY: ["attr1", "attr2"]
-        }    
+        }
 
     def test_convert_custom_config_from_dict(self):
         convert_custom_config_dict = self._get_dummy_convert_custom_config_dict()
