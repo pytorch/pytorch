@@ -129,9 +129,6 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::TransposeOp:
       ptr(handler)->handle(expr->as<TransposeOp>());
       return;
-    case ExprType::ExpandOp:
-      ptr(handler)->handle(expr->as<ExpandOp>());
-      return;
     case ExprType::ShiftOp:
       ptr(handler)->handle(expr->as<ShiftOp>());
       return;
@@ -287,9 +284,6 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::TransposeOp:
       ptr(handler)->handle(expr->as<TransposeOp>());
-      return;
-    case ExprType::ExpandOp:
-      ptr(handler)->handle(expr->as<ExpandOp>());
       return;
     case ExprType::ShiftOp:
       ptr(handler)->handle(expr->as<ShiftOp>());
@@ -454,9 +448,6 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
       return;
     case ExprType::TransposeOp:
       ptr(mutator)->mutate(expr->as<TransposeOp>());
-      return;
-    case ExprType::ExpandOp:
-      ptr(mutator)->mutate(expr->as<ExpandOp>());
       return;
     case ExprType::ShiftOp:
       ptr(mutator)->mutate(expr->as<ShiftOp>());
@@ -687,9 +678,6 @@ void OptOutConstDispatch::handle(const Merge* stmt) {
 void OptOutConstDispatch::handle(const TransposeOp* stmt) {
   unhandled(stmt);
 }
-void OptOutConstDispatch::handle(const ExpandOp* stmt) {
-  unhandled(stmt);
-}
 void OptOutConstDispatch::handle(const ShiftOp* stmt) {
   unhandled(stmt);
 }
@@ -814,9 +802,6 @@ void OptOutDispatch::handle(Merge* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(TransposeOp* stmt) {
-  unhandled(stmt);
-}
-void OptOutDispatch::handle(ExpandOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(ShiftOp* stmt) {
