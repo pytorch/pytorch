@@ -407,10 +407,6 @@ class FuseCustomConfig:
         :func:`~torch.ao.quantization.fx.custom_config.ConvertCustomConfig.from_dict`.
         """
         d: Dict[str, Any] = {}
-        for quant_type, observed_to_quantized_mapping in self.observed_to_quantized_mapping.items():
-            if OBSERVED_TO_QUANTIZED_DICT_KEY not in d:
-                d[OBSERVED_TO_QUANTIZED_DICT_KEY] = {}
-            d[OBSERVED_TO_QUANTIZED_DICT_KEY][quant_type_to_str(quant_type)] = observed_to_quantized_mapping
         if len(self.preserved_attributes) > 0:
             d[PRESERVED_ATTRIBUTES_DICT_KEY] = self.preserved_attributes
         return d
