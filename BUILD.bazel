@@ -1,7 +1,7 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
 load("@rules_proto//proto:defs.bzl", "proto_library")
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library")
 load("//third_party:substitution.bzl", "header_template_rule")
 load("//:tools/bazel.bzl", "rules")
 load("//tools/rules:cu.bzl", "cu_library")
@@ -1774,7 +1774,7 @@ cc_test(
 )
 
 [
-  cc_test(
+  rules.cc_test(
       name = paths.split_extension(paths.basename(filename))[0].replace("-","_") + "_test",
       size = "medium",
       srcs = [filename],
@@ -1816,7 +1816,7 @@ test_suite(
 )
 
 # dist autograd tests
-cc_test(
+rules.cc_test(
     name = "torch_dist_autograd_test",
     size = "small",
     srcs = ["test/cpp/dist_autograd/test_dist_autograd.cpp"],
@@ -1833,7 +1833,7 @@ cc_test(
 # jit tests
 # Because these individual unit tests require custom registering,
 # it is easier to mimic the cmake build by globing together a single test.
-cc_test(
+rules.cc_test(
     name = "jit_tests",
     size = "small",
     srcs = glob([
@@ -1856,7 +1856,7 @@ cc_test(
     ],
 )
 
-cc_test(
+rules.cc_test(
     name = "lazy_tests",
     size = "small",
     srcs = glob([

@@ -17,13 +17,29 @@ def _py_library(name, **kwds):
 def _requirement(_pypi_project):
     return None
 
+def pytorch_cc_test(name, srcs, tags = [], **kwargs):
+    """PyTorch cc test rule.
+
+    One of the reason to proxy all tests through this central location
+    is ability to change the behavior on all of them instead of one-by-one.
+
+    For example, sombody using Remote Build Execution can add exec_properties for tests here.
+    """
+    if "gpu-required" in tags:
+        exec_properties = {
+            "test.dockerRuntime": "nvidia",
+        }
+    else:
+        exec_properties = {}
+    native.cc_test(name=name, srcs=srcs, tags=tags, exec_properties=exec_properties, **kwargs)
+
 # Rules implementation for the Bazel build system. Since the common
 # build structure aims to replicate Bazel as much as possible, most of
 # the rules simply forward to the Bazel definitions.
 rules = struct(
     cc_binary = cc_binary,
     cc_library = cc_library,
-    cc_test = cc_test,
+    cc_test = pytorch_cc_test,
     cmake_configure_file = cmake_configure_file,
     filegroup = native.filegroup,
     genrule = _genrule,
