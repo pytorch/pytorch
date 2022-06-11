@@ -2,7 +2,6 @@ import sys
 import warnings
 
 import torch
-from torch._C import _onnx as _C_onnx
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
 from torch.onnx import symbolic_opset10 as opset10
