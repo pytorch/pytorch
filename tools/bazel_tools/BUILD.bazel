@@ -1,12 +1,5 @@
 sh_binary(
     name = "shellwrap",
     srcs = ["shellwrap.sh"],
-    args = [
-        "--ttywrap_bin_path",
-        "$(location :ttywrap)",
-    ],
-    data = [
-        ":ttywrap",
-    ],
     visibility = ["//visibility:public"],
 )
