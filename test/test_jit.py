@@ -16116,7 +16116,8 @@ dedent """
             def forward(self, x):
                 return x[(1,)]
 
-        self.checkModule(MyModule(), torch.ones(2, 3))
+        inp = torch.ones(2, 3)
+        self.checkModule(MyModule(), inp)
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
