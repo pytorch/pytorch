@@ -370,18 +370,14 @@ meta disagrees with real impl:
 RE_NOT_IMPLEMENTED_MSG = re.compile(r"Could not run '([^']+)' with arguments ")
 
 meta_function_expected_failures = {
-    torch.Tensor.item: {b8, bf16, c128, c64, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense
     torch.Tensor.to_sparse: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::to_sparse, aten::to_sparse.sparse_dim
-    torch.allclose: {bf16, f16, f32, f64},  # aten::_local_scalar_dense
     torch.argwhere: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero
     torch.bincount: {i16, i32, i64, i8, u8},  # aten::bincount
     torch.bucketize: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::bucketize.Tensor, aten::bucketize.Tensor_out
     torch.combinations: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::masked_select
     torch.complex: {f16, f32, f64},  # aten::complex.out
     torch.conj_physical: {c32},  # aten::conj_physical.out
-    torch.corrcoef: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense
     torch.count_nonzero: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::count_nonzero.dim_IntList
-    torch.cov: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense
     torch.diag: {bf16, b8, f32, f64, i16, i32, i64, i8, u8},  # aten::diag.out
     torch.diagflat: {bf16, b8, f32, f64, i16, i32, i64, i8, u8},  # aten::diag.out
     torch.fft.fft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
@@ -429,7 +425,6 @@ meta_function_expected_failures = {
     torch.nn.functional.conv_transpose2d: {f32, f64, i64},
     torch.nn.functional.conv_transpose3d: {f32, f64, i64},
     torch.nn.functional.ctc_loss: {f32, f64},
-    torch.nn.functional.gaussian_nll_loss: {bf16, f32, f64},  # aten::_local_scalar_dense
     torch.nn.functional.grid_sample: {f32, f64},  # aten::grid_sampler_2d, aten::grid_sampler_3d
     torch.nn.functional.max_pool3d: {f32, f64},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_pool3d_with_indices: {f32, f64},  # aten::max_pool3d_with_indices
@@ -438,7 +433,6 @@ meta_function_expected_failures = {
     torch.nn.functional.max_unpool3d: {f32, f64},  # aten::max_unpool3d
     torch.nn.functional.multi_margin_loss: {f32, f64},  # aten::multi_margin_loss
     torch.nn.functional.multilabel_margin_loss: {f32, f64},  # aten::multilabel_margin_loss_forward
-    torch.nn.functional.one_hot: {i64},  # aten::_local_scalar_dense
     torch.nn.functional.pdist: {f32, f64},  # aten::_pdist_forward
     torch.nn.functional.prelu: {bf16, f32, f64},  # aten::prelu
     torch.nn.functional.rrelu: {bf16, f32, f64},  # aten::rrelu_with_noise
@@ -456,7 +450,6 @@ meta_function_expected_failures = {
     torch.cholesky: {f32, f64},  # aten::cholesky, aten::cholesky.out
     torch.cholesky_inverse: {f32, f64},  # aten::cholesky_inverse, aten::cholesky_inverse.out
     torch.cholesky_solve: {f32, f64},  # aten::_cholesky_solve_helper
-    torch.eig: {f32, f64},  # aten::_local_scalar_dense
     torch.geqrf: {f32, f64},  # aten::geqrf
     torch.linalg.det: {f32, f64},  # aten::_det_lu_based_helper
     torch.linalg.eig: {f32, f64},  # aten::linalg_eig
@@ -505,8 +498,6 @@ meta_function_device_expected_failures['cpu'] = {
 }
 
 meta_function_device_expected_failures['cuda'] = {
-    torch.corrcoef: {bf16, f16},  # aten::_local_scalar_dense
-    torch.cov: {f16},  # aten::_local_scalar_dense
     torch.diag: {bf16, f16},  # aten::diag.out
     torch.diagflat: {bf16, f16},  # aten::diag.out
     torch.fft.fft2: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
@@ -545,7 +536,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.nn.functional.conv_transpose1d: {bf16, f16},
     torch.nn.functional.conv_transpose2d: {bf16, f16},
     torch.nn.functional.conv_transpose3d: {bf16, f16},
-    torch.nn.functional.gaussian_nll_loss: {f16},  # aten::_local_scalar_dense
     torch.nn.functional.grid_sample: {f16},  # aten::grid_sampler_2d, aten::grid_sampler_3d
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_pool3d_with_indices: {bf16, f16},  # aten::max_pool3d_with_indices
@@ -631,7 +621,6 @@ meta_dispatch_expected_failures = {
     aten._histogramdd_bin_edges.default: {f64, f32},
     aten._histogramdd_from_bin_cts.default: {f64, f32},
     aten._histogramdd_from_bin_tensors.default: {f64, f32},
-    aten._local_scalar_dense.default: {c64, i64, c128, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten._pdist_forward.default: {f64, f32},
     aten._unique2.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.bincount.default: {i8, i64, i16, u8, i32},
@@ -708,7 +697,6 @@ meta_dispatch_expected_failures = {
     aten.cholesky_inverse.out: {f32, f64},  # aten::cholesky_inverse.out
     aten.cholesky_solve.default: {f32, f64},  # aten::_cholesky_solve_helper
     aten.cholesky_solve.out: {f32, f64},  # aten::_cholesky_solve_helper
-    aten.eig.default: {f32, f64},  # aten::_local_scalar_dense
     aten.geqrf.default: {f32, f64},  # aten::geqrf
     aten.linalg_eig.default: {f32, f64},  # aten::linalg_eig
     aten.linalg_eigh.default: {f32, f64},
@@ -780,7 +768,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.multilabel_margin_loss_forward.default: {bf16, f16},  # aten::multilabel_margin_loss_forward
     aten.multinomial.default: {f16},  # aten::multinomial
     aten.multinomial.out: {f16},  # aten::multinomial.out
-    aten.mvlgamma.default: {f16},  # aten::_local_scalar_dense
     aten.mvlgamma.out: {f16},  # aten::mvlgamma.out
     aten.nanmedian.default: {f16},  # aten::nanmedian
     aten.nanmedian.dim: {f16},  # aten::nanmedian.dim_values
