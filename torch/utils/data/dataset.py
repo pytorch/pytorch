@@ -1,5 +1,6 @@
 import bisect
 import warnings
+import math
 from typing import (
     Generic,
     Iterable,
@@ -313,16 +314,19 @@ def random_split(dataset: Dataset[T], lengths_or_frac: Sequence[Union[int, float
         lengths_or_frac (sequence): lengths or fractions of splits to be produced
         generator (Generator): Generator used for the random permutation.
     """
-    if 0 <= sum(lengths_or_frac) <= 1.0:  # type: ignore[arg-type]
-        import math
-        # if lengths is a float, it is a percentage. We convert it to a sequence of ints
+    if math.isclose(sum(lengths_or_frac), 1):
         lengths = []
-        for frac in lengths_or_frac:
-            n_items_in_split = int(math.floor(len(dataset) * frac))  # type: ignore[arg-type]
+        for i, frac in enumerate(lengths_or_frac):
+            if frac < 0 or frac > 1:
+                raise ValueError(f"Fraction at index {i} is not between 0 and 1")
+            n_items_in_split = int(
+                math.floor(len(dataset) * frac)  # type: ignore[arg-type]
+            )
             lengths.append(n_items_in_split)
         remainder = len(dataset) - sum(lengths)  # type: ignore[arg-type]
-        if remainder > 0:
-            lengths.append(remainder)
+        # add 1 to all the lengths in round-robin fashion until the remainder is 0
+        for i in range(remainder):
+            lengths[i % len(lengths)] += 1
     else:
         lengths = lengths_or_frac  # type: ignore[assignment]
     # Cannot verify that dataset is Sized
