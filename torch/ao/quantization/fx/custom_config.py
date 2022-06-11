@@ -44,8 +44,8 @@ class PrepareCustomConfig:
 
     The user can set custom configuration using the following methods:
 
-        `set_standalone_module_name`: sets the configuration for running a standalone module identified by name
-        `set_standalone_module_class`: sets the configuration for running a standalone module identified by class
+        `set_standalone_module_name`: sets the config for preparing a standalone module for quantization, identified by name
+        `set_standalone_module_class`: sets the config for preparing a standalone module for quantization, identified by class
         `set_float_to_observed_mapping`: sets the mapping from a float module class to an observed module class
         `set_non_traceable_module_names`: sets modules that are not symbolically traceable, identified by name
         `set_non_traceable_module_classes`: sets modules that are not symbolically traceable, identified by class
