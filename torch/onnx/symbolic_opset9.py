@@ -533,12 +533,12 @@ def expand_as(g, self, other):
 
 @symbolic_helper.parse_args("v", "v", "i", "b", "v")
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
-    if scale_grad_by_freq and GLOBALS.training_mode == _C_onnx.TrainingMode.TRAINING:
+    if scale_grad_by_freq and GLOBALS.model_training:
         raise RuntimeError(
             "Unsupported: ONNX export of embedding with scale_grad_by_freq=True "
             "for training mode. ONNX does not support scaling the gradients."
         )
-    if padding_idx >= 0 and GLOBALS.training_mode == _C_onnx.TrainingMode.TRAINING:
+    if padding_idx >= 0 and GLOBALS.model_training:
         warnings.warn(
             "Warning: ONNX export of embedding with padding_idx >= 0 "
             "for training mode. "

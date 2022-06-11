@@ -61,6 +61,7 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
         if mode == _C_onnx.TrainingMode.TRAINING or (
             mode == _C_onnx.TrainingMode.PRESERVE and originally_training
         ):
+            GLOBALS.model_training = True
             if GLOBALS.export_onnx_opset_version < 12:
                 warnings.warn(
                     "You are exporting the model in training mode with onnx opset "
@@ -68,6 +69,8 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
                     "Opset versions lower than opset 12 will not be able to export "
                     "nodes such as Dropout and BatchNorm correctly."
                 )
+        else:
+            GLOBALS.model_training = False
 
         GLOBALS.training_mode = mode
         if mode == _C_onnx.TrainingMode.TRAINING:
