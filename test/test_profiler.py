@@ -5,6 +5,7 @@ import gc
 import io
 import json
 import os
+import re
 import tempfile
 import unittest
 
@@ -384,6 +385,8 @@ class TestProfiler(TestCase):
                 return self.conv(x)
 
         mod = DummyModule()
+        def call_module(x):
+          return mod(x)
 
         with _profile(with_stack=True, use_kineto=kineto_available()) as p:
             x = torch.randn(10, 10, requires_grad=True)
@@ -393,7 +396,7 @@ class TestProfiler(TestCase):
             v = 2 * w
             v.backward()
             a = torch.randn(2, 3, 2, 2, requires_grad=True)
-            b = mod(a)
+            b = call_module(a)
             c = b.sum()
             c.backward()
 
@@ -404,6 +407,20 @@ class TestProfiler(TestCase):
                     "test_source" in entry or
                     "ts_method_1" in entry or
                     "ts_method_2" in entry) for entry in e.stack]))
+
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            with io.open(fname, 'r') as f:
+                events = json.load(f)["traceEvents"]
+
+            def extract(pattern: str):
+              matches = [e for e in events if re.search(pattern, e["name"])]
+              self.assertEqual(len(matches), 1, repr([e["name"] for e in matches]))
+              return matches[0]
+
+            module_event = extract(r"DummyModule_0")
+            wrapper_event = extract(r"call_module")
+            self.assertEqual(module_event["args"]["Python parent id"], wrapper_event["args"]["Python id"])
 
         torch._C._set_graph_executor_optimize(prev_opt)
 
