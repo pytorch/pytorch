@@ -1684,28 +1684,11 @@ def bitwise_not(g, inp):
     return g.op("Not", inp)
 
 
-def wrap_logical_op_with_cast_to(to_type):
-    def decorator(fn):
-        def wrap_with_cast(g, input, other):
-            return g.op(
-                "Cast",
-                fn(g, input, other),
-                to_i=symbolic_helper.cast_pytorch_to_onnx[to_type],
-            )
-
-        return wrap_with_cast
-
-    return decorator
-
-
 def wrap_logical_op_with_cast_to_and_from(to_type):
     def decorator(fn):
         def wrap_with_cast(g, input, other):
             to_cast_func = globals()[f"_cast_{to_type}"]
-            from_cast_func = wrap_logical_op_with_cast_to(input.type().scalarType())(fn)
-            return from_cast_func(
-                g, to_cast_func(g, input, False), to_cast_func(g, other, False)
-            )
+            return fn(g, to_cast_func(g, input, False), to_cast_func(g, other, False))
 
         return wrap_with_cast
 
