@@ -65,6 +65,7 @@ import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal import composite_compliance
 
 from torch.utils._pytree import tree_flatten
+from torch.utils._python_dispatch import push_torch_dispatch_mode, TorchDispatchMode
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -1432,6 +1433,57 @@ class TestMathBits(TestCase):
             torch.is_complex,
         )
 
+# input strides and size may have been altered due to the result of an inplace op
+def test_inplace_view(func, input, rs, input_size, input_strides):
+    if func is None:
+        return
+    # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm.out
+    # which mutate not necessarily the first input.
+    if isinstance(rs, torch.Tensor) and rs is input:
+        unequal_size = rs.size() != input_size
+        unequal_strides = rs.stride() != input_strides
+        # resize_ should probably have inplace_view tag. Not adding the tag since it
+        # breaks some codegen logic
+        if (unequal_size or unequal_strides):
+            if isinstance(func, torch._ops.OpOverloadPacket):
+                func = func.default
+            # Reference: https://github.com/pytorch/pytorch/issues/78759
+            if func is not torch.ops.aten.resize_.default:
+                # TODO: use self.assertIn when we have separate tests for each tag
+                assert torch.Tag.inplace_view in func.tags
+
+# A mode that when enabled runs correctness checks to ensure
+# that operators have expected tags based on their input and
+# ouput tensor properties
+class TestTagsMode(TorchDispatchMode):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if isinstance(args[0], torch.Tensor):
+            old_size = args[0].size()
+            old_stride = args[0].stride()
+            rs = func(*args, **kwargs)
+            test_inplace_view(func, args[0], rs, old_size, old_stride)
+        else:
+            rs = func(*args, **kwargs)
+        return rs
+
+# Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
+class TestTags(TestCase):
+    @onlyCPU
+    @ops(ops_and_refs, dtypes=OpDTypes.any_one)
+    def test_tags(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample in samples:
+            # TODO: Test tags for ops that return a list of tensors
+            input = sample.input
+            if isinstance(input, torch.Tensor):
+                old_size = input.size()
+                old_stride = input.stride()
+                with push_torch_dispatch_mode(TestTagsMode):
+                    rs = op(input, *sample.args, **sample.kwargs)
+                # TODO: add test for aliases: https://github.com/pytorch/pytorch/issues/78761
+                aten_name = op.aten_name if op.aten_name is not None else op.name
+                opoverloadpacket = getattr(torch.ops.aten, aten_name, None)
+                test_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
 
 
 class TestRefsOpsInfo(TestCase):
@@ -1497,8 +1549,27 @@ fake_skips = (
     "repeat_interleave",  # cannot repeat_interleave a meta tensor without output_size
     "segment_reduce",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
     "sparse.sampled.addmm",  # sparsity not supported
+    # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
+    "nn.functional.one_hot",
 )
 
+dynamic_output_op_tests = (
+    "argwhere",
+    "bincount",
+    "index_select",
+    "combinations",
+    "linalg.lstsq",
+    "masked_select",
+    "nonzero",
+    "unique_consecutive",
+    "unique",
+    "linalg.lstsq.grad_oriented",
+)
+
+# some inputs invoke dynamic output shape operators, some do not
+sometimes_dynamic_output_op_test = (
+    "__getitem__",
+)
 
 class TestFakeTensorNonErroring(TestCase):
     @onlyCPU
@@ -1525,16 +1596,29 @@ class TestFakeTensorNonErroring(TestCase):
                 kwargs = tree_map(map_to_fake, sample.kwargs)
 
                 with enable_torch_dispatch_mode(mode):
-                    res = op(input, *args, **kwargs)
+                    res_fake = op(input, *args, **kwargs)
 
-                for arg in tree_flatten(res)[0]:
-                    fake_output = (not isinstance(arg, torch.Tensor)) or isinstance(arg, FakeTensor)
-                    self.assertTrue(fake_output)
+                res = op(sample.input, *sample.args, **sample.kwargs)
+
+                for fake_out, real_out in zip(
+                    tree_flatten(res_fake)[0], tree_flatten(res)[0]
+                ):
+                    if not isinstance(fake_out, torch.Tensor):
+                        self.assertTrue(not isinstance(real_out, torch.Tensor))
+                        continue
+
+                    self.assertTrue(isinstance(fake_out, FakeTensor))
+                    # if you see a shape exception here, you may need to add
+                    # a `dynamic_output_shape` tag to an operator
+                    prims.utils.compare_tensor_meta(fake_out, real_out)
+                self.assertTrue(name not in dynamic_output_op_tests)
 
             except torch._subclasses.fake_tensor.ComplexInputException:
                 pass
             except torch._subclasses.fake_tensor.SparseInputException:
                 pass
+            except torch._subclasses.fake_tensor.DynamicOutputShapeException:
+                self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
 
 
 instantiate_device_type_tests(TestCommon, globals())
@@ -1542,8 +1626,7 @@ instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFakeTensorNonErroring, globals())
-
-
+instantiate_device_type_tests(TestTags, globals())
 
 if __name__ == "__main__":
     run_tests()
