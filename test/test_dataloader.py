@@ -140,9 +140,18 @@ class TestDatasetRandomSplit(TestCase):
 
         # Odd size splits
         self.assertEqual(
-            len(random_split(range(3), [0.5], generator=torch.Generator().manual_seed(1))),
+            len(random_split(range(3), [0.5, 0.5], generator=torch.Generator().manual_seed(1))),
             2
         )
+
+        # Odd sized round-robin splits
+        splits = random_split(range(106), [0.1, 0.2, 0.3, 0.4],
+                              generator=torch.Generator().manual_seed(1))
+        self.assertEqual(len(splits[0]), 12)
+        self.assertEqual(len(splits[1]), 22)
+        self.assertEqual(len(splits[2]), 31)
+        self.assertEqual(len(splits[3]), 41)
+
 
     def test_splits_are_mutually_exclusive(self):
         data = [5, 2, 3, 4, 1, 6]
@@ -154,7 +163,7 @@ class TestDatasetRandomSplit(TestCase):
         all_values.sort()
         self.assertListEqual(data, all_values)
 
-        splits = random_split(data, [0.33])
+        splits = random_split(data, [0.33, 0.67])
         all_values = []
         all_values.extend(list(splits[0]))
         all_values.extend(list(splits[1]))
@@ -215,19 +224,14 @@ class TestDatasetRandomSplit(TestCase):
             random_split(range(100), [0.5, 0.5], generator=torch.Generator().manual_seed(42)),
         )
         self.assertEqual(
-            random_split(range(100), [0.33, 0.33], generator=torch.Generator().manual_seed(42)),
-            random_split(range(100), [0.33, 0.33], generator=torch.Generator().manual_seed(42)),
+            random_split(range(100), [0.33, 0.33, 0.34], generator=torch.Generator().manual_seed(42)),
+            random_split(range(100), [0.33, 0.33, 0.34], generator=torch.Generator().manual_seed(42)),
         )
 
     def test_incomplete_fractional_splits(self):
-        self.assertEqual(
-            random_split(range(10), [0.5], generator=torch.Generator().manual_seed(1)),
-            random_split(range(10), [0.5, 0.5], generator=torch.Generator().manual_seed(1)),
-        )
-        self.assertEqual(
-            len(random_split(range(10), [0.33, 0.33, 0.33])),
-            4
-        )
+        with self.assertRaises(ValueError):
+            # should raise since the sum of fractions is not 1
+            random_split([1, 2, 3, 4], [0.1])
 
     def test_splits_generator(self):
         # A random_split without a specific generator should affect the default one
