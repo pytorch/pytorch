@@ -225,7 +225,7 @@ class InlineOptionalDeviceGuard {
 
   /// Set the current device to the passed Device, if it is not nullopt.
   explicit InlineOptionalDeviceGuard(optional<Device> device_opt)
-      : guard_() { // See Note [Explicit initialization of optional fields]
+      : guard_{} { // See Note [Explicit initialization of optional fields]
     if (device_opt.has_value()) {
       guard_.emplace(device_opt.value());
     }
