@@ -2712,12 +2712,11 @@ def slice(g, self, *args):
         step = symbolic_helper._parse_arg(step, "i")
         if step != 1:
             raise RuntimeError("step!=1 is currently not supported")
-        is_start_none = (
-            start.node().kind() == "prim::Constant"
-            and start.type().kind() == "NoneType"
+        is_start_none = start.node().kind() == "prim::Constant" and isinstance(
+            start.type(), _C.NoneType
         )
-        is_end_none = (
-            end.node().kind() == "prim::Constant" and end.type().kind() == "NoneType"
+        is_end_none = end.node().kind() == "prim::Constant" and isinstance(
+            end.type(), _C.NoneType
         )
         is_start_onnx_const = start.node().kind() == "onnx::Constant"
         is_end_onnx_const = end.node().kind() == "onnx::Constant"
@@ -2758,12 +2757,11 @@ def slice(g, self, *args):
         # aten::slice(t[] l, int start, int end, int step) -> t[]
         start, end, step = args
         dim = 0
-        is_start_none = (
-            start.node().kind() == "prim::Constant"
-            and start.type().kind() == "NoneType"
+        is_start_none = start.node().kind() == "prim::Constant" and isinstance(
+            start.type(), _C.NoneType
         )
-        is_end_none = (
-            end.node().kind() == "prim::Constant" and end.type().kind() == "NoneType"
+        is_end_none = end.node().kind() == "prim::Constant" and isinstance(
+            end.type(), _C.NoneType
         )
         start = 0 if is_start_none else symbolic_helper._parse_arg(start, "i")
         end = (
@@ -4760,6 +4758,38 @@ def dot(g, self, other):
     return matmul(g, self, other)
 
 
+@symbolic_helper.parse_args("v", "t", "t")
+def movedim(g, self, source, destination):
+    # This is a pythonic implementation mostly taken from aten/src/ATen/native/TensorShape.cpp::movedim
+    source = source.view(-1)
+    destination = destination.view(-1)
+
+    assert source.size() == destination.size()
+
+    if (source == destination).all():
+        return self
+
+    self_rank = symbolic_helper._get_tensor_rank(self)
+
+    perm = list(range(self_rank))
+
+    src_dims = perm.copy()
+    dst_dims = perm.copy()
+
+    for src, dst in zip(source.tolist(), destination.tolist()):
+        perm[dst] = src
+        src_dims[src] = -1
+        dst_dims[dst] = -1
+
+    src_dims = [dim for dim in src_dims if dim != -1]
+    dst_dims = [dim for dim in dst_dims if dim != -1]
+
+    for src, dst in zip(src_dims, dst_dims):
+        perm[dst] = src
+
+    return g.op("Transpose", self, perm_i=perm)
+
+
 @symbolic_helper.parse_args("v", "v")
 def fill(g, self, value):
     dtype = self.type().scalarType()
@@ -4892,6 +4922,26 @@ def cdist(g, x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     )
 
 
+def lerp(g, self, end, weight):
+    # Conditional for better numeric. This has been discussed in
+    # https://github.com/pytorch/pytorch/pull/18871
+    diff = g.op("Sub", end, self)
+    return where(
+        g,
+        g.op("Less", weight, g.op("Constant", value_t=torch.tensor(0.5))),
+        g.op("Add", self, g.op("Mul", weight, diff)),
+        g.op(
+            "Sub",
+            end,
+            g.op(
+                "Mul",
+                diff,
+                g.op("Sub", g.op("Constant", value_t=torch.tensor(1.0)), weight),
+            ),
+        ),
+    )
+
+
 def broadcast_tensors(g, self):
     all_tensors = symbolic_helper._unpack_list(self)
     t_with_final_shape = zeros_like(g, all_tensors[0])
@@ -5008,14 +5058,14 @@ class Prim:
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
     @staticmethod
-    def device(ctx: torch.onnx.SymbolicContext, g, *inputs, **kwargs):
-        n = ctx.cur_node
-
-        if n.output().type().kind() == "DeviceObjType":
+    def device(ctx: torch.onnx.SymbolicContext, g: _C.Graph, *inputs, **kwargs) -> None:
+        output_type = ctx.cur_node.output().type()
+        if isinstance(output_type, _C.DeviceObjType):
             return None
 
         return symbolic_helper._unimplemented(
-            "prim::device", "output type is not `DeviceObjType`."
+            "prim::device",
+            f"output type should be 'DeviceObjType', not '{output_type.kind()}'",
         )
 
     @staticmethod
