@@ -54,5 +54,8 @@ echo =====
 
 echo "Entering interactive shell at the execution root:"
 
+# quote escape all the arguments to use as a single input string
+cmd="'$shell' --noprofile --rcfile '$rcfile'"
+
 # run the command in a script psuedo terminal and dump to null
-"$shell" --noprofile --rcfile /tmp/pytorch_bazel_tools_shellwrap
+/usr/bin/script -c "$cmd" -q /dev/null
