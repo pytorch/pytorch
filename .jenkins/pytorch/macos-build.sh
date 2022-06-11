@@ -5,7 +5,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
 # Build PyTorch
-if [ -z "${IN_CI}" ]; then
+if [ -z "${CI}" ]; then
   export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
 fi
 

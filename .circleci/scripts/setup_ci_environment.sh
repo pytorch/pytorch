@@ -66,7 +66,6 @@ add_to_env_file() {
   esac
 }
 
-add_to_env_file IN_CI 1
 add_to_env_file CI_MASTER "${CI_MASTER:-}"
 add_to_env_file COMMIT_SOURCE "${CIRCLE_BRANCH:-}"
 add_to_env_file BUILD_ENVIRONMENT "${BUILD_ENVIRONMENT}"

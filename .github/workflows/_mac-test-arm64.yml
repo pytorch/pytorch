@@ -53,5 +53,9 @@ jobs:
           # shellcheck disable=SC1090
           . ~/miniconda3/etc/profile.d/conda.sh
           set -ex
+          # TODO(https://github.com/pytorch/pytorch/issues/79293)
+          # This step currently fails if we actually run as if we're in CI.
+          unset CI
+
           conda run --cwd test -p "${ENV_NAME}" python3 test_mps.py -v
           conda env remove -p "${ENV_NAME}"

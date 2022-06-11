@@ -29,6 +29,9 @@ fi
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
+echo "Environment variables"
+env
+
 echo "Testing pytorch"
 
 export LANG=C.UTF-8

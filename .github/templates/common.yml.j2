@@ -195,6 +195,7 @@ on:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' > "/tmp/github_env_${GITHUB_RUN_ID}"
 {%- endmacro -%}
 
 {%- macro teardown_ec2_linux(pytorch_directory="") -%}

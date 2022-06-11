@@ -22,7 +22,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     IS_SANDCASTLE,
     clone_input_helper,
-    IS_IN_CI,
+    IS_CI,
     suppress_warnings,
     noncontiguous_like,
     TEST_WITH_ASAN,
@@ -103,7 +103,7 @@ class TestCommon(TestCase):
     def tearDownClass(cls):
         super().tearDownClass()
 
-        if IS_IN_CI:
+        if IS_CI:
             err_msg = (
                 "The operator(s) below is(are) using dynamic_dtypes in the OpInfo entries."
                 "This is OK for testing, but be sure to set the dtypes manually before landing your PR!"
