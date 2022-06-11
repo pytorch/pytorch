@@ -1,11 +1,5 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
-#include <c10/core/DeviceType.h>
-#include <c10/core/DispatchKey.h>
-#include <c10/core/ScalarType.h>
-#include <c10/util/Optional.h>
-
 namespace at {
 namespace autocast {
 

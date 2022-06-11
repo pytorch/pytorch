@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/ExpandUtils.h>
 #include <ATen/core/Tensor.h>
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
@@ -75,6 +76,28 @@ struct InputMetadata {
 
   at::Tensor zeros_like() const {
     return at::zeros(shape_, options_);
+  }
+
+  bool is_same_shape(const at::Tensor& grad) const {
+    TORCH_CHECK(!grad.is_nested(), "Nested grads are not currently supported.")
+    return grad.sizes().equals(shape());
+  }
+  bool is_expandable_to_shape(const at::Tensor& grad) const {
+    // TODO: Currently NestedTensors are not expandable.
+    return grad.is_nested() ? false
+                            : at::is_expandable_to(shape(), grad.sizes());
+  }
+
+  std::stringstream incompatible_shape_error_message(
+      const size_t index,
+      const at::Tensor& grad) const {
+    std::stringstream ss;
+    TORCH_CHECK(!grad.is_nested(), "Nested grads are not currently supported.")
+    ss << "invalid gradient at index " << index << " - got ";
+    ss << grad.sizes();
+    ss << " but expected shape compatible with ";
+    ss << shape();
+    return ss;
   }
 
  private:

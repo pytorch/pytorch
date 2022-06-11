@@ -81,8 +81,8 @@ static PyObject* THPStorage_copy_(
 
 static PyObject* THPStorage_isPinned(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPStorage*)_self;
 #if defined(USE_CUDA)
+  auto self = (THPStorage*)_self;
   return PyBool_FromLong(
       at::globalContext().isPinnedPtr(self->cdata->data<uint8_t>()));
 #else
@@ -93,7 +93,6 @@ static PyObject* THPStorage_isPinned(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPStorage_elementSize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPStorage*)_self;
   return THPUtils_packInt64(sizeof(uint8_t));
   END_HANDLE_TH_ERRORS
 }
@@ -387,7 +386,6 @@ PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyTuple_Size(args) == 2, "_new_with_file takes exactly two arguments");
-  PyObject* fd_obj = PyTuple_GetItem(args, 0);
   int fd = PyObject_AsFileDescriptor(PyTuple_GetItem(args, 0));
   THPUtils_assert(
       fd != -1,

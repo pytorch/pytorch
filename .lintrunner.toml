@@ -41,6 +41,7 @@ init_command = [
 [[linter]]
 code = 'CLANGFORMAT'
 include_patterns = [
+    'aten/src/ATen/*.h',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
@@ -49,6 +50,7 @@ include_patterns = [
     'test/cpp/**/*.cpp',
 ]
 exclude_patterns = [
+    'c10/util/strong_type.h',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
 ]
 init_command = [
@@ -559,6 +561,7 @@ include_patterns = [
     'torch/onnx/**/*.py',
     'torch/_refs/**/*.py',
     'torch/_prims/**/*.py',
+    'torch/_meta_registrations.py',
     'test/onnx/**/*.py',
 ]
 command = [

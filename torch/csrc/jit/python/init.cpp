@@ -663,6 +663,17 @@ void initJITBindings(PyObject* module) {
       .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
 #endif
       .def(
+          "_jit_set_tracer_state_warn",
+          [](bool new_warn) {
+            jit::tracer::getTracerStateWarnMode() = new_warn;
+          })
+      .def(
+          "_jit_get_tracer_state_warn",
+          []() {
+            bool current_tracer_warn = jit::tracer::getTracerStateWarnMode();
+            return current_tracer_warn;
+          })
+      .def(
           "_jit_set_nvfuser_skip_node_kind",
           // Args:
           //     `op_name`: Symbol of op;
@@ -1352,7 +1363,7 @@ void initJITBindings(PyObject* module) {
                     return _get_operation_for_overload_or_packet(
                         {op}, symbol, args, kwargs, true);
                   });
-              return func;
+              return py::make_tuple(func, py::cast(op->getTags().vec()));
             }
           }
           throw std::runtime_error("Found no matching operator overload");

@@ -30,22 +30,6 @@ std::array<THPDtype*, static_cast<int>(at::ScalarType::NumOptions)>
 std::array<THPLayout*, static_cast<int>(at::Layout::NumOptions)>
     layout_registry = {};
 
-at::Backend get_backend(bool is_cuda, bool is_sparse) {
-  if (is_cuda) {
-    if (is_sparse) {
-      return at::Backend::SparseCUDA;
-    } else {
-      return at::Backend::CUDA;
-    }
-  } else {
-    if (is_sparse) {
-      return at::Backend::SparseCPU;
-    } else {
-      return at::Backend::CPU;
-    }
-  }
-}
-
 at::DeprecatedTypeProperties* get_type_properties(
     at::DeviceType device_type,
     at::ScalarType scalarType) {

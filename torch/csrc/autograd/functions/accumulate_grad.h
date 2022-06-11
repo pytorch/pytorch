@@ -94,7 +94,7 @@ struct TORCH_API AccumulateGrad : public Node {
 
   // variable: the variable whose grad we're accumulating.
   // variable_grad: the current grad for the variable.
-  // new_grad: new grad we want to acummulate for the variable.
+  // new_grad: new grad we want to accumulate for the variable.
   // num_expected_refs: the number of refs we expect to hold internally
   //                    such that it is safe to avoid cloning the grad
   //                    if use_count() of the grad is less than or equal

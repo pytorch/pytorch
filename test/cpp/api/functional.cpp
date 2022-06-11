@@ -2039,7 +2039,6 @@ TEST_F(FunctionalTest, InstanceNorm2d) {
 
 TEST_F(FunctionalTest, InstanceNorm2dDefaultOptions) {
   int num_features = 5;
-  double eps = 1e-05;
 
   auto input =
       torch::arange(2. * num_features * 2 * 2).view({2, num_features, 2, 2});
@@ -2104,7 +2103,6 @@ TEST_F(FunctionalTest, InstanceNorm3d) {
 
 TEST_F(FunctionalTest, InstanceNorm3dDefaultOptions) {
   int num_features = 5;
-  double eps = 1e-05;
 
   auto input = torch::arange(2. * num_features * 2 * 2 * 2)
                    .view({2, num_features, 2, 2, 2});

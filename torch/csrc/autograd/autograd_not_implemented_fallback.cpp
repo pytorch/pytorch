@@ -5,6 +5,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/ivalue.h>
 
+#include <ATen/core/TorchDispatchModeTLS.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
@@ -181,6 +182,9 @@ void autogradNotImplementedFallbackImpl(
       num_arguments);
   _foreach_tensor(
       [&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
+        if (at::impl::tensor_has_dispatch(t) ||
+            at::impl::dispatch_mode_enabled())
+          return;
         if (!is_inplace_output[idx_ret])
           TORCH_INTERNAL_ASSERT(
               t.use_count() <= 1, op_name); // Okay to return undefined tensor
@@ -274,7 +278,6 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(
   const auto num_arguments = arguments.size();
   const auto num_returns = returns.size();
   const auto stack_start = stack->size() - num_arguments;
-  bool any_is_inplace = false;
 
   at::Tensor aliased_input;
 
@@ -312,8 +315,6 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(
             aliased_input_iv
                 .toTensor(); // TODO: Can we avoid saving this tensor and
                              // incurring the refcount bump?
-      } else {
-        any_is_inplace = true;
       }
     }
   }

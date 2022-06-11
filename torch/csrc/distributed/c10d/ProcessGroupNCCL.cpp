@@ -1233,7 +1233,7 @@ void check_gpu_single_tensor(const at::Tensor& tensor) {
   if (!tensor.is_cuda() || tensor.is_sparse()) {
     TORCH_CHECK(false, "Tensors must be CUDA and dense");
   }
-  if (!tensor.is_contiguous()) {
+  if (!tensor.is_contiguous(tensor.suggest_memory_format())) {
     TORCH_CHECK(false, "Tensors must be contiguous");
   }
 }
@@ -1273,7 +1273,7 @@ void check_gpu_tensors_different_devices(
     if (t.strides() != first.strides()) {
       TORCH_CHECK(false, "Tensors must have identical strides");
     }
-    if (!t.is_contiguous()) {
+    if (!t.is_contiguous(t.suggest_memory_format())) {
       TORCH_CHECK(false, "Tensors must be contiguous");
     }
     const auto inserted = usedDevices.insert(t.get_device()).second;

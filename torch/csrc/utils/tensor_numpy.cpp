@@ -112,58 +112,63 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject* py_seq) {
   return result;
 }
 
-PyObject* tensor_to_numpy(const at::Tensor& tensor) {
+PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
   TORCH_CHECK(is_numpy_available(), "Numpy is not available");
-
-  TORCH_CHECK_TYPE(
-      tensor.device().type() == DeviceType::CPU,
-      "can't convert ",
-      tensor.device().str().c_str(),
-      " device type tensor to numpy. Use Tensor.cpu() to ",
-      "copy the tensor to host memory first.");
-
-  TORCH_CHECK_TYPE(
-      tensor.layout() == Layout::Strided,
-      "can't convert ",
-      c10::str(tensor.layout()).c_str(),
-      " layout tensor to numpy.",
-      "convert the tensor to a strided layout first.");
-
-  TORCH_CHECK(
-      !(at::GradMode::is_enabled() && tensor.requires_grad()),
-      "Can't call numpy() on Tensor that requires grad. "
-      "Use tensor.detach().numpy() instead.");
-
-  TORCH_CHECK(
-      !tensor.is_conj(),
-      "Can't call numpy() on Tensor that has conjugate bit set. ",
-      "Use tensor.resolve_conj().numpy() instead.");
-
-  TORCH_CHECK(
-      !tensor.is_neg(),
-      "Can't call numpy() on Tensor that has negative bit set. "
-      "Use tensor.resolve_neg().numpy() instead.");
 
   TORCH_CHECK(
       !tensor.unsafeGetTensorImpl()->is_python_dispatch(),
       ".numpy() is not supported for tensor subclasses.");
 
-  auto dtype = aten_to_numpy_dtype(tensor.scalar_type());
-  auto sizes = to_numpy_shape(tensor.sizes());
-  auto strides = to_numpy_shape(tensor.strides());
+  TORCH_CHECK_TYPE(
+      tensor.layout() == Layout::Strided,
+      "can't convert ",
+      c10::str(tensor.layout()).c_str(),
+      " layout tensor to numpy. ",
+      "Use Tensor.dense() first.");
+
+  if (!force) {
+    TORCH_CHECK_TYPE(
+        tensor.device().type() == DeviceType::CPU,
+        "can't convert ",
+        tensor.device().str().c_str(),
+        " device type tensor to numpy. Use Tensor.cpu() to ",
+        "copy the tensor to host memory first.");
+
+    TORCH_CHECK(
+        !(at::GradMode::is_enabled() && tensor.requires_grad()),
+        "Can't call numpy() on Tensor that requires grad. "
+        "Use tensor.detach().numpy() instead.");
+
+    TORCH_CHECK(
+        !tensor.is_conj(),
+        "Can't call numpy() on Tensor that has conjugate bit set. ",
+        "Use tensor.resolve_conj().numpy() instead.");
+
+    TORCH_CHECK(
+        !tensor.is_neg(),
+        "Can't call numpy() on Tensor that has negative bit set. "
+        "Use tensor.resolve_neg().numpy() instead.");
+  }
+
+  auto prepared_tensor = tensor.detach().cpu().resolve_conj().resolve_neg();
+
+  auto dtype = aten_to_numpy_dtype(prepared_tensor.scalar_type());
+  auto sizes = to_numpy_shape(prepared_tensor.sizes());
+  auto strides = to_numpy_shape(prepared_tensor.strides());
+
   // NumPy strides use bytes. Torch strides use element counts.
-  auto element_size_in_bytes = tensor.element_size();
+  auto element_size_in_bytes = prepared_tensor.element_size();
   for (auto& stride : strides) {
     stride *= element_size_in_bytes;
   }
 
   auto array = THPObjectPtr(PyArray_New(
       &PyArray_Type,
-      tensor.dim(),
+      prepared_tensor.dim(),
       sizes.data(),
       dtype,
       strides.data(),
-      tensor.data_ptr(),
+      prepared_tensor.data_ptr(),
       0,
       NPY_ARRAY_ALIGNED | NPY_ARRAY_WRITEABLE,
       nullptr));
@@ -174,14 +179,14 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   // object of the ndarray to the tensor and disabling resizes on the storage.
   // This is not sufficient. For example, the tensor's storage may be changed
   // via Tensor.set_, which can free the underlying memory.
-  PyObject* py_tensor = THPVariable_Wrap(tensor);
+  PyObject* py_tensor = THPVariable_Wrap(prepared_tensor);
   if (!py_tensor)
     throw python_error();
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
     return nullptr;
   }
   // Use the private storage API
-  tensor.storage().unsafeGetStorageImpl()->set_resizable(false);
+  prepared_tensor.storage().unsafeGetStorageImpl()->set_resizable(false);
 
   return array.release();
 }
