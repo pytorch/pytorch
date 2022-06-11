@@ -697,19 +697,6 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(torch.linalg.LinAlgError, r'\(Batch element 3\): The factorization could not be completed'):
             torch.linalg.cholesky_ex(A, check_errors=True)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_cholesky_ex_out_info_error(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        # dtype for info must be torch.int32
-        A = random_hermitian_pd_matrix(3, dtype=dtype, device=device)
-        L = torch.empty(A.shape, dtype=dtype, device=device)
-        info = torch.empty(A.shape[:-2], dtype=torch.int64, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got long int instead"):
-            torch.linalg.cholesky_ex(A, out=(L, info))
-
     def _test_addr_vs_numpy(self, device, dtype, beta=1, alpha=1):
         def check(m, a, b, beta, alpha):
             if dtype == torch.bfloat16:
