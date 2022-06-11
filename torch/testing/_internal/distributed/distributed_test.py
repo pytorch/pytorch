@@ -1,7 +1,6 @@
 import copy
 import itertools
 import math
-from multiprocessing import dummy
 import os
 import random
 import sys
@@ -8823,6 +8822,90 @@ class DistributedTest:
             self.assertEqual(ddp_grads[0], local_model.fc.weight.grad)
             self.assertEqual(ddp_grads[1], local_model.fc.bias.grad)
 
+        def _test_hook_pickling(self, hook, hook_state):
+            learning_rate = 0.01
+            chkpt_file = tempfile.gettempdir() + "/checkpoint.pt"
+            rank = self.rank
+
+            input = torch.randn(1, 1, device=rank)
+            net = torch.nn.Linear(1, 5).to(rank)
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                net,
+                device_ids=[rank]
+            )
+            dummy_ddp_model = torch.nn.parallel.DistributedDataParallel(
+                net,
+                device_ids=[rank]
+            )
+            optimizer = torch.optim.SGD(ddp_model.parameters(), lr=learning_rate)
+            ddp_model.register_comm_hook(hook_state, hook)
+
+            for _ in range(10):
+                optimizer.zero_grad()
+                loss = ddp_model(input).sum()
+                loss.backward()
+                optimizer.step()
+
+            state = {
+                'state_dict': ddp_model.state_dict(),
+                'comm_hook': pickle.dumps(hook),
+                'comm_hook_state': pickle.dumps(hook_state)
+            }
+
+            if rank == 0:
+                torch.save(state, chkpt_file)
+
+            dist.barrier()
+            map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
+            checkpoint = torch.load(chkpt_file, map_location=map_location)
+
+            dummy_ddp_model.load_state_dict(checkpoint['state_dict'])
+            dummy_hook = pickle.loads(checkpoint['comm_hook'])
+
+            with self.assertLogs() as captured:
+                dummy_hook_state = pickle.loads(checkpoint['comm_hook_state'])
+
+            # Check that the logger has only one entry
+            self.assertEqual(len(captured.records), 1)
+            # Check that the logger has an expected entry
+            self.assertEqual(
+                captured.records[0].getMessage(),
+                "NOTE: PowerSGDState is set to use the default process group."
+            )
+            # Check that loaded function is correct
+            self.assertEqual(dummy_hook.__qualname__, hook.__qualname__)
+
+            slots_original = hook_state.__slots__
+            slots_restored = dummy_hook_state.__slots__
+            self.assertEqual(slots_original, slots_restored)
+
+            slots = copy.copy(slots_restored)
+            slots.remove("process_group")
+            slots.remove("rng")
+
+            # Check that all attributes are restored correctly.
+            # Excluding ``process_group`` and ``rng``.
+            for entry in slots:
+                self.assertEqual(getattr(dummy_hook_state, entry), getattr(hook_state, entry))
+
+            # Check that ``process_group`` was set to default
+            self.assertEqual(dummy_hook_state.process_group, _get_default_group())
+
+            # Check that a random state was restored properly:
+            # :met:`np.random.RandomState.get_state` returns a tuple with entries:
+            # `bit_generator` - str,
+            # `state.key` - ndarray dtype[uint32],
+            # `state.pos` - int,
+            # `has_gauss` - int,
+            # `gauss` - float
+            #  (refer to https://github.com/numpy/numpy/blob/266aad7478bc7fbcc55eea7f942a0d373b838396/numpy/random/mtrand.pyi)
+            # To make sure random state was restored properly, all entries should equal the original
+            for entry1, entry2 in zip(hook_state.rng.get_state(), dummy_hook_state.rng.get_state()):
+                np.testing.assert_array_equal(entry1, entry2)
+
+            if rank == 0:
+                os.remove(chkpt_file)
+
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["cuda"],
             f"The {BACKEND} backend does not support DDP communication hook on CUDA devices"
@@ -8830,61 +8913,17 @@ class DistributedTest:
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_ddp_hook_pickling_powerSGD(self):
 
-
-            learning_rate = 0.01
-            chkpt_file = tempfile.gettempdir() + "/checkpoint.pt"
-
-            world_size = dist.get_world_size()
-            rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
-            gpus = [rank_to_GPU[int(r)][0] for r in range(world_size)]
-            process_group = torch.distributed.new_group(gpus)
-            rank = self.rank
-            #print(process_group)
-
-            input = torch.randn(1, 1, device=rank)
-            net = torch.nn.Linear(1, 5).to(self.rank)
-            ddp_model =torch.nn.parallel.DistributedDataParallel(
-                net,
-                device_ids=[self.rank]
-            )
-            dummy_ddp_model =torch.nn.parallel.DistributedDataParallel(
-                net,
-                device_ids=[self.rank]
-            )
-            optimizer = torch.optim.SGD(ddp_model.parameters(), lr = learning_rate)
-
-            powersgd_state = powerSGD.PowerSGDState(
-                    process_group=None,
-                    matrix_approximation_rank=1,
-                    start_powerSGD_iter=4,
-                )
             hook = powerSGD.powerSGD_hook
-            ddp_model.register_comm_hook(powersgd_state, hook)
-            #print(powersgd_state.iter)
+            powersgd_state = powerSGD.PowerSGDState(
+                process_group=None,
+                matrix_approximation_rank=1,
+                start_powerSGD_iter=4,
+            )
+            self._test_hook_pickling(hook, powersgd_state)
 
-            for _ in range(10):
-                loss = ddp_model(input).sum()
-                loss.backward()
-            #print(powersgd_state.iter)
-            state = {'state_dict':ddp_model.state_dict(),'comm_hook': pickle.dumps(hook), 'comm_hook_state': pickle.dumps(powersgd_state)}
 
-            if self.rank == 0:
-                torch.save(state, chkpt_file)
 
-            dist.barrier()
-            map_location = {'cuda:%d' % 0: 'cuda:%d' % self.rank}
-            checkpoint = torch.load(chkpt_file, map_location=map_location)
 
-            dummy_ddp_model.load_state_dict(checkpoint['state_dict'])
-            dummy_hook = pickle.loads(checkpoint['comm_hook'])
-            dummy_hook_state = pickle.loads(checkpoint['comm_hook_state'])
-
-            #Check that loaded function is correct
-            self.assertEqual(dummy_hook.__qualname__, hook.__qualname__)
-
-            if self.rank == 0:
-                print(f"iter = {dummy_hook_state.iter}")
-                os.remove(chkpt_file)
 
 
 instantiate_parametrized_tests(DistributedTest._DistTestBase)

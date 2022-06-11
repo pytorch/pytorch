@@ -267,6 +267,11 @@ class PowerSGDState(object):
         self.batch_tensors_with_same_shape = batch_tensors_with_same_shape
 
     def __getstate__(self):
+        r"""
+        Returns a ``PowerSGDState`` which will be pickled and saved.
+        ``process_group`` is not serializable and excluded from
+        a returned state.
+        """
         slots = copy.copy(self.__slots__)
         slots.remove("process_group")
         return {
@@ -275,9 +280,13 @@ class PowerSGDState(object):
         }
 
     def __setstate__(self, state):
+        r"""
+        Takes a provided ``state`` and retrieves ``PowerSGDState``.
+        ``process_group`` is set to default.
+        """
         self.process_group = distributed_c10d._get_default_group()
         logger.warning(
-            "NOTE: State is set to use the default process group."
+            "NOTE: PowerSGDState is set to use the default process group."
         )
         for slot, value in state.items():
             setattr(self, slot, value)
