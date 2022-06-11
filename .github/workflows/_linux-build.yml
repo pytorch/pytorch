@@ -104,7 +104,6 @@ jobs:
             -e PR_NUMBER \
             -e SHA1 \
             -e BRANCH \
-            -e GITHUB_RUN_ID \
             -e SCCACHE_BUCKET \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
