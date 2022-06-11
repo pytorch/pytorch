@@ -377,27 +377,6 @@ void ConvertGraphToONNXProto(
   }
 }
 
-// this function checks wheather the blocks of If node have the same return
-// type.
-bool IsBlockReturnTypeSame(Node* n) {
-  TORCH_INTERNAL_ASSERT(n->kind() == ::c10::onnx::If);
-  auto then_block = n->blocks()[0];
-  auto else_block = n->blocks()[1];
-  for (const auto i : c10::irange(n->outputs().size())) {
-    // check the type
-    auto then_block_type = then_block->outputs()[i]->type();
-    auto else_block_type = else_block->outputs()[i]->type();
-    if (then_block_type->cast<TensorType>() &&
-        else_block_type->cast<TensorType>()) {
-      if (then_block_type->castRaw<TensorType>()->scalarType() !=
-          else_block_type->castRaw<TensorType>()->scalarType()) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
 c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
   if (n->inputs().size() == 0) {
     return c10::nullopt;
