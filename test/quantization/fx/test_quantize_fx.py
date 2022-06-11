@@ -154,6 +154,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_quantization import (
     LinearReluLinearModel,
     LinearReluModel,
+    LinearBnLeakyReluModel,
     QuantizationTestCase,
     skipIfNoFBGEMM,
     skip_if_no_torchvision,
@@ -361,21 +362,6 @@ class TestFuseFx(QuantizationTestCase):
             expected_node_occurrence=expected_occurrence)
 
     def test_fuse_linear_bn_leaky_relu_eval(self):
-        class M(torch.nn.Module):
-            def __init__(self, with_bn=True):
-                super().__init__()
-                self.linear = nn.Linear(1, 1)
-                self.bn1d = nn.BatchNorm1d(1)
-                self.leaky_relu = nn.LeakyReLU(0.01)
-                self.with_bn = with_bn
-
-            def forward(self, x):
-                x = self.linear(x)
-                if self.with_bn:
-                    x = self.bn1d(x)
-                x = self.leaky_relu(x)
-                return x
-
         expected_nodes = [
             ns.call_module(nni.LinearLeakyReLU),
         ]
@@ -386,7 +372,7 @@ class TestFuseFx(QuantizationTestCase):
 
         for with_bn in [True, False]:
             # test eval mode
-            m = M(with_bn).eval()
+            m = LinearBnLeakyReluModel(with_bn).eval()
             # fuse_fx is a top level api and only supports eval mode
             m = fuse_fx(m)
             self.checkGraphModuleNodes(
@@ -461,7 +447,9 @@ class TestFuseFx(QuantizationTestCase):
             "": None,
             "object_type": [(nn.Linear, default_qconfig),
                             (nn.ReLU, default_qconfig),
-                            (F.relu, default_qconfig)]
+                            (F.relu, default_qconfig),
+                            (nn.LeakyReLU, default_qconfig),
+                            (F.leaky_relu, default_qconfig)]
         }
 
         linearRelu_node_list = [
@@ -477,8 +465,15 @@ class TestFuseFx(QuantizationTestCase):
             ns.call_method('dequantize')
         ]
 
+        linearLeakyRelu_node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nniq.LinearLeakyReLU),
+            ns.call_method('dequantize')
+        ]
+
         tests = [(LinearReluModel, linearRelu_node_list),
-                 (LinearReluLinearModel, linearReluLinear_node_list)]
+                 (LinearReluLinearModel, linearReluLinear_node_list),
+                 (LinearBnLeakyReluModel, linearLeakyRelu_node_list)]
 
         for M, node_list in tests:
             m = M().eval()

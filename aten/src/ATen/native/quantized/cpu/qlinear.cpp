@@ -296,7 +296,7 @@ at::Tensor PackedLinearWeight:: apply_leaky_relu(
   auto w_fp32 = w_q.dequantize();
   auto y_fp32 = at::linear(x_fp32, w_fp32, bias);
   auto z_fp32 = at::leaky_relu(y_fp32, negative_slope);
-  return at::quantize_per_tensor(z_fp32, output_scale, output_zero_point, c10::kQUInt8);
+  return at::quantize_per_tensor(z_fp32, output_scale, output_zero_point, input.scalar_type());
 }
 
 #endif // USE_FBGEMM
@@ -647,7 +647,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_leaky_relu(
   auto w_fp32 = w_q.dequantize();
   auto y_fp32 = at::linear(x_fp32, w_fp32, bias);
   auto z_fp32 = at::leaky_relu(y_fp32, negative_slope);
-  return at::quantize_per_tensor(z_fp32, output_scale, output_zero_point, c10::kQUInt8);
+  return at::quantize_per_tensor(z_fp32, output_scale, output_zero_point, input.scalar_type());
 }
 
 #endif // USE_PYTORCH_QNNPACK
