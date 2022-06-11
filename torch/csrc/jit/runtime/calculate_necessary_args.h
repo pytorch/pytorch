@@ -10,7 +10,7 @@ namespace jit {
 // Calculates the number of args that need to be passed in.
 // Less args may be needed if defaults are provided.
 // Returns: {number args needed, number of out args}
-inline std::pair<ssize_t, ssize_t> CalculateNecessaryArgs(
+inline std::pair<int64_t, int64_t> CalculateNecessaryArgs(
     const std::vector<Argument>& schema_args,
     at::ArrayRef<Value*> actual_inputs,
     bool allow_trailing_out_args) {
@@ -19,7 +19,7 @@ inline std::pair<ssize_t, ssize_t> CalculateNecessaryArgs(
   }
 
   // count number of out arguments
-  ssize_t schema_idx = schema_args.size() - 1;
+  int64_t schema_idx = static_cast<int64_t>(schema_args.size()) - 1;
   if (allow_trailing_out_args) {
     // skip over out arguments in the end.
     while (schema_idx >= 0) {
@@ -31,7 +31,7 @@ inline std::pair<ssize_t, ssize_t> CalculateNecessaryArgs(
     }
   }
 
-  ssize_t num_out = schema_args.size() - schema_idx - 1;
+  int64_t num_out = static_cast<int64_t>(schema_args.size()) - schema_idx - 1;
 
   if (schema_args.size() < actual_inputs.size()) {
     return std::make_pair(actual_inputs.size(), num_out);
