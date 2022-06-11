@@ -77,7 +77,7 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
   explicit ThreadPool(
       int pool_size,
       int numa_node_id = -1,
-      std::function<void()> init_thread = nullptr);
+      const std::function<void()>& init_thread = nullptr);
 
   ~ThreadPool() override;
 

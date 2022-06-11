@@ -86,7 +86,7 @@ bool in_parallel_region() {
   return tbb::this_task_arena::current_thread_index() >= 0;
 }
 
-void intraop_launch(std::function<void()> func) {
+void intraop_launch(const std::function<void()>& func) {
   if (get_num_threads() > 1) {
     tg_.run(func);
   } else {

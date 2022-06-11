@@ -142,7 +142,7 @@ void launch_no_thread_state(std::function<void()> fn);
 } // namespace internal
 
 // Launches intra-op parallel task
-TORCH_API void intraop_launch(std::function<void()> func);
+TORCH_API void intraop_launch(const std::function<void()>& func);
 
 // Returns number of intra-op threads used by default
 TORCH_API int intraop_default_num_threads();

@@ -274,7 +274,7 @@ bool in_parallel_region() {
 #endif // C10_MOBILE
 }
 
-void intraop_launch(std::function<void()> func) {
+void intraop_launch(const std::function<void()>& func) {
 #ifndef C10_MOBILE
   if (!in_parallel_region() && get_num_threads() > 1) {
     _get_intraop_pool().run(func);
