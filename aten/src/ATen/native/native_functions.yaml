@@ -4893,6 +4893,10 @@
   dispatch:
     CPU, CUDA: NestedTensor_nested_tensor_from_mask
 
+- func: _nested_tensor_from_mask_left_aligned(Tensor t, Tensor mask) -> bool
+  dispatch:
+    CPU, CUDA: NestedTensor_nested_tensor_from_mask_left_aligned
+
 - func: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
   device_check: NoCheck # cpu_nested_shape_example will always be on CPU
   dispatch:
