@@ -466,6 +466,22 @@ def meta_embedding_bag(
     return output, offset2bag, bag_size, max_indices
 
 
+@torch.library.impl(meta_lib, "diag.out")
+def meta_diag_out(self, dim=0, *, out):
+    assert self.dim() in (1, 2), "matrix or a vector expected"
+    if self.dim() == 1:
+        sz = self.size(0) + abs(dim)
+        torch._resize_output_(out, (sz, sz), self.device)
+        return out
+    else:
+        if dim >= 0:
+            sz = min(self.size(0), self.size(1) - dim)
+        else:
+            sz = min(self.size(0) + dim, self.size(1))
+        torch._resize_output_(out, (sz,), self.device)
+        return out
+
+
 @torch.library.impl(meta_lib, "_embedding_bag_forward_only")
 def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
     output, offset2bag, bag_size, max_indices = meta_embedding_bag(
