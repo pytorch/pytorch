@@ -56,6 +56,13 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
@@ -68,6 +75,7 @@ jobs:
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: 5.2
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -78,6 +86,7 @@ jobs:
             -e PR_LABELS \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
+            -e OUR_GITHUB_JOB_ID \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
