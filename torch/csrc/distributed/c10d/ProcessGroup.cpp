@@ -51,7 +51,8 @@ std::string opTypeToString(OpType opType) {
 }
 
 bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
-  if (batchP2P) return false;
+  if (batchP2P)
+    return false;
   return opType == OpType::SEND || opType == OpType::RECV ||
       opType == OpType::RECVANYSOURCE;
 }
@@ -78,7 +79,9 @@ ProcessGroup::Work::Work(
           inputs.emplace_back(tensor);
         }
       }
-      recordingFunction->before(profilingTitle, c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
+      recordingFunction->before(
+          profilingTitle,
+          c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
       std::function<void()> end_handler = [recordingFunction]() {
         recordingFunction->end();
       };
@@ -91,7 +94,7 @@ OpType ProcessGroup::Work::retrieveOpType() {
   return opType_;
 }
 
-ProcessGroup::Work::~Work()=default;
+ProcessGroup::Work::~Work() = default;
 
 bool ProcessGroup::Work::isCompleted() {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -109,7 +112,8 @@ std::exception_ptr ProcessGroup::Work::exception() const {
 }
 
 int ProcessGroup::Work::sourceRank() const {
-  TORCH_CHECK(false,
+  TORCH_CHECK(
+      false,
       "sourceRank() may only be called on work objects "
       "that correspond to a recv or recv-from-any call.");
 }
@@ -183,7 +187,8 @@ ProcessGroup::ProcessGroup(int rank, int size)
 ProcessGroup::~ProcessGroup() {}
 
 void ProcessGroup::init() {
-  C10_LOG_API_USAGE_ONCE(fmt::format("c10d.process_group_{}", getBackendName()));
+  C10_LOG_API_USAGE_ONCE(
+      fmt::format("c10d.process_group_{}", getBackendName()));
 }
 
 } // namespace c10d

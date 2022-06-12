@@ -95,7 +95,7 @@ jobs:
         uses: seemethere/upload-artifact-s3@v5
         with:
           s3-prefix: |
-            ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifacts/
+            ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
           retention-days: 14
           if-no-files-found: error
           path: sccache-stats-*.json
