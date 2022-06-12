@@ -382,8 +382,6 @@ meta_function_expected_failures = {
     torch.corrcoef: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense
     torch.count_nonzero: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::count_nonzero.dim_IntList
     torch.cov: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense
-    torch.diag: {bf16, b8, f32, f64, i16, i32, i64, i8, u8},  # aten::diag.out
-    torch.diagflat: {bf16, b8, f32, f64, i16, i32, i64, i8, u8},  # aten::diag.out
     torch.fft.fft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
     torch.fft.fft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
     torch.fft.fftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
@@ -450,7 +448,6 @@ meta_function_expected_failures = {
     torch.searchsorted: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::searchsorted.Tensor, aten::searchsorted.Tensor_out
     torch.symeig: {f32, f64},
     torch.take: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::take, aten::take.out
-    torch.trace: {f32, f64, i16, i32, i64, i8, u8},  # aten::trace
     torch.vdot: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::vdot
     torch.ormqr: {f32, f64},
     torch.cholesky: {f32, f64},  # aten::cholesky, aten::cholesky.out
@@ -507,8 +504,6 @@ meta_function_device_expected_failures['cpu'] = {
 meta_function_device_expected_failures['cuda'] = {
     torch.corrcoef: {bf16, f16},  # aten::_local_scalar_dense
     torch.cov: {f16},  # aten::_local_scalar_dense
-    torch.diag: {bf16, f16},  # aten::diag.out
-    torch.diagflat: {bf16, f16},  # aten::diag.out
     torch.fft.fft2: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
     torch.fft.fft: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
     torch.fft.fftn: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
@@ -557,7 +552,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.nn.functional.prelu: {f16},  # aten::prelu
     torch.nn.functional.rrelu: {f16},  # aten::rrelu_with_noise
     torch.ormqr: {f32, f64},  # aten::ormqr, aten::ormqr.out
-    torch.trace: {b8, bf16, f16},  # aten::diag.out
     torch.vdot: {f16},  # aten::vdot
 }
 
@@ -644,8 +638,6 @@ meta_dispatch_expected_failures = {
     aten.convolution.default: {c64, i64, f64, c128, bf16, f32},
     aten.count_nonzero.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.count_nonzero.dim_IntList: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.diag.default: {i64, u8, b8, f32, i8, f64, i16, i32, bf16},
-    aten.diag.out: {bf16, i64, u8, b8, f32, i8, f64, i16, i32},
     aten.floor_divide.default: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.floor_divide.out: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.frexp.Tensor: {bf16, f16, f64, f32},
@@ -695,7 +687,6 @@ meta_dispatch_expected_failures = {
     aten.tensordot.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.to_sparse.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.to_sparse.sparse_dim: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.trace.default: {i8, i64, f64, i16, u8, i32, f32},
     aten.unique_consecutive.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.unique_dim.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.upsample_nearest3d.vec: {bf16, u8, f64, f32},
@@ -753,8 +744,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten._use_cudnn_ctc_loss.default: {f32, f64},  # aten::_use_cudnn_ctc_loss
     aten.convolution.default: {f16, c32},
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
-    aten.diag.default: {f16},  # aten::diag.out
-    aten.diag.out: {bf16, f16},  # aten::diag.out
     aten.geqrf.default: {f32, f64},  # aten::geqrf
     aten.grid_sampler_2d.default: {f16},  # aten::grid_sampler_2d
     aten.grid_sampler_3d.default: {f16},  # aten::grid_sampler_3d
@@ -791,7 +780,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.prelu.default: {f16},  # aten::prelu
     aten.rrelu_with_noise.default: {f16},  # aten::rrelu_with_noise
     aten.tensordot.out: {f16},  # aten::tensordot.out
-    aten.trace.default: {b8, bf16, f16},  # aten::diag.out
     aten.unique_consecutive.default: {f16},  # aten::unique_consecutive
     aten.unique_dim.default: {f16},  # aten::unique_dim
     aten.upsample_nearest3d.vec: {f16},  # aten::upsample_nearest3d.vec
