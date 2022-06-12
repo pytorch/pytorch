@@ -85,7 +85,6 @@ jobs:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
-          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: 5.2
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -104,7 +103,6 @@ jobs:
             -e SCCACHE_BUCKET \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
             -e PR_LABELS \
