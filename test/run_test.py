@@ -321,10 +321,6 @@ or `conda install ninja`. Alternatively, disable said tests with
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 
-ENABLE_PR_HISTORY_REORDERING = bool(
-    os.environ.get("ENABLE_PR_HISTORY_REORDERING", "0") == "1"
-)
-
 JIT_EXECUTOR_TESTS = [
     "test_jit_profiling",
     "test_jit_legacy",
@@ -1033,9 +1029,7 @@ def main():
     #     sys.path.remove(test_directory)
 
     if IS_CI:
-        selected_tests = get_reordered_tests(
-            selected_tests, ENABLE_PR_HISTORY_REORDERING
-        )
+        selected_tests = get_reordered_tests(selected_tests)
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
 
