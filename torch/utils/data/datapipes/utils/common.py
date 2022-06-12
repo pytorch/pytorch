@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
 __all__ = [
+    "ensure_map_fn_works",
     "StreamWrapper",
     "get_file_binaries_from_pathnames",
     "get_file_pathnames_from_root",
