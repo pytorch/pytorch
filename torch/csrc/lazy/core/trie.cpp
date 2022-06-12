@@ -17,7 +17,7 @@ void TraverseTrie(TrieNode* node, std::stringstream& ss) {
   }
   if (node->ir_node) {
     ss << node->unique_id << "[label=\"" << node->ir_node->op().ToString()
-        << ", " << node->hit_counter << " hits\"]\n";
+       << ", " << node->hit_counter << " hits\"]\n";
   }
   for (auto& successor : node->successors) {
     ss << node->unique_id << " -> " << successor->unique_id << "\n";
@@ -31,13 +31,15 @@ TrieCache* TrieCache::Get() {
   return trie;
 }
 
-TrieCache::TrieCache() : root_(std::make_shared<TrieNode>()), current_(root_.get()) {}
+TrieCache::TrieCache()
+    : root_(std::make_shared<TrieNode>()), current_(root_.get()) {}
 
 TrieNode* TrieCache::Current() const {
   return current_;
 }
 
-void TrieCache::SetCurrent(std::list<std::shared_ptr<TrieNode>>::iterator& iter) {
+void TrieCache::SetCurrent(
+    std::list<std::shared_ptr<TrieNode>>::iterator& iter) {
   auto& successors = current_->successors;
   // Update current_ before iter gets destroyed
   current_ = (*iter).get();
