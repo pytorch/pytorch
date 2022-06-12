@@ -6,7 +6,7 @@ import sys
 import types
 
 import torch.jit
-import torch._utils_internal as torch_utils_internal
+from torch import _utils_internal
 
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags')
@@ -252,7 +252,7 @@ class _Ops(types.ModuleType):
         if sys.executable == "torch_deploy":
             return
 
-        path = torch_utils_internal.resolve_library_path(path)
+        path = _utils_internal.resolve_library_path(path)
         with dl_open_guard():
             # Import the shared library into the process, thus running its
             # static (global) initialization code in order to register custom
