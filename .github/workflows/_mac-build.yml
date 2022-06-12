@@ -78,7 +78,16 @@ jobs:
           sudo chmod +x /usr/local/bin/sccache
           echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build
+        env:
+          OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
           .jenkins/pytorch/macos-build.sh
@@ -96,3 +105,13 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip
+
+      - name: Upload sccache stats to GHA
+        uses: actions/upload-artifact@v2
+        # Only if sccache is installed, see above
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        with:
+          name: ${{ inputs.build-environment }}-sccache-stats
+          retention-days: 14
+          if-no-files-found: error
+          path: sccache_stats.json

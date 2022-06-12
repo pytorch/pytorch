@@ -67,4 +67,11 @@ else
   compile_x86_64
 fi
 
+if which sccache > /dev/null; then
+  sccache --show-stats
+  sccache --show-stats \
+    | python -m tools.stats.sccache_stats_to_json \
+    > sccache_stats.json
+fi
+
 assert_git_not_dirty
