@@ -961,9 +961,6 @@
   dispatch:
     CompositeExplicitAutograd: binary_cross_entropy_with_logits
 
-- func: binary_cross_entropy_with_logits_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
-  variants: function
-
 - func: bincount(Tensor self, Tensor? weights=None, int minlength=0) -> Tensor
   variants: function, method
   dispatch:
