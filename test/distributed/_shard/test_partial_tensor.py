@@ -55,7 +55,6 @@ class TestPartialTensorReshard(ShardedTensorTestBase):
             results_compare.append(torch.cat(results))
         parital_tensor = _PartialTensor(
             torch.cat(local_result), pg, reduce_op=reduce_op
-        
         )
         local_sharded_result = parital_tensor.reshard(reshard_spec)
         local_shards = local_sharded_result.local_shards()

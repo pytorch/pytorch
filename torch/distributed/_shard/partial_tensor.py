@@ -190,10 +190,10 @@ class _PartialTensor(torch.Tensor):
             # Need to re-arrange original shard_dim of output_tensor_list.
             local_shards = [local_shards[idx] for idx in indices]  # type: ignore[call-overload]
         local_result = reduce_scatter(
-            torch.empty_like(local_shards[0]), 
-            list(local_shards), 
+            torch.empty_like(local_shards[0]),
+            list(local_shards),
             op=self._reduce_op,
-            group=self._process_group
+            group=self._process_group,
         )
 
         sharded_tensor_size = self._local_shard.size()
