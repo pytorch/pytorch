@@ -385,8 +385,9 @@ class TestProfiler(TestCase):
                 return self.conv(x)
 
         mod = DummyModule()
+
         def call_module(x):
-          return mod(x)
+            return mod(x)
 
         with _profile(with_stack=True, use_kineto=kineto_available()) as p:
             x = torch.randn(10, 10, requires_grad=True)
@@ -414,9 +415,9 @@ class TestProfiler(TestCase):
                 events = json.load(f)["traceEvents"]
 
             def extract(pattern: str):
-              matches = [e for e in events if re.search(pattern, e["name"])]
-              self.assertEqual(len(matches), 1, repr([e["name"] for e in matches]))
-              return matches[0]
+                matches = [e for e in events if re.search(pattern, e["name"])]
+                self.assertEqual(len(matches), 1, repr([e["name"] for e in matches]))
+                return matches[0]
 
             module_event = extract(r"DummyModule_0")
             wrapper_event = extract(r"call_module")

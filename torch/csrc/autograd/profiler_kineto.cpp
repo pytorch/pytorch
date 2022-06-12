@@ -213,7 +213,8 @@ struct EventFieldsVisitor {
     annotations_.emplace_back("Python id", std::to_string(t.id_));
     annotations_.emplace_back(
         "Python parent id",
-        !py_metadata_.empty() ? std::to_string(py_metadata_.at(0).id_) : "null");
+        !py_metadata_.empty() ? std::to_string(py_metadata_.at(0).id_)
+                              : "null");
     annotations_.emplace_back("Python thread", std::to_string(t.python_tid_));
   }
 

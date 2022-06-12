@@ -139,17 +139,6 @@ def TensorMeta(
         )
 
 
-def same_shape(a: ShapeType, b: ShapeType) -> bool:
-    if len(a) != len(b):
-        return False
-
-    for x, y in zip(a, b):
-        if x != y:
-            return False
-
-    return True
-
-
 # TODO: look at using torch.testing.assert_close instead with an option
 #   to just compare metadata
 def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
@@ -163,9 +152,10 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
 
-    if not same_shape(a.shape, b.shape):
-        msg = "Shapes {0} and {1} are not equal!".format(a.shape, b.shape)
-        raise AssertionError(msg)
+    for x, y in zip(a.shape, b.shape):
+        if x != y:
+            msg = "Shapes {0} and {1} are not equal!".format(a.shape, b.shape)
+            raise AssertionError(msg)
 
     if a.dtype != b.dtype:
         msg = "Dtypes {0} and {1} are not equal!".format(a.dtype, b.dtype)
