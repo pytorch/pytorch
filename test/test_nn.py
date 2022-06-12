@@ -14357,12 +14357,12 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(gradgradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol))
 
 
-    def test_channel_shuffle_runtime_errors(self, device):
+    def test_channel_shuffle_return_self(self, device):
         # gh-76616: nn.ChannelShuffle will return self with an  empty input tensor
         groups = 3
         input_tensor = torch.rand([0, 9, 4, 4], device=device)
         output = torch.nn.ChannelShuffle(groups)(input_tensor)
-        torch.tensting.assert_close(output, input_tensor)
+        torch.testing.assert_close(output, input_tensor)
 
     def test_Dropout(self, device):
         input = torch.empty(1000)
