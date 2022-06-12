@@ -2020,13 +2020,12 @@ Tensor binary_cross_entropy_with_logits_backward(
   }
 
   if (isDefined(weight)) {
-    if (!at::isTensorSubclassLike(*weight) && !at::GradMode::is_enabled() ) {
+    if (!at::isTensorSubclassLike(*weight) && !at::GradMode::is_enabled()) {
       grad_input.mul_(*weight);
     } else {
       grad_input = grad_input.mul(*weight);
     }
   }
-
 
   if (reduction == at::Reduction::Mean) {
     return grad_input.div_(input.numel());
@@ -2050,12 +2049,12 @@ Tensor binary_cross_entropy_with_logits_target_backward(
   if (isDefined(pos_weight)) {
     if (!areAnyTensorSubclassLike({*pos_weight, grad_output})) {
       grad_target = at::log_sigmoid(-self)
-            .sub_(at::log_sigmoid(self).mul_(*pos_weight))
-            .mul_(grad_output);
+                        .sub_(at::log_sigmoid(self).mul_(*pos_weight))
+                        .mul_(grad_output);
     } else {
       grad_target = at::log_sigmoid(-self)
-            .sub_(at::log_sigmoid(self).mul(*pos_weight))
-            .mul(grad_output);
+                        .sub_(at::log_sigmoid(self).mul(*pos_weight))
+                        .mul(grad_output);
     }
   } else {
     grad_target = -self * grad_output;
