@@ -810,6 +810,43 @@ class TestTorchDeviceType(TestCase):
             torch.from_numpy(a)
             torch.from_numpy(a)
 
+    @onlyNativeDeviceTypes
+    def test_complex_half_experimental_warning(self, device):
+        msg = 'ComplexHalf support is experimental'
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            t = torch.randn(3, dtype=torch.chalf, device=device)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.rand(3, dtype=torch.chalf, device=device)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.empty(3, dtype=torch.chalf, device=device)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.ones(3, dtype=torch.chalf, device=device)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.zeros(3, dtype=torch.chalf, device=device)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.randn_like(t)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.rand_like(t)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.empty_like(t)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.ones_like(t)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.zeros_like(t)
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            # t + 1 allocates a new tensor for result using empty
+            t + 1
+
     # TODO: this test should be in test_nn.py
     def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
         in_channels = 64
@@ -1626,6 +1663,7 @@ else:
             res = torch.gather(src, dim, idx)
             weight = torch.rand_like(res, device=device) * 10 ** 6
             res.backward(weight)
+            assert src.grad is not None
             grad = src.grad.detach().clone()
 
             if torch.device(device).type == 'cuda':
@@ -5529,22 +5567,14 @@ class TestDevicePrecision(TestCase):
 
         cpu = torch.device('cpu')
         for device in devices:
-            # Index cpu tensor with device tensor
             x = torch.randn(3, 4, 4, 4, 3)
-            ia = torch.tensor([0, 2, 1]).to(device)
-            ib = torch.tensor([0, 2, 1]).to(device)
-            test(x, ia, ib)
+            ia = torch.tensor([0, 2, 1])
+            ib = torch.tensor([0, 2, 1])
 
             # Index device tensor with cpu tensor
             x = x.to(device)
             ia = ia.to(cpu)
             ib = ib.to(cpu)
-            test(x, ia, ib)
-
-            # Index cpu tensor with mixed cpu, device tensors
-            x = x.to(cpu)
-            ia = ia.to(cpu)
-            ib = ib.to(device)
             test(x, ia, ib)
 
             # Index device tensor with mixed cpu, device tensors
@@ -5553,10 +5583,32 @@ class TestDevicePrecision(TestCase):
             ib = ib.to(device)
             test(x, ia, ib)
 
+    @deviceCountAtLeast(1)
+    def test_advancedindex_mixed_devices_error(self, devices) -> None:
+        def test(x: torch.Tensor, ia: torch.Tensor, ib: torch.Tensor) -> None:
+            # test getitem
+            with self.assertRaisesRegex(RuntimeError, fr"indices should be either .* \({x.device}\)"):
+                value = x[:, ia, None, ib, 0]
+            with self.assertRaisesRegex(RuntimeError, fr"indices should be either .* \({x.device}\)"):
+                value = x[ib]
+
+        cpu = torch.device('cpu')
+        for device in devices:
+            # Index cpu tensor with device tensor
+            x = torch.randn(3, 4, 4, 4, 3)
+            ia = torch.tensor([0, 2, 1]).to(device)
+            ib = torch.tensor([0, 2, 1]).to(device)
+            test(x, ia, ib)
+
+            # Index cpu tensor with mixed cpu, device tensors
+            x = x.to(cpu)
+            ia = ia.to(cpu)
+            ib = ib.to(device)
+            test(x, ia, ib)
+
             if len(devices) > 1:
-                other_device = devices[0]
-                if device == devices[0]:
-                    other_device = devices[1]
+                other_device = devices[0] if device == devices[1] else devices[1]
+
                 # Index device tensor with mixed cpu, device tensors on different devices
                 x = x.to(device)
                 ia = ia.to(cpu)
@@ -5880,6 +5932,20 @@ class TestTorch(TestCase):
         self.assertFalse(t1.is_same_size(t2))
         self.assertFalse(t1.is_same_size(t3))
         self.assertTrue(t1.is_same_size(t4))
+
+        nt1 = torch.nested_tensor([torch.ones(2, 4), torch.ones(3, 4), torch.ones(5, 4)])
+        nt2 = torch.nested_tensor([torch.ones(2, 4), torch.ones(2, 4), torch.ones(2, 4)])
+        nt3 = torch.nested_tensor([torch.ones(2, 4, 5), torch.ones(2, 6, 5)])
+        nt4 = torch.nested_tensor([torch.ones(2, 4), torch.ones(3, 4), torch.ones(5, 4)])
+
+        self.assertFalse(nt1.is_same_size(nt2))
+        self.assertFalse(nt1.is_same_size(nt3))
+        self.assertTrue(nt1.is_same_size(nt4))
+        with self.assertRaisesRegex(RuntimeError, "Expected both self and other to be nested tensors."):
+            t1.is_same_size(nt1)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected both self and other to be nested tensors."):
+            nt1.is_same_size(t1)
 
     def test_tensor_set(self):
         t1 = torch.tensor([])

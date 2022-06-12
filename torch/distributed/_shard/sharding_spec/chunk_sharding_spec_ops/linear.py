@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, cast
 
 import torch
 import torch.distributed as dist
@@ -100,18 +100,18 @@ def sharded_linear(types, args, kwargs, pg):
     bias = args[2]
 
     local_shard = weight.local_tensor()
-    local_shard_t = local_shard.t().contiguous()
+    local_shard_t = local_shard.t()
     sharding_dim = weight._sharding_spec.dim
     world_size = dist.get_world_size(pg)
     rank = dist.get_rank(pg)
 
-    if sharding_dim == 1 and isinstance(input, ShardedTensor):
-        return _handle_row_wise_sharding_sharded_tensor(
-            input, world_size, weight, local_shard_t, bias, pg
-        )
-    elif sharding_dim == 1 and isinstance(input, torch.Tensor):
+    if sharding_dim == 1 and isinstance(input, torch.Tensor):
         return _handle_row_wise_sharding_tensor(
             input, world_size, weight, rank, local_shard_t, bias, pg
+        )
+    elif sharding_dim == 1 and isinstance(input, ShardedTensor):
+        return _handle_row_wise_sharding_sharded_tensor(
+            input, world_size, weight, local_shard_t, bias, pg
         )
     elif sharding_dim == 0:
         return _handle_col_wise_sharding(
@@ -125,7 +125,7 @@ def sharded_linear(types, args, kwargs, pg):
 
 def _validate_linear_op_param(args, kwargs):
     """
-    Validate input params of sharded linear op.
+    Validate input params of sharded embedding op.
 
     Args:
         input: input of the linear layer.
@@ -141,13 +141,13 @@ def _validate_linear_op_param(args, kwargs):
     # Validate types
     if not isinstance(input, torch.Tensor) and not isinstance(input, ShardedTensor):
         raise TypeError("input needs to be either torch.Tensor or ShardedTensor")
-    if type(bias) != torch.Tensor and type(bias) != torch.nn.Parameter:
+    if not isinstance(bias, torch.Tensor):
         raise TypeError("bias needs to be torch.Tensor")
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")
     if len(input.size()) < 1:  # type: ignore[arg-type]
         raise ValueError("Input needs to have at least 1 dim")
-    weight_size = weight.size()
+    weight_size = cast(torch.Size, weight.size())
     if len(weight_size) != 2:
         raise ValueError("Weight needs to have exactly 2 dims")
     if len(bias.size()) != 1:
@@ -198,7 +198,7 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     # allgather the inputs first.
     out_size = list(input.size())
     out_size[0] = input.size(0) * dist.get_world_size(pg)
-    output = torch.empty(out_size, device=input.device)
+    output = torch.empty(out_size, device=input.device, dtype=input.dtype)
     output = _all_gather_base(output, input, group=pg)
 
     # Adjust bias and perform local matmul.
@@ -290,25 +290,31 @@ def _handle_row_wise_sharding_tensor(
     gathered_input_size = [input_split_sizes[rank] * world_size] + list(
         input_t_size[1:]
     )
-    gathered_input = torch.empty(gathered_input_size, device=input_t.device)
+    gathered_input = torch.empty(gathered_input_size, device=input_t.device, dtype=input_t.dtype)
 
     # Perform autograd enabled alltoall
     all_to_all_single(
         gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg
     )
-    gathered_input = gathered_input.transpose(0, -1)
 
-    # Perform local matmuls for all shards
-    results = []
+    # Reshape gathered_input appropriately for matmul
     shard_size = local_shard_t.size()[0]
-    for r in range(world_size):
-        inp = torch.narrow(gathered_input, -1, r * shard_size, shard_size)
-        results.append(
-            inp.matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias)
-        )
+    reshaped_inputs = [
+        torch.narrow(gathered_input, 0, r * shard_size, shard_size).transpose(0, -1)
+        for r in range(world_size)
+    ]
+    reshaped_input = torch.cat(reshaped_inputs)
+    if reshaped_input.dim() == 1:
+        reshaped_input = reshaped_input.view(-1, local_shard_t.size(0))
+
+    # Perform appropriate local matmul
+    if reshaped_input.dim() <= 2:
+        result = torch.addmm(_BiasTensorPartial.apply(world_size, bias), reshaped_input, local_shard_t)
+    else:
+        result = reshaped_input.matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias)
 
     # Return the partial local result.
-    return _PartialTensor(torch.cat(results), pg)
+    return _PartialTensor(result, pg)
 
 
 def _handle_row_wise_sharding_sharded_tensor(

@@ -429,6 +429,9 @@ def gen_pyi(
                 " device: Optional[_device] = None,"
                 " requires_grad: bool = False) -> Tensor: ..."
             ],
+            "_is_functional_tensor": [
+                "def _is_functional_tensor(t: Tensor) -> _bool: ..."
+            ],
             "range": [
                 "def range(start: Number, end: Number,"
                 " step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...".format(
@@ -639,7 +642,7 @@ def gen_pyi(
             "cuda": [
                 "def cuda(self, device: Optional[Union[_device, _int, str]]=None, non_blocking: _bool=False) -> Tensor: ..."
             ],
-            "numpy": ["def numpy(self) -> Any: ..."],
+            "numpy": ["def numpy(self, *, force: _bool=False) -> Any: ..."],
             "apply_": ["def apply_(self, callable: Callable) -> Tensor: ..."],
             "map_": [
                 "def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ..."
