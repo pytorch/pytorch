@@ -1,24 +1,20 @@
 import argparse
 import os
-import requests
-import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional
 from tempfile import TemporaryDirectory
 
-import rockset  # type: ignore[import]
 import boto3  # type: ignore[import]
+from tools.stats.upload_stats_lib import (
+    download_gha_artifacts,
+    download_s3_artifacts,
+    upload_to_rockset,
+    unzip,
+)
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 S3_RESOURCE = boto3.resource("s3")
-
-
-def get_request_headers() -> Dict[str, str]:
-    return {
-        "Accept": "application/vnd.github.v3+json",
-        "Authorization": "token " + os.environ["GITHUB_TOKEN"],
-    }
 
 
 def parse_xml_report(
@@ -111,107 +107,6 @@ def process_xml_element(element: ET.Element, skip_tag: Optional[str]) -> Dict[st
     return ret
 
 
-def get_artifact_urls(workflow_run_id: int) -> Dict[Path, str]:
-    """Get all workflow artifacts with 'test-report' in the name."""
-    response = requests.get(
-        f"{PYTORCH_REPO}/actions/runs/{workflow_run_id}/artifacts?per_page=100",
-    )
-    artifacts = response.json()["artifacts"]
-    while "next" in response.links.keys():
-        response = requests.get(
-            response.links["next"]["url"], headers=get_request_headers()
-        )
-        artifacts.extend(response.json()["artifacts"])
-
-    artifact_urls = {}
-    for artifact in artifacts:
-        if "test-report" in artifact["name"]:
-            artifact_urls[Path(artifact["name"])] = artifact["archive_download_url"]
-    return artifact_urls
-
-
-def unzip(p: Path) -> None:
-    """Unzip the provided zipfile to a similarly-named directory.
-
-    Returns None if `p` is not a zipfile.
-
-    Looks like: /tmp/test-reports.zip -> /tmp/unzipped-test-reports/
-    """
-    assert p.is_file()
-    unzipped_dir = p.with_name("unzipped-" + p.stem)
-
-    with zipfile.ZipFile(p, "r") as zip:
-        zip.extractall(unzipped_dir)
-
-
-def download_and_extract_artifact(
-    artifact_name: Path, artifact_url: str, workflow_run_attempt: int
-) -> None:
-    # [Artifact run attempt]
-    # All artifacts on a workflow share a single namespace. However, we can
-    # re-run a workflow and produce a new set of artifacts. To avoid name
-    # collisions, we add `-runattempt1<run #>-` somewhere in the artifact name.
-    #
-    # This code parses out the run attempt number from the artifact name. If it
-    # doesn't match the one specified on the command line, skip it.
-    atoms = str(artifact_name).split("-")
-    for atom in atoms:
-        if atom.startswith("runattempt"):
-            found_run_attempt = int(atom[len("runattempt") :])
-            if workflow_run_attempt != found_run_attempt:
-                print(
-                    f"Skipping {artifact_name} as it is an invalid run attempt. "
-                    f"Expected {workflow_run_attempt}, found {found_run_attempt}."
-                )
-
-    print(f"Downloading and extracting {artifact_name}")
-
-    response = requests.get(artifact_url, headers=get_request_headers())
-    with open(artifact_name, "wb") as f:
-        f.write(response.content)
-    unzip(artifact_name)
-
-
-def download_and_extract_s3_reports(
-    workflow_run_id: int, workflow_run_attempt: int
-) -> None:
-    bucket = S3_RESOURCE.Bucket("gha-artifacts")
-    objs = bucket.objects.filter(
-        Prefix=f"pytorch/pytorch/{workflow_run_id}/{workflow_run_attempt}/artifact/test-reports"
-    )
-
-    found_one = False
-    for obj in objs:
-        found_one = True
-        p = Path(Path(obj.key).name)
-        print(f"Downloading and extracting {p}")
-        with open(p, "wb") as f:
-            f.write(obj.get()["Body"].read())
-        unzip(p)
-
-    if not found_one:
-        raise RuntimeError(
-            "Didn't find any test reports in s3, there is probably a bug!"
-        )
-
-
-def download_and_extract_gha_artifacts(
-    workflow_run_id: int, workflow_run_attempt: int
-) -> None:
-    artifact_urls = get_artifact_urls(workflow_run_id)
-    for name, url in artifact_urls.items():
-        download_and_extract_artifact(Path(name), url, workflow_run_attempt)
-
-
-def upload_to_rockset(collection: str, docs: List[Any]) -> None:
-    print(f"Writing {len(docs)} documents to Rockset")
-    client = rockset.Client(
-        api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-    )
-    client.Collection.retrieve(collection).add_docs(docs)
-    print("Done!")
-
-
 def get_tests(
     workflow_run_id: int, workflow_run_attempt: int
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -220,8 +115,17 @@ def get_tests(
         os.chdir(temp_dir)
 
         # Download and extract all the reports (both GHA and S3)
-        download_and_extract_s3_reports(workflow_run_id, workflow_run_attempt)
-        download_and_extract_gha_artifacts(workflow_run_id, workflow_run_attempt)
+        s3_paths = download_s3_artifacts(
+            "test-report", workflow_run_id, workflow_run_attempt
+        )
+        for path in s3_paths:
+            unzip(path)
+
+        artifact_paths = download_gha_artifacts(
+            "test-report", workflow_run_id, workflow_run_attempt
+        )
+        for path in artifact_paths:
+            unzip(path)
 
         # Parse the reports and transform them to JSON
         test_cases = []
