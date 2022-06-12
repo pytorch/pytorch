@@ -47,7 +47,7 @@ STAT_NAMES = {
 
 
 if __name__ == "__main__":
-    data = {"job_id": GITHUB_JOB_ID}
+    data = {"job_id": int(GITHUB_JOB_ID)}
     for line in sys.stdin:
         line = line.strip()
         values = [x.strip() for x in line.split("  ")]
