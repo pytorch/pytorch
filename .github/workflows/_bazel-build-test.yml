@@ -65,7 +65,6 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
-          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: 5.2
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -76,7 +75,6 @@ jobs:
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e PR_LABELS \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
@@ -102,7 +100,6 @@ jobs:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
@@ -119,7 +116,6 @@ jobs:
           # a regular directory ./test/test-reports
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e GIT_DEFAULT_BRANCH="$GIT_DEFAULT_BRANCH" \
             -e SHARD_NUMBER \
