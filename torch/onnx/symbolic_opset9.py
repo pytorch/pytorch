@@ -4081,8 +4081,8 @@ def _any(g, *args):
     )
 
     if dim is None and keepdim == 0:
-        return symbolic_helper._squeeze_helper(
-            g, gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0]))), [0]
+        return g.op(
+            "Squeeze", gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0])))
         )
     return gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0])))
 
