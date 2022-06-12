@@ -151,3 +151,12 @@ function checkout_install_torchdynamo() {
   popd
   popd
 }
+
+function print_sccache_stats() {
+  echo 'PyTorch Build Statistics'
+  sccache --show-stats
+
+  sccache --show-stats \
+    | python -m tools.stats.sccache_stats_to_json \
+    > "sccache-stats-${BUILD_ENVIORONMENT}-${OUR_GITHUB_JOB_ID}.json"
+}

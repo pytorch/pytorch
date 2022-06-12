@@ -68,10 +68,7 @@ else
 fi
 
 if which sccache > /dev/null; then
-  sccache --show-stats
-  sccache --show-stats \
-    | python -m tools.stats.sccache_stats_to_json \
-    > sccache_stats.json
+  print_sccache_stats
 fi
 
 assert_git_not_dirty

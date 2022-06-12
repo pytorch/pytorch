@@ -144,10 +144,11 @@ jobs:
       - name: Upload sccache stats
         uses: seemethere/upload-artifact-s3@v5
         with:
-          name: ${{ inputs.build-environment }}
+          s3-prefix: |
+            ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifacts/
           retention-days: 365
           if-no-files-found: error
-          path: sccache_stats.json
+          path: sccache-stats-*.json
 
       - name: Teardown Linux
         uses: ./.github/actions/teardown-linux

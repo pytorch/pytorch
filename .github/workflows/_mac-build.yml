@@ -111,7 +111,7 @@ jobs:
         # Only if sccache is installed, see above
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         with:
-          name: ${{ inputs.build-environment }}-sccache-stats
+          name: sccache-stats-${{ inputs.build-environment }}-runattempt${{ github.run_attempt }}.json
           retention-days: 14
-          if-no-files-found: error
-          path: sccache_stats.json
+          if-no-files-found: warn
+          path: sccache-stats-*.json
