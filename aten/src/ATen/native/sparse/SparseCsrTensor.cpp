@@ -125,7 +125,7 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
               batch_ndim, " + ", block_ndim, ") but got ", values.dim());
   // 3.1
   TORCH_CHECK(
-              size.size() == batch_ndim + base_ndim + dense_ndim,
+              static_cast<int>(size.size()) == batch_ndim + base_ndim + dense_ndim,
               "tensor dimensionality must be sum of batch, base, and dense dimensionalites (=",
               batch_ndim, " + ", base_ndim, " + ", dense_ndim, ") but got ", size.size());
 
