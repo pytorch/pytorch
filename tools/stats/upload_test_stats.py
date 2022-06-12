@@ -4,7 +4,7 @@ import requests
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, Optional
 from tempfile import TemporaryDirectory
 
 import rockset  # type: ignore[import]
@@ -22,7 +22,11 @@ def get_request_headers() -> Dict[str, str]:
 
 
 def parse_xml_report(
-    tag: str, report: Path, workflow_id: int, workflow_run_attempt: int
+    tag: str,
+    report: Path,
+    workflow_id: int,
+    workflow_run_attempt: int,
+    skip_tag: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Convert a test report xml file into a JSON-serializable list of test cases."""
     print(f"Parsing {tag}s for test report: {report}")
@@ -38,7 +42,7 @@ def parse_xml_report(
 
     test_cases = []
     for test_case in root.iter(tag):
-        case = process_xml_element(test_case)
+        case = process_xml_element(test_case, skip_tag)
         case["workflow_id"] = workflow_id
         case["workflow_run_attempt"] = workflow_run_attempt
         case["job_id"] = job_id
@@ -47,7 +51,7 @@ def parse_xml_report(
     return test_cases
 
 
-def process_xml_element(element: ET.Element) -> Dict[str, Any]:
+def process_xml_element(element: ET.Element, skip_tag: Optional[str]) -> Dict[str, Any]:
     """Convert a test suite element into a JSON-serializable dict."""
     ret: Dict[str, Any] = {}
 
@@ -84,11 +88,26 @@ def process_xml_element(element: ET.Element) -> Dict[str, Any]:
     # e.g.
     #     <testcase>
     #       <foo>hello</foo>
+    #       <foo>world</foo>
+    #       <bar>another</bar>
     #     </testcase>
     # becomes
-    #    {"foo": {"text": "hello"}}
+    #    {
+    #       "foo": [{"text": "hello"}, {"text": "world"}],
+    #       "bar": {"text": "another"}
+    #    }
     for child in element:
-        ret[child.tag] = process_xml_element(child)
+        if child.tag == skip_tag:
+            continue
+
+        if child.tag not in ret:
+            ret[child.tag] = process_xml_element(child, skip_tag)
+        else:
+            # If there are multiple tags with the same name, they should be
+            # coalesced into a list.
+            if not isinstance(ret[child.tag], list):
+                ret[child.tag] = [ret[child.tag]]
+            ret[child.tag].append(process_xml_element(child, skip_tag))
     return ret
 
 
@@ -222,6 +241,7 @@ def get_tests(
                     xml_report,
                     workflow_run_id,
                     workflow_run_attempt,
+                    skip_tag="testcase",
                 )
             )
 
