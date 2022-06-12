@@ -1,7 +1,11 @@
 import torch
 from torch import Tensor
 from torch._prims import utils
-from torch._prims.utils import check
+from torch._prims.utils import (
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    check,
+    elementwise_dtypes,
+)
 from torch._prims.wrappers import out_wrapper_multi, out_wrapper
 
 from typing import List, Optional
@@ -41,6 +45,20 @@ def meta_max(self):
 @torch.library.impl(meta_lib, "min")
 def meta_min(self):
     return self.new_empty(())
+
+
+@torch.library.impl(meta_lib, "angle")
+def meta_angle(self):
+    _, result_dtype = elementwise_dtypes(
+        self, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    )
+    return self.new_empty(self.size(), dtype=result_dtype)
+
+
+@torch.library.impl(meta_lib, "angle.out")
+def meta_angle_out(self, out):
+    torch._resize_output_(out, self.size(), self.device)
+    return out.copy_(torch.angle(self))
 
 
 def squareCheckInputs(self, f_name):
@@ -160,47 +178,10 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
-@torch.library.impl(meta_lib, "_linalg_qr_helper")
-def meta_linalg_qr_helper(input, mode):
-    if mode == "reduced":
-        compute_q = True
-        reduced_mode = True
-    elif mode == "complete":
-        compute_q = True
-        reduced_mode = False
-    elif mode == "r":
-        compute_q = False
-        reduced_mode = True
-    else:
-        raise RuntimeError(f"qr received unrecognized mode {mode}")
-    check(
-        input.ndim >= 2,
-        lambda: f"expected matrix or batch of matrices, but got {input.ndim}-D tensor",
-    )
-    check(
-        utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
-        lambda: f"expected float or complex tensor, but got {input.dtype}",
-    )
-    m = input.size(-2)
-    n = input.size(-1)
-    mn = min(m, n)
-    if compute_q:
-        Qt_shape = list(input.size())
-        Qt_shape[-2] = mn if reduced_mode else m
-        Qt_shape[-1] = m
-        Q = input.new_empty(Qt_shape)
-        Q.transpose_(-2, -1)
-    else:
-        Q = input.new_empty(0)
-    Rt_shape = list(input.size())
-    Rt_shape[-2] = n
-    Rt_shape[-1] = mn if reduced_mode or not compute_q else m
-    R = input.new_empty(Rt_shape)
-    R.transpose_(-2, -1)
-    return (Q, R)
-
-
-@torch.library.impl(meta_lib, "index.Tensor")
+# Leaving this function around because a python implementation
+# of indexing shape inference is useful,
+# but not registering it to the dispatcher because we already
+# get shape inference through structured kernels
 def meta_index_Tensor(self, indices):
     check(indices, lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation

@@ -613,7 +613,6 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
       }
       batch_sizes[i-1] = total;
     }
-    int64_t offset = 0;
     std::vector<torch::Tensor> tensors_to_be_cat;
     for (int64_t i = 1; i < static_cast<int64_t>(sorted_lengths.size() + 1); i++) {
       int64_t l = sorted_lengths.at(i-1);
