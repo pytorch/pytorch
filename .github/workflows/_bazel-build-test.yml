@@ -152,13 +152,6 @@ jobs:
         uses: ./.github/actions/chown-workspace
         if: always()
 
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
         if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
