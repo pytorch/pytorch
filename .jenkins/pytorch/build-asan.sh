@@ -33,6 +33,4 @@ cd torch-*
 python setup.py build --cmake-only
 popd
 
-print_sccache_stats
-
 assert_git_not_dirty
