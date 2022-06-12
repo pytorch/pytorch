@@ -5,7 +5,6 @@ import subprocess
 
 from tools.stats.s3_stat_parser import (
     get_previous_reports_for_branch,
-    get_previous_reports_for_pr,
     Report,
     Version2Report,
     HAVE_BOTO3,
@@ -158,29 +157,6 @@ def _query_past_job_times(test_times_file: Optional[str] = None) -> Dict[str, fl
     return job_times
 
 
-def _query_failure_test_module(reports: List[Tuple["Report", str]]) -> List[str]:
-    test_modules: List[str] = []
-    if len(reports) == 0 or len(reports[0]) == 0:
-        return test_modules
-    report = reports[0][0]
-    v_report = cast(Version2Report, report)
-    assert (
-        "format_version" in v_report.keys() and v_report.get("format_version") == 2
-    ), "S3 format currently handled is version 2 only"
-    files: Dict[str, Any] = v_report["files"]
-    for fname, file in files.items():
-        contains_failure = any(
-            any(
-                case["status"] == "errored" or case["status"] == "failed"
-                for _, case in suite["cases"].items()
-            )
-            for _, suite in file["suites"].items()
-        )
-        if contains_failure:
-            test_modules.append(fname)
-    return test_modules
-
-
 def _query_changed_test_files() -> List[str]:
     default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'master')}"
     cmd = ["git", "diff", "--name-only", default_branch, "HEAD"]
@@ -268,21 +244,9 @@ def get_specified_test_cases(filename: str, tests: List[str]) -> Dict[str, List[
         return specified_test_case_dict
 
 
-def get_reordered_tests(tests: List[str], is_reordering_by_pr: bool) -> List[str]:
+def get_reordered_tests(tests: List[str]) -> List[str]:
     """Get the reordered test filename list based on github PR history or git changed file."""
-    prioritized_tests = []
-    # Try using historic stats from PR.
-    if is_reordering_by_pr and HAVE_BOTO3:
-        pr_number = os.environ.get("PR_NUMBER", os.environ.get("CIRCLE_PR_NUMBER", ""))
-        if len(pr_number):
-            ci_job_prefix = _get_stripped_CI_job()
-            s3_reports: List[Tuple["Report", str]] = get_previous_reports_for_pr(
-                pr_number, ci_job_prefix
-            )
-            prioritized_tests = _query_failure_test_module(s3_reports)
-            print("Prioritized test from previous CI info.")
-
-    # Using file changes priority if no stats found from previous PR.
+    prioritized_tests: List[str] = []
     if len(prioritized_tests) == 0:
         try:
             changed_files = _query_changed_test_files()
