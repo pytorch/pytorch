@@ -153,3 +153,7 @@ python setup.py install --cmake && sccache --show-stats && (
     copy /Y "build\.ninja_log" "%PYTORCH_FINAL_PACKAGE_DIR%\"
   )
 )
+
+sccache --show-stats
+sccache --show-stats | python tools/stats/upload_sccache_stats.py > sccache-stats-%BUILD_ENVIRONMENT%-%OUR_GITHUB_JOB_ID%.json
+sccache --stop-server
