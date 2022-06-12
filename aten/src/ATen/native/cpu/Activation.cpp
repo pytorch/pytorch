@@ -325,48 +325,96 @@ void GeluKernelImpl(TensorIteratorBase& it, GeluType approximate) {
     grain_size = it.numel() / at::get_num_threads();
   }
   if (approximate == GeluType::Tanh) {
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        ScalarType::BFloat16, it.dtype(), "GeluKernelImpl", [&]() {
-      using Vec = vec::Vectorized<scalar_t>;
-      const Vec kBetaVec(scalar_t(M_SQRT2 * M_2_SQRTPI * 0.5));
-      const Vec kKappaVec(scalar_t(0.044715));
-      const Vec kOneVec(scalar_t(1));
-      const Vec kPointFiveVec(scalar_t(0.5));
+    if (it.common_dtype() == kBFloat16) {
+      auto beta_vec = Vectorized<float>((float)(M_SQRT2 * M_2_SQRTPI * 0.5));
+      auto kappa_vec = Vectorized<float>((float)(0.044715));
+      auto one_vec = Vectorized<float>((float)(1));
+      auto pointfive_vec = Vectorized<float>((float)(0.5));
       cpu_kernel_vec(
           it,
-          [](scalar_t x) {
-            const scalar_t kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
-            const scalar_t kKappa = 0.044715;
-            auto x_cube = x * x * x;
-            auto inner = kBeta * (x + kKappa * x_cube);
-            return scalar_t(0.5) * x * (scalar_t(1) + std::tanh(inner));
+          [&](BFloat16 x) -> BFloat16 {
+            const float kBeta = float(M_SQRT2 * M_2_SQRTPI * 0.5);
+            const float kKappa = 0.044715;
+            float x_cube = float(float(x) * float(x) * float(x));
+            float inner = kBeta * (float(x) + kKappa * x_cube);
+            return float(0.5) * float(x) * (float(1) + std::tanh(inner));
           },
-          [&](Vec x_vec) {
-            auto x_cube = x_vec * x_vec * x_vec;
-            auto inner_vec = kBetaVec * (x_vec + kKappaVec * x_cube);
-            return kPointFiveVec * x_vec * (kOneVec + inner_vec.tanh());
+          [&](Vectorized<BFloat16> x) -> Vectorized<BFloat16> {
+            Vectorized<float> x0, x1;
+            std::tie(x0, x1) = convert_bfloat16_float(x);
+            auto x0_cube = x0 * x0 * x0;
+            auto x1_cube = x1 * x1 * x1;
+            auto inner_vec_0 = beta_vec * (x0 + kappa_vec * x0_cube);
+            auto inner_vec_1 = beta_vec * (x1 + kappa_vec * x1_cube);
+            auto res0 = pointfive_vec * x0 * (one_vec + inner_vec_0.tanh());
+            auto res1 = pointfive_vec * x1 * (one_vec + inner_vec_1.tanh());
+            return convert_float_bfloat16(res0, res1);
           },
           grain_size);
-    });
+    } else {
+      AT_DISPATCH_FLOATING_TYPES(
+          it.dtype(), "GeluKernelImpl", [&]() {
+        using Vec = vec::Vectorized<scalar_t>;
+        const Vec kBetaVec(scalar_t(M_SQRT2 * M_2_SQRTPI * 0.5));
+        const Vec kKappaVec(scalar_t(0.044715));
+        const Vec kOneVec(scalar_t(1));
+        const Vec kPointFiveVec(scalar_t(0.5));
+        cpu_kernel_vec(
+            it,
+            [](scalar_t x) {
+              const scalar_t kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
+              const scalar_t kKappa = 0.044715;
+              auto x_cube = x * x * x;
+              auto inner = kBeta * (x + kKappa * x_cube);
+              return scalar_t(0.5) * x * (scalar_t(1) + std::tanh(inner));
+            },
+            [&](Vec x_vec) {
+              auto x_cube = x_vec * x_vec * x_vec;
+              auto inner_vec = kBetaVec * (x_vec + kKappaVec * x_cube);
+              return kPointFiveVec * x_vec * (kOneVec + inner_vec.tanh());
+            },
+            grain_size);
+      });
+    }
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        ScalarType::BFloat16, it.dtype(), "GeluKernelImpl", [&]() {
-      using Vec = vec::Vectorized<scalar_t>;
-      const Vec kAlphaVec(scalar_t(M_SQRT1_2));
-      const Vec kOneVec(scalar_t(1));
-      const Vec kPointFiveVec(scalar_t(0.5));
+    if (it.common_dtype() == kBFloat16) {
+      auto alpha_vec = Vectorized<float>((float)(M_SQRT1_2));
+      auto one_vec = Vectorized<float>((float)(1));
+      auto pointfive_vec = Vectorized<float>((float)(0.5));
       cpu_kernel_vec(
           it,
-          [](scalar_t x) {
-            const scalar_t kAlpha = scalar_t(M_SQRT1_2);
-            return x * scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
+          [&](BFloat16 x) -> BFloat16 {
+            const float kAlpha = float(M_SQRT1_2);
+            return float(x) * float(0.5) * (float(1) + std::erf(float(x) * kAlpha));
           },
-          [&](Vec x_vec) {
-            return x_vec * kPointFiveVec *
-                (kOneVec + (x_vec * kAlphaVec).erf());
+          [&](Vectorized<BFloat16> x) -> Vectorized<BFloat16> {
+            Vectorized<float> x0, x1;
+            std::tie(x0, x1) = convert_bfloat16_float(x);
+            auto res0 = x0 * pointfive_vec * (one_vec + (x0 * alpha_vec).erf());
+            auto res1 = x1 * pointfive_vec * (one_vec + (x1 * alpha_vec).erf());
+            return convert_float_bfloat16(res0, res1);
           },
           grain_size);
-    });
+    } else {
+      AT_DISPATCH_FLOATING_TYPES(
+          it.dtype(), "GeluKernelImpl", [&]() {
+        using Vec = vec::Vectorized<scalar_t>;
+        const Vec kAlphaVec(scalar_t(M_SQRT1_2));
+        const Vec kOneVec(scalar_t(1));
+        const Vec kPointFiveVec(scalar_t(0.5));
+        cpu_kernel_vec(
+            it,
+            [](scalar_t x) {
+              const scalar_t kAlpha = scalar_t(M_SQRT1_2);
+              return x * scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
+            },
+            [&](Vec x_vec) {
+              return x_vec * kPointFiveVec *
+                  (kOneVec + (x_vec * kAlphaVec).erf());
+            },
+            grain_size);
+      });
+    }
   }
 }
 
