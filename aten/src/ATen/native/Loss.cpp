@@ -5,7 +5,6 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/PointwiseOps.h>
-#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/Exception.h>
@@ -136,7 +135,15 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
 
 Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double margin, int64_t reduction) {
   auto zeros = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto margin_clamp = (margin - self).clamp_min_(0);
+  auto margin_diff = (margin - self);
+  // For Composite Compliance,
+  // In Forward AD, if `margin_diff` is a CCT but its tangent isn't,
+  // using inplace clamp_min doesn't work because we end up writing
+  // the CCT in-place to the tangent
+  auto margin_clamp = (margin_diff._fw_grad(/*level*/ 0).defined() &&
+                       isTensorSubclassLike(margin_diff))
+      ? margin_diff.clamp_min(0)
+      : margin_diff.clamp_min_(0);
   auto output_margin = at::where(target != 1, margin_clamp, zeros);
   auto output_self = at::where(target != -1, self, zeros);
   auto output = output_margin + output_self;
@@ -168,7 +175,15 @@ Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const T
 }
 
 Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
-  auto output =  (-target * (input1 - input2) + margin).clamp_min_(0);
+  auto unclamped_output = (-target * (input1 - input2) + margin);
+  // For Composite Compliance,
+  // In Forward AD, if `margin_diff` is a CCT but its tangent isn't,
+  // using inplace clamp_min doesn't work because we end up writing
+  // the CCT in-place to the tangent
+  auto output = (unclamped_output._fw_grad(/*level*/ 0).defined() &&
+                 isTensorSubclassLike(unclamped_output))
+      ? unclamped_output.clamp_min(0)
+      : unclamped_output.clamp_min_(0);
   return apply_loss_reduction(output, reduction);
 }
 
