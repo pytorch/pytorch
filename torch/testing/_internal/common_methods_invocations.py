@@ -19953,11 +19953,11 @@ python_ref_db = [
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.chalf,), device_type='cpu'),
+                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                         dtypes=(torch.chalf,), device_type='cpu'),
+                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
         )
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -20519,13 +20519,13 @@ python_ref_db = [
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type='cuda'
+                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
             ),
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type='cuda'
+                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
             ),
         )
     ),
@@ -20560,13 +20560,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda"
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
             ),
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda"
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
             ),
         ),
     ),
@@ -20606,13 +20606,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda",
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda",
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
             ),
         ),
     ),
