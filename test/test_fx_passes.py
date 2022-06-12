@@ -13,21 +13,9 @@ from types import BuiltinFunctionType
 import torch
 import torch.fx.experimental.optimization as optimization
 from torch.fx._symbolic_trace import symbolic_trace
-from torch.fx.experimental import merge_matmul
-from torch.fx.experimental.accelerator_partitioner import Partitioner
-from torch.fx.experimental.normalize import NormalizeOperators, NormalizeArgs
 from torch.fx.passes import graph_manipulation
-from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
-from torch.fx.experimental.partitioner_utils import (
-    NodeLatency,
-    get_partition_to_latency_mapping,
-    get_latency_of_partitioned_graph,
-    Device,
-    PartitionerConfig,
-    PartitionMode,
-)
-from torch.fx.experimental.rewriter import RewritingTracer
-from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
+
+
 import torch.fx.experimental.meta_tracer
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -38,25 +26,9 @@ from torch._prims.executor import make_traced
 from torch.fx.passes.graph_drawer import FxGraphDrawer
 import copy
 
-from torch.fx.graph_module import GraphModule
-from torch.fx.node import Node
-from torch.fx.operator_schemas import (
-    _torchscript_type_to_python_type,
-    normalize_function,
-    normalize_module,
-    type_matches,
-    create_type_hint,
-)
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
 from torch.fx.passes.fuser_utils import fuse_by_partitions
 
-from torch.testing._internal.common_device_type import (
-    ops,
-    onlyCPU,
-    instantiate_device_type_tests,
-)
-from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_nn import module_tests, new_module_tests
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -194,7 +166,6 @@ class TestFXGraphPasses(JitTestCase):
 
         print(traced.graph)
 
-
         # TODO: support for arbitrate node order
         test_cases = [
             [ ['add', 'add_1'], ['add_5', 'add_6'] ],
@@ -208,17 +179,15 @@ class TestFXGraphPasses(JitTestCase):
             [ ['add_6', 'relu' ] ],   # includes call_function + call_module node
             [ ['param', 'add_2' ] ],   # includes get_attr + call_module nodes
             [ ['param', 'add_1', 'linear' ] ],   # includes get_attr + call_function + call_module nodes
-            [ ["add", "linear", "add_1", "param", "add_2", "add_3", "add_4", "linear2", "add_5", "add_6", "relu"] ] # full graph
+            [ ["add", "linear", "add_1", "param", "add_2", "add_3", "add_4", "linear2", "add_5", "add_6", "relu"] ], # full graph
         ]
 
         # expected failing cases
         x_test_cases = [
             [ ['add', 'add_1'], ['add_1', 'add_5', 'add_6'] ],  # add_1 exists in multiple partitions
-        ]
-
-        # unhandled failing cases
-        failing_test_cases = [
-            [ ['add', 'add_1', 'add_2', 'add_3', 'add_4'] ],    # invalid partition: circular dependency
+            [ ['add', 'add_1', 'add_3'] ],    # invalid partition: circular dependency
+            [ ['add_4', 'add_5'] ],    # invalid partition: circular dependency
+            [ ['relu', 'add_5'] ],    # invalid partition: circular dependency
         ]
 
         drawer = FxGraphDrawer(traced, "test")

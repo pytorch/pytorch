@@ -31,6 +31,41 @@ def topo_sort(nodes: NodeList) -> NodeList:
 
     return sorted_nodes
 
+
+def validate_partition(partition: NodeList) -> bool:
+    # verify the partition does't form a dependency cycle in the original graph
+    # returns True for valid partition, False for invalid
+
+    partition_set = set(partition)
+
+    outputs: NodeList = list()
+    for node in partition_set:
+        for user_node in node.users:
+            if user_node not in partition_set:
+                # external user node, need to expose as an output
+                outputs.append(user_node)
+
+    # perform DFS on the parition outputs
+    # if it reaches a node within the partition, then it found a cycle
+    visited: NodeSet = set()
+    def dfs_find_cycle(node):
+        if node in partition_set:
+            return False  # found cycle, return False for invalid
+
+        visited.add(node)
+        for user_node in node.users:
+            if user_node not in visited:
+                if not dfs_find_cycle(user_node):
+                    return False
+        return True
+
+    for output_node in outputs:
+        if not dfs_find_cycle(output_node):
+            return False
+
+    return True
+
+
 # TODO: copied from split_by_tags's impl, refactor split_by_tags to use this function
 def copy_module_attributes(gm: torch.fx.GraphModule, subgraph: torch.fx.Graph) -> HolderModule:
     # Loop through all module calls (call_module) and param fetches (get_attr)
@@ -76,8 +111,8 @@ def fuse_partition(gm: torch.fx.GraphModule,
         assert not node._erased, f"{node} has been removed from owning graph"
         assert node in gm.graph.nodes, f"{node} is not found in graph module {gm._get_name()}"
 
-    # TODO: validate partition
-    # - partition doesn't introduce circles in the graph
+    # validates partition doesn't introduce dependency circles in the graph
+    assert validate_partition(nodes), "Invalid partition, found dependency cycles"
 
     subgraph = torch.fx.Graph()
 
