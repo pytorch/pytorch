@@ -260,6 +260,25 @@ const char* FunctionalTensorWrapper::tensorimpl_type_name() const {
     return "FunctionalTensorWrapper";
 }
 
+at::IntArrayRef FunctionalTensorWrapper::sizes_custom() const {
+  return value_.unsafeGetTensorImpl()->sizes();
+}
+at::IntArrayRef FunctionalTensorWrapper::strides_custom() const {
+  return value_.unsafeGetTensorImpl()->strides();
+}
+int64_t FunctionalTensorWrapper::dim_custom() const {
+  return value_.unsafeGetTensorImpl()->dim();
+}
+int64_t FunctionalTensorWrapper::numel_custom() const {
+  return value_.unsafeGetTensorImpl()->numel();
+}
+bool FunctionalTensorWrapper::is_contiguous_custom(at::MemoryFormat memory_format) const {
+  return value_.unsafeGetTensorImpl()->is_contiguous();
+}
+c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
+  return value_.unsafeGetTensorImpl()->sym_sizes();
+}
+
 namespace functionalization {
 namespace impl {
 
@@ -308,18 +327,24 @@ std::vector<Tensor> to_functional_tensor(const TensorList& t_list) {
   return outputs;
 }
 
-Tensor from_functional_tensor(const Tensor& tensor) {
+Tensor from_functional_tensor(const Tensor& tensor, bool assert_functional) {
   // Note [Wrapped Numbers <> Functionalization]
   if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
       return tensor;
   }
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(tensor));
-  auto impl = unsafeGetFunctionalWrapper(tensor);
-  return impl->value();
+  if (isFunctionalTensor(tensor)) {
+    auto impl = unsafeGetFunctionalWrapper(tensor);
+    return impl->value();
+  } else {
+    // If the current tensor is not functional, then raise an error
+    // if assert_functional is true. Otherwise, return the input.
+    TORCH_INTERNAL_ASSERT(!assert_functional)
+    return tensor;
+  }
 }
-c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t) {
+c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t, bool assert_functional) {
   if (t.has_value()) {
-    return c10::make_optional<Tensor>(from_functional_tensor(*t));
+    return c10::make_optional<Tensor>(from_functional_tensor(*t, assert_functional));
   }
   return c10::nullopt;
 }
@@ -327,7 +352,13 @@ c10::List<Tensor> from_functional_tensor(const c10::List<Tensor>& t_list) {
   c10::List<Tensor> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
-    outputs.push_back(from_functional_tensor(t_list[i]));
+    // from_functional_tensor(Tensor) has asserts to make sure you don't accidentally call
+    // it on a non-functional input,
+    // but from_functional_tensor(TensorList) can recieve a list containing both
+    // functional and non-functional tensors.
+    // Example of when that can happen: torch.cat(function_input_tensor, global_state_tensor).
+    // When that happens, we're okay with only unwrapping the functional tensors.
+    outputs.push_back(from_functional_tensor(t_list[i], /*assert_functional=*/false));
   }
   return outputs;
 }
@@ -335,14 +366,14 @@ c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::opt
   c10::List<c10::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
-    outputs.push_back(from_functional_tensor(t_list[i]));
+    outputs.push_back(from_functional_tensor(t_list[i], /*assert_functional=*/false));
   }
   return outputs;
 }
 std::vector<Tensor> from_functional_tensor(const TensorList& t_list) {
   std::vector<Tensor> outputs(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = from_functional_tensor(t_list[i]);
+    outputs[i] = from_functional_tensor(t_list[i], /*assert_functional=*/false);
   }
   return outputs;
 }

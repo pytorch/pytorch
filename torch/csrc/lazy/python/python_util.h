@@ -11,5 +11,5 @@ c10::optional<SourceLocation> TORCH_API GetPythonFrameTop();
 
 std::vector<SourceLocation> TORCH_API GetPythonFrames();
 
-}  // namespace lazy
-}  // namespace torch
+} // namespace lazy
+} // namespace torch
