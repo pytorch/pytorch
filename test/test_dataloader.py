@@ -147,10 +147,10 @@ class TestDatasetRandomSplit(TestCase):
         # Odd sized round-robin splits
         splits = random_split(range(106), [0.1, 0.2, 0.3, 0.4],
                               generator=torch.Generator().manual_seed(1))
-        self.assertEqual(len(splits[0]), 12)
+        self.assertEqual(len(splits[0]), 11)
         self.assertEqual(len(splits[1]), 22)
         self.assertEqual(len(splits[2]), 31)
-        self.assertEqual(len(splits[3]), 41)
+        self.assertEqual(len(splits[3]), 42)
 
 
     def test_splits_are_mutually_exclusive(self):
