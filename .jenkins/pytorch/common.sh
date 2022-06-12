@@ -34,11 +34,6 @@ fi
 # system; to find out more, grep for this string in ossci-job-dsl.
 echo "ENTERED_USER_LAND"
 
-# Previously IN_CI is only set in .circleci/scripts/setup_ci_environment.sh,
-# this means other CI system doesn't actually have this flag properly set.
-# Now we explicitly export IN_CI environment variable here.
-export IN_CI=1
-
 # compositional trap taken from https://stackoverflow.com/a/7287873/23845
 
 # note: printf is used instead of echo to avoid backslash
