@@ -1086,6 +1086,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           pop(stack, a);
           push(stack, a.is_dml());
         },
+        aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::is_cpu(Tensor a) -> bool"),
         [](Stack& stack) {
