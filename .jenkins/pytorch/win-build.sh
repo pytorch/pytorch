@@ -55,7 +55,6 @@ set -ex
 
 "$SCRIPT_HELPERS_DIR"/build_pytorch.bat
 
-print_sccache_stats
 assert_git_not_dirty
 
 if [ ! -f "${TMP_DIR}"/"${IMAGE_COMMIT_TAG}".7z ] && [ ! "${BUILD_ENVIRONMENT}" == "" ]; then
