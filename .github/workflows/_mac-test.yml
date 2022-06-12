@@ -20,10 +20,6 @@ on:
         required: true
         description: secret acess key for test stats upload
 
-env:
-  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
-
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
 defaults:
   run:
@@ -41,7 +37,6 @@ jobs:
     env:
       GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-      COMPACT_JOB_NAME: ${{ inputs.build-environment }}
       JOB_BASE_NAME: ${{ inputs.build-environment }}-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
