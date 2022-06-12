@@ -9,6 +9,7 @@ from typing import Dict, Iterable, List, Tuple, Union, Optional, Callable
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
 __all__ = [
+    "ensure_map_fn_works",
     "StreamWrapper",
     "get_file_binaries_from_pathnames",
     "get_file_pathnames_from_root",
