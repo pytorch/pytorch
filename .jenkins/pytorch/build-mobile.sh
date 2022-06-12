@@ -28,3 +28,5 @@ elif [[ "$BUILD_ENVIRONMENT" == *-mobile-lightweight-dispatch* ]]; then
 else
   TEST_DEFAULT_BUILD=1 test/mobile/custom_build/build.sh
 fi
+
+print_sccache_stats
