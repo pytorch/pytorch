@@ -5,16 +5,12 @@ from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional
 from tempfile import TemporaryDirectory
 
-import boto3  # type: ignore[import]
 from tools.stats.upload_stats_lib import (
     download_gha_artifacts,
     download_s3_artifacts,
     upload_to_rockset,
     unzip,
 )
-
-PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
-S3_RESOURCE = boto3.resource("s3")
 
 
 def parse_xml_report(
