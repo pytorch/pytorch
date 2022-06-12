@@ -400,7 +400,11 @@ def create_differentiability_info(
         functions: Sequence[NativeFunction], name: str
     ) -> NativeFunction:
         for f in functions:
-            if not f.func.is_functional_fn() and not f.func.is_out_fn() and name == str(f.func.name.name):
+            if (
+                not f.func.is_functional_fn()
+                and not f.func.is_out_fn()
+                and name == str(f.func.name.name)
+            ):
                 return f
         # some functions only have in-place variants
         assert name + "_" == cpp.name(functions[0].func)

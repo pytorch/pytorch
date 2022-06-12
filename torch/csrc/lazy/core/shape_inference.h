@@ -9,7 +9,7 @@
 #include <torch/csrc/lazy/core/shape.h>
 #include <vector>
 
-namespace torch{
+namespace torch {
 namespace lazy {
 // Turn clang-format off, as we rely on the whole signature being on one line
 // for codegen.
