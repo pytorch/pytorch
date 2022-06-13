@@ -5351,6 +5351,29 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
     # With `None` weight and bias (tests failing for this, see the link above)
     # yield SampleInput(make_arg((1, 2)), args=((2,), None, make_arg((2,))))
 
+
+def sample_inputs_native_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as input shape, normalized_shape, eps
+    cases: Tuple[Tuple[int], Tuple[int], float] = (  # type: ignore[assignment]
+        ((1, 2, 3), (1, 2, 3), 0.5),
+        ((2, 2, 3), (2, 3), -0.5),
+        ((1,), (1,), 1e-5),
+        ((1, 2), (2,), 1e-5),
+        ((0, 1), (1,), 1e-5),
+    )
+
+    for input_shape, normalized_shape, eps in cases:
+        # Shape of weight and bias should be the same as normalized_shape
+        weight = make_arg(normalized_shape)
+        bias = make_arg(normalized_shape)
+        yield SampleInput(
+            make_arg(input_shape),
+            args=(normalized_shape, weight, bias, eps),
+        )
+
+
 def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -10080,6 +10103,10 @@ def wrapper_set_seed(op, *args, **kwargs):
 
 
 def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
+    return reference_native_layer_norm(inp, normalized_shape, weight, bias, eps)[0]
+
+
+def reference_native_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
     feature_size = np.prod(normalized_shape)
     inp_view = inp.reshape(-1, feature_size)  # type: ignore[call-overload]
     mean = inp_view.mean(axis=-1, keepdims=True)
@@ -10091,7 +10118,10 @@ def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=N
         Y = Y * weight.reshape(-1)
     elif weight is not None and bias is not None:
         Y = Y * weight.reshape(-1) + bias.reshape(-1)
-    return Y.reshape(*inp.shape)
+    axis = inp.ndim - len(normalized_shape)
+    stat_shape = inp.shape[:axis] + (1,) * len(normalized_shape)
+    return Y.reshape(*inp.shape), mean.reshape(stat_shape), (1.0 / np.sqrt(var + eps)).reshape(stat_shape)
+
 
 def reference_group_norm(inp: np.ndarray, num_groups: int, weight=None, bias=None, eps=1e-5):
     inp_view = inp
@@ -13445,6 +13475,19 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip('Passes on complex128 and float64 only'), 'TestGradients', 'test_fn_fwgrad_bwgrad'),)),
+    OpInfo('native_layer_norm',
+           aten_name='native_layer_norm',
+           ref=reference_native_layer_norm,
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           assert_jit_shape_analysis=True,
+           sample_inputs_func=sample_inputs_native_layer_norm,
+           supports_expanded_weight=True,
+           skips=(
+               # IndexError: tuple index out of range
+               DecorateInfo(unittest.skip('Skipped!'), 'TestGradients', 'test_forward_mode_AD'),
+           )),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
            dtypes=floating_types_and(torch.bfloat16),
