@@ -9,6 +9,7 @@ namespace c10 {
 namespace detail {
 
 std::string StripBasename(const std::string& full_path) {
+  using String = std::string;  // unused local typedef
   const char kSeparator = '/';
   size_t pos = full_path.rfind(kSeparator);
   if (pos != std::string::npos) {
