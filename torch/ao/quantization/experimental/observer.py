@@ -6,6 +6,7 @@ the values observed during calibration (PTQ) or training (QAT).
 import torch
 import itertools
 import math
+import matplotlib.pyplot as plt
 from torch.ao.quantization.observer import ObserverBase
 from typing import Tuple
 
@@ -113,25 +114,6 @@ class NonUniformQuantizationObserverBase(ObserverBase):
 
         return (self.gamma, quantization_levels, level_indices)
 
-    def float_to_apot(self, x, levels, indices):
-        levels_lst = list(levels)
-        indices_lst = list(indices)
-
-        min_delta = math.inf
-        best_idx = 0
-
-        for level, idx in zip(levels_lst, indices_lst):
-            cur_delta = abs(level - x)
-            if cur_delta < min_delta:
-                min_delta = cur_delta
-                best_idx = idx
-
-        return best_idx
-
-    def apot_to_float(self, x_apot, levels, indices):
-        idx = list(indices).index(x_apot)
-        return levels[idx]
-
 class APoTObserver(NonUniformQuantizationObserverBase):
     def __init__(
         self,
@@ -159,3 +141,42 @@ class APoTObserver(NonUniformQuantizationObserverBase):
         self.min_val.copy_(min_val)
         self.max_val.copy_(max_val)
         return x_orig
+
+    r"""Converts floating point input into int4 APoT2 number
+    based on quantization levels
+    """
+    def float_to_apot(self, x, levels, indices):
+        levels_lst = list(levels)
+        indices_lst = list(indices)
+
+        min_delta = math.inf
+        best_idx = 0
+
+        for level, idx in zip(levels_lst, indices_lst):
+            cur_delta = abs(level - x)
+            if cur_delta < min_delta:
+                min_delta = cur_delta
+                best_idx = idx
+
+        return best_idx
+
+    r"""Converts int4 APoT2 input into floating point number
+    based on quantization levels
+    """
+    def apot_to_float(self, x_apot, levels, indices):
+        idx = list(indices).index(x_apot)
+        return levels[idx]
+
+    def quant_levels_visualization(self, obs_result, filename):
+        xs = [float(x) / 1000.0 for x in range(1000)]
+        ys = [self.apot_to_float(self.float_to_apot(x, obs_result[1], obs_result[2]),
+                                 obs_result[1], obs_result[2]).item() for x in xs]
+
+        f = plt.figure(figsize=(15, 10))
+
+        plt.plot(xs, ys)
+        plt.title("APoT Quantization Plot")
+        plt.xlabel("Float")
+        plt.ylabel("Quantized")
+        filestr = "/data/users/amandaliu/pytorch/test/quantization/core/experimental/plots/" + filename
+        plt.savefig(filestr)

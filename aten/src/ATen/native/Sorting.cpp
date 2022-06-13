@@ -928,10 +928,6 @@ Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
   return std::get<1>(at::sort(self, dim, descending));
 }
 
-Tensor argsort_stable(const Tensor & self, bool stable, int64_t dim, bool descending) {
-  return std::get<1>(at::sort(self, stable, dim, descending));
-}
-
 
 } // namespace native
 } // namespace at

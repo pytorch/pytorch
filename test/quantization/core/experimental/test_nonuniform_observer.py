@@ -2,24 +2,9 @@
 
 from torch.ao.quantization.experimental.observer import APoTObserver
 import unittest
-import matplotlib.pyplot as plt
 import torch
 
 class TestNonUniformObserver(unittest.TestCase):
-    def quant_levels_visualization(self, obs, obs_result, filename):
-        xs = [float(x) / 1000.0 for x in range(1000)]
-        ys = [obs.apot_to_float(obs.float_to_apot(x, obs_result[1], obs_result[2]),
-                                obs_result[1], obs_result[2]).item() for x in xs]
-
-        f = plt.figure(figsize=(15, 10))
-
-        plt.plot(xs, ys)
-        plt.title("APoT Quantization Plot")
-        plt.xlabel("Float")
-        plt.ylabel("Quantized")
-        filestr = "/data/users/amandaliu/pytorch/test/quantization/core/experimental/plots/" + filename
-        plt.savefig(filestr)
-
     def test_calculate_qparams(self):
         """
         Test case 1
@@ -58,7 +43,7 @@ class TestNonUniformObserver(unittest.TestCase):
 
         self.assertTrue(unique_elts)
 
-        self.quant_levels_visualization(obs2, obs2_result, "plt1")
+        obs2.quant_levels_visualization(obs2_result, "plt1")
 
         """
         Test case 3
@@ -87,7 +72,7 @@ class TestNonUniformObserver(unittest.TestCase):
 
         self.assertTrue(unique_elts)
 
-        self.quant_levels_visualization(obs3, obs3_result, "plt2")
+        obs3.quant_levels_visualization(obs3_result, "plt2")
 
         """
         Test case 4
@@ -122,7 +107,7 @@ class TestNonUniformObserver(unittest.TestCase):
 
         self.assertTrue(unique_elts)
 
-        self.quant_levels_visualization(obs4, obs4_result, "plt3")
+        obs4.quant_levels_visualization(obs4_result, "plt3")
 
     # def test_override_calculate_qparams(self):
     #     t = torch.Tensor()

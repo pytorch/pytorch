@@ -91,12 +91,10 @@ class Library:
 def impl(lib, name, dispatch_key=""):
     def wrap(f):
         lib.impl(name, f, dispatch_key)
-        return f
     return wrap
 
 def define(lib, schema, alias_analysis=""):
     def wrap(f):
         name = lib.define(schema, alias_analysis)
         lib.impl(name, f)
-        return f
     return wrap

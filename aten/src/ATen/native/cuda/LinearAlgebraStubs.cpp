@@ -13,7 +13,6 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/BatchLinearAlgebra.h>
-#include <ATen/native/TransposeType.h>
 #if defined(BUILD_LAZY_CUDA_LINALG)
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 
@@ -34,6 +33,7 @@ namespace native {
 #if defined(BUILD_LAZY_CUDA_LINALG)
 namespace {
 cuda::detail::LinalgDispatch disp = {_symeig_helper_cuda,
+                                     _linalg_qr_helper_cuda,
                                      _cholesky_solve_helper_cuda,
                                      legacy_lstsq_cuda,
                                      _linalg_inv_out_helper_cuda};
@@ -116,9 +116,14 @@ void lazy_svd_kernel(const Tensor& A,
   svd_stub(DeviceType::CUDA, A, full_matrices, compute_uv, driver, U, S, Vh, info);
 }
 
-void lazy_lu_solve(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+void lazy_lu_solve_trans(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
   getTorchLinalgLibrary();
-  lu_solve_stub(DeviceType::CUDA, LU, pivots, B, trans);
+  lu_solve_trans_stub(DeviceType::CUDA, b, lu, pivots, trans);
+}
+
+void lazy_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  getTorchLinalgLibrary();
+  lu_solve_stub(DeviceType::CUDA, b, lu, pivots);
 }
 
 void lazy_lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name)  {
@@ -159,6 +164,7 @@ REGISTER_CUDA_DISPATCH(linalg_eigh_stub, &lazy_linalg_eigh_kernel);
 REGISTER_CUDA_DISPATCH(eig_stub, &lazy_eig_kernel);
 REGISTER_CUDA_DISPATCH(linalg_eig_stub, &lazy_linalg_eig_kernel);
 REGISTER_CUDA_DISPATCH(svd_stub, &lazy_svd_kernel)
+REGISTER_CUDA_DISPATCH(lu_solve_trans_stub, &lazy_lu_solve_trans);
 REGISTER_CUDA_DISPATCH(lu_solve_stub, &lazy_lu_solve);
 REGISTER_CUDA_DISPATCH(lstsq_stub, &lazy_lstsq_kernel);
 } // anonymous namespace
@@ -193,6 +199,12 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
     getTorchLinalgLibrary();
     TORCH_CHECK(disp.cholesky_solve_helper != _cholesky_solve_helper_cuda, "Can't find _cholesky_solve_helper_cuda");
     return disp.cholesky_solve_helper(self, A, upper);
+}
+
+std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::string_view mode) {
+    getTorchLinalgLibrary();
+    TORCH_CHECK(disp.qr_helper != _linalg_qr_helper_cuda, "Can't find _linalg_qr_helper_cuda");
+    return disp.qr_helper(input, mode);
 }
 
 std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvectors, bool upper) {

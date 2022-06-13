@@ -304,8 +304,6 @@ static const char* expr_type2string(ExprType t) {
       return "BroadcastOp";
     case ExprType::WelfordOp:
       return "WelfordOp";
-    case ExprType::LoadStoreOp:
-      return "LoadStoreOp";
     case ExprType::MmaOp:
       return "MmaOp";
     case ExprType::TransposeOp:
@@ -328,8 +326,6 @@ static const char* expr_type2string(ExprType t) {
       return "BlockSync";
     case ExprType::GridSync:
       return "GridSync";
-    case ExprType::CpAsyncWait:
-      return "CpAsyncWait";
     case ExprType::InitMagicZero:
       return "InitMagicZero";
     case ExprType::UpdateMagicZero:
@@ -340,8 +336,6 @@ static const char* expr_type2string(ExprType t) {
       return "IfThenElse";
     case ExprType::GridReduction:
       return "GridReduction";
-    case ExprType::GroupedGridReduction:
-      return "GroupedGridReduction";
     case ExprType::GridBroadcast:
       return "GridBroadcast";
     case ExprType::GridWelford:
@@ -752,19 +746,6 @@ static const char* thread_size2string(ParallelType t) {
   }
 }
 
-static const char* load_store_type2string(LoadStoreOpType t) {
-  switch (t) {
-    case LoadStoreOpType::LdMatrix:
-      return "LdMatrix";
-    case LoadStoreOpType::LdMatrixTranspose:
-      return "LdMatrixTranspose";
-    case LoadStoreOpType::CpAsync:
-      return "CpAsync";
-    default:
-      TORCH_INTERNAL_ASSERT(false, "Unexpected parallel type");
-  }
-}
-
 const unsigned int _WORD_SHIFT = 16;
 constexpr unsigned int supported_switch_pair(DataType t1, DataType t2) {
   return ((unsigned int)t1 << _WORD_SHIFT) + (unsigned int)t2;
@@ -779,52 +760,34 @@ static const char* supported_casts2string(
     case supported_switch_pair(DataType::Double, DataType::Float):
     case supported_switch_pair(DataType::Bool, DataType::Float):
       return "(float)";
-    case supported_switch_pair(DataType::ComplexFloat, DataType::Float):
-    case supported_switch_pair(DataType::ComplexDouble, DataType::Float):
-      return "(float)std::real";
     case supported_switch_pair(DataType::Index, DataType::Int):
     case supported_switch_pair(DataType::Int32, DataType::Int):
     case supported_switch_pair(DataType::Float, DataType::Int):
     case supported_switch_pair(DataType::Double, DataType::Int):
     case supported_switch_pair(DataType::Bool, DataType::Int):
       return "(int64_t)";
-    case supported_switch_pair(DataType::ComplexFloat, DataType::Int):
-    case supported_switch_pair(DataType::ComplexDouble, DataType::Int):
-      return "(int64_t)std::real";
     case supported_switch_pair(DataType::Index, DataType::Int32):
     case supported_switch_pair(DataType::Int, DataType::Int32):
     case supported_switch_pair(DataType::Float, DataType::Int32):
     case supported_switch_pair(DataType::Double, DataType::Int32):
     case supported_switch_pair(DataType::Bool, DataType::Int32):
       return "(int32_t)";
-    case supported_switch_pair(DataType::ComplexFloat, DataType::Int32):
-    case supported_switch_pair(DataType::ComplexDouble, DataType::Int32):
-      return "(int32_t)std::real";
     case supported_switch_pair(DataType::Int, DataType::Index):
     case supported_switch_pair(DataType::Int32, DataType::Index):
     case supported_switch_pair(DataType::Float, DataType::Index):
     case supported_switch_pair(DataType::Double, DataType::Index):
       return "(nvfuser_index_t)";
-    case supported_switch_pair(DataType::ComplexFloat, DataType::Index):
-    case supported_switch_pair(DataType::ComplexDouble, DataType::Index):
-      return "(nvfuser_index_t)std::real";
     case supported_switch_pair(DataType::Index, DataType::Double):
     case supported_switch_pair(DataType::Int, DataType::Double):
     case supported_switch_pair(DataType::Int32, DataType::Double):
     case supported_switch_pair(DataType::Float, DataType::Double):
     case supported_switch_pair(DataType::Bool, DataType::Double):
       return "(double)";
-    case supported_switch_pair(DataType::ComplexFloat, DataType::Double):
-    case supported_switch_pair(DataType::ComplexDouble, DataType::Double):
-      return "(double)std::real";
     case supported_switch_pair(DataType::Float, DataType::Bool):
     case supported_switch_pair(DataType::Double, DataType::Bool):
     case supported_switch_pair(DataType::Int32, DataType::Bool):
     case supported_switch_pair(DataType::Int, DataType::Bool):
       return "(bool)";
-    case supported_switch_pair(DataType::ComplexFloat, DataType::Bool):
-    case supported_switch_pair(DataType::ComplexDouble, DataType::Bool):
-      return "(bool)std::real";
     case supported_switch_pair(DataType::Index, DataType::ComplexDouble):
     case supported_switch_pair(DataType::Int, DataType::ComplexDouble):
     case supported_switch_pair(DataType::Int32, DataType::ComplexDouble):
@@ -953,12 +916,6 @@ std::ostream& operator<<(std::ostream& out, const MemoryType mtype) {
 
 std::ostream& operator<<(std::ostream& out, const IdMappingMode immtype) {
   return out << id_map_mode_type2string(immtype);
-}
-
-std::ostream& operator<<(
-    std::ostream& out,
-    const LoadStoreOpType load_store_type) {
-  return out << load_store_type2string(load_store_type);
 }
 
 TORCH_CUDA_CU_API std::ostream& operator<<(

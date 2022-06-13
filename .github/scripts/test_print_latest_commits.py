@@ -19,7 +19,7 @@ class TestPrintCommits(TestCase):
     def test_match_rules(self, mock_get_commit_results: Any) -> None:
         "Test that passes all conditions for promote-able"
         workflow_checks = mock_get_commit_results()
-        self.assertTrue(isGreen("sha", workflow_checks))
+        self.assertTrue(isGreen(workflow_checks))
 
     @mock.patch('print_latest_commits.get_commit_results', return_value=TestChecks().make_test_checks())
     def test_jobs_failing(self, mock_get_commit_results: Any) -> None:

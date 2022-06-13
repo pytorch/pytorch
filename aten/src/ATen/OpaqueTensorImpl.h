@@ -55,8 +55,7 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
 
 #ifdef DEBUG
   bool has_storage() const override {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        !storage_, "OpaqueTensorImpl assumes that storage_ is never set");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!storage_, "OpaqueTensorImpl assumes that storage_ is never set");
     return false;
   }
 #endif

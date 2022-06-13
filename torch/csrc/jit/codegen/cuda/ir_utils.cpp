@@ -356,21 +356,6 @@ struct SubstituteInExpr : public OptInDispatch {
         welford_expr->isAllreduce());
   }
 
-  void handle(LoadStoreOp* ldst_expr) final {
-    TORCH_INTERNAL_ASSERT(
-        substitute_->isA<TensorView>(),
-        "All args to view must be TensorView, but received a non-TensorView for replacement: ",
-        substitute_);
-    auto in = reference_->sameAs(ldst_expr->in())
-        ? substitute_->as<TensorView>()
-        : ldst_expr->in();
-    auto out = reference_->sameAs(ldst_expr->out())
-        ? substitute_->as<TensorView>()
-        : ldst_expr->out();
-    expr_ = IrBuilder::create<LoadStoreOp>(
-        ldst_expr->container(), ldst_expr->opType(), out, in);
-  }
-
   void handle(MmaOp* mma_expr) final {
     TORCH_INTERNAL_ASSERT(
         substitute_->isA<TensorView>(),

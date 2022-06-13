@@ -14,9 +14,6 @@ namespace profiler {
 using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
 
 struct TORCH_API KinetoEvent {
-  explicit KinetoEvent(bool is_python_function = false)
-      : is_python_function_{is_python_function} {}
-
   uint64_t startThreadId() const {
     return start_thread_id_;
   }
@@ -240,10 +237,6 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
-  bool isPythonFunction() const {
-    return is_python_function_;
-  }
-
   int64_t cudaElapsedUs() const;
 
   uint64_t start_thread_id_ = 0;
@@ -274,7 +267,6 @@ struct TORCH_API KinetoEvent {
 
   torch::profiler::impl::CUDAEventStub cuda_event_start_ = nullptr;
   torch::profiler::impl::CUDAEventStub cuda_event_end_ = nullptr;
-  bool is_python_function_;
 };
 
 // Consolidating events returned directly from Kineto
@@ -375,6 +367,12 @@ TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities);
+
+namespace python_tracer {
+// Because we are interleaving events, the Python tracer should use the same
+// timer as the profiler.
+TORCH_API int64_t now();
+}  // namespace python_tracer
 
 } // namespace profiler
 }} // namespace torch::autograd
