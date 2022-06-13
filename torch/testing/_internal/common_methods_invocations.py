@@ -13532,9 +13532,6 @@ op_db: List[OpInfo] = [
            skips=(
                # IndexError: tuple index out of range
                DecorateInfo(unittest.skip('Skipped!'), 'TestGradients', 'test_forward_mode_AD'),
-               # Difference from float64 is larger with decomposition native_layer_norm_backward.default than original
-               DecorateInfo(unittest.skip('Skipped!'), 'TestDecomp', 'test_comprehensive',
-                            device_type='cpu', dtypes=(torch.bfloat16,)),
            )),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",

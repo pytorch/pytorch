@@ -841,6 +841,38 @@ def normalize(input, norm_dims, eps):
     return out, mean, rstd
 
 
+@register_decomposition(aten.native_layer_norm.default)
+def native_layer_norm(
+    input: Tensor,
+    normalized_shape: List[int],
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+
+    axis = input.dim() - len(normalized_shape)
+    if prod(list(input.shape[:axis])) == 0:
+        mean = input.new_zeros((0,), dtype=computation_dtype)
+        rstd = input.new_zeros((0,), dtype=computation_dtype)
+        out = input
+    else:
+        reduction_dims = list(range(axis, input.dim()))
+        out, mean, rstd = normalize(input, reduction_dims, eps)
+
+        if weight is not None:
+            out = out * weight
+        if bias is not None:
+            out = out + bias
+
+        out = out.to(dtype=input.dtype)
+
+    if input.device.type == 'cpu':
+        mean = mean.to(dtype=input.dtype)
+        rstd = rstd.to(dtype=input.dtype)
+    return (out, mean, rstd)
+
+
 @register_decomposition(aten.native_group_norm.default, disable_meta=True)
 def native_group_norm(
     input: Tensor,
