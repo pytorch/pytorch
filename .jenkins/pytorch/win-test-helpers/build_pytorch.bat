@@ -10,7 +10,8 @@ set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocol
 :: able to see what our cl.exe commands are (since you can actually
 :: just copy-paste them into a local Windows setup to just rebuild a
 :: single file.)
-set CMAKE_VERBOSE_MAKEFILE=1
+:: log sizes are too long, but leaving this here incase someone wants to use it locally
+:: set CMAKE_VERBOSE_MAKEFILE=1
 
 
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
@@ -153,7 +154,5 @@ python setup.py install --cmake && sccache --show-stats && (
   )
 )
 
-sccache --show-stats > stats.txt
-python -m tools.stats.upload_sccache_stats stats.txt
+sccache --show-stats | python tools/stats/sccache_stats_to_json.py > sccache-stats-%BUILD_ENVIRONMENT%-%OUR_GITHUB_JOB_ID%.json
 sccache --stop-server
-rm stats.txt

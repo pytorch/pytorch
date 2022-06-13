@@ -5,8 +5,10 @@ import re
 import yaml
 from collections import namedtuple, Counter
 from typing import (
+    Any,
     List,
     Dict,
+    Tuple,
     Union,
     Sequence,
     Optional,
@@ -106,10 +108,10 @@ ParsedExternalYaml = namedtuple(
 )
 
 
-def parse_full_codegen_ops(
+def parse_native_functions_keys(
     backend_yaml_path: str,
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
-) -> List[OperatorName]:
+) -> Tuple[List[OperatorName], List[Any]]:
 
     native_functions_map: Dict[OperatorName, NativeFunction] = {
         f.func.name: f
@@ -124,12 +126,10 @@ def parse_full_codegen_ops(
     assert isinstance(yaml_values, dict)
 
     full_codegen = yaml_values.pop("full_codegen", [])
-    assert isinstance(
-        full_codegen, list
-    ), f'expected "full_codegen" to be a list, but got: {full_codegen}'
-    full_codegen = [OperatorName.parse(name) for name in full_codegen]
-
-    return full_codegen
+    non_native = yaml_values.pop("non_native", [])
+    assert isinstance(full_codegen, list)
+    assert isinstance(non_native, list)
+    return [OperatorName.parse(name) for name in full_codegen], non_native
 
 
 def validate_shape_inference_header(
@@ -150,13 +150,16 @@ def validate_shape_inference_header(
     )
     # TODO(whc) add a check for shape inference functions that have meta kernels implement and should be retired.
 
-    for decl in expected_shape_infr_decls:
-        assert (
-            decl in shape_infr_decl_lines
-        ), f"""Missing shape inference function.\n
+    missing_decls = [
+        decl for decl in expected_shape_infr_decls if decl not in shape_infr_decl_lines
+    ]
+    if missing_decls:
+        raise Exception(
+            f"""Missing shape inference function.\n
 Please add declare this function in {shape_inference_hdr}:\n
 and implement it in the the corresponding shape_inference.cpp file.\n
-{decl}"""
+{os.linesep.join(missing_decls)}"""
+        )
 
 
 class default_args:
@@ -324,7 +327,9 @@ def run_gen_lazy_tensor(
     autograd_key = parsed_backend_yaml.autograd_key
     cpp_namespace = parsed_backend_yaml.cpp_namespace
     backend_indices = parsed_backend_yaml.backend_indices
-    full_codegen = parse_full_codegen_ops(source_yaml, grouped_native_functions)
+    full_codegen, non_native = parse_native_functions_keys(
+        source_yaml, grouped_native_functions
+    )
 
     def concat_map_codegen(
         func: Callable[[NativeFunction], Sequence[str]],
@@ -408,7 +413,6 @@ def run_gen_lazy_tensor(
             fm,
             output_dir,
             class_name,
-            cpp_namespace,
             backend_indices,
             grouped_native_functions,
             backend_key,
@@ -476,6 +480,10 @@ def run_gen_lazy_tensor(
         },
     )
     # Generate IR node classes
+    lazy_ir_obj = lazy_ir_generator(
+        backend_indices[backend_key], backend_name, node_base
+    )
+
     fm.write_with_template(
         "LazyIr.h",
         "LazyIr.h",
@@ -492,16 +500,35 @@ def run_gen_lazy_tensor(
                     "vector",
                 ]
             ],
-            "lazy_ir_inc": [
-                f'#include "{path}"'
-                for path in [node_base_hdr if node_base_hdr is not None else None]
-                if path is not None
-            ],
+            "lazy_ir_inc": [f'#include "{node_base_hdr}"']
+            if node_base_hdr is not None
+            else [],
             "ir_declarations": list(
-                concat_map_codegen(
-                    lazy_ir_generator(backend_indices[backend_key], node_base),
-                    grouped_native_functions,
-                )
+                concat_map_codegen(lazy_ir_obj, grouped_native_functions)
+            ),
+            "namespace_prologue": ns_helper.prologue,
+            "namespace_epilogue": ns_helper.epilogue,
+        },
+    )
+
+    # Generate Non Native IR Node classes
+    fm.write_with_template(
+        "LazyNonNativeIr.h",
+        "LazyNonNativeIr.h",
+        lambda: {
+            "lazy_non_native_ir_inc": [
+                f"#include <{path}>"
+                for path in [
+                    "torch/csrc/lazy/core/ir.h",
+                    "torch/csrc/lazy/core/ir_builder.h",
+                    "torch/csrc/lazy/core/internal_ops/ltc_ops.h",
+                    "torch/csrc/lazy/core/shape_inference.h",
+                ]
+                + ([node_base_hdr] if node_base_hdr else [])
+                if path
+            ],
+            "non_native_ir_nodes": dest.generate_non_native_lazy_ir_nodes(
+                non_native, lazy_ir_obj
             ),
             "namespace_prologue": ns_helper.prologue,
             "namespace_epilogue": ns_helper.epilogue,

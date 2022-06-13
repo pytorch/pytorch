@@ -2,6 +2,7 @@ import sys
 import warnings
 
 import torch
+from torch import _C
 import torch._C._onnx as _C_onnx
 import torch.onnx
 
@@ -141,6 +142,7 @@ max_pool3d_with_indices = _max_pool(
 
 
 def _avg_pool(name, tuple_fn):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
@@ -187,6 +189,7 @@ avg_pool3d = _avg_pool("avg_pool3d", torch.nn.modules.utils._triple)
 
 
 def _interpolate(name, dim, interpolate_mode):
+    @symbolic_helper.quantized_args(True, False, False)
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = symbolic_helper._get_interpolate_attributes(
             g, interpolate_mode, args
@@ -258,11 +261,11 @@ def slice(g, self, *args):
         dim = 0
     else:
         raise NotImplementedError("Unknown aten::slice signature")
-    is_start_none = (
-        start.node().kind() == "prim::Constant" and start.type().kind() == "NoneType"
+    is_start_none = start.node().kind() == "prim::Constant" and isinstance(
+        start.type(), _C.NoneType
     )
-    is_end_none = (
-        end.node().kind() == "prim::Constant" and end.type().kind() == "NoneType"
+    is_end_none = end.node().kind() == "prim::Constant" and isinstance(
+        end.type(), _C.NoneType
     )
     is_start_onnx_const = start.node().kind() == "onnx::Constant"
     is_end_onnx_const = end.node().kind() == "onnx::Constant"
@@ -411,8 +414,8 @@ def fake_quantize_per_tensor_affine(
         )
     if (quant_min, quant_max) not in [(0, 255), (-128, 127)]:
         raise RuntimeError(
-            "For (quant_min, quant_max), ONNX allows only (0, 255) and (-128, 127). "
-            "Got ({}, {})".format(quant_min, quant_max)
+            f"For (quant_min, quant_max), ONNX allows only (0, 255) and (-128, 127). "
+            f"Got ({quant_min}, {quant_max})"
         )
     scale = symbolic_helper._maybe_get_scalar(scale)
     if scale is None:
@@ -540,6 +543,16 @@ class Quantized:
         y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
 
         output = opset9.add(g, x, y)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def add_relu(g, x, y, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+        y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
+
+        output = opset9.add(g, x, y)
+        output = opset9.relu(g, output)
 
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 

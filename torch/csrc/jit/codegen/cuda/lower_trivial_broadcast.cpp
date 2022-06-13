@@ -11,6 +11,8 @@ namespace fuser {
 namespace cuda {
 
 void ConcretizedBroadcastDomains::build(Fusion* fusion) {
+  exact_map_ = std::make_unique<ExactRootDomainMap>(fusion);
+
   // Initialize the origin map with input broadcast domains
   for (const auto fusion_input_tv :
        ir_utils::filterByType<TensorView>(fusion->inputs())) {
@@ -116,7 +118,9 @@ void ConcretizedBroadcastDomains::markAsConcretized(
     auto child = child_domains.front();
     child_domains.pop_front();
     auto& concrete_ids = broadcast_to_concrete_map_[child];
-    if (!concrete_ids.emplace(concrete_root_domain).second) {
+    auto inserted =
+        insertRootDomainToConcreteDomainSet(concrete_root_domain, concrete_ids);
+    if (!inserted) {
       continue;
     }
     const auto& child_uses = child->uses();
@@ -126,6 +130,21 @@ void ConcretizedBroadcastDomains::markAsConcretized(
         child_domains.push_back(out_id);
       }
     }
+  }
+}
+
+bool ConcretizedBroadcastDomains::insertRootDomainToConcreteDomainSet(
+    IterDomain* new_root_id,
+    std::unordered_set<IterDomain*>& id_set) {
+  auto has_exactly_mapped_id =
+      std::any_of(id_set.begin(), id_set.end(), [&](IterDomain* existing_id) {
+        return exact_map_->areMapped(new_root_id, existing_id);
+      });
+  if (has_exactly_mapped_id) {
+    return false;
+  } else {
+    id_set.emplace(new_root_id);
+    return true;
   }
 }
 
