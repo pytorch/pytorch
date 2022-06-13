@@ -43,16 +43,14 @@ def meta_fft_r2c(self, dim, normalization, onesided):
     )
 
 
+@torch.library.impl(meta_lib, "_fft_c2r.out")
+@torch.library.impl(meta_lib, "_fft_c2r")
 @out_wrapper
 def meta_fft_c2r(self, dim, normalization, lastdim):
     assert self.dtype.is_complex
     output_sizes = list(self.size())
     output_sizes[dim[-1]] = lastdim
     return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
-
-
-torch.library.impl(meta_lib, "_fft_c2r")(meta_fft_c2r)
-torch.library.impl(meta_lib, "_fft_c2r.out")(meta_fft_c2r)
 
 
 @torch.library.impl(meta_lib, "conj_physical.out")
@@ -347,6 +345,8 @@ torch.library.impl(meta_lib, "linalg_cholesky_ex")(meta_linalg_cholesky_ex)
 torch.library.impl(meta_lib, "linalg_cholesky_ex.L")(meta_linalg_cholesky_ex)
 
 
+@torch.library.impl(meta_lib, "addbmm")
+@torch.library.impl(meta_lib, "addbmm.out")
 @out_wrapper
 def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     dim1 = batch1.size(1)
@@ -370,10 +370,6 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
         lambda: "self tensor does not match matmul output shape",
     )
     return self.new_empty(self.size())
-
-
-torch.library.impl(meta_lib, "addbmm")(meta_addbmm)
-torch.library.impl(meta_lib, "addbmm.out")(meta_addbmm)
 
 
 @torch.library.impl(meta_lib, "_cdist_forward")
@@ -529,3 +525,56 @@ def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
     if offsets.device.type == "cpu":
         bag_size = offsets.new_empty(offsets.size())
     return output, offset2bag, bag_size, max_indices
+
+
+def _get_reduction_dtype(input, dtype, promote_int_to_long=True):
+    # if specified, dtype takes precedence
+    if dtype:
+        return dtype
+
+    if input.dtype.is_floating_point or input.dtype.is_complex:
+        return input.dtype
+    elif promote_int_to_long:
+        return torch.long
+
+    return input.dtype
+
+
+def _get_reduction_output_size(input, dims, keepdim):
+    if input.size() == () or tuple(dims) == ():
+        return ()
+
+    out_size = list(input.size())
+    dims = utils.canonicalize_dims(input.dim(), dims)
+    # Sort in descending order as we have to pop
+    # elements out of `out_size` (if keepdim = False)
+    for dim in sorted(dims, reverse=True):
+        if keepdim:
+            out_size[dim] = 1
+        else:
+            out_size.pop(dim)
+
+    return out_size
+
+
+@torch.library.impl(meta_lib, "nansum")
+@torch.library.impl(meta_lib, "nansum.out")
+@out_wrapper
+def meta_nansum(input, dims=(), keepdim=False, *, dtype=None):
+    output_dtype = _get_reduction_dtype(input, dtype, promote_int_to_long=True)
+    output_size = _get_reduction_output_size(input, dims, keepdim)
+    return input.new_empty(output_size, dtype=output_dtype)
+
+
+@torch.library.impl(meta_lib, "nanmedian")
+def meta_nanmedian(input):
+    output_size = _get_reduction_output_size(input, (), False)
+    return input.new_empty(output_size)
+
+
+@torch.library.impl(meta_lib, "nanmedian.dim_values")
+@torch.library.impl(meta_lib, "nanmedian.dim")
+@out_wrapper_multi("values", "indices")
+def meta_nanmedian_dim(input, dim=-1, keepdim=False):
+    output_size = _get_reduction_output_size(input, (dim,), keepdim)
+    return input.new_empty(output_size), input.new_empty(output_size, dtype=torch.long)
