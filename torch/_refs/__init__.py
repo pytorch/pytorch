@@ -492,7 +492,7 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
         msg = f"Complex dtype is not supported for isposinf, got dtype {a.dtype}"
         raise ValueError(msg)
     elif a.dtype.is_floating_point:
-        return eq(a, float('inf'))
+        return eq(a, float("inf"))
     return zeros_like(a, dtype=torch.bool)
 
 
@@ -502,20 +502,7 @@ def isneginf(a: TensorLikeType) -> TensorLikeType:
         msg = f"Complex dtype is not supported for isneginf, got dtype {a.dtype}"
         raise ValueError(msg)
     elif a.dtype.is_floating_point:
-        return eq(a, float('-inf'))
-    return zeros_like(a, dtype=torch.bool)
-
-
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
-def isinf(a: TensorLikeType) -> TensorLikeType:
-    # TODO Add complex tensor support to remove is_infinite prim
-    # if utils.is_complex_dtype(a):
-    #     return bitwise_or(_isinf(real(a), _isinf(imag(a))
-    # else:
-    #     return bitwise_not(bitwise_or(isnan(a), isfinite(a)))
-    if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
-        return prims.is_infinite(a)
-
+        return eq(a, float("-inf"))
     return zeros_like(a, dtype=torch.bool)
 
 
