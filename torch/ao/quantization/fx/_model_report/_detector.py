@@ -140,19 +140,23 @@ DEFAULT_NON_STATIONARY = "non-stationary"
 
 def _detect_dynamic_vs_static(model: GraphModule, tolerance=0.5) -> Tuple[str, Dict[str, Any]]:
     """
-    determines whether dynamic or static quantization is more appropriate for a given module
+    Determines whether dynamic or static quantization is more appropriate for a given module.
 
+    Takes advantage of the ModelReportObserver that records range information.
     Stationary distribution of data are strictly above tolerance level for the comparison statistic:
 
         S = average_batch_activation_range/epoch_activation_range
 
-    Nonstationary distributions are below the tolerance level for this metric
+    Nonstationary distributions are below or at the tolerance level for this metric.
 
-    This will then generate suggestions for dynamic vs static quantization focused around Linear
+    If the distribution of data right after the module is non-stationary, recommend dynamic quantization
+        Otherwise recommend static quantization
+
+    This will then generate suggestions for dynamic vs static quantization focused around Linear.
 
     Args:
-        model: The prepared and calibrated GraphModule with inserted ModelReportObservers around layers of interest
-
+        model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers around layers of interest
+        tolerance (float, optional): The threshold where S metric is stationary above and non-stationary otherwise. Default: 0.5
     """
 
     # store modules dynamic vs static information
@@ -171,30 +175,12 @@ def _detect_dynamic_vs_static(model: GraphModule, tolerance=0.5) -> Tuple[str, D
             post_stat = post_obs.get_batch_to_epoch_ratio()
 
             # record module, pre and post stat, and whether to do dynamic or static based off it
-            dynamic_recommended = False
+            # true if post observer data distribution is non-stationary, false if it's stationary
+            dynamic_recommended = True if post_stat <= tolerance else False
 
-            # string for pre and post observer classification
-            pre_obs_dist_classification = ""
-            post_obs_dist_classification = ""
-
-            if pre_stat > tolerance and post_stat > tolerance:
-                dynamic_recommended = False  # static is best if both stationary
-                pre_obs_dist_classification = DEFAULT_STATIONARY
-                post_obs_dist_classification = DEFAULT_STATIONARY
-            elif pre_stat <= tolerance and post_stat > tolerance:
-                dynamic_recommended = False  # static best if input non-stationary, output stationary
-                pre_obs_dist_classification = DEFAULT_NON_STATIONARY
-                post_obs_dist_classification = DEFAULT_STATIONARY
-            elif pre_stat <= tolerance and post_stat <= tolerance:
-                dynamic_recommended = True  # dynamic best if input, output non-stationary
-                pre_obs_dist_classification = DEFAULT_NON_STATIONARY
-                post_obs_dist_classification = DEFAULT_NON_STATIONARY
-            elif pre_stat > tolerance and post_stat <= tolerance:
-                dynamic_recommended = True  # dynamic best if input stationary, output non-stationary
-                pre_obs_dist_classification = DEFAULT_STATIONARY
-                post_obs_dist_classification = DEFAULT_NON_STATIONARY
-            else:
-                raise Exception("Should always take one of above branches")
+            # specify the classifications for whether data distributions considered stationary or non-stationary
+            pre_obs_dist_classification = DEFAULT_STATIONARY if pre_stat > tolerance else DEFAULT_NON_STATIONARY
+            post_obs_dist_classification = DEFAULT_STATIONARY if post_stat > tolerance else DEFAULT_NON_STATIONARY
 
             # store the set of important information for this module
             module_info = {
@@ -218,11 +204,17 @@ def _detect_dynamic_vs_static(model: GraphModule, tolerance=0.5) -> Tuple[str, D
         # decide what string formatting values will be
         quantization_type = ""
 
-        # TODO CHANGE TO NON STATIONARY AND STATIONARY TALK
         quantization_reasoning = "the distribution of data before {} is {} and the distribution after is {}."
         dynamic_benefit = " You will get more accurate results if you use dynamic quantization"
         static_benefit = " You can increase model efficiency if you use static quantization"
 
+        # strings for if dynamic quantized per tensor is needed
+        recommend_per_tensor = " We recommend to add a {} before this module if it is static."
+        rec_lay_to_add = "dynamic quantize per tensor layer"
+        dynamic_per_tensor_string = recommend_per_tensor.format(rec_lay_to_add)
+        dynamic_per_tensor_reasoning_string = " This is because the input to this module has a non-stationary distribution."
+
+        # start composing explanation
         if module_info["dynamic_recommended"]:
             quantization_type = "dynamic"
             quantization_reasoning = (
@@ -240,19 +232,12 @@ def _detect_dynamic_vs_static(model: GraphModule, tolerance=0.5) -> Tuple[str, D
                 + static_benefit
             )
 
-        # if we have a non-stationary input -> linear -> stationary input we suggest
+        # if we have a non-stationary input -> linear -> stationary we suggested static
+        # however, we want to also recommend they add a dynamic quantize per tensor right if this change is made
         if (
-            module_info["pre_observer_comp_stat"] <= module_info["tolerance"]
-            and module_info["post_observer_comp_stat"] > module_info["tolerance"]
+            module_info["pre_observer_data_dist"] == DEFAULT_NON_STATIONARY
+            and module_info["post_observer_data_dist"] == DEFAULT_STATIONARY
         ):
-            rec_lay_to_add = "dynamic quantize per tensor layer"
-            dynamic_per_tensor_string = " We recommend to add a {} before this module if it is static.".format(
-                rec_lay_to_add
-            )
-            dynamic_per_tensor_reasoning_string = (
-                " This is because the input to this module has a non-stationary distribution."
-            )
-
             quantization_reasoning = (
                 quantization_reasoning + dynamic_per_tensor_string + dynamic_per_tensor_reasoning_string
             )
