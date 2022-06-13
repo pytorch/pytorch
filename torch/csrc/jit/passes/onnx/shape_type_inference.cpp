@@ -284,6 +284,7 @@ Node* CloneNodeToGraph(
       n, [&n_graph, &vals_to_params_map, opset_version](Value* v) {
         auto v_n = v->node();
         switch (v_n->kind()) {
+          case ::c10::prim::Constant:
           case ::c10::onnx::Constant: {
             // Clone the input if it is constant.
             auto constant_n = n_graph->insertNode(
@@ -299,22 +300,25 @@ Node* CloneNodeToGraph(
             return input;
           }
           default: {
+            // Try to lookup input value and insert it into the graph.
+            // If the input value is unknown, set it to graph input in the new
+            // graph, and copy over metadata, such as datatype and shape.
+            ::c10::optional<at::Tensor> val = ::c10::nullopt;
             if (vals_to_params_map.find(v) != vals_to_params_map.end()) {
-              // If the input is a parameter, insert a constant of its value as
-              // input.
-              auto val = vals_to_params_map.find(v)->second.second.toTensor();
+              val = vals_to_params_map.find(v)->second.second.toTensor();
+            } else if (ConstantValueMap::HasValue(v->debugName())) {
+              val = ConstantValueMap::GetValue(v->debugName());
+            }
+
+            if (val.has_value()) {
               return n_graph
                   ->insertNode(n_graph->create(::c10::onnx::Constant)
-                                   ->t_(attr::value, val))
+                                   ->t_(attr::value, val.value()))
                   ->output();
-            } else {
-              // If the input is not constant, we cannot depend on its value
-              // in shape inference. Set it to graph input in the new graph,
-              // and copy over metadata, such as datatype and shape.
-              auto input = n_graph->addInput();
-              input->copyMetadata(v);
-              return input;
             }
+            auto input = n_graph->addInput();
+            input->copyMetadata(v);
+            return input;
           }
         }
       });
@@ -1854,6 +1858,11 @@ std::pair<bool, bool> AreInputsReliableOrStatic(Node* n) {
       continue;
     }
     auto input = n->inputs()[idx];
+    // Always consider None reliable and complete, because it represents
+    // unspecified optional inputs in ONNX.
+    if (input->node()->mustBeNone()) {
+      continue;
+    }
     reliable &=
         ConstantValueMap::GetTypeReliable(input->debugName()).value_or(false);
     if (auto pt = input->type()->cast<TensorType>()) {
