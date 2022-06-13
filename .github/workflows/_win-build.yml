@@ -18,8 +18,6 @@ on:
         description: If set, build in debug mode.
 
 env:
-  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
@@ -61,7 +59,6 @@ jobs:
           MAX_JOBS: 8
           CUDA_VERSION: ${{ inputs.cuda-version }}
           PYTHON_VERSION: "3.8"
-          PYTORCH_RETRY_TEST_CASES: 1
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           SCCACHE_BUCKET: "ossci-compiler-cache"
           VC_PRODUCT: "BuildTools"
@@ -79,7 +76,7 @@ jobs:
 
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to s3
-        uses: seemethere/upload-artifact-s3@v4
+        uses: seemethere/upload-artifact-s3@v5
         with:
           retention-days: 14
           if-no-files-found: error

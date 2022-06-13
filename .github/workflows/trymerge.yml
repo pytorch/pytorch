@@ -48,6 +48,7 @@ jobs:
             python3 .github/scripts/trymerge.py "${PR_NUM}"
           fi
 
-# TODO: Separate merge on green merges from regular merges to not hold up try-merge workflows overall concurrency
-# NOTE: force pushes are also put in their concurrency group to put them higher than regular merges
-concurrency: try-merge-${{ github.event.client_payload.force}}-${{ github.event.client_payload.on_green }}
+# We want newer merge commands to supercede old ones
+concurrency:
+  group: try-merge-${{ github.event.client_payload.pr_num }}
+  cancel-in-progress: true
