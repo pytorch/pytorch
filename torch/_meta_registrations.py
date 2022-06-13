@@ -22,6 +22,45 @@ def toRealValueType(dtype):
     return from_complex.get(dtype, dtype)
 
 
+@torch.library.impl(meta_lib, "_fft_c2c")
+def meta_fft_c2c(self, dim, normalization, forward):
+    assert self.dtype.is_complex
+    return self.new_empty(self.size())
+
+
+@torch.library.impl(meta_lib, "_fft_r2c")
+def meta_fft_r2c(self, dim, normalization, onesided):
+    assert self.dtype.is_floating_point
+    output_sizes = list(self.size())
+
+    if onesided:
+        last_dim = dim[-1]
+        last_dim_halfsize = (output_sizes[last_dim] // 2) + 1
+        output_sizes[last_dim] = last_dim_halfsize
+
+    return self.new_empty(
+        output_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+    )
+
+
+@out_wrapper
+def meta_fft_c2r(self, dim, normalization, lastdim):
+    assert self.dtype.is_complex
+    output_sizes = list(self.size())
+    output_sizes[dim[-1]] = lastdim
+    return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
+
+
+torch.library.impl(meta_lib, "_fft_c2r")(meta_fft_c2r)
+torch.library.impl(meta_lib, "_fft_c2r.out")(meta_fft_c2r)
+
+
+@torch.library.impl(meta_lib, "conj_physical.out")
+def meta_conj_physical_out(self, out):
+    torch._resize_output_(out, self.size(), self.device)
+    return out.copy_(self)
+
+
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
 @torch.library.impl(meta_lib, "index_select")
 def meta_index_select(self, dim, index):
