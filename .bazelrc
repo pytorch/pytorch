@@ -60,8 +60,6 @@ build --per_file_copt=^external/@-w
 #    cache
 #  * it allows for selective overrides on individual targets since the
 #    macro-level opts will come earlier than target level overrides
-build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=type-limits
-build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-but-set-variable
 
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=all
 # The following warnings come from -Wall. We downgrade them from error
