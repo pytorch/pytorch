@@ -97,7 +97,7 @@ class TestFXGraphPasses(JitTestCase):
                 linear_2 = self.linear2(add_4)
 
                 add_5 = linear_2 + add_4
-                add_6 = add_5 + a
+                add_6 = add_5 + add_4
 
                 return add_4, add_6
 
@@ -111,17 +111,12 @@ class TestFXGraphPasses(JitTestCase):
 
         partitions = partitioner.partition(candidates)
 
-
-        print(partitions)
-
-
+        print("partition", partitions)
         drawer = FxGraphDrawer(traced, "test")
         dot_graph = drawer.get_dot_graph()
         dot_graph.write_png("before.png")
 
-        # module_with_submodules = split_module(traced, m, lambda node: assignment[node] if node in assignment else -1)
-
-        fused_graph = fuse_by_partitions(traced, partitions)
+        fused_graph = partitioner.fuse_partitions(partitions)
 
         drawer = FxGraphDrawer(fused_graph, "test")
         dot_graph = drawer.get_dot_graph()
@@ -190,9 +185,9 @@ class TestFXGraphPasses(JitTestCase):
             [ ['relu', 'add_5'] ],    # invalid partition: circular dependency
         ]
 
-        drawer = FxGraphDrawer(traced, "test")
-        dot_graph = drawer.get_dot_graph()
-        dot_graph.write_png("before.png")
+        # drawer = FxGraphDrawer(traced, "test")
+        # dot_graph = drawer.get_dot_graph()
+        # dot_graph.write_png("before.png")
 
         for id, test_case in enumerate(test_cases):
             gm = copy.deepcopy(traced)
@@ -205,9 +200,9 @@ class TestFXGraphPasses(JitTestCase):
 
             fused_graph = fuse_by_partitions(gm, partitions)
 
-            drawer = FxGraphDrawer(fused_graph, "test")
-            dot_graph = drawer.get_dot_graph()
-            dot_graph.write_png(f"after_{id}.png")
+            # drawer = FxGraphDrawer(fused_graph, "test")
+            # dot_graph = drawer.get_dot_graph()
+            # dot_graph.write_png(f"after_{id}.png")
 
             a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
 
