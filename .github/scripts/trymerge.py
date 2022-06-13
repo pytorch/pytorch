@@ -5,6 +5,7 @@ import json
 import os
 import re
 import time
+from datetime import datetime
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
@@ -121,6 +122,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
             checkSuites(first: 10) {
               ...PRCheckSuites
             }
+            pushedDate
             oid
           }
         }
@@ -446,6 +448,12 @@ class GitHubPR:
 
     def get_changed_files_count(self) -> int:
         return int(self.info["changedFiles"])
+
+    def last_pushed_at(self) -> datetime:
+        return datetime.fromisoformat(self.last_commit()['pushedDate'][:-1])
+
+    def last_commit(self) -> Any:
+        return self.info["commits"]["nodes"][-1]["commit"]
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
@@ -909,32 +917,44 @@ def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
 
-def merge_on_green(pr_num: int, repo: GitRepo,
-                   dry_run: bool = False,
-                   mandatory_only: bool = False,
-                   timeout_minutes: int = 400) -> None:
+def merge(pr_num: int, repo: GitRepo,
+          dry_run: bool = False,
+          force: bool = False,
+          comment_id: Optional[int] = None,
+          mandatory_only: bool = False,
+          on_green: bool = False,
+          timeout_minutes: int = 400,
+          stale_pr_days: int = 3) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
+    pr = GitHubPR(org, project, pr_num)
+    initial_commit_sha = pr.last_commit()['oid']
+    if force:
+        pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
+    if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
+        raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
+
     start_time = time.time()
     last_exception = ''
     elapsed_time = 0.0
     while elapsed_time < timeout_minutes * 60:
         current_time = time.time()
         elapsed_time = current_time - start_time
-
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
+        if initial_commit_sha != pr.last_commit()['oid']:
+            raise RuntimeError("New commits were pushed while merging. Please rerun the merge command.")
         try:
             find_matching_merge_rule(pr, repo)
             pending = pr_get_pending_checks(pr)
             failing = pr_get_failed_checks(pr)
-            if not mandatory_only and len(failing) > 0:
+            if (not mandatory_only and on_green) and len(failing) > 0:
                 raise RuntimeError(f"{len(failing)} additional jobs have failed, first few of them are: " +
                                    ' ,'.join(f"[{x[0]}]({x[1]})" for x in failing[:5]))
-            if not mandatory_only and len(pending) > 0:
+            if (not mandatory_only and on_green) and len(pending) > 0:
                 raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
                                                   f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
-            return pr.merge_into(repo, dry_run=dry_run)
+            return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min")
@@ -980,16 +1000,16 @@ def main() -> None:
         gh_post_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
 
-    if args.on_green or args.on_mandatory:
-        try:
-            merge_on_green(args.pr_num, repo, dry_run=args.dry_run, mandatory_only=args.on_mandatory)
-        except Exception as e:
-            handle_exception(e)
-    else:
-        try:
-            pr.merge_into(repo, dry_run=args.dry_run, force=args.force, comment_id=args.comment_id)
-        except Exception as e:
-            handle_exception(e)
+    try:
+        merge(args.pr_num, repo,
+              dry_run=args.dry_run,
+              force=args.force,
+              comment_id=args.comment_id,
+              on_green=args.on_green,
+              mandatory_only=args.on_mandatory)
+    except Exception as e:
+        handle_exception(e)
+
 
 
 if __name__ == "__main__":

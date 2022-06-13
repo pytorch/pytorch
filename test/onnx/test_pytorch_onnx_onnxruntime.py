@@ -8093,6 +8093,41 @@ class _TestONNXRuntime:
         y = torch.arange(4, 7).to(dtype=torch.long)
         self.run_test(Outer(), input_args=(x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_movedim(self):
+        class MovedimModel(torch.nn.Module):
+            def forward(self, x):
+                return (
+                    x.movedim(1, 3),
+                    x.movedim(2, 0),
+                    x.movedim(1, 1),
+                    x.movedim((1, 2, 3), (3, 0, 1)),
+                    x.movedim((0, 1, 2), (1, 2, 3)),
+                    x.movedim((1, 3, 2), (1, 3, 2)),
+                )
+
+        x = torch.randn(5, 3, 4, 2)
+
+        self.run_test(MovedimModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_moveaxis(self):
+        # moveaxis is an alias of movedim; thus, mostly copied from `test_movedim`.
+        class MoveaxisModel(torch.nn.Module):
+            def forward(self, x):
+                return (
+                    x.moveaxis(1, 3),
+                    x.moveaxis(2, 0),
+                    x.moveaxis(1, 1),
+                    x.moveaxis((1, 2, 3), (3, 0, 1)),
+                    x.moveaxis((0, 1, 2), (1, 2, 3)),
+                    x.moveaxis((1, 3, 2), (1, 3, 2)),
+                )
+
+        x = torch.randn(5, 3, 4, 2)
+
+        self.run_test(MoveaxisModel(), x)
+
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_einsum(self):
         class EinsumModelBatchDiagonal(torch.nn.Module):
