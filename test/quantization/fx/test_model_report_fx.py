@@ -618,9 +618,6 @@ class TestModelReportObserver(QuantizationTestCase):
         # run it through the model and do general tests
         self.run_model_and_common_checks(model, ex_input, 10, 15)
 
-        # make sure final values are all 0
-        self.assertTrue(getattr(model, "obs2").get_batch_to_epoch_ratio() >= 0)
-
     """Case includes:
         non-zero tensor
         dim size = 2
