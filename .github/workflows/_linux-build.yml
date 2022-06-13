@@ -68,7 +68,7 @@ jobs:
         env:
           ENV_VARS: ${{ inputs.env-variables }}
         run: |
-          if [[ -n "${ENV_VARS}"]]; then
+          if [[ -n "${ENV_VARS}" ]]; then
             echo "${ENV_VARS}" >> "${GITHUB_ENV}"
             echo "${ENV_VARS}" >> "/tmp/docker_env_${GITHUB_RUN_ID}"
           fi
