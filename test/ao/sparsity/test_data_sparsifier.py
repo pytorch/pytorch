@@ -119,6 +119,46 @@ class TestBaseDataSparsiferType(TestCase):
             sparsifier.add_data(name=name1, data=data2)
             assert torch.all(data2 == sparsifier.get_data(name=name1))
 
+    def test_state_dict(self):
+        sparsifier1 = self.get_sparsifier()
+        sparsifier2 = ImplementedSparsifier(data_list=[self.data_list[0]])
+        sparsifier1.step()
+
+        state_dict1 = sparsifier1.state_dict()
+
+        assert sparsifier1.state != sparsifier2.state
+        name, _, _ = self.get_name_data_config(self.data_list[0])
+        self.assertNotEqual(sparsifier1.get_mask(name), sparsifier2.get_mask(name))
+
+        sparsifier2.load_state_dict(state_dict1)
+        assert len(sparsifier1.state) == len(sparsifier2.state)
+        assert len(sparsifier1.data_groups) == len(sparsifier2.data_groups)
+
+        for name in sparsifier1.state.keys():
+            # compare mask
+            assert name in sparsifier2.state
+            assert 'mask' in sparsifier2.state[name]
+            assert 'mask' in sparsifier1.state[name]
+            mask1, mask2 = sparsifier1.state[name]['mask'], sparsifier2.state[name]['mask']
+            assert torch.all(mask1 == mask2)
+
+            # compare data_groups
+            dg1, dg2 = sparsifier1.data_groups, sparsifier2.data_groups
+            assert name in dg1 and name in dg2
+            assert dg1[name] == dg2[name]
+
+            # compare container
+            container1, container2 = sparsifier1._container, sparsifier2._container
+            assert torch.all(getattr(container1, name) == getattr(container2, name))
+            assert is_parametrized(container1, name) == is_parametrized(container2, name)
+            if is_parametrized(container1, name):
+                param1 = getattr(container1.parametrizations, name)[0]
+                param2 = getattr(container2.parametrizations, name)[0]
+                assert hasattr(param1, 'mask')
+                assert hasattr(param2, 'mask')
+                self.assertEqual(param1.__dict__, param2.__dict__)
+
+
 class TestBaseDataSparsifier(TestCase):
     """To add unit tests to support new data types for the BaseDataSparsifier, create the following
         data_list: List of tuples of name, data to be added to the constructor
@@ -146,3 +186,4 @@ class TestBaseDataSparsifier(TestCase):
         tensor_test.test_constructor()
         tensor_test.test_squash_mask()
         tensor_test.test_add_data()
+        tensor_test.test_state_dict()

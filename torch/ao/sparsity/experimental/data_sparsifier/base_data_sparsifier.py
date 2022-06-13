@@ -110,6 +110,98 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         else:
             return getattr(self._container, name)
 
+    def state_dict(self):
+        r"""Returns the state of the optimizer as a :class:`dict`.
+
+        It contains:
+        * state - contains name -> mask mapping.
+        * data_groups - a list containing all sparsity configuration groups
+            with the key name specifying the name of the data
+        * container_state_dict - the state dictionary of the internal
+            container model used for sparsification
+        """
+        return {
+            'state': self.state,
+            'data_groups': self.data_groups,
+            '_container': self._container.state_dict()
+        }
+
+    def _load_container_from_state(self, states, data_groups, container_state_dict):
+        r"""This restores the state of the container specifically based on the data present in state and data_groups
+        If the data was parametrized, then the data would be added to the container and then parametrized,
+        else it would just add the attribute the container.
+        """
+        for name, state in states.items():
+            config_name = data_groups.get(name, None)
+            if config_name is None:
+                raise RuntimeError(f"Error loading {name}")
+
+            # check if the data with such a name was parametrized, if so parametrize
+            # otherwise just set the attribute and continue
+            parametrized_name = f'parametrizations.{name}.original'
+            parametrized = False
+            data = container_state_dict.get(name, None)
+            if name in container_state_dict:
+                # the parametrization was probably removed for this
+                data = container_state_dict.get(name)
+
+            elif parametrized_name in container_state_dict:
+                # so the weight was parametrized
+                data = container_state_dict.get(parametrized_name)
+                parametrized = True
+
+            else:
+                raise RuntimeError(f"Error loading {name}")
+
+            param = nn.Parameter(data, requires_grad=False)
+            setattr(self._container, name, param)
+
+            if parametrized:
+                # register parameter if parametrized
+                mask = state.get('mask', torch.ones_like(data))
+                param_class = data_groups.get('parametrization', utils.FakeSparsity)  # change once public_api for utils is fixed!
+                parametrize.register_parametrization(self._container, name, param_class(mask))
+
+    def load_state_dict(self, state_dict, strict=True):
+        r"""The load_state_dict() restores the state of the sparsifier based on the state_dict
+
+        Args:
+        * state_dict - the dictionary that to which the current sparsifier needs to be restored to
+        * strict - If True - the sparsifier is reset and is restored exactly to the state in state_dict.
+            If False - the current sparsifier is not reset before loading the state_dict i.e. data added
+            before loading the state_dict is not erased.
+        """
+        states = copy.deepcopy(state_dict['state'])
+        data_groups = copy.deepcopy(state_dict['data_groups'])
+        container_state_dict = copy.deepcopy(state_dict['_container'])
+        if strict:
+            # if strict load -> then reset container
+            self._container = _Container()
+
+        self._load_container_from_state(states, data_groups, container_state_dict)
+
+        if not strict:
+            states.update(self.state)
+            data_groups.update(self.data_groups)
+
+        self.__setstate__({'state': states, 'data_groups': data_groups})
+
+    def __setstate__(self, state):
+        if '_container' in state:  # If container object is in state then load model
+            container_dict = state.pop('_container')
+            self._container = _Container()
+            self._load_container_from_state(state['state'], state['data_groups'], container_dict)
+
+        self.__dict__.update(state)
+
+    def __getstate__(self):
+        return {
+            'defaults': self.defaults,
+            'state': self.state,
+            'data_groups': self.data_groups,
+            '_container': self._container.state_dict()
+        }
+
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
         for name, sparse_args in self.data_groups.items():
