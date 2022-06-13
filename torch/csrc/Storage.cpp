@@ -4,6 +4,7 @@
 #endif
 #include <structmember.h>
 
+#include <ATen/mps/MPSDevice.h>
 #include <c10/core/CPUAllocator.h>
 #include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
@@ -15,7 +16,6 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/copy_utils.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <ATen/mps/MPSDevice.h>
 
 #include <c10/util/intrusive_ptr.h>
 #include <fmt/format.h>
