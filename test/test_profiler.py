@@ -409,19 +409,21 @@ class TestProfiler(TestCase):
                     "ts_method_1" in entry or
                     "ts_method_2" in entry) for entry in e.stack]))
 
-        with TemporaryFileName(mode="w+") as fname:
-            p.export_chrome_trace(fname)
-            with io.open(fname, 'r') as f:
-                events = json.load(f)["traceEvents"]
+        # TODO: https://github.com/pytorch/kineto/issues/617
+        if kineto_available() and not IS_WINDOWS:
+            with TemporaryFileName(mode="w+") as fname:
+                p.export_chrome_trace(fname)
+                with io.open(fname, 'r') as f:
+                    events = json.load(f)["traceEvents"]
 
-            def extract(pattern: str):
-                matches = [e for e in events if re.search(pattern, e["name"])]
-                self.assertEqual(len(matches), 1, repr([e["name"] for e in matches]))
-                return matches[0]
+                def extract(pattern: str):
+                    matches = [e for e in events if re.search(pattern, e["name"])]
+                    self.assertEqual(len(matches), 1, repr([e["name"] for e in matches]))
+                    return matches[0]
 
-            module_event = extract(r"DummyModule_0")
-            wrapper_event = extract(r"call_module")
-            self.assertEqual(module_event["args"]["Python parent id"], wrapper_event["args"]["Python id"])
+                module_event = extract(r"DummyModule_0")
+                wrapper_event = extract(r"call_module")
+                self.assertEqual(module_event["args"]["Python parent id"], wrapper_event["args"]["Python id"])
 
         torch._C._set_graph_executor_optimize(prev_opt)
 
