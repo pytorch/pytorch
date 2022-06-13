@@ -22,6 +22,9 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   refresh_numel();
   refresh_contiguous();
   storage_access_should_throw_ = false;
+  // In general, the sizes/stride metadata on a tensor can change as it is mutated,
+  // and these changes need to be reflected in the metadata of the wrapper.
+  set_allow_tensor_metadata_change(true);
   key_set_ = c10::DispatchKeySet(c10::DispatchKey::Functionalize) | value_.key_set();
   // All of the keys corresponding to functorch transforms should not be copied over.
   // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
@@ -260,6 +263,49 @@ const char* FunctionalTensorWrapper::tensorimpl_type_name() const {
     return "FunctionalTensorWrapper";
 }
 
+template <typename VariableVersion>
+c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_core(
+    VariableVersion&& version_counter,
+    bool allow_tensor_metadata_change) const {
+  if (key_set_.has(DispatchKey::Python) &&
+      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
+    auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
+    if (r) {
+      r->set_version_counter(std::forward<VariableVersion>(version_counter));
+      r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      return r;
+    }
+  }
+  auto impl = c10::make_intrusive<FunctionalTensorWrapper>(value_);
+  copy_tensor_metadata(
+      /*src_impl=*/this,
+      /*dest_impl=*/impl.get(),
+      /*version_counter=*/std::forward<VariableVersion>(version_counter),
+      // I want to confirm with someone that this is reasonable.
+      // The autograd kernel for detach() always creates a view of the output
+      // with "allow_tensor_metadata_changes" set to false.
+      // We *always* want this flag to be true for FunctionalTensorWrapper though,
+      // Since mutations later on can changes the size/stride metadata on the wrapper.
+      /*allow_tensor_metadata_change=*/true);
+  impl->refresh_numel();
+  impl->refresh_contiguous();
+  return impl;
+}
+
+c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const {
+  return shallow_copy_and_detach_core(
+      version_counter, allow_tensor_metadata_change);
+}
+
+c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach(
+    c10::VariableVersion&& version_counter,
+    bool allow_tensor_metadata_change) const {
+  return shallow_copy_and_detach_core(
+      std::move(version_counter), allow_tensor_metadata_change);
+}
+
 at::IntArrayRef FunctionalTensorWrapper::sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sizes();
 }
@@ -329,7 +375,7 @@ std::vector<Tensor> to_functional_tensor(const TensorList& t_list) {
 
 Tensor from_functional_tensor(const Tensor& tensor, bool assert_functional) {
   // Note [Wrapped Numbers <> Functionalization]
-  if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+  if (!tensor.defined() || tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
       return tensor;
   }
   if (isFunctionalTensor(tensor)) {
@@ -454,41 +500,59 @@ bool isFunctionalTensor(const c10::optional<Tensor>& t) {
 
 bool isFunctionalTensor(const c10::List<Tensor>& t_list) {
   if (t_list.size() == 0) return false;
-  bool any_functional = isFunctionalTensor(t_list[0]);
-  for (const auto i : c10::irange(1, t_list.size())) {
-    auto curr_functional = isFunctionalTensor(t_list[i]);
-    TORCH_INTERNAL_ASSERT(
-         curr_functional == any_functional,
-        "Functionalization encountered a list of tensors where some are functional",
-        "and some are not, which is not currently unsupported.");
+  auto functional_count = 0;
+  auto nonfunctional_count = 0;
+  for (const auto i : c10::irange(t_list.size())) {
+    if (!t_list[i].defined()) continue;
+    if (isFunctionalTensor(t_list[i])) {
+      ++functional_count;
+    } else {
+      ++nonfunctional_count;
+    }
   }
-  return any_functional;
+  TORCH_INTERNAL_ASSERT(
+       functional_count == 0 || nonfunctional_count == 0,
+      "Functionalization encountered a list of tensors where some are functional",
+      "and some are not, which is not currently unsupported.");
+  return functional_count > 0;
 }
 
 bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list) {
   if (t_list.size() == 0) return false;
-  bool any_functional = isFunctionalTensor(t_list[0]);
-  for (const auto i : c10::irange(1, t_list.size())) {
-    auto curr_functional = isFunctionalTensor(t_list[i]);
-    TORCH_INTERNAL_ASSERT(
-         curr_functional == any_functional,
-        "Functionalization encountered a list of tensors where some are functional",
-        "and some are not, which is not currently unsupported.");
+  auto functional_count = 0;
+  auto nonfunctional_count = 0;
+  for (const auto i : c10::irange(t_list.size())) {
+    if (!t_list[i].has_value() || !t_list[i]->defined()) continue;
+    if (isFunctionalTensor(t_list[i])) {
+      ++functional_count;
+    } else {
+      ++nonfunctional_count;
+    }
   }
-  return any_functional;
+  TORCH_INTERNAL_ASSERT(
+       functional_count == 0 || nonfunctional_count == 0,
+      "Functionalization encountered a list of tensors where some are functional",
+      "and some are not, which is not currently unsupported.");
+  return functional_count > 0;
 }
 
 bool isFunctionalTensor(const c10::ArrayRef<Tensor> t_list) {
   if (t_list.size() == 0) return false;
-  bool any_functional = isFunctionalTensor(t_list[0]);
-  for (const auto i : c10::irange(1, t_list.size())) {
-    auto curr_functional = isFunctionalTensor(t_list[i]);
-    TORCH_INTERNAL_ASSERT(
-         curr_functional == any_functional,
-        "Functionalization encountered a list of tensors where some are functional",
-        "and some are not, which is not currently unsupported.");
+  auto functional_count = 0;
+  auto nonfunctional_count = 0;
+  for (const auto i : c10::irange(t_list.size())) {
+    if (!t_list[i].defined()) continue;
+    if (isFunctionalTensor(t_list[i])) {
+      ++functional_count;
+    } else {
+      ++nonfunctional_count;
+    }
   }
-  return any_functional;
+  TORCH_INTERNAL_ASSERT(
+       functional_count == 0 || nonfunctional_count == 0,
+      "Functionalization encountered a list of tensors where some are functional",
+      "and some are not, which is not currently unsupported.");
+  return functional_count > 0;
 }
 
 Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta, int64_t out_idx) {
@@ -552,5 +616,89 @@ void setFunctionalizationReapplyViewsTLS(bool reapply_views) {
 }
 
 } // namespace impl
+
+
+// Given an **out-of-place** op that might internally call view/inplace ops,
+// This function will "functionalize" it.
+// That is, it will call the operator, but removing any intermediate views/mutations
+// that are performed inside of it.
+// This is useful for LTC/XLA, which would like to re-use some of our composite kernels
+// from pytorch core but not have to worry about the view ops that they might call.
+// e.g. at::block_diag
+void functionalize_op_helper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  const auto& schema = op.schema();
+  const auto num_arguments = schema.arguments().size();
+  const auto arguments_begin = stack->size() - num_arguments;
+  auto arguments = torch::jit::last(stack, num_arguments);
+
+  // Wrap all tensor-like inputs into FunctionalTensorWrappers.
+  // When we re-invoke the dispatcher, this will automatically enable the functionalization pass.
+  for (uint64_t idx = 0; idx < num_arguments; ++idx) {
+    const auto& ivalue = arguments[idx];
+    if (ivalue.isTensor()) {
+      auto t = ivalue.toTensor();
+      if (t.defined()) {
+        TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t),
+          "The composite op functionalization fallback expects its inputs all not to be functional tensors");
+        auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(t));
+        (*stack)[arguments_begin + idx] = t_new;
+      }
+    } else if (ivalue.isTensorList()) {
+      auto tensors = ivalue.toTensorList();
+      TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(tensors),
+        "The composite op functionalization fallback expects its inputs all not to be functional tensors");
+      auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(tensors));
+      (*stack)[arguments_begin + idx] = t_new;
+    } else if (ivalue.isOptionalTensorList()) {
+      auto opt_tensors = ivalue.toOptionalTensorList();
+      TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(opt_tensors),
+        "The composite op functionalization fallback expects its inputs all not to be functional tensors");
+      auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(opt_tensors));
+      (*stack)[arguments_begin + idx] = t_new;
+    }
+  }
+
+  {
+    // Today when you call at::empty(device=lazy), the lazy backend decides whether or not to wrap
+    // the output in a functional tensor based on TLS.
+    // In this code, we're re-entrantly entering functionalization in the same call-stack,
+    // so we need to manually fix up TLS as if it hadn't already been called.
+    ReenableFunctionalize guard;
+    // So, we should probably provide a way to directly call a kernel registered to
+    // the `CompositeExplicitAutograd` key.
+    // We can't do that today, so this should be a reasonably good proxy
+    // (It won't work in cases where an op has both a CompositeExplicitAutograd kernel
+    // AND a dedicated meta kernel, but that probably shouldn't ever happen).
+    op.redispatchBoxed(c10::DispatchKeySet(c10::DispatchKey::Meta), stack);
+  }
+
+  const auto num_returns = schema.returns().size();
+  const auto returns_begin = stack->size() - num_returns;
+  auto returns = torch::jit::last(stack, num_returns);
+
+  for (const auto idx : c10::irange(num_returns)) {
+    const auto& ivalue = returns[idx];
+    if (ivalue.isTensor()) {
+      auto t = ivalue.toTensor();
+      if (!t.defined()) continue;
+      at::functionalization::impl::sync(t);
+      auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(t));
+      (*stack)[returns_begin + idx] = t_new;
+    } else if (ivalue.isTensorList()) {
+      auto tensors = ivalue.toTensorList();
+      at::functionalization::impl::sync(tensors);
+      auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(tensors));
+      (*stack)[returns_begin + idx] = t_new;
+    } else if (ivalue.isOptionalTensorList()) {
+      auto opt_tensors = ivalue.toOptionalTensorList();
+      at::functionalization::impl::sync(opt_tensors);
+      auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(opt_tensors));
+      (*stack)[returns_begin + idx] = t_new;
+    }
+  }
+}
+
+
+
 } // namespace functionalization
 } // namespace at
