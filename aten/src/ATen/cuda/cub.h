@@ -62,14 +62,6 @@ void radix_sort_keys(
     const key_t *keys_in, key_t *keys_out,
     int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8);
 
-template <typename scalar_t>
-void unique(const scalar_t *input, scalar_t *output,
-            int64_t *num_selected_out, int64_t num_items);
-
-template <typename scalar_t>
-void run_length_encode(const scalar_t *input, scalar_t *output, int64_t *counts_out,
-                       int64_t *length_out, int64_t n);
-
 // NOTE: Intermediate sums will be truncated to input_t precision
 template <typename input_t, typename output_t>
 void inclusive_sum_truncating(const input_t *input, output_t *output, int64_t n);
