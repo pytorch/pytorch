@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_fusion_simplifier.h>
 #include <torch/csrc/jit/codegen/cuda/lower_index.h>
 #include <torch/csrc/jit/codegen/cuda/lower_insert_syncs.h>
+#include <torch/csrc/jit/codegen/cuda/lower_instrument.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/lower_magic_zero.h>
 #include <torch/csrc/jit/codegen/cuda/lower_misaligned_vectorization.h>
@@ -143,8 +144,11 @@ void GpuLower::collectPaddedParallelDims() {
   for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
     for (auto id : tv->domain()->domain()) {
       if (tv->definition()) {
+        // TODO: Support GroupedReductionOp
         if (auto reduction = dynamic_cast<ReductionOp*>(tv->definition())) {
-          if (ir_utils::getMaybeWarpReductionDim(reduction).has_value()) {
+          if (ir_utils::getMaybeWarpReductionDim(
+                  reduction->out(), reduction->in())
+                  .has_value()) {
             warp_pad_info_.has_warp_reduction = true;
           }
         }
@@ -229,22 +233,17 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // with set unary op
   trivialReductionReplacement(fusion_, trivial_reduction_info_);
 
-  // In the future we may directly use this map, but for now it will propagate
-  // and validate (to some extent) the parallelization strategy. Map only axes
-  // to the left of compute at position, forward broadcast in replay.
-  ca_parallel_map_ = ComputeAtMap(ComputeAtMap::MappingMode::PARALLEL);
-  ca_parallel_map_.build(fusion_, current());
+  // Build what's refered to as the compute at map. This map contains the
+  // mappings of all iteration domains across the fusion. There are three types
+  // of mappings Permissive, Exact, and Loop, see compute_at_map.h/cpp for more
+  // information.
+  compute_at_map_ = std::make_unique<ComputeAtMap>(fusion_);
 
-  // Generate mappings to generate indices. Maps all iteration domains but
-  // doesn't map any broadcast iteration domains, nor forward them in replay.
-  ca_index_map_ = ComputeAtMap(ComputeAtMap::MappingMode::INDEX);
-  ca_index_map_.build(fusion_, current());
+  if (isDebugDumpEnabled(DebugDumpOption::ComputeAtMap)) {
+    std::cout << compute_at_map_->toString() << std::endl;
+  }
 
-  // Generate mappings to generate and map to loop nests. Maps all iteration
-  // domains, forwards broadcasts, ensures root domain mappings exist (aren't
-  // replaced in forwarding).
-  ca_loop_map_ = ComputeAtMap(ComputeAtMap::MappingMode::LOOP);
-  ca_loop_map_.build(fusion_, current());
+  compute_at_map_->validateAndPropagatePType();
 
   // Used in parallel dimension map
   concretized_broadcast_domains_.build(fusion_);
@@ -264,7 +263,7 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // Fuse cetain patterns of reductions, such as a grid reduction
   // followed by a grid broadcast. Only depends on parallelization and
   // thread predicate map.
-  fuseReductions(fusion_);
+  fuseReductionsAndBroadcasts(fusion_);
 
   // Scan the whole fusion and build mappings about halo extensions of
   // all IterDomains
@@ -282,10 +281,11 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
 
   validatePartialSplit(fusion_);
 
-  // Detects all exprssions that don't need predicates
-  predicateElimination().build(fusion_);
-
   nonDivisibleSplitInfo().build(fusion_);
+
+  // Detects all exprssions that don't need predicates. Depends on
+  // nonDivisibleSplitInfo.
+  predicateElimination().build(fusion_);
 
   doubleBufferInfo().build(fusion_);
 
@@ -350,10 +350,12 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   const auto exprs_cleaned_up_loops =
       KIRCleaner::cleanUp(exprs_register_adjusted);
 
+  const auto exprs_instrumented = instrumentKernel(exprs_cleaned_up_loops);
+
   // We now have the lowered expressions, finalize the kernel IR. This function
   // will also copy over some relevant information for code generation from
   // GpuLower.
-  kernel_->finalize(exprs_cleaned_up_loops);
+  kernel_->finalize(exprs_instrumented);
 }
 
 kir::Kernel* GpuLower::kernel() const {
@@ -365,6 +367,14 @@ GpuLower* GpuLower::current() {
   TORCH_INTERNAL_ASSERT(
       active_gpu_lower != nullptr, "No active GpuLower available");
   return active_gpu_lower;
+}
+
+bool GpuLower::hasCurrent() {
+  return active_gpu_lower != nullptr;
+}
+
+void GpuLower::propagateExprInfo(const Expr* old_expr, const Expr* new_expr) {
+  pred_elimination_.propagateRemovalInfo(old_expr, new_expr);
 }
 
 } // namespace cuda
