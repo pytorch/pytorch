@@ -33,20 +33,27 @@ from functorch._C import (
     _assert_wrapped_functional,
     _propagate_functional_input_mutation,
     set_inplace_requires_grad_allowed,
+    get_inplace_requires_grad_allowed,
 )
 
 argnums_t = Union[int, Tuple[int, ...]]
 
 
+@contextlib.contextmanager
+def enable_inplace_requires_grad(enabled=True):
+    prev_state = get_inplace_requires_grad_allowed()
+    set_inplace_requires_grad_allowed(enabled)
+    try:
+        yield
+    finally:
+        set_inplace_requires_grad_allowed(prev_state)
+
+
 def _create_differentiable(inps, level=None):
     def create_differentiable(x):
         if isinstance(x, torch.Tensor):
-            try:
-                set_inplace_requires_grad_allowed(True)
+            with enable_inplace_requires_grad():
                 return x.requires_grad_()
-            finally:
-                set_inplace_requires_grad_allowed(False)
-
         raise ValueError(f'Thing passed to transform API must be Tensor, '
                          f'got {type(x)}')
     return tree_map(create_differentiable, inps)
