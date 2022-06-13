@@ -3,10 +3,10 @@ load("@rules_cuda//cuda:defs.bzl", "cuda_library")
 NVCC_COPTS = [
     "--expt-relaxed-constexpr",
     "--expt-extended-lambda",
-    "--compiler-options=-Werror=all",
     "--compiler-options=-Werror=type-limits",
     "--compiler-options=-Werror=unused-but-set-variable",
 
+    "--compiler-options=-Werror=all",
     # The following warnings come from -Wall. We downgrade them from
     # error to warnings here.
     #
