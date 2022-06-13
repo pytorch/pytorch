@@ -585,14 +585,20 @@ def set_float32_matmul_precision(precision):
     Running float32 matrix multiplications in lower precision may significantly increase
     performance, and in some programs the loss of precision has a negligible impact.
 
-    .. note:: This does not change the output dtype of float32 matrix multiplications,
+    .. note::
+
+        This does not change the output dtype of float32 matrix multiplications,
         it controls how the internal computation of the matrix multiplication is performed.
 
-    .. note:: This does not change the precision of convolution operations. Other flags,
+    .. note::
+
+        This does not change the precision of convolution operations. Other flags,
         like `torch.backends.cudnn.allow_tf32`, may control the precision of convolution
         operations.
 
-    .. note:: This flag currently only affects one native device type: CUDA.
+    .. note::
+
+        This flag currently only affects one native device type: CUDA.
         If "high" or "medium" are set then the TensorFloat32 datatype will be used
         when computing float32 matrix multiplications, equivalent to setting
         `torch.backends.cuda.matmul.allow_tf32 = True`. When "highest" (the default)
@@ -611,6 +617,7 @@ def set_float32_matmul_precision(precision):
                 internal computations, if a fast matrix multiplication algorithm
                 using that datatype internally is available. Otherwise float32
                 matrix multiplications are computed as if the precision is "high."
+
     """
     _C._set_float32_matmul_precision(precision)
 
