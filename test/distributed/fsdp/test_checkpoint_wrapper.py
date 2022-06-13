@@ -14,12 +14,12 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 
 from torch.utils.checkpoint import checkpoint
 
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-
 from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+
+import unittest
 
 class CheckpointWrapperTest(TestCase):
     def setUp(self):
@@ -48,7 +48,7 @@ class CheckpointWrapperTest(TestCase):
         for p1, p2 in zip(lin.parameters(), lin_new.parameters()):
             self.assertEqual(p1, p2)
 
-    @skip_if_lt_x_gpu(1)
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
     def test_checkpoint_wrapper_parity(self):
         """
         Tests that using checkpoint_wrapper or the functional
