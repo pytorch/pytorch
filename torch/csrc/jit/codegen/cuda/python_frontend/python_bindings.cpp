@@ -102,7 +102,8 @@ void initNvFuserPythonBindings(PyObject* module) {
       .value("Bool", torch::jit::fuser::cuda::DataType::Bool)
       .value("BFloat16", torch::jit::fuser::cuda::DataType::BFloat16)
       .value("ComplexFloat", torch::jit::fuser::cuda::DataType::ComplexFloat)
-      .value("ComplexDouble", torch::jit::fuser::cuda::DataType::ComplexDouble);
+      .value("ComplexDouble", torch::jit::fuser::cuda::DataType::ComplexDouble)
+      .value("Null", torch::jit::fuser::cuda::DataType::Null);
 
   // Binding an object that owns a FusionExecutorCache instance and provides an
   // interface
