@@ -5372,6 +5372,18 @@ def sample_inputs_native_layer_norm(opinfo, device, dtype, requires_grad, **kwar
             make_arg(input_shape),
             args=(normalized_shape, weight, bias, eps),
         )
+        yield SampleInput(
+            make_arg(input_shape),
+            args=(normalized_shape, None, bias, eps),
+        )
+        yield SampleInput(
+            make_arg(input_shape),
+            args=(normalized_shape, weight, None, eps),
+        )
+        yield SampleInput(
+            make_arg(input_shape),
+            args=(normalized_shape, None, None, eps),
+        )
 
 
 def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kwargs):
@@ -10106,7 +10118,7 @@ def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=N
     return reference_native_layer_norm(inp, normalized_shape, weight, bias, eps)[0]
 
 
-def reference_native_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
+def reference_native_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight, bias, eps):
     feature_size = np.prod(normalized_shape)
     inp_view = inp.reshape(-1, feature_size)  # type: ignore[call-overload]
     mean = inp_view.mean(axis=-1, keepdims=True)
