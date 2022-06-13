@@ -160,15 +160,17 @@ def meta_dot(self, tensor):
     return self.new_empty(())
 
 
+def _compute_reduction_shape(self, dims, keepdim):
+    if keepdim:
+        return tuple(self.shape[i] if i not in dims else 1 for i in range(self.ndim))
+
+    return utils.compute_reduction_output_shape(self.shape, dims)
+
+
 @torch.library.impl(meta_lib, "var_mean.correction")
 def meta_var_mean_correction(self, dim, *, correction, keepdim=False):
     dim = utils.reduction_dims(self.shape, dim)
-    if keepdim:
-        output_shape = tuple(
-            self.shape[i] if i not in dim else 1 for i in range(self.ndim)
-        )
-    else:
-        output_shape = utils.compute_reduction_output_shape(self.shape, dim)
+    output_shape = _compute_reduction_shape(self, dim, keepdim)
     result1 = self.new_empty(output_shape, dtype=toRealValueType(self.dtype))
     result2 = self.new_empty(output_shape)
     return result1, result2
@@ -540,41 +542,30 @@ def _get_reduction_dtype(input, dtype, promote_int_to_long=True):
     return input.dtype
 
 
-def _get_reduction_output_size(input, dims, keepdim):
-    if input.size() == () or tuple(dims) == ():
-        return ()
-
-    out_size = list(input.size())
-    dims = utils.canonicalize_dims(input.dim(), dims)
-    # Sort in descending order as we have to pop
-    # elements out of `out_size` (if keepdim = False)
-    for dim in sorted(dims, reverse=True):
-        if keepdim:
-            out_size[dim] = 1
-        else:
-            out_size.pop(dim)
-
-    return out_size
-
-
 @torch.library.impl(meta_lib, "nansum")
 @torch.library.impl(meta_lib, "nansum.out")
 @out_wrapper
-def meta_nansum(input, dims=(), keepdim=False, *, dtype=None):
+def meta_nansum(input, dims=None, keepdim=False, *, dtype=None):
     output_dtype = _get_reduction_dtype(input, dtype, promote_int_to_long=True)
-    output_size = _get_reduction_output_size(input, dims, keepdim)
-    return input.new_empty(output_size, dtype=output_dtype)
+    dims = utils.reduction_dims(input.shape, dims)
+    output_shape = _compute_reduction_shape(input, dims, keepdim)
+    return input.new_empty(output_shape, dtype=output_dtype)
 
 
 @torch.library.impl(meta_lib, "nanmedian")
 def meta_nanmedian(input):
-    output_size = _get_reduction_output_size(input, (), False)
-    return input.new_empty(output_size)
+    output_shape = utils.compute_reduction_output_shape(
+        input.shape, tuple(range(input.dim()))
+    )
+    return input.new_empty(output_shape)
 
 
 @torch.library.impl(meta_lib, "nanmedian.dim_values")
 @torch.library.impl(meta_lib, "nanmedian.dim")
 @out_wrapper_multi("values", "indices")
 def meta_nanmedian_dim(input, dim=-1, keepdim=False):
-    output_size = _get_reduction_output_size(input, (dim,), keepdim)
-    return input.new_empty(output_size), input.new_empty(output_size, dtype=torch.long)
+    dim = utils.reduction_dims(input.shape, (dim,))
+    output_shape = _compute_reduction_shape(input, dim, keepdim)
+    return input.new_empty(output_shape), input.new_empty(
+        output_shape, dtype=torch.long
+    )
