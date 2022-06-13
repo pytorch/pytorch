@@ -1785,7 +1785,43 @@ def native_layer_norm(
     bias: Optional[Tensor],
     eps: float,
 ) -> Tuple[TensorLikeType, TensorLikeType, TensorLikeType]:
-    axis = input.ndim - len(normalized_shape)
+    normalized_ndim = len(normalized_shape)
+    utils.check(
+        normalized_ndim >= 1,
+        lambda: "Expected normalized_shape to be at least 1-dimensional, i.e., "
+        + "containing at least one element, but got normalized_shape = "
+        + str(normalized_shape),
+    )
+    # torch.Size([1, 2, 3]) == [1, 2, 3] evaluates to False
+    # while torch.Size([1, 2, 3]) == (1, 2, 3) is True
+    # therefore we use tuple(normalized_shape)
+    utils.check(
+        weight is None or weight.shape == tuple(normalized_shape),
+        lambda: "Expected weight to be of same shape as normalized_shape, but got "
+        + "weight of shape "
+        + str(weight.shape)
+        + " and normalized_shape = "
+        + str(normalized_shape),
+    )
+    utils.check(
+        bias is None or bias.shape == tuple(normalized_shape),
+        lambda: "Expected bias to be of same shape as normalized_shape, but got "
+        + "bias of shape "
+        + str(bias.shape)
+        + " and normalized_shape = "
+        + str(normalized_shape),
+    )
+    utils.check(
+        input.ndim >= normalized_ndim
+        and input.shape[(input.ndim - normalized_ndim):] == tuple(normalized_shape),
+        lambda: "Given normalized_shape="
+        + str(normalized_shape)
+        + ", expected input with shape "
+        + str(normalized_shape)
+        + ", but got input of size "
+        + str(input.shape),
+    )
+    axis = input.ndim - normalized_ndim
     reduction_dims = list(range(axis, input.ndim))
     out, mean, rstd = _normalize(input, reduction_dims, eps)
     if weight is None and bias is not None:
