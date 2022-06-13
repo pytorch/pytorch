@@ -39,17 +39,6 @@ class ShardMetadata(object):
             self.placement = _remote_device(placement)
         else:
             self.placement = placement
-
-    def __hash__(self):
-        def _hash_reduce(a, b):
-            return (a << 8) + hash(b)
-
-        res = reduce(_hash_reduce, self.shard_offsets, 37)
-        res = reduce(_hash_reduce, self.shard_sizes, res)
-        res = _hash_reduce(res, self.placement)
-        return res
-
-    def __post_init__(self):
         if len(self.shard_offsets) != len(self.shard_sizes):
             raise ValueError(
                 f'shard_offsets and shard_sizes should have '
@@ -61,3 +50,12 @@ class ShardMetadata(object):
                 raise ValueError('shard_offsets should be >=0')
             if self.shard_sizes[i] < 0:
                 raise ValueError('shard_sizes should be >= 0')
+
+    def __hash__(self):
+        def _hash_reduce(a, b):
+            return (a << 8) + hash(b)
+
+        res = reduce(_hash_reduce, self.shard_offsets, 37)
+        res = reduce(_hash_reduce, self.shard_sizes, res)
+        res = _hash_reduce(res, self.placement)
+        return res
