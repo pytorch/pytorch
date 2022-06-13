@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, NamedTuple
+from typing import Any, Dict, List, NamedTuple, Tuple
 from gitutils import _check_output
 
 import rockset  # type: ignore[import]
@@ -69,7 +69,7 @@ def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, A
             )._asdict())
     return workflow_checks
 
-def isGreen(commit: str, results: Dict[str, Any]) -> bool:
+def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
     workflow_checks = get_commit_results(commit, results)
 
     for check in workflow_checks:
@@ -80,14 +80,14 @@ def isGreen(commit: str, results: Dict[str, Any]) -> bool:
                 pass
                 # there are trunk checks that run the same tests, so this pull workflow check can be skipped
             else:
-                return False
+                return (False, workflowName + " checks were not successful")
         elif workflowName in ["periodic", "docker-release-builds"] and conclusion not in ["success", "skipped"]:
-            return False
-    return True
+            return (False, workflowName + " checks were not successful")
+    return (True, "")
 
 def get_latest_green_commit(commits: List[str], results: Dict[str, Any]) -> Any:
     for commit in commits:
-        if isGreen(commit, results):
+        if isGreen(commit, results)[0]:
             return commit
     return None
 
