@@ -321,6 +321,10 @@ Tensor broadcast_to(const Tensor& self, IntArrayRef size) {
   return self.expand(size);
 }
 
+Tensor broadcast_to(const Tensor& self, c10::SymIntArrayRef sym_size) {
+  return self.expand(self.sym_sizes());
+}
+
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
@@ -2748,6 +2752,9 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   // of freedom we don't want; for example, consider shape [0, 1, 3, 0], with start_dim=1, end_dim=2.
   // It's clear we want result shape [0, 3, 0] but passing [0, -1, 0] to infer_size means the -1
   // can take on any value and satisfy the constraints.
+  std::cout<<"HEY"<<std::endl;
+  std::cout<<self.sizes()<<std::endl;
+  std::cout<<"HEY2"<<std::endl;
   auto slice_numel = c10::multiply_integers(self.sizes().slice(start_dim, end_dim - start_dim + 1));
   std::vector<int64_t> shape;
   shape.reserve(self.dim() - end_dim + start_dim);

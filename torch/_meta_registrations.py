@@ -3,8 +3,10 @@ from torch import Tensor
 from torch._prims import utils
 from torch._prims.utils import check
 from torch._prims.wrappers import out_wrapper_multi, out_wrapper
+from torch.utils._pytree import tree_map
 
 from typing import List, Optional
+aten = torch.ops.aten
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
@@ -16,24 +18,36 @@ def toRealValueType(dtype):
     }
     return from_complex.get(dtype, dtype)
 
+meta_funcs = {}
+
+def register_meta(op):
+    def wrapper(f):
+        def add_func(op):
+            meta_funcs[op] = f
+        tree_map(add_func, op)
+        # name = op.__name__ if op._overloadname != 'default' else op.overloadpacket.__name__
+        return f
+    return wrapper
+
+
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
-@torch.library.impl(meta_lib, "index_select")
+@register_meta(aten.index_select.default)
 def meta_index_select(self, dim, index):
     result_size = list(self.size())
     if self.dim() > 0:
         result_size[dim] = index.numel()
     return self.new_empty(result_size)
 
-@torch.library.impl(meta_lib, "index_select.out")
+@register_meta(aten.index_select.out)
 def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.index_select(self, dim, index))
 
-@torch.library.impl(meta_lib, "max")
+@register_meta(aten.max.default)
 def meta_max(self):
     return self.new_empty(())
 
-@torch.library.impl(meta_lib, "min")
+@register_meta(aten.min.default)
 def meta_min(self):
     return self.new_empty(())
 

@@ -7,12 +7,14 @@ import functools
 from typing import Any, Dict, Optional, Tuple, Callable, Union
 import torch
 from torch._C import _disabled_torch_function_impl
+from torch.fx.experimental.fake_symbolic_tensor import PySymInt
 import torch.utils._pytree as pytree
 from torch.fx import Tracer, GraphModule
 import torch.fx as fx
 from torch.utils._mode_utils import no_dispatch
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager
+from .fake_symbolic_tensor import FakeSymbolicTensor, create_contiguous, ShapeEnv
 
 from torch.utils._python_dispatch import push_torch_dispatch_mode, TorchDispatchMode
 
@@ -41,9 +43,9 @@ def enable_strict(val):
 
 def wrap_output(real_out, proxy_out):
     def wrap_with_proxy(e, proxy):
-        if type(e) == torch.Tensor:
+        if isinstance(e, torch.Tensor):
             with no_dispatch():
-                return ProxyTensor(e, proxy)
+                return ProxyTensor(proxy_out, e.shape, create_contiguous(e.shape), e.dtype, e.layout, e.requires_grad, e.device)
         else:
             return e
 
@@ -59,52 +61,24 @@ def wrap_output(real_out, proxy_out):
     else:
         return real_out
 
+from torch.overrides import enable_reentrant_dispatch
 
-def proxy_call(func_overload, args, kwargs=None):
-    func = func_overload.overloadpacket
-    if func_overload in CURRENT_DECOMPOSITION_TABLE:
-        return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
-    if func_overload == aten._local_scalar_dense.default:
-        raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
-                           "It's likely that this is caused by data-dependent control flow or similar."
-                           "Try torch.fx.experimental.proxy_tensor.enable_strict(False) to disable this check")
 
-    def unwrap_proxy(e):
-        return e.proxy if isinstance(e, ProxyTensor) else e
-
-    proxy_args = pytree.tree_map(unwrap_proxy, args)
-    proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
-
-    proxy_out = func(*proxy_args, **proxy_kwargs)
-
-    # Kind of a hacky way to test if an op is in-place or not
-    if func.__name__[-1] == "_" and func.__name__[0] != "_":
-        args[0].proxy = proxy_out
-        proxy_out.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
-
-    with no_dispatch():
-        real_out = func_overload(*args, **kwargs)
-
-    return wrap_output(real_out, proxy_out)
-
-class ProxyTensor(torch.Tensor):
+class ProxyTensor(FakeSymbolicTensor):
     proxy: fx.Proxy
 
     @staticmethod
-    def __new__(cls, elem, proxy, *, requires_grad=None):
+    def __new__(cls, proxy, sym_shape, sym_strides, dtype, layout, requires_grad, device):
         # Hack to deal with super().__new__ not working for sparse tensors
-        if elem.is_sparse or requires_grad is not None:
-            if requires_grad is None:
-                requires_grad = False
-            r = torch.Tensor._make_subclass(cls, elem, requires_grad)
-        else:
-            r = super().__new__(cls, elem)  # type: ignore[call-arg]
+        def create_proxy_symint(sym_int, new_proxy):
+            return torch._C.SymbolicIntNode.new_symint(ProxySymInt(sym_int, new_proxy))
 
-        if elem.is_sparse:
-            proxy.node.meta['tensor_meta'] = {}
-        else:
-            proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(r)
-        r.proxy = proxy  # type: ignore[attr-defined]
+        r = super().__new__(cls, [create_proxy_symint(sym_shape[i], proxy.size(i)) for i in range(len(sym_shape))], sym_strides, dtype, layout, requires_grad, device)
+        r.proxy = proxy
+        # if elem.is_sparse:
+        #     proxy.node.meta['tensor_meta'] = {}
+        # else:
+        #     proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(r)
 
         return r
 
@@ -119,8 +93,87 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-        return proxy_call(func_overload, args, kwargs)
+        # print(func_overload)
+        func = func_overload.overloadpacket
+        if func_overload in CURRENT_DECOMPOSITION_TABLE:
+            return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
+        if func_overload == aten._local_scalar_dense.default:
+            raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
+                            "It's likely that this is caused by data-dependent control flow or similar."
+                            "Try torch.fx.experimental.proxy_tensor.enable_strict(False) to disable this check")
 
+        def unwrap_proxy(e):
+            return e.proxy if isinstance(e, ProxyTensor) else e
+
+        def unwrap_proxyints(shape):
+            return [e.get_pyobj().sym_int if isinstance(e.get_pyobj(), ProxySymInt) else e for e in shape]
+
+        def unwrap_fake(e):
+            if isinstance(e, ProxyTensor):
+                return FakeSymbolicTensor(unwrap_proxyints(e.shape), None, e.dtype, e.layout, e.requires_grad, e.device)
+            return e
+
+        proxy_args = pytree.tree_map(unwrap_proxy, args)
+        proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
+
+        proxy_out = func(*proxy_args, **proxy_kwargs)
+
+        # Kind of a hacky way to test if an op is in-place or not
+        if func.__name__[-1] == "_" and func.__name__[0] != "_":
+            args[0].proxy = proxy_out
+            proxy_out.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
+
+        real_out = super().__torch_dispatch__(func_overload, types, pytree.tree_map(unwrap_fake, args), pytree.tree_map(unwrap_fake, kwargs))
+
+        return wrap_output(real_out, proxy_out)
+
+
+class ProxySymInt(object):
+    def __init__(self, sym_int, proxy):
+        assert isinstance(sym_int, torch._C.SymbolicIntNode) or isinstance(sym_int, int)
+        self.sym_int = sym_int
+        self.proxy = proxy
+
+    def wrap(self, num):
+        return ProxySymInt(num, num)
+
+    def __str__(self):
+        return f"ProxySymInt({self.sym_int})"
+
+    def __int__(self):
+        return int(self.sym_int)
+
+    def __bool__(self):
+        return bool(self.sym_int)
+
+magic_methods = [
+    'add',
+    # 'radd',
+    'sub',
+    'mul',
+    # 'div',
+    'mod',
+    'eq',
+    'gt',
+    'lt',
+]
+
+import operator
+
+for method in magic_methods:
+    method_name = f'{method}'
+    op = getattr(operator, method_name)
+    def create_magic_impl(op):
+        def magic_impl(self, other):
+            def unwrap_proxy(x): return x.proxy if isinstance(x, ProxySymInt) else x
+            out_proxy = op(unwrap_proxy(self), unwrap_proxy(other))
+            def unwrap_proxyint(x): return x.sym_int if isinstance(x, ProxySymInt) else x
+            out_sym_int = op(unwrap_proxyint(self), unwrap_proxyint(other))
+            return ProxySymInt(out_sym_int, out_proxy)
+        return magic_impl
+
+    # this should be wrapped transparently into torch._C.SymbolicIntNode
+    setattr(ProxySymInt, method_name, create_magic_impl(op))
 
 class PythonKeyTracer(Tracer):
     def __init__(self):
@@ -151,6 +204,10 @@ class PythonKeyTracer(Tracer):
                 setattr(self.root, qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})
+        elif isinstance(a, torch._C.SymbolicIntNode):
+            py_symint = a.get_pyobj()
+            assert isinstance(py_symint, ProxySymInt)
+            return py_symint.proxy.node
         return super().create_arg(a)
 
 
@@ -169,7 +226,13 @@ def dispatch_trace(
     return GraphModule(tracer.root, graph, name)
 
 
-def wrap_key(f, inps):
+def create_proxy_tensor_symbolic(proxy, arg, shape_env):
+    sym_shapes = tuple([shape_env.create_symint(f"{proxy.node.name}_{idx}", val) for idx, val in enumerate(arg.size())])
+    sym_strides = tuple([shape_env.create_symint(f"{proxy.node.name}_{idx}_stride", val) for idx, val in enumerate(arg.stride())])
+    return ProxyTensor(proxy, sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device)
+
+
+def wrap_key(f, inps, create_proxy_tensor):
     flat_inps, _ = pytree.tree_flatten(inps)
 
     @functools.wraps(f)
@@ -179,9 +242,7 @@ def wrap_key(f, inps):
         for idx, arg in enumerate(flat_args):
             if isinstance(flat_inps[idx], torch.Tensor):
                 with no_dispatch():
-                    flat_args[idx] = ProxyTensor(flat_inps[idx], arg, requires_grad=(
-                        flat_inps[idx].is_leaf and flat_inps[idx].requires_grad
-                    ))
+                    flat_args[idx] = create_proxy_tensor(flat_args[idx], flat_inps[idx])
             else:
                 flat_args[idx] = flat_inps[idx]
 
@@ -213,17 +274,20 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
             return wrap_output(real_out, proxy_out)
 
+from functools import partial
+
 
 def make_fx(f, decomposition_table=None, trace_factory_functions=False):
     if decomposition_table is None:
         decomposition_table = {}
-
     @functools.wraps(f)
     def wrapped(*args):
         phs = pytree.tree_map(lambda x: fx.PH, args)  # type: ignore[attr-defined]
+        shape_env = ShapeEnv()
         with decompose(decomposition_table):
-            t = dispatch_trace(wrap_key(f, args), concrete_args=tuple(phs),
+            t = dispatch_trace(wrap_key(f, args, partial(create_proxy_tensor_symbolic, shape_env = shape_env)), concrete_args=tuple(phs),
                                trace_factory_functions=trace_factory_functions)
+            t.shape_env = shape_env
         return t
 
     return wrapped

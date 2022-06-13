@@ -19,6 +19,7 @@ namespace torch { namespace autograd {
 AccumulateGrad::AccumulateGrad(Variable variable_)
    : Node(/*sequence_nr=*/UINT64_MAX),
    variable(std::move(variable_)) {
+  std::cout<<"22"<<std::endl;
   add_input_metadata(variable);
 }
 
