@@ -3394,7 +3394,7 @@ at::Tensor& diagonal_copy_out(const at::Tensor & self, int64_t offset, int64_t d
 
 
 at::Tensor& expand_copy_SymInt_out(const at::Tensor & self, c10::SymIntArrayRef size, bool implicit, at::Tensor & out) {
-  auto tmp = self.expand(size, implicit);
+  auto tmp = self.expand_symint(size, implicit);
   out.copy_(tmp);
   return out;
 }
@@ -3492,13 +3492,6 @@ at::Tensor& t_copy_out(const at::Tensor & self, at::Tensor & out) {
 
 at::Tensor& transpose_copy_int_out(const at::Tensor & self, int64_t dim0, int64_t dim1, at::Tensor & out) {
   auto tmp = self.transpose(dim0, dim1);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& _unsafe_view_copy_out(const at::Tensor & self, at::IntArrayRef size, at::Tensor & out) {
-  auto tmp = at::_unsafe_view(self, size);
   out.copy_(tmp);
   return out;
 }
