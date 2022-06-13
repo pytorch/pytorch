@@ -520,6 +520,24 @@ def log10(a):
     return prims.log10(a)
 
 
+@out_wrapper
+def log_softmax(
+    a: TensorLikeType,
+    dim: int,
+    *,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    result_dtype = dtype or a.dtype
+    computation_dtype = utils.get_computation_dtype(a.dtype)
+    a = prims.convert_element_type(a, computation_dtype)
+    a_max = amax(a, dim, keepdim=True)
+    shifted = a - a_max
+    shifted_logsumexp = logsumexp(shifted, dim, keepdim=True)
+    return prims.convert_element_type(
+        shifted - shifted_logsumexp, result_dtype
+    )
+
+
 def _squeeze_multiple(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     for dim in reversed(dims):
         a = squeeze(a, dim)
