@@ -2225,11 +2225,7 @@ struct InferredType {
   /* implicit */ InferredType(std::string reason)
       : type_(nullptr), reason_(std::move(reason)) {}
   TypePtr type() const {
-    TORCH_INTERNAL_ASSERT(
-        type_,
-        "Tried to get the type from an InferredType but the type is null. ",
-        "Reason: ",
-        reason_);
+    TORCH_INTERNAL_ASSERT(type_);
     return type_;
   }
   bool success() const {

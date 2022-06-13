@@ -1,5 +1,3 @@
-# Only used for PyTorch open source BUCK build
-
 """Provides macros for queries type information."""
 
 _SELECT_TYPE = type(select({"DEFAULT": []}))

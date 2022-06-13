@@ -3264,18 +3264,7 @@ class IrParser {
   }
 
   bool registerScalar(const JitValue* val) {
-    if (val->type()->isSubtypeOf(
-            static_cast<c10::TypePtr>(ComplexType::get()))) {
-      CgValue cg_val = nullptr;
-      if (auto ival = constant_as<c10::complex<double>>(val)) {
-        cg_val = IrBuilder::create<ComplexDouble>(ival.value());
-      } else {
-        cg_val = IrBuilder::create<ComplexDouble>();
-      }
-      value_map_.emplace(val->unique(), cg_val);
-      return true;
-    } else if (val->type()->isSubtypeOf(
-                   static_cast<c10::TypePtr>(FloatType::get()))) {
+    if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(FloatType::get()))) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
       if (auto ival = constant_as<double>(val)) {

@@ -108,9 +108,7 @@ __device__ void sync(
         index_utils::maskedIsLast<X_BLOCK, Y_BLOCK, Z_BLOCK>(blockIdx, gridDim);
     if (last_block) {
       int64_t finished_val =
-          ((int64_t)(
-              index_utils::maskedSize<X_BLOCK, Y_BLOCK, Z_BLOCK>(gridDim) -
-              1)) *
+          ((int64_t)(index_utils::maskedSize<X_BLOCK, Y_BLOCK, Z_BLOCK>(gridDim) - 1)) *
           ((int64_t)n_entrances);
 
       unsigned int ns = 8;

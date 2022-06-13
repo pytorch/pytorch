@@ -4905,10 +4905,9 @@ class DistributedTest:
             # so cannot deep copy an averager. See:
             # https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496
             averager2 = create_averager()
-            post_localSGD_opt = self._create_post_localSGD_optimizer(
-                net_using_post_localSGD_opt,
-                learning_rate,
-                averager2
+            post_localSGD_opt = post_localSGD_optimizer.PostLocalSGDOptimizer(
+                optim=torch.optim.SGD(net_using_post_localSGD_opt.parameters(), lr=learning_rate),
+                averager=averager2,
             )
 
             input = torch.randn(dist.get_world_size() * 2, 2).cuda()
@@ -4916,16 +4915,18 @@ class DistributedTest:
             loss_fn = nn.MSELoss()
 
             for _ in range(20):
-                self._perform_a_train_step(opt, net, loss_fn, input, target)
+                opt.zero_grad()
+                output = net(input)
+                loss = loss_fn(output, target)
+                loss.backward()
+                opt.step()
                 averager.average_parameters(net.parameters())
 
-                self._perform_a_train_step(
-                    post_localSGD_opt,
-                    net_using_post_localSGD_opt,
-                    loss_fn,
-                    input,
-                    target
-                )
+                post_localSGD_opt.zero_grad()
+                output_using_post_localSGD_opt = net_using_post_localSGD_opt(input)
+                loss_using_post_localSGD_opt = loss_fn(output_using_post_localSGD_opt, target)
+                loss_using_post_localSGD_opt.backward()
+                post_localSGD_opt.step()
                 for p1, p2 in zip(net.parameters(), net_using_post_localSGD_opt.parameters()):
                     self.assertEqual(p1.data, p2.data)
 
@@ -4934,86 +4935,6 @@ class DistributedTest:
 
         def _create_periodic_model_averager(self):
             return averagers.PeriodicModelAverager(period=4, warmup_steps=10)
-
-        def _create_post_localSGD_optimizer(self, net, learning_rate, averager):
-            return post_localSGD_optimizer.PostLocalSGDOptimizer(
-                optim=torch.optim.SGD(net.parameters(), lr=learning_rate),
-                averager=averager,
-            )
-
-        def _perform_a_train_step(self, optimizer, net, loss_fn, input, target):
-            optimizer.zero_grad()
-            output = net(input)
-            loss = loss_fn(output, target)
-            loss.backward()
-            optimizer.step()
-
-        def _test_post_localSGD_optimizer_step_reload(self, create_averager):
-            learning_rate = 0.03
-            chkpt_file = tempfile.gettempdir() + "/checkpoint.pt"
-
-            net_using_post_localSGD_opt = torch.nn.parallel.DistributedDataParallel(
-                copy.deepcopy(DDP_NET).cuda(),
-                device_ids=[self.rank]
-            )
-
-            averager = create_averager()
-            post_localSGD_opt = self._create_post_localSGD_optimizer(
-                net_using_post_localSGD_opt,
-                learning_rate,
-                averager
-            )
-
-            averager2 = create_averager()
-            dummy_post_localSGD_opt = self._create_post_localSGD_optimizer(
-                net_using_post_localSGD_opt,
-                learning_rate,
-                averager2
-            )
-
-            input = torch.randn(dist.get_world_size() * 2, 2).cuda()
-            target = torch.randn(dist.get_world_size() * 2, 4).cuda()
-            loss_fn = nn.MSELoss()
-
-            for _ in range(20):
-                self._perform_a_train_step(
-                    post_localSGD_opt,
-                    net_using_post_localSGD_opt,
-                    loss_fn,
-                    input,
-                    target
-                )
-
-            if self.rank == 0:
-                torch.save({'optimizer_state_dict': post_localSGD_opt.state_dict()}, chkpt_file)
-
-            dist.barrier()
-            map_location = {'cuda:%d' % 0: 'cuda:%d' % self.rank}
-            checkpoint = torch.load(chkpt_file, map_location=map_location)
-            dummy_post_localSGD_opt.load_state_dict(checkpoint['optimizer_state_dict'])
-
-            # Check that we didn't hit the trivial case
-            self.assertNotEqual(averager2.step, 0)
-            # Check if dummy averager was initialized to a correct value
-            self.assertEqual(averager.step, averager2.step)
-
-            # Remove 'step' entry from a checkpoint.
-            # And make sure it is not in the state dictionary
-            del checkpoint['optimizer_state_dict']['step']
-            self.assertNotIn('step', checkpoint['optimizer_state_dict'])
-
-            # Check if checkpoint without a 'step' entry invokes a warning
-            with self.assertWarnsRegex(
-                expected_warning=UserWarning,
-                expected_regex="Loaded state dict does not contain a step counter for an averager. "
-                "Setting step counter to 0."
-            ):
-                dummy_post_localSGD_opt.load_state_dict(checkpoint['optimizer_state_dict'])
-
-            self.assertEqual(averager2.step, 0)
-
-            if self.rank == 0:
-                os.remove(chkpt_file)
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
@@ -5069,17 +4990,6 @@ class DistributedTest:
             self._test_post_localSGD_optimizer_parity(
                 self._create_hierarchical_model_averager,
                 grad_is_view=True,
-            )
-
-        @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(
-            BACKEND not in DistTestCases.backend_feature["ddp"],
-            f"The {BACKEND} backend does not support DistributedDataParallel"
-        )
-        def test_post_localSGD_optimizer_step_reload(self):
-            torch.cuda.set_device(self.rank)
-            self._test_post_localSGD_optimizer_step_reload(
-                self._create_periodic_model_averager
             )
 
         @sandcastle_skip_if(

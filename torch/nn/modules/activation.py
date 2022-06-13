@@ -734,7 +734,7 @@ class LeakyReLU(Module):
     or
 
     .. math::
-        \text{LeakyReLU}(x) =
+        \text{LeakyRELU}(x) =
         \begin{cases}
         x, & \text{ if } x \geq 0 \\
         \text{negative\_slope} \times x, & \text{ otherwise }

@@ -253,14 +253,14 @@ class DataLoader(Generic[T_co]):
                 self.worker_init_fn = functools.partial(
                     _sharding_worker_init_fn, self.worker_init_fn, ws, rank)
             else:
-                torch.utils.data.graph_settings.apply_sharding(self.dataset, ws, rank)
+                self.dataset = torch.utils.data.graph_settings.apply_sharding(self.dataset, ws, rank)
         elif isinstance(self.dataset, MapDataPipe):
             self.dataset = _MapDataPipeSerializationWrapper(self.dataset)
             if num_workers > 0:
                 self.worker_init_fn = functools.partial(
                     _sharding_worker_init_fn, self.worker_init_fn, ws, rank)
             else:
-                torch.utils.data.graph_settings.apply_sharding(self.dataset, ws, rank)
+                self.dataset = torch.utils.data.graph_settings.apply_sharding(self.dataset, ws, rank)
 
 
         # Arg-check dataset related before checking samplers because we want to

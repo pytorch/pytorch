@@ -110,9 +110,6 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::WelfordOp:
       ptr(handler)->handle(expr->as<WelfordOp>());
       return;
-    case ExprType::LoadStoreOp:
-      ptr(handler)->handle(expr->as<LoadStoreOp>());
-      return;
     case ExprType::MmaOp:
       ptr(handler)->handle(expr->as<MmaOp>());
       return;
@@ -150,9 +147,6 @@ void Expr::dispatch(T handler, Expr* expr) {
       return;
     case ExprType::GridSync:
       ptr(handler)->handle(expr->as<kir::GridSync>());
-      return;
-    case ExprType::CpAsyncWait:
-      ptr(handler)->handle(expr->as<kir::CpAsyncWait>());
       return;
     case ExprType::InitMagicZero:
       ptr(handler)->handle(expr->as<kir::InitMagicZero>());
@@ -266,9 +260,6 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::WelfordOp:
       ptr(handler)->handle(expr->as<WelfordOp>());
       return;
-    case ExprType::LoadStoreOp:
-      ptr(handler)->handle(expr->as<LoadStoreOp>());
-      return;
     case ExprType::MmaOp:
       ptr(handler)->handle(expr->as<MmaOp>());
       return;
@@ -306,9 +297,6 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::GridSync:
       ptr(handler)->handle(expr->as<kir::GridSync>());
-      return;
-    case ExprType::CpAsyncWait:
-      ptr(handler)->handle(expr->as<kir::CpAsyncWait>());
       return;
     case ExprType::InitMagicZero:
       ptr(handler)->handle(expr->as<kir::InitMagicZero>());
@@ -430,9 +418,6 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
     case ExprType::WelfordOp:
       ptr(mutator)->mutate(expr->as<WelfordOp>());
       return;
-    case ExprType::LoadStoreOp:
-      ptr(mutator)->mutate(expr->as<LoadStoreOp>());
-      return;
     case ExprType::MmaOp:
       ptr(mutator)->mutate(expr->as<MmaOp>());
       return;
@@ -470,9 +455,6 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
       return;
     case ExprType::GridSync:
       ptr(mutator)->mutate(expr->as<kir::GridSync>());
-      return;
-    case ExprType::CpAsyncWait:
-      ptr(mutator)->mutate(expr->as<kir::CpAsyncWait>());
       return;
     case ExprType::InitMagicZero:
       ptr(mutator)->mutate(expr->as<kir::InitMagicZero>());
@@ -659,9 +641,6 @@ void OptOutConstDispatch::handle(const GroupedReductionOp* stmt) {
 void OptOutConstDispatch::handle(const WelfordOp* stmt) {
   unhandled(stmt);
 }
-void OptOutConstDispatch::handle(const LoadStoreOp* stmt) {
-  unhandled(stmt);
-}
 void OptOutConstDispatch::handle(const MmaOp* stmt) {
   unhandled(stmt);
 }
@@ -698,9 +677,6 @@ void OptOutConstDispatch::handle(const kir::BlockSync* stmt) {
   unhandled(stmt);
 }
 void OptOutConstDispatch::handle(const kir::GridSync* stmt) {
-  unhandled(stmt);
-}
-void OptOutConstDispatch::handle(const kir::CpAsyncWait* stmt) {
   unhandled(stmt);
 }
 void OptOutConstDispatch::handle(const kir::InitMagicZero* stmt) {
@@ -785,9 +761,6 @@ void OptOutDispatch::handle(GroupedReductionOp* stmt) {
 void OptOutDispatch::handle(WelfordOp* stmt) {
   unhandled(stmt);
 }
-void OptOutDispatch::handle(LoadStoreOp* stmt) {
-  unhandled(stmt);
-}
 void OptOutDispatch::handle(MmaOp* stmt) {
   unhandled(stmt);
 }
@@ -824,9 +797,6 @@ void OptOutDispatch::handle(kir::BlockSync* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::GridSync* stmt) {
-  unhandled(stmt);
-}
-void OptOutDispatch::handle(kir::CpAsyncWait* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::InitMagicZero* stmt) {
