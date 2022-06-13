@@ -20,9 +20,6 @@ on:
         required: true
         description: secret acess key for test stats upload
 
-env:
-  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
 defaults:
   run:
