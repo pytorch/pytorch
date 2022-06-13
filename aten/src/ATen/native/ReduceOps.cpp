@@ -670,12 +670,12 @@ template<typename T1, typename T2, typename Operation>
 void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data,
           int self_dim_size, int self_stride, int values_stride, int indices_stride) {
       Operation op;
-      T1 out = self_data[0];
+      T1 out = c10::load(self_data);
       int idx = 0;
       for (const auto i : c10::irange(self_dim_size)) {
-        T1 curr_elem = self_data[i*self_stride];
+        T1 curr_elem = c10::load(&self_data[i*self_stride]);
         if(isnan_(curr_elem) || (!isnan_(out) && op(curr_elem, out))) {
-            out = self_data[i*self_stride];
+            out = curr_elem;
             idx = i;
         }
         values_data[i*values_stride] = out;
@@ -1987,7 +1987,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       char* other_data = data[1];
       for (const auto i : c10::irange(dim_size)) {
         (void)i; //Suppress unused variable warning
-        if (*((scalar_t*)self_data) != *((scalar_t*)other_data)) {
+        if (c10::load<scalar_t>(self_data) != c10::load<scalar_t>(other_data)) {
           result = false;
           return;
         }
