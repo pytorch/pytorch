@@ -102,16 +102,5 @@ class TestNonUniformObserver(unittest.TestCase):
 
         self.assertTrue(unique_elts)
 
-    # def test_override_calculate_qparams(self):
-    #     t = torch.Tensor()
-    #     obs = APoTObserver(t, t, t, 0, 0)
-
-    #     raised = False
-    #     try:
-    #         obs._calculate_qparams(t, t)
-    #     except Exception:
-    #         raised = True
-    #     self.assertFalse(raised, 'Exception raised')
-
 if __name__ == '__main__':
     unittest.main()
