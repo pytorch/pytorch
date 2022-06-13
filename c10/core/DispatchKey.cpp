@@ -46,6 +46,9 @@ const char* toString(DispatchKey t) {
   switch (t) {
     case DispatchKey::Undefined:
       return "Undefined";
+
+    case DispatchKey::StartOfDenseBackends:
+      return "StartOfDenseBackends";
     case DispatchKey::CPU:
       return "CPU";
     case DispatchKey::CUDA:
@@ -56,24 +59,35 @@ const char* toString(DispatchKey t) {
       return "VE";
     case DispatchKey::FPGA:
       return "FPGA";
-    case DispatchKey::XPU:
-      return "XPU";
     case DispatchKey::IPU:
       return "IPU";
     case DispatchKey::ORT:
       return "ORT";
-    case DispatchKey::XLA:
-      return "XLA";
-    case DispatchKey::Lazy:
-      return "Lazy";
-    case DispatchKey::MPS:
-      return "MPS";
-    case DispatchKey::HPU:
-      return "HPU";
     case DispatchKey::Vulkan:
       return "Vulkan";
     case DispatchKey::Metal:
       return "Metal";
+    case DispatchKey::XLA:
+      return "XLA";
+    case DispatchKey::Lazy:
+      return "Lazy";
+    case DispatchKey::Meta:
+      return "Meta";
+    case DispatchKey::MPS:
+      return "MPS";
+    case DispatchKey::HPU:
+      return "HPU";
+    case DispatchKey::PrivateUse1:
+      return "PrivateUse1";
+    case DispatchKey::PrivateUse2:
+      return "PrivateUse2";
+    case DispatchKey::PrivateUse3:
+      return "PrivateUse3";
+    case DispatchKey::MkldnnCPU:
+      return "MkldnnCPU";
+
+    case DispatchKey::StartOfQuantizedBackends:
+      return "StartOfQuantizedBackends";
     case DispatchKey::QuantizedCPU:
       return "QuantizedCPU";
     case DispatchKey::QuantizedCUDA:
@@ -82,14 +96,14 @@ const char* toString(DispatchKey t) {
       return "QuantizedHIP";
     case DispatchKey::QuantizedVE:
       return "QuantizedVE";
-    case DispatchKey::QuantizedXPU:
-      return "QuantizedXPU";
     case DispatchKey::QuantizedIPU:
       return "QuantizedIPU";
     case DispatchKey::QuantizedXLA:
       return "QuantizedXLA";
     case DispatchKey::QuantizedLazy:
       return "QuantizedLazy";
+    case DispatchKey::QuantizedMeta:
+      return "QuantizedMeta";
     case DispatchKey::QuantizedMPS:
       return "QuantizedMPS";
     case DispatchKey::QuantizedHPU:
@@ -101,11 +115,8 @@ const char* toString(DispatchKey t) {
     case DispatchKey::QuantizedPrivateUse3:
       return "QuantizedPrivateUse3";
 
-    case DispatchKey::CustomRNGKeyId:
-      return "CustomRNGKeyId";
-    case DispatchKey::MkldnnCPU:
-      return "MkldnnCPU";
-
+    case DispatchKey::StartOfSparseBackends:
+      return "StartOfSparseBackends";
     case DispatchKey::SparseCPU:
       return "SparseCPU";
     case DispatchKey::SparseCUDA:
@@ -114,14 +125,14 @@ const char* toString(DispatchKey t) {
       return "SparseHIP";
     case DispatchKey::SparseVE:
       return "SparseVE";
-    case DispatchKey::SparseXPU:
-      return "SparseXPU";
     case DispatchKey::SparseIPU:
       return "SparseIPU";
     case DispatchKey::SparseXLA:
       return "SparseXLA";
     case DispatchKey::SparseLazy:
       return "SparseLazy";
+    case DispatchKey::SparseMeta:
+      return "SparseMeta";
     case DispatchKey::SparseMPS:
       return "SparseMPS";
     case DispatchKey::SparseHPU:
@@ -133,6 +144,8 @@ const char* toString(DispatchKey t) {
     case DispatchKey::SparsePrivateUse3:
       return "SparsePrivateUse3";
 
+    case DispatchKey::StartOfSparseCsrBackends:
+      return "StartOfSparseCsrBackends";
     case DispatchKey::SparseCsrCPU:
       return "SparseCsrCPU";
     case DispatchKey::SparseCsrCUDA:
@@ -141,14 +154,14 @@ const char* toString(DispatchKey t) {
       return "SparseCsrHIP";
     case DispatchKey::SparseCsrVE:
       return "SparseCsrVE";
-    case DispatchKey::SparseCsrXPU:
-      return "SparseCsrXPU";
     case DispatchKey::SparseCsrIPU:
       return "SparseCsrIPU";
     case DispatchKey::SparseCsrXLA:
       return "SparseCsrXLA";
     case DispatchKey::SparseCsrLazy:
       return "SparseCsrLazy";
+    case DispatchKey::SparseCsrMeta:
+      return "SparseCsrMeta";
     case DispatchKey::SparseCsrMPS:
       return "SparseCsrMPS";
     case DispatchKey::SparseCsrHPU:
@@ -160,8 +173,8 @@ const char* toString(DispatchKey t) {
     case DispatchKey::SparseCsrPrivateUse3:
       return "SparseCsrPrivateUse3";
 
-    case DispatchKey::NestedTensor:
-      return "NestedTensor";
+    case DispatchKey::StartOfNestedTensorBackends:
+      return "StartOfNestedTensorBackends";
     case DispatchKey::NestedTensorCPU:
       return "NestedTensorCPU";
     case DispatchKey::NestedTensorCUDA:
@@ -170,14 +183,14 @@ const char* toString(DispatchKey t) {
       return "NestedTensorHIP";
     case DispatchKey::NestedTensorVE:
       return "NestedTensorVE";
-    case DispatchKey::NestedTensorXPU:
-      return "NestedTensorXPU";
     case DispatchKey::NestedTensorIPU:
       return "NestedTensorIPU";
     case DispatchKey::NestedTensorXLA:
       return "NestedTensorXLA";
     case DispatchKey::NestedTensorLazy:
       return "NestedTensorLazy";
+    case DispatchKey::NestedTensorMeta:
+      return "NestedTensorMeta";
     case DispatchKey::NestedTensorMPS:
       return "NestedTensorMPS";
     case DispatchKey::NestedTensorHPU:
@@ -189,36 +202,12 @@ const char* toString(DispatchKey t) {
     case DispatchKey::NestedTensorPrivateUse3:
       return "NestedTensorPrivateUse3";
 
-    case DispatchKey::Python:
-      return "Python";
-    case DispatchKey::PythonTLSSnapshot:
-      return "PythonTLSSnapshot";
-
-    case DispatchKey::PrivateUse1:
-      return "PrivateUse1";
-    case DispatchKey::PrivateUse2:
-      return "PrivateUse2";
-    case DispatchKey::PrivateUse3:
-      return "PrivateUse3";
-
-    case DispatchKey::Negative:
-      return "Negative";
-    case DispatchKey::Conjugate:
-      return "Conjugate";
-    case DispatchKey::Meta:
-      return "Meta";
-
-    case DispatchKey::ADInplaceOrView:
-      return "ADInplaceOrView";
-
-    case DispatchKey::Autograd:
-      return "Autograd";
+    case DispatchKey::StartOfAutogradBackends:
+      return "StartOfAutogradBackends";
     case DispatchKey::AutogradCPU:
       return "AutogradCPU";
     case DispatchKey::AutogradIPU:
       return "AutogradIPU";
-    case DispatchKey::AutogradXPU:
-      return "AutogradXPU";
     case DispatchKey::AutogradCUDA:
       return "AutogradCUDA";
     case DispatchKey::AutogradHIP:
@@ -241,17 +230,13 @@ const char* toString(DispatchKey t) {
       return "AutogradPrivateUse2";
     case DispatchKey::AutogradPrivateUse3:
       return "AutogradPrivateUse3";
-    case DispatchKey::AutogradOther:
-      return "AutogradOther";
-    case DispatchKey::AutogradNestedTensor:
-      return "AutogradNestedTensor";
 
+    case DispatchKey::StartOfAutocastBackends:
+      return "StartOfAutocastBackends";
     case DispatchKey::AutocastCPU:
       return "AutocastCPU";
     case DispatchKey::AutocastIPU:
       return "AutocastIPU";
-    case DispatchKey::AutocastXPU:
-      return "AutocastXPU";
     case DispatchKey::AutocastCUDA:
       return "AutocastCUDA";
     case DispatchKey::AutocastHIP:
@@ -260,6 +245,8 @@ const char* toString(DispatchKey t) {
       return "AutocastXLA";
     case DispatchKey::AutocastLazy:
       return "AutocastLazy";
+    case DispatchKey::AutocastMeta:
+      return "AutocastMeta";
     case DispatchKey::AutocastMPS:
       return "AutocastMPS";
     case DispatchKey::AutocastHPU:
@@ -273,60 +260,8 @@ const char* toString(DispatchKey t) {
     case DispatchKey::AutocastPrivateUse3:
       return "AutocastPrivateUse3";
 
-    case DispatchKey::ZeroTensor:
-      return "ZeroTensor";
-    case DispatchKey::BackendSelect:
-      return "BackendSelect";
-    case DispatchKey::Named:
-      return "Named";
-
-    case DispatchKey::Functionalize:
-      return "Functionalize";
-
-    case DispatchKey::Tracer:
-      return "Tracer";
-
-    case DispatchKey::Batched:
-      return "Batched";
-
-    case DispatchKey::VmapMode:
-      return "VmapMode";
-
-    case DispatchKey::CompositeImplicitAutograd:
-      return "CompositeImplicitAutograd";
-
-    case DispatchKey::CompositeExplicitAutograd:
-      return "CompositeExplicitAutograd";
-
-    case DispatchKey::TESTING_ONLY_GenericWrapper:
-      return "TESTING_ONLY_GenericWrapper";
-
-    case DispatchKey::TESTING_ONLY_GenericMode:
-      return "TESTING_ONLY_GenericMode";
-
-    // Note [Out-of-tree vmap+grad prototype]
-    // The following keys are used in the implementation of the out-of-tree
-    // composable functions transforms (vmap+grad) prototype that lives at
-    // https://github.com/zou3519/functorch
-    // We plan on eventually upstreaming the prototype into core, at which
-    // point it will have a different design that should use fewer keys.
-    case DispatchKey::FuncTorchDynamicLayerBackMode:
-      return "FuncTorchDynamicLayerBackMode";
-    case DispatchKey::FuncTorchDynamicLayerFrontMode:
-      return "FuncTorchDynamicLayerFrontMode";
-    case DispatchKey::FuncTorchGradWrapper:
-      return "FuncTorchGradWrapper";
-    case DispatchKey::FuncTorchVmapMode:
-      return "FuncTorchVmapMode";
-    case DispatchKey::FuncTorchBatched:
-      return "FuncTorchBatched";
-
-    // Out-of-core torchdistX dispatch keys
-    case DispatchKey::Fake:
-      return "Fake";
-    case DispatchKey::DeferredInit:
-      return "DeferredInit";
-
+    case DispatchKey::CustomRNGKeyId:
+      return "CustomRNGKeyId";
     case DispatchKey::Dense:
       return "Dense";
     case DispatchKey::Quantized:
@@ -335,10 +270,79 @@ const char* toString(DispatchKey t) {
       return "Sparse";
     case DispatchKey::SparseCsr:
       return "SparseCsr";
+    case DispatchKey::NestedTensor:
+      return "NestedTensor";
+    case DispatchKey::BackendSelect:
+      return "BackendSelect";
+    case DispatchKey::Python:
+      return "Python";
+    // Out-of-core torchdistX dispatch keys
+    case DispatchKey::Fake:
+      return "Fake";
+    // Note [Out-of-tree vmap+grad prototype]
+    // The following keys are used in the implementation of the out-of-tree
+    // composable functions transforms (vmap+grad) prototype that lives at
+    // https://github.com/zou3519/functorch
+    // We plan on eventually upstreaming the prototype into core, at which
+    // point it will have a different design that should use fewer keys.
+    case DispatchKey::FuncTorchDynamicLayerBackMode:
+      return "FuncTorchDynamicLayerBackMode";
+    case DispatchKey::Functionalize:
+      return "Functionalize";
+    case DispatchKey::Named:
+      return "Named";
+    case DispatchKey::Conjugate:
+      return "Conjugate";
+    case DispatchKey::Negative:
+      return "Negative";
+    case DispatchKey::ZeroTensor:
+      return "ZeroTensor";
+    case DispatchKey::ADInplaceOrView:
+      return "ADInplaceOrView";
+    case DispatchKey::AutogradOther:
+      return "AutogradOther";
     case DispatchKey::AutogradFunctionality:
       return "AutogradFunctionality";
+    case DispatchKey::AutogradNestedTensor:
+      return "AutogradNestedTensor";
+    case DispatchKey::Tracer:
+      return "Tracer";
     case DispatchKey::AutocastFunctionality:
       return "AutocastFunctionality";
+    case DispatchKey::FuncTorchBatched:
+      return "FuncTorchBatched";
+    case DispatchKey::FuncTorchVmapMode:
+      return "FuncTorchVmapMode";
+    case DispatchKey::Batched:
+      return "Batched";
+    case DispatchKey::VmapMode:
+      return "VmapMode";
+    case DispatchKey::FuncTorchGradWrapper:
+      return "FuncTorchGradWrapper";
+    case DispatchKey::DeferredInit:
+      return "DeferredInit";
+    case DispatchKey::PythonTLSSnapshot:
+      return "PythonTLSSnapshot";
+    case DispatchKey::FuncTorchDynamicLayerFrontMode:
+      return "FuncTorchDynamicLayerFrontMode";
+
+    case DispatchKey::TESTING_ONLY_GenericWrapper:
+      return "TESTING_ONLY_GenericWrapper";
+    case DispatchKey::TESTING_ONLY_GenericMode:
+      return "TESTING_ONLY_GenericMode";
+
+
+    case DispatchKey::Autograd:
+      return "Autograd";
+
+    case DispatchKey::Autocast:
+      return "Autocast";
+
+    case DispatchKey::CompositeImplicitAutograd:
+      return "CompositeImplicitAutograd";
+
+    case DispatchKey::CompositeExplicitAutograd:
+      return "CompositeExplicitAutograd";
 
     default:
       return "UNKNOWN_TENSOR_TYPE_ID";
@@ -450,6 +454,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradPrivateUse3", c10::DispatchKey::AutogradPrivateUse3},
 
       {"Autograd", c10::DispatchKey::Autograd},
+      {"Autocast", c10::DispatchKey::Autocast},
       {"CompositeImplicitAutograd",
        c10::DispatchKey::CompositeImplicitAutograd},
       {"CompositeExplicitAutograd",

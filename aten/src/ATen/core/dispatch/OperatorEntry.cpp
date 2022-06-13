@@ -230,6 +230,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //    The implementation of (2.2) relies on the invariant that for a given backend,
   //    `computeDispatchTableEntryWithDebug()` will be called for that backend's autograd key after the
   //    backend key. See Note [Refresh Runtime Autograd entries in dispatchTable_]
+  //    (2.4) Use kernel from DispatchKey::Autocast if available
   //  (3) Use fallthrough kernel that are registered as fallback.
   // Alias Key Precedence:
   //   CompositeExplicitAutograd > CompositeImplicitAutograd > Autograd
@@ -279,6 +280,13 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)) {
     if (auto autograd_registration = getKernelForDispatchKey(DispatchKey::Autograd)) {
       return {*autograd_registration, "autograd kernel"};
+    }
+  }
+
+  // 2.4. For autocast keys, use the kernel from the alias `DispatchKey::Autocast`
+  if (isIncludedInAlias(dispatch_key, DispatchKey::Autocast)) {
+    if (auto autocast_registration = getKernelForDispatchKey(DispatchKey::Autocast)) {
+      return {*autocast_registration, "autocast kernel"};
     }
   }
 

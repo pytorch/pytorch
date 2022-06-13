@@ -38,6 +38,9 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
       // dispatch keys, like AutogradCPU, but that requires having backend bits.
       return autograd_dispatch_keyset |
           DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
+    case DispatchKey::Autocast:
+      return DispatchKeySet(DispatchKey::AutocastFunctionality) |
+          DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
     case DispatchKey::CompositeImplicitAutograd:
       return math_dispatch_keyset;
     case DispatchKey::CompositeExplicitAutograd:
@@ -52,6 +55,8 @@ bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
   switch (t) {
     case DispatchKey::Autograd:
       return autograd_dispatch_keyset.has(toFunctionalityKey(k));
+    case DispatchKey::Autocast:
+      return toFunctionalityKey(k) == DispatchKey::AutocastFunctionality;
     case DispatchKey::CompositeImplicitAutograd:
       // See Note [NestedTensor Not Included in Backend Keys]
       return k != DispatchKey::NestedTensor && math_dispatch_keyset.has(k);

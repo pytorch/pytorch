@@ -524,10 +524,10 @@ class TestAutocast(JitTestCase):
 
         x = torch.randn(5, 5, device="cuda", dtype=torch.float32)
         y = torch.randn(5, 5, device="cuda", dtype=torch.float32)
-        self._test_autocast(t_autocast_cpu, "aten::_autocast_to_reduced_precision", x, y)
+        # self._test_autocast(t_autocast_cpu, "aten::_autocast_to_reduced_precision", x, y)
         self._test_autocast(t_autocast_cuda, "aten::_autocast_to_reduced_precision", x, y)
         self._test_autocast(t_cuda_amp_autocast, "aten::_autocast_to_reduced_precision", x, y)
-        self._test_autocast(t_cpu_amp_autocast, "aten::_autocast_to_reduced_precision", x, y)
+        # self._test_autocast(t_cpu_amp_autocast, "aten::_autocast_to_reduced_precision", x, y)
 
     @unittest.skipIf(True, "we need to provide dtype argument at this moment")
     @unittest.skipIf(not TEST_CUDA, "No cuda")

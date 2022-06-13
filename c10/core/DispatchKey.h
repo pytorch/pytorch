@@ -576,6 +576,10 @@ enum class DispatchKey : uint16_t {
 
   // See Note [Alias Dispatch Key : Autograd]
   Autograd,
+  // Alias key for all autocast keys
+  // Today, all of the autocast CUDA rules get registered to the alias key
+  // (so they can be re-used by both CUDA and XLA)
+  Autocast,
   CompositeImplicitAutograd, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
   CompositeExplicitAutograd, // registered at
@@ -595,7 +599,6 @@ enum class DispatchKey : uint16_t {
   PrivateUse1_PreAutograd = AutogradPrivateUse1,
   PrivateUse2_PreAutograd = AutogradPrivateUse2,
   PrivateUse3_PreAutograd = AutogradPrivateUse3,
-  Autocast = AutocastCUDA,
 };
 
 // Note [Private use DispatchKey]

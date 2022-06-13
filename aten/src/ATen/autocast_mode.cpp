@@ -479,10 +479,6 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
          TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
 }
 
-TORCH_LIBRARY_IMPL(_, AutocastCPU, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
-}
-
 TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   // lower_precision_fp cast policy
   KERNEL_CPU(ADD_NS(conv1d), "conv1d", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), lower_precision_fp)
