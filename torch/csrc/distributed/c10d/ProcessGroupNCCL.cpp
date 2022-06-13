@@ -14,11 +14,11 @@
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
-#include <c10/util/CallOnce.h>
 #include <c10d/ParamCommsUtils.hpp>
 #include <c10d/TraceUtils.h>
 #include <c10d/Utils.hpp>
