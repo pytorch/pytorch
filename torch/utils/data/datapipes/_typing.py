@@ -504,6 +504,16 @@ def hook_iterator(namespace, profile_name):
         def wrap_generator(*args, **kwargs):
             gen = func(*args, **kwargs)
             datapipe = args[0]
+            if datapipe._fast_forward_iterator:
+                print("Returning fast-forward iterator")
+                print("Iterator in wrap_generator", datapipe._fast_forward_iterator)
+                # print(list(datapipe._fast_forward_iterator))
+                while True:
+                    try:
+                        yield next(datapipe._fast_forward_iterator)
+                    except StopIteration:
+                        datapipe._fast_forward_iterator = None
+                        return
             iterator_id = _set_datapipe_valid_iterator_id(datapipe)  # This ID is tied to each created iterator
             _profiler_enabled = torch.autograd._profiler_enabled()
             try:

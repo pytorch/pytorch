@@ -2588,5 +2588,79 @@ class TestIterDataPipeSingletonConstraint(TestCase):
             next(it1)
         self.assertEqual(1, next(it3))
 
+
+class TestIterDataPipeFastForward(TestCase):
+
+    def test_iterable_wrapper_fast_forward(self):
+        datapipe = dp.iter.IterableWrapper(range(10))
+        res = list(datapipe)
+
+        # Test Case: fast forward works with list
+        n_elements = 5
+        datapipe.fast_forward(n_elements)
+        self.assertEqual(res[n_elements:], list(datapipe))
+
+        # Test Case: fast forward works with iterator
+        datapipe.fast_forward(n_elements)
+        it = iter(datapipe)
+        self.assertEqual(res[n_elements:], list(it))
+        with self.assertRaises(StopIteration):
+            next(it)
+
+    def test_mapper_fast_forward(self):
+        datapipe = dp.iter.IterableWrapper(range(10))
+        datapipe = datapipe.map(lambda x: x + 1)
+        res = list(datapipe)
+
+        # Test Case: fast forward works with list
+        n_elements = 5
+        datapipe.fast_forward(n_elements)
+        print(res)
+        print(list(datapipe))
+        # self.assertEqual(res[n_elements:], list(datapipe))
+
+        # Test Case: fast forward works with iterator
+        datapipe.fast_forward(n_elements)
+        it = iter(datapipe)
+        # self.assertEqual(res[n_elements:], list(it))
+        # with self.assertRaises(StopIteration):
+        #     next(it)
+
+
+class TestIterDataPipeFastForwardWithBuffer(TestCase):
+
+
+    def test_shuffler_fast_forward(self):
+        datapipe = dp.iter.IterableWrapper(range(10))
+        datapipe = datapipe.shuffle()
+        datapipe.set_seed(0)
+        res = list(datapipe)
+
+        # Test Case: fast forward works with list
+        n_elements = 5
+        # TODO: Must set seed (or restore seed) before fast-forwarding, is this fine?
+        #       In a real example, `self._rng` should be restored but what we want to save is the initial seed,
+        #       because fast_forward is starting from the beginning again. We can potentially add an instance variable
+        #       to remember the last initial seed, only for the purpose of fast-forwarding.
+        datapipe.set_seed(0)
+        datapipe.fast_forward(n_elements)
+        self.assertEqual(res[n_elements:], list(datapipe))
+
+        # Test Case: fast forward works with iterator
+        datapipe.set_seed(0)
+        datapipe.fast_forward(n_elements)
+        it = iter(datapipe)
+        self.assertEqual(res[n_elements:], list(it))
+        with self.assertRaises(StopIteration):
+            next(it)
+
+        # TODO: Add more complicated examples where buffer is small (less than overall data size)?
+
+    def test_mux_fast_forward(self):
+        pass
+
+    def test_grouper_fast_forward(self):
+        pass
+
 if __name__ == '__main__':
     run_tests()
