@@ -48,7 +48,7 @@ runner_types:
   linux.4xlarge.nvidia.gpu:
     instance_type: g3.4xlarge
     os: linux
-    max_available: 250
+    max_available: 300
     disk_size: 150
     is_ephemeral: false
   linux.16xlarge.nvidia.gpu:
