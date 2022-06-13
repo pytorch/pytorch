@@ -841,7 +841,6 @@ def normalize(input, norm_dims, eps):
     return out, mean, rstd
 
 
-@register_decomposition(aten.native_layer_norm.default)
 def native_layer_norm(
     input: Tensor,
     normalized_shape: List[int],

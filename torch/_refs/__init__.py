@@ -192,6 +192,7 @@ __all__ = [
     "hsplit",
     "hstack",
     "narrow",
+    "native_layer_norm",
     "permute",
     "ravel",
     "reshape",
@@ -589,6 +590,11 @@ def reciprocal(a):
 )
 def round(a):
     return prims.round(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def rsqrt(a):
+    return prims.rsqrt(a)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -1760,6 +1766,37 @@ def flipud(a: TensorLikeType) -> TensorLikeType:
 def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
     dim = utils.canonicalize_dim(a.ndim, dim)
     return prims.slice_in_dim(a, start, start + length, axis=dim)
+
+
+def _normalize(a, norm_dims, eps):
+    computation_dtype = utils.get_computation_dtype(a.dtype)
+    a_acc = prims.convert_element_type(a, computation_dtype)
+    biased_var, mean = var_mean(a_acc, dim=norm_dims, unbiased=False, keepdim=True)
+    rstd = rsqrt(biased_var + eps)
+    out = ((a - mean) * rstd)
+    return out, mean, rstd
+
+
+@register_decomposition(torch.ops.aten.native_layer_norm)
+def native_layer_norm(
+    input: TensorLikeType,
+    normalized_shape: ShapeType,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    eps: float,
+) -> Tuple[TensorLikeType, TensorLikeType, TensorLikeType]:
+    axis = input.ndim - len(normalized_shape)
+    reduction_dims = list(range(axis, input.ndim))
+    out, mean, rstd = _normalize(input, reduction_dims, eps)
+    if weight is not None:
+        out = out * weight
+    if bias is not None:
+        out = out + bias
+    out = prims.convert_element_type(out, input.dtype)
+    if input.device.type == 'cpu':
+        mean = prims.convert_element_type(mean, input.dtype)
+        rstd = prims.convert_element_type(rstd, input.dtype)
+    return (out, mean, rstd)
 
 
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.

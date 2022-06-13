@@ -20146,6 +20146,10 @@ python_ref_db = [
         torch_opinfo_name="round",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.rsqrt",
+        torch_opinfo_name="rsqrt",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.sigmoid",
         torch_opinfo_name="sigmoid",
         # Reference: https://github.com/pytorch/pytorch/issues/56012
@@ -20785,6 +20789,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.narrow",
         torch_opinfo_name="narrow",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.native_layer_norm",
+        torch_opinfo_name="native_layer_norm",
         supports_nvfuser=False,
     ),
     PythonRefInfo(
