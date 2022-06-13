@@ -108,7 +108,7 @@ void _mkldnn_convolution_out(
     int64_t groups,
     const ideep::attr_t& attr = ideep::attr_t()) {
   if (b.has_value()) {
-    ideep::convolution_forward::compute(
+    ideep::convolution_forward::compute_v2(
         x,
         w,
         b.value(),
@@ -122,9 +122,11 @@ void _mkldnn_convolution_out(
         ideep::scale_t(),
         ideep::scale_t(),
         ideep::scale_t(),
+        ideep::zero_point_t(),
+        ideep::zero_point_t(),
         attr);
   } else {
-    ideep::convolution_forward::compute(
+    ideep::convolution_forward::compute_v2(
         x,
         w,
         {output_sizes.cbegin(), output_sizes.cend()},
@@ -137,6 +139,8 @@ void _mkldnn_convolution_out(
         ideep::scale_t(),
         ideep::scale_t(),
         ideep::scale_t(),
+        ideep::zero_point_t(),
+        ideep::zero_point_t(),
         attr);
   }
 }
