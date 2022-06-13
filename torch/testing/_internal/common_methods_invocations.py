@@ -20133,6 +20133,14 @@ python_ref_db = [
         "_refs.sinh",
         torch_opinfo_name="sinh",
     ),
+    PythonRefInfo(
+        "_refs.softmax",
+        torch_opinfo_name="softmax",
+        skips=(
+            # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sqrt",
         torch_opinfo_name="sqrt",

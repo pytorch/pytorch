@@ -2018,6 +2018,23 @@ def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
 
 @out_wrapper
+def softmax(
+    a: TensorLikeType,
+    dim: int,
+    *,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    result_dtype = dtype or a.dtype
+    computation_dtype = utils.get_computation_dtype(a.dtype)
+    a = prims.convert_element_type(a, computation_dtype)
+    a_max = amax(a, dim, keepdim=True)
+    unnormalized = exp(a - a_max)
+    return prims.convert_element_type(
+        true_divide(unnormalized, sum(unnormalized, dim, keepdim=True)), result_dtype
+    )
+
+
+@out_wrapper
 def hstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "hstack expects a non-empty TensorList")
     aligned_tensors = atleast_1d(*tensors)
