@@ -79,7 +79,9 @@ def mock_merge(pr_num: int, repo: GitRepo,
                force: bool = False,
                comment_id: Optional[int] = None,
                mandatory_only: bool = False,
-               timeout_minutes: int = 400) -> None:
+               on_green: bool = False,
+               timeout_minutes: int = 400,
+               stale_pr_days: int = 3) -> None:
     pass
 
 def mock_gh_get_info() -> Any:
