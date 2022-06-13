@@ -3529,8 +3529,7 @@ class TestSparse(TestCase):
             self.assertTrue(out.layout == ex_layout, f"Output layout {out.layout} expected {ex_layout}")
             self.assertEqual(out_dense, ref_out, f"Result:\n{out_dense} does not match reference:\n{ref_out}")
 
-            # todo: remove device condition once cuda backward is added
-            if requires_grad and (layout is None) and (not diags.is_cuda):
+            if requires_grad and (layout is None):
                 def gc_fn(d):
                     return _sparse_to_dense(torch.sparse.spdiags(d, offsets, shape, layout=layout))
 

@@ -73,6 +73,50 @@ __global__ void _spdiags_sparse_coo_cuda_kernel(
     }
   }
 }
+
+template <typename scalar_t>
+C10_LAUNCH_BOUNDS_1(1024)
+__global__ void _spdiags_backward_sparse_coo_cuda_kernel(
+    int64_t total_diags,
+    const TensorInfo<int64_t, int64_t> offsets_ti,
+    const TensorInfo<int64_t, int64_t> grad_out_indices_ti,
+    const TensorInfo<scalar_t, int64_t> grad_out_values_ti,
+    int64_t n_rows_out,
+    int64_t n_cols_out,
+    TensorInfo<scalar_t, int64_t> grad_in_ti) {
+  const int64_t d_0 = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t n_cols_in = grad_in_ti.sizes[1];
+  int64_t grad_in_stride0 = grad_in_ti.strides[0];
+  int64_t grad_out_indices_stride0 = grad_out_indices_ti.strides[0];
+  int64_t grid_stride = blockDim.x * gridDim.x;
+  int64_t nnz = grad_out_values_ti.sizes[0];
+  for (int64_t di = d_0; di < total_diags; di += grid_stride) {
+    auto off_i = offsets_ti.data[di];
+    int64_t col_start = ::max(off_i, int64_t{0});
+    int64_t row_start = col_start - off_i;
+    int64_t write_begin = di * grad_in_stride0 + col_start;
+    int64_t nval = 0;
+    if (off_i >= 0) {
+      nval = ::max(
+          ::min(::min(n_cols_out - off_i, n_rows_out), n_cols_in - off_i),
+          nval);
+    } else {
+      nval =
+          ::max(::min(::min(n_cols_out, n_rows_out - off_i), n_cols_in), nval);
+    }
+    for (int64_t j = 0; j < nval; ++j) {
+      auto r_idx = row_start + j;
+      auto c_idx = col_start + j;
+      for (int64_t nnz_idx = 0; nnz_idx < nnz; ++nnz_idx) {
+        if ((grad_out_indices_ti.data[nnz_idx] == r_idx) &&
+            (grad_out_indices_ti.data[grad_out_indices_stride0 + nnz_idx] ==
+             c_idx)) {
+          grad_in_ti.data[write_begin + j] += grad_out_values_ti.data[nnz_idx];
+        }
+      }
+    }
+  }
+}
 } // namespace
 
 SparseTensor spdiags_sparse_cuda(
@@ -227,6 +271,67 @@ SparseTensor spdiags_sparse_cuda(
     }
   }
   return result_coo;
+}
+
+Tensor spdiags_backward_sparse_cuda(
+    const Tensor& grad_out,
+    const Tensor& offsets,
+    IntArrayRef input_shape) {
+  AT_ASSERT(input_shape.size() == 2);
+  AT_ASSERT(offsets.dim() == 1);
+  auto n_diag = input_shape[0];
+  auto n_col_in = input_shape[1];
+  auto n_col_out = grad_out.size(1);
+  auto n_row_out = grad_out.size(0);
+  auto grad_in_options = grad_out.options().layout(Layout::Strided);
+
+  Tensor grad_in = at::zeros({input_shape}, grad_in_options);
+  if (n_diag > 0) {
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+    Tensor grad_out_indices;
+    Tensor grad_out_values;
+    if (grad_out.layout() == Layout::Sparse) {
+      grad_out_indices = get_sparse_impl(grad_out)->indices_;
+      grad_out_values = get_sparse_impl(grad_out)->values_;
+    } else {
+      Tensor grad_out_coo = grad_out.to_sparse();
+      grad_out_indices = get_sparse_impl(grad_out_coo)->indices_;
+      grad_out_values = get_sparse_impl(grad_out_coo)->values_;
+    }
+
+    auto grad_out_indices_ti =
+        getTensorInfo<int64_t, int64_t>(grad_out_indices);
+    auto offsets_ti = getTensorInfo<int64_t, int64_t>(offsets);
+    int64_t block_size = std::min(
+        at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+    auto grid_size = ceil_div(n_diag, block_size);
+
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        at::ScalarType::BFloat16,
+        at::ScalarType::Half,
+        at::ScalarType::Bool,
+        at::ScalarType::ComplexHalf,
+        grad_in.scalar_type(),
+        "spdiags_backward_sparse_cuda",
+        [&] {
+          auto grad_out_values_ti =
+              getTensorInfo<scalar_t, int64_t>(grad_out_values);
+          auto grad_in_ti = getTensorInfo<scalar_t, int64_t>(grad_in);
+          _spdiags_backward_sparse_coo_cuda_kernel<scalar_t>
+              <<<grid_size, block_size, 0, stream>>>(
+                  n_diag,
+                  offsets_ti,
+                  grad_out_indices_ti,
+                  grad_out_values_ti,
+                  n_col_out,
+                  n_row_out,
+                  grad_in_ti);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        });
+  }
+
+  return grad_in;
 }
 
 } // namespace native
