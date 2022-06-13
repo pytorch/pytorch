@@ -1999,36 +1999,35 @@ Tensor binary_cross_entropy_with_logits_backward(
   // -w * [ pos * y * (1 -sigmoid(x)) - (1 - y) sigmoid(x)] * grad
 
   // If there are subclassed tensors use the out of place version
-  auto hasSubclassTensors = !at::areAnyTensorSubclassLike({input, target});
   Tensor grad_input;
   if (isDefined(pos_weight)) {
     // pos_weight might need to be broadcasted, thus mul(target) is not inplace.
     auto t = pos_weight->mul(target);
-    grad_input = hasSubclassTensors || at::GradMode::is_enabled()
+    grad_input = at::areAnyTensorSubclassLike({input, target}) || at::GradMode::is_enabled()
         ? t.add(1).sub(target).mul(input.sigmoid()).sub(t)
         : t.add(1).sub_(target).mul_(input.sigmoid()).sub_(t);
   } else {
-    grad_input = hasSubclassTensors || at::GradMode::is_enabled()
+    grad_input = at::areAnyTensorSubclassLike({input, target}) || at::GradMode::is_enabled()
         ? input.sigmoid().sub(target)
         : input.sigmoid().sub_(target);
   }
 
-  if (!at::isTensorSubclassLike(grad) && !at::GradMode::is_enabled()) {
-    grad_input.mul_(grad);
-  } else {
+  if (at::isTensorSubclassLike(grad) || at::GradMode::is_enabled()) {
     grad_input = grad_input.mul(grad);
+  } else {
+    grad_input.mul_(grad);
   }
 
   if (isDefined(weight)) {
-    if (!at::isTensorSubclassLike(*weight) && !at::GradMode::is_enabled()) {
-      grad_input.mul_(*weight);
-    } else {
+    if (at::isTensorSubclassLike(*weight) || at::GradMode::is_enabled()) {
       grad_input = grad_input.mul(*weight);
+    } else {
+      grad_input.mul_(*weight);
     }
   }
 
   if (reduction == at::Reduction::Mean) {
-    return grad_input.div_(input.numel());
+    grad_input.div_(input.numel());
   }
 
   return grad_input;
@@ -2047,24 +2046,24 @@ Tensor binary_cross_entropy_with_logits_target_backward(
 
   Tensor grad_target;
   if (isDefined(pos_weight)) {
-    if (!areAnyTensorSubclassLike({*pos_weight, grad_output})) {
+    if (areAnyTensorSubclassLike({*pos_weight, grad_output})) {
+      grad_target = at::log_sigmoid(-self)
+                        .sub(at::log_sigmoid(self).mul(*pos_weight))
+                        .mul(grad_output);
+    } else {
       grad_target = at::log_sigmoid(-self)
                         .sub_(at::log_sigmoid(self).mul_(*pos_weight))
                         .mul_(grad_output);
-    } else {
-      grad_target = at::log_sigmoid(-self)
-                        .sub_(at::log_sigmoid(self).mul(*pos_weight))
-                        .mul(grad_output);
     }
   } else {
     grad_target = -self * grad_output;
   }
 
   if (isDefined(weight)) {
-    if (!at::isTensorSubclassLike(*weight)) {
-      grad_target.mul_(*weight);
-    } else {
+    if (at::isTensorSubclassLike(*weight)) {
       grad_target = grad_target.mul(*weight);
+    } else {
+      grad_target.mul_(*weight);
     }
   }
 
