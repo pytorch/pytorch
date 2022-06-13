@@ -57,6 +57,7 @@ build:cpu-only --@rules_cuda//cuda:enable_cuda=False
 #  * it allows for selective overrides on individual targets since the
 #    macro-level opts will come earlier than target level overrides
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=type-limits
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-but-set-variable
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-function
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-variable
 

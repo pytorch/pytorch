@@ -4,6 +4,7 @@ NVCC_COPTS = [
     "--expt-relaxed-constexpr",
     "--expt-extended-lambda",
     "--compiler-options=-Werror=type-limits",
+    "--compiler-options=-Werror=unused-but-set-variable",
     "--compiler-options=-Werror=unused-function",
     "--compiler-options=-Werror=unused-variable",
 ]

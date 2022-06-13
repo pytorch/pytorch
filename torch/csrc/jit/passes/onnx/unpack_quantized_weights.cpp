@@ -193,7 +193,6 @@ std::vector<Node*> CreateQuantizedWeights(
       at::from_blob(
           data, c10::IntArrayRef(shapes), c10::IntArrayRef(strides), at::kChar)
           .to(at::kCPU);
-  auto options = c10::TensorOptions().dtype(at::kChar).device(at::kCPU);
   // Need clone because at::from_blob does not take ownership of data.
   data_node->t_(Symbol::attr("value"), data_value.clone());
 
