@@ -355,6 +355,42 @@ class TestNestedTensorDeviceType(TestCase):
         is_cuda = 'cuda' in str(device)
         self.assertEqual(nt.is_cuda, is_cuda)
 
+    @dtypes(torch.float, torch.float16, torch.double)
+    def test_nested_tensor_indexing(self, device, dtype):
+        # edge case: empty nested tensor
+        nt0 = torch.nested_tensor([])
+        self.assertRaisesRegex(
+            RuntimeError,
+            "cannot index an empty nested tensor",
+            lambda: nt0[0]
+        )
+        # normal case
+        x0 = torch.randn((2, 5), device=device, dtype=dtype)
+        x1 = torch.randn((3, 4), device=device, dtype=dtype)
+        nt = torch.nested_tensor([x0, x1])
+        # single index: only support integer in the batch dimension
+        self.assertEqual(nt[0], x0)
+        self.assertEqual(nt[-1], x1)
+        self.assertRaises(IndexError, lambda: nt[2])
+        self.assertRaises(IndexError, lambda: nt[-3])
+        self.assertRaises(NotImplementedError, lambda: nt[:])
+        self.assertRaises(NotImplementedError, lambda: nt[None])
+        self.assertRaises(NotImplementedError, lambda: nt[...])
+        # tuple of indices: only support integer in the batch dimension
+        #                 + all possible indexing in the original tensor dimensions
+        self.assertEqual(nt[0, 0, 0], x0[0, 0])
+        self.assertEqual(nt[0, 1, :], x0[1, :])
+        self.assertEqual(nt[1, ...], x1)
+        self.assertRaises(IndexError, lambda: nt[1, 4, 2])
+        self.assertRaises(NotImplementedError, lambda: nt[:, 1, 1])
+        # make sure indexing returns a view
+        nt[0].fill_(100.0)
+        answer = torch.tensor(100.0, device=device, dtype=dtype).expand((2, 5))
+        self.assertEqual(nt[0], answer)
+        nt[1, 1, :].fill_(200.0)
+        answer = torch.tensor(200.0, device=device, dtype=dtype).expand(4)
+        self.assertEqual(nt[1, 1, :], answer)
+
     # Helper functions for testing elementwise ops
     def random_nt(self, device, dtype, num_tensors, max_dims, min_dims=None):
         if min_dims is None:

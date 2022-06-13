@@ -1,6 +1,6 @@
 import torch
 import warnings
-from typing import Any, Iterable, List, Tuple, Union, Dict
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
@@ -332,7 +332,7 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
             had_cuda_in_fwd = True
             fwd_gpu_devices, fwd_gpu_states = get_device_states(*args)
 
-    storage: Dict[int, Union[torch.Tensor, None]] = {}
+    storage: Dict[int, Optional[torch.Tensor]] = {}
     counter = 0
 
     def pack(x):
