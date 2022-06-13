@@ -102,15 +102,16 @@ class TestMkldnnFusion(JitTestCase):
         ]:
             for eltwise_fn in [torch.relu]:
                 for bias in [True, False]:
-                    m = M(eltwise_fn, 3, 10, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
-                    x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
+                    for oC in [1, 10]:
+                        m = M(eltwise_fn, 3, oC, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
+                        x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
 
-                    graph = self._check_model(m, x)
-                    if enabled:
-                        self.assertFused(graph, ['aten::conv2d', 'aten::' + eltwise_fn.__name__])
-                        self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
-                    else:
-                        self.assertGraphContains(graph, kind='aten::conv2d')
+                        graph = self._check_model(m, x)
+                        if enabled:
+                            self.assertFused(graph, ['aten::conv2d', 'aten::' + eltwise_fn.__name__])
+                            self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+                        else:
+                            self.assertGraphContains(graph, kind='aten::conv2d')
 
 
 if __name__ == "__main__":
