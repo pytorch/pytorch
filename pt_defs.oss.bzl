@@ -336,6 +336,7 @@ def get_aten_generated_files(enabled_backends):
         "RegisterBackendSelect.cpp",
         "RegisterCompositeImplicitAutograd.cpp",
         "RegisterCompositeExplicitAutograd.cpp",
+        "DispatchlessCompositeExplicitAutograd.cpp",
         "CompositeViewCopyKernels.cpp",
         "RegisterSchema.cpp",
         "Declarations.yaml",
@@ -521,17 +522,23 @@ def get_aten_derived_type_src_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, "Register" + backend + ".cpp")
         for backend in enabled_backends
+    ] + [
+        ":{}[{}]".format(aten_rule_name, "Dispatchless" + backend + ".cpp")
+        for backend in enabled_backends
     ]
 
 def get_aten_selective_cpp_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, f)
-        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
+        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "DispatchlessCompositeExplicitAutograd.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
     ] + get_aten_derived_type_src_rules(aten_rule_name, enabled_backends)
 
 def get_aten_derived_type_srcs(enabled_backends):
     return [
         "Register" + derived_type + ".cpp"
+        for derived_type in enabled_backends
+    ] + [
+        "Dispatchless" + derived_type + ".cpp"
         for derived_type in enabled_backends
     ] + [
         derived_type + "Functions.h"
