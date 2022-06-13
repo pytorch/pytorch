@@ -103,6 +103,7 @@ GENERATED_H_CORE = [
     "core/TensorBody.h",
     "MethodOperators.h",
     "core/aten_interned_strings.h",
+    "core/enum_tag.h",
 ]
 
 GENERATED_H_CUDA = [
@@ -189,6 +190,7 @@ _GENERATED_AUTOGRAD_PYTHON_CPP = [
     "torch/csrc/autograd/generated/python_fft_functions.cpp",
     "torch/csrc/autograd/generated/python_linalg_functions.cpp",
     "torch/csrc/autograd/generated/python_return_types.cpp",
+    "torch/csrc/autograd/generated/python_enum_tag.cpp",
     "torch/csrc/autograd/generated/python_sparse_functions.cpp",
     "torch/csrc/autograd/generated/python_special_functions.cpp",
     "torch/csrc/autograd/generated/python_torch_functions_0.cpp",

@@ -6,8 +6,6 @@ import io
 import json
 import os
 import tempfile
-import textwrap
-import typing
 import unittest
 
 import torch
@@ -92,49 +90,6 @@ class TestProfilerCUDA(TestCase):
             s = custom_layer(z)
             q = s.sum()
             q.backward()
-
-class IcicleNode:
-    OP_TEMPLATE = "[ {}]"
-    PAD_LENGTH = len(OP_TEMPLATE.format(""))
-
-    @classmethod
-    def format(cls, profiler, indent: int = 0):
-        tree = profiler.kineto_results.experimental_event_tree()
-        lines = cls.cat([cls(i).materialize() for i in tree])
-        out = "\n".join([textwrap.indent(l.rstrip(), " " * indent) for l in lines])
-        return f"{out}\n{' ' * indent}"
-
-    @staticmethod
-    def cat(inputs: typing.List[typing.List[str]], join_str="") -> typing.List[str]:
-        assert inputs and all(i for i in inputs), "inputs cannot be empty"
-        depth = max(len(i) for i in inputs)
-        widths = [max(len(j) for j in i) for i in inputs]
-        inputs = [i + [""] * (depth - len(i)) for i in inputs]
-        inputs = [[j.ljust(w) for j in i] for i, w in zip(inputs, widths)]
-        return [join_str.join(i) for i in zip(*inputs)]
-
-    def __init__(self, event) -> None:
-        self.width = 0
-        self.children : typing.List[IcicleNode] = []
-        for child in event.children:
-            self.children.append(IcicleNode(child))
-            self.width += self.children[-1].width
-
-        self.name = f"{event.name()} "
-
-        # torch::autograd::Node relies on c10::demangle to generate names, and
-        # Windows demangles to include `struct` in the name.
-        if IS_WINDOWS:
-            self.name = self.name.replace('struct torch::autograd::AccumulateGrad', 'torch::autograd::AccumulateGrad')
-
-        self.width = max(self.width, len(self.name) + self.PAD_LENGTH)
-
-    def materialize(self) -> typing.List[str]:
-        name = self.OP_TEMPLATE.format(self.name.ljust(self.width - self.PAD_LENGTH, "-"))
-        out = [name]
-        if self.children:
-            out.extend(self.cat([child.materialize() for child in self.children]))
-        return out
 
 class TestRecordFunction(TestCase):
     def _record_function_with_param(self):
@@ -1108,79 +1063,6 @@ class TestProfiler(TestCase):
         # Kineto profiler
         with profile():
             self.assertEqual(profiler_type(), ActiveProfilerType.KINETO)
-
-    def test_profiler_experimental_tree(self):
-        t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
-        with profile() as p:
-            z = torch.add(t1, t2)
-            y = torch.ones(1)
-            loss = (y - z) ** 2
-            loss.backward()
-
-        self.assertExpectedInline(
-            IcicleNode.format(p.profiler, 12),
-            """\
-            [ aten::add ][ aten::ones ----------------][ aten::sub ][ aten::pow --------------------][ aten::ones_like -------------------][ autograd::engine::evaluate_function: PowBackward0 ----------------------------------------------][ autograd::engine::evaluate_function: SubBackward0 ][ autograd::engine::evaluate_function: AddBackward0 ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ]
-                         [ aten::empty ][ aten::fill_ ]             [ aten::result_type ][ aten::to ][ aten::empty_like ---][ aten::fill_ ][ PowBackward0 -----------------------------------------------------------------------------------][ SubBackward0 ]                                     [ AddBackward0 ]                                     [ torch::autograd::AccumulateGrad -------]                              [ torch::autograd::AccumulateGrad ]
-                                                                                                     [ aten::empty_strided ]               [ aten::pow -----------------------------------][ aten::mul -------------------------][ aten::mul ][ aten::neg ]                                                                                             [ aten::new_empty_strided ][ aten::copy_ ]                              [ aten::detach ]
-                                                                                                                                           [ aten::result_type ][ aten::to ][ aten::copy_ ][ aten::mul -------------------------]                                                                                                                       [ aten::empty_strided ]                                                 [ detach ]
-                                                                                                                                                                                           [ aten::to --------------------------]
-                                                                                                                                                                                           [ aten::_to_copy --------------------]
-                                                                                                                                                                                           [ aten::empty_strided ][ aten::copy_ ]
-            """  # noqa: B950
-        )
-
-    def test_profiler_experimental_tree_with_record_function(self):
-        with profile() as p:
-            with torch.autograd.profiler.record_function("Top level Annotation"):
-                with torch.autograd.profiler.record_function("First Annotation"):
-                    x = torch.ones((1,), requires_grad=True)
-
-                # Check that we correctly handle the case when a user
-                # annotation does not call `__exit__`.
-                _ = torch.autograd.profiler.record_function("Second Annotation").__enter__()
-
-                y = x + 1
-                with torch.autograd.profiler.record_function("Third Annotation"):
-                    y.backward()
-
-        # NB: The `aten::zeros` before the record function annotations are due to
-        # `at::cpp_custom_type_hack`. When we switch to `torch::CustomClassHolder`
-        # they will disappear.
-        self.assertExpectedInline(
-            IcicleNode.format(p.profiler, 12),
-            """\
-            [ aten::zeros ---------------][ Top level Annotation ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------]
-            [ aten::empty ][ aten::zero_ ][ aten::empty ][ aten::zeros ---------------][ First Annotation -------------------------][ aten::zeros ---------------][ Second Annotation ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------]
-                                                         [ aten::empty ][ aten::zero_ ][ aten::empty ][ aten::ones ----------------][ aten::empty ][ aten::zero_ ][ aten::empty ][ aten::add -------------------------][ aten::zeros ---------------][ Third Annotation --------------------------------------------------------------------------------------------------------------------------------------------------------------]
-                                                                                                      [ aten::empty ][ aten::fill_ ]                                             [ aten::to --------------------------][ aten::empty ][ aten::zero_ ][ aten::empty ][ aten::ones_like -------------------][ autograd::engine::evaluate_function: AddBackward0 ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ]
-                                                                                                                                                                                 [ aten::_to_copy --------------------]                                             [ aten::empty_like ---][ aten::fill_ ][ AddBackward0 ]                                     [ torch::autograd::AccumulateGrad -------]
-                                                                                                                                                                                 [ aten::empty_strided ][ aten::copy_ ]                                             [ aten::empty_strided ]                                                                    [ aten::new_empty_strided ][ aten::copy_ ]
-                                                                                                                                                                                                                                                                                                                                                               [ aten::empty_strided ]
-            """  # noqa: B950
-        )
-
-    def test_profiler_experimental_tree_with_memory(self):
-        t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
-        with profile(profile_memory=True) as p:
-            z = torch.add(t1, t2)
-            y = torch.ones(1)
-            loss = (y - z) ** 2
-            loss.backward()
-
-        self.assertExpectedInline(
-            IcicleNode.format(p.profiler, 12),
-            """\
-            [ aten::add ][ aten::ones ----------------][ aten::sub ][ aten::pow --------------------------------][ aten::ones_like -------------------][ autograd::engine::evaluate_function: PowBackward0 ----------------------------------------------------------------------------------------------------------------------------------------------][ autograd::engine::evaluate_function: SubBackward0 ][ autograd::engine::evaluate_function: AddBackward0 ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ][ [memory] ]
-            [ [memory] ] [ aten::empty ][ aten::fill_ ][ [memory] ] [ aten::result_type ][ aten::to ][ [memory] ][ aten::empty_like ---][ aten::fill_ ][ PowBackward0 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------][ [memory] ][ SubBackward0 ][ [memory] ]                         [ AddBackward0 ]                                     [ torch::autograd::AccumulateGrad -------]                              [ torch::autograd::AccumulateGrad ]
-                         [ [memory] ]                                                                            [ aten::empty_strided ]               [ aten::pow -----------------------------------------------][ aten::mul -------------------------------------------------------------------------][ aten::mul ][ [memory] ][ [memory] ]            [ aten::neg ]                                                                                             [ aten::new_empty_strided ][ aten::copy_ ]                              [ aten::detach ]
-                                                                                                                 [ [memory] ]                          [ aten::result_type ][ aten::to ][ [memory] ][ aten::copy_ ][ [memory] ][ aten::mul -------------------------------------------------][ [memory] ][ [memory] ]                                     [ [memory] ]                                                                                              [ aten::empty_strided ]                                                 [ detach ]
-                                                                                                                                                                                                                               [ aten::to --------------------------][ [memory] ][ [memory] ]                                                                                                                                                                       [ [memory] ]
-                                                                                                                                                                                                                               [ aten::_to_copy --------------------]
-                                                                                                                                                                                                                               [ aten::empty_strided ][ aten::copy_ ]
-                                                                                                                                                                                                                               [ [memory] ]
-            """  # noqa: B950
-        )
 
 
 if __name__ == '__main__':
