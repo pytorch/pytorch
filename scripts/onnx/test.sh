@@ -30,6 +30,7 @@ fi
 pip install pytest scipy hypothesis # these may not be necessary
 pip install pytest-cov # installing since `coverage run -m pytest ..` doesn't work
 pip install -e tools/coverage_plugins_package # allows coverage to run w/o failing due to a missing plug-in
+pip install parameterized # parameterizing test class
 
 # realpath might not be available on MacOS
 script_path=$(python -c "import os; import sys; print(os.path.realpath(sys.argv[1]))" "${BASH_SOURCE[0]}")
@@ -59,36 +60,29 @@ if [[ "${SHARD_NUMBER}" == "1" ]]; then
   # run them locally
   pytest "${args[@]}" "${args_parallel[@]}" \
     --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py" \
-    --ignore "$top_dir/test/onnx/test_custom_ops.py" \
     --ignore "$top_dir/test/onnx/test_models_onnxruntime.py" \
-    --ignore "$top_dir/test/onnx/test_utility_funs.py" \
-    --ignore "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py" \
-    --ignore "$top_dir/test/onnx/test_pytorch_onnx_shape_inference.py" \
     --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime_cuda.py" \
-    --ignore "$top_dir/test/onnx/test_pytorch_onnx_caffe2_quantized.py" \
+    --ignore "$top_dir/test/onnx/test_custom_ops.py" \
+    --ignore "$top_dir/test/onnx/test_utility_funs.py" \
+    --ignore "$top_dir/test/onnx/test_models.py" \
     "${test_paths[@]}"
 
-  # Tests that cannot run in parallel.
+  # Heavy memory usage tests that cannot run in parallel.
   pytest "${args[@]}" \
     "$top_dir/test/onnx/test_models_onnxruntime.py" \
     "$top_dir/test/onnx/test_custom_ops.py" \
-    "$top_dir/test/onnx/test_utility_funs.py"
-
-  pytest "${args[@]}" "${args_parallel[@]}" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset7" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset8" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset9" \
-    "$top_dir/test/onnx/test_pytorch_onnx_shape_inference.py" \
-    "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py" \
-    "$top_dir/test/onnx/test_pytorch_onnx_caffe2_quantized.py"
+    "$top_dir/test/onnx/test_utility_funs.py" \
+    "$top_dir/test/onnx/test_models_onnxruntime.py" "-k" "not TestModelsONNXRuntime"
 fi
 
 if [[ "${SHARD_NUMBER}" == "2" ]]; then
-  # Update the loop for new opsets
-  for i in $(seq 10 16); do
-    pytest "${args[@]}" "${args_parallel[@]}"\
-      "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset$i"
-  done
+  # Heavy memory usage tests that cannot run in parallel.
+  pytest "${args[@]}" \
+    "$top_dir/test/onnx/test_models.py" \
+    "$top_dir/test/onnx/test_models_onnxruntime.py" "-k" "TestModelsONNXRuntime"
+
+  pytest "${args[@]}" "${args_parallel[@]}" \
+    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py"
 fi
 
 # Our CI expects both coverage.xml and .coverage to be within test/
