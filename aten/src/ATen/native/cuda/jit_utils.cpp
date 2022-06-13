@@ -209,7 +209,39 @@ struct alignas(2) BFloat16 {
 }
 )ESCAPE";
 
-// copy-pasted from c10/util/TypeCast.h
+// From c10/util/Load.h
+const std::string load_support_literal = R"ESCAPE(
+
+  namespace c10 {
+    template <typename T>
+    struct LoadImpl {
+      __device__ static T apply(const void *src) {
+        return *reinterpret_cast<const T*>(src);
+      }
+    };
+
+    template <>
+    struct LoadImpl<bool> {
+      __device__ static bool apply(const void *src) {
+        static_assert(sizeof(bool) == sizeof(char), "");
+        return LoadImpl<char>::apply(src);
+      }
+    };
+
+    template <typename T>
+    __device__ T load(const void *src) {
+      return LoadImpl<T>::apply(src);
+    }
+
+    template <typename scalar_t>
+    __device__ scalar_t load(const scalar_t *src) {
+      return LoadImpl<scalar_t>::apply(src);
+    }
+  }  // namespace c10
+
+)ESCAPE";
+
+// copy-pasted from c10/util/TypeCast.h and c10/core/DynamicCast.h
 const std::string dynamic_cast_support_literal = R"ESCAPE(
 
   template <typename T>
@@ -283,7 +315,7 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
   // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
   #define FETCH_AND_CAST_CASE(type, scalartype) \
     case ScalarType::scalartype:                \
-      return static_cast_with_inter_type<dest_t, type>::apply(*(const type*)ptr);
+      return static_cast_with_inter_type<dest_t, type>::apply(c10::load<type>(ptr));
   template<typename dest_t>
   __device__ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
     switch (src_type) {
@@ -344,7 +376,7 @@ const std::string no_dynamic_cast_support_literal = R"ESCAPE(
   struct LoadWithoutCast {
   template <typename scalar_t>
   __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg=0) {
-    return *(reinterpret_cast<scalar_t*>(base_ptr) + offset);
+    return c10::load(reinterpret_cast<scalar_t*>(base_ptr) + offset);
   }
   };
 
@@ -446,6 +478,7 @@ const std::string offset_calc_template = R"ESCAPE(
 
 const std::string jit_code_template = R"ESCAPE(
 
+  ${load_support}
   ${dynamic_casting_string}
 
 
@@ -509,9 +542,11 @@ const std::string jit_code_template = R"ESCAPE(
 
 const std::string jit_vectorized_code_template = R"ESCAPE(
 
+  ${load_support}
+
   template <typename scalar_t>
   __device__ __inline__ scalar_t load(char* base_ptr, uint32_t offset) {
-      return *(reinterpret_cast<scalar_t*>(base_ptr) + offset);
+      return c10::load(reinterpret_cast<scalar_t*>(base_ptr) + offset);
   }
 
   template<typename scalar_t>
@@ -525,6 +560,24 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
     scalar_t val[vec_size];
   };
 
+  template <int vec_size, typename scalar_t>
+  __device__ aligned_vector<scalar_t, vec_size> load_vector(const scalar_t *base_ptr, uint32_t offset) {
+    using vec_t = aligned_vector<scalar_t, vec_size>;
+    auto *from = reinterpret_cast<const vec_t *>(base_ptr);
+    return from[offset];
+  }
+
+  template <int vec_size>
+  __device__ aligned_vector<bool, vec_size> load_vector(const bool *base_ptr, uint32_t offset) {
+    // See NOTE [Loading boolean values]
+    auto tmp = load_vector<vec_size>(reinterpret_cast<const uint8_t*>(base_ptr), offset);
+    aligned_vector<bool, vec_size> ret;
+    for (int i = 0; i < vec_size; ++i) {
+      ret.val[i] = bool(tmp.val[i]);
+    }
+    return ret;
+  }
+
   ${functor}
 
   // TODO: setup grid-stride loop
@@ -536,6 +589,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
       ${compute_type} scalar_val${extra_params}) //[${nInputs}+${nOutputs}],
       {
       constexpr int vec_size = ${vec_size};
+      using scalar_t = ${scalar_type};
       int remaining = N - block_work_size * blockIdx.x;
       auto thread_idx = threadIdx.x;
       int idx = blockIdx.x;
@@ -571,11 +625,9 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
       } else {
         static constexpr int loop_size = thread_work_size / vec_size;
   //actual loading
-        using vec_t_input = aligned_vector<${scalar_type}, vec_size>;
         ${vector_inputs}
         #pragma unroll
         for (int i = 0; i<loop_size; i++){
-          vec_t_input v;
           ${load_vectorized_inputs}
           thread_idx += num_threads;
         }
@@ -826,6 +878,8 @@ std::string generate_code(
     env.s("complex_half_body_string", "");
   }
 
+  env.s("load_support", load_support_literal);
+
   if (!vectorized) {
     if (!dynamic_casting) {
       env.s("loader", "LoadWithoutCast");
@@ -875,9 +929,9 @@ std::string generate_code(
   std::stringstream vector_inputs;
   for (const auto i : c10::irange(nInputs)){
     auto i_string = std::to_string(i);
-    vector_inputs << "vec_t_input * vec" << i_string <<
-    " = reinterpret_cast<vec_t_input *>(data[" << i_string << "+" << nOutputs << "])" <<
-    " + block_work_size / vec_size * idx;\n";
+    vector_inputs << "auto * input" << i_string <<
+        " = reinterpret_cast<const scalar_t*>(data[" << i_string << "+" << nOutputs << "])" <<
+        " + block_work_size * idx;\n";
   }
   env.s("vector_inputs", vector_inputs.str());
 
@@ -893,10 +947,11 @@ std::string generate_code(
   std::stringstream load_vectorized_inputs;
   for (const auto i : c10::irange(nInputs)) {
     auto i_string = std::to_string(i);
-    load_vectorized_inputs << "v = vec" << i_string << "[thread_idx];\n";
+    load_vectorized_inputs << "const auto vec" << i_string << " = load_vector<vec_size>("
+                           << "input" << i_string << ", thread_idx);\n";
     load_vectorized_inputs << "#pragma unroll\n";
     load_vectorized_inputs << "for (int j=0; j < vec_size; j++){\n";
-    load_vectorized_inputs << "  arg" << i_string << "[vec_size * i + j] = v.val[j];\n";
+    load_vectorized_inputs << "  arg" << i_string << "[vec_size * i + j] = vec" << i_string << ".val[j];\n";
     load_vectorized_inputs << "}\n";
   }
   env.s("load_vectorized_inputs", load_vectorized_inputs.str());
