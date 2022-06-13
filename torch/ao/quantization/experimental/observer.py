@@ -129,12 +129,8 @@ class APoTObserver(NonUniformQuantizationObserverBase):
         return (self.gamma, quantization_levels, level_indices)
 
     def forward(self, x_orig):
-        r"""Records the running minimum and maximum of ``x``."""
-        if x_orig.numel() == 0:
-            return x_orig
-        x = x_orig.detach()
+        r"""Records the running maximum of ``x``."""
         max_val = self.max_val
-        self.max_val.copy_(max_val)
         return x_orig
 
     def quant_levels_visualization(self, obs_result, filename):
