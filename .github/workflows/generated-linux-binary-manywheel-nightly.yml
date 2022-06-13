@@ -26,7 +26,6 @@ env:
   BUILD_ENVIRONMENT: linux-binary-manywheel
   BUILDER_ROOT: /builder
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  IN_CI: 1
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   PYTORCH_FINAL_PACKAGE_DIR: /artifacts
@@ -1602,6 +1601,7 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -1949,6 +1949,7 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -3684,6 +3685,7 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -4031,6 +4033,7 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -5766,6 +5769,7 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -6113,6 +6117,7 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -7848,6 +7853,7 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -8195,6 +8201,7 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
