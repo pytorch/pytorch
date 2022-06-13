@@ -1645,5 +1645,57 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             e = StridesDefaultReturn(torch.randn(6, 2), use_wrapper_subclass)
             self.assertEqual(e.stride(), (2, 1))
 
+    def test_sizes_slow_path(self):
+        for use_wrapper_subclass in [True, False]:
+            data = torch.randn(6, 2)
+
+            class SizesNotImplemented(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.aten.dim:
+                        return data.dim()
+                    return NotImplemented
+
+            class SizesCustomReturn(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.aten.dim:
+                        return data.dim()
+                    if func.overloadpacket == torch.ops.aten.size:
+                        return (5, 3)
+                    return NotImplemented
+
+            class SizesDefaultReturn(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.aten.dim:
+                        return data.dim()
+                    if func.overloadpacket == torch.ops.aten.size:
+                        return None
+                    return NotImplemented
+
+            err_msg = "no implementation found for 'torch.ops.aten.size'"
+            e = SizesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.size()
+
+            e = SizesCustomReturn(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(e.size(), (5, 3))
+
+            e = SizesDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
+            self.assertEqual(e.size(), (4, 2))
+
 if __name__ == '__main__':
     run_tests()
