@@ -97,7 +97,7 @@ jobs:
           s3-prefix: |
             ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
           retention-days: 14
-          if-no-files-found: error
+          if-no-files-found: warn
           path: sccache-stats-*.json
 
       - name: Teardown Windows
