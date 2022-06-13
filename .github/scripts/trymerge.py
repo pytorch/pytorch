@@ -930,7 +930,7 @@ def merge(pr_num: int, repo: GitRepo,
     pr = GitHubPR(org, project, pr_num)
     initial_commit_sha = pr.last_commit()['oid']
     if force:
-        pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
+        return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
     if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
         raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
