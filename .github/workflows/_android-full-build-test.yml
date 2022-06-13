@@ -30,7 +30,6 @@ on:
         required: true
 
 env:
-  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
@@ -70,7 +69,8 @@ jobs:
       - name: Preserve github env variables for use in docker
         shell: bash
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
 
       - name: Parse ref
         id: parse-ref
@@ -145,7 +145,6 @@ jobs:
             -e PR_NUMBER \
             -e SHA1 \
             -e BRANCH \
-            -e GITHUB_RUN_ID \
             -e SCCACHE_BUCKET \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
