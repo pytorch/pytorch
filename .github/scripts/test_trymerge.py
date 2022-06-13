@@ -53,6 +53,38 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
 
     return rc
 
+def mock_parse_args(revert: bool = False,
+                    force: bool = False) -> Any:
+    class Object(object):
+        def __init__(self) -> None:
+            self.revert = revert
+            self.force = force
+            self.pr_num = 76123
+            self.dry_run = True
+            self.comment_id = 0
+            self.on_mandatory = False
+            self.on_green = False
+            self.reason = 'this is for testing'
+
+    return Object()
+
+def mock_revert(repo: GitRepo, pr: GitHubPR, *,
+                dry_run: bool = False,
+                comment_id: Optional[int] = None,
+                reason: Optional[str] = None) -> None:
+    pass
+
+def mock_merge(pr_num: int, repo: GitRepo,
+               dry_run: bool = False,
+               force: bool = False,
+               comment_id: Optional[int] = None,
+               mandatory_only: bool = False,
+               timeout_minutes: int = 400) -> None:
+    pass
+
+def mock_gh_get_info() -> Any:
+    return {"closed": False, "isCrossRepository": False}
+
 
 def mocked_read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
     mock_merge_rules = """
@@ -77,7 +109,7 @@ class TestGitHubPR(TestCase):
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_match_rules(self, mocked_gql: Any) -> None:
         "Tests that PR passes merge rules"
-        pr = GitHubPR("pytorch", "pytorch", 77078)
+        pr = GitHubPR("pytorch", "pytorch", 77700)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
 
@@ -190,6 +222,49 @@ class TestGitHubPR(TestCase):
         assert pr._reviews is not None  # to pacify mypy
         self.assertGreater(len(pr._reviews), 100)
 
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_get_checkruns_many_runs(self, mocked_gql: Any) -> None:
+        """ Tests that all checkruns can be fetched
+        """
+        pr = GitHubPR("pytorch", "pytorch", 77700)
+        conclusions = pr.get_checkrun_conclusions()
+        self.assertTrue("linux-docs / build-docs (cpp)" in conclusions.keys())
+
+    @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
+    @mock.patch('trymerge.parse_args', return_value=mock_parse_args(True, False))
+    @mock.patch('trymerge.try_revert', side_effect=mock_revert)
+    def test_main_revert(self, mock_revert: Any, mock_parse_args: Any, gh_get_pr_info: Any) -> None:
+        import trymerge
+        trymerge.main()
+        mock_revert.assert_called_once()
+
+    @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
+    @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, True))
+    @mock.patch('trymerge.merge', side_effect=mock_merge)
+    def test_main_force(self, mock_merge: Any, mock_parse_args: Any, mock_gh_get_info: Any) -> None:
+        import trymerge
+        trymerge.main()
+        mock_merge.assert_called_once_with(mock.ANY,
+                                           mock.ANY,
+                                           dry_run=mock.ANY,
+                                           force=True,
+                                           comment_id=mock.ANY,
+                                           on_green=False,
+                                           mandatory_only=False)
+
+    @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
+    @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, False))
+    @mock.patch('trymerge.merge', side_effect=mock_merge)
+    def test_main_merge(self, mock_merge: Any, mock_parse_args: Any, mock_gh_get_info: Any) -> None:
+        import trymerge
+        trymerge.main()
+        mock_merge.assert_called_once_with(mock.ANY,
+                                           mock.ANY,
+                                           dry_run=mock.ANY,
+                                           force=False,
+                                           comment_id=mock.ANY,
+                                           on_green=False,
+                                           mandatory_only=False)
 
 if __name__ == "__main__":
     main()

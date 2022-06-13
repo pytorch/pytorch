@@ -34,11 +34,11 @@ set_bool(AT_MAGMA_ENABLED USE_MAGMA)
 set_bool(CAFFE2_STATIC_LINK_CUDA_INT CAFFE2_STATIC_LINK_CUDA)
 
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
-# TODO: Don't unconditionally generate CUDAConfig.h.in.  Unfortunately,
-# this file generates AT_ROCM_ENABLED() which is required by the miopen
-# files, which are compiled even if we are doing a vanilla CUDA build.
-# Once we properly split CUDA and HIP in ATen, we can remove this code.
-configure_file(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
+# TODO: Do not generate CUDAConfig.h for ROCm BUILDS
+# At the moment, `jit_macors.h` include CUDAConfig.h for both CUDA and HIP builds
+if(USE_CUDA OR USE_ROCM)
+  configure_file(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
+endif()
 if(USE_ROCM)
   configure_file(hip/HIPConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/hip/HIPConfig.h")
 endif()
@@ -420,7 +420,6 @@ if(USE_CUDA AND NOT USE_ROCM)
       ${CUDA_LIBRARIES}
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusparse_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static_nocallback.a
       )
    if(NOT BUILD_LAZY_CUDA_LINALG)

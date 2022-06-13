@@ -4,10 +4,10 @@ import itertools
 import warnings
 from typing import Any, Callable, Dict, Tuple, Union
 
-import torch._C
+from torch import _C
 from torch.onnx import _constants
 
-_SymbolicFunction = Callable[..., Union[torch._C.Value, Tuple[torch._C.Value]]]
+_SymbolicFunction = Callable[..., Union[_C.Value, Tuple[_C.Value]]]
 
 """
 The symbolic registry "_registry" is a dictionary that maps operators
@@ -29,9 +29,7 @@ def _import_symbolic_opsets():
     for opset_version in itertools.chain(
         _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
     ):
-        module = importlib.import_module(
-            "torch.onnx.symbolic_opset{}".format(opset_version)
-        )
+        module = importlib.import_module(f"torch.onnx.symbolic_opset{opset_version}")
         global _symbolic_versions
         _symbolic_versions[opset_version] = module
 
