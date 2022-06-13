@@ -365,21 +365,20 @@ Tensor i1e_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& result);
-Tensor linalg_lu_solve_LU(
+std::tuple<Tensor, Tensor> lu_solve_backward(
   const Tensor& grad,
-  const Tensor& LU,
-  const Tensor& pivots,
   const Tensor& X,
-  const bool left,
-  const bool adjoint);
-Tensor linalg_lu_solve_jvp(
+  const Tensor& LU_data,
+  const Tensor& LU_pivots,
+  const std::array<bool, 2>& grad_input_mask
+);
+Tensor lu_solve_jvp(
   const Tensor& X,
-  const Tensor& LU,
-  const Tensor& pivots,
-  const Tensor& dLU,
+  const Tensor& LU_data,
+  const Tensor& dLU_data,
   const Tensor& dB,
-  const bool left,
-  const bool adjoint);
+  const Tensor& LU_pivots
+);
 Tensor lu_unpack_backward(
   const Tensor& L_grad,
   const Tensor& U_grad,

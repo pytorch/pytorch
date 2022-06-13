@@ -116,10 +116,6 @@ void IrCloner::handle(const WelfordOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
 
-void IrCloner::handle(const LoadStoreOp* op) {
-  clone_ = IrBuilder::clone(op, this);
-}
-
 void IrCloner::handle(const MmaOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }

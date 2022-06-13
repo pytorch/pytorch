@@ -796,7 +796,7 @@ std::vector<TensorView*> TensorView::rFactor(
   return rf_tvs;
 }
 
-TensorView* TensorView::cacheBefore(c10::optional<LoadStoreOpType> cache_op) {
+TensorView* TensorView::cacheBefore() {
   TORCH_INTERNAL_ASSERT(
       !container()->isA<kir::Kernel>(),
       "Function invalid for kernel container.");
@@ -865,13 +865,7 @@ TensorView* TensorView::cacheBefore(c10::optional<LoadStoreOpType> cache_op) {
   ir_utils::replaceValInExpr(definition(), this, producer);
 
   // Expr* producer_uses =
-  if (cache_op.has_value()) {
-    IrBuilder::create<LoadStoreOp>(
-        container(), cache_op.value(), consumer, producer);
-  } else {
-    IrBuilder::create<UnaryOp>(
-        container(), UnaryOpType::Set, consumer, producer);
-  }
+  IrBuilder::create<UnaryOp>(container(), UnaryOpType::Set, consumer, producer);
 
   // definition_ is no longer valid
   // setDefinition(nullptr);
@@ -930,7 +924,7 @@ TensorView* TensorView::cacheFork() {
   return new_output;
 }
 
-TensorView* TensorView::cacheAfter(c10::optional<LoadStoreOpType> cache_op) {
+TensorView* TensorView::cacheAfter() {
   TORCH_INTERNAL_ASSERT(
       !container()->isA<kir::Kernel>(),
       "Function invalid for kernel container.");
@@ -996,13 +990,7 @@ TensorView* TensorView::cacheAfter(c10::optional<LoadStoreOpType> cache_op) {
   }
 
   // Expr* consumer_definition =
-  if (cache_op.has_value()) {
-    IrBuilder::create<LoadStoreOp>(
-        container(), cache_op.value(), consumer, producer);
-  } else {
-    IrBuilder::create<UnaryOp>(
-        container(), UnaryOpType::Set, consumer, producer);
-  }
+  IrBuilder::create<UnaryOp>(container(), UnaryOpType::Set, consumer, producer);
 
   return consumer;
 }
@@ -1055,7 +1043,7 @@ bool TensorView::isEmptyTensor() const {
 
 void TensorView::applyMmaSwizzle(MmaOptions options) {
   switch (options.operand) {
-    case MmaOptions::Operand::Accumulator:
+    case MmaOptions::Operand::NotOperand:
       mma_util::WarpMmaSwizzler::scheduleMmaWarpOutput(this, options);
       break;
     case MmaOptions::Operand::A:
@@ -1130,6 +1118,13 @@ TensorView* TensorViewBuilder::build() const {
   // Create the final TensorView
   return IrBuilder::create<TensorView>(
       IrBuilder::create<TensorDomain>(domain, contiguity_), dtype_);
+}
+
+void TensorView::configureMma(MmaOptions options) {
+  TORCH_CHECK(definition(), "configureMma: invalid for input tensor ", this);
+  auto mma = dynamic_cast<MmaOp*>(definition());
+  TORCH_CHECK(mma, "configureMma: invalid for non-mma output: ", this);
+  mma->configureOptions(options);
 }
 
 } // namespace cuda

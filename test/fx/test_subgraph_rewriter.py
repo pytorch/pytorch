@@ -403,21 +403,21 @@ class TestSubgraphRewriter(JitTestCase):
         class Replacement(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.tanh = torch.nn.Tanh()
+                self.id = torch.nn.Identity()
                 self.submod = torch.nn.ReLU()
 
             def forward(self, x):
-                return self.submod(self.tanh(x))
+                return self.submod(self.id(x))
 
         class Comparison(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.tanh = torch.nn.Tanh()
+                self.id = torch.nn.Identity()
                 self.submod = torch.nn.ReLU()
 
             def forward(self, x):
                 x = x + 1
-                return self.submod(self.tanh(x))
+                return self.submod(self.id(x))
 
         traced = symbolic_trace(M())
         comparison = Comparison()
@@ -432,7 +432,7 @@ class TestSubgraphRewriter(JitTestCase):
         test_outs = traced.forward(x)
         self.assertEqual(ref_outs, test_outs)
 
-        traced.get_submodule("tanh")
+        traced.get_submodule("id")
         with self.assertRaisesRegex(AttributeError, "has no attribute"):
             traced.get_submodule("sigmoid")
 

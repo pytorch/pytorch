@@ -608,7 +608,6 @@ class TypeCheckerTest(TestCase):
                              TensorType((4, 16, 6, 7)), TensorType((4, 672)), TensorType((4, 672))]
 
         expected_iter = iter(expected_ph_types)
-        traced.graph.eliminate_dead_code()
 
         for n in traced.graph.nodes:
             assert n.type == next(expected_iter)
@@ -826,8 +825,6 @@ class TypeCheckerTest(TestCase):
 
         g = GraphTypeChecker({}, gm_static)
         g.type_check()
-        gm_static.graph.eliminate_dead_code()
-        gm_run.graph.eliminate_dead_code()
         # here we are checking for consistency with fully dynamic nodes
         for n1, n2 in zip(gm_static.graph.nodes, gm_run.graph.nodes):
             assert is_consistent(n1.type, TensorType(n2.meta['tensor_meta'].shape))
@@ -851,7 +848,6 @@ class TypeCheckerTest(TestCase):
 
 
         batch_sizes = set()
-        gm_static.graph.eliminate_dead_code()
         for n in gm_static.graph.nodes:
             assert isinstance(n.type, TensorType)
             batch_sizes.add(n.type.__args__[0])

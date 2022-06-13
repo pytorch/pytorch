@@ -1033,9 +1033,8 @@ TEST_F(NVFuserTest, FusionGroupAllreduce2_CUDA) {
   auto tv8 = add(tv7, tv6);
   fusion.addOutput(tv8);
 
-  const int tidx = 512;
   groupReductions({tv1, tv4});
-  tv1->split(1, tidx);
+  tv1->split(1, 128);
   TransformPropagator::from(tv1);
 
   tv0->computeAt(tv8, -1, ComputeAtMode::MostInlined);
@@ -1045,11 +1044,7 @@ TEST_F(NVFuserTest, FusionGroupAllreduce2_CUDA) {
   tv1->axis(2)->parallelize(ParallelType::TIDx);
   scheduler_utils::parallelizeAllLike(tv1, ir_utils::allTvs(&fusion));
 
-  std::vector<int64_t> shape({10, 999});
-
-  if (shape.at(0) * ceilDiv(shape.at(1), tidx) > deviceSMCount()) {
-    GTEST_SKIP() << "Not enough SMs to run this test";
-  }
+  std::vector<int64_t> shape({99, 999});
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 

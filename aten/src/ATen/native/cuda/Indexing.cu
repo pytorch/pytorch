@@ -1164,8 +1164,7 @@ Tensor& index_select_out_cuda(
       index_select_out_cuda_impl<scalar_t>(out, self, dim, index);
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-        at::ScalarType::ComplexHalf,
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         at::ScalarType::Half,
         at::ScalarType::Bool,
         at::ScalarType::BFloat16,

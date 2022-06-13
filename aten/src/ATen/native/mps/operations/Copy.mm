@@ -339,6 +339,9 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_,
     }
   }
 
+  if (!dst_.is_contiguous()) {
+    TORCH_WARN("The dst MTL buffer in copy_to_mps is non-contiguous");
+  }
   const void* host_src = src.storage().data();
   uint64_t size = src.nbytes();
 

@@ -662,7 +662,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.linalg.lu: lambda input, pivot=True, out=None: -1,
         torch.linalg.lu_factor: lambda input, pivot=True, out=None: -1,
         torch.linalg.lu_factor_ex: lambda input, pivot=True, check_errors=False, out=None: -1,
-        torch.linalg.lu_solve: lambda LU, pivots, B, left=True, adjoint=False, out=None: -1,
         torch.linalg.matmul: lambda input, other, out=None: -1,  # alias for torch.matmul
         torch.matrix_power: lambda input, n: -1,
         torch.linalg.matrix_power: lambda input, n, out=None: -1,
