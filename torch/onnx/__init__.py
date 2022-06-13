@@ -72,6 +72,10 @@ __all__ = [
     "CheckerError",  # Backwards compatibility
 ]
 
+# Set namespace for exposed private names
+ExportTypes.__module__ = "torch.onnx"
+SymbolicContext.__module__ = "torch.onnx"
+
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
 
