@@ -108,7 +108,7 @@ void applySymbolicShapesOnLT(
   }
   auto res_symbolic = jit::calculateSymbolicShapesOnOp(&schema, converted_args);
   if (!res_symbolic) {
-    for (auto & result_shape : result_shapes) {
+    for (auto& result_shape : result_shapes) {
       result_shape = result_shape.with_symbolic_dims(c10::nullopt);
     }
   } else {

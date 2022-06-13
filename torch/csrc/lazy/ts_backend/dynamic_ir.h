@@ -12,11 +12,11 @@
 #include <vector>
 
 #include <c10/core/ScalarType.h>
+#include <c10/util/Flags.h>
 #include <torch/csrc/lazy/core/hash.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
-#include <c10/util/Flags.h>
 
 C10_DECLARE_bool(ltc_enable_dynamic_shapes);
 
@@ -47,7 +47,7 @@ class TORCH_API DimensionNode : public lazy::TsNode {
  public:
   DimensionNode(OpKind op, OpList operands, hash_t hash_seed = kHashSeed);
   bool isDynamic() {
-      return false;
+    return false;
   }
 
   std::string ToString() const override;
@@ -65,25 +65,26 @@ class TORCH_API SizeNode : public DimensionNode {
   int64_t getStaticValue() const override;
   std::string ToString() const override;
   size_t dim_ = 0;
-  TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
-                          TSLoweringContext* loctx) const override;
+  virtual TSOpVector Lower(
+      std::shared_ptr<torch::jit::GraphFunction> function,
+      TSLoweringContext* loctx) const override;
 };
 
-class TORCH_API SizeAdd: public DimensionNode {
+class TORCH_API SizeAdd : public DimensionNode {
  public:
   SizeAdd(Value a, Value b);
   int64_t getStaticValue() const override;
   std::string ToString() const override;
 };
 
-class TORCH_API SizeMul: public DimensionNode {
+class TORCH_API SizeMul : public DimensionNode {
  public:
   SizeMul(Value a, Value b);
   int64_t getStaticValue() const override;
   std::string ToString() const override;
 };
 
-class TORCH_API SizeDiv: public DimensionNode {
+class TORCH_API SizeDiv : public DimensionNode {
  public:
   SizeDiv(Value a, Value b);
   int64_t getStaticValue() const override;
