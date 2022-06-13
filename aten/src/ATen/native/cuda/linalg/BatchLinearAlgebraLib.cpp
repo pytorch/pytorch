@@ -92,6 +92,33 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
 }
 
 template <typename scalar_t>
+static void apply_lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
+#ifndef CUDART_VERSION
+  TORCH_CHECK(false, "linalg.lu_factor: cuBLAS backend for linalg.lu_factor is not available.")
+#else
+  // This function just works with square matrices
+  TORCH_INTERNAL_ASSERT(A.size(-2) == A.size(-1));
+
+  auto batch_size = cuda_int_cast(batchCount(A), "batch_size");;
+  auto n = cuda_int_cast(A.size(-2), "n");
+  auto lda = cuda_int_cast(std::max<int>(1, n), "lda");
+
+  auto pivots_data = get_pivots ? pivots.data_ptr<int>() : nullptr;
+  auto infos_data = infos.data_ptr<int>();
+  Tensor a_ptr_array = get_device_pointers<scalar_t>(A);
+  auto a_ptr_array_data = reinterpret_cast<scalar_t**>(a_ptr_array.data_ptr());
+
+  at::cuda::blas::getrfBatched(n, a_ptr_array_data, lda, pivots_data, infos_data, batch_size);
+#endif
+}
+
+void lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "lu_factor_cublas", [&]{
+    apply_lu_factor_batched_cublas<scalar_t>(A, pivots, infos, get_pivots);
+  });
+}
+
+template <typename scalar_t>
 static void apply_lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
 #ifndef CUDART_VERSION
   TORCH_CHECK(false, "lu_solve: cuBLAS backend for lu_solve is not available.")
