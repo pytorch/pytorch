@@ -747,11 +747,6 @@ class TestModelReportDetectDynamicStatic(QuantizationTestCase):
         q_config_mapping = QConfigMapping()
         q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig("fbgemm"))
 
-        # set the weights to be 1s so then we get the same values as outputs
-        # with torch.no_grad():
-        #     model.block1.linear.weight = torch.nn.Parameter(torch.ones_like(model.block1.linear.weight))
-        #     model.block2.linear.weight = torch.nn.Parameter(torch.ones_like(model.block2.linear.weight))
-
         # prep model and select observer
         model_prep = quantize_fx.prepare_fx(model, q_config_mapping, example_input)
         obs_ctr = ModelReportObserver

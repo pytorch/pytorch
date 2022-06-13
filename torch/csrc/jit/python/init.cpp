@@ -118,6 +118,7 @@
 namespace torch {
 namespace jit {
 
+using ::c10::AliasInfo;
 using ::c10::Argument;
 using ::c10::FunctionSchema;
 using caffe2::serialize::PyTorchStreamReader;
@@ -1363,7 +1364,7 @@ void initJITBindings(PyObject* module) {
                     return _get_operation_for_overload_or_packet(
                         {op}, symbol, args, kwargs, true);
                   });
-              return func;
+              return py::make_tuple(func, py::cast(op->getTags().vec()));
             }
           }
           throw std::runtime_error("Found no matching operator overload");
@@ -1491,6 +1492,12 @@ void initJITBindings(PyObject* module) {
           })
       .def_property_readonly(
           "is_out", [](Argument& self) { return self.is_out(); })
+      .def_property_readonly(
+          "is_mutable",
+          [](Argument& self) {
+            const AliasInfo* aliasInfo = self.alias_info();
+            return aliasInfo && aliasInfo->isWrite();
+          })
       .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
         return self.kwarg_only();
       });

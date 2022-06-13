@@ -22,12 +22,15 @@ fi
 
 # Get fully qualified path using realpath
 if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
-  CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
+  CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
 fi
 
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+echo "Environment variables"
+env
 
 echo "Testing pytorch"
 
