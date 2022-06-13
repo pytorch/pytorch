@@ -3323,16 +3323,12 @@ class TestDynamicQuantizedOps(TestCase):
         # lstm op
         seq_len = 1
 
+        reduce_range = True
         for rnn_type in ['LSTMCell', 'GRUCell', 'RNNTanh', 'RNNReLU']:
             for dtype in [torch.qint8, torch.float16]:
                 # Fp16 quantization is not supported for qnnpack or onednn
                 if torch.backends.quantized.engine in ('qnnpack', 'onednn') and dtype == torch.float16:
                     continue
-
-                if torch.backends.quantized.engine == 'qnnpack':
-                    reduce_range = False
-                else:
-                    reduce_range = True
 
                 Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, 1, reduce_range)
                 Wq1, Wq2, b1, b2 = self._get_rnn_weights_and_bias(

@@ -74,7 +74,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_dynamic(
     bool reduce_range) {
   if (reduce_range) {
     TORCH_WARN("reduce_range is set to true for the conv operator while using qnnpack backend, but qnnpack does "
-    " not require a reduction in range. We recommend switching this flag to false");
+    " not require a reduction in range. We recommend switching this flag to false so that accuracy isn't compromised");
   }
 
   // On empty input, no output data will be generated,
