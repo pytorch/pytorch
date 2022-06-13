@@ -22,7 +22,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     IS_SANDCASTLE,
     clone_input_helper,
-    IS_IN_CI,
+    IS_CI,
     suppress_warnings,
     noncontiguous_like,
     TEST_WITH_ASAN,
@@ -103,7 +103,7 @@ class TestCommon(TestCase):
     def tearDownClass(cls):
         super().tearDownClass()
 
-        if IS_IN_CI:
+        if IS_CI:
             err_msg = (
                 "The operator(s) below is(are) using dynamic_dtypes in the OpInfo entries."
                 "This is OK for testing, but be sure to set the dtypes manually before landing your PR!"
@@ -361,9 +361,6 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref_meta(self, device, dtype, op):
-        if dtype is torch.chalf:
-            self.skipTest("Skipping chalf until it has more operator support")
-
         mode = torch._prims.utils.get_prim_fake_mode()
 
         def _to_tensormeta(x):
@@ -373,7 +370,6 @@ class TestCommon(TestCase):
             return x
 
         # TODO: iterate over requires_grad true/false
-        inps = tuple(op.reference_inputs(device, dtype, requires_grad=False))
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
             result = op(sample.input, *sample.args, **sample.kwargs)
 
@@ -394,9 +390,6 @@ class TestCommon(TestCase):
                         prims.utils.compare_tensor_meta(a, b)
 
     def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False):
-        if dtype is torch.chalf:
-            self.skipTest("Skipping chalf until it has more operator support")
-
         # NOTE: this test works by comparing the reference
         ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
@@ -1547,7 +1540,7 @@ fake_skips = (
     "to_sparse",  # Could not run 'aten::to_sparse' with arguments from the 'Meta' backend
     "tensor_split",  # The tensor has a non-zero number of elements, but its data is not allocated yet
     "repeat_interleave",  # cannot repeat_interleave a meta tensor without output_size
-    "segment_reduce",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
+    "segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
     "sparse.sampled.addmm",  # sparsity not supported
     # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
     "nn.functional.one_hot",

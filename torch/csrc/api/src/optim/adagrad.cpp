@@ -1,9 +1,9 @@
 #include <torch/optim/adagrad.h>
 
 #include <torch/csrc/autograd/variable.h>
+#include <torch/optim/serialize.h>
 #include <torch/serialize/archive.h>
 #include <torch/utils.h>
-#include <torch/optim/serialize.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
@@ -16,11 +16,10 @@ namespace optim {
 AdagradOptions::AdagradOptions(double lr) : lr_(lr) {}
 
 bool operator==(const AdagradOptions& lhs, const AdagradOptions& rhs) {
-  return (lhs.lr() == rhs.lr()) &&
-          (lhs.lr_decay() == rhs.lr_decay()) &&
-          (lhs.weight_decay() == rhs.weight_decay()) &&
-          (lhs.initial_accumulator_value() == rhs.initial_accumulator_value()) &&
-          (lhs.eps() == rhs.eps());
+  return (lhs.lr() == rhs.lr()) && (lhs.lr_decay() == rhs.lr_decay()) &&
+      (lhs.weight_decay() == rhs.weight_decay()) &&
+      (lhs.initial_accumulator_value() == rhs.initial_accumulator_value()) &&
+      (lhs.eps() == rhs.eps());
 }
 
 void AdagradOptions::serialize(torch::serialize::OutputArchive& archive) const {
@@ -48,11 +47,11 @@ void AdagradOptions::set_lr(const double lr) {
 }
 
 bool operator==(const AdagradParamState& lhs, const AdagradParamState& rhs) {
-  return (lhs.step() == rhs.step()) &&
-            torch::equal(lhs.sum(), rhs.sum());
+  return (lhs.step() == rhs.step()) && torch::equal(lhs.sum(), rhs.sum());
 }
 
-void AdagradParamState::serialize(torch::serialize::OutputArchive& archive) const {
+void AdagradParamState::serialize(
+    torch::serialize::OutputArchive& archive) const {
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(step);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(sum);
 }
@@ -77,14 +76,20 @@ Tensor Adagrad::step(LossClosure closure) {
         continue;
       }
       auto grad = p.grad();
-      TORCH_INTERNAL_ASSERT(state_[c10::guts::to_string(p.unsafeGetTensorImpl())] != nullptr, "state found NULL for the Tensor ", p);
-      auto& state = static_cast<AdagradParamState&>(*state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
+      TORCH_INTERNAL_ASSERT(
+          state_[c10::guts::to_string(p.unsafeGetTensorImpl())] != nullptr,
+          "state found NULL for the Tensor ",
+          p);
+      auto& state = static_cast<AdagradParamState&>(
+          *state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
       auto& options = static_cast<AdagradOptions&>(group.options());
 
       state.step(state.step() + 1);
 
       if (options.weight_decay() != 0) {
-        TORCH_CHECK(!p.grad().is_sparse(), "weight_decay option is not compatible with sparse gradients");
+        TORCH_CHECK(
+            !p.grad().is_sparse(),
+            "weight_decay option is not compatible with sparse gradients");
         grad = grad.add(p, options.weight_decay());
       }
       const auto clr = options.lr() /
@@ -96,19 +101,19 @@ Tensor Adagrad::step(LossClosure closure) {
         auto grad_values = grad._values();
         auto size = grad.sizes();
 
-        auto make_sparse = [&] (const Tensor& values) -> Tensor {
+        auto make_sparse = [&](const Tensor& values) -> Tensor {
           if (grad_indices.dim() == 0 || values.dim() == 0) {
             return torch::empty({0}, grad.options()).resize_as_(grad);
           }
-          return torch::sparse_coo_tensor(grad_indices, values, size, grad.options());
+          return torch::sparse_coo_tensor(
+              grad_indices, values, size, grad.options());
         };
         state.sum(state.sum().add_(make_sparse(grad_values.pow(2))));
         auto std = state.sum().sparse_mask(grad);
         const auto std_values = std._values().sqrt_().add_(options.eps());
 
         p.add_(make_sparse(grad_values / std_values), -clr);
-      }
-      else {
+      } else {
         state.sum(state.sum().addcmul_(grad, grad, 1.0));
         const auto std = state.sum().sqrt().add_(options.eps());
         p.addcdiv_(grad, std, -clr);
@@ -126,22 +131,24 @@ void Adagrad::load(serialize::InputArchive& archive) {
   IValue pytorch_version;
   if (archive.try_read("pytorch_version", pytorch_version)) {
     serialize(*this, archive);
-  }
-  else { // deserializing archives saved in old format (prior to version 1.5.0)
+  } else { // deserializing archives saved in old format (prior to
+           // version 1.5.0)
     TORCH_WARN(
-      "Your serialized Adagrad optimizer is still using the old serialization format. "
-      "You should re-save your Adagrad optimizer to use the new serialization format.");
+        "Your serialized Adagrad optimizer is still using the old serialization format. "
+        "You should re-save your Adagrad optimizer to use the new serialization format.");
     std::vector<Tensor> sum_buffers;
     std::vector<int64_t> step_buffers;
     torch::optim::serialize(archive, "sum_buffers", sum_buffers);
     torch::optim::serialize(archive, "step_buffers", step_buffers);
-    // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
+    // since there were no param_groups prior to version 1.5.0, assuming all
+    // tensors are now in one param_group
     std::vector<Tensor> params = param_groups_.at(0).params();
-    for(const auto idx : c10::irange(params.size())) {
+    for (const auto idx : c10::irange(params.size())) {
       auto state = std::make_unique<AdagradParamState>();
       state->step(step_buffers[idx]);
       state->sum(sum_buffers[idx]);
-      state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(state);
+      state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] =
+          std::move(state);
     }
   }
 }

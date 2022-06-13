@@ -12,19 +12,19 @@ pip install -q hypothesis "expecttest==0.1.3" "librosa>=0.6.2" "numba<=0.49.1" p
 pip install "unittest-xml-reporting<=3.2.0,>=2.0.0" \
   pytest
 
-if [ -z "${IN_CI}" ]; then
+if [ -z "${CI}" ]; then
   rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
 fi
 
 export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
 
 # Test PyTorch
-if [ -z "${IN_CI}" ]; then
+if [ -z "${CI}" ]; then
   export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
 fi
 
 # Download torch binaries in the test jobs
-if [ -z "${IN_CI}" ]; then
+if [ -z "${CI}" ]; then
   rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
   aws s3 cp s3://ossci-macos-build/pytorch/"${IMAGE_COMMIT_TAG}".7z "${IMAGE_COMMIT_TAG}".7z
   7z x "${IMAGE_COMMIT_TAG}".7z -o"${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages"
