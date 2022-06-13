@@ -1082,7 +1082,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
         x = A()
         with x:
-            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode"):
+            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
                 with x:
                     pass
 
@@ -1096,6 +1096,46 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
         with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
             with A():
                 x + x
+
+    def test_error_with_ancestor(self):
+        x = LoggingTensorMode()
+        with x:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
+            with x:
+                pass
+
+    def test_restore_errors(self):
+        with self.assertRaisesRegex(RuntimeError, "does not have any ancestors. Use the standard version instead"):
+            with LoggingTensorMode().restore():
+                pass
+
+        x = LoggingTensorMode()
+        with LoggingTensorMode():
+            with x:
+                pass
+
+        with LoggingTensorMode():  # a different mode instance than the one above
+            with self.assertRaisesRegex(RuntimeError, "the current mode is not its ancestor"):
+                with x.restore():
+                    pass
+
+    def test_restore_ancestor_mode(self):
+        x = LoggingTensorMode()
+        y = LoggingTensorMode()
+        with x:
+            with y:
+                pass
+
+        z = LoggingTensorMode()
+        with y.restore():
+            with z:
+                pass
+
+        with x.restore():
+            with z.restore():
+                pass
 
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))

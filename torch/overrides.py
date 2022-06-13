@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 
-from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init
+from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init, _restore_mode
 
 __all__ = [
     "get_ignored_functions",
@@ -1841,14 +1841,23 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
         raise NotImplementedError()
 
     def __enter__(self):
-        if hasattr(self, "inner"):
-            raise RuntimeError(f"{self} has already been used as a mode, please create and use a fresh version")
         old = _get_torch_function_mode()
-        self.inner = old
+        if hasattr(self, "inner"):
+            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version or use restore")
+        else:
+            self.inner = old
+            if old is None:
+                self.ancestors = set()
+            else:
+                self.ancestors = self.inner.ancestors.union({self.inner})
         _set_torch_function_mode(self)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         _set_torch_function_mode(self.inner)
+
+    @contextlib.contextmanager
+    def restore(self):
+        return _restore_mode(self, mode_info=_TorchFunctionModeInfo())
 
     @classmethod
     def push(cls, *args, **kwargs):
