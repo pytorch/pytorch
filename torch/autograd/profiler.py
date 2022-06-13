@@ -440,15 +440,15 @@ class record_function(ContextDecorator):
         self.run_callbacks_on_exit: bool = True
         # Stores underlying RecordFunction as a tensor. TODO: move to custom
         # class (https://github.com/pytorch/pytorch/issues/35026).
-        self.handle: torch.Tensor = torch.zeros(1)
+        self.handle: torch.Tensor = torch.zeros(())
 
     def __enter__(self):
-        self.handle = torch.ops.profiler._record_function_enter(self.name, self.args)
+        self.handle = torch.ops.profiler._record_function_enter.default(self.handle, self.name, self.args)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
         if self.run_callbacks_on_exit:
-            torch.ops.profiler._record_function_exit(self.handle)
+            torch.ops.profiler._record_function_exit.default(self.handle)
 
     def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
         """

@@ -1,6 +1,7 @@
 #include <ATen/ThreadLocalState.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/record_function.h>
+#include <torch/csrc/profiler/api.h>
 #include <torch/csrc/autograd/record_function_ops.h>
 
 #include <torch/csrc/jit/runtime/operator.h>
@@ -34,11 +35,16 @@ void record_function_enter(
 
 // Legacy signature using cpp_custom_type_hack
 at::Tensor record_function_enter_legacy(
+    const at::Tensor& prev,
     const std::string& name,
     const c10::optional<std::string>& args) {
-  auto rec = std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
-  record_function_enter(name, args, *rec);
-  return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
+  if (profilerEnabled()) {
+    auto rec = std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
+    record_function_enter(name, args, *rec);
+    return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
+  } else {
+    return prev;
+  }
 }
 
 // New signature using custom_class
@@ -65,8 +71,10 @@ void record_function_exit(at::RecordFunction& rec) {
 void record_function_exit_legacy(const at::Tensor& handle) {
   // We don't actually need to do anything with handle just need to persist the
   // lifetime until now.
-  auto& rec = getRecordFunctionFromTensor(handle);
-  record_function_exit(rec);
+  if (handle.ndimension() == 1) {
+    auto& rec = getRecordFunctionFromTensor(handle);
+    record_function_exit(rec);
+  }
 }
 
 // New signature using custom_class
@@ -129,7 +137,7 @@ TORCH_LIBRARY_FRAGMENT(profiler, m) {
   m.class_<PythonRecordFunction>("_RecordFunction");
 
   m.def(
-      "_record_function_enter(str name, str? args=None) -> Tensor",
+      "_record_function_enter(Tensor prev, str name, str? args=None) -> Tensor",
       &record_function_enter_legacy);
   m.def(
       "_record_function_enter_new(str name, str? args=None) -> "
@@ -144,9 +152,13 @@ TORCH_LIBRARY_FRAGMENT(profiler, m) {
         // Pop inputs, which should be a future and a tensor
         auto fut = jit::pop(stack).toFuture();
         auto tensor = jit::pop(stack).toTensor();
-        auto profiledFut = _call_end_callbacks_on_fut_legacy(tensor, fut);
-        // return future that completes when profiling callbacks have run.
-        jit::push(stack, std::move(profiledFut));
+        if (tensor.ndimension() == 1) {
+          auto profiledFut = _call_end_callbacks_on_fut_legacy(tensor, fut);
+          // return future that completes when profiling callbacks have run.
+          jit::push(stack, std::move(profiledFut));
+        } else {
+          jit::push(stack, std::move(fut));
+        }
       },
       c10::AliasAnalysisKind::FROM_SCHEMA));
   torch::jit::registerOperator(torch::jit::Operator(
