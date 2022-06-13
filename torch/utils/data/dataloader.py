@@ -15,9 +15,9 @@ from typing import Any, Callable, Iterable, TypeVar, Generic, Sequence, List, Op
 
 import multiprocessing as python_multiprocessing
 import torch
+import torch.distributed as dist
 import torch.multiprocessing as multiprocessing
 import torch.utils.data.graph_settings
-import torch.distributed as dist
 
 from torch._utils import ExceptionWrapper
 from torch._six import string_classes
@@ -92,17 +92,26 @@ class _InfiniteConstantSampler(Sampler):
             yield None
 
 
-def _sharding_worker_init_fn(worker_init_fn, worker_id):
+def _get_distributed_settings():
+    if dist.is_available() and dist.is_initialized():
+        return dist.get_world_size(), dist.get_rank()
+    else:
+        return 1, 0
+
+
+def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id):
     global_worker_id = worker_id
     info = torch.utils.data.get_worker_info()
     total_workers = info.num_workers
     datapipe = info.dataset
-    if dist.is_available() and dist.is_initialized():
-        total_workers *= dist.get_world_size()
-        global_worker_id = dist.get_rank() * info.num_workers + global_worker_id
+    # To distribute elements across distributed process evenly, we should shard data on distributed
+    # processes first then shard on worker processes
+    total_workers *= world_size
+    global_worker_id = global_worker_id * world_size + rank_id
     torch.utils.data.graph_settings.apply_sharding(datapipe, total_workers, global_worker_id)
     if worker_init_fn is not None:
         worker_init_fn(worker_id)
+
 
 class DataLoader(Generic[T_co]):
     r"""
@@ -239,13 +248,19 @@ class DataLoader(Generic[T_co]):
         # 2. Additional worker init function will take care of sharding in MP and Distributed
         if isinstance(self.dataset, IterDataPipe):
             self.dataset = _IterDataPipeSerializationWrapper(self.dataset)
-            self.worker_init_fn = functools.partial(
-                _sharding_worker_init_fn, self.worker_init_fn)
+            ws, rank = _get_distributed_settings()
+            if num_workers > 0:
+                self.worker_init_fn = functools.partial(
+                    _sharding_worker_init_fn, self.worker_init_fn, ws, rank)
+            else:
+                torch.utils.data.graph_settings.apply_sharding(self.dataset, ws, rank)
         elif isinstance(self.dataset, MapDataPipe):
             self.dataset = _MapDataPipeSerializationWrapper(self.dataset)
-            self.worker_init_fn = functools.partial(
-                _sharding_worker_init_fn, self.worker_init_fn)
-
+            if num_workers > 0:
+                self.worker_init_fn = functools.partial(
+                    _sharding_worker_init_fn, self.worker_init_fn, ws, rank)
+            else:
+                torch.utils.data.graph_settings.apply_sharding(self.dataset, ws, rank)
 
 
         # Arg-check dataset related before checking samplers because we want to
@@ -543,12 +558,36 @@ class DataLoader(Generic[T_co]):
                 self.num_workers,
                 cpuset_checked))
 
+    def _get_shared_seed(self):
+        if isinstance(self.dataset, IterDataPipe):
+            _shared_tensor_seed = torch.empty((), dtype=torch.int64).random_(generator=self.generator)
+            if dist.is_available() and dist.is_initialized():
+                rank = dist.get_rank()
+                if rank == 0:
+                    ws = dist.get_world_size()
+                    reqs = []
+                    for rank_id in range(1, ws):
+                        req = dist.isend(tensor=_shared_tensor_seed, dst=rank_id, tag=rank_id)
+                        reqs.append(req)
+                    for req in reqs:
+                        req.wait()
+                else:
+                    dist.recv(tensor=_shared_tensor_seed, src=0, tag=rank)
+            _shared_seed = _shared_tensor_seed.item()
+            del _shared_tensor_seed
+            return _shared_seed
+        else:
+            return None
+
 
 class _BaseDataLoaderIter(object):
     def __init__(self, loader: DataLoader) -> None:
         self._dataset = loader.dataset
+        self._shared_seed = loader._get_shared_seed()
         if isinstance(self._dataset, IterDataPipe):
-            self._dataset = torch.utils.data.graph_settings.apply_shuffle_seed(self._dataset, loader.generator)
+            shared_rng = torch.Generator()
+            shared_rng.manual_seed(self._shared_seed)
+            self._dataset = torch.utils.data.graph_settings.apply_shuffle_seed(self._dataset, shared_rng)
         self._dataset_kind = loader._dataset_kind
         self._IterableDataset_len_called = loader._IterableDataset_len_called
         self._auto_collation = loader._auto_collation
@@ -585,6 +624,11 @@ class _BaseDataLoaderIter(object):
         self._sampler_iter = iter(self._index_sampler)
         self._num_yielded = 0
         self._IterableDataset_len_called = loader._IterableDataset_len_called
+        self._shared_seed = loader._get_shared_seed()
+        if isinstance(self._dataset, IterDataPipe):
+            shared_rng = torch.Generator()
+            shared_rng.manual_seed(self._shared_seed)
+            self._dataset = torch.utils.data.graph_settings.apply_shuffle_seed(self._dataset, shared_rng)
 
     def _next_index(self):
         return next(self._sampler_iter)  # may raise StopIteration
@@ -983,7 +1027,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                       self._worker_result_queue, self._workers_done_event,
                       self._auto_collation, self._collate_fn, self._drop_last,
                       self._base_seed, self._worker_init_fn, i, self._num_workers,
-                      self._persistent_workers))
+                      self._persistent_workers, self._shared_seed))
             w.daemon = True
             # NB: Process.start() actually take some time as it needs to
             #     start a process and pass the arguments over via a pipe.
@@ -1053,7 +1097,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # We resume the prefetching in case it was enabled
         if not first_iter:
             for idx in range(self._num_workers):
-                self._index_queues[idx].put(_utils.worker._ResumeIteration())
+                self._index_queues[idx].put(_utils.worker._ResumeIteration(self._shared_seed))
             resume_iteration_cnt = self._num_workers
             while resume_iteration_cnt > 0:
                 return_idx, return_data = self._get_data()
