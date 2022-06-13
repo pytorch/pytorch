@@ -108,7 +108,7 @@ __all__ = [
     "ne",
     "nextafter",
     "pow",
-    "rem",
+    "remainder",
     "rsqrt",
     "shift_left",
     "shift_right_arithmetic",
@@ -1058,14 +1058,14 @@ pow = _make_elementwise_binary_prim(
 )
 
 
-def _rem_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+def _remainder_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
     return fd.Ops.remainder(a, b)  # type: ignore[attr-defined]
 
 
-rem = _make_elementwise_binary_prim(
+remainder = _make_elementwise_binary_prim(
     "remainder",
     impl_aten=torch.remainder,
-    impl_nvfuser=_rem_nvfuser,
+    impl_nvfuser=_remainder_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )

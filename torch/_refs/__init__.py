@@ -877,8 +877,6 @@ gcd = _make_elementwise_binary_reference(
     prims.gcd,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.gcd,
-    supports_lhs_python_scalar=False,
-    supports_rhs_python_scalar=False,
 )
 
 # TODO: add docstring
@@ -981,8 +979,6 @@ lcm = _make_elementwise_binary_reference(
     _lcm,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.lcm,
-    supports_lhs_python_scalar=False,
-    supports_rhs_python_scalar=False,
 )
 
 
@@ -1088,7 +1084,7 @@ pow = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 remainder = _make_elementwise_binary_reference(
-    prims.rem,
+    prims.remainder,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.remainder,
 )
