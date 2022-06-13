@@ -123,7 +123,7 @@ class APoTObserver(ObserverBase):
 
         plt.plot(xs, ys)
         plt.title("APoT Quantization Plot")
-        plt.xlabel("Float")
+        plt.xlabel("Full Precision")
         plt.ylabel("Quantized")
         filestr = "pytorch/test/quantization/core/experimental/plots/" + filename
         plt.savefig(filestr)
