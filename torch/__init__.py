@@ -585,6 +585,19 @@ def set_float32_matmul_precision(precision):
     Running float32 matrix multiplications in lower precision may significantly increase
     performance, and in some programs the loss of precision has a negligible impact.
 
+    Supports three settings:
+
+        * "highest", float32 matrix multiplications use the float32 datatype for
+          internal computations.
+        * "high", float32 matrix multiplications use the TensorFloat32 or bfloat16_3x
+          datatypes for internal computations, if fast matrix multiplication algorithms
+          using those datatypes internally are available. Otherwise float32
+          matrix multiplications are computed as if the precision is "highest".
+        * "medium", float32 matrix multiplications use the bfloat16 datatype for
+          internal computations, if a fast matrix multiplication algorithm
+          using that datatype internally is available. Otherwise float32
+          matrix multiplications are computed as if the precision is "high".
+
     .. note::
 
         This does not change the output dtype of float32 matrix multiplications,
@@ -606,17 +619,7 @@ def set_float32_matmul_precision(precision):
         to setting `torch.backends.cuda.matmul.allow_tf32 = False`.
 
     Args:
-        precision(str): can be set to "highest" (default), "high", or "medium".
-            If "highest", float32 matrix multiplications use the float32 datatype for
-                internal computations.
-            If "high", float32 matrix multiplications use the TensorFloat32 or bfloat16_3x
-                datatypes for internal computations, if fast matrix multiplication algorithms
-                using those datatypes internally are available. Otherwise float32
-                matrix multiplications are computed as if the precision is "highest".
-            If "medium", float32 matrix multiplications use the bfloat16 datatype for
-                internal computations, if a fast matrix multiplication algorithm
-                using that datatype internally is available. Otherwise float32
-                matrix multiplications are computed as if the precision is "high".
+        precision(str): can be set to "highest" (default), "high", or "medium" (see above).
 
     """
     _C._set_float32_matmul_precision(precision)
