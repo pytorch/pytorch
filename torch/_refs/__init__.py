@@ -1799,7 +1799,7 @@ def native_layer_norm(
         weight is None or weight.shape == tuple(normalized_shape),
         lambda: "Expected weight to be of same shape as normalized_shape, but got "
         + "weight of shape "
-        + str(weight.shape)
+        + str(weight.shape)  # type: ignore[union-attr]
         + " and normalized_shape = "
         + str(normalized_shape),
     )
@@ -1807,7 +1807,7 @@ def native_layer_norm(
         bias is None or bias.shape == tuple(normalized_shape),
         lambda: "Expected bias to be of same shape as normalized_shape, but got "
         + "bias of shape "
-        + str(bias.shape)
+        + str(bias.shape)  # type: ignore[union-attr]
         + " and normalized_shape = "
         + str(normalized_shape),
     )
