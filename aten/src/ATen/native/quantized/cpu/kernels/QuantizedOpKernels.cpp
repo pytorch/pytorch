@@ -5,6 +5,7 @@
 #include <ATen/native/TopKImpl.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/UpSample.h>
+#include <ATen/native/cpu/IndexKernelUtils.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/quantized/FakeQuantAffine.h>
@@ -57,6 +58,7 @@ Tensor qcat_nhwc_kernel(
   std::vector<double> scales;
   std::vector<int64_t> zero_pts;
   std::vector<void*> data_ptrs;
+  std::vector<bool> is_fast_path;
 
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const at::Tensor& qx : qxs) {
@@ -88,6 +90,9 @@ Tensor qcat_nhwc_kernel(
     scales.push_back(qx.q_scale());
     zero_pts.push_back(qx.q_zero_point());
     data_ptrs.push_back(qx.data_ptr());
+    is_fast_path.push_back(
+        qx.q_scale() == scale &&
+        qx.q_zero_point() == zero_point);
   }
 
   const int64_t N = qx0.size(0);
@@ -122,6 +127,11 @@ Tensor qcat_nhwc_kernel(
           scalar_t::underlying* iptr =
               reinterpret_cast<scalar_t::underlying*>(data_ptrs[tidx]) +
               i * curr_C;
+
+          if (is_fast_path[tidx] && !ReLUFused) {
+            std::memcpy(optr, iptr, curr_C * sizeof(typename scalar_t::underlying));
+            continue;
+          }
 
           constexpr int64_t VLEN = Vec::size();
           int64_t c = 0;
@@ -3632,6 +3642,20 @@ void masked_fill_kernel_quantized_cpu(TensorIterator& iter, const Scalar& value,
     }
   });
 }
+
+// currently, we do not support accumulate=True for quantized tensors. We throw an exception in _index_put_impl_quantized_cpu_
+void index_put_kernel_quantized_cpu(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate, double scale, int zero_point) {
+  // NOTE: duplicate indices are only supported if accumulate is true.
+  AT_DISPATCH_QINT_TYPES(iter.dtype(), "index_put", [&] {
+    // See Note [Enabling Deterministic Operations]
+    // Parallel cpu_index_kernel with accumulation is nondeterministic, so we
+    // must enable serial execution if deterministic algorithms are enabled.
+    const bool is_deterministic = at::globalContext().deterministicAlgorithms();
+    at::native::cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [scale, zero_point](char* dst, char* src, int64_t offset) {
+      *(scalar_t*)(dst + offset) = quantize_val<scalar_t>(scale, zero_point, *(float*)src);
+    }, /*serial_execution=*/is_deterministic);
+  });
+}
 } // anonymous namespace
 
 // Some quantization tests are flaky on Windows with AVX512. If --continue-through-error
@@ -3684,6 +3708,7 @@ REGISTER_NO_AVX512_DISPATCH(qupsample_bilinear2d_nhwc_stub);
 REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
 REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
 REGISTER_NO_AVX512_DISPATCH(masked_fill_kernel_quantized_stub);
+REGISTER_NO_AVX512_DISPATCH(index_put_kernel_quantized_stub);
 #else
 REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
                   &dequantize_tensor_per_channel_affine_cpu);
@@ -3751,6 +3776,9 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(
     masked_fill_kernel_quantized_stub,
     &masked_fill_kernel_quantized_cpu);
+REGISTER_DISPATCH(
+    index_put_kernel_quantized_stub,
+    &index_put_kernel_quantized_cpu);
 #endif // CPU_CAPABILITY_AVX512 && _WIN32
 
 } // namespace native

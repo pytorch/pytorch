@@ -969,6 +969,7 @@
   dispatch:
     CPU: _bincount_cpu
     CUDA: _bincount_cuda
+  tags: dynamic_output_shape
 
 - func: bitwise_not(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -2483,14 +2484,23 @@
 
 - func: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: index.Tensor_out
   variants: function, method
   dispatch:
-    CPU, CUDA: index
     QuantizedCPU: quantized_index
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/TensorIndexing.cpp:
   # - Tensor Tensor::index(ArrayRef<TensorIndex> indices)
   # - Tensor Tensor::index(std::initializer_list<TensorIndex> indices)
+
+- func: index.Tensor_out(Tensor self, Tensor?[] indices, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  structured: True
+  structured_inherits: TensorIteratorBase
+  precomputed:
+  - indices -> DimVector sizes, DimVector strides
+  dispatch:
+    CPU, CUDA: index_out
 
 - func: index_copy.out(Tensor self, int dim, Tensor index, Tensor source, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -2537,6 +2547,7 @@
   variants: function
   dispatch:
     CPU, CUDA: _index_put_impl_
+    QuantizedCPU: _index_put_impl_quantized_cpu_
   autogen: _index_put_impl.functional, _index_put_impl.out
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
@@ -2637,6 +2648,9 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: nested_is_same_size
+    CompositeExplicitAutograd: is_same_size
 
 - func: is_signed(Tensor self) -> bool
   variants: function, method
@@ -2685,12 +2699,14 @@
   dispatch:
     CPU: layer_norm_cpu
     CUDA: layer_norm_cuda
+    MPS: layer_norm_mps
     CompositeExplicitAutograd: math_native_layer_norm
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: layer_norm_backward_cpu
     CUDA: layer_norm_backward_cuda
+    MPS: layer_norm_backward_mps
 
 - func: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
   variants: function, method
@@ -4845,6 +4861,7 @@
 - func: one_hot(Tensor self, int num_classes=-1) -> Tensor
   python_module: nn
   variants: function
+  tags: dynamic_output_shape
 
 - func: flip(Tensor self, int[] dims) -> Tensor
   variants: function, method
@@ -4887,6 +4904,10 @@
 - func: _nested_tensor_from_mask(Tensor t, Tensor mask) -> Tensor
   dispatch:
     CPU, CUDA: NestedTensor_nested_tensor_from_mask
+
+- func: _nested_tensor_from_mask_left_aligned(Tensor t, Tensor mask) -> bool
+  dispatch:
+    CPU, CUDA: NestedTensor_nested_tensor_from_mask_left_aligned
 
 - func: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
   device_check: NoCheck # cpu_nested_shape_example will always be on CPU
@@ -4960,18 +4981,21 @@
   dispatch:
     CPU: unique_dim_cpu
     CUDA: unique_dim_cuda
+  tags: dynamic_output_shape
 
 - func: unique_consecutive(Tensor self, bool return_inverse=False, bool return_counts=False, int? dim=None) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
     CPU: unique_consecutive_cpu
     CUDA: unique_consecutive_cuda
+  tags: dynamic_output_shape
 
 - func: unique_dim_consecutive(Tensor self, int dim, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
     CPU: unique_dim_consecutive_cpu
     CUDA: unique_dim_consecutive_cuda
+  tags: dynamic_output_shape
 
 # _unique and _unique_dim are fragile and modifying them easily cause internal break
 # the below operator is a temporary hack for adding return_counts support
@@ -4982,6 +5006,7 @@
   dispatch:
     CPU: _unique2_cpu
     CUDA: _unique2_cuda
+  tags: dynamic_output_shape
 
 - func: _unsafe_view(Tensor(a) self, int[] size) -> Tensor(a)
   dispatch:
@@ -6968,6 +6993,7 @@
   variants: method
   dispatch:
     CPU, CUDA: exponential_
+    MPS: exponential_mps_
   autogen: exponential.functional, exponential.out
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
@@ -7409,6 +7435,7 @@
     CPU, QuantizedCPU: index_select_out_cpu_
     CUDA, QuantizedCUDA: index_select_out_cuda
     MPS: index_select_out_mps
+  tags: dynamic_output_shape
 
 - func: index_select(Tensor self, int dim, Tensor index) -> Tensor
   variants: method, function
@@ -7420,11 +7447,14 @@
     SparseCPU: index_select_sparse_cpu
     SparseCUDA: index_select_sparse_cuda
     MPS: index_select_mps
+  tags: dynamic_output_shape
 
 - func: index_select.dimname_out(Tensor self, Dimname dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
+  tags: dynamic_output_shape
 
 - func: index_select.dimname(Tensor self, Dimname dim, Tensor index) -> Tensor
   variants: method, function
+  tags: dynamic_output_shape
 
 - func: index_select_backward(Tensor grad, int[] self_sizes, int dim, Tensor index) -> Tensor
   variants: function
@@ -7435,12 +7465,14 @@
   dispatch:
     CPU: masked_select_out_cpu
     CUDA: masked_select_out_cuda
+  tags: dynamic_output_shape
 
 - func: masked_select(Tensor self, Tensor mask) -> Tensor
   variants: method, function
   dispatch:
     CPU: masked_select_cpu
     CUDA: masked_select_cuda
+  tags: dynamic_output_shape
 
 - func: masked_select_backward(Tensor grad, Tensor input, Tensor mask) -> Tensor
   variants: function
@@ -7451,18 +7483,21 @@
   dispatch:
     CPU: nonzero_out_cpu
     CUDA: nonzero_out_cuda
+  tags: dynamic_output_shape
 
 - func: nonzero(Tensor self) -> Tensor
   variants: method, function
   dispatch:
     CPU: nonzero_cpu
     CUDA: nonzero_cuda
+  tags: dynamic_output_shape
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
   variants: method, function
 
 - func: argwhere(Tensor self) -> Tensor
   variants: method, function
+  tags: dynamic_output_shape
 
 - func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -11583,12 +11618,14 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: linalg_lstsq
+  tags: dynamic_output_shape
 
 - func: linalg_lstsq.out(Tensor self, Tensor b, float? rcond=None, *, str? driver=None, Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values) -> (Tensor(a!) solution, Tensor(b!) residuals, Tensor(c!) rank, Tensor(d!) singular_values)
   python_module: linalg
   variants: function
   dispatch:
     CPU, CUDA: linalg_lstsq_out
+  tags: dynamic_output_shape
 
 # torch.linalg.matmul, alias for torch.matmul
 - func: linalg_matmul(Tensor self, Tensor other) -> Tensor
@@ -11826,16 +11863,19 @@
   python_module: linalg
   variants: function
 
-- func: linalg_solve(Tensor input, Tensor other) -> Tensor
-  python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: linalg_solve
+- func: _linalg_solve(Tensor A, Tensor B, *, bool left=True) -> (Tensor result, Tensor LU, Tensor pivots)
+  structured_delegate: _linalg_solve.result
 
-- func: linalg_solve.out(Tensor input, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: linalg
+- func: _linalg_solve.result(Tensor A, Tensor B, *, bool left=True, Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots) -> (Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots)
+  structured: True
   dispatch:
-    CPU, CUDA: linalg_solve_out
+    CPU, CUDA: _linalg_solve_out
+
+- func: linalg_solve(Tensor A, Tensor B, *, bool left=True) -> Tensor
+  python_module: linalg
+
+- func: linalg_solve.out(Tensor A, Tensor B, *, bool left=True, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
 
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
   python_module: linalg
@@ -11951,12 +11991,12 @@
   dispatch:
     CompositeExplicitAutograd: _test_warn_in_autograd
 
-- func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
+- func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, Tensor? offsets=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: segment_reduce_kernel
 
-- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None, int axis=0, Scalar? initial=None) -> Tensor
+- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None, Tensor? offsets=None, int axis=0, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: _segment_reduce_backward_kernel
