@@ -2,25 +2,22 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
-import torch.ao.quantization.quantize_fx
+import torch.ao.quantization.quantize_fx as quantize_fx
+import torch.nn.functional as F
 from torch.ao.quantization import QConfig, QConfigMapping
-from torch.ao.quantization.fx._model_report._detector import _detect_per_channel
-from torch.ao.quantization.fx._model_report.model_report_observer import (
-    ModelReportObserver,
-)
-from torch.ao.quantization.observer import (
-    default_per_channel_weight_observer,
-    HistogramObserver,
-)
+from torch.ao.quantization.fx._model_report._detector import _detect_dynamic_vs_static, _detect_per_channel
+from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
+from torch.ao.quantization.observer import HistogramObserver, default_per_channel_weight_observer
 from torch.nn.intrinsic.modules.fused import ConvReLU2d, LinearReLU
 from torch.testing._internal.common_quantization import (
     ConvModel,
     QuantizationTestCase,
     SingleLayerLinearModel,
+    TwoLayerLinearModel,
     skipIfNoFBGEMM,
     skipIfNoQNNPACK,
-    TwoLayerLinearModel,
 )
+
 
 """
 Partition of input domain:
@@ -40,7 +37,9 @@ There are possible changes / suggestions, there are no changes / suggestions
 """
 
 # Default output for string if no optimizations are possible
-DEFAULT_NO_OPTIMS_ANSWER_STRING = "Further Optimizations for backend {}: \nNo further per_channel optimizations possible."
+DEFAULT_NO_OPTIMS_ANSWER_STRING = (
+    "Further Optimizations for backend {}: \nNo further per_channel optimizations possible."
+)
 
 # Example Sequential Model with multiple Conv and Linear with nesting involved
 NESTED_CONV_LINEAR_EXAMPLE = torch.nn.Sequential(
@@ -75,9 +74,7 @@ class TestModelReportFxDetector(QuantizationTestCase):
     """Prepares and callibrate the model"""
 
     def _prepare_model_and_run_input(self, model, q_config_mapping, input):
-        model_prep = torch.ao.quantization.quantize_fx.prepare_fx(
-            model, q_config_mapping, input
-        )  # prep model
+        model_prep = torch.ao.quantization.quantize_fx.prepare_fx(model, q_config_mapping, input)  # prep model
         model_prep(input).sum()  # callibrate the model
         return model_prep
 
@@ -94,14 +91,10 @@ class TestModelReportFxDetector(QuantizationTestCase):
         torch.backends.quantized.engine = "onednn"
 
         q_config_mapping = QConfigMapping()
-        q_config_mapping.set_global(
-            torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine)
-        )
+        q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
 
         input = torch.randn(1, 3, 10, 10)
-        prepared_model = self._prepare_model_and_run_input(
-            ConvModel(), q_config_mapping, input
-        )
+        prepared_model = self._prepare_model_and_run_input(ConvModel(), q_config_mapping, input)
 
         # run the detector
         optims_str, per_channel_info = _detect_per_channel(prepared_model)
@@ -118,9 +111,7 @@ class TestModelReportFxDetector(QuantizationTestCase):
             per_channel_info["per_channel_status"]["conv"]["per_channel_supported"],
             True,
         )
-        self.assertEqual(
-            per_channel_info["per_channel_status"]["conv"]["per_channel_used"], True
-        )
+        self.assertEqual(per_channel_info["per_channel_status"]["conv"]["per_channel_used"], True)
 
     """Case includes:
         Multiple conv or linear
@@ -136,9 +127,7 @@ class TestModelReportFxDetector(QuantizationTestCase):
         torch.backends.quantized.engine = "qnnpack"
 
         q_config_mapping = QConfigMapping()
-        q_config_mapping.set_global(
-            torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine)
-        )
+        q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
 
         prepared_model = self._prepare_model_and_run_input(
             TwoLayerLinearModel(),
@@ -237,9 +226,7 @@ class TestModelReportFxDetector(QuantizationTestCase):
             elif "conv" in key:
                 self.assertEqual(module_entry["per_channel_used"], True)
             else:
-                raise ValueError(
-                    "Should only contain conv and linear layers as key values"
-                )
+                raise ValueError("Should only contain conv and linear layers as key values")
 
     """Case includes:
         Multiple conv or linear
@@ -255,9 +242,7 @@ class TestModelReportFxDetector(QuantizationTestCase):
         torch.backends.quantized.engine = "qnnpack"
 
         q_config_mapping = QConfigMapping()
-        q_config_mapping.set_global(
-            torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine)
-        )
+        q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
 
         prepared_model = self._prepare_model_and_run_input(
             NESTED_CONV_LINEAR_EXAMPLE,
@@ -298,9 +283,7 @@ class TestModelReportFxDetector(QuantizationTestCase):
         torch.backends.quantized.engine = "qnnpack"
 
         q_config_mapping = QConfigMapping()
-        q_config_mapping.set_global(
-            torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine)
-        )
+        q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
 
         prepared_model = self._prepare_model_and_run_input(
             LAZY_CONV_LINEAR_EXAMPLE,
@@ -341,9 +324,7 @@ class TestModelReportFxDetector(QuantizationTestCase):
         torch.backends.quantized.engine = "fbgemm"
 
         q_config_mapping = QConfigMapping()
-        q_config_mapping.set_global(
-            torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine)
-        )
+        q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
 
         prepared_model = self._prepare_model_and_run_input(
             FUSION_CONV_LINEAR_EXAMPLE,
@@ -408,9 +389,7 @@ class TestModelReportFxDetector(QuantizationTestCase):
 
         # model must be in eval mode for fusion
         model_fp32.eval()
-        model_fp32_fused = torch.quantization.fuse_modules(
-            model_fp32, [["conv", "bn", "relu"]]
-        )
+        model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [["conv", "bn", "relu"]])
 
         # model must be set to train mode for QAT logic to work
         model_fp32_fused.train()
@@ -487,12 +466,8 @@ class TestModelReportObserver(QuantizationTestCase):
                 getattr(model, "obs1").average_batch_activation_range,
                 torch.tensor(float(0)),
             )
-            self.assertEqual(
-                getattr(model, "obs1").epoch_activation_min, torch.tensor(float("inf"))
-            )
-            self.assertEqual(
-                getattr(model, "obs1").epoch_activation_max, torch.tensor(float("-inf"))
-            )
+            self.assertEqual(getattr(model, "obs1").epoch_activation_min, torch.tensor(float("inf")))
+            self.assertEqual(getattr(model, "obs1").epoch_activation_max, torch.tensor(float("-inf")))
 
             # loop through the batches and run through
             for index, batch in enumerate(split_up_data):
@@ -502,9 +477,7 @@ class TestModelReportObserver(QuantizationTestCase):
 
                 # get general info about the batch and the model to use later
                 batch_min, batch_max = torch.aminmax(batch)
-                current_average_range = getattr(
-                    model, "obs1"
-                ).average_batch_activation_range
+                current_average_range = getattr(model, "obs1").average_batch_activation_range
                 current_epoch_min = getattr(model, "obs1").epoch_activation_min
                 current_epoch_max = getattr(model, "obs1").epoch_activation_max
 
@@ -512,9 +485,9 @@ class TestModelReportObserver(QuantizationTestCase):
                 model(ex_input)
 
                 # check that average batch activation range updated correctly
-                correct_updated_value = (
-                    current_average_range * num_tracked_so_far + (batch_max - batch_min)
-                ) / (num_tracked_so_far + 1)
+                correct_updated_value = (current_average_range * num_tracked_so_far + (batch_max - batch_min)) / (
+                    num_tracked_so_far + 1
+                )
                 self.assertEqual(
                     getattr(model, "obs1").average_batch_activation_range,
                     correct_updated_value,
@@ -618,17 +591,17 @@ class TestModelReportObserver(QuantizationTestCase):
         self.run_model_and_common_checks(model, ex_input, 10, 15)
 
         # make sure final values are all 0
-        self.assertTrue(getattr(model, "obs2").epoch_activation_min >= 0)
+        self.assertTrue(getattr(model, "obs2").get_batch_to_epoch_ratio() >= 0)
 
     """Case includes:
-    non-zero tensor
-    dim size = 2
-    run for 1 epoch
-    run for 1 batch
-    tests input data observer
+        non-zero tensor
+        dim size = 2
+        run for multiple epoch
+        run for multiple batch
+        tests input data observer
     """
 
-    def test_obs_in_nested_module(self):
+    def test_random_epochs_and_batches(self):
 
         # set up a basic model
         class TinyNestModule(torch.nn.Module):
@@ -661,56 +634,174 @@ class TestModelReportObserver(QuantizationTestCase):
                 x = self.relu(x)
                 return x
 
-        # initialize the model
-        model = LargerIncludeNestModel()
+        class ModifiedThreeOps(torch.nn.Module):
+            def __init__(self, batch_norm_dim):
+                super(ModifiedThreeOps, self).__init__()
+                self.obs1 = ModelReportObserver()
+                self.linear = torch.nn.Linear(7, 3, 2)
+                self.obs2 = ModelReportObserver()
 
-        # generate the desired input
-        ex_input = torch.ones((1, 1, 5))
+                if batch_norm_dim == 2:
+                    self.bn = torch.nn.BatchNorm2d(2)
+                elif batch_norm_dim == 3:
+                    self.bn = torch.nn.BatchNorm3d(4)
+                else:
+                    raise ValueError("Dim should only be 2 or 3")
 
-        # run it through the model and do general tests
-        self.run_model_and_common_checks(model, ex_input, 1, 1)
+                self.relu = torch.nn.ReLU()
 
-        # make sure final values are all 0
-        self.assertTrue(
-            getattr(getattr(model, "nested"), "obs2").epoch_activation_min >= 0
-        )
+            def forward(self, x):
+                x = self.obs1(x)
+                x = self.linear(x)
+                x = self.obs2(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                return x
 
-        # make sure final values are all 0 except for range
-        self.assertEqual(
-            getattr(getattr(model, "nested"), "obs1").epoch_activation_min, 1
-        )
-        self.assertEqual(
-            getattr(getattr(model, "nested"), "obs1").epoch_activation_max, 1
-        )
-        self.assertEqual(
-            getattr(getattr(model, "nested"), "obs1").average_batch_activation_range, 0
-        )
+        class HighDimensionNet(torch.nn.Module):
+            def __init__(self):
+                super(HighDimensionNet, self).__init__()
+                self.obs1 = ModelReportObserver()
+                self.fc1 = torch.nn.Linear(3, 7)
+                self.block1 = ModifiedThreeOps(3)
+                self.fc2 = torch.nn.Linear(3, 7)
+                self.block2 = ModifiedThreeOps(3)
+                self.fc3 = torch.nn.Linear(3, 7)
 
-    """Case includes:
-        non-zero tensor
-        dim size = 2
-        run for multiple epoch
-        run for multiple batch
-        tests input data observer
-    """
+            def forward(self, x):
+                x = self.obs1(x)
+                x = self.fc1(x)
+                x = self.block1(x)
+                x = self.fc2(x)
+                y = self.block2(x)
+                y = self.fc3(y)
+                z = x + y
+                z = F.relu(z)
+                return z
 
-    def test_random_epochs_and_batches(self):
         # the purpose of this test is to give the observers a variety of data examples
         # initialize the model
-        model = self.NestedModifiedSingleLayerLinear()
+        models = [
+            self.NestedModifiedSingleLayerLinear(),
+            LargerIncludeNestModel(),
+            ModifiedThreeOps(2),
+            HighDimensionNet(),
+        ]
 
         # get random number of epochs and batches
         num_epochs = torch.randint(1, 10, (1,))  # cap epochs at 10
         num_batches = torch.randint(1, 15, (1,))  # cap batches at 15
 
-        # generate the desired input
-        ex_input = torch.randn((num_batches, 1, 5))
+        input_shapes = [(1, 5), (1, 5), (2, 3, 7), (4, 1, 8, 3)]
+
+        # generate the desired inputs
+        inputs = []
+        for shape in input_shapes:
+            ex_input = torch.randn((num_batches, *shape))
+            inputs.append(ex_input)
 
         # run it through the model and do general tests
-        self.run_model_and_common_checks(model, ex_input, num_epochs, num_batches)
+        for index, model in enumerate(models):
+            self.run_model_and_common_checks(model, inputs[index], num_epochs, num_batches)
+
+
+"""
+Partition on domain / things to test
+
+There is only a single test case for now.
+
+This will be more thoroughly tested with the implementation of the full end to end tool coming soon.
+"""
 
 
 class TestModelReportDetectDynamicStatic(QuantizationTestCase):
+    @skipIfNoFBGEMM
+    def test_nested_detection_case(self):
+        class SingleLinear(torch.nn.Module):
+            def __init__(self):
+                super(SingleLinear, self).__init__()
+                self.linear = torch.nn.Linear(3, 3)
 
-    def run_simple_pass(self):
-        pass
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        class TwoBlockNet(torch.nn.Module):
+            def __init__(self):
+                super(TwoBlockNet, self).__init__()
+                self.block1 = SingleLinear()
+                self.block2 = SingleLinear()
+
+            def forward(self, x):
+                x = self.block1(x)
+                y = self.block2(x)
+                z = x + y
+                z = F.relu(z)
+                return z
+
+        # create model, example input, and qconfig mapping
+        torch.backends.quantized.engine = "fbgemm"
+        model = TwoBlockNet()
+        example_input = torch.randint(-10, 0, (1, 3, 3, 3))
+        example_input = example_input.to(torch.float)
+        q_config_mapping = QConfigMapping()
+        q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig("fbgemm"))
+
+        # set the weights to be 1s so then we get the same values as outputs
+        # with torch.no_grad():
+        #     model.block1.linear.weight = torch.nn.Parameter(torch.ones_like(model.block1.linear.weight))
+        #     model.block2.linear.weight = torch.nn.Parameter(torch.ones_like(model.block2.linear.weight))
+
+        # prep model and select observer
+        model_prep = quantize_fx.prepare_fx(model, q_config_mapping, example_input)
+        obs_ctr = ModelReportObserver
+
+        # find layer to attach to and store
+        linear_fqn = "block2.linear"  # fqn of target linear
+
+        target_linear = None
+        for node in model_prep.graph.nodes:
+            if node.target == linear_fqn:
+                target_linear = node
+                break
+
+        # insert into both module and graph pre and post
+
+        # set up to insert before target_linear (pre_observer)
+        with model_prep.graph.inserting_before(target_linear):
+            obs_to_insert = obs_ctr()
+            pre_obs_fqn = linear_fqn + ".model_report_pre_observer"
+            model_prep.add_submodule(pre_obs_fqn, obs_to_insert)
+            model_prep.graph.create_node(op="call_module", target=pre_obs_fqn, args=target_linear.args)
+
+        # set up and insert after the target_linear (post_observer)
+        with model_prep.graph.inserting_after(target_linear):
+            obs_to_insert = obs_ctr()
+            post_obs_fqn = linear_fqn + ".model_report_post_observer"
+            model_prep.add_submodule(post_obs_fqn, obs_to_insert)
+            model_prep.graph.create_node(op="call_module", target=post_obs_fqn, args=(target_linear,))
+
+        # need to recompile module after submodule added and pass input through
+        model_prep.recompile()
+
+        num_iterations = 10
+        for i in range(num_iterations):
+            if i % 2 == 0:
+                example_input = torch.randint(-10, 0, (1, 3, 3, 3)).to(torch.float)
+            else:
+                example_input = torch.randint(0, 10, (1, 3, 3, 3)).to(torch.float)
+            model_prep(example_input)
+
+        # run it through the dynamic vs static detector
+        dynam_vs_stat_str, dynam_vs_stat_dict = _detect_dynamic_vs_static(model_prep, tolerance=0.5)
+
+        # one of the stats should be stationary, and the other non-stationary
+        # as a result, dynamic should be recommended
+        data_dist_info = [
+            dynam_vs_stat_dict[linear_fqn]["pre_observer_data_dist"],
+            dynam_vs_stat_dict[linear_fqn]["post_observer_data_dist"],
+        ]
+
+        self.assertTrue("stationary" in data_dist_info)
+        self.assertTrue("non-stationary" in data_dist_info)
+        self.assertTrue(dynam_vs_stat_dict[linear_fqn]["dynamic_recommended"])

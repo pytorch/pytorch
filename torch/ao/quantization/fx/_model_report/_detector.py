@@ -3,11 +3,12 @@ from typing import Any, Dict, Set, Tuple
 import torch
 import torch.nn as nn
 from torch.ao.quantization.fake_quantize import FakeQuantize
+from torch.ao.quantization.fx.graph_module import GraphModule
 from torch.ao.quantization.observer import ObserverBase
 from torch.ao.quantization.qconfig import QConfig
 from torch.nn.qat.modules.conv import _ConvNd as QatConvNd
 from torch.nn.qat.modules.linear import Linear as QatLinear
-from torch.ao.quantization.fx.graph_module import GraphModule
+
 
 # Default map for representing supported per channel quantization modules for different backends
 DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES: Dict[str, Set[Any]] = {
@@ -36,15 +37,9 @@ def _detect_per_channel(model: nn.Module) -> Tuple[str, Dict[str, Any]]:
     backend_chosen = torch.backends.quantized.engine
     supported_modules = set([])
     if backend_chosen in DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES:
-        supported_modules = DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES[
-            backend_chosen
-        ]
+        supported_modules = DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES[backend_chosen]
     else:
-        raise ValueError(
-            "Not configured to work with {}. Try a different default backend".format(
-                backend_chosen
-            )
-        )
+        raise ValueError("Not configured to work with {}. Try a different default backend".format(backend_chosen))
 
     # store information on submodules and if per_channel quantization is supported and used as well as qconfig information
     per_channel_info = {"backend": backend_chosen, "per_channel_status": {}}
@@ -68,9 +63,7 @@ def _detect_per_channel(model: nn.Module) -> Tuple[str, Dict[str, Any]]:
             assert isinstance(fqn, str) and isinstance(per_channel_info["per_channel_status"], dict)
 
             is_in_include_list = (
-                True
-                if sum(list(map(lambda x: isinstance(module, x), supported_modules))) > 0
-                else False
+                True if sum(list(map(lambda x: isinstance(module, x), supported_modules))) > 0 else False
             )
 
             # check if the module per_channel is supported
@@ -86,22 +79,15 @@ def _detect_per_channel(model: nn.Module) -> Tuple[str, Dict[str, Any]]:
 
                 # this object should either be fake quant or observer
                 q_or_s_obj = module.qconfig.weight.p.func()
-                assert isinstance(q_or_s_obj, FakeQuantize) or isinstance(
-                    q_or_s_obj, ObserverBase
-                )
+                assert isinstance(q_or_s_obj, FakeQuantize) or isinstance(q_or_s_obj, ObserverBase)
 
                 per_channel_used = False  # will be true if found in qconfig
 
-                if hasattr(
-                    q_or_s_obj, "ch_axis"
-                ):  # then we know that per_channel quantization used
+                if hasattr(q_or_s_obj, "ch_axis"):  # then we know that per_channel quantization used
 
                     # all fake quants have channel axis so need to check is_per_channel
                     if isinstance(q_or_s_obj, FakeQuantize):
-                        if (
-                            hasattr(q_or_s_obj, "is_per_channel")
-                            and q_or_s_obj.is_per_channel
-                        ):
+                        if hasattr(q_or_s_obj, "is_per_channel") and q_or_s_obj.is_per_channel:
                             per_channel_used = True
                     elif isinstance(q_or_s_obj, ObserverBase):
                         # should be an observer otherwise
@@ -118,9 +104,7 @@ def _detect_per_channel(model: nn.Module) -> Tuple[str, Dict[str, Any]]:
     _detect_per_channel_helper(model)
 
     # String to let the user know of further optimizations
-    further_optims_str = "Further Optimizations for backend {}: \n".format(
-        backend_chosen
-    )
+    further_optims_str = "Further Optimizations for backend {}: \n".format(backend_chosen)
 
     # assert for MyPy check
     assert isinstance(per_channel_info["per_channel_status"], dict)
@@ -135,12 +119,23 @@ def _detect_per_channel(model: nn.Module) -> Tuple[str, Dict[str, Any]]:
             )
 
     if optimizations_possible:
-        further_optims_str += "To use per_channel quantization, make sure the qconfig has a per_channel weight observer."
+        further_optims_str += (
+            "To use per_channel quantization, make sure the qconfig has a per_channel weight observer."
+        )
     else:
         further_optims_str += "No further per_channel optimizations possible."
 
     # return the string and the dictionary form of same information
     return (further_optims_str, per_channel_info)
+
+
+# names for the pre and post observers that are inserted
+DEFAULT_PRE_OBSERVER_NAME = "model_report_pre_observer"
+DEFAULT_POST_OBSERVER_NAME = "model_report_post_observer"
+
+# naming conventions for stationary vs non-stationary data
+DEFAULT_STATIONARY = "stationary"
+DEFAULT_NON_STATIONARY = "non-stationary"
 
 
 def _detect_dynamic_vs_static(model: GraphModule, tolerance=0.5) -> Tuple[str, Dict[str, Any]]:
@@ -166,28 +161,38 @@ def _detect_dynamic_vs_static(model: GraphModule, tolerance=0.5) -> Tuple[str, D
     # loop through all submodules included nested ones
     for name, module in model.named_modules():
         # if module has the ModelReportObserver attached to it
-        if hasattr(module, "model_report_pre_observer") and hasattr(module, "model_report_pre_observer"):
+        if hasattr(module, DEFAULT_PRE_OBSERVER_NAME) and hasattr(module, DEFAULT_POST_OBSERVER_NAME):
             # get pre and post observers for the module
-            pre_obs = getattr(module, "model_report_pre_observer")
-            post_obs = getattr(module, "model_report_post_observer")
+            pre_obs = getattr(module, DEFAULT_PRE_OBSERVER_NAME)
+            post_obs = getattr(module, DEFAULT_POST_OBSERVER_NAME)
 
             # get the statistics for each module
             pre_stat = pre_obs.get_batch_to_epoch_ratio()
             post_stat = post_obs.get_batch_to_epoch_ratio()
 
-            print(pre_obs.epoch_activation_min, pre_obs.epoch_activation_max, pre_obs.average_batch_activation_range)
-
             # record module, pre and post stat, and whether to do dynamic or static based off it
             dynamic_recommended = False
 
+            # string for pre and post observer classification
+            pre_obs_dist_classification = ""
+            post_obs_dist_classification = ""
+
             if pre_stat > tolerance and post_stat > tolerance:
                 dynamic_recommended = False  # static is best if both stationary
+                pre_obs_dist_classification = DEFAULT_STATIONARY
+                post_obs_dist_classification = DEFAULT_STATIONARY
             elif pre_stat <= tolerance and post_stat > tolerance:
                 dynamic_recommended = False  # static best if input non-stationary, output stationary
+                pre_obs_dist_classification = DEFAULT_NON_STATIONARY
+                post_obs_dist_classification = DEFAULT_STATIONARY
             elif pre_stat <= tolerance and post_stat <= tolerance:
                 dynamic_recommended = True  # dynamic best if input, output non-stationary
+                pre_obs_dist_classification = DEFAULT_NON_STATIONARY
+                post_obs_dist_classification = DEFAULT_NON_STATIONARY
             elif pre_stat > tolerance and post_stat <= tolerance:
                 dynamic_recommended = True  # dynamic best if input stationary, output non-stationary
+                pre_obs_dist_classification = DEFAULT_STATIONARY
+                post_obs_dist_classification = DEFAULT_NON_STATIONARY
             else:
                 raise Exception("Should always take one of above branches")
 
@@ -196,7 +201,9 @@ def _detect_dynamic_vs_static(model: GraphModule, tolerance=0.5) -> Tuple[str, D
                 "tolerance": tolerance,
                 "dynamic_recommended": dynamic_recommended,
                 "pre_observer_comp_stat": pre_stat,
+                "pre_observer_data_dist": pre_obs_dist_classification,
                 "post_observer_comp_stat": post_stat,
+                "post_observer_data_dist": post_obs_dist_classification,
             }
 
             module_dynamic_static_info[name] = module_info
@@ -210,23 +217,38 @@ def _detect_dynamic_vs_static(model: GraphModule, tolerance=0.5) -> Tuple[str, D
 
         # decide what string formatting values will be
         quantization_type = ""
-        quantization_reasoning = "the ratio of average batch range to epoch range is {} the threshold."
-        dynamic_benefit = " You will get more accurate results if you use dynamic quantization."
-        static_benefit = " You can increase model efficiency if you use static quantization."
+
+        # TODO CHANGE TO NON STATIONARY AND STATIONARY TALK
+        quantization_reasoning = "the distribution of data before {} is {} and the distribution after is {}."
+        dynamic_benefit = " You will get more accurate results if you use dynamic quantization"
+        static_benefit = " You can increase model efficiency if you use static quantization"
 
         if module_info["dynamic_recommended"]:
             quantization_type = "dynamic"
-            quantization_reasoning = quantization_reasoning.format("below") + dynamic_benefit
+            quantization_reasoning = (
+                quantization_reasoning.format(
+                    module_name, module_info["pre_observer_data_dist"], module_info["post_observer_data_dist"]
+                )
+                + dynamic_benefit
+            )
         else:
             quantization_type = "static"
-            quantization_reasoning = quantization_reasoning.format("above") + static_benefit
+            quantization_reasoning = (
+                quantization_reasoning.format(
+                    module_name, module_info["pre_observer_data_dist"], module_info["post_observer_data_dist"]
+                )
+                + static_benefit
+            )
 
         # if we have a non-stationary input -> linear -> stationary input we suggest
         if (
             module_info["pre_observer_comp_stat"] <= module_info["tolerance"]
             and module_info["post_observer_comp_stat"] > module_info["tolerance"]
         ):
-            dynamic_per_tensor_string = " We recommend to add a dynamic quantize per tensor layer preceding this module if you choose to make it static."
+            rec_lay_to_add = "dynamic quantize per tensor layer"
+            dynamic_per_tensor_string = " We recommend to add a {} before this module if it is static.".format(
+                rec_lay_to_add
+            )
             dynamic_per_tensor_reasoning_string = (
                 " This is because the input to this module has a non-stationary distribution."
             )
@@ -236,7 +258,9 @@ def _detect_dynamic_vs_static(model: GraphModule, tolerance=0.5) -> Tuple[str, D
             )
 
         # format the overall suggestion string with the specific inputs
-        module_suggestion_string = suggestion_string_template.format(name, quantization_type, quantization_reasoning)
+        module_suggestion_string = suggestion_string_template.format(
+            module_name, quantization_type, quantization_reasoning
+        )
 
         # append to overall suggestion
         dynamic_vs_static_string += module_suggestion_string
