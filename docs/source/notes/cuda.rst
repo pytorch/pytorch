@@ -97,6 +97,7 @@ To get an idea of the precision and speed, see the example code below:
   b = b_full.float()
 
   # Do matmul at TF32 mode.
+  torch.backends.cuda.matmul.allow_tf32 = True
   ab_tf32 = a @ b  # takes 0.016s on GA100
   error = (ab_tf32 - ab_full).abs().max()  # 0.1747
   relative_error = error / mean  # 0.0022
