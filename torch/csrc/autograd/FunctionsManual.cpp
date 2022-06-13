@@ -1919,7 +1919,8 @@ Tensor kl_div_double_backward_target(
   if (log_target) {
     g = grad * result;
   } else {
-    g = at::where(target > 0, -grad * grad_output, at::zeros({}, grad.options()));
+    g = at::where(
+        target > 0, -grad * grad_output, at::zeros({}, grad.options()));
     if (reduction == at::Reduction::Mean) {
       g = areAnyTensorSubclassLike({g}) ? g / input.numel()
                                         : g.div_(input.numel());
