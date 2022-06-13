@@ -482,6 +482,52 @@ class TestNestedTensorDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             nt1.clone(memory_format=torch.channels_last)
 
+class TestNestedTensorAutograd(TestCase):
+    def nt_equal(self, nt1, nt2):
+        self.assertEqual(nt1.dtype, nt2.dtype)
+        self.assertEqual(nt1.device, nt2.device)
+        ub1 = nt1.unbind()
+        ub2 = nt2.unbind()
+        self.assertEqual(len(ub1), len(ub2))
+        n = len(ub1)
+        for i in range(n):
+            self.assertEqual(ub1[i], ub2[i])
+
+    def _create_nested_tensor_from_list(self, requires_grad=False):
+        return torch.nested_tensor([torch.randn(1, 2, requires_grad=requires_grad),
+                                    torch.randn(7, 8, requires_grad=requires_grad)])
+
+    def _create_nested_tensor_from_mask(self, requires_grad=False):
+        data = torch.randn(2, 3, 4, requires_grad=requires_grad)
+        mask = torch.ones_like(data[:, :, 0]).bool()
+        return torch._nested_tensor_from_mask(data, mask)
+
+    def test_requires_grad(self):
+        nt = self._create_nested_tensor_from_list()
+        nt.requires_grad_()
+        assert nt.requires_grad
+
+    def test_requires_grad_from_mask(self):
+        nt = self._create_nested_tensor_from_mask()
+        nt.requires_grad_()
+        assert nt.requires_grad
+
+    def test_backward_for_add_op(self):
+        nt_1 = self._create_nested_tensor_from_mask()
+        nt_2 = self._create_nested_tensor_from_mask()
+
+        nt_1.requires_grad_()
+        c = nt_1 + nt_2
+
+        assert nt_1.requires_grad
+        assert c.requires_grad
+        upward_grad = self._create_nested_tensor_from_mask()
+        c.backward(upward_grad)
+
+        #  Grad check doesn't work with nested yet.
+        # d/dnt_1 (nt + nt_1) = 1*upward_grad
+        self.nt_equal(nt_1.grad, upward_grad)
+
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 
 if __name__ == '__main__':
