@@ -185,7 +185,7 @@ else
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
     # rocm builds fail when WERROR=1
-    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]
+    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
       WERROR=1 python setup.py bdist_wheel
     else
       python setup.py bdist_wheel
