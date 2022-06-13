@@ -16,8 +16,7 @@ struct THPSize {
   PyTupleObject tuple;
 };
 
-PyObject * THPSize_New(const torch::autograd::Variable& var)
-{
+PyObject* THPSize_New(const torch::autograd::Variable& var) {
   if (!torch::jit::tracer::isTracing()) {
     auto sizes = var.sizes();
     return THPSize_NewFromSizes(var.dim(), sizes.data());
@@ -45,35 +44,40 @@ PyObject* THPSize_NewFromSizes(int dim, const int64_t* sizes) {
   return self.release();
 }
 
-PyObject * THPSize_NewFromSymSizes(const at::Tensor& self_)
-{
-    auto sym_sizes = self_.sym_sizes();
+PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
+  auto sym_sizes = self_.sym_sizes();
 
-    auto ret = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, sym_sizes.size()));
-    if (!ret) throw python_error();
+  auto ret = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, sym_sizes.size()));
+  if (!ret)
+    throw python_error();
 
-    for (auto i: c10::irange(sym_sizes.size())) {
-      auto si = sym_sizes[i];
-      if (si.is_symbolic()) {
-        TORCH_CHECK(!torch::jit::tracer::isTracing(), "JIT Tracing of SymInts isn't supported");
-        auto py_symint = py::cast(si.toSymbolicIntNode()).release().ptr();
-        PyTuple_SET_ITEM(ret.get(), i, py_symint);
+  for (auto i : c10::irange(sym_sizes.size())) {
+    auto si = sym_sizes[i];
+    if (si.is_symbolic()) {
+      TORCH_CHECK(
+          !torch::jit::tracer::isTracing(),
+          "JIT Tracing of SymInts isn't supported");
+      auto py_symint = py::cast(si.toSymbolicIntNode()).release().ptr();
+      PyTuple_SET_ITEM(ret.get(), i, py_symint);
+    } else {
+      if (torch::jit::tracer::isTracing()) {
+        PyObject* py_size_tensor =
+            THPVariable_Wrap(torch::jit::tracer::getSizeOf(self_, i));
+        if (!py_size_tensor)
+          throw python_error();
+        PyTuple_SET_ITEM(ret.get(), i, py_size_tensor);
       } else {
-        if (torch::jit::tracer::isTracing()) {
-          PyObject *py_size_tensor = THPVariable_Wrap(torch::jit::tracer::getSizeOf(self_, i));
-          if (!py_size_tensor) throw python_error();
-          PyTuple_SET_ITEM(ret.get(), i, py_size_tensor);
-        } else {
-          PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(si.data()));
-        }
+        PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(si.data()));
       }
     }
-    return ret.release();
+  }
+  return ret.release();
 }
 
-static bool isTracedZeroDimVar(PyObject *item) {
-  if (!THPVariable_Check(item)) return false;
-  auto & var = THPVariable_Unpack(item);
+static bool isTracedZeroDimVar(PyObject* item) {
+  if (!THPVariable_Check(item))
+    return false;
+  auto& var = THPVariable_Unpack(item);
   return var.dim() == 0 && torch::jit::tracer::getValueTrace(var);
 }
 
@@ -126,9 +130,9 @@ static PyObject* THPSize_repr(THPSize* self) {
     auto item = PyTuple_GET_ITEM(self, i);
     auto ih = py::handle(item);
 
-    repr += torch::is_symint_node(ih) ?
-      std::string(py::str(ih)) :
-      std::to_string(THPUtils_unpackLong(PyTuple_GET_ITEM(self, i)));
+    repr += torch::is_symint_node(ih)
+        ? std::string(py::str(ih))
+        : std::to_string(THPUtils_unpackLong(PyTuple_GET_ITEM(self, i)));
   }
   repr += "])";
   return THPUtils_packString(repr);

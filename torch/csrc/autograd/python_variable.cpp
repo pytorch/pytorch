@@ -698,12 +698,14 @@ static PyObject* THPVariable_make_wrapper_subclass(
   Tensor tensor;
   if (r.idx == 0) {
     tensor = at::for_blob(nullptr, r.intlist(1))
-          .strides(r.intlistOptional(2))
-          .storage_offset(r.toInt64Optional(3))
-          .context(nullptr, [](void *ctx) {})
-          .target_device(options.device())  // TODO: this shouldn't be necessary if it came from options
-          .options(options)
-          .make_tensor();
+                 .strides(r.intlistOptional(2))
+                 .storage_offset(r.toInt64Optional(3))
+                 .context(nullptr, [](void* ctx) {})
+                 .target_device(
+                     options.device()) // TODO: this shouldn't be necessary if
+                                       // it came from options
+                 .options(options)
+                 .make_tensor();
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
@@ -734,10 +736,11 @@ static PyObject* THPVariable_make_wrapper_subclass(
       tensor_impl->set_storage_offset(*storage_offset);
     }
 
-
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
-      TORCH_CHECK(false, "Setting sizes_strides_policy isn't suppored for this overload")
+      TORCH_CHECK(
+          false,
+          "Setting sizes_strides_policy isn't suppored for this overload")
     }
   }
 
@@ -1196,7 +1199,7 @@ PyObject* THPVariable_get_shape(THPVariable* self, void* unused) {
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "shape");
   }
-  //return THPSize_NewFromSymSizes(THPVariable_Unpack(self));
+  // return THPSize_NewFromSymSizes(THPVariable_Unpack(self));
   return THPSize_New(THPVariable_Unpack(self));
   END_HANDLE_TH_ERRORS
 }
