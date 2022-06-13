@@ -1788,10 +1788,12 @@ def native_layer_norm(
     axis = input.ndim - len(normalized_shape)
     reduction_dims = list(range(axis, input.ndim))
     out, mean, rstd = _normalize(input, reduction_dims, eps)
-    if weight is not None:
-        out = out * weight
-    if bias is not None:
+    if weight is None and bias is not None:
         out = out + bias
+    elif weight is not None and bias is None:
+        out = out * weight
+    elif weight is not None and bias is not None:
+        out = out * weight + bias
     out = prims.convert_element_type(out, input.dtype)
     if input.device.type == 'cpu':
         mean = prims.convert_element_type(mean, input.dtype)
