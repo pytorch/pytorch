@@ -46,20 +46,6 @@ mse_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const a
   TORCH_INTERNAL_ASSERT(false);
 };
 
-at::Tensor
-mse_loss_backward_batch_rule(
-    const at::Tensor& grad_output,
-    const at::Tensor& self,
-    const at::Tensor& target,
-    int64_t reduction) {
-
-  const auto result = 2. * (self - target) * grad_output;
-  if (reduction == Reduction::Mean) {
-    return result / self.numel();
-  }
-  return result;
-};
-
 static Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
   if (reduction == at::Reduction::Mean) {
     return unreduced.mean();
@@ -296,7 +282,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("nll_loss_backward", nll_loss_backward_decomposition);
   m.impl("nll_loss2d_backward", nll_loss_backward_decomposition);
   VMAP_SUPPORT(mse_loss, mse_loss_batch_rule);
-  m.impl("mse_loss_backward", mse_loss_backward_batch_rule);
+  // mse_loss_backwards uses a decomposition for its batch rule
   m.impl("binary_cross_entropy", binary_cross_entropy_plumbing);
   m.impl("binary_cross_entropy_backward", binary_cross_entropy_backward_plumbing);
 }
