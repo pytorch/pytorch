@@ -6,7 +6,7 @@ import sys
 
 import torch
 import torch.nn as nn
-
+import numpy as np
 from typing import Any, Tuple
 
 # Make the helper files in test/ importable
@@ -461,10 +461,7 @@ class TestAsync(JitTestCase):
 
             def forward(self, input):
                 fut_list = self.list_fut_mod(input)
-                res = input
-                for fut in fut_list:
-                    res = res + fut.wait()
-                return res
+                return input+np.sum([fut.wait() for fut in fut_list])
 
         self.checkTrace(TestModuleWrapper(), (torch.randn(5, 5),))
 
