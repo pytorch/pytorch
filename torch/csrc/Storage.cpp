@@ -15,6 +15,7 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/copy_utils.h>
 #include <torch/csrc/utils/python_arg_parser.h>
+#include <ATen/mps/MPSDevice.h>
 
 #include <c10/util/intrusive_ptr.h>
 #include <fmt/format.h>
@@ -93,6 +94,10 @@ static PyObject* THPStorage_pynew(
     } else if (device.type() == at::kCUDA) {
       at::globalContext().lazyInitCUDA();
       allocator = c10::cuda::CUDACachingAllocator::get();
+#endif
+#ifdef USE_MPS
+    } else if (device.type() == at::kMPS) {
+      allocator = at::mps::GetMPSAllocator();
 #endif
     } else if (device.type() == at::DeviceType::Meta) {
       allocator = c10::GetAllocator(device.type());
