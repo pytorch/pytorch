@@ -125,7 +125,7 @@ class APoTObserver(ObserverBase):
         plt.title("APoT Quantization Plot")
         plt.xlabel("Float")
         plt.ylabel("Quantized")
-        filestr = "/data/users/amandaliu/pytorch/test/quantization/core/experimental/plots/" + filename
+        filestr = "pytorch/test/quantization/core/experimental/plots/" + filename
         plt.savefig(filestr)
 
 r"""Converts floating point input into int4 APoT2 number
