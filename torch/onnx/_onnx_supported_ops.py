@@ -63,9 +63,9 @@ def _all_aten_forward_schemas():
 
 def _symbolic_argument_count(func):
     params = []
-    sig = inspect.signature(func)
+    signature = inspect.signature(func)
     optional_params = []
-    for name, parameter in sig.parameters.items():
+    for name, parameter in signature.parameters.items():
         if name in {"_outputs", "g"}:
             continue
         if parameter.default is parameter.empty:
@@ -95,7 +95,6 @@ def onnx_supported_ops():
     symbolic_schemas = _all_symbolics_schemas()
     torch_schemas = set(symbolic_schemas.values())
     supported_ops = []
-    unsupported_ops = []
     onnx_supported = []
     for schema in aten_schemas:
         if schema in torch_schemas:
@@ -104,6 +103,4 @@ def onnx_supported_ops():
             if schema not in supported_ops:
                 supported_ops.append(symbolic_schemas[opname])
                 onnx_supported.append((opname, " ".join(str(o) for o in opsets)))
-        else:
-            unsupported_ops.append(schema)
     return sorted(onnx_supported, key=lambda x: x[0])
