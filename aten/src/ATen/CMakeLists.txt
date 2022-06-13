@@ -420,7 +420,6 @@ if(USE_CUDA AND NOT USE_ROCM)
       ${CUDA_LIBRARIES}
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusparse_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static_nocallback.a
       )
    if(NOT BUILD_LAZY_CUDA_LINALG)
