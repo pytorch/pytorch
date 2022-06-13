@@ -2,12 +2,12 @@
 
 #include <ATen/Parallel.h>
 #include <c10/core/Event.h>
+#include <c10/util/DeadlockDetection.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
-#include <c10/util/DeadlockDetection.h>
 
 namespace torch {
 namespace distributed {
@@ -98,7 +98,7 @@ void DistEngine::globalCpuThread(
                 variables =
                     InputBuffer::variables(std::move(task.inputs_))]() mutable {
       InputBuffer inputs(variables.size());
-      for(const auto i : c10::irange(variables.size())) {
+      for (const auto i : c10::irange(variables.size())) {
         inputs.add(i, std::move(variables[i]), c10::nullopt, c10::nullopt);
       }
       execute_graph_task_until_ready_queue_empty(
@@ -296,7 +296,8 @@ void DistEngine::computeDependencies(
 
     // Create a dummy GraphRoot and run init_to_execute with it.
     GraphRoot dummyRoot(edges, {});
-    graphTask->init_to_execute(dummyRoot, outputEdges, /*accumulate_grad=*/false, /*min_topo_nr=*/0);
+    graphTask->init_to_execute(
+        dummyRoot, outputEdges, /*accumulate_grad=*/false, /*min_topo_nr=*/0);
     for (auto& mapEntry : graphTask->exec_info_) {
       auto& execInfo = mapEntry.second;
       if (!execInfo.captures_) {
@@ -411,32 +412,31 @@ c10::intrusive_ptr<c10::ivalue::Future> DistEngine::
   auto accumulateGradFuture =
       c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
 
-  futureGrads->addCallback(
-      [autogradContext, outputEdges, accumulateGradFuture](c10::ivalue::Future& futureGrads) {
-        if (futureGrads.hasError()) {
-          // Don't accumulate gradients if we receive an error.
-          // We must add the node information here since DistEngine::execute
-          // waits on accumulateGradFuture and will throw an exception once we
-          // set the error below.
-          std::string errorMsg = c10::str(
-              "Error on Node ",
-              DistAutogradContainer::getInstance().getWorkerId(),
-              ": ",
-              futureGrads.tryRetrieveErrorMessage());
-          accumulateGradFuture->setError(std::make_exception_ptr(
-              c10::ivalue::Future::FutureError(std::move(errorMsg))));
-          return;
-        }
+  futureGrads->addCallback([autogradContext, outputEdges, accumulateGradFuture](
+                               c10::ivalue::Future& futureGrads) {
+    if (futureGrads.hasError()) {
+      // Don't accumulate gradients if we receive an error.
+      // We must add the node information here since DistEngine::execute
+      // waits on accumulateGradFuture and will throw an exception once we
+      // set the error below.
+      std::string errorMsg = c10::str(
+          "Error on Node ",
+          DistAutogradContainer::getInstance().getWorkerId(),
+          ": ",
+          futureGrads.tryRetrieveErrorMessage());
+      accumulateGradFuture->setError(std::make_exception_ptr(
+          c10::ivalue::Future::FutureError(std::move(errorMsg))));
+      return;
+    }
 
-        try {
-          const variable_list& grads =
-              futureGrads.constValue().toTensorVector();
-          TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
-          accumulateGradFuture->markCompleted(c10::IValue());
-        } catch (std::exception& e) {
-          accumulateGradFuture->setErrorIfNeeded(std::current_exception());
-        }
-      });
+    try {
+      const variable_list& grads = futureGrads.constValue().toTensorVector();
+      TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
+      accumulateGradFuture->markCompleted(c10::IValue());
+    } catch (std::exception& e) {
+      accumulateGradFuture->setErrorIfNeeded(std::current_exception());
+    }
+  });
 
   return accumulateGradFuture;
 }
@@ -445,22 +445,22 @@ c10::intrusive_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
     const ContextPtr& autogradContext,
     const std::shared_ptr<SendRpcBackward>& sendFunction,
     bool retainGraph) {
-
   // Typically the local autograd engine ensures stream synchronizations between
   // nodes in the graph. However, for distributed autograd the sendFunction
   // inputs might have been retrieved over the wire on a separate stream and the
   // sendFunction itself runs on a different stream. As a result, we need to
   // manually synchronize those two streams here.
-  const auto& send_backward_stream = sendFunction->stream(c10::DeviceType::CUDA);
+  const auto& send_backward_stream =
+      sendFunction->stream(c10::DeviceType::CUDA);
   if (send_backward_stream) {
     for (const auto& grad : sendFunction->getGrads()) {
-        const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
-        const auto default_stream = guard.getStream(grad.device());
-        if (send_backward_stream != default_stream) {
-          auto event = c10::Event{c10::DeviceType::CUDA};
-          event.record(default_stream);
-          send_backward_stream->wait(event);
-        }
+      const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+      const auto default_stream = guard.getStream(grad.device());
+      if (send_backward_stream != default_stream) {
+        auto event = c10::Event{c10::DeviceType::CUDA};
+        event.record(default_stream);
+        send_backward_stream->wait(event);
+      }
     }
   }
 
@@ -490,42 +490,45 @@ c10::intrusive_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
     auto callbackFuture =
         c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
 
-    accumulateGradFuture->addCallback([autogradContext,
-                                       callbackFuture](c10::ivalue::Future& accumulateGradFuture) {
-      try {
-        if (accumulateGradFuture.hasError()) {
-          // Perform cleanup at the end of the backward pass (before we mark
-          // the future as completed).
-          DistEngine::getInstance().cleanupBackwardPass(autogradContext);
-
-          // Skip any further processing on errors.
-          callbackFuture->setError(accumulateGradFuture.exception_ptr());
-          return;
-        }
-
-        // Wait for all RPCs after the autograd engine is done.
-        auto rpcFuture = autogradContext->clearAndWaitForOutstandingRpcsAsync();
-        rpcFuture->addCallback([callbackFuture, autogradContext](c10::ivalue::Future& rpcFuture) {
+    accumulateGradFuture->addCallback(
+        [autogradContext,
+         callbackFuture](c10::ivalue::Future& accumulateGradFuture) {
           try {
-            // Perform cleanup at the end of the backward pass (before
-            // we mark the future as completed).
-            DistEngine::getInstance().cleanupBackwardPass(autogradContext);
+            if (accumulateGradFuture.hasError()) {
+              // Perform cleanup at the end of the backward pass (before we mark
+              // the future as completed).
+              DistEngine::getInstance().cleanupBackwardPass(autogradContext);
+
+              // Skip any further processing on errors.
+              callbackFuture->setError(accumulateGradFuture.exception_ptr());
+              return;
+            }
+
+            // Wait for all RPCs after the autograd engine is done.
+            auto rpcFuture =
+                autogradContext->clearAndWaitForOutstandingRpcsAsync();
+            rpcFuture->addCallback([callbackFuture, autogradContext](
+                                       c10::ivalue::Future& rpcFuture) {
+              try {
+                // Perform cleanup at the end of the backward pass (before
+                // we mark the future as completed).
+                DistEngine::getInstance().cleanupBackwardPass(autogradContext);
+              } catch (std::exception& e) {
+                callbackFuture->setErrorIfNeeded(std::current_exception());
+                return;
+              }
+
+              // Finally mark the 'uber' future as completed.
+              if (!rpcFuture.hasError()) {
+                callbackFuture->markCompleted(c10::IValue());
+              } else {
+                callbackFuture->setError(rpcFuture.exception_ptr());
+              }
+            });
           } catch (std::exception& e) {
             callbackFuture->setErrorIfNeeded(std::current_exception());
-            return;
-          }
-
-          // Finally mark the 'uber' future as completed.
-          if (!rpcFuture.hasError()) {
-            callbackFuture->markCompleted(c10::IValue());
-          } else {
-            callbackFuture->setError(rpcFuture.exception_ptr());
           }
         });
-      } catch (std::exception& e) {
-        callbackFuture->setErrorIfNeeded(std::current_exception());
-      }
-    });
 
     // Return the future which waits for all async processing to be done.
     return callbackFuture;

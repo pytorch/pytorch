@@ -58,7 +58,6 @@ runs:
           -e PR_NUMBER \
           -e SHA1 \
           -e BRANCH \
-          -e GITHUB_RUN_ID \
           -e SCCACHE_BUCKET \
           -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
           -e SKIP_SCCACHE_INITIALIZATION=1 \
