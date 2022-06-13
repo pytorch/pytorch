@@ -1,5 +1,8 @@
+[pt]
+  is_oss=1
+
 [buildfile]
-name = BUILD.buck
+  name = BUCK.oss
 
 [repositories]
   bazel_skylib = third_party/bazel-skylib/
