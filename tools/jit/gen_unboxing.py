@@ -2,13 +2,7 @@
 import argparse
 import os
 import pathlib
-import sys
 from dataclasses import dataclass
-from typing import Union, Sequence, List
-
-import yaml
-from typing_extensions import Literal
-
 from torchgen.api import cpp
 from torchgen.api import unboxing
 from torchgen.api.translate import translate
@@ -19,6 +13,8 @@ from torchgen.gen import parse_native_yaml, cpp_string, get_custom_build_selecto
 from torchgen.model import NativeFunction, NativeFunctionsGroup, Variant, Argument
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import Target, FileManager, mapMaybe, make_file_manager
+from typing import Union, Sequence
+from typing_extensions import Literal
 
 
 # Generates UnboxingFunctions.h & UnboxingFunctions.cpp.
@@ -192,7 +188,7 @@ def gen_unboxing(
     )
 
 
-def main(args: List[str]) -> None:
+def main() -> None:
     parser = argparse.ArgumentParser(description="Generate unboxing source files")
     parser.add_argument(
         "-s",
@@ -228,22 +224,8 @@ def main(args: List[str]) -> None:
         "each item is `namespace`::`operator name` without overload name; "
         "e.g.: aten::empty aten::conv2d ...",
     )
-    parser.add_argument(
-        "--TEST_ONLY_op_registration_allowlist_yaml_path",
-        help="Provide a path to the operator selection (for custom build) YAML "
-        "which contains a list of operators. It is to serve testing purpose and "
-        "each item is `namespace`::`operator name` without overload name; "
-        "e.g.: aten::empty aten::conv2d ...",
-    )
 
-    options = parser.parse_args(args)
-    if options.op_registration_allowlist:
-        op_registration_allowlist = options.op_registration_allowlist
-    elif options.TEST_ONLY_op_registration_allowlist_yaml_path:
-        with open(options.TEST_ONLY_op_registration_allowlist_yaml_path, "r") as f:
-            op_registration_allowlist = yaml.safe_load(f)
-    else:
-        op_registration_allowlist = None
+    options = parser.parse_args()
 
     selector = get_custom_build_selector(
         options.op_registration_allowlist,
@@ -271,4 +253,4 @@ def main(args: List[str]) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    main()

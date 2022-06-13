@@ -67,8 +67,4 @@ else
   compile_x86_64
 fi
 
-if which sccache > /dev/null; then
-  print_sccache_stats
-fi
-
 assert_git_not_dirty

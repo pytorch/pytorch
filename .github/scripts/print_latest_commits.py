@@ -1,4 +1,5 @@
-from typing import Any, Dict, List, NamedTuple, Tuple
+from typing import Any, Dict, List, NamedTuple
+from datetime import datetime, timedelta
 from gitutils import _check_output
 
 import rockset  # type: ignore[import]
@@ -20,36 +21,33 @@ class WorkflowCheck(NamedTuple):
     jobName: str
     conclusion: str
 
-def get_latest_commits() -> List[str]:
-    latest_viable_commit = _check_output(
-        [
-            "git",
-            "log",
-            "-n",
-            "1",
-            "--pretty=format:%H",
-            "origin/viable/strict",
-        ],
-        encoding="ascii",
-    )
+def parse_args() -> Any:
+    from argparse import ArgumentParser
+    parser = ArgumentParser("Print latest commits")
+    parser.add_argument("--minutes", type=int, default=30, help="duration in minutes of last commits")
+    return parser.parse_args()
+
+def print_latest_commits(qlambda: Any, minutes: int = 30) -> None:
+    current_time = datetime.now()
+    time_since = current_time - timedelta(minutes=minutes)
+    timestamp_since = datetime.timestamp(time_since)
     commits = _check_output(
         [
             "git",
             "rev-list",
-            f"{latest_viable_commit}^..HEAD",
+            f"--max-age={timestamp_since}",
             "--remotes=*origin/master",
         ],
         encoding="ascii",
     ).splitlines()
 
-    return commits
-
-def query_commits(commits: List[str], qlambda: Any) -> Any:
     params = rockset.ParamDict()
     params['shas'] = ",".join(commits)
     results = qlambda.execute(parameters=params)
 
-    return results
+    for commit in commits:
+        print_commit_status(commit, results)
+        print("isGreen:", isGreen(commit, results))
 
 def print_commit_status(commit: str, results: Dict[str, Any]) -> None:
     print(commit)
@@ -69,7 +67,7 @@ def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, A
             )._asdict())
     return workflow_checks
 
-def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
+def isGreen(commit: str, results: Dict[str, Any]) -> Any:
     workflow_checks = get_commit_results(commit, results)
 
     for check in workflow_checks:
@@ -80,18 +78,13 @@ def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
                 pass
                 # there are trunk checks that run the same tests, so this pull workflow check can be skipped
             else:
-                return (False, workflowName + " checks were not successful")
+                return workflowName + " checks were not successful"
         elif workflowName in ["periodic", "docker-release-builds"] and conclusion not in ["success", "skipped"]:
-            return (False, workflowName + " checks were not successful")
-    return (True, "")
-
-def get_latest_green_commit(commits: List[str], results: Dict[str, Any]) -> Any:
-    for commit in commits:
-        if isGreen(commit, results)[0]:
-            return commit
-    return None
+            return workflowName + " checks were not successful"
+    return True
 
 def main() -> None:
+    args = parse_args()
     rs = rockset.Client(
         api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
     )
@@ -99,12 +92,7 @@ def main() -> None:
         'commit_jobs_batch_query',
         version='15aba20837ae9d75',
         workspace='commons')
-
-    commits = get_latest_commits()
-    results = query_commits(commits, qlambda)
-
-    latest_viable_commit = get_latest_green_commit(commits, results)
-    print(latest_viable_commit)
+    print_latest_commits(qlambda, args.minutes)
 
 if __name__ == "__main__":
     main()

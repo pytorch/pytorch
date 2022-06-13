@@ -5,7 +5,6 @@ import json
 import os
 import re
 import time
-from datetime import datetime
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
@@ -122,7 +121,6 @@ query ($owner: String!, $name: String!, $number: Int!) {
             checkSuites(first: 10) {
               ...PRCheckSuites
             }
-            pushedDate
             oid
           }
         }
@@ -448,12 +446,6 @@ class GitHubPR:
 
     def get_changed_files_count(self) -> int:
         return int(self.info["changedFiles"])
-
-    def last_pushed_at(self) -> datetime:
-        return datetime.fromisoformat(self.last_commit()['pushedDate'][:-1])
-
-    def last_commit(self) -> Any:
-        return self.info["commits"]["nodes"][-1]["commit"]
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
@@ -923,16 +915,12 @@ def merge(pr_num: int, repo: GitRepo,
           comment_id: Optional[int] = None,
           mandatory_only: bool = False,
           on_green: bool = False,
-          timeout_minutes: int = 400,
-          stale_pr_days: int = 3) -> None:
+          timeout_minutes: int = 400) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
-    pr = GitHubPR(org, project, pr_num)
-    initial_commit_sha = pr.last_commit()['oid']
     if force:
+        pr = GitHubPR(org, project, pr_num)
         pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
-    if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
-        raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
     start_time = time.time()
     last_exception = ''
@@ -942,8 +930,6 @@ def merge(pr_num: int, repo: GitRepo,
         elapsed_time = current_time - start_time
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
-        if initial_commit_sha != pr.last_commit()['oid']:
-            raise RuntimeError("New commits were pushed while merging. Please rerun the merge command.")
         try:
             find_matching_merge_rule(pr, repo)
             pending = pr_get_pending_checks(pr)

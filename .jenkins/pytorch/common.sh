@@ -8,6 +8,13 @@ set -ex
 # Save the SCRIPT_DIR absolute path in case later we chdir (as occurs in the gpu perf test)
 SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
 
+if [[ "${BUILD_ENVIRONMENT}" == *linux* ]]; then
+  # TODO: Remove this once nvidia package repos are back online
+  # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
+  # shellcheck disable=SC2046
+  sudo sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
+fi
+
 # Required environment variables:
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
 
@@ -26,6 +33,40 @@ fi
 # if a failure is a legitimate problem, or a problem with the build
 # system; to find out more, grep for this string in ossci-job-dsl.
 echo "ENTERED_USER_LAND"
+
+# compositional trap taken from https://stackoverflow.com/a/7287873/23845
+
+# note: printf is used instead of echo to avoid backslash
+# processing and to properly handle values that begin with a '-'.
+
+log() { printf '%s\n' "$*"; }
+error() { log "ERROR: $*" >&2; }
+fatal() { error "$@"; exit 1; }
+
+# appends a command to a trap
+#
+# - 1st arg:  code to add
+# - remaining args:  names of traps to modify
+#
+trap_add() {
+    trap_add_cmd=$1; shift || fatal "${FUNCNAME[0]} usage error"
+    for trap_add_name in "$@"; do
+        trap -- "$(
+            # helper fn to get existing trap command from output
+            # of trap -p
+            extract_trap_cmd() { printf '%s\n' "$3"; }
+            # print existing trap command with newline
+            eval "extract_trap_cmd $(trap -p "${trap_add_name}")"
+            # print the new trap command
+            printf '%s\n' "${trap_add_cmd}"
+        )" "${trap_add_name}" \
+            || fatal "unable to add to trap ${trap_add_name}"
+    done
+}
+# set the trace attribute for the above function.  this is
+# required to modify DEBUG or RETURN traps because functions don't
+# inherit them unless the trace attribute is set
+declare -f -t trap_add
 
 trap_add cleanup EXIT
 
