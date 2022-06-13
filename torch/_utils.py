@@ -489,7 +489,7 @@ def _get_device_attr(get_member):
     if device_type and device_type.lower() == "cuda":
         return get_member(torch.cuda)
     if device_type and device_type.lower() == "xpu":
-        return get_member(torch.xpu)
+        return get_member(torch.xpu)  # type: ignore[attr-defined]
     # add more available device types here
     return None
 
