@@ -2,6 +2,7 @@
 
 from torch.ao.quantization.experimental.observer import APoTObserver
 import unittest
+import torch
 
 class TestNonUniformObserver(unittest.TestCase):
     """
@@ -11,8 +12,8 @@ class TestNonUniformObserver(unittest.TestCase):
     def test_calculate_qparams1(self):
         obs1 = APoTObserver(max_val=0.0, b=0, k=0)
 
-        with self.assertRaises(AssertionError):
-            obs1_result = obs1.calculate_qparams(signed=False)
+        with self.assertRaises(NotImplementedError):
+            obs.calculate_qparams()
 
     """
         Test case 2
