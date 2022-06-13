@@ -9,21 +9,24 @@ from torch.ao.quantization.observer import ObserverBase
 from typing import Tuple
 
 class NonUniformQuantizationObserverBase(ObserverBase):
-    max_val: float
+    min_val: torch.Tensor
+    max_val: torch.Tensor
+    level_indices: torch.Tensor
     b: int
     k: int
     n: int
     alpha: float
     gamma: float
-    level_indices: torch.Tensor
 
     def __init__(
         self,
+        min_val=None,
         max_val=None,
         b=None,
         k=None,
             dtype=torch.quint8) -> None:
         super().__init__(dtype)
+        self.min_val = min_val
         self.max_val = max_val
         self.level_indices = torch.tensor([])
         self.b = b
@@ -35,6 +38,7 @@ class NonUniformQuantizationObserverBase(ObserverBase):
     r""" Calculates nonuniform quantization parameters given min and max value tensors.
     Parameters calculated according to APoT paper: https://arxiv.org/pdf/1909.13144.pdf
     Args:
+        min_val: minimum values per channel
         max_val: maximum values per channel
         signed: specifies whether to include signed values in quantization level calculations
     Returns:
@@ -44,23 +48,11 @@ class NonUniformQuantizationObserverBase(ObserverBase):
     """
     def _calculate_qparams(
         self,
+        min_val: torch.Tensor,
+        max_val: torch.Tensor,
             signed: bool) -> Tuple[float, torch.Tensor, torch.Tensor]:
-        raise NotImplementedError
-
-class APoTObserver(NonUniformQuantizationObserverBase):
-    def __init__(
-        self,
-        max_val,
-        b,
-            k) -> None:
-        super(APoTObserver, self).__init__(max_val, b, k)
-
-    def calculate_qparams(self, signed: bool) -> Tuple[float, torch.Tensor, torch.Tensor]:
-        return self._calculate_qparams(signed)
-
-    def _calculate_qparams(self, signed):
         # compute alpha
-        self.alpha = self.max_val
+        self.alpha = float(max_val)
 
         # check for valid inputs of b, k
         assert(self.k and self.k != 0)
@@ -92,16 +84,10 @@ class APoTObserver(NonUniformQuantizationObserverBase):
                 p_all.append(p_curr)
 
         # gamma calculation:
-        # loop through all tensors
-        # if signed, add element at index 0 for each tensor
-        # else, add element at index 1 for each tensor
-        # gamma defined to ensure alpha is at max of range
+        # loop through all tensors, add element at index 1 for each tensor
         p_sum = 0.0
         for tens in p_all:
-            if signed:
-                p_sum += float(tens[0])
-            else:
-                p_sum += float(tens[1])
+            p_sum += float(tens[1])
 
         # assign gamma
         self.gamma = self.alpha / p_sum
@@ -125,7 +111,30 @@ class APoTObserver(NonUniformQuantizationObserverBase):
 
         return (self.gamma, quantization_levels, level_indices)
 
+class APoTObserver(NonUniformQuantizationObserverBase):
+    def __init__(
+        self,
+        min_val=torch.Tensor,
+        max_val=torch.Tensor,
+        b=0,
+            k=0) -> None:
+        super(APoTObserver, self).__init__(min_val, max_val, b, k)
+
+    def calculate_qparams(self, signed):
+        return self._calculate_qparams(self.min_val, self.max_val, signed)
+
+    def _calculate_qparams(self, min_val, max_val, signed):
+        return super(APoTObserver, self)._calculate_qparams(min_val, max_val, signed)
+
     def forward(self, x_orig):
-        r"""Records the running maximum of ``x``."""
-        max_val = self.max_val
+        r"""Records the running minimum and maximum of ``x``."""
+        if x_orig.numel() == 0:
+            return x_orig
+        x = x_orig.detach()
+        x = x.to(self.min_val.dtype)
+        min_val_cur, max_val_cur = torch.aminmax(x)
+        min_val = torch.min(min_val_cur, self.min_val)
+        max_val = torch.max(max_val_cur, self.max_val)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
         return x_orig
