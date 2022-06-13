@@ -36,8 +36,8 @@ jobs:
           WORKFLOW_URL: ${{ github.event.workflow_run.html_url }}
         run: |
           echo "${WORKFLOW_URL}"
-          python3 tools/stats/upload_test_stats.py --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}"
-          python3 tools/stats/upload_sccache_stats.py --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}"
+          python3 -m tools.stats.upload_test_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}"
+          python3 -m tools.stats.upload_test_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}"
 
   check-api-rate:
     if: ${{ always() }}
