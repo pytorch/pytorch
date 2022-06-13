@@ -140,6 +140,11 @@ void setInplaceRequiresGradAllowed(bool allowed) {
   functorch_tls->allow_inplace_requires_grad_ = allowed;
 }
 
+bool getInplaceRequiresGradAllowed() {
+  auto* functorch_tls = getRawFunctorchTLS();
+  return functorch_tls->allow_inplace_requires_grad_;
+}
+
 
 static std::vector<DynamicLayer>& dynamicLayerStackAccessor() {
   return getRawFunctorchTLS()->dynamicLayerStack;
