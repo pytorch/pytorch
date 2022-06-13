@@ -57,7 +57,13 @@ class CheckpointWrapperTest(TestCase):
         equivalent memory usage wise.
         """
         class Model(nn.Module):
-            def __init__(self, n: int, use_cp: bool, use_wrapper: bool = False, use_reentrant=True):
+            def __init__(
+                self,
+                n: int,
+                use_cp: bool,
+                use_wrapper: bool = False,
+                use_reentrant: bool = True
+            ):
                 super().__init__()
                 self.layers = nn.ModuleList()
                 self.n = n
@@ -87,7 +93,7 @@ class CheckpointWrapperTest(TestCase):
                 return x
 
         def test(use_checkpointing, use_wrapper, use_reentrant):
-            a = Model(8, use_checkpointing, use_wrapper=use_wrapper, use_reentrant=False).cuda()
+            a = Model(8, use_checkpointing, use_wrapper=use_wrapper, use_reentrant=use_reentrant).cuda()
             x = torch.randn(10000, 256, requires_grad=True).cuda()
             torch.cuda.reset_peak_memory_stats()
             loss = a(x).sum()
