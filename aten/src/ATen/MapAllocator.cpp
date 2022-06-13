@@ -471,6 +471,7 @@ RefcountedMapAllocator::RefcountedMapAllocator(WithFd, const char *filename, int
 }
 
 void RefcountedMapAllocator::initializeAlloc() {
+  TORCH_CHECK(base_ptr_, "base_ptr_ is null");
   MapInfo *map_info = (MapInfo*)base_ptr_;
 
 #ifdef _WIN32
@@ -605,8 +606,7 @@ void* RefcountedMapAllocator::data() const {
 }
 
 MapAllocator::~MapAllocator() {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  close();
+  MapAllocator::close();
   c10::reportMemoryUsageToProfiler(base_ptr_, -size_, 0, 0, c10::Device(c10::DeviceType::CPU));
 }
 
