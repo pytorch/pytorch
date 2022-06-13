@@ -191,59 +191,6 @@ class TestPythonKey(TestCase):
         self.assertEqual(grads, grads2)
 
 
-make_fx_failures = {
-    xfail('allclose'),
-    xfail('nn.functional.dropout'),
-    xfail('linalg.eigvals'),
-    xfail('nn.functional.max_pool1d', device_type='cpu'),  # precision problems?
-    xfail('randn_like'),  # randomness
-    xfail('rand_like'),  # randomness
-    xfail('randint_like'),  # randomness
-    skip('new_empty'),  # nondeterministic
-    skip('empty_like'),  # nondeterministic
-    skip('linalg.lstsq', 'grad_oriented'),  # flaky
-    xfail('normal', '', device_type='cpu'),
-    xfail('normal', 'number_mean', device_type='cpu'),
-    xfail('multinomial', device_type='cpu'),
-    xfail('nn.functional.feature_alpha_dropout', 'with_train', device_type='cpu'),
-    xfail('bernoulli', device_type='cpu'),
-    xfail('nn.functional.dropout2d', device_type='cpu'),
-    skip('nn.functional.max_unpool1d', '', device_type='cpu'),  # flaky
-    skip('nn.functional.max_unpool2d', '', device_type='cpu'),  # flaky
-    skip('nn.functional.max_unpool3d', '', device_type='cpu'),  # flaky
-    skip('linalg.lstsq'),  # flaky, probably just a precision issue
-    xfail('histogram'),
-    xfail('scatter')
-}
-
-
-class TestPythonKeyOperatorsOpInfo(TestCase):
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestPythonKeyOperatorsOpInfo', 'test_make_fx_exhaustive', make_fx_failures
-             )
-    def test_make_fx_exhaustive(self, device, dtype, op):
-
-        def f(args, kwargs):
-            return op.op(*args, **kwargs)
-        sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
-        new_f = None
-        for sample_input in sample_inputs_itr:
-            args = [sample_input.input] + list(sample_input.args)
-            kwargs = sample_input.kwargs
-
-            new_f = make_fx(f)(args, kwargs)
-            for arg in args:
-                if isinstance(arg, torch.Tensor) and arg.dtype == torch.float:
-                    arg.uniform_(0, 1)
-            try:
-                old_out = f(args, kwargs)
-            except Exception:
-                continue
-            new_out = new_f(args, kwargs)
-            self.assertEqual(new_out, old_out)
-            pass
-
-
 def _outs_and_grads(fn, inps):
     outs = fn(*inps)
     for out in pytree.tree_flatten(outs)[0]:
@@ -375,6 +322,7 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('diag_embed'),
         xfail('linalg.householder_product'),
         xfail('logit'),
+        xfail('logdet'),
         xfail('matrix_exp'),
         xfail('trapezoid'),
         xfail('trapz'),
@@ -604,7 +552,6 @@ instantiate_device_type_tests(
     globals(),
     only_for=only_for,
 )
-instantiate_device_type_tests(TestPythonKeyOperatorsOpInfo, globals(), only_for=only_for)
 instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for=only_for)
 
 
