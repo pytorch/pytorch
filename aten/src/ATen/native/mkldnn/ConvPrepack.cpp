@@ -191,52 +191,85 @@ std::vector<int64_t> get_output_sizes(
 }
 
 Tensor run(ContextConv& context, const Tensor& input) {
-  TORCH_INTERNAL_ASSERT(
-      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast,
-      "Expected input to be in ChannelsLast format");
   std::vector<int64_t> output_sizes = get_output_sizes(context, input);
-
-  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   auto output = at::empty(
       output_sizes,
       input.options().memory_format(input.suggest_memory_format()));
-  ideep::tensor mkldnn_output = itensor_view_from_dense(output);
 
-  mkldnn_convolution_out(
-      input,
-      mkldnn_output,
-      context.weight_packed_,
-      context.at_bias_,
-      context.padding_,
-      context.stride_,
-      context.dilation_,
-      output_sizes,
-      context.groups_,
-      context.attr_);
+  bool is_channels_last =
+      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  ideep::tensor y;
+
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+  ideep::tensor mkldnn_output = itensor_from_tensor(output);
+
+  if (is_channels_last) {
+    mkldnn_convolution_out(
+        input,
+        mkldnn_output,
+        context.weight_packed_,
+        context.at_bias_,
+        context.padding_,
+        context.stride_,
+        context.dilation_,
+        output_sizes,
+        context.groups_,
+        context.attr_);
+  } else {
+    mkldnn_convolution_out(
+        input,
+        y,
+        context.weight_packed_,
+        context.at_bias_,
+        context.padding_,
+        context.stride_,
+        context.dilation_,
+        output_sizes,
+        context.groups_,
+        context.attr_);
+    mkldnn_output.feed_from(y);
+  }
   return output;
 }
 
 void run(ContextConv& context, const Tensor& input, void* output) {
-  TORCH_INTERNAL_ASSERT(
-      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast,
-      "Expected input to be in ChannelsLast format");
   std::vector<int64_t> output_sizes = get_output_sizes(context, input);
 
+  bool is_channels_last =
+      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  ideep::tensor y;
+
+  ideep::tag o_tag = is_channels_last ? ideep::tag::nhwc : ideep::tag::nchw;
   ideep::tensor::desc o_desc = {
-      output_sizes, get_mkldnn_dtype(input.scalar_type()), ideep::tag::nhwc};
+      output_sizes, get_mkldnn_dtype(input.scalar_type()), o_tag};
   ideep::tensor mkldnn_output = {o_desc, output};
 
-  mkldnn_convolution_out(
-      input,
-      mkldnn_output,
-      context.weight_packed_,
-      context.at_bias_,
-      context.padding_,
-      context.stride_,
-      context.dilation_,
-      output_sizes,
-      context.groups_,
-      context.attr_);
+  if (is_channels_last) {
+    mkldnn_convolution_out(
+        input,
+        mkldnn_output,
+        context.weight_packed_,
+        context.at_bias_,
+        context.padding_,
+        context.stride_,
+        context.dilation_,
+        output_sizes,
+        context.groups_,
+        context.attr_);
+  } else {
+    mkldnn_convolution_out(
+        input,
+        y,
+        context.weight_packed_,
+        context.at_bias_,
+        context.padding_,
+        context.stride_,
+        context.dilation_,
+        output_sizes,
+        context.groups_,
+        context.attr_);
+    mkldnn_output.feed_from(y);
+  }
 }
 
 Tensor conv_run(
