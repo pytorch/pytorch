@@ -2003,11 +2003,13 @@ Tensor binary_cross_entropy_with_logits_backward(
   if (isDefined(pos_weight)) {
     // pos_weight might need to be broadcasted, thus mul(target) is not inplace.
     auto t = pos_weight->mul(target);
-    grad_input = at::areAnyTensorSubclassLike({input, target}) || at::GradMode::is_enabled()
+    grad_input = at::areAnyTensorSubclassLike({input, target}) ||
+            at::GradMode::is_enabled()
         ? t.add(1).sub(target).mul(input.sigmoid()).sub(t)
         : t.add(1).sub_(target).mul_(input.sigmoid()).sub_(t);
   } else {
-    grad_input = at::areAnyTensorSubclassLike({input, target}) || at::GradMode::is_enabled()
+    grad_input = at::areAnyTensorSubclassLike({input, target}) ||
+            at::GradMode::is_enabled()
         ? input.sigmoid().sub(target)
         : input.sigmoid().sub_(target);
   }

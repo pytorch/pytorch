@@ -59,7 +59,7 @@ ALLOW_LIST = [
     ("aten::l1_loss_backward.grad_input", datetime.date(2022, 7, 1)),
     ("aten::l1_loss_backward", datetime.date(2022, 7, 1)),
     ("aten::l1_loss.out", datetime.date(2022, 7, 1)),
-    ("aten::binary_cross_entropy_with_logits_backward", datetime.date(2022, 9, 31)),
+    ("aten::binary_cross_entropy_with_logits_backward", datetime.date(2022, 9, 21)),
     ("aten::cudnn_convolution_backward", datetime.date(2022, 1, 31)),
     ("aten::cudnn_convolution_backward_input", datetime.date(2022, 1, 31)),
     ("aten::cudnn_convolution_backward_weight", datetime.date(2022, 1, 31)),
