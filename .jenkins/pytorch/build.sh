@@ -37,6 +37,9 @@ gcc --version
 echo "CMake version:"
 cmake --version
 
+echo "Environment variables:"
+env
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   echo "NVCC version:"
   nvcc --version
@@ -139,7 +142,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export MAX_JOBS=$(($(nproc) - 1))
   fi
 
-  if [[ -n "$IN_CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
+  if [[ -n "$CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
       # Set ROCM_ARCH to gfx900 and gfx906 for CI builds, if user doesn't override.
       echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CI builds"
       export PYTORCH_ROCM_ARCH="gfx900;gfx906"
@@ -224,13 +227,6 @@ else
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
 
-    if which sccache > /dev/null; then
-      echo 'PyTorch Build Statistics'
-      sccache --show-stats
-
-      sccache --show-stats | python -m tools.stats.upload_sccache_stats
-    fi
-
     assert_git_not_dirty
     # Copy ninja build logs to dist folder
     mkdir -p dist
@@ -253,7 +249,7 @@ else
       popd
     fi
 
-    CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}
+    CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
     CUSTOM_TEST_USE_ROCM=$([[ "$BUILD_ENVIRONMENT" == *rocm* ]] && echo "ON" || echo "OFF")
     CUSTOM_TEST_MODULE_PATH="${PWD}/cmake/public"
     mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
@@ -313,3 +309,5 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python test/run_test.py --export-past-test-times
 fi
+
+print_sccache_stats
