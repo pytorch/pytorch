@@ -2543,6 +2543,7 @@ Tensor linalg_matrix_norm(
   TORCH_CHECK(ord == "fro" || ord == "nuc", "linalg.matrix_norm: Order ", ord, " not supported.");
 
   auto A_ = opt_dtype.has_value() ? A.to(*opt_dtype) : A;
+  using Int = IntArrayRef::value_type;
 
   if (ord == "fro") {
     return at::linalg_vector_norm(A_, 2, dim, keepdim);
