@@ -193,6 +193,7 @@ __all__ = [
     "hstack",
     "narrow",
     "permute",
+    "ravel",
     "reshape",
     "roll",
     "rot90",
@@ -2267,6 +2268,10 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 def view(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=False)
+
+
+def ravel(a: TensorLikeType) -> TensorLikeType:
+    return reshape(a, (-1,))
 
 
 @out_wrapper

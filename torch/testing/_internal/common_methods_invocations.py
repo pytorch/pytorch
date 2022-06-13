@@ -8365,7 +8365,10 @@ def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
                                        requires_grad=requires_grad)),
                SampleInput(make_tensor((), dtype=dtype, device=device,
                                        low=None, high=None,
-                                       requires_grad=requires_grad)),)
+                                       requires_grad=requires_grad)),
+               SampleInput(make_tensor((S, S, S), dtype=dtype, device=device,
+                                       low=None, high=None,
+                                       requires_grad=requires_grad, noncontiguous=True)),)
 
     return samples
 
@@ -16378,6 +16381,12 @@ op_db: List[OpInfo] = [
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_ravel,
+           skips=(
+               # the stride of the tensor was modified directly without going through the PyTorch dispatcher.
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               # the stride of the tensor was modified directly without going through the PyTorch dispatcher.
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+           )
            ),
     OpInfo('reshape',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -20616,6 +20625,15 @@ python_ref_db = [
         "_refs.permute",
         torch_opinfo_name="permute",
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.ravel",
+        torch_opinfo_name="ravel",
+        skips=(
+            # TypeError: 'NoneType' object is not callable
+            DecorateInfo(unittest.skip("Passes on aten executor but fails on nvFuser executor"),
+                         'TestCommon', 'test_python_ref_executor', dtypes=(torch.float, torch.int32)),
+        ),
     ),
     PythonRefInfo(
         "_refs.reshape",
