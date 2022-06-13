@@ -169,6 +169,7 @@ if(USE_VULKAN)
 endif()
 
 target_link_libraries(${PYTORCH_JNI_TARGET} ${pytorch_jni_LIBS})
+target_link_libraries(${PYTORCH_JNI_TARGET} -fuse-ld=lld)
 
 install(TARGETS ${PYTORCH_JNI_TARGET}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
