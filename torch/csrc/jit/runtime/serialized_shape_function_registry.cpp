@@ -1714,6 +1714,21 @@ def transpose(self: List[int],
   return output_size
 
 )=====")
++ std::string(R"=====(def conv_backwards(grad_output: List[int],
+    input: List[int],
+    weight: List[int],
+    biases: Optional[List[int]]) -> Tuple[List[int], List[int], List[int]]:
+  out = annotate(List[int], [])
+  for _0 in range(torch.len(input)):
+    elem = input[_0]
+    _1 = torch.append(out, elem)
+  out0 = annotate(List[int], [])
+  for _2 in range(torch.len(weight)):
+    elem0 = weight[_2]
+    _3 = torch.append(out0, elem0)
+  return (out, out0, [grad_output[1]])
+
+)=====")
 + std::string(R"=====(def flatten(input: List[int],
     start_dim: int,
     end_dim: int) -> List[int]:
@@ -2726,6 +2741,7 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", "conv2d"},
     {"aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor", "batch_norm"},
     {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
+    {"aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", "conv_backwards"},
     {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
     {"aten::cat(Tensor[] tensors, int dim=0) -> Tensor", "cat"},
     {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
