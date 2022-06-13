@@ -52,10 +52,7 @@ build --per_file_copt=^external/@-w
 #
 # On the bright side, this means we don't have to more broadly apply
 # the exceptions to an entire target.
-build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=type-limits
-build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-but-set-variable
-build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=all
-
+#
 # Looking for CUDA flags? We have a cu_library macro that we can edit
 # directly. Look in //tools/rules:cu.bzl for details. Editing the
 # macro over this has the following advantages:
@@ -63,7 +60,10 @@ build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=all
 #    cache
 #  * it allows for selective overrides on individual targets since the
 #    macro-level opts will come earlier than target level overrides
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=type-limits
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=unused-but-set-variable
 
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=all
 # The following warnings come from -Wall. We downgrade them from error
 # to warnings here.
 #
