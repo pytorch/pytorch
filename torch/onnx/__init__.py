@@ -82,7 +82,7 @@ producer_version = _C_onnx.PRODUCER_VERSION
 
 def _export(*args, **kwargs):
     warnings.warn(
-        "`torch.onnx._export` is deprecated. Please use `export` instead.",
+        "`torch.onnx._export` is deprecated. Please use `torch.onnx.export` instead.",
         DeprecationWarning,
     )
     return utils._export(*args, **kwargs)
