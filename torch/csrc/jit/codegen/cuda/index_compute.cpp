@@ -1313,7 +1313,8 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   {
     int stride_i = 0;
     for (const auto i : c10::irange(root_dom.size())) {
-      if (root_dom[i]->isReduction()) {
+      if (root_dom[i]->isReduction() ||
+          root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
         strides[i] = GpuLower::current()->kernel()->oneVal();
         continue;
       }
@@ -1332,12 +1333,15 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
     if (root_dom[dim]->isReduction()) {
       continue;
     }
+    if (root_dom[dim]->getIterType() == IterType::BroadcastWithoutStride) {
+      continue;
+    }
 
     Val* root_ind = nullptr;
     if (producer_indexing.indexMap().find(root_dom[dim]) !=
         producer_indexing.indexMap().end()) {
       root_ind = producer_indexing.indexMap().at(root_dom[dim]);
-    } else if (root_dom[dim]->isBroadcast()) {
+    } else if (root_dom[dim]->getIterType() == IterType::BroadcastWithStride) {
       root_ind = GpuLower::current()->kernel()->zeroVal();
     }
 
@@ -1381,7 +1385,9 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   for (const auto i : c10::irange(root_dom.size())) {
     // If the domain is derived from a trivial reduction, no indexing
     // to create.
-    if (root_dom[i]->isReduction() || root_dom[i]->isBroadcast() ||
+    if (root_dom[i]->isReduction() ||
+        root_dom[i]->getIterType() == IterType::BroadcastWithoutStride ||
+        root_dom[i]->getIterType() == IterType::BroadcastWithStride ||
         gpu_lower->trivialReductionInfo().isDerived(root_dom[i])) {
       continue;
     }
@@ -1859,7 +1865,9 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
   {
     int stride_i = 0;
     for (const auto i : c10::irange(root_dom.size())) {
-      if (root_dom[i]->isReduction() || root_dom[i]->isStride()) {
+      if (root_dom[i]->isReduction() ||
+          root_dom[i]->getIterType() == IterType::BroadcastWithoutStride ||
+          root_dom[i]->isStride()) {
         strides[i] = GpuLower::current()->kernel()->oneVal();
         continue;
       }
@@ -1878,12 +1886,15 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
     if (root_dom[dim]->isReduction() || root_dom[dim]->isStride()) {
       continue;
     }
+    if (root_dom[dim]->getIterType() == IterType::BroadcastWithoutStride) {
+      continue;
+    }
 
     Val* root_ind = nullptr;
     if (consumer_indexing.indexMap().find(root_dom[dim]) !=
         consumer_indexing.indexMap().end()) {
       root_ind = consumer_indexing.indexMap().at(root_dom[dim]);
-    } else if (root_dom[dim]->isBroadcast()) {
+    } else if (root_dom[dim]->getIterType() == IterType::BroadcastWithStride) {
       root_ind = GpuLower::current()->kernel()->zeroVal();
     }
 
@@ -1925,7 +1936,9 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
       root_dom.size(), GpuLower::current()->kernel()->zeroVal());
   for (const auto i : c10::irange(root_dom.size())) {
     // See a comment in indexing to root domains in getGlobalProducerIndex.
-    if (root_dom[i]->isReduction() || root_dom[i]->isBroadcast() ||
+    if (root_dom[i]->isReduction() ||
+        root_dom[i]->getIterType() == IterType::BroadcastWithoutStride ||
+        root_dom[i]->getIterType() == IterType::BroadcastWithStride ||
         gpu_lower->trivialReductionInfo().isDerived(root_dom[i]) ||
         root_dom[i]->isStride()) {
       continue;
@@ -2392,19 +2405,6 @@ std::vector<PredicateDomainInfo> getPredicateContigIds(
     contig_id_infos.push_back(contig_id_info);
   }
   return contig_id_infos;
-}
-
-IterDomain* getMappedReferenceDomain(
-    IterDomain* id,
-    const ReferenceTensor& reference) {
-  // Partially overlaps with getPredicateContigIds()
-  auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
-      id, IdMappingMode::EXACT);
-  auto it = reference.concrete_to_id.find(concrete_id);
-  if (it == reference.concrete_to_id.end()) {
-    return nullptr;
-  }
-  return it->second;
 }
 
 std::vector<PredicateDomainInfo> getNonDivisibleConsumerDomainsToPredicate(
