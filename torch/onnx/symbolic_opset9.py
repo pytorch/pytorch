@@ -314,6 +314,7 @@ __all__ = [
     "roll",
     "cross",
     "cdist",
+    "lerp",
     "broadcast_tensors",
     "Prim",
     "Onnx",
