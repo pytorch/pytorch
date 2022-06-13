@@ -198,7 +198,7 @@ void col2im(
           dilation_height,
           dilation_width,
           height_col,
-          width_cpl,
+          width_col,
           data_im);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
