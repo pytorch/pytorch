@@ -141,6 +141,9 @@ class TORCH_API FlatbufferLoader {
   IValue parseIValue(const mobile::serialization::IValue* ivalue);
   std::unique_ptr<mobile::Function> parseFunction(
       const mobile::serialization::Function* method);
+  void parseAndPopulate(uint32_t i,
+      const mobile::serialization::IValue* ivalue);
+
 
   std::unordered_map<uint32_t, mobile::Function*> all_functions_;
   std::vector<ClassTypePtr> all_types_;
@@ -158,6 +161,8 @@ class TORCH_API FlatbufferLoader {
   bool module_parsed_ = false;
   bool should_copy_tensor_memory_ = false;
   bool should_load_operators_ = true;
+  // 0 -> mobile_ivalue_size_ elements are from the mobile module.
+  int mobile_ivalue_size_ = 0;
 };
 
 } // namespace jit

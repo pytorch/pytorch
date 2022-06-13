@@ -177,6 +177,19 @@ void parseExtraFiles(
   parseExtraFilesFromVector(extra_files_offsets, &extra_files);
 }
 
+void FlatbufferLoader::parseAndPopulate(
+    uint32_t i,
+    const mobile::serialization::IValue* ivalue) {
+  if (const auto* func = ivalue->val_as_Function()) {
+    auto func_ptr = parseFunction(func);
+    all_functions_[i] = func_ptr.get();
+    mcu_->register_function(std::move(func_ptr));
+  } else {
+    all_ivalues_[i] = parseIValue(ivalue);
+  }
+}
+
+
 mobile::Module FlatbufferLoader::parseModule(
     mobile::serialization::Module* module) {
   module_ = module;
@@ -192,15 +205,14 @@ mobile::Module FlatbufferLoader::parseModule(
   storages_.resize(module->storage_data_size());
   storage_loaded_.resize(module->storage_data_size(), false);
 
-  for (uint32_t i = 0; i < ivalues->size(); i++) {
+  mobile_ivalue_size_ = module_->mobile_ivalue_size();
+  if (mobile_ivalue_size_ == 0) {
+    mobile_ivalue_size_ = ivalues->size();
+  }
+
+  for (uint32_t i = 0; i < mobile_ivalue_size_; i++) {
     const auto* ival = ivalues->Get(i);
-    if (const auto* func = ival->val_as_Function()) {
-      auto func_ptr = parseFunction(func);
-      all_functions_[i] = func_ptr.get();
-      mcu_->register_function(std::move(func_ptr));
-    } else {
-      all_ivalues_[i] = parseIValue(ival);
-    }
+    parseAndPopulate(i, ival);
   }
   IValue& module_ivalue = getIValue(module->state_obj());
 
@@ -660,6 +672,21 @@ void FlatbufferLoader::extractJitSourceAndConstants(
   AT_ASSERT(
       module_parsed_,
       "Need to first parse a flatbuffer file before extracing jit_sources");
+
+  const auto* ivalues = module_->ivalues();
+  for (uint32_t i = mobile_ivalue_size_; i < ivalues->size(); i++) {
+    const auto* ival = ivalues->Get(i);
+    parseAndPopulate(i, ival);
+  }
+  // register functions
+  for (const auto& f : all_functions_) {
+    if (f.first >= mobile_ivalue_size_) {
+      uint32_t class_index =
+          ivalues->Get(f.first)->val_as_Function()->class_type();
+      ClassTypePtr class_type = all_types_[class_index];
+      class_type->addMethod(f.second);
+    }
+  }
   const auto* jit_constants = module_->jit_constants();
   for (auto i = 0; i < jit_constants->size(); ++i) {
     constants->emplace_back(getIValue(jit_constants->Get(i)));
