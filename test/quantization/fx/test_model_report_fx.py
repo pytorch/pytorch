@@ -69,7 +69,7 @@ FUSION_CONV_LINEAR_EXAMPLE = torch.nn.Sequential(
 )
 
 
-class TestModelReportFxDetector(QuantizationTestCase):
+class TestFxModelReportDetector(QuantizationTestCase):
 
     """Prepares and callibrate the model"""
 
@@ -432,7 +432,7 @@ Partition on Output
 """
 
 
-class TestModelReportObserver(QuantizationTestCase):
+class TestFxModelReportObserver(QuantizationTestCase):
     class NestedModifiedSingleLayerLinear(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -590,9 +590,6 @@ class TestModelReportObserver(QuantizationTestCase):
         # run it through the model and do general tests
         self.run_model_and_common_checks(model, ex_input, 10, 15)
 
-        # make sure final values are all 0
-        self.assertTrue(getattr(model, "obs2").get_batch_to_epoch_ratio() >= 0)
-
     """Case includes:
         non-zero tensor
         dim size = 2
@@ -714,7 +711,7 @@ This will be more thoroughly tested with the implementation of the full end to e
 """
 
 
-class TestModelReportDetectDynamicStatic(QuantizationTestCase):
+class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_nested_detection_case(self):
         class SingleLinear(torch.nn.Module):
