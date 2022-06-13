@@ -187,6 +187,8 @@ supported:
   # after functionalization,
   # but their implementations call view operators (which we need to functionalize away).
   - block_diag
+  - diagonal_backward
+  - slice_backward
   - new_empty_strided
   - narrow_copy
   - pixel_shuffle

@@ -51,10 +51,10 @@
 
 #include <ATen/AccumulateType.h>
 #include <ATen/CompositeExplicitAutogradFunctions.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Functions.h>
 #include <ATen/InferSize.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/TensorConversions.h>

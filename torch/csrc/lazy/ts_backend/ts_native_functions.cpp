@@ -582,6 +582,27 @@ at::Tensor& LazyNativeFunctions::logsumexp_out(
   return out;
 }
 
+at::Tensor diagonal_backward(
+    const at::Tensor& grad_output,
+    at::IntArrayRef input_sizes,
+    int64_t offset,
+    int64_t dim1,
+    int64_t dim2) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(
+      diagonal_backward)>::call(grad_output, input_sizes, offset, dim1, dim2);
+}
+
+at::Tensor slice_backward(
+    const at::Tensor& grad_output,
+    at::IntArrayRef input_sizes,
+    int64_t dim,
+    int64_t start,
+    int64_t end,
+    int64_t step) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(
+      slice_backward)>::call(grad_output, input_sizes, dim, start, end, step);
+}
+
 // re-use the composite kernel from core, that way we don't need to provide a
 // backwards formula for native_group_norm
 std::tuple<at::Tensor, at::Tensor, at::Tensor> LazyNativeFunctions::
