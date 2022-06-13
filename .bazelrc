@@ -52,9 +52,16 @@ build --per_file_copt=^external/@-w
 #
 # On the bright side, this means we don't have to more broadly apply
 # the exceptions to an entire target.
-build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=all
-build --per_file_copt='^//.*\.cu$'@--compiler-options=-Werror=all
+#
+# Looking for CUDA flags? We have a cu_library macro that we can edit
+# directly. Look in //tools/rules:cu.bzl for details. Editing the
+# macro over this has the following advantages:
+#  * making changes does not require discarding the Bazel analysis
+#    cache
+#  * it allows for selective overrides on individual targets since the
+#    macro-level opts will come earlier than target level overrides
 
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=all
 # The following warnings come from -Wall. We downgrade them from error
 # to warnings here.
 #
@@ -62,14 +69,10 @@ build --per_file_copt='^//.*\.cu$'@--compiler-options=-Werror=all
 # codebase. It will be a lot of work to fix them, just disable it for
 # now.
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-sign-compare
-build --per_file_copt='^//.*\.cu$'@--compiler-options=-Wno-sign-compare
 # We intentionally use #pragma unroll, which is compiler specific.
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-error=unknown-pragmas
-build --per_file_copt='^//.*\.cu$'@--compiler-options=-Wno-error=unknown-pragmas
 
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=extra
-build --per_file_copt='^//.*\.cu$'@--compiler-options=-Werror=extra
-
 # The following warnings come from -Wextra. We downgrade them from error
 # to warnings here.
 #
@@ -77,7 +80,6 @@ build --per_file_copt='^//.*\.cu$'@--compiler-options=-Werror=extra
 # codebase. It will be a lot of work to fix them, just disable it for
 # now.
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-unused-parameter
-build --per_file_copt='^//.*\.cu$'@--compiler-options=-Wno-unused-parameter
 # missing-field-parameters has both a large number of violations in
 # the codebase, but it also is used pervasively in the Python C
 # API. There are a couple of catches though:
@@ -93,7 +95,6 @@ build --per_file_copt='^//.*\.cu$'@--compiler-options=-Wno-unused-parameter
 # up some of the clear-cut cases that could be risky, but we still
 # likely want to have this disabled for the most part.
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-missing-field-initializers
-build --per_file_copt='^//.*\.cu$'@--compiler-options=-Wno-missing-field-initializers
 
 build --per_file_copt='//:aten/src/ATen/RegisterCompositeExplicitAutograd\.cpp$'@-Wno-error=unused-function
 build --per_file_copt='//:aten/src/ATen/RegisterCompositeImplicitAutograd\.cpp$'@-Wno-error=unused-function
