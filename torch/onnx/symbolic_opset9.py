@@ -309,6 +309,7 @@ __all__ = [
     "hann_window",
     "mv",
     "dot",
+    "movedim",
     "fill",
     "index_add",
     "roll",
