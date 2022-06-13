@@ -998,7 +998,9 @@ Arguments:
 
           .def(
               "broadcast",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self, at::Tensor& x, int rootRank) {
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 at::Tensor& x,
+                 int rootRank) {
                 ::c10d::BroadcastOptions opts;
                 opts.rootRank = rootRank;
                 return ::c10d::ops::broadcast(self, {x}, opts);
