@@ -106,9 +106,6 @@ inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_buffer();
 }
 
-inline const at::Tensor& get_nested_size_tensor(const at::Tensor& tensor) {
-  return get_nested_tensor_impl(tensor)->get_nested_size_tensor();
-}
 
 // CPU only!
 // TODO: The algorithm here can be optimized, right now it involves a lot of
@@ -192,6 +189,27 @@ Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask)
     sizes = at::cat({sizes, d}, 1).to(kCPU);
 
     return at::_nested_from_padded(t, sizes, false);
+}
+
+bool NestedTensor_nested_tensor_from_mask_left_aligned(const Tensor& t, const Tensor& mask) {
+    TORCH_CHECK(mask.scalar_type() == at::ScalarType::Bool, "Expected mask to be of ScalarType Bool, but got ", mask.scalar_type(), " instead.");
+    TORCH_CHECK(mask.dim() == 2, "Padding mask should be 2D");
+    TORCH_CHECK(t.dim() == 3, "Input should be a 3D tensor, N * L * D");
+    auto N = t.size(0), L = t.size(1);
+    auto NN = mask.size(0), LL = mask.size(1);
+    TORCH_CHECK(N == NN && L == LL, "Mask size should match input size");
+
+    // N * L
+    Tensor sizes = mask;
+    Tensor tmp_pad = at::zeros({N, 1}, mask.options());
+    // Make sure padding is only added at the end of mask
+    Tensor nums = at::cat({sizes, tmp_pad}, 1).to(kInt).argmin(1);
+
+    // N, ([size1, size2, ... sizeN])
+    sizes = sizes.cumsum(1).select(1, L - 1);
+    nums = nums.to(sizes.options());
+
+    return sizes.equal(nums);
 }
 
 Tensor nested_tensor(
@@ -555,6 +573,74 @@ Tensor& NestedTensor_mul__Tensor(Tensor& self, const Tensor& other) {
       self, other, "mul_", [](const Tensor& b1, const Tensor& b2) {
         return b1.mul_(b2);
       });
+}
+
+Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
+  TORCH_CHECK(
+    dim == 0,
+    "NestedTensor can only be selected along dimension 0 ",
+    "got dimension ", dim, " instead."
+  );
+  auto self_ptr = get_nested_tensor_impl(self);
+  // buffer contains the underlying data in a contiguous vector
+  const at::Tensor & buffer = self_ptr->get_buffer();
+  int64_t numel = buffer.numel();
+  TORCH_CHECK(
+    numel > 0,
+    "cannot index an empty nested tensor."
+  );
+  // nested_tensor[i] = i-th original tensor
+  int64_t ntensors = *(self_ptr->opt_size(0));
+  int64_t positive_index = at::maybe_wrap_dim(index, ntensors);
+  // determine the memory segment of the i-th original tensor
+  Tensor sizemat = get_nested_size_tensor(self);
+  int64_t original_dim = sizemat.size(1);
+  const int64_t * sizemat_ptr = sizemat.data_ptr<int64_t>();
+  // start of the segment
+  int64_t start = 0, sizemat_offset = 0;
+  for (int64_t i = 0; i < positive_index; i++) {
+    int64_t row_product = sizemat_ptr[sizemat_offset];
+    sizemat_offset++;
+    for (int64_t j = 1; j < original_dim; j++) {
+      row_product *= sizemat_ptr[sizemat_offset];
+      sizemat_offset++;
+    }
+    start += row_product;
+  }
+  // btw determine the shape of the i-th original tensor
+  IntArrayRef shape(sizemat_ptr + sizemat_offset, sizemat_ptr + sizemat_offset + original_dim);
+  // stop of the segment
+  int64_t stop;
+  if (positive_index == ntensors - 1) {
+    stop = numel;
+  }
+  else {
+    int64_t row_product = sizemat_ptr[sizemat_offset];
+    sizemat_offset++;
+    for (int64_t j = 1; j < original_dim; j++) {
+      row_product *= sizemat_ptr[sizemat_offset];
+      sizemat_offset++;
+    }
+    stop = start + row_product;
+  }
+  // extract the memory segment then reshape to the original shape
+  return buffer.slice(0, start, stop).view(shape);
+}
+
+Tensor clone_nested(
+    const Tensor& self,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
+  TORCH_CHECK(
+      memory_format == MemoryFormat::Preserve,
+      "clone_nested only supports memory format Preserve, but got ",
+      memory_format,
+      " instead.");
+  // TODO: The size doesn't necessarily need to be cloned, but it is more
+  // conservative. This is something we could revisit once we land a more
+  // efficient implementation of nested_size_tensor_.
+  return wrap_buffer(
+      get_buffer(self).clone(), get_nested_size_tensor(self).clone());
 }
 
 } // namespace native
