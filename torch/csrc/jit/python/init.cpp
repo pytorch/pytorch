@@ -143,6 +143,7 @@ class PythonSymbolicIntNode : public c10::SymbolicIntNode {
   };
 
   virtual std::shared_ptr<SymbolicIntNode> wrap(int64_t num) override {
+    py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr("wrap")(num);
     return std::make_shared<PythonSymbolicIntNode>(r);
   }
