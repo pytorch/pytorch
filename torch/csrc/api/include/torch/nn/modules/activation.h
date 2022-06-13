@@ -1,10 +1,10 @@
 #pragma once
 
 #include <torch/nn/cloneable.h>
-#include <torch/nn/options/activation.h>
 #include <torch/nn/functional/activation.h>
 #include <torch/nn/modules/common.h>
 #include <torch/nn/modules/linear.h>
+#include <torch/nn/options/activation.h>
 
 #include <torch/csrc/Export.h>
 
@@ -114,9 +114,9 @@ class TORCH_API HardshrinkImpl : public torch::nn::Cloneable<HardshrinkImpl> {
 
 /// A `ModuleHolder` subclass for `HardshrinkImpl`.
 /// See the documentation for `HardshrinkImpl` class to learn what methods it
-/// provides, and examples of how to use `Hardshrink` with `torch::nn::HardshrinkOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `Hardshrink` with
+/// `torch::nn::HardshrinkOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Hardshrink);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Hardtanh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -130,7 +130,8 @@ TORCH_MODULE(Hardshrink);
 ///
 /// Example:
 /// ```
-/// Hardtanh model(HardtanhOptions().min_val(-42.42).max_val(0.42).inplace(true));
+/// Hardtanh
+/// model(HardtanhOptions().min_val(-42.42).max_val(0.42).inplace(true));
 /// ```
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API HardtanhImpl : public torch::nn::Cloneable<HardtanhImpl> {
@@ -150,9 +151,9 @@ class TORCH_API HardtanhImpl : public torch::nn::Cloneable<HardtanhImpl> {
 
 /// A `ModuleHolder` subclass for `HardtanhImpl`.
 /// See the documentation for `HardtanhImpl` class to learn what methods it
-/// provides, and examples of how to use `Hardtanh` with `torch::nn::HardtanhOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `Hardtanh` with
+/// `torch::nn::HardtanhOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Hardtanh);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LeakyReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -186,9 +187,9 @@ class TORCH_API LeakyReLUImpl : public torch::nn::Cloneable<LeakyReLUImpl> {
 
 /// A `ModuleHolder` subclass for `LeakyReLUImpl`.
 /// See the documentation for `LeakyReLUImpl` class to learn what methods it
-/// provides, and examples of how to use `LeakyReLU` with `torch::nn::LeakyReLUOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `LeakyReLU` with
+/// `torch::nn::LeakyReLUOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(LeakyReLU);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LogSigmoid ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -244,9 +245,9 @@ class TORCH_API SoftmaxImpl : public torch::nn::Cloneable<SoftmaxImpl> {
 
 /// A `ModuleHolder` subclass for `SoftmaxImpl`.
 /// See the documentation for `SoftmaxImpl` class to learn what methods it
-/// provides, and examples of how to use `Softmax` with `torch::nn::SoftmaxOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `Softmax` with
+/// `torch::nn::SoftmaxOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Softmax);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softmin ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -280,9 +281,9 @@ class TORCH_API SoftminImpl : public torch::nn::Cloneable<SoftminImpl> {
 
 /// A `ModuleHolder` subclass for `SoftminImpl`.
 /// See the documentation for `SoftminImpl` class to learn what methods it
-/// provides, and examples of how to use `Softmin` with `torch::nn::SoftminOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `Softmin` with
+/// `torch::nn::SoftminOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Softmin);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LogSoftmax ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -301,7 +302,8 @@ TORCH_MODULE(Softmin);
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LogSoftmaxImpl : public torch::nn::Cloneable<LogSoftmaxImpl> {
  public:
-  explicit LogSoftmaxImpl(int64_t dim) : LogSoftmaxImpl(LogSoftmaxOptions(dim)) {}
+  explicit LogSoftmaxImpl(int64_t dim)
+      : LogSoftmaxImpl(LogSoftmaxOptions(dim)) {}
   explicit LogSoftmaxImpl(const LogSoftmaxOptions& options_);
 
   Tensor forward(const Tensor& input);
@@ -316,9 +318,9 @@ class TORCH_API LogSoftmaxImpl : public torch::nn::Cloneable<LogSoftmaxImpl> {
 
 /// A `ModuleHolder` subclass for `LogSoftmaxImpl`.
 /// See the documentation for `LogSoftmaxImpl` class to learn what methods it
-/// provides, and examples of how to use `LogSoftmax` with `torch::nn::LogSoftmaxOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `LogSoftmax` with
+/// `torch::nn::LogSoftmaxOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(LogSoftmax);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softmax2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -686,9 +688,9 @@ class TORCH_API SoftplusImpl : public torch::nn::Cloneable<SoftplusImpl> {
 
 /// A `ModuleHolder` subclass for `SoftplusImpl`.
 /// See the documentation for `SoftplusImpl` class to learn what methods it
-/// provides, and examples of how to use `Softplus` with `torch::nn::SoftplusOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `Softplus` with
+/// `torch::nn::SoftplusOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Softplus);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softshrink ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -722,9 +724,9 @@ class TORCH_API SoftshrinkImpl : public torch::nn::Cloneable<SoftshrinkImpl> {
 
 /// A `ModuleHolder` subclass for `SoftshrinkImpl`.
 /// See the documentation for `SoftshrinkImpl` class to learn what methods it
-/// provides, and examples of how to use `Softshrink` with `torch::nn::SoftshrinkOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `Softshrink` with
+/// `torch::nn::SoftshrinkOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Softshrink);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softsign ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -810,7 +812,7 @@ TORCH_MODULE(Tanhshrink);
 class TORCH_API ThresholdImpl : public torch::nn::Cloneable<ThresholdImpl> {
  public:
   ThresholdImpl(double threshold, double value)
-    : ThresholdImpl(ThresholdOptions(threshold, value)) {}
+      : ThresholdImpl(ThresholdOptions(threshold, value)) {}
   explicit ThresholdImpl(const ThresholdOptions& options_);
 
   Tensor forward(Tensor input);
@@ -826,9 +828,9 @@ class TORCH_API ThresholdImpl : public torch::nn::Cloneable<ThresholdImpl> {
 
 /// A `ModuleHolder` subclass for `ThresholdImpl`.
 /// See the documentation for `ThresholdImpl` class to learn what methods it
-/// provides, and examples of how to use `Threshold` with `torch::nn::ThresholdOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `Threshold` with
+/// `torch::nn::ThresholdOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Threshold);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MultiheadAttention ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -837,8 +839,8 @@ TORCH_MODULE(Threshold);
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.MultiheadAttention
 /// to learn about the exact behavior of this module.
 ///
-/// See the documentation for `torch::nn::MultiheadAttentionOptions` class to learn what
-/// constructor arguments are supported for this module.
+/// See the documentation for `torch::nn::MultiheadAttentionOptions` class to
+/// learn what constructor arguments are supported for this module.
 ///
 /// Example:
 /// ```
@@ -846,18 +848,28 @@ TORCH_MODULE(Threshold);
 /// ```
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API MultiheadAttentionImpl
-  : public torch::nn::Cloneable<MultiheadAttentionImpl> {
+    : public torch::nn::Cloneable<MultiheadAttentionImpl> {
  public:
   MultiheadAttentionImpl(int64_t embed_dim, int64_t num_heads)
-    : MultiheadAttentionImpl(MultiheadAttentionOptions(embed_dim, num_heads)) {}
+      : MultiheadAttentionImpl(
+            MultiheadAttentionOptions(embed_dim, num_heads)) {}
   explicit MultiheadAttentionImpl(const MultiheadAttentionOptions& options_);
 
-  std::tuple<Tensor, Tensor> forward(const Tensor& query, const Tensor& key,
-                 const Tensor& value, const Tensor& key_padding_mask = {},
-                 bool need_weights = true, const Tensor& attn_mask = {},
-                 bool average_attn_weights = true);
+  std::tuple<Tensor, Tensor> forward(
+      const Tensor& query,
+      const Tensor& key,
+      const Tensor& value,
+      const Tensor& key_padding_mask = {},
+      bool need_weights = true,
+      const Tensor& attn_mask = {},
+      bool average_attn_weights = true);
+
  protected:
-  FORWARD_HAS_DEFAULT_ARGS({3, AnyValue(Tensor())}, {4, AnyValue(true)}, {5, AnyValue(Tensor())}, {6, AnyValue(true)})
+  FORWARD_HAS_DEFAULT_ARGS(
+      {3, AnyValue(Tensor())},
+      {4, AnyValue(true)},
+      {5, AnyValue(Tensor())},
+      {6, AnyValue(true)})
 
  public:
   void reset() override;
@@ -880,10 +892,10 @@ class TORCH_API MultiheadAttentionImpl
 };
 
 /// A `ModuleHolder` subclass for `MultiheadAttentionImpl`.
-/// See the documentation for `MultiheadAttentionImpl` class to learn what methods it
-/// provides, and examples of how to use `MultiheadAttention` with `torch::nn::MultiheadAttentionOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// See the documentation for `MultiheadAttentionImpl` class to learn what
+/// methods it provides, and examples of how to use `MultiheadAttention` with
+/// `torch::nn::MultiheadAttentionOptions`. See the documentation for
+/// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(MultiheadAttention);
 
 } // namespace nn
