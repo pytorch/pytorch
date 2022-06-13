@@ -6,9 +6,6 @@ set -ex
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-# shellcheck disable=SC2034
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
-
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -20,7 +17,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.3* || "$BUILD_ENVIRONMENT" == *linux-bionic-cuda11.5* || "$BUILD_ENVIRONMENT" == *linux-bionic-cuda11.6* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *deploy* ]]; then
   # Enabling DEPLOY build (embedded torch python interpreter, experimental)
   # only on one config for now, can expand later
   export USE_DEPLOY=ON
@@ -39,6 +36,9 @@ gcc --version
 
 echo "CMake version:"
 cmake --version
+
+echo "Environment variables:"
+env
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   echo "NVCC version:"
@@ -142,7 +142,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export MAX_JOBS=$(($(nproc) - 1))
   fi
 
-  if [[ -n "$IN_CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
+  if [[ -n "$CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
       # Set ROCM_ARCH to gfx900 and gfx906 for CI builds, if user doesn't override.
       echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CI builds"
       export PYTORCH_ROCM_ARCH="gfx900;gfx906"
@@ -166,10 +166,6 @@ export TORCH_CUDA_ARCH_LIST="5.2"
 # Add sm_75 support for the Linux CUDA 11.1 cuDNN 8 CircleCI build
 if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda11.1*build ]]; then
   export TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST";7.5"
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
-  export TORCH_CUDA_ARCH_LIST="6.0"
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
@@ -216,12 +212,11 @@ else
 
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
-    # ppc64le, rocm builds fail when WERROR=1
+    # rocm builds fail when WERROR=1
     # XLA test build fails when WERROR=1
     # set only when building other architectures
     # or building non-XLA tests.
-    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* &&
-          "$BUILD_ENVIRONMENT" != *rocm*  &&
+    if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
       WERROR=1 python setup.py bdist_wheel
     else
@@ -231,13 +226,6 @@ else
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
-
-    if which sccache > /dev/null; then
-      echo 'PyTorch Build Statistics'
-      sccache --show-stats
-
-      sccache --show-stats | python -m tools.stats.upload_sccache_stats
-    fi
 
     assert_git_not_dirty
     # Copy ninja build logs to dist folder
@@ -261,7 +249,7 @@ else
       popd
     fi
 
-    CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}
+    CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
     CUSTOM_TEST_USE_ROCM=$([[ "$BUILD_ENVIRONMENT" == *rocm* ]] && echo "ON" || echo "OFF")
     CUSTOM_TEST_MODULE_PATH="${PWD}/cmake/public"
     mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
@@ -321,3 +309,5 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python test/run_test.py --export-past-test-times
 fi
+
+print_sccache_stats

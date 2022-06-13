@@ -6747,6 +6747,30 @@ class TestAutogradForwardMode(TestCase):
             dual = fwAD.make_dual(a, b)
             dual[1:]
 
+    def test_metadata_check_check_conj(self):
+        keys = {
+            "NEITHER": lambda x: x,
+            "CONJ": lambda x: x.conj(),
+            "NEG": lambda x: x._neg_view()
+        }
+
+        for primal_key, tangent_key in product(keys, keys):
+            x = keys[primal_key](torch.randn(2, 3, 4, dtype=torch.cdouble))
+            t = keys[tangent_key](torch.randn(2, 3, 4, dtype=torch.cdouble))
+
+            if primal_key == tangent_key:
+                with fwAD.dual_level():
+                    dual = fwAD.make_dual(x, t)
+                    self.assertTrue(fwAD.unpack_dual(dual).tangent is t)
+                    torch.real(dual)
+                    torch.imag(dual)
+            else:
+                with fwAD.dual_level():
+                    dual = fwAD.make_dual(x, t)
+                    self.assertTrue(fwAD.unpack_dual(dual).tangent is not t)
+                    torch.real(dual)
+                    torch.imag(dual)
+
     # The following test functions want to ensure all the following behaviors:
     #   - Ensure that default level system in the python binding works
     #   - Ensure that only level 0 exists and nesting is properly disabled
