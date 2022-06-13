@@ -9,20 +9,6 @@ set -ex
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
-  exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
-  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *deploy* ]]; then
-  # Enabling DEPLOY build (embedded torch python interpreter, experimental)
-  # only on one config for now, can expand later
-  export USE_DEPLOY=ON
-fi
-
 echo "Python version:"
 python --version
 
@@ -47,13 +33,6 @@ fi
 
 if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
   export BUILD_CAFFE2=ON
-fi
-
-if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
-  export ATEN_THREADING=TBB
-  export USE_TBB=1
-elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
-  export ATEN_THREADING=NATIVE
 fi
 
 # TODO: Don't run this...
@@ -166,10 +145,6 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CC=clang
   export CXX=clang++
-fi
-
-if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
-  export USE_PER_OPERATOR_HEADERS=0
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *linux-focal-py3.7-gcc7-build*  ]]; then
