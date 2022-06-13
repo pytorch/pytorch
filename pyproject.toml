@@ -21,17 +21,4 @@ build-backend = "setuptools.build_meta:__legacy__"
 [tool.black]
 # Uncomment if pyproject.toml worked fine to ensure consistency with flake8
 # line-length = 120
-skip-string-normalization = true
 target-version = ["py37", "py38", "py39", "py310"]
-include = '''
-(
-    ^/torchgen/.*\.py$
-    | ^/tools/.*\.py$
-    | ^/torch/package/.*\.py$
-    | ^/torch/onnx/.*\.py$
-    | ^/torch/_refs/.*\.py$
-    | ^/torch/_prims/.*\.py$
-    | ^/torch/_meta_registrations\.py$
-    | ^/test/onnx/.*\.py$
-)
-'''
