@@ -5,6 +5,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/TypeCast.h>
 #include <ATen/native/cpu/zmath.h>
+#include <ATen/TensorIteratorInternal.h>
 
 namespace at {
 namespace native {
@@ -14,6 +15,34 @@ void conj_kernel(TensorIteratorBase &iter);
 } // namespace CPU_CAPABILITY
 
 namespace {
+
+inline void float_bfloat16_copy_kernel(TensorIteratorBase &iter) {
+  if (iter.dtype(1) == ScalarType::BFloat16 && iter.dtype(0) == ScalarType::Float) {
+    using src_scalar = at::BFloat16;
+    using dst_scalar = float;
+    using src_t = std::tuple<Vectorized<src_scalar>>;
+    using dst_t = std::tuple<Vectorized<dst_scalar>, Vectorized<dst_scalar>>;
+    cpu_kernel_vec(
+      iter,
+      [=](src_scalar a) -> dst_scalar { return a; },
+      [=](src_t a) -> dst_t { 
+        Vectorized<src_scalar> a_vec;
+        std::tie(a_vec) = a;
+        return convert_bfloat16_float(a_vec); });
+  } else if (iter.dtype(1) == ScalarType::Float && iter.dtype(0) == ScalarType::BFloat16) {
+    using src_scalar = float;
+    using dst_scalar = at::BFloat16;
+    using src_t = std::tuple<Vectorized<src_scalar>, Vectorized<src_scalar>>;
+    using dst_t = std::tuple<Vectorized<dst_scalar>>;
+    cpu_kernel_vec(
+      iter,
+      [=](src_scalar a) -> dst_scalar { return a; },
+      [=](src_t a) -> dst_t { 
+        Vectorized<src_scalar> a_vec0, a_vec1;
+        std::tie(a_vec0, a_vec1) = a;
+        return convert_float_bfloat16(a_vec0, a_vec1); });
+  }
+}
 
 void direct_copy_kernel(TensorIteratorBase &iter) {
   // TODO: we don't actually need separate instantiations per dtype;
@@ -80,6 +109,10 @@ void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
 
   if (dtype == iter.dtype(1)) {
     copy_same_dtype(iter, requires_conj, requires_neg);
+  } else if ((iter.dtype(1) == ScalarType::BFloat16 && iter.dtype(0) == ScalarType::Float) ||
+              (iter.dtype(1) == ScalarType::Float && iter.dtype(0) == ScalarType::BFloat16)) {
+    // printf("iter.dtype(1) == ScalarType::BFloat16 && iter.dtype(0) == ScalarType::Float");
+    float_bfloat16_copy_kernel(iter);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
       using dest_t = scalar_t;

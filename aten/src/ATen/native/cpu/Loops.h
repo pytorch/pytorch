@@ -61,6 +61,68 @@ dereference(char* C10_RESTRICT data[], const int64_t* strides, int64_t i) {
   return dereference_impl<traits>(data, strides, i, Indices{});
 }
 
+template <typename T>
+struct is_tuple_Impl : std::false_type {};
+
+template <typename... U>
+struct is_tuple_Impl<std::tuple <U...>> : std::true_type {};
+
+template <typename T>
+constexpr bool is_tuple() {
+  return is_tuple_Impl<T>::value; //decay_t<T>
+}
+
+template <typename first, typename... Vec, std::size_t... INDEX>
+inline void store_multi_vec(char* data, std::tuple <first, Vec...> outs, int64_t i, std::index_sequence<INDEX...>) {
+  using scalar_t = typename first::value_type;
+  (void)std::initializer_list<int>{(std::get<INDEX>(outs).store(data + (i + INDEX * first::size()) * sizeof(scalar_t)), 0)...};
+  // int arr[] = {(std::get<INDEX>(outs).store(data + (i + INDEX * first::size()) * sizeof(scalar_t)), 0)...};
+  // {(std::get<INDEX>(outs).store(data + (i + INDEX * first::size()) * sizeof(scalar_t)), 0)...};
+}
+
+template <typename Vec, std::size_t... INDEX>
+auto
+dereference_multi_vec_impl(char* data,
+                           const Vec& opt_scalar,
+                           bool scalar_vec,
+                           std::index_sequence<INDEX...>) {
+  using scalar_t = typename Vec::value_type;
+  return std::make_tuple(
+      scalar_vec ?
+      opt_scalar :
+      Vec::loadu(data + INDEX * sizeof(scalar_t))...);
+}
+
+template <typename Vec, std::size_t num, typename traits, std::size_t INDEX>
+auto
+dereference_multi_vec(char* C10_RESTRICT data,
+                     const Vec& opt_scalar,
+                     size_t S, 
+                     int64_t i) {
+  using scalar_t = typename Vec::value_type;
+  using Indices = std::make_index_sequence<num>;
+  return dereference_multi_vec_impl<Vec>(data + i * sizeof(scalar_t), opt_scalar, S == INDEX + 1, Indices{});
+
+}
+
+template <typename Vec, std::size_t num, typename traits, std::size_t... INDEX>
+typename traits::ArgsTuple
+dereference_tuple_vec_impl(char* C10_RESTRICT data[],
+                     const Vec& opt_scalar,
+                     size_t S,
+                     int64_t i,
+                     std::index_sequence<INDEX...>) {
+  return std::make_tuple(
+      dereference_multi_vec<Vec, num, traits, INDEX>(data[INDEX], opt_scalar, S, i)...);
+}
+
+template <typename Vec, std::size_t num, typename traits>
+typename traits::ArgsTuple
+dereference_tuple_vec(char* C10_RESTRICT data[], const Vec& opt_scalar, size_t S, int64_t i) {
+  using Indices = std::make_index_sequence<traits::arity>;
+  return dereference_tuple_vec_impl<Vec, num, traits>(data, opt_scalar, S, i, Indices{});
+}
+
 template <typename traits, std::size_t... INDEX>
 typename traits::ArgsTuple
 dereference_vec_impl(char* C10_RESTRICT data[],
@@ -193,6 +255,82 @@ multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_
   }
 }
 
+template <typename func_t, typename vec_func_t, bool istuple>
+struct vectorized_loop_core;
+
+template <typename func_t, typename vec_func_t>
+struct vectorized_loop_core<func_t, vec_func_t, true> {
+  static inline void call(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, vec_func_t&& vop) {
+    using traits = function_traits<vec_func_t>;
+    using result_type = typename function_traits<vec_func_t>::result_type;
+
+    constexpr int ntensors = traits::arity + 1;
+
+    char* C10_RESTRICT data[ntensors];
+    for (const auto arg : c10::irange(ntensors)) {
+      data[arg] = data_[arg];
+    }
+    
+    using arg_type = typename traits::template arg<0>::type;
+    using Vec_in = typename std::tuple_element<0, arg_type>::type;
+    using Vec_out = typename std::tuple_element<0, result_type>::type;
+    using input_scalar = typename Vec_in::value_type;
+    using out_scalar = typename Vec_out::value_type;
+    Vec_in opt_scalar = Vec_in(S > 0 ? *(input_scalar*)data[S] : input_scalar(0));
+
+    constexpr int in_num = std::tuple_size<arg_type>::value;
+    constexpr int out_num = std::tuple_size<result_type>::value;
+    int64_t i = 0;
+    for (; i <= n - in_num * Vec_in::size(); i += in_num * Vec_in::size()) {
+      auto args = dereference_tuple_vec<Vec_in, in_num, traits>(&data[1], opt_scalar, S, i);
+      auto outs = c10::guts::apply(std::forward<vec_func_t>(vop), std::move(args));
+      store_multi_vec(data[0], outs, i, std::make_index_sequence<out_num>{});
+    }
+
+    if (i < n) {
+      int64_t strides[ntensors];
+      strides[0] = sizeof(out_scalar);
+      for (const auto arg : c10::irange(1, ntensors)) {
+        strides[arg] = (S > 0 && arg == S) ? 0 : sizeof(input_scalar);
+      }
+      basic_loop(data, strides, i, n, std::forward<func_t>(op));
+    }
+
+  }
+};
+
+template <typename func_t, typename vec_func_t>
+struct vectorized_loop_core<func_t, vec_func_t, false> {
+  static inline void call(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, vec_func_t&& vop) {
+    using traits = function_traits<vec_func_t>;
+    using scalar_t = typename function_traits<func_t>::result_type;
+    using Vec = Vectorized<scalar_t>;
+    constexpr int ntensors = traits::arity + 1;
+
+    char* C10_RESTRICT data[ntensors];
+    for (const auto arg : c10::irange(ntensors)) {
+      data[arg] = data_[arg];
+    }
+    Vec opt_scalar = Vec(S > 0 ? *(scalar_t*)data[S] : scalar_t(0));
+    int64_t i = 0;
+    for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
+      auto args1 = dereference_vec<traits>(&data[1], opt_scalar, S, i);
+      auto args2 = dereference_vec<traits>(&data[1], opt_scalar, S, i + Vec::size());
+      auto out1 = c10::guts::apply(std::forward<vec_func_t>(vop), std::move(args1));
+      auto out2 = c10::guts::apply(std::forward<vec_func_t>(vop), std::move(args2));
+      out1.store(data[0] + i * sizeof(scalar_t));
+      out2.store(data[0] + (i + Vec::size()) * sizeof(scalar_t));
+    }
+    if (i < n) {
+      int64_t strides[ntensors];
+      for (const auto arg : c10::irange(ntensors)) {
+        strides[arg] = (S > 0 && arg == S) ? 0 : sizeof(scalar_t);
+      }
+      basic_loop(data, strides, i, n, std::forward<func_t>(op));
+    }
+  }
+};
+
 // Explicitly vectorized loop implementation. All inputs and outputs must be
 // the same type and contiguous with one exception: a single input may be
 // a scalar (stride 0). It's position is indicated by the argument `S`. If `S`
@@ -201,32 +339,9 @@ template <typename func_t, typename vec_func_t>
 static inline void
 vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, vec_func_t&& vop) {
   using traits = function_traits<vec_func_t>;
-  using scalar_t = typename function_traits<func_t>::result_type;
-  using Vec = Vectorized<scalar_t>;
-  constexpr int ntensors = traits::arity + 1;
-
-  char* C10_RESTRICT data[ntensors];
-  for (const auto arg : c10::irange(ntensors)) {
-    data[arg] = data_[arg];
-  }
-
-  Vec opt_scalar = Vec(S > 0 ? *(scalar_t*)data[S] : scalar_t(0));
-  int64_t i = 0;
-  for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
-    auto args1 = dereference_vec<traits>(&data[1], opt_scalar, S, i);
-    auto args2 = dereference_vec<traits>(&data[1], opt_scalar, S, i + Vec::size());
-    auto out1 = c10::guts::apply(std::forward<vec_func_t>(vop), std::move(args1));
-    auto out2 = c10::guts::apply(std::forward<vec_func_t>(vop), std::move(args2));
-    out1.store(data[0] + i * sizeof(scalar_t));
-    out2.store(data[0] + (i + Vec::size()) * sizeof(scalar_t));
-  }
-  if (i < n) {
-    int64_t strides[ntensors];
-    for (const auto arg : c10::irange(ntensors)) {
-      strides[arg] = (S > 0 && arg == S) ? 0 : sizeof(scalar_t);
-    }
-    basic_loop(data, strides, i, n, std::forward<func_t>(op));
-  }
+  using result_type = typename function_traits<vec_func_t>::result_type;
+  constexpr bool istuple = is_tuple<result_type>();
+  vectorized_loop_core<func_t, vec_func_t, istuple>::call(data_, n, S, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
 }
 
 
