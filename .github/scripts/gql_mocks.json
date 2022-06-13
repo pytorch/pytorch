@@ -344,7 +344,7 @@
               }
             ],
             "pageInfo": {
-              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wMy0wNFQxNDoyNDo0OC0wODowMLkyMDIyLTAzLTA0VDE0OjI0OjQ4LTA4OjAwzjWwwqA=",
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wMy0wNFQxNzoyNDo0OC0wNTowMLkyMDIyLTAzLTA0VDE3OjI0OjQ4LTA1OjAwzjWwwqA=",
               "hasPreviousPage": false
             }
           },
@@ -2463,7 +2463,7 @@
               }
             ],
             "pageInfo": {
-              "startCursor": "Y3Vyc29yOnYyOpO5MjAxOS0xMi0zMFQxMDoxOToxMS0wODowMLkyMDE5LTEyLTMwVDEwOjE5OjExLTA4OjAwzhQZLuY=",
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAxOS0xMi0zMFQxMzoxOToxMS0wNTowMLkyMDE5LTEyLTMwVDEzOjE5OjExLTA1OjAwzhQZLuY=",
               "hasPreviousPage": false
             }
           },
@@ -6948,7 +6948,7 @@
               }
             ],
             "pageInfo": {
-              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wNC0yNVQxMTozNTowMS0wNzowMLkyMDIyLTA0LTI1VDExOjM1OjAwLTA3OjAwzjjC2d0=",
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wNC0yNVQxNDozNTowMS0wNDowMLkyMDIyLTA0LTI1VDE0OjM1OjAwLTA0OjAwzjjC2d0=",
               "hasPreviousPage": true
             }
           },
@@ -7009,7 +7009,7 @@
       }
     }
   },
-  "query_sha=6a8ce6412a780d5804bfe180ed1dc807269e1eae2ae50de2346d56d1283884bc cursor=Y3Vyc29yOnYyOpO5MjAyMi0wNC0yNVQxMTozNTowMS0wNzowMLkyMDIyLTA0LTI1VDExOjM1OjAwLTA3OjAwzjjC2d0= name=pytorch number=76123 owner=pytorch": {
+  "query_sha=6a8ce6412a780d5804bfe180ed1dc807269e1eae2ae50de2346d56d1283884bc cursor=Y3Vyc29yOnYyOpO5MjAyMi0wNC0yNVQxNDozNTowMS0wNDowMLkyMDIyLTA0LTI1VDE0OjM1OjAwLTA0OjAwzjjC2d0= name=pytorch number=76123 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -7071,7 +7071,7 @@
               }
             ],
             "pageInfo": {
-              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wNC0yMlQyMDozNzo1NC0wNzowMLkyMDIyLTA0LTIyVDE2OjAyOjA5LTA3OjAwzjip7G8=",
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wNC0yMlQyMzozNzo1NC0wNDowMLkyMDIyLTA0LTIyVDE5OjAyOjA5LTA0OjAwzjip7G8=",
               "hasPreviousPage": false
             }
           }
@@ -7843,7 +7843,7 @@
               }
             ],
             "pageInfo": {
-              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wMS0yNVQwODoyODoxMC0wODowMLkyMDIyLTAxLTI1VDA3OjU0OjA1LTA4OjAwzjNooqI=",
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wMS0yNVQxMToyODoxMC0wNTowMLkyMDIyLTAxLTI1VDEwOjU0OjA1LTA1OjAwzjNooqI=",
               "hasPreviousPage": false
             }
           },
@@ -9256,7 +9256,7 @@
               }
             ],
             "pageInfo": {
-              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wNC0wNlQxMjo1NjoyNC0wNzowMLkyMDIyLTA0LTA2VDA4OjQwOjM4LTA3OjAwzjenO6Y=",
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wNC0wNlQxNTo1NjoyNC0wNDowMLkyMDIyLTA0LTA2VDExOjQwOjM4LTA0OjAwzjenO6Y=",
               "hasPreviousPage": false
             }
           },
@@ -9999,7 +9999,7 @@
               }
             ],
             "pageInfo": {
-              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wNS0xOFQxMjo0MTowNS0wNzowMLkyMDIyLTA1LTE4VDEyOjQxOjA0LTA3OjAwzjpD7es=",
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wNS0xOFQxNTo0MTowNS0wNDowMLkyMDIyLTA1LTE4VDE1OjQxOjA0LTA0OjAwzjpD7es=",
               "hasPreviousPage": false
             }
           },
@@ -11746,7 +11746,7 @@
               }
             ],
             "pageInfo": {
-              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMS0xMi0xMFQwOToyNDoxOS0wODowMLkyMDIxLTEyLTEwVDA5OjI0OjE5LTA4OjAwzjFryLE=",
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMS0xMi0xMFQxMjoyNDoxOS0wNTowMLkyMDIxLTEyLTEwVDEyOjI0OjE5LTA1OjAwzjFryLE=",
               "hasPreviousPage": false
             }
           },
@@ -13764,7 +13764,7 @@
               }
             ],
             "pageInfo": {
-              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wMi0xOFQxNzoxODo0NC0wODowMLkyMDIyLTAyLTE4VDE3OjE4OjQ0LTA4OjAwzjTr0H0=",
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wMi0xOFQyMDoxODo0NC0wNTowMLkyMDIyLTAyLTE4VDIwOjE4OjQ0LTA1OjAwzjTr0H0=",
               "hasPreviousPage": false
             }
           },
@@ -14629,7 +14629,7 @@
               }
             ],
             "pageInfo": {
-              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wMy0yM1QxNTo1MDo0NS0wNzowMLkyMDIyLTAzLTIzVDE1OjUwOjQ1LTA3OjAwzjbPEDg=",
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wMy0yM1QxODo1MDo0NS0wNDowMLkyMDIyLTAzLTIzVDE4OjUwOjQ1LTA0OjAwzjbPEDg=",
               "hasPreviousPage": false
             }
           },
@@ -15466,9 +15466,6 @@
                 "login": "jg2912"
               },
               {
-                "login": "jwpark1985"
-              },
-              {
                 "login": "robieta"
               },
               {
@@ -15593,26 +15590,26 @@
               },
               {
                 "login": "samdow"
+              },
+              {
+                "login": "dzhulgakov"
               }
             ],
             "pageInfo": {
               "hasNextPage": true,
-              "endCursor": "Y3Vyc29yOnYyOpHOARD0hA=="
+              "endCursor": "Y3Vyc29yOnYyOpHOARD9PA=="
             }
           }
         }
       }
     }
   },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOARD0hA== name=metamates org=pytorch": {
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOARD9PA== name=metamates org=pytorch": {
     "data": {
       "organization": {
         "team": {
           "members": {
             "nodes": [
-              {
-                "login": "dzhulgakov"
-              },
               {
                 "login": "great-way"
               },
@@ -15909,26 +15906,26 @@
               },
               {
                 "login": "mvsampath"
+              },
+              {
+                "login": "cheetah2216"
               }
             ],
             "pageInfo": {
               "hasNextPage": true,
-              "endCursor": "Y3Vyc29yOnYyOpHOA5ai_g=="
+              "endCursor": "Y3Vyc29yOnYyOpHOA5-fyQ=="
             }
           }
         }
       }
     }
   },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOA5ai_g== name=metamates org=pytorch": {
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOA5-fyQ== name=metamates org=pytorch": {
     "data": {
       "organization": {
         "team": {
           "members": {
             "nodes": [
-              {
-                "login": "cheetah2216"
-              },
               {
                 "login": "pinaki-mukerji"
               },
@@ -16017,9 +16014,6 @@
                 "login": "yidawang-oss"
               },
               {
-                "login": "beback4u"
-              },
-              {
                 "login": "asalioufb"
               },
               {
@@ -16059,438 +16053,47 @@
       }
     }
   },
-  "query_sha=4fa42dda073cf7ac75b2bbf595a8ef67b6dfff4bd248668750ff33ea913bf75f cursor=Y3Vyc29yOnYyOpHPAAAAAUK_Uc0= name=pytorch number=71759 owner=pytorch": {
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=None name=pytorch-dev-infra org=pytorch": {
     "data": {
-      "repository": {
-        "pullRequest": {
-          "commits": {
+      "organization": {
+        "team": {
+          "members": {
             "nodes": [
               {
-                "commit": {
-                  "oid": "346e0c547953d98eb84d23c1391a95badb9c4a22",
-                  "checkSuites": {
-                    "edges": [
-                      {
-                        "node": {
-                          "app": {
-                            "name": "GitHub Actions",
-                            "databaseId": 15368
-                          },
-                          "workflowRun": {
-                            "workflow": {
-                              "name": "linux-xenial-cuda11.3-py3.7-gcc7"
-                            }
-                          },
-                          "checkRuns": {
-                            "nodes": [
-                              {
-                                "name": "build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302020053?check_suite_focus=true"
-                              },
-                              {
-                                "name": "test (default, 1, 2, linux.4xlarge.nvidia.gpu)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302536958?check_suite_focus=true"
-                              },
-                              {
-                                "name": "test (distributed, 1, 1, linux.8xlarge.nvidia.gpu)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302537118?check_suite_focus=true"
-                              },
-                              {
-                                "name": "test (default, 2, 2, linux.4xlarge.nvidia.gpu)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302537373?check_suite_focus=true"
-                              }
-                            ],
-                            "pageInfo": {
-                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwOTJ0=",
-                              "hasNextPage": false
-                            }
-                          },
-                          "conclusion": "SUCCESS",
-                          "url": "https://github.com/pytorch/pytorch/commit/346e0c547953d98eb84d23c1391a95badb9c4a22/checks?check_suite_id=5414801870"
-                        },
-                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAUK_Uc4="
-                      },
-                      {
-                        "node": {
-                          "app": {
-                            "name": "GitHub Actions",
-                            "databaseId": 15368
-                          },
-                          "workflowRun": {
-                            "workflow": {
-                              "name": "Test tools"
-                            }
-                          },
-                          "checkRuns": {
-                            "nodes": [
-                              {
-                                "name": "test",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302020045?check_suite_focus=true"
-                              }
-                            ],
-                            "pageInfo": {
-                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwGZ80=",
-                              "hasNextPage": false
-                            }
-                          },
-                          "conclusion": "SUCCESS",
-                          "url": "https://github.com/pytorch/pytorch/commit/346e0c547953d98eb84d23c1391a95badb9c4a22/checks?check_suite_id=5414801872"
-                        },
-                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAUK_UdA="
-                      },
-                      {
-                        "node": {
-                          "app": {
-                            "name": "GitHub Actions",
-                            "databaseId": 15368
-                          },
-                          "workflowRun": {
-                            "workflow": {
-                              "name": "linux-bionic-py3.7-clang9"
-                            }
-                          },
-                          "checkRuns": {
-                            "nodes": [
-                              {
-                                "name": "build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302020051?check_suite_focus=true"
-                              },
-                              {
-                                "name": "test (default, 1, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302145103?check_suite_focus=true"
-                              },
-                              {
-                                "name": "test (noarch, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302145224?check_suite_focus=true"
-                              },
-                              {
-                                "name": "test (default, 2, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302145353?check_suite_focus=true"
-                              }
-                            ],
-                            "pageInfo": {
-                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwIUUk=",
-                              "hasNextPage": false
-                            }
-                          },
-                          "conclusion": "SUCCESS",
-                          "url": "https://github.com/pytorch/pytorch/commit/346e0c547953d98eb84d23c1391a95badb9c4a22/checks?check_suite_id=5414801874"
-                        },
-                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAUK_UdI="
-                      },
-                      {
-                        "node": {
-                          "app": {
-                            "name": "GitHub Actions",
-                            "databaseId": 15368
-                          },
-                          "workflowRun": {
-                            "workflow": {
-                              "name": "linux-docs"
-                            }
-                          },
-                          "checkRuns": {
-                            "nodes": [
-                              {
-                                "name": "build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302020056?check_suite_focus=true"
-                              },
-                              {
-                                "name": "build-docs (cpp)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302148279?check_suite_focus=true"
-                              },
-                              {
-                                "name": "build-docs (python)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302148361?check_suite_focus=true"
-                              }
-                            ],
-                            "pageInfo": {
-                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwIXQk=",
-                              "hasNextPage": false
-                            }
-                          },
-                          "conclusion": "SUCCESS",
-                          "url": "https://github.com/pytorch/pytorch/commit/346e0c547953d98eb84d23c1391a95badb9c4a22/checks?check_suite_id=5414801876"
-                        },
-                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAUK_UdQ="
-                      },
-                      {
-                        "node": {
-                          "app": {
-                            "name": "GitHub Actions",
-                            "databaseId": 15368
-                          },
-                          "workflowRun": {
-                            "workflow": {
-                              "name": "linux-xenial-py3-clang5-mobile-custom-build-static"
-                            }
-                          },
-                          "checkRuns": {
-                            "nodes": [
-                              {
-                                "name": "build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302020057?check_suite_focus=true"
-                              }
-                            ],
-                            "pageInfo": {
-                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwGZ9k=",
-                              "hasNextPage": false
-                            }
-                          },
-                          "conclusion": "SUCCESS",
-                          "url": "https://github.com/pytorch/pytorch/commit/346e0c547953d98eb84d23c1391a95badb9c4a22/checks?check_suite_id=5414801877"
-                        },
-                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAUK_UdU="
-                      },
-                      {
-                        "node": {
-                          "app": {
-                            "name": "GitHub Actions",
-                            "databaseId": 15368
-                          },
-                          "workflowRun": {
-                            "workflow": {
-                              "name": "TorchBench CI (pytorch-linux-py3.7-cu102)"
-                            }
-                          },
-                          "checkRuns": {
-                            "nodes": [
-                              {
-                                "name": "run-torchbench",
-                                "conclusion": "NEUTRAL",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302019919?check_suite_focus=true"
-                              }
-                            ],
-                            "pageInfo": {
-                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwGZ08=",
-                              "hasNextPage": false
-                            }
-                          },
-                          "conclusion": "SKIPPED",
-                          "url": "https://github.com/pytorch/pytorch/commit/346e0c547953d98eb84d23c1391a95badb9c4a22/checks?check_suite_id=5414801878"
-                        },
-                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAUK_UdY="
-                      },
-                      {
-                        "node": {
-                          "app": {
-                            "name": "GitHub Actions",
-                            "databaseId": 15368
-                          },
-                          "workflowRun": {
-                            "workflow": {
-                              "name": "linux-xenial-py3.7-gcc7"
-                            }
-                          },
-                          "checkRuns": {
-                            "nodes": [
-                              {
-                                "name": "build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302020088?check_suite_focus=true"
-                              },
-                              {
-                                "name": "test (default, 2, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302151055?check_suite_focus=true"
-                              },
-                              {
-                                "name": "test (default, 1, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302151166?check_suite_focus=true"
-                              },
-                              {
-                                "name": "test (distributed, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302151251?check_suite_focus=true"
-                              }
-                            ],
-                            "pageInfo": {
-                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwIaFM=",
-                              "hasNextPage": false
-                            }
-                          },
-                          "conclusion": "SUCCESS",
-                          "url": "https://github.com/pytorch/pytorch/commit/346e0c547953d98eb84d23c1391a95badb9c4a22/checks?check_suite_id=5414801880"
-                        },
-                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAUK_Udg="
-                      },
-                      {
-                        "node": {
-                          "app": {
-                            "name": "GitHub Actions",
-                            "databaseId": 15368
-                          },
-                          "workflowRun": {
-                            "workflow": {
-                              "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single"
-                            }
-                          },
-                          "checkRuns": {
-                            "nodes": [
-                              {
-                                "name": "build-and-test",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302020054?check_suite_focus=true"
-                              }
-                            ],
-                            "pageInfo": {
-                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwGZ9Y=",
-                              "hasNextPage": false
-                            }
-                          },
-                          "conclusion": "SUCCESS",
-                          "url": "https://github.com/pytorch/pytorch/commit/346e0c547953d98eb84d23c1391a95badb9c4a22/checks?check_suite_id=5414801882"
-                        },
-                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAUK_Udo="
-                      },
-                      {
-                        "node": {
-                          "app": {
-                            "name": "GitHub Actions",
-                            "databaseId": 15368
-                          },
-                          "workflowRun": {
-                            "workflow": {
-                              "name": "win-vs2019-cpu-py3"
-                            }
-                          },
-                          "checkRuns": {
-                            "nodes": [
-                              {
-                                "name": "build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302019942?check_suite_focus=true"
-                              },
-                              {
-                                "name": "test (default, 1, 2, windows.4xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5303136931?check_suite_focus=true"
-                              },
-                              {
-                                "name": "test (default, 2, 2, windows.4xlarge)",
-                                "conclusion": "FAILURE",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5303137019?check_suite_focus=true"
-                              }
-                            ],
-                            "pageInfo": {
-                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwXcvs=",
-                              "hasNextPage": false
-                            }
-                          },
-                          "conclusion": "FAILURE",
-                          "url": "https://github.com/pytorch/pytorch/commit/346e0c547953d98eb84d23c1391a95badb9c4a22/checks?check_suite_id=5414801885"
-                        },
-                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAUK_Ud0="
-                      },
-                      {
-                        "node": {
-                          "app": {
-                            "name": "GitHub Actions",
-                            "databaseId": 15368
-                          },
-                          "workflowRun": {
-                            "workflow": {
-                              "name": "linux-vulkan-bionic-py3.7-clang9"
-                            }
-                          },
-                          "checkRuns": {
-                            "nodes": [
-                              {
-                                "name": "build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302020058?check_suite_focus=true"
-                              },
-                              {
-                                "name": "test (default, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302161211?check_suite_focus=true"
-                              }
-                            ],
-                            "pageInfo": {
-                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwIjzs=",
-                              "hasNextPage": false
-                            }
-                          },
-                          "conclusion": "SUCCESS",
-                          "url": "https://github.com/pytorch/pytorch/commit/346e0c547953d98eb84d23c1391a95badb9c4a22/checks?check_suite_id=5414801895"
-                        },
-                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAUK_Uec="
-                      }
-                    ],
-                    "pageInfo": {
-                      "hasNextPage": true
-                    }
-                  }
-                }
-              }
-            ]
-          }
-        }
-      }
-    }
-  },
-  "query_sha=4fa42dda073cf7ac75b2bbf595a8ef67b6dfff4bd248668750ff33ea913bf75f cursor=Y3Vyc29yOnYyOpHPAAAAAUK_Uec= name=pytorch number=71759 owner=pytorch": {
-    "data": {
-      "repository": {
-        "pullRequest": {
-          "commits": {
-            "nodes": [
+                "login": "kit1980"
+              },
               {
-                "commit": {
-                  "oid": "346e0c547953d98eb84d23c1391a95badb9c4a22",
-                  "checkSuites": {
-                    "edges": [
-                      {
-                        "node": {
-                          "app": {
-                            "name": "GitHub Actions",
-                            "databaseId": 15368
-                          },
-                          "workflowRun": {
-                            "workflow": {
-                              "name": "linux-xenial-py3.7-gcc7-no-ops"
-                            }
-                          },
-                          "checkRuns": {
-                            "nodes": [
-                              {
-                                "name": "build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/runs/5302020052?check_suite_focus=true"
-                              }
-                            ],
-                            "pageInfo": {
-                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwGZ9Q=",
-                              "hasNextPage": false
-                            }
-                          },
-                          "conclusion": "SUCCESS",
-                          "url": "https://github.com/pytorch/pytorch/commit/346e0c547953d98eb84d23c1391a95badb9c4a22/checks?check_suite_id=5414801896"
-                        },
-                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAUK_Ueg="
-                      }
-                    ],
-                    "pageInfo": {
-                      "hasNextPage": false
-                    }
-                  }
-                }
+                "login": "b0noI"
+              },
+              {
+                "login": "seemethere"
+              },
+              {
+                "login": "malfet"
+              },
+              {
+                "login": "tenpercent"
+              },
+              {
+                "login": "atalman"
+              },
+              {
+                "login": "osalpekar"
+              },
+              {
+                "login": "swang392"
+              },
+              {
+                "login": "janeyx99"
+              },
+              {
+                "login": "clee2000"
               }
-            ]
+            ],
+            "pageInfo": {
+              "hasNextPage": false,
+              "endCursor": "Y3Vyc29yOnYyOpHOAqnOlw=="
+            }
           }
         }
       }
@@ -17324,56 +16927,163 @@
       }
     }
   },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=None name=pytorch-dev-infra org=pytorch": {
-    "data": {
-      "organization": {
-        "team": {
-          "members": {
-            "nodes": [
-              {
-                "login": "kit1980"
-              },
-              {
-                "login": "b0noI"
-              },
-              {
-                "login": "seemethere"
-              },
-              {
-                "login": "malfet"
-              },
-              {
-                "login": "tenpercent"
-              },
-              {
-                "login": "atalman"
-              },
-              {
-                "login": "osalpekar"
-              },
-              {
-                "login": "swang392"
-              },
-              {
-                "login": "janeyx99"
-              },
-              {
-                "login": "clee2000"
-              }
-            ],
-            "pageInfo": {
-              "hasNextPage": false,
-              "endCursor": "Y3Vyc29yOnYyOpHOAqnOlw=="
-            }
-          }
-        }
-      }
-    }
-  },
   "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=None name=qwertyuiop org=pytorch": {
     "data": {
       "organization": {
         "team": null
+      }
+    }
+  },
+  "query_sha=62ce809793481ce6ddce6e1a19d9b0761755ff0ff75decaf8a79419eaf793110 cursor=Y3Vyc29yOnYyOpHOQqri9w== name=pytorch number=76123 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "comments": {
+            "nodes": [
+              {
+                "bodyText": "\ud83d\udd17 Helpful links\n\n\ud83e\uddea \u00a0See artifacts and rendered test results at hud.pytorch.org/pr/76123\n\ud83d\udcc4 \u00a0Preview Python docs built from this PR\n\ud83d\udcc4 \u00a0Preview C++ docs built from this PR\n\u2753Need help or want to give feedback on the CI? Visit our office hours\n\u21a9\ufe0f \u00a0[fb-only] Re-run with SSH instructions\n\n\ud83d\udc8a CI failures summary and remediations\nAs of commit 96c5299 (more details on the Dr. CI page):\nExpand to see more\n\n\n3/3 failures introduced in this PR\n\n\n\ud83d\udd75\ufe0f 3 new failures recognized by patterns\nThe following CI failures do not appear to be due to upstream breakages\n pull / linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge) (1/3)\nStep: \"Test\" (full log | diagnosis details | \ud83d\udd01 rerun)\n\n\n2022-05-05T16:09:27.0340973Z The PR is introduc...m to confirm whether this change is wanted or not.\n\n2022-05-05T16:09:27.0325517Z processing existing schema:  text(__torch__.torch.classes.profiling.SourceRef _0) -> (str _0)\n2022-05-05T16:09:27.0326788Z processing existing schema:  count(__torch__.torch.classes.profiling.InstructionStats _0) -> (int _0)\n2022-05-05T16:09:27.0328838Z processing existing schema:  duration_ns(__torch__.torch.classes.profiling.InstructionStats _0) -> (int _0)\n2022-05-05T16:09:27.0330436Z processing existing schema:  source(__torch__.torch.classes.profiling.SourceStats _0) -> (__torch__.torch.classes.profiling.SourceRef _0)\n2022-05-05T16:09:27.0333056Z processing existing schema:  line_map(__torch__.torch.classes.profiling.SourceStats _0) -> (Dict(int, __torch__.torch.classes.profiling.InstructionStats) _0)\n2022-05-05T16:09:27.0333966Z processing existing schema:  __init__(__torch__.torch.classes.profiling._ScriptProfile _0) -> (NoneType _0)\n2022-05-05T16:09:27.0335812Z processing existing schema:  enable(__torch__.torch.classes.profiling._ScriptProfile _0) -> (NoneType _0)\n2022-05-05T16:09:27.0337445Z processing existing schema:  disable(__torch__.torch.classes.profiling._ScriptProfile _0) -> (NoneType _0)\n2022-05-05T16:09:27.0339361Z processing existing schema:  _dump_stats(__torch__.torch.classes.profiling._ScriptProfile _0) -> (__torch__.torch.classes.profiling.SourceStats[] _0)\n2022-05-05T16:09:27.0340656Z processing existing schema:  __init__(__torch__.torch.classes.dist_rpc.WorkerInfo _0, str _1, int _2) -> (NoneType _0)\n2022-05-05T16:09:27.0340973Z The PR is introducing backward incompatible changes to the operator library. Please contact PyTorch team to confirm whether this change is wanted or not. \n2022-05-05T16:09:27.0340981Z \n2022-05-05T16:09:27.0341055Z Broken ops: [\n2022-05-05T16:09:27.0341503Z \taten::_sparse_bsr_tensor_unsafe(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None) -> (Tensor)\n2022-05-05T16:09:27.0341908Z \taten::sparse_bsc_tensor.ccol_row_value_size(Tensor ccol_indices, Tensor row_indices, Tensor values, int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=False) -> (Tensor)\n2022-05-05T16:09:27.0342288Z \taten::sparse_bsc_tensor.ccol_row_value(Tensor ccol_indices, Tensor row_indices, Tensor values, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=False) -> (Tensor)\n2022-05-05T16:09:27.0342686Z \taten::sparse_bsr_tensor.crow_col_value_size(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=False) -> (Tensor)\n2022-05-05T16:09:27.0343063Z \taten::sparse_bsr_tensor.crow_col_value(Tensor crow_indices, Tensor col_indices, Tensor values, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=False) -> (Tensor)\n2022-05-05T16:09:27.0343459Z \taten::sparse_csc_tensor.ccol_row_value_size(Tensor ccol_indices, Tensor row_indices, Tensor values, int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=False) -> (Tensor)\n2022-05-05T16:09:27.0343837Z \taten::sparse_csc_tensor.ccol_row_value(Tensor ccol_indices, Tensor row_indices, Tensor values, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=False) -> (Tensor)\n2022-05-05T16:09:27.0344275Z \taten::sparse_compressed_tensor.comp_plain_value_size(Tensor compressed_indices, Tensor plain_indices, Tensor values, int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=False) -> (Tensor)\n\n\n pull / linux-xenial-cuda11.3-py3.7-gcc7 / test (distributed, 1, 2, linux.8xlarge.nvidia.gpu) (2/3)\nStep: \"Test\" (full log | diagnosis details | \ud83d\udd01 rerun)\n\n\n2022-05-05T17:44:17.5621127Z   test_rnn (__main...as.so.11: undefined symbol: cublasGetSmCountTarget\n\n2022-05-05T17:44:14.3331226Z \n2022-05-05T17:44:14.3331614Z Generating XML reports...\n2022-05-05T17:44:14.3364495Z Generated XML report: test-reports/dist-gloo/distributed.test_c10d_spawn_gloo/TEST-DistributedDataParallelSingleProcessTest-20220505174414.xml\n2022-05-05T17:44:15.4328518Z INFO:torch.distributed.nn.jit.instantiator:Created a temporary directory at /tmp/tmppkaiddzk\n2022-05-05T17:44:15.4329548Z INFO:torch.distributed.nn.jit.instantiator:Writing /tmp/tmppkaiddzk/_remote_module_non_sriptable.py\n2022-05-05T17:44:17.0055093Z INFO:numba.cuda.cudadrv.driver:init\n2022-05-05T17:44:17.0124550Z Test results will be stored in test-reports/dist-gloo/distributed.test_c10d_spawn_gloo\n2022-05-05T17:44:17.0140782Z \n2022-05-05T17:44:17.0141038Z Running tests...\n2022-05-05T17:44:17.0141470Z ----------------------------------------------------------------------\n2022-05-05T17:44:17.5621127Z   test_rnn (__main__.DistributedDataParallelSingleProcessTest) ... Could not load symbol cublasGetSmCountTarget from libcublas.so.11. Error: /usr/local/cuda/lib64/libcublas.so.11: undefined symbol: cublasGetSmCountTarget\n2022-05-05T17:44:17.6693126Z INFO:torch.nn.parallel.distributed:Reducer buckets have been rebuilt in this iteration.\n2022-05-05T17:44:18.1650025Z ok (1.151s)\n2022-05-05T17:44:18.1651272Z \n2022-05-05T17:44:18.1651813Z ----------------------------------------------------------------------\n2022-05-05T17:44:18.1652170Z Ran 1 test in 1.151s\n2022-05-05T17:44:18.1652338Z \n2022-05-05T17:44:18.1652429Z OK\n2022-05-05T17:44:18.1652546Z \n2022-05-05T17:44:18.1652676Z Generating XML reports...\n2022-05-05T17:44:18.1686537Z Generated XML report: test-reports/dist-gloo/distributed.test_c10d_spawn_gloo/TEST-DistributedDataParallelSingleProcessTest-20220505174417.xml\n\n\n pull / pytorch-xla-linux-bionic-py3.7-clang8 / test (xla, 1, 1, linux.2xlarge) (3/3)\nStep: \"Test\" (full log | diagnosis details | \ud83d\udd01 rerun)\n\n\n2022-05-05T18:18:06.1360060Z \ufffd[0;31m[  FAILED  ] \ufffd[mAtenXlaTensorTest.TestMaxUnpool3DBackward\n\n2022-05-05T18:18:06.1355251Z \ufffd[0;32m[----------] \ufffd[m1 test from XlaUtilCacheTest (0 ms total)\n2022-05-05T18:18:06.1355519Z \n2022-05-05T18:18:06.1355847Z \ufffd[0;32m[----------] \ufffd[mGlobal test environment tear-down\n2022-05-05T18:18:06.1356397Z \ufffd[0;32m[==========] \ufffd[m623 tests from 8 test suites ran. (510109 ms total)\n2022-05-05T18:18:06.1356818Z \ufffd[0;32m[  PASSED  ] \ufffd[m619 tests.\n2022-05-05T18:18:06.1357247Z \ufffd[0;32m[  SKIPPED ] \ufffd[m1 test, listed below:\n2022-05-05T18:18:06.1357814Z \ufffd[0;32m[  SKIPPED ] \ufffd[mAtenXlaTensorTest.TestGroupNormBackward\n2022-05-05T18:18:06.1358319Z \ufffd[0;31m[  FAILED  ] \ufffd[m3 tests, listed below:\n2022-05-05T18:18:06.1358823Z \ufffd[0;31m[  FAILED  ] \ufffd[mAtenXlaTensorTest.TestMatmul_1x2\n2022-05-05T18:18:06.1359424Z \ufffd[0;31m[  FAILED  ] \ufffd[mAtenXlaTensorTest.TestMaxUnpool2DBackward\n2022-05-05T18:18:06.1360060Z \ufffd[0;31m[  FAILED  ] \ufffd[mAtenXlaTensorTest.TestMaxUnpool3DBackward\n2022-05-05T18:18:06.1360345Z \n2022-05-05T18:18:06.1360463Z  3 FAILED TESTS\n2022-05-05T18:18:06.3154942Z + cleanup\n2022-05-05T18:18:06.3155169Z + retcode=1\n2022-05-05T18:18:06.3155327Z + set +x\n2022-05-05T18:18:06.3695951Z ##[error]Process completed with exit code 1.\n2022-05-05T18:18:06.3873716Z ##[group]Run pytorch/pytorch/.github/actions/get-workflow-job-id@master\n2022-05-05T18:18:06.3873966Z with:\n2022-05-05T18:18:06.3874336Z   github-token: ***\n2022-05-05T18:18:06.3874505Z env:\n\n\n\nThis comment was automatically generated by Dr. CI (expand for details).\nPlease report bugs/suggestions to the (internal) Dr. CI Users group.\nClick here  to manually regenerate this comment.",
+                "author": {
+                  "login": "facebook-github-bot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": {
+                  "login": "facebook-github-bot"
+                },
+                "databaseId": 1104245131
+              },
+              {
+                "bodyText": "Thanks for the PR. qq, what is the naming conversation for prototype feature in test folder?  I notice that it is \"_checkpoint\" in the src but \"checkpoint\" in the test.\nSince we have been through the review cycle for this prototype feature already, shall we stamp and merge this",
+                "author": {
+                  "login": "zzzwen"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1105854055
+              },
+              {
+                "bodyText": "Thanks for the PR. qq, what is the naming conversation for prototype feature in test folder? I notice that it is \"_checkpoint\" in the src but \"checkpoint\" in the test.\nSince we have been through the review cycle for this prototype feature already, shall we stamp and merge this\n\nTests are not part of the API so it's ok to land them checkpoint and I don't think there will be any confusion on how it's supposed to work.\nWhile we need this stamped, it can't be merged before our tests are green.",
+                "author": {
+                  "login": "kumpera"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1106726326
+              },
+              {
+                "bodyText": "Awesome work @kumpera!",
+                "author": {
+                  "login": "pritamdamania87"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1107350566
+              },
+              {
+                "bodyText": "@kumpera has imported this pull request. If you are a Meta employee, you can view this diff on Phabricator.",
+                "author": {
+                  "login": "facebook-github-bot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1108958721
+              },
+              {
+                "bodyText": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge) failure is unrelated.",
+                "author": {
+                  "login": "kumpera"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1110207153
+              },
+              {
+                "bodyText": "@kumpera has imported this pull request. If you are a Meta employee, you can view this diff on Phabricator.",
+                "author": {
+                  "login": "facebook-github-bot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1110207988
+              },
+              {
+                "bodyText": "@wanchaol  @pritamdamania87 I believe I addressed all review issues, broken tests.\nThere's a lot of work ahead beyond this prototype, I filed half a dozen issues on it under sharded_tensor",
+                "author": {
+                  "login": "kumpera"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1110249740
+              },
+              {
+                "bodyText": "@kumpera has imported this pull request. If you are a Meta employee, you can view this diff on Phabricator.",
+                "author": {
+                  "login": "facebook-github-bot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1112182036
+              },
+              {
+                "bodyText": "@pritamdamania87\n\nIn that case, we can just have prepare_storage take the metadata as a parameter instead?\nRegarding prepare_storage.\n\nMetadata is actually not enough because it doesn't have any information telling which rank is saving what, making it quite error prone.\nPass a list of FQNs would be annoying for Shards since you'd need to scan through the list of ShardStorageMetadata.\nPassing a list of storage keys is the most reasonable approach for now, given it's the best way to tie back to write calls.\nI expect this method to completely go away based on a storage coalescing prototype.",
+                "author": {
+                  "login": "kumpera"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1112598769
+              },
+              {
+                "bodyText": "I don't think we should add flags like this in the code just for testing purposes. We can test this accordingly in unit tests by doing things like if self.rank == 0: validate_something(). I feel the latter is more robust since otherwise your unit tests are testing a codepath that is never actually triggered in practice.\n\n@pritamdamania87 makes sense, this is just part of an overall issue of the current design of PTD that none of its building blocks operate without a properly initialized PG.",
+                "author": {
+                  "login": "kumpera"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1112605213
+              },
+              {
+                "bodyText": "@simpkins  I'm tracking future work to improve the serialization story here: #76441",
+                "author": {
+                  "login": "kumpera"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1115311085
+              },
+              {
+                "bodyText": "@kumpera has imported this pull request. If you are a Meta employee, you can view this diff on Phabricator.",
+                "author": {
+                  "login": "facebook-github-bot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1115389763
+              },
+              {
+                "bodyText": "Metadata is actually not enough because it doesn't have any information telling which rank is saving what, making it quite error prone.\n\n\nPass a list of FQNs would be annoying for Shards since you'd need to scan through the list of ShardStorageMetadata.\n\n\nPassing a list of storage keys is the most reasonable approach for now, given it's the best way to tie back to write calls.\n\n\nI expect this method to completely go away based on a storage coalescing prototype.\n\nAh my bad, I actually meant to say passing a List[WriteRequests] to prepare_storage so that it is more generic and has all the information about future incoming writes. But if this is probably going to change quite a bit based on the coalescing prototype we can revisit this in a follow up PR.",
+                "author": {
+                  "login": "pritamdamania87"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1116714017
+              },
+              {
+                "bodyText": "@pytorchbot merge this",
+                "author": {
+                  "login": "kumpera"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1118494220
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpHOQdFxiw==",
+              "hasPreviousPage": false
+            }
+          }
+        }
       }
     }
   }
