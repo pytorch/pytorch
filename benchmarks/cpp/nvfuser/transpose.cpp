@@ -79,7 +79,6 @@ static void setupTranspose(
     std::pair<int, int> axes,
     TransposeConfig tc) {
   FusionGuard fg(fusion);
-  typedef std::pair<int, int> transpose_axes;
 
   auto optionalTranspose = [axes](TensorView* tv, bool is_transpose) {
     return (is_transpose) ? transpose(tv, axes.first, axes.second) : tv;
