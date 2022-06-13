@@ -20075,6 +20075,14 @@ python_ref_db = [
         "_refs.log2",
         torch_opinfo_name="log2",
     ),
+    PythonRefInfo(
+        "_refs.logsumexp",
+        torch_opinfo_name="logsumexp",
+        skips=(
+            # SyntaxError: cannot assign to False
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nan_to_num",
         torch_opinfo_name="nan_to_num",
