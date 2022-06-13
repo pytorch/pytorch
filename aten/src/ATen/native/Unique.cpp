@@ -25,6 +25,30 @@ namespace native{
 namespace {
 
 template <typename scalar_t>
+std::unordered_set<scalar_t> unique_elements(const scalar_t* begin, const scalar_t* end) {
+  return std::unordered_set<scalar_t>(begin, end);
+}
+
+std::unordered_set<bool> unique_elements(const bool* begin, const bool* end) {
+  std::array<bool, 2> seen;
+  for (; begin != end; ++begin) {
+    seen[c10::load(begin)] = true;
+    if (seen[false] && seen[true]) {
+      break;
+    }
+  }
+
+  std::unordered_set<bool> ret;
+  if (seen[false]) {
+    ret.insert(false);
+  }
+  if (seen[true]) {
+    ret.insert(true);
+  }
+  return ret;
+}
+
+template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
     const Tensor& self,
     const bool sorted,
@@ -36,7 +60,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
   Tensor output;
   Tensor inverse_indices = at::empty({0}, self.options().dtype(kLong));
   Tensor counts = at::empty({0}, self.options().dtype(kLong));
-  std::unordered_set<scalar_t> set(input_data, input_data + numel);
+  auto set = unique_elements(input_data, input_data + numel);
   output = at::empty({static_cast<int64_t>(set.size())}, input.options());
   scalar_t *output_data = output.data_ptr<scalar_t>();
   if (sorted) {
@@ -56,7 +80,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
       inverse_map[output_data[i]] = i;
     }
     for (const auto i : c10::irange(numel)) {
-      inverse_indices_data[i] = inverse_map[input_data[i]];
+      const auto val = c10::load(&input_data[i]);
+      inverse_indices_data[i] = inverse_map[val];
     }
     if (return_counts) {
       std::unordered_map<scalar_t, int64_t> counts_map;
@@ -65,7 +90,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
         counts_map[output_data[i]] = 0;
       }
       for (const auto i : c10::irange(numel)) {
-        counts_map[input_data[i]] += 1;
+        const auto val = c10::load(&input_data[i]);
+        counts_map[val] += 1;
       }
       counts.resize_(output.sizes());
       counts.fill_(0);
@@ -98,7 +124,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
     scalar_t *output_data = output.data_ptr<scalar_t>();
     int64_t *inverse_data = inverse_indices.data_ptr<int64_t>();;
     int64_t *counts_data = nullptr;
-    *output_data = *input_data;
+    scalar_t last_value = c10::load(input_data);
+    *output_data = last_value;
 
     if (return_counts) {
       counts.resize_({numel});
@@ -111,8 +138,10 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
       inverse_data[0] = 0;
     }
     for (const auto i : c10::irange(1, numel)) {
-      if (input_data[i] != *p) {
-        *(++p) = input_data[i];
+      const auto value = c10::load(&input_data[i]);
+      if (value != last_value) {
+        *(++p) = value;
+        last_value = value;
         if (return_counts) {
           *(q++) = i - last;
           last = i;
@@ -208,8 +237,8 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
     std::sort(indices.begin(), indices.end(),
       [&](int64_t a, int64_t b) -> bool {
         for (const auto i : c10::irange(numel)) {
-          scalar_t lhs = input_flat_ptr[i + a * numel];
-          scalar_t rhs = input_flat_ptr[i + b * numel];
+          scalar_t lhs = c10::load(&input_flat_ptr[i + a * numel]);
+          scalar_t rhs = c10::load(&input_flat_ptr[i + b * numel]);
           if (lhs < rhs) {
             return true;
           } else if (lhs > rhs) {
