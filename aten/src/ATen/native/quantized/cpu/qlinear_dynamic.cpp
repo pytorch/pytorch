@@ -233,7 +233,13 @@ at::Tensor PackedLinearWeight::apply_dynamic_relu(
 #ifdef USE_PYTORCH_QNNPACK
 template <bool ReluFused>
 at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
-    at::Tensor input) {
+    at::Tensor input,
+    bool reduce_range) {
+  if (reduce_range) {
+    TORCH_WARN("reduce_range is set to true for the linear operator while using qnnpack backend, but qnnpack does "
+    " not require a reduction in range. We recommend switching this flag to false so that accuracy isn't compromised");
+  }
+
   using at::Tensor;
   TORCH_CHECK(
       input.dim() >= 2,
@@ -275,7 +281,11 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
       /*min=*/x_min,
       /*max=*/x_max,
       /*qmin=*/0,
-      /*qmax=*/255);
+      /*qmax=*/255,
+      /*preserve_sparsity=*/false,
+      /*force_scale_power_of_two=*/false,
+      /*reduce_range=*/reduce_range);
+
   float* weight_scales_data = w_scales.data_ptr<float>();
 
   if (!input_scale.has_value() || input_scale.value() != q_params.scale) {
@@ -376,17 +386,13 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
 at::Tensor PackedLinearWeightsQnnp::apply_dynamic(
     at::Tensor input,
     bool reduce_range) {
-  if (reduce_range) {
-    TORCH_WARN("reduce_range is set to true for qnnpack backend. qnnpack does not require a reduction in range. The linear operator "
-    "will ignore this setting and use the full range");
-  }
-  return apply_dynamic_impl</*ReluFused=*/false>(std::move(input));
+  return apply_dynamic_impl</*ReluFused=*/false>(std::move(input), reduce_range);
 }
 
 at::Tensor PackedLinearWeightsQnnp::apply_dynamic_relu(
     at::Tensor input,
-    bool /* reduce_range */) {
-  return apply_dynamic_impl</*ReluFused=*/true>(std::move(input));
+    bool reduce_range) {
+  return apply_dynamic_impl</*ReluFused=*/true>(std::move(input), reduce_range);
 }
 
 #endif // USE_PYTORCH_QNNPACK
