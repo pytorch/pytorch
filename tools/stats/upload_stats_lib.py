@@ -84,8 +84,9 @@ def download_s3_artifacts(
         paths.append(p)
 
     if not found_one:
-        raise RuntimeError(
-            "Didn't find any test reports in s3, there is probably a bug!"
+        print(
+            "::warning title=s3 artifacts not found::"
+            "Didn't find any test reports in s3, there might be a bug!"
         )
     return paths
 
