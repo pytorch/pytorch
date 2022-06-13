@@ -16442,9 +16442,7 @@ TEST_F(NVFuserTest, FusionWelfordOtherPersistence_CUDA) {
 
   for (auto inner_size : {4096, 8192, 32768}) {
     auto runtime = run_test(inner_size);
-    TORCH_CHECK(
-        !runtime->isSegmented() ||
-        runtime->fusionSegments()->groups().size() == 1);
+    TORCH_CHECK(!runtime->isSegmented());
   }
 }
 
@@ -19824,6 +19822,40 @@ TEST_F(NVFuserTest, FusionRfactorPredication2_CUDA) {
       &fusion, cg_outputs, {at_t0, at_t3}, {at_t2, at_t4}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionRfactorIndirectRoot_CUDA) {
+  // https://github.com/csarofeen/pytorch/issues/1692
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(3);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1, 2});
+  fusion.addOutput(tv1);
+
+  tv1->split(2, 4);
+  tv1->split(1, 3);
+  tv1->merge(2, 3);
+  auto rf = tv1->rFactor({-1});
+
+  tv1->split(0, 256);
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+  rf->computeAt(tv1, -1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  auto at_in = at::randn({6, 6, 6}, options);
+  auto at_out = at_in.sum({1, 2});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {at_in});
+  auto cg_outputs = fe.runFusion({at_in});
+
+  testValidate(&fusion, cg_outputs, {at_in}, {at_out}, __LINE__, __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionNonDivisibleSplit1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -20974,6 +21006,70 @@ TEST_F(NVFuserTest, FusionBroadcastConcretization4_CUDA) {
   fusion.printKernel();
 }
 #endif
+
+TEST_F(NVFuserTest, FusionBroadcastConcretization5_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(1);
+  fusion.addInput(tv1);
+  auto tv2 = makeSymbolicTensor(1);
+  fusion.addInput(tv2);
+  auto tv3 = makeSymbolicTensor(1);
+  fusion.addInput(tv3);
+
+  // Assert tv2 and tv3 have the same shape
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  // Concretize a broadcast domain to multiple non-concrete domains
+  // through a multi-output expression. It should be considered to be
+  // non-uniquely concretized.
+  auto tv5 = broadcast(tv0, {false, true});
+  // Reduce only the non-broadcast domain.
+  auto tvs = Welford(tv5, {0});
+  auto tv9 = add(tvs.avg, tv1);
+  auto tv10 = add(tvs.var_sum, tv2);
+  fusion.addOutput(tv9);
+  fusion.addOutput(tv10);
+
+  // Same pattern as the above, but concretize the broadcast domain
+  // with tv2 and tv3, which have the exactly same shape, so the
+  // broadcast should be considered uniquely concretized.
+  auto tv11 = broadcast(tv0, {false, true});
+  // Reduce only the non-broadcast domain.
+  auto tvs2 = Welford(tv11, {0});
+  auto tv15 = add(tvs2.avg, tv2);
+  auto tv16 = add(tvs2.var_sum, tv3);
+  fusion.addOutput(tv15);
+  fusion.addOutput(tv16);
+
+  // Reduce only the broadcast domain. Since it's reduced, it should
+  // not be considered to be concretized.
+  auto tv17 = broadcast(tv0, {false, true});
+  auto tvs3 = Welford(tv17, {1});
+  fusion.addOutput(tvs3.avg);
+
+  ConcretizedBroadcastDomains bcast_concretization_info;
+  bcast_concretization_info.build(&fusion);
+
+  TORCH_CHECK(
+      bcast_concretization_info.maybeNonUniquelyConcretized(tv5->axis(1)),
+      "Failed to detect non-unique concretization of ",
+      tv5->toString());
+
+  TORCH_CHECK(
+      bcast_concretization_info.isUniquelyConcretized(tv11->axis(1)),
+      "Failed to detect unique concretization of ",
+      tv11->toString());
+
+  TORCH_CHECK(
+      !bcast_concretization_info.isConcretized(tv17->axis(1)),
+      "Failed to detect non-concretization of ",
+      tv17->toString());
+}
 
 TEST_F(NVFuserTest, FusionIssue1430_CUDA) {
   // Derived from an expression sorting issue when using loop map, now expr
@@ -22330,7 +22426,9 @@ TEST_F(NVFuserTest, FusionRAWSyncInsertionPlace4_CUDA) {
       // Record number of unary ops that modifies shared memory.
       if (uop->out()->isA<kir::TensorIndex>() &&
           uop->out()->as<kir::TensorIndex>()->view()->getMemoryType() ==
-              MemoryType::Shared) {
+              MemoryType::Shared &&
+          // Filter out initialization expressions
+          uop->in()->isA<kir::TensorIndex>()) {
         number_of_writes_++;
       }
     }
@@ -22432,6 +22530,257 @@ TEST_F(NVFuserTest, FusionSerialSmemWriteParallelRead2_CUDA) {
   auto ref = t0 + t1 + t2;
 
   testValidate(&fusion, cg_outputs, {t0, t1, t2}, {ref}, __LINE__, __FILE__);
+}
+
+// Simple test of async copy primitive
+TEST_F(NVFuserTest, FusionSimpleCpAsync_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  int m = 33, n = 31;
+
+  TensorView* tv0 = makeConcreteTensor({m, n});
+  TensorView* tv1 = makeConcreteTensor({m, n});
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  TensorView* tv2 = add(tv0, tv1);
+
+  fusion.addOutput(tv2);
+
+  auto tv0_shared = tv0->cacheAfter(LoadStoreOpType::CpAsync);
+  tv0_shared->setMemoryType(MemoryType::Shared);
+
+  tv0->computeAt(tv2, 1);
+  tv0_shared->axis(1)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({m, n}, options);
+  at::Tensor t1 = at::randn({m, n}, options);
+
+  FusionExecutor fe;
+
+  // requires ampere+ GPU
+  if (!deviceMajorMinorCheck(8)) {
+    ASSERT_ANY_THROW(fe.compileFusion(&fusion, {t0, t1}));
+    GTEST_SKIP() << "skipping tests on pre-AMPERE GPUs";
+  }
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// Simple test of async copy primitive: double buffered
+//   Double buffer case 1, both block sync and async wait
+//  are needed.
+TEST_F(NVFuserTest, FusionDoubleBufferCpAsync1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Using vectorization so need to keep n multiple of 4.
+  int m = 33, n = 48;
+
+  TensorView* tv0 = makeConcreteTensor({m, n});
+  TensorView* tv1 = makeConcreteTensor({m, n});
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  TensorView* tv2 = add(tv0, tv1);
+
+  fusion.addOutput(tv2);
+
+  auto tv0_shared = tv0->cacheAfter(LoadStoreOpType::CpAsync);
+  tv0_shared->setMemoryType(MemoryType::Shared);
+  tv0->computeAt(tv2, 1);
+
+  // Asynchronously load a tile in one schedule
+  tv0_shared->split(1, 4);
+  tv0_shared->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv0_shared->axis(-2)->parallelize(ParallelType::TIDx);
+
+  // Consume the loaded tile in another schedule,
+  //   triggering the need for a sync.
+  tv2->split(1, 12);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // Double buffer the shared mem tensor.
+  tv0_shared->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({m, n}, options);
+  at::Tensor t1 = at::randn({m, n}, options);
+
+  FusionExecutor fe;
+  // requires ampere+ GPU
+  if (!deviceMajorMinorCheck(8)) {
+    ASSERT_ANY_THROW(fe.compileFusion(&fusion, {t0, t1}));
+    GTEST_SKIP() << "skipping tests on pre-AMPERE GPUs";
+  }
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// Simple test of async copy primitive: double buffered
+//   Double buffer case 2, only async wait is needed
+TEST_F(NVFuserTest, FusionDoubleBufferCpAsync2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Using vectorization so need to keep n multiple of 4.
+  int m = 33, n = 48;
+
+  TensorView* tv0 = makeConcreteTensor({m, n});
+  TensorView* tv1 = makeConcreteTensor({m, n});
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  TensorView* tv2 = add(tv0, tv1);
+
+  fusion.addOutput(tv2);
+
+  auto tv0_shared = tv0->cacheAfter(LoadStoreOpType::CpAsync);
+  tv0_shared->setMemoryType(MemoryType::Shared);
+  tv0->computeAt(tv2, 1);
+
+  // Asynchronously load a tile in one schedule
+  tv0_shared->split(1, 4);
+  tv0_shared->axis(-2)->parallelize(ParallelType::TIDx);
+
+  // Consume the loaded tile in another schedule,
+  //   triggering the need for a sync.
+  tv2->split(1, 4);
+  tv2->axis(-2)->parallelize(ParallelType::TIDx);
+
+  // Double buffer the shared mem tensor.
+  tv0_shared->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({m, n}, options);
+  at::Tensor t1 = at::randn({m, n}, options);
+
+  FusionExecutor fe;
+  // requires ampere+ GPU
+  if (!deviceMajorMinorCheck(8)) {
+    ASSERT_ANY_THROW(fe.compileFusion(&fusion, {t0, t1}));
+    GTEST_SKIP() << "skipping tests on pre-AMPERE GPUs";
+  }
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// Simple test for double buffer in shared mem,
+//  where we should not insert redundant syncs when
+//  they are not needed.
+TEST_F(NVFuserTest, FusionDoubleBufferNoSync_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Using vectorization so need to keep n multiple of 4.
+  int m = 33, n = 48;
+
+  TensorView* tv0 = makeConcreteTensor({m, n});
+  TensorView* tv1 = makeConcreteTensor({m, n});
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  TensorView* tv2 = add(tv0, tv1);
+
+  fusion.addOutput(tv2);
+
+  auto tv0_shared = tv0->cacheAfter();
+  tv0_shared->setMemoryType(MemoryType::Shared);
+  tv0->computeAt(tv2, 1);
+
+  // Asynchronously load a tile in one schedule
+  tv0_shared->split(1, 4);
+  tv0_shared->axis(-2)->parallelize(ParallelType::TIDx);
+
+  // Consume the loaded tile in another schedule,
+  //   triggering the need for a sync.
+  tv2->split(1, 4);
+  tv2->axis(-2)->parallelize(ParallelType::TIDx);
+
+  // Double buffer the shared mem tensor.
+  tv0_shared->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({m, n}, options);
+  at::Tensor t1 = at::randn({m, n}, options);
+
+  GpuLower gpulw(&fusion);
+  auto flattened_exprs =
+      ir_utils::flattenScopedExprs(gpulw.kernel()->topLevelExprs());
+  bool sync_inserted = std::any_of(
+      flattened_exprs.begin(), flattened_exprs.end(), [](Expr* expr) {
+        return expr->isA<kir::BlockSync>();
+      });
+  TORCH_INTERNAL_ASSERT(!sync_inserted, "Un-expected block sync inserted");
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// Test predicate inversion for cp.async
+TEST_F(NVFuserTest, FusionCpAsyncPredicate_CUDA) {
+  // requires ampere+ GPU
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Using vectorization so need to keep n multiple of 4.
+  int m = 33, n = 48;
+
+  TensorView* tv0 = makeConcreteTensor({m, n});
+
+  fusion.addInput(tv0);
+  auto tv1 = sum(tv0, {1});
+  fusion.addOutput(tv1);
+
+  auto tv0_shared = tv0->cacheAfter(LoadStoreOpType::CpAsync);
+  auto tv0_reg = tv0_shared->cacheAfter();
+  tv0_shared->setMemoryType(MemoryType::Shared);
+  tv0->computeAt(tv1, 1);
+
+  tv0_shared->split(-1, 32);
+  tv0_shared->split(-1, 4);
+  tv0_shared->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({m, n}, options);
+
+  FusionExecutor fe;
+  if (!deviceMajorMinorCheck(8)) {
+    ASSERT_ANY_THROW(fe.compileFusion(&fusion, {t0}));
+    GTEST_SKIP() << "skipping tests on pre-AMPERE GPUs";
+  }
+
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0.sum({1});
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
 // Test predicate removal on reg-to-reg expressions
@@ -22707,6 +23056,41 @@ TEST_F(NVFuserMultithreadedTest, MultipleFunctions_CUDA) {
   }
 }
 
+// Repro of issue #1655
+TEST_F(NVFuserTest, FusionIncompleteConcreteID_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+  auto tv2 = makeSymbolicTensor(2);
+  fusion.addInput(tv2);
+
+  auto tv3 = broadcast(tv0, {true, true, false});
+  auto tv4 = broadcast(tv1, {false, true, false});
+  auto tv5 = broadcast(tv2, {true, false, false});
+
+  auto tv6 = add(tv3, tv4);
+  auto tv7 = add(tv3, tv5);
+
+  fusion.addOutput(tv6);
+  fusion.addOutput(tv7);
+
+  tv6->merge(0);
+  tv6->merge(0);
+
+  TransformPropagator::from(tv6);
+
+  tv0->computeAt(tv6, -1, ComputeAtMode::MostInlined);
+  tv1->computeAt(tv6, -1, ComputeAtMode::MostInlined);
+  tv2->computeAt(tv7, -1, ComputeAtMode::MostInlined);
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(fusion.printKernel());
+}
+
 TEST_F(NVFuserTest, FusionTestReEntrantGridWelford_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
@@ -22832,27 +23216,14 @@ TEST_F(NVFuserTest, FusionRedundantPredSync_CUDA) {
   tv3->axis(0)->parallelize(ParallelType::TIDy);
   tv3->axis(1)->parallelize(ParallelType::TIDx);
 
-  // Utility class to make sure one block sync
-  //  is inserted by RAW pass.
-  class SyncChecker : public kir::IrVisitor {
-   public:
-    using kir::IrVisitor::handle;
-    bool result() {
-      return sync_seen_;
-    }
-
-   private:
-    void handle(kir::BlockSync*) final {
-      sync_seen_ = true;
-    }
-
-   private:
-    bool sync_seen_ = false;
-  } checker;
-
   GpuLower gpulw(&fusion);
-  checker.handle(gpulw.kernel()->topLevelExprs());
-  TORCH_INTERNAL_ASSERT(checker.result(), "Expected block sync not inserted");
+  auto flattened_exprs =
+      ir_utils::flattenScopedExprs(gpulw.kernel()->topLevelExprs());
+  bool sync_inserted = std::any_of(
+      flattened_exprs.begin(), flattened_exprs.end(), [](Expr* expr) {
+        return expr->isA<kir::BlockSync>();
+      });
+  TORCH_INTERNAL_ASSERT(sync_inserted, "Expected block sync not inserted");
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
@@ -22974,6 +23345,53 @@ TEST_F(NVFuserTest, FusionContigPredicate_CUDA) {
   auto ref = t0.unsqueeze(1);
 
   testValidate(fe.kernel(), cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Repro of an issue of the reduction scheduler with a broadcast
+// domain concretized to multiple domains that are not proven to have
+// the same extent
+TEST_F(NVFuserTest, FusionRepro1713_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeSymbolicTensor(2);
+  auto tv2 = makeSymbolicTensor(1);
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+  fusion->addInput(tv2);
+  auto tv3 = broadcast(tv2, {false, true});
+
+  auto tv4 = add(tv3, tv0);
+
+  auto tv5 = add(tv3, tv1);
+  auto tv6 = sum(tv5, {0});
+  fusion->addOutput(tv4);
+  fusion->addOutput(tv6);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({1024, 204800}, options);
+  // Original repro had the same shape as t0, but this should work
+  // with a different extent at the second axis
+  at::Tensor t1 = at::randn({1024, 123}, options);
+  at::Tensor t2 = at::randn({1024}, options);
+  std::vector<IValue> aten_inputs({t0, t1, t2});
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+
+  auto t3 = t2.unsqueeze(-1);
+  auto t4 = t3 + t0;
+  auto t5 = t3 + t1;
+  auto t6 = sum(t5, {0});
+
+  testValidate(
+      executor_cache.fusion(),
+      cg_outputs,
+      {t0, t1, t2},
+      {t4, t6},
+      __LINE__,
+      __FILE__);
 }
 
 } // namespace jit

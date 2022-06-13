@@ -55,7 +55,7 @@ namespace meta {
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")"); \
  \
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self); \
-  set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
 
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   ADDMM_META();
@@ -73,7 +73,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
       self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   auto names = at::namedinference::compute_matmul_outnames(self, mat2);
-  set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output_raw_strided(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
 }
 
 TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
@@ -106,7 +106,7 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
   auto options = self.options()
                      .dtype(toRealValueType(opt_dtype.value_or(self.scalar_type())));
 
-  set_output(shape, options);
+  set_output_raw_strided(0, shape, {}, options);
 }
 
 template <typename Meta>
@@ -129,7 +129,7 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
 
   auto& result = meta.maybe_get_output(0);
   // 'set_output' does not resize for in-place calls
-  meta.set_output(output_size, batch2.options());
+  meta.set_output_raw_strided(0, output_size, {}, batch2.options());
   const auto result_sizes = result.sizes();
   // Error is raised if called from in-place overload with incorrect shape
   TORCH_CHECK(result_sizes == output_size,
@@ -556,10 +556,12 @@ Tensor matrix_power(const Tensor& self, int64_t n) {
   return at::native::linalg_matrix_power(self, n);
 }
 
-// Computes the rank of 'input' and saves the result in-place in 'result'
+namespace {
+
+// Computes the rank of 'input' and saves the result in-place in 'result'.
 // 'hermitian' controls whether SVD or eigendecomposition is used for computing the singular values
 // 'atol' and 'rtol' are the absolute and relative tolerances, respectively.
-Tensor& linalg_matrix_rank_out(
+Tensor& matrix_rank_impl(
     const Tensor& input,
     const optional<Tensor>& atol_opt,
     const optional<Tensor>& rtol_opt,
@@ -574,17 +576,8 @@ Tensor& linalg_matrix_rank_out(
   ScalarType output_type = ScalarType::Long;
   checkLinalgCompatibleDtype("torch.linalg.matrix_rank", result.scalar_type(), output_type);
 
-  // Matrices or batch of matrices are allowed
-  TORCH_CHECK(input.dim() >= 2, "torch.linalg.matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", input.sizes());
-
   checkNotComplexTolerance(atol, "torch.linalg.matrix_rank", "atol");
   checkNotComplexTolerance(rtol, "torch.linalg.matrix_rank", "rtol");
-
-  // matrix_rank assigns a scalar value for each matrix in the batch so
-  // result's shape is equal to input.shape[0:input.ndim-2]
-  // for single matrix result_shape = {}
-  auto result_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
-  at::native::resize_output(result, result_shape);
 
   // NumPy doesn't take into account possible input with no elements and it errors on max not defined for this case
   // Let's output 0 for this case, since that kind of matrices have zero number of non-zero rows, hence rank is 0.
@@ -613,6 +606,36 @@ Tensor& linalg_matrix_rank_out(
   return result;
 }
 
+Tensor get_matrix_rank_result_tensor(const Tensor& input) {
+  // Matrices or batch of matrices are allowed
+  checkIsMatrix(input, "torch.linalg.matrix_rank", "input");
+  // For Composite Compliance, allocate `result` of correct shape to
+  // avoid resizing in `out` variant.
+  // See also `NOTE [matrix rank output shape]`
+  auto result_shape =
+      IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
+  Tensor result =
+      at::empty(result_shape, input.options().dtype(ScalarType::Long));
+
+  return result;
+}
+
+}  // anonymous namespace
+
+Tensor& linalg_matrix_rank_out(
+    const Tensor& input,
+    const optional<Tensor>& atol_opt,
+    const optional<Tensor>& rtol_opt,
+    bool hermitian,
+    Tensor& result) {
+  // Matrices or batch of matrices are allowed
+  checkIsMatrix(input, "torch.linalg.matrix_rank", "input");
+  auto result_shape =
+    IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
+  at::native::resize_output(result, result_shape);
+  return matrix_rank_impl(input, atol_opt, rtol_opt, hermitian, result);
+}
+
 Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian, Tensor& result) {
   Tensor atol_tensor, rtol_tensor;
   std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
@@ -621,15 +644,17 @@ Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> atol, optio
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, const optional<Tensor>& atol, const optional<Tensor>& rtol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
-  result = at::linalg_matrix_rank_outf(input, atol, rtol, hermitian, result);
-  return result;
+  auto result = get_matrix_rank_result_tensor(input);
+  return matrix_rank_impl(input, atol, rtol, hermitian, result);
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
-  result = at::linalg_matrix_rank_outf(input, atol, rtol, hermitian, result);
-  return result;
+  auto result = get_matrix_rank_result_tensor(input);
+
+  Tensor atol_tensor, rtol_tensor;
+  std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
+
+  return matrix_rank_impl(input, atol_tensor, rtol_tensor, hermitian, result);
 }
 
 Tensor& linalg_matrix_rank_out(const Tensor& input, const Tensor& tol, bool hermitian, Tensor& result) {
@@ -648,15 +673,17 @@ Tensor& linalg_matrix_rank_out(const Tensor& input, double tol, bool hermitian, 
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, const Tensor& tol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
-  result = at::linalg_matrix_rank_outf(input, tol, hermitian, result);
-  return result;
+  auto result = get_matrix_rank_result_tensor(input);
+  return matrix_rank_impl(input, tol, at::zeros({}, tol.options()), hermitian, result);
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, double tol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
-  result = at::linalg_matrix_rank_outf(input, tol, hermitian, result);
-  return result;
+  auto result = get_matrix_rank_result_tensor(input);
+
+  Tensor atol_tensor, rtol_tensor;
+  std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, tol, 0.0);
+
+  return matrix_rank_impl(input, atol_tensor, rtol_tensor, hermitian, result);
 }
 
 Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
@@ -2410,18 +2437,21 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   auto dim = opt_dim.value_or(IntArrayRef{});
   // No need to handle opt_dtype explicitly as it is already encoded in the dtype of result
 
-  // Issue arising from the difference between vectorized and non-vectorized implementation on CPU
+  // https://github.com/pytorch/pytorch/issues/52648
+  // Reductions always use `std::abs` to compute the absolute value. In the backward of this
+  // function, we need to locate the index that was selected as the largest value. To do so
+  // we do self.abs() == result to locate the index of the largest element.
+  // Now, self.abs() may dispatch to a vectorized implementation which gives sliiightly different
+  // results to the std::abs(std::complex<T>) implementation.
+  // As such, to be able to compute the correct index in the backward, we need to use self.abs()
+  // both in the forward and in the backward
   Tensor self_;
-  if (self.device().type() == c10::kCPU &&
-      isComplexType(self.scalar_type()) &&
-      std::abs(ord) == INFINITY) {
-    // TODO: This at::abs() call is used so that the at::abs() call in the
-    // backward function produces an identical result for complex inputs.
-    // However, it would be ideal if we could incorporate this into
-    // linalg_vector_norm_stub. See issue:
-    // https://github.com/pytorch/pytorch/issues/52648
-    auto in_dtype = opt_dtype.value_or(self.scalar_type());
-    self_ = self.to(in_dtype).abs();
+  if (self.is_cpu() && self.is_complex() && std::abs(ord) == INFINITY) {
+    if (opt_dtype.has_value()) {
+      self_ = self.to(*opt_dtype).abs();
+    } else {
+      self_ = self.abs();
+    }
   } else {
     self_ = self;
   }
@@ -2513,7 +2543,6 @@ Tensor linalg_matrix_norm(
   TORCH_CHECK(ord == "fro" || ord == "nuc", "linalg.matrix_norm: Order ", ord, " not supported.");
 
   auto A_ = opt_dtype.has_value() ? A.to(*opt_dtype) : A;
-  using Int = IntArrayRef::value_type;
 
   if (ord == "fro") {
     return at::linalg_vector_norm(A_, 2, dim, keepdim);
