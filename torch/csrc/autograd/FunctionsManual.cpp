@@ -1888,9 +1888,18 @@ Tensor kl_div_target_backward(
     Tensor target,
     int64_t reduction,
     bool log_target) {
+  // No in-place operations on target unless it is not broadcasted
+  const auto is_broadcasted_target = [&]() {
+    const auto target_storage = target.storage();
+    const auto target_dtype_nbytes = c10::elementSize(target.scalar_type());
+    const auto target_storage_numel = target_storage.nbytes() / target_dtype_nbytes;
+    return target_storage_numel == target.numel();
+  }();
+
   Tensor grad_target;
   if (!log_target) {
-    if (!areAnyTensorSubclassLike({self, target}) &&
+    if (!is_broadcasted_target &&
+        !areAnyTensorSubclassLike({self, target}) &&
         !grad_output._is_zerotensor()) {
       grad_target = grad_output.mul(target.log().add_(1).sub_(self))
                         .masked_fill_(target == 0, 0.);
@@ -1899,7 +1908,8 @@ Tensor kl_div_target_backward(
                         .masked_fill(target == 0, 0.);
     }
   } else {
-    if (!areAnyTensorSubclassLike({self, target})) {
+    if (!is_broadcasted_target &&
+        !areAnyTensorSubclassLike({self, target})) {
       grad_target =
           grad_output.mul(target.add(1).sub_(self).mul_(target.exp()));
     } else {
