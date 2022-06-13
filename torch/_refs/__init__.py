@@ -490,7 +490,12 @@ isinf = _make_elementwise_unary_reference(
 
 
 def _isposinf(a: TensorLikeType) -> TensorLikeType:
-    return logical_and(_isinf(a), gt(a, 0))
+    if a.dtype.is_complex:
+        msg = f"Complex dtype is not supported for isposinf, got dtype {a.dtype}"
+        raise ValueError(msg)
+    elif a.dtype.is_floating_point:
+        return eq(a, float('inf'))
+    return zeros_like(a, dtype=torch.bool)
 
 
 isposinf = _make_elementwise_unary_reference(
@@ -501,7 +506,12 @@ isposinf = _make_elementwise_unary_reference(
 
 
 def _isneginf(a: TensorLikeType) -> TensorLikeType:
-    return logical_and(_isinf(a), lt(a, 0))
+    if a.dtype.is_complex:
+        msg = f"Complex dtype is not supported for isneginf, got dtype {a.dtype}"
+        raise ValueError(msg)
+    elif a.dtype.is_floating_point:
+        return eq(a, float('-inf'))
+    return zeros_like(a, dtype=torch.bool)
 
 
 isneginf = _make_elementwise_unary_reference(
