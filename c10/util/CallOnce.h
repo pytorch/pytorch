@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <c10/macros/Macros.h>
+#include <c10/util/C++17.h>
 
 namespace c10 {
 
@@ -36,7 +37,7 @@ class once_flag {
     if (init_.load(std::memory_order_relaxed)) {
       return;
     }
-    f(std::forward<Args>(args)...);
+    c10::guts::invoke(f, std::forward<Args>(args)...);
     init_.store(true, std::memory_order_release);
   }
 
