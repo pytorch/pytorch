@@ -46,7 +46,6 @@ class NonUniformQuantizationObserverBase(ObserverBase):
     """
     def _calculate_qparams(
         self,
-        max_val: float,
             signed: bool) -> Tuple[float, torch.Tensor, torch.Tensor]:
         raise NotImplementedError
 
@@ -59,9 +58,9 @@ class APoTObserver(NonUniformQuantizationObserverBase):
         super(APoTObserver, self).__init__(max_val, b, k)
 
     def calculate_qparams(self, signed: bool) -> Tuple[float, torch.Tensor, torch.Tensor]:
-        return self._calculate_qparams(self.max_val, signed)
+        return self._calculate_qparams(signed)
 
-    def _calculate_qparams(self, max_val, signed):
+    def _calculate_qparams(self, signed):
         # compute alpha
         self.alpha = self.max_val
 
