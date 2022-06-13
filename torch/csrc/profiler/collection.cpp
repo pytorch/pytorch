@@ -38,14 +38,14 @@ void InputOutputEncoder::push(const at::Tensor& t) {
     const auto& sizes = t.sizes();
     const auto dim = sizes.size();
     TORCH_CHECK(
-      dim <= std::numeric_limits<uint32_t>::max(),
-      "Cannot profile Tensors of size > uint32 max. Got dim: ", dim);
+        dim <= std::numeric_limits<uint32_t>::max(),
+        "Cannot profile Tensors of size > uint32 max. Got dim: ",
+        dim);
 
     tensor_metadata_.emplace_back(
-      /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
-      /*dtype_=*/t.scalar_type(),
-      /*dim_=*/(uint32_t)dim
-    );
+        /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
+        /*dtype_=*/t.scalar_type(),
+        /*dim_=*/(uint32_t)dim);
 
     for (const auto i : sizes) {
       tensor_sizes_.emplace_back(i);
@@ -57,7 +57,8 @@ void InputOutputEncoder::push(const at::Tensor& t) {
 
 // This is a custom-iterator-like getter to obtain input shapes and dtypes.
 auto InputOutputEncoder::getNextShapesAndDtypes() {
-  return [this, tag_it = tags_.begin(),
+  return [this,
+          tag_it = tags_.begin(),
           tensor_metadata_it = tensor_metadata_.begin(),
           tensor_size_it = tensor_sizes_.begin()]() mutable {
     struct Inputs out;
@@ -65,21 +66,19 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
     while (!terminate && tag_it != tags_.end()) {
       out.shapes_.emplace_back();
       switch (*tag_it) {
-        case Tag::Tensor:
-          {
-            const auto& md = *tensor_metadata_it++;
-            for (const auto _ : c10::irange(md.dim_)) {
-              (void)_; // Suppress unused variable warning
-              out.shapes_.back().push_back(*tensor_size_it++);
-            }
-            out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
+        case Tag::Tensor: {
+          const auto& md = *tensor_metadata_it++;
+          for (const auto _ : c10::irange(md.dim_)) {
+            (void)_; // Suppress unused variable warning
+            out.shapes_.back().push_back(*tensor_size_it++);
           }
-          break;
+          out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
+        } break;
 
         case Tag::TensorListBegin:
-            while (*(++tag_it) != Tag::TERMINATOR) {
-              // TODO: Skip TensorLists for now.
-            }
+          while (*(++tag_it) != Tag::TERMINATOR) {
+            // TODO: Skip TensorLists for now.
+          }
           out.dtypes_.emplace_back("TensorList");
           break;
 
@@ -343,8 +342,9 @@ ThreadLocalSubqueue* RecordQueue::getSubqueue() {
   std::lock_guard<std::mutex> guard(sub_queue_mutex_);
   auto it = sub_queues_.find(tid);
   if (it == sub_queues_.end()) {
-    it =
-        sub_queues_.emplace(tid, std::make_unique<ThreadLocalSubqueue>(tid, config_)).first;
+    it = sub_queues_
+             .emplace(tid, std::make_unique<ThreadLocalSubqueue>(tid, config_))
+             .first;
   }
 
   sub_queue_cache_ = SubQueueThreadCache{id_, it->second.get()};
