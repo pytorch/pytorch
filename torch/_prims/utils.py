@@ -4,8 +4,7 @@ from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
-import weakref
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor
 
 import torch
 
@@ -63,27 +62,6 @@ TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 
 
-# In order to keep things like aliasing relationships and storage
-# consistent wrt/meta tensors, FakeTensors own a FakeTensorMode
-# which caches conversions to Meta Tensors. We would like to use
-# one consistent mode among along FakeTensors, which we store here.
-# We store a weakref, so that when all previous FakeTensors are
-# the present mode will also deallocate. FakeTensorMode holds onto
-# tensors that are converted to Meta so we don't want to persist it
-# longer than necessary.x
-prim_fake_mode_ref = None
-
-
-def get_prim_fake_mode():
-    global prim_fake_mode_ref
-    if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
-        mode = FakeTensorMode()
-        prim_fake_mode_ref = weakref.ref(mode)
-        return mode
-    else:
-        return prim_fake_mode_ref()
-
-
 def TensorMeta(
     tensorlike: Optional[Union[NumberType, torch.Tensor]] = None,
     *,
@@ -124,19 +102,9 @@ def TensorMeta(
     if isinstance(device, str):
         device = torch.device(device)
 
-    if isinstance(tensorlike, FakeTensor):
-        mode = tensorlike.fake_mode
-    else:
-        mode = get_prim_fake_mode()
-
-    if device.type == "meta":
-        return torch.empty_strided(shape, strides, dtype=dtype, device="meta")
-    else:
-        return FakeTensor(
-            mode,
-            torch.empty_strided(shape, strides, dtype=dtype, device="meta"),
-            device,
-        )
+    return FakeTensor(
+        torch.empty_strided(shape, strides, dtype=dtype, device="meta"), device
+    )
 
 
 # TODO: look at using torch.testing.assert_close instead with an option

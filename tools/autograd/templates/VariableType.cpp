@@ -48,6 +48,9 @@ namespace{
 
 namespace {
 
+bool torch_dispatch_set() {
+  return static_cast<bool>(at::impl::TorchDispatchModeTLS::get_state());
+}
 
 ${type_derived_method_definitions}
 }

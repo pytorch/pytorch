@@ -987,7 +987,6 @@ class MKLDNNSubgraphSlicer {
       case aten::relu:
       case aten::relu6:
       case aten::gelu:
-      case aten::prelu:
       case aten::sigmoid:
       case aten::hardsigmoid:
       case aten::hardswish:

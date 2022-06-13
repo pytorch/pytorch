@@ -4758,38 +4758,6 @@ def dot(g, self, other):
     return matmul(g, self, other)
 
 
-@symbolic_helper.parse_args("v", "t", "t")
-def movedim(g, self, source, destination):
-    # This is a pythonic implementation mostly taken from aten/src/ATen/native/TensorShape.cpp::movedim
-    source = source.view(-1)
-    destination = destination.view(-1)
-
-    assert source.size() == destination.size()
-
-    if (source == destination).all():
-        return self
-
-    self_rank = symbolic_helper._get_tensor_rank(self)
-
-    perm = list(range(self_rank))
-
-    src_dims = perm.copy()
-    dst_dims = perm.copy()
-
-    for src, dst in zip(source.tolist(), destination.tolist()):
-        perm[dst] = src
-        src_dims[src] = -1
-        dst_dims[dst] = -1
-
-    src_dims = [dim for dim in src_dims if dim != -1]
-    dst_dims = [dim for dim in dst_dims if dim != -1]
-
-    for src, dst in zip(src_dims, dst_dims):
-        perm[dst] = src
-
-    return g.op("Transpose", self, perm_i=perm)
-
-
 @symbolic_helper.parse_args("v", "v")
 def fill(g, self, value):
     dtype = self.type().scalarType()
@@ -4919,26 +4887,6 @@ def cdist(g, x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     broadcasted_x2 = symbolic_helper._unsqueeze_helper(g, x2, [rank - 2])
     return pairwise_distance(
         g, broadcasted_x1, broadcasted_x2, p, eps=1e-06, keepdim=False
-    )
-
-
-def lerp(g, self, end, weight):
-    # Conditional for better numeric. This has been discussed in
-    # https://github.com/pytorch/pytorch/pull/18871
-    diff = g.op("Sub", end, self)
-    return where(
-        g,
-        g.op("Less", weight, g.op("Constant", value_t=torch.tensor(0.5))),
-        g.op("Add", self, g.op("Mul", weight, diff)),
-        g.op(
-            "Sub",
-            end,
-            g.op(
-                "Mul",
-                diff,
-                g.op("Sub", g.op("Constant", value_t=torch.tensor(1.0)), weight),
-            ),
-        ),
     )
 
 

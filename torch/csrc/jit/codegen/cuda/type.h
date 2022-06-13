@@ -114,14 +114,12 @@ enum class ExprType {
   ShiftOp,
   GatherOp,
   ViewOp,
-  LoadStoreOp,
   Split,
   ViewAsScalar,
   Merge,
   Allocate,
   BlockSync,
   GridSync,
-  CpAsyncWait,
   InitMagicZero,
   UpdateMagicZero,
   ForLoop,
@@ -303,8 +301,6 @@ static constexpr std::array<IdMappingMode, 3> kIdMappingModes = {
     IdMappingMode::EXACT,
     IdMappingMode::LOOP};
 
-enum class LoadStoreOpType { LdMatrix, LdMatrixTranspose, CpAsync };
-
 // Returns if function needs an f suffix on the operator when operating on a
 // float value i.e. sin->sinf
 bool needFloatSuffix(UnaryOpType t);
@@ -329,9 +325,6 @@ TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ParallelType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const MemoryType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IterType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IdMappingMode);
-TORCH_CUDA_CU_API std::ostream& operator<<(
-    std::ostream&,
-    const LoadStoreOpType);
 
 std::string stringifyBooleanOp(const UnaryOpType);
 std::string stringifyBooleanOp(const BinaryOpType);

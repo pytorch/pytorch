@@ -29,9 +29,7 @@ class TORCH_API MapAllocator {
   MapAllocator(MapAllocator&&) = delete;
   MapAllocator& operator=(MapAllocator&&) = delete;
 
-  const char* filename() const {
-    return filename_.c_str();
-  }
+  const char* filename() const { return filename_.c_str(); }
   int fd() const {
 #ifdef _WIN32
     TORCH_CHECK(false, "MapAllocator::fd() is unsupported on Windows");
@@ -39,29 +37,15 @@ class TORCH_API MapAllocator {
     return fd_;
 #endif
   }
-  ptrdiff_t size() const {
-    return size_;
-  }
+  ptrdiff_t size() const { return size_; }
   // Return a pointer to the actual data for this allocator
   // (in the case of the refcounted allocator, this is offset
   // from the base pointer.)
-  virtual void* data() const {
-    return base_ptr_;
-  }
+  virtual void* data() const { return base_ptr_; }
 
   static MapAllocator* fromDataPtr(const at::DataPtr&);
-  static at::DataPtr makeDataPtr(
-      std::string filename,
-      int flags,
-      size_t size,
-      size_t* actual_size_out);
-  static at::DataPtr makeDataPtr(
-      WithFd,
-      const char* filename,
-      int fd,
-      int flags,
-      size_t size,
-      size_t* actual_size_out);
+  static at::DataPtr makeDataPtr(std::string filename, int flags, size_t size, size_t* actual_size_out);
+  static at::DataPtr makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out);
 
   // Closes the data.  Helps us avoid destructor shenanigans
   virtual void close();
@@ -70,7 +54,7 @@ class TORCH_API MapAllocator {
   // subclass
   virtual ~MapAllocator();
 
- protected:
+protected:
   bool closed_ = false;
   std::string filename_;
   int flags_ = 0;
@@ -82,7 +66,7 @@ class TORCH_API MapAllocator {
 #else
   int fd_ = -1;
 #endif
-  void* base_ptr_ = nullptr;
+  void *base_ptr_ = nullptr;
 };
 
 // Base-from-member idiom
@@ -90,30 +74,16 @@ struct TORCH_API RefcountedMapAllocatorArgCheck {
   RefcountedMapAllocatorArgCheck(int flags);
 };
 
-class TORCH_API RefcountedMapAllocator : private RefcountedMapAllocatorArgCheck,
-                                         public MapAllocator {
+class TORCH_API RefcountedMapAllocator
+    : private RefcountedMapAllocatorArgCheck,
+      public MapAllocator {
  public:
-  RefcountedMapAllocator(const char* filename, int flags, size_t size);
-  RefcountedMapAllocator(
-      WithFd,
-      const char* filename,
-      int fd,
-      int flags,
-      size_t size);
+  RefcountedMapAllocator(const char *filename, int flags, size_t size);
+  RefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
 
   static RefcountedMapAllocator* fromDataPtr(const at::DataPtr&);
-  static at::DataPtr makeDataPtr(
-      const char* filename,
-      int flags,
-      size_t size,
-      size_t* actual_size_out);
-  static at::DataPtr makeDataPtr(
-      WithFd,
-      const char* filename,
-      int fd,
-      int flags,
-      size_t size,
-      size_t* actual_size_out);
+  static at::DataPtr makeDataPtr(const char *filename, int flags, size_t size, size_t* actual_size_out);
+  static at::DataPtr makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out);
 
   void* data() const override;
 
@@ -121,13 +91,11 @@ class TORCH_API RefcountedMapAllocator : private RefcountedMapAllocatorArgCheck,
   int decref();
   void close() override;
 
-  virtual ~RefcountedMapAllocator() {
-    close();
-  }
+  virtual ~RefcountedMapAllocator() { close(); }
 
- protected:
+protected:
   void checkFlags();
   void initializeAlloc();
 };
 
-} // namespace at
+}  // namespace at
