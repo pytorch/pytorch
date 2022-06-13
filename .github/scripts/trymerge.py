@@ -847,12 +847,17 @@ def find_matching_merge_rule(pr: GitHubPR,
     raise RuntimeError(reject_reason)
 
 
-def get_pending_checks(pr: GitHubPR) -> List[Tuple[str, str]]:
+def pr_get_checks_with_lambda(pr: GitHubPR, status_check: Callable[[Optional[str]], bool]) -> List[Tuple[str, str]]:
     checks = pr.get_checkrun_conclusions()
-    return [(name, status[1]) for name, status in checks.items() if status[0] is None]
+    return [(name, status[1]) for name, status in checks.items() if status_check(status[0])]
 
-def pr_has_pending_checks(pr: GitHubPR) -> bool:
-    return len(get_pending_checks(pr)) > 0
+
+def pr_get_pending_checks(pr: GitHubPR) -> List[Tuple[str, str]]:
+    return pr_get_checks_with_lambda(pr, lambda x: x is None)
+
+
+def pr_get_failed_checks(pr: GitHubPR) -> List[Tuple[str, str]]:
+    return pr_get_checks_with_lambda(pr, lambda x: x == "FAILURE")
 
 
 def try_revert(repo: GitRepo, pr: GitHubPR, *,
@@ -904,29 +909,38 @@ def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
 
-def merge_on_green(pr_num: int, repo: GitRepo,
-                   dry_run: bool = False,
-                   mandatory_only: bool = False,
-                   timeout_minutes: int = 400) -> None:
+def merge(pr_num: int, repo: GitRepo,
+          dry_run: bool = False,
+          force: bool = False,
+          comment_id: Optional[int] = None,
+          mandatory_only: bool = False,
+          on_green: bool = False,
+          timeout_minutes: int = 400) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
+    if force:
+        pr = GitHubPR(org, project, pr_num)
+        pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
+
     start_time = time.time()
     last_exception = ''
     elapsed_time = 0.0
     while elapsed_time < timeout_minutes * 60:
         current_time = time.time()
         elapsed_time = current_time - start_time
-
-
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
         try:
             find_matching_merge_rule(pr, repo)
-            if not mandatory_only and pr_has_pending_checks(pr):
-                pending = get_pending_checks(pr)
+            pending = pr_get_pending_checks(pr)
+            failing = pr_get_failed_checks(pr)
+            if (not mandatory_only and on_green) and len(failing) > 0:
+                raise RuntimeError(f"{len(failing)} additional jobs have failed, first few of them are: " +
+                                   ' ,'.join(f"[{x[0]}]({x[1]})" for x in failing[:5]))
+            if (not mandatory_only and on_green) and len(pending) > 0:
                 raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
                                                   f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
-            return pr.merge_into(repo, dry_run=dry_run)
+            return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min")
@@ -972,16 +986,16 @@ def main() -> None:
         gh_post_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
 
-    if args.on_green or args.on_mandatory:
-        try:
-            merge_on_green(args.pr_num, repo, dry_run=args.dry_run, mandatory_only=args.on_mandatory)
-        except Exception as e:
-            handle_exception(e)
-    else:
-        try:
-            pr.merge_into(repo, dry_run=args.dry_run, force=args.force, comment_id=args.comment_id)
-        except Exception as e:
-            handle_exception(e)
+    try:
+        merge(args.pr_num, repo,
+              dry_run=args.dry_run,
+              force=args.force,
+              comment_id=args.comment_id,
+              on_green=args.on_green,
+              mandatory_only=args.on_mandatory)
+    except Exception as e:
+        handle_exception(e)
+
 
 
 if __name__ == "__main__":
