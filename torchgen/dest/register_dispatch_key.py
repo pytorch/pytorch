@@ -139,6 +139,10 @@ c10::optional<Tensor> maybe_create_proxy(const Tensor &out, IntArrayRef sizes, I
 
 
 def gen_resize_out_helper(backend_index: BackendIndex) -> List[str]:
+    if backend_index.dispatch_key == DispatchKey.CompositeExplicitAutogradNonFunctional:
+        # The function isn't used by this key (since only functional ops have a kernel for this key),
+        # so we need to not include it to avoid a defined-but-not-used error.
+        return []
     return [
         """
 void resize_out(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {
