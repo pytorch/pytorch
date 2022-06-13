@@ -879,7 +879,7 @@ Module freeze_module(
     bool preserveParameters) {
   checkModuleDoesNotReturnSelf(module);
 
-  auto moduleClone = module.clone(/*inplace*/false);
+  auto moduleClone = module.clone(/*inplace*/ false);
   AttributePropagator attrPropagator(
       moduleClone, preservedAttrs, freezeInterfaces, preserveParameters);
   attrPropagator.run();
