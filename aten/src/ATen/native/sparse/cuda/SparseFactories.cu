@@ -191,7 +191,7 @@ SparseTensor spdiags_sparse_cuda(
     auto nnz_prefix_sum_ti = getTensorInfo<int64_t, int64_t>(nnz_prefix_sum);
     int64_t block_size = std::min(
         at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
-    auto grid_size = ceil_div(nnz, block_size);
+    auto grid_size = ceil_div(n_diag, block_size);
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
         at::ScalarType::BFloat16,
         at::ScalarType::Half,
