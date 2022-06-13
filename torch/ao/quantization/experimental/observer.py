@@ -8,9 +8,8 @@ import itertools
 import math
 import matplotlib.pyplot as plt
 from torch.ao.quantization.observer import ObserverBase
-from typing import Tuple
 
-class NonUniformQuantizationObserverBase(ObserverBase):
+class APoTObserver(ObserverBase):
     max_val: float
     b: int
     k: int
@@ -21,18 +20,17 @@ class NonUniformQuantizationObserverBase(ObserverBase):
 
     def __init__(
         self,
-        max_val=None,
-        b=None,
-        k=None,
+        max_val,
+        b,
+        k,
             dtype=torch.quint8) -> None:
         super().__init__(dtype)
         self.max_val = max_val
-        self.level_indices = torch.tensor([])
         self.b = b
         self.k = k
-        self.n = 0
-        self.alpha = 0.0
-        self.gamma = 0.0
+
+    def calculate_qparams(self, signed):
+        return self._calculate_qparams(signed)
 
     r""" Calculates nonuniform quantization parameters given min and max value tensors.
     Parameters calculated according to APoT paper: https://arxiv.org/pdf/1909.13144.pdf
@@ -44,22 +42,6 @@ class NonUniformQuantizationObserverBase(ObserverBase):
         quantization_levels: non-uniform quantization levels
         level_indices: int representation of quantization_levels indices
     """
-    def _calculate_qparams(
-        self,
-            signed: bool) -> Tuple[float, torch.Tensor, torch.Tensor]:
-        raise NotImplementedError
-
-class APoTObserver(NonUniformQuantizationObserverBase):
-    def __init__(
-        self,
-        max_val,
-        b,
-            k) -> None:
-        super(APoTObserver, self).__init__(max_val, b, k)
-
-    def calculate_qparams(self, signed: bool) -> Tuple[float, torch.Tensor, torch.Tensor]:
-        return self._calculate_qparams(signed)
-
     def _calculate_qparams(self, signed):
         # compute alpha
         self.alpha = self.max_val
@@ -123,9 +105,9 @@ class APoTObserver(NonUniformQuantizationObserverBase):
         quantization_levels_gamma = [self.gamma * ele for ele in quantization_levels_list]
         quantization_levels = torch.tensor(quantization_levels_gamma)
         level_indices = torch.tensor([])
-        quantization_levels, level_indices = quantization_levels.sort()
+        quantization_levels, self.level_indices = quantization_levels.sort()
 
-        return (self.gamma, quantization_levels, level_indices)
+        return (self.gamma, quantization_levels, self.level_indices)
 
     def forward(self, x_orig):
         r"""Records the running maximum of ``x``."""
