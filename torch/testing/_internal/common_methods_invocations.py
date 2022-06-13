@@ -15020,8 +15020,6 @@ op_db: List[OpInfo] = [
            skips=(
                # Resized a non-empty tensor but did not warn about it
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            device_type='cuda'),
            ),
            sample_inputs_func=sample_inputs_mode,),
     MvlGammaInfo(variant_test_name='mvlgamma_p_1',
