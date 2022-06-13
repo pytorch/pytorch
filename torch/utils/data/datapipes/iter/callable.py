@@ -122,6 +122,8 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
             "{} instance doesn't have valid length".format(type(self).__name__)
         )
 
+    def fast_forward=
+
 
 @functional_datapipe("collate")
 class CollatorIterDataPipe(MapperIterDataPipe):

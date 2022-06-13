@@ -55,7 +55,7 @@ STAT_NAMES = {
 
 
 if __name__ == "__main__":
-    if os.getenv("IS_GHA", "0") == "1":
+    if os.getenv("GITHUB_ACTIONS"):
         data = {}
         if len(sys.argv) == 2:
             with open(sys.argv[1]) as f:
