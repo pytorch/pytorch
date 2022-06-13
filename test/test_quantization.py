@@ -36,6 +36,7 @@ from quantization.core.test_workflow_module import TestRecordHistogramObserver  
 from quantization.core.test_workflow_module import TestHistogramObserver  # noqa: F401
 from quantization.core.test_workflow_module import TestDistributed  # noqa: F401
 from quantization.core.test_workflow_module import TestFusedObsFakeQuantModule  # noqa: F401
+from quantization.core.test_utils import TestUtils  # noqa: F401
 
 
 # Eager Mode Workflow. Tests for the functionality of APIs and different features implemented
@@ -78,6 +79,12 @@ try:
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcherModels  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIs  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIsModels  # noqa: F401
+except ImportError:
+    pass
+
+# Test the model report module
+try:
+    from quantization.fx.test_model_report_fx import TestModelReportFxDetector  # noqa: F401
 except ImportError:
     pass
 
