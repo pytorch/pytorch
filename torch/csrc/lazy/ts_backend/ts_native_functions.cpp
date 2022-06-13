@@ -582,7 +582,7 @@ at::Tensor& LazyNativeFunctions::logsumexp_out(
   return out;
 }
 
-at::Tensor diagonal_backward(
+at::Tensor LazyNativeFunctions::diagonal_backward(
     const at::Tensor& grad_output,
     at::IntArrayRef input_sizes,
     int64_t offset,
@@ -592,7 +592,7 @@ at::Tensor diagonal_backward(
       diagonal_backward)>::call(grad_output, input_sizes, offset, dim1, dim2);
 }
 
-at::Tensor slice_backward(
+at::Tensor LazyNativeFunctions::slice_backward(
     const at::Tensor& grad_output,
     at::IntArrayRef input_sizes,
     int64_t dim,
