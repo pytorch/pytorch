@@ -274,7 +274,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
-      script: .jenkins/pytorch/build-deploy.sh
+      env-variables: USE_DEPLOY=1
 
   deploy-linux-xenial-cuda11_3-py3_7-gcc7-test:
     name: linux-xenial-cuda11.3-py3.7-gcc7
