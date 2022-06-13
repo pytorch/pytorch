@@ -2,10 +2,13 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/native/nested/NestedTensorMath.h>
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
+#include <c10/core/TensorImpl.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/util/variant.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -14,9 +17,12 @@
 #endif
 
 #include <cstdint>
+#include <utility>
 
 namespace torch {
 namespace autograd {
+
+using MetadataShape = c10::variant<at::DimVector, at::Tensor>;
 
 /**
  * Records TensorOptions, shape of the tensor, whether or not the Python
@@ -31,10 +37,10 @@ struct InputMetadata {
 
   InputMetadata(
       const at::TensorOptions options,
-      at::IntArrayRef shape,
+      MetadataShape input_shape,
       bool is_tensor_subclass)
       : options_{options},
-        shape_{shape},
+        shape_{input_shape},
         is_tensor_subclass_{is_tensor_subclass} {
     auto device_ = options.device();
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
@@ -43,15 +49,11 @@ struct InputMetadata {
   InputMetadata(const at::Tensor& t)
       : InputMetadata(
             t.options(),
-            t.sizes(),
+            compute_variant_shape(t),
             t.unsafeGetTensorImpl()->is_python_dispatch()) {}
 
   const at::TensorOptions options() const {
     return options_;
-  }
-
-  at::IntArrayRef shape() const {
-    return shape_;
   }
 
   caffe2::TypeMeta dtype() const {
@@ -75,37 +77,78 @@ struct InputMetadata {
   }
 
   at::Tensor zeros_like() const {
-    return at::zeros(shape_, options_);
+    TORCH_CHECK(
+        !is_nested_tensor(),
+        "Zeros is not currently supported for nested tensors.")
+    return at::zeros(shape_as_dim_vector(), options_);
   }
 
   bool is_same_shape(const at::Tensor& grad) const {
-    TORCH_CHECK(!grad.is_nested(), "Nested grads are not currently supported.")
-    return grad.sizes().equals(shape());
+    TORCH_CHECK(
+        grad.is_nested() == is_nested_tensor(),
+        "Both grad and InputMetadata need to be either nested or non nested tensors.")
+    if (grad.is_nested()) {
+      return at::native::get_nested_size_tensor(grad).is_same_size(
+          shape_as_tensor());
+    }
+    return grad.sizes().equals(shape_as_dim_vector());
   }
   bool is_expandable_to_shape(const at::Tensor& grad) const {
-    // TODO: Currently NestedTensors are not expandable.
-    return grad.is_nested() ? false
-                            : at::is_expandable_to(shape(), grad.sizes());
+    TORCH_CHECK(
+        grad.is_nested() == is_nested_tensor(),
+        "Both grad and InputMetadata need to be either nested or non nested tensors.")
+    return grad.is_nested()
+        ? false
+        : at::is_expandable_to(shape_as_dim_vector(), grad.sizes());
+  }
+
+  at::Tensor expand_grad(at::Tensor& grad) const {
+    TORCH_CHECK(!grad.is_nested() && !is_nested_tensor())
+    return at::sum_to(std::move(grad), shape_as_dim_vector());
   }
 
   std::stringstream incompatible_shape_error_message(
       const size_t index,
       const at::Tensor& grad) const {
     std::stringstream ss;
-    TORCH_CHECK(!grad.is_nested(), "Nested grads are not currently supported.")
     ss << "invalid gradient at index " << index << " - got ";
-    ss << grad.sizes();
+    if (grad.is_nested()) {
+      ss << at::native::get_nested_size_tensor(grad);
+    } else {
+      ss << grad.sizes();
+    }
     ss << " but expected shape compatible with ";
-    ss << shape();
+    if (is_nested_tensor()) {
+      ss << shape_as_tensor();
+    } else {
+      ss << shape_as_dim_vector();
+    }
     return ss;
   }
 
  private:
+  bool is_nested_tensor() const {
+    return (c10::holds_alternative<at::Tensor>(shape_));
+  }
+  MetadataShape compute_variant_shape(const at::Tensor& input) {
+    if (input.is_nested()) {
+      auto nested_size = at::native::get_nested_size_tensor(input);
+      return MetadataShape{c10::in_place_type<at::Tensor>, nested_size};
+    }
+    return MetadataShape{c10::in_place_type<at::DimVector>, input.sizes()};
+  }
+
+  at::DimVector shape_as_dim_vector() const {
+    return c10::get<at::DimVector>(shape_);
+  }
+  at::Tensor shape_as_tensor() const {
+    return c10::get<at::Tensor>(shape_);
+  }
+
   const at::TensorOptions options_;
-  at::DimVector shape_;
+  MetadataShape shape_;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device());
   bool is_tensor_subclass_ = false;
 };
-
 } // namespace autograd
 } // namespace torch
