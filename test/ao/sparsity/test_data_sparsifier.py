@@ -77,7 +77,7 @@ class TestBaseDataSparsiferType(TestCase):
         step_count = 3
 
         for _ in range(0, step_count):
-            self.sparsifier.step()
+            sparsifier.step()
         for some_data in all_data:
             name, data, _ = self.get_name_data_config(some_data)
             data = sparsifier._extract_weight(data)
@@ -88,7 +88,7 @@ class TestBaseDataSparsiferType(TestCase):
             assert torch.all(original_data == data)
             assert torch.all(mask[0] == 0)
             assert 'step_count' in sparsifier.state[name]
-            assert sparsifier[name]['step_count'] == 3
+            assert sparsifier.state[name]['step_count'] == 3
 
     def test_squash_mask(self):
         sparsifier = self.get_sparsifier()
@@ -119,6 +119,13 @@ class TestBaseDataSparsiferType(TestCase):
             data2 = sparsifier._extract_weight(data2)
             sparsifier.add_data(name=name1, data=data2)
             assert torch.all(data2 == sparsifier.get_data(name=name1))
+
+    def run_tests(self):
+        self.test_constructor()
+        self.test_squash_mask()
+        self.test_add_data()
+        self.test_step()
+        self.test_state_dict()
 
     def test_state_dict(self):
         sparsifier1 = self.get_sparsifier()
@@ -184,10 +191,7 @@ class TestBaseDataSparsifier(TestCase):
         ]
         tensor_test = TestBaseDataSparsiferType(data_list=data_list, defaults=defaults,
                                                 data_with_config=data_with_config)
-        tensor_test.test_constructor()
-        tensor_test.test_squash_mask()
-        tensor_test.test_add_data()
-        tensor_test.test_state_dict()
+        tensor_test.run_tests()
 
     def test_nn_parameters(self):
         param1, param2, param3 = nn.Parameter(torch.randn(3, 3)), nn.Parameter(torch.randn(4, 4)), nn.Parameter(torch.randn(5, 5))
@@ -205,10 +209,7 @@ class TestBaseDataSparsifier(TestCase):
         ]
         param_test = TestBaseDataSparsiferType(data_list=data_list, defaults=defaults,
                                                data_with_config=data_with_config)
-        param_test.test_constructor()
-        param_test.test_squash_mask()
-        param_test.test_add_data()
-        param_test.test_state_dict()
+        param_test.run_tests()
 
     def test_nn_embeddings(self):
         emb1, emb2, = nn.Embedding(10, 3), nn.Embedding(20, 3)
@@ -228,7 +229,4 @@ class TestBaseDataSparsifier(TestCase):
         ]
         emb_test = TestBaseDataSparsiferType(data_list=data_list, defaults=defaults,
                                              data_with_config=data_with_config)
-        emb_test.test_constructor()
-        emb_test.test_squash_mask()
-        emb_test.test_add_data()
-        emb_test.test_state_dict()
+        emb_test.run_tests()
