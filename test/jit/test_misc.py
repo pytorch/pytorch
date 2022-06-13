@@ -6,7 +6,6 @@ from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.testing import FileCheck
 from torch import jit
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
-import unittest
 import os
 import sys
 import torch
@@ -47,24 +46,6 @@ class TestMisc(JitTestCase):
 
         self.assertEqual(out, out_script)
         self.assertEqual(captured, captured_script)
-
-    @unittest.skipIf(sys.version_info[:2] < (3, 7), "`dataclasses` module not present on < 3.7")
-    def test_dataclass_error(self):
-        from dataclasses import dataclass
-
-        @dataclass
-        class NormalizationInfo(object):
-            mean: float = 0.0
-
-            def compute(self, total_rows):
-                return self.mean
-
-        def fn():
-            return NormalizationInfo(1, 2, 3, 4, 5)
-
-        with self.assertRaisesRegex(OSError, "could not get source code"):
-            torch.jit.script(fn)
-
 
     def test_kwarg_support(self):
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "variable number of arguments"):

@@ -32,8 +32,8 @@ TORCH_META_FUNC(topk)
   if (topKSize.size() > 0) {
     topKSize[dim] = k;
   }
-  set_output(0, topKSize, self.options());
-  set_output(1, topKSize, self.options().dtype(at::kLong));
+  set_output_raw_strided(0, topKSize, {}, self.options());
+  set_output_raw_strided(1, topKSize, {}, self.options().dtype(at::kLong));
 }
 
 TORCH_META_FUNC2(sort, stable)
@@ -50,8 +50,8 @@ TORCH_META_FUNC2(sort, stable)
       ? self.strides().vec()
       : at::infer_dense_strides(self.sizes(), self.strides());
 
-  set_output(0, self.sizes(), strides, self.options(), {});
-  set_output(1, self.sizes(), strides, self.options().dtype(kLong), {});
+  set_output_raw_strided(0, self.sizes(), strides, self.options(), {});
+  set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(kLong), {});
 }
 
 } // namespace meta
@@ -926,6 +926,10 @@ Tensor msort(const Tensor& self) {
 
 Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
   return std::get<1>(at::sort(self, dim, descending));
+}
+
+Tensor argsort_stable(const Tensor & self, bool stable, int64_t dim, bool descending) {
+  return std::get<1>(at::sort(self, stable, dim, descending));
 }
 
 
