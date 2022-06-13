@@ -66,12 +66,12 @@ TORCH_API bool IsSpecialScalar(const at::Scalar& value);
 
 // Note: returns a reference instead of a fresh tensor to avoid refcount bumps.
 inline const at::Tensor& maybe_unwrap_functional(const at::Tensor& tensor) {
-    if (at::functionalization::impl::isFunctionalTensor(tensor)) {
-        return at::functionalization::impl::unsafeGetFunctionalWrapper(tensor)->value();
-    } else {
-        return tensor;
-    }
-
+  if (at::functionalization::impl::isFunctionalTensor(tensor)) {
+    return at::functionalization::impl::unsafeGetFunctionalWrapper(tensor)
+        ->value();
+  } else {
+    return tensor;
+  }
 }
 
 } // namespace lazy

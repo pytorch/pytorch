@@ -162,6 +162,7 @@ ATEN_EXPORTED_HEADERS = {
     "RedispatchFunctions.h": ":gen_aten[RedispatchFunctions.h]",
     "core/TensorBody.h": ":gen_aten[core/TensorBody.h]",
     "core/aten_interned_strings.h": ":gen_aten[core/aten_interned_strings.h]",
+    "core/enum_tag.h": ":gen_aten[core/enum_tag.h]",
 }
 
 cxx_library(
