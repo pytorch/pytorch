@@ -143,7 +143,6 @@ TEST(IrTest, DimensionNodeTest) {
 }
 
 TEST(IrTest, DimensionIsDynamicTest) {
-
   const size_t DIM0 = 5;
   const size_t DIM1 = 8;
   const auto shape = Shape(c10::kFloat, {DIM0, DIM1});
@@ -153,19 +152,24 @@ TEST(IrTest, DimensionIsDynamicTest) {
       /*num_outputs*/ 1,
       /*hash_seed*/ kHashSeed);
 
-  auto size0 = std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 0));
-  auto size1 = std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 1));
+  auto size0 =
+      std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 0));
+  auto size1 =
+      std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 1));
 
   ASSERT_EQ(true, size0->isDynamic());
   ASSERT_EQ(false, size1->isDynamic());
 
-  auto add_dim = std::dynamic_pointer_cast<SizeAdd>(MakeNode<SizeAdd>(Value{size0}, Value{size1}));
+  auto add_dim = std::dynamic_pointer_cast<SizeAdd>(
+      MakeNode<SizeAdd>(Value{size0}, Value{size1}));
   ASSERT_EQ(true, add_dim->isDynamic());
 
-  add_dim = std::dynamic_pointer_cast<SizeAdd>(MakeNode<SizeAdd>(Value{size1}, Value{size1}));
+  add_dim = std::dynamic_pointer_cast<SizeAdd>(
+      MakeNode<SizeAdd>(Value{size1}, Value{size1}));
   ASSERT_EQ(false, add_dim->isDynamic());
 
-  auto mul_dim = std::dynamic_pointer_cast<SizeMul>(MakeNode<SizeMul>(Value{size0}, Value{size0}));
+  auto mul_dim = std::dynamic_pointer_cast<SizeMul>(
+      MakeNode<SizeMul>(Value{size0}, Value{size0}));
   ASSERT_EQ(true, mul_dim->isDynamic());
 }
 

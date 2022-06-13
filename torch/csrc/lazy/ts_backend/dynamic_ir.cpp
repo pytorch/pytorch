@@ -10,8 +10,7 @@ DimensionNode::DimensionNode(OpKind op, OpList operands, hash_t hash_seed)
           /*num_outputs=*/1,
           /* hash_seed */ HashCombine(op.hash(), hash_seed)) {}
 
-
-const DimensionNode* DimensionNode::getOpDimNode(size_t index) const{
+const DimensionNode* DimensionNode::getOpDimNode(size_t index) const {
   return dynamic_cast<const DimensionNode*>(operand(index).node);
 }
 
@@ -44,12 +43,13 @@ SizeNode::SizeNode(Value input, size_t dim)
 int64_t SizeNode::getStaticValue() const {
   return dynamic_cast<const TsNode*>(operand(0).node)->shape(0).size(dim_);
 }
-bool SizeNode:: isDynamic() const {
-    auto symbolic_vec = dynamic_cast<const TsNode*>(operand(0).node)->shape(0).is_symbolic();
-    if(!symbolic_vec.has_value()){
-        return true;
-    }
-    return symbolic_vec->at(dim_);
+bool SizeNode::isDynamic() const {
+  auto symbolic_vec =
+      dynamic_cast<const TsNode*>(operand(0).node)->shape(0).is_symbolic();
+  if (!symbolic_vec.has_value()) {
+    return true;
+  }
+  return symbolic_vec->at(dim_);
 }
 
 std::string SizeNode::ToString() const {
@@ -60,10 +60,10 @@ SizeAdd::SizeAdd(Value a, Value b)
     : DimensionNode(OpKind{c10::Symbol::fromQualString("aten::add")}, {a, b}){};
 
 int64_t SizeAdd::getStaticValue() const {
-    return getOpDimNode(0)->getStaticValue() + getOpDimNode(1)->getStaticValue();
+  return getOpDimNode(0)->getStaticValue() + getOpDimNode(1)->getStaticValue();
 }
 
-bool SizeAdd:: isDynamic() const {
+bool SizeAdd::isDynamic() const {
   return getOpDimNode(0)->isDynamic() || getOpDimNode(1)->isDynamic();
 }
 
@@ -75,10 +75,10 @@ SizeMul::SizeMul(Value a, Value b)
     : DimensionNode(OpKind{c10::Symbol::fromQualString("aten::mul")}, {a, b}){};
 
 int64_t SizeMul::getStaticValue() const {
-    return getOpDimNode(0)->getStaticValue() * getOpDimNode(1)->getStaticValue();
+  return getOpDimNode(0)->getStaticValue() * getOpDimNode(1)->getStaticValue();
 }
 
-bool SizeMul:: isDynamic() const {
+bool SizeMul::isDynamic() const {
   return getOpDimNode(0)->isDynamic() || getOpDimNode(1)->isDynamic();
 }
 
@@ -90,11 +90,13 @@ SizeDiv::SizeDiv(Value a, Value b)
     : DimensionNode(OpKind{c10::Symbol::fromQualString("aten::div")}, {a, b}){};
 
 int64_t SizeDiv::getStaticValue() const {
-    TORCH_CHECK(getOpDimNode(1)->getStaticValue() != 0, "Can't divide a dimension by zero");
-    return getOpDimNode(0)->getStaticValue() / getOpDimNode(1)->getStaticValue();
+  TORCH_CHECK(
+      getOpDimNode(1)->getStaticValue() != 0,
+      "Can't divide a dimension by zero");
+  return getOpDimNode(0)->getStaticValue() / getOpDimNode(1)->getStaticValue();
 }
 
-bool SizeDiv:: isDynamic() const {
+bool SizeDiv::isDynamic() const {
   return getOpDimNode(0)->isDynamic() || getOpDimNode(1)->isDynamic();
 }
 

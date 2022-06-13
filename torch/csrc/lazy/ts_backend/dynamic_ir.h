@@ -50,7 +50,7 @@ class TORCH_API DimensionNode : public lazy::TsNode {
   std::string ToString() const override;
   virtual int64_t getStaticValue() const = 0;
 
-  protected:
+ protected:
   // Only valid for ops which have DimensionNode operands.
   const DimensionNode* getOpDimNode(size_t index) const;
 };
