@@ -11,10 +11,6 @@ void convertSubgraphToSubBlock(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* node = *it++;
-    for (auto block : node->blocks()) {
-      convertSubgraphToSubBlock(block);
-    }
-
     if (node->kind() == prim::PythonOp) {
       // Construct subblock
       auto subblock = node->addBlock();
@@ -46,9 +42,9 @@ void convertSubgraphToSubBlock(Block* block) {
       // Remove subgraph attribute from the pythonOp node and recurse through
       // sub-blocks
       node->removeAttribute(attr::Subgraph);
-      for (auto block : node->blocks()) {
-        convertSubgraphToSubBlock(block);
-      }
+    }
+    for (auto block : node->blocks()) {
+      convertSubgraphToSubBlock(block);
     }
   }
 }

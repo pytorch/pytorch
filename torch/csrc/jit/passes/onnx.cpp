@@ -465,8 +465,16 @@ void NodeToONNX(
         try {
           inlineAutograd(op);
         } catch (const std::exception& ex) {
-          // TODO : Add more description in warning
-          TORCH_WARN("Unable to inline PythonOp: ", op->name());
+          TORCH_WARN(
+              "Unable to inline PythonOp: ",
+              op->name(),
+              " due to the following exception\n",
+              ex.what(),
+              "prim::PythonOp will be exported as is and without being inlined\n",
+              "Try exporting with the following alternatives: \n",
+              "1) Set operator_export_type to ONNX_FALLTHROUGH mode\n",
+              "2) Register a symbolic method for the prim::PythonOp ",
+              op->name());
           cloneNode(op);
         }
       } else {
