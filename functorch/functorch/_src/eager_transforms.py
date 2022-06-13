@@ -1325,7 +1325,7 @@ def _register_python_decomposition_vmap(decomp):
         raise RuntimeError(f"could not find decomposition for {decomp}")
 
 
-_register_jit_decomposition(torch.ops.aten.trace.default)
+_register_jit_decomposition(torch.ops.aten.trace.default, use_python=True)
 _register_jit_decomposition(torch.ops.aten.nll_loss_backward.default)
 _register_jit_decomposition(torch.ops.aten.nll_loss2d_backward.default)
 _register_jit_decomposition(torch.ops.aten._log_softmax_backward_data.default)
