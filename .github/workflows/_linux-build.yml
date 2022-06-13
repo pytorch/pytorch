@@ -4,8 +4,9 @@ on:
   workflow_call:
     inputs:
       build-environment:
-        required: true
+        required: false
         type: string
+        default: ""
         description: Top-level label for what's being built/tested.
       docker-image-name:
         required: true
