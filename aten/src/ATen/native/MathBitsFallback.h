@@ -98,6 +98,9 @@ struct MathOpFallback {
           continue;
         }
         auto tensor = std::move(ivalue).toTensor();
+        if (tensor.is_meta()) {
+          continue;
+        }
         auto resolved_tensor = at::clone(tensor);
         if (mut_arg) {
           TORCH_CHECK(mutable_inputs_with_their_clones.empty(), op_name, " fallback does not support operators with more than one mutable tensors with ",
