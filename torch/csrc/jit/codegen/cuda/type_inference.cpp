@@ -253,17 +253,14 @@ class NaiveTypePropagator {
       }
       case aten::_batch_norm_impl_index_backward:
       case aten::native_batch_norm_backward: {
-        int weight_index = -1;
         int mask_index = -1;
         if (node->kind() ==
             c10::Symbol::fromQualString(
                 "aten::_batch_norm_impl_index_backward")) {
-          weight_index = 3;
           mask_index = 10;
         } else if (
             node->kind() ==
             c10::Symbol::fromQualString("aten::native_batch_norm_backward")) {
-          weight_index = 2;
           mask_index = 9;
         } else {
           TORCH_INTERNAL_ASSERT(
