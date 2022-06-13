@@ -5,6 +5,7 @@ import torch
 import torch.ao.quantization.quantize_fx
 from torch.ao.quantization import QConfig, QConfigMapping
 from torch.ao.quantization.fx._model_report._detector import _detect_per_channel
+import torch.nn.functional as F
 from torch.ao.quantization.fx._model_report.model_report_observer import (
     ModelReportObserver,
 )
@@ -618,17 +619,17 @@ class TestModelReportObserver(QuantizationTestCase):
         self.run_model_and_common_checks(model, ex_input, 10, 15)
 
         # make sure final values are all 0
-        self.assertTrue(getattr(model, "obs2").epoch_activation_min >= 0)
+        self.assertTrue(getattr(model, "obs2").get_batch_to_epoch_ratio() >= 0)
 
     """Case includes:
-    non-zero tensor
-    dim size = 2
-    run for 1 epoch
-    run for 1 batch
-    tests input data observer
+        non-zero tensor
+        dim size = 2
+        run for multiple epoch
+        run for multiple batch
+        tests input data observer
     """
 
-    def test_obs_in_nested_module(self):
+    def test_random_epochs_and_batches(self):
 
         # set up a basic model
         class TinyNestModule(torch.nn.Module):
@@ -661,50 +662,67 @@ class TestModelReportObserver(QuantizationTestCase):
                 x = self.relu(x)
                 return x
 
-        # initialize the model
-        model = LargerIncludeNestModel()
+        class ThreeOps(torch.nn.Module):
+            def __init__(self, batch_norm_dim):
+                super(ThreeOps, self).__init__()
+                self.obs1 = ModelReportObserver()
+                self.linear = torch.nn.Linear(7, 3, 2)
+                self.obs2 = ModelReportObserver()
 
-        # generate the desired input
-        ex_input = torch.ones((1, 1, 5))
+                if batch_norm_dim == 2:
+                    self.bn = torch.nn.BatchNorm2d(2)
+                elif batch_norm_dim == 3:
+                    self.bn = torch.nn.BatchNorm3d(4)
+                else:
+                    raise ValueError("Dim should only be 2 or 3")
 
-        # run it through the model and do general tests
-        self.run_model_and_common_checks(model, ex_input, 1, 1)
+                self.relu = torch.nn.ReLU()
 
-        # make sure final values are all 0
-        self.assertTrue(
-            getattr(getattr(model, "nested"), "obs2").epoch_activation_min >= 0
-        )
+            def forward(self, x):
+                x = self.obs1(x)
+                x = self.linear(x)
+                x = self.obs2(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                return x
 
-        # make sure final values are all 0 except for range
-        self.assertEqual(
-            getattr(getattr(model, "nested"), "obs1").epoch_activation_min, 1
-        )
-        self.assertEqual(
-            getattr(getattr(model, "nested"), "obs1").epoch_activation_max, 1
-        )
-        self.assertEqual(
-            getattr(getattr(model, "nested"), "obs1").average_batch_activation_range, 0
-        )
+        class HighDimensionNet(torch.nn.Module):
+            def __init__(self):
+                super(HighDimensionNet, self).__init__()
+                self.obs1 = ModelReportObserver()
+                self.fc1 = torch.nn.Linear(3, 7)
+                self.block1 = ThreeOps(3)
+                self.fc2 = torch.nn.Linear(3, 7)
+                self.block2 = ThreeOps(3)
+                self.fc3 = torch.nn.Linear(3, 7)
 
-    """Case includes:
-        non-zero tensor
-        dim size = 2
-        run for multiple epoch
-        run for multiple batch
-        tests input data observer
-    """
+            def forward(self, x):
+                x = self.obs1(x)
+                x = self.fc1(x)
+                x = self.block1(x)
+                x = self.fc2(x)
+                y = self.block2(x)
+                y = self.fc3(y)
+                z = x + y
+                z = F.relu(z)
+                return z
 
-    def test_random_epochs_and_batches(self):
         # the purpose of this test is to give the observers a variety of data examples
         # initialize the model
-        model = self.NestedModifiedSingleLayerLinear()
+        models = [self.NestedModifiedSingleLayerLinear(), LargerIncludeNestModel(), ThreeOps(2), HighDimensionNet()]
 
         # get random number of epochs and batches
         num_epochs = torch.randint(1, 10, (1,))  # cap epochs at 10
         num_batches = torch.randint(1, 15, (1,))  # cap batches at 15
 
-        # generate the desired input
-        ex_input = torch.randn((num_batches, 1, 5))
+        input_shapes = [(1, 5), (1, 5), (2, 3, 7), (4, 1, 8, 3)]
+
+        # generate the desired inputs
+        inputs = []
+        for shape in input_shapes:
+            ex_input = torch.randn((num_batches, *shape))
+            inputs.append(ex_input)
 
         # run it through the model and do general tests
-        self.run_model_and_common_checks(model, ex_input, num_epochs, num_batches)
+        for index, model in enumerate(models):
+            self.run_model_and_common_checks(model, inputs[index], num_epochs, num_batches)
