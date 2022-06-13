@@ -1773,7 +1773,7 @@ def _normalize(a, norm_dims, eps):
     a_acc = prims.convert_element_type(a, computation_dtype)
     biased_var, mean = var_mean(a_acc, dim=norm_dims, unbiased=False, keepdim=True)
     rstd = rsqrt(biased_var + eps)
-    out = ((a - mean) * rstd)
+    out = (a - mean) * rstd
     return out, mean, rstd
 
 
@@ -1813,7 +1813,7 @@ def native_layer_norm(
     )
     utils.check(
         input.ndim >= normalized_ndim
-        and input.shape[(input.ndim - normalized_ndim):] == tuple(normalized_shape),
+        and input.shape[(input.ndim - normalized_ndim) :] == tuple(normalized_shape),
         lambda: "Given normalized_shape="
         + str(normalized_shape)
         + ", expected input with shape "
@@ -1831,7 +1831,7 @@ def native_layer_norm(
     elif weight is not None and bias is not None:
         out = out * weight + bias
     out = prims.convert_element_type(out, input.dtype)
-    if input.device.type == 'cpu':
+    if input.device.type == "cpu":
         mean = prims.convert_element_type(mean, input.dtype)
         rstd = prims.convert_element_type(rstd, input.dtype)
     return (out, mean, rstd)
