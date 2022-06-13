@@ -22,10 +22,6 @@ on:
         required: false
         description: Permissions for pushing to the docs site.
 
-env:
-  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
-
 jobs:
   build-docs:
     # Don't run on forked repos.
@@ -87,7 +83,6 @@ jobs:
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
-            -e IN_CI \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SHA1="$GITHUB_SHA" \
             -e DOCS_VERSION="${target}" \

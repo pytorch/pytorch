@@ -36,6 +36,7 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
 
   // See test_metadata_check_when_primal_has_conj_bit in test_autograd.py
   m.impl("_has_same_storage_numel", torch::CppFunction::makeFallthrough());
+  m.impl("_new_zeros_with_same_feature_meta", torch::CppFunction::makeFallthrough());
 
   // linear algebra functions
   m.impl("dot", torch::CppFunction::makeFallthrough());
