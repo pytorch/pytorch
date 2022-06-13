@@ -303,8 +303,8 @@ def fuse_fx(
         * `fuse_custom_config`: custom configurations for fuse_fx.
             See :class:`~torch.ao.quantization.fx.custom_config.FuseCustomConfig` for more detail::
 
-            from torch.ao.quantization.fx.custom_config import FuseCustomConfig
-            fuse_custom_config = FuseCustomConfig().set_preserved_attributes(["preserved_attr"])
+                from torch.ao.quantization.fx.custom_config import FuseCustomConfig
+                fuse_custom_config = FuseCustomConfig().set_preserved_attributes(["preserved_attr"])
 
     Example::
 
@@ -365,19 +365,19 @@ def prepare_fx(
       * `prepare_custom_config`: customization configuration for quantization tool.
           See :class:`~torch.ao.quantization.fx.custom_config.PrepareCustomConfig` for more detail::
 
-          from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
+              from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
 
-          prepare_custom_config = PrepareCustomConfig() \
-              .set_standalone_module_name("module1", qconfig_mapping, example_inputs, \
-                  child_prepare_custom_config, backend_config_dict) \
-              .set_standalone_module_class(MyStandaloneModule, qconfig_mapping, example_inputs, \
-                  child_prepare_custom_config, backend_config_dict) \
-              .set_float_to_observed_mapping(FloatCustomModule, ObservedCustomModule) \
-              .set_non_traceable_module_names(["module2", "module3"]) \
-              .set_non_traceable_module_classes([NonTraceableModule1, NonTraceableModule2]) \
-              .set_input_quantized_indexes([0]) \
-              .set_output_quantized_indexes([0]) \
-              .set_preserved_attributes(["attr1", "attr2"])
+              prepare_custom_config = PrepareCustomConfig() \
+                  .set_standalone_module_name("module1", qconfig_mapping, example_inputs, \
+                      child_prepare_custom_config, backend_config_dict) \
+                  .set_standalone_module_class(MyStandaloneModule, qconfig_mapping, example_inputs, \
+                      child_prepare_custom_config, backend_config_dict) \
+                  .set_float_to_observed_mapping(FloatCustomModule, ObservedCustomModule) \
+                  .set_non_traceable_module_names(["module2", "module3"]) \
+                  .set_non_traceable_module_classes([NonTraceableModule1, NonTraceableModule2]) \
+                  .set_input_quantized_indexes([0]) \
+                  .set_output_quantized_indexes([0]) \
+                  .set_preserved_attributes(["attr1", "attr2"])
 
       * `equalization_config`: config for specifying how to perform equalization on the model
 
@@ -529,11 +529,11 @@ def convert_fx(
         * `convert_custom_config`: custom configurations for convert function.
             See :class:`~torch.ao.quantization.fx.custom_config.ConvertCustomConfig` for more detail::
 
-            from torch.ao.quantization.fx.custom_config import ConvertCustomConfig
+                from torch.ao.quantization.fx.custom_config import ConvertCustomConfig
 
-            convert_custom_config = ConvertCustomConfig() \
-                .set_observed_to_quantized_mapping(ObservedCustomModule, QuantizedCustomModule) \
-                .set_preserved_attributes(["attr1", "attr2"])
+                convert_custom_config = ConvertCustomConfig() \
+                    .set_observed_to_quantized_mapping(ObservedCustomModule, QuantizedCustomModule) \
+                    .set_preserved_attributes(["attr1", "attr2"])
 
         * `_remove_qconfig`: Option to remove the qconfig attributes in the model after convert.
 

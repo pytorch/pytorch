@@ -4905,6 +4905,10 @@
   dispatch:
     CPU, CUDA: NestedTensor_nested_tensor_from_mask
 
+- func: _nested_tensor_from_mask_left_aligned(Tensor t, Tensor mask) -> bool
+  dispatch:
+    CPU, CUDA: NestedTensor_nested_tensor_from_mask_left_aligned
+
 - func: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
   device_check: NoCheck # cpu_nested_shape_example will always be on CPU
   dispatch:
@@ -11859,16 +11863,19 @@
   python_module: linalg
   variants: function
 
-- func: linalg_solve(Tensor input, Tensor other) -> Tensor
-  python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: linalg_solve
+- func: _linalg_solve(Tensor A, Tensor B, *, bool left=True) -> (Tensor result, Tensor LU, Tensor pivots)
+  structured_delegate: _linalg_solve.result
 
-- func: linalg_solve.out(Tensor input, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: linalg
+- func: _linalg_solve.result(Tensor A, Tensor B, *, bool left=True, Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots) -> (Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots)
+  structured: True
   dispatch:
-    CPU, CUDA: linalg_solve_out
+    CPU, CUDA: _linalg_solve_out
+
+- func: linalg_solve(Tensor A, Tensor B, *, bool left=True) -> Tensor
+  python_module: linalg
+
+- func: linalg_solve.out(Tensor A, Tensor B, *, bool left=True, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
 
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
   python_module: linalg
@@ -11984,12 +11991,12 @@
   dispatch:
     CompositeExplicitAutograd: _test_warn_in_autograd
 
-- func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
+- func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, Tensor? offsets=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: segment_reduce_kernel
 
-- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None, int axis=0, Scalar? initial=None) -> Tensor
+- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None, Tensor? offsets=None, int axis=0, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: _segment_reduce_backward_kernel
