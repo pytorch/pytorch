@@ -506,10 +506,10 @@ The export should be successful as long as these individual operators are suppor
 There is no static symbolic method present for this model, yet it is exported as follows::
 
     graph(%input : Float(1, strides=[1], requires_grad=0, device=cpu)):
-      %1 : float = onnx::Exp[](%input)
-      %2 : float = onnx::Log[](%1)
-      %3 : float = onnx::Log[](%2)
-      return (%3)
+        %1 : float = onnx::Exp[](%input)
+        %2 : float = onnx::Log[](%1)
+        %3 : float = onnx::Log[](%2)
+        return (%3)
 
 In order to avoid inlining of autograd.Functions, model should be exported with
 operator_export_type set to ONNX_FALLTHROUGH or ONNX_ATEN_FALLBACK mode
