@@ -1,7 +1,5 @@
 #!/bin/bash
 set -ex
-# shellcheck disable=SC2034
-COMPACT_JOB_NAME=pytorch-win-ws2019-cuda10.1-py3-test
 
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
@@ -48,6 +46,13 @@ fi
 if [[ "$TEST_CONFIG" = "force_on_cpu" ]]; then
   # run the full test suite for force_on_cpu test
   export USE_CUDA=0
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  # Used so that only cuda/rocm specific versions of tests are generated
+  # mainly used so that we're not spending extra cycles testing cpu
+  # devices on expensive gpu machines
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
 run_tests() {

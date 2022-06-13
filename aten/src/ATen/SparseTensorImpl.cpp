@@ -51,21 +51,17 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
 
   is_non_overlapping_and_dense_ = false;
   set_storage_access_should_throw();
-  set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
+  set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
 }
 
+  // Destructor doesn't call release_resources because it's
+  // unnecessary; don't forget to change that if needed!
 void SparseTensorImpl::release_resources() {
   TensorImpl::release_resources();
   values_.reset();
   indices_.reset();
 }
 
-IntArrayRef SparseTensorImpl::strides() const {
-  AT_ERROR("sparse tensors do not have strides");
-}
-int64_t SparseTensorImpl::stride(int64_t d) const {
-  AT_ERROR("sparse tensors do not have strides");
-}
 void SparseTensorImpl::set_size(int64_t dim, int64_t new_size) {
   AT_ERROR("sparse tensors do not have set_size");
 }
