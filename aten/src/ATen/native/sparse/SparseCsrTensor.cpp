@@ -413,7 +413,7 @@ DimVector _estimate_sparse_compressed_tensor_size(
     size.push_back((j < values.dim() ? values.size(j) : 1));
   }
   TORCH_CHECK(
-              size.size() == batch_ndim + base_ndim + dense_ndim,
+              static_cast<int>(size.size()) == batch_ndim + base_ndim + dense_ndim,
               "tensor dimensionality must be sum of batch, base, and dense dimensionalites (=",
               batch_ndim, " + ", base_ndim, " + ", dense_ndim, ") but got ", size.size());
   return size;
