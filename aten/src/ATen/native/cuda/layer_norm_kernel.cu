@@ -852,21 +852,21 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
   Tensor rstd = at::empty({M}, X->options().dtype(acc_type));
   if (M > 0) {
     LayerNormKernelImpl(*X, *gamma, *beta, M, N, eps, &Y, &mean, &rstd);
-
-    const auto input_shape = input.sizes();
-    const size_t axis = input.dim() - normalized_shape.size();
-
-    std::vector<int64_t> stat_shape;
-    for (size_t idx = 0; idx < axis; ++idx) {
-      stat_shape.push_back(input_shape[idx]);
-    }
-    for (size_t idx = axis; idx < input.dim(); ++idx) {
-      stat_shape.push_back(1);
-    }
-
-    mean = mean.view(stat_shape);
-    rstd = rstd.view(stat_shape);
   }
+  const auto input_shape = input.sizes();
+  const size_t axis = input.dim() - normalized_shape.size();
+
+  std::vector<int64_t> stat_shape;
+  for (size_t idx = 0; idx < axis; ++idx) {
+    stat_shape.push_back(input_shape[idx]);
+  }
+  for (size_t idx = axis; idx < input.dim(); ++idx) {
+    stat_shape.push_back(1);
+  }
+
+  mean = mean.view(stat_shape);
+  rstd = rstd.view(stat_shape);
+
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
