@@ -106,9 +106,6 @@ inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_buffer();
 }
 
-inline const at::Tensor& get_nested_size_tensor(const at::Tensor& tensor) {
-  return get_nested_tensor_impl(tensor)->get_nested_size_tensor();
-}
 
 // CPU only!
 // TODO: The algorithm here can be optimized, right now it involves a lot of
