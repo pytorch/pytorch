@@ -6,14 +6,6 @@
 
 set -ex
 
-TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
-TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
-TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib
-TORCH_TEST_DIR="$TORCH_INSTALL_DIR"/test
-
-BUILD_DIR="build"
-BUILD_RENAMED_DIR="build_renamed"
-BUILD_BIN_DIR="$BUILD_DIR"/bin
 
 # GHA has test config defined for the test job, so we need to add them.
 if [[ -n "${TEST_CONFIG}" ]]; then
@@ -25,9 +17,11 @@ if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
   CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
 fi
 
-
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+# shellcheck source=./test-common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/test-common.sh"
 
 echo "Environment variables"
 env
@@ -539,16 +533,6 @@ test_dynamo() {
   popd
 }
 
-test_torch_deploy() {
-  python torch/csrc/deploy/example/generate_examples.py
-  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-  "$TORCH_BIN_DIR"/test_deploy
-  "$TORCH_BIN_DIR"/test_deploy_gpu
-  assert_git_not_dirty
-}
-
 test_docs_test() {
   .jenkins/pytorch/docs-test.sh
 }
@@ -557,10 +541,7 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${BUILD_ENVIRONMENT}" == *deploy* ]]; then
-  install_torchdynamo
-  test_torch_deploy
-elif [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
+if [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then

@@ -185,11 +185,7 @@ else
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
     # rocm builds fail when WERROR=1
-    # XLA test build fails when WERROR=1
-    # set only when building other architectures
-    # or building non-XLA tests.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
-          "$BUILD_ENVIRONMENT" != *xla* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]
       WERROR=1 python setup.py bdist_wheel
     else
       python setup.py bdist_wheel

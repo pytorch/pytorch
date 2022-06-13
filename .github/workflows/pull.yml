@@ -25,7 +25,6 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-py3_7-gcc7-build
     with:
-      build-environment: linux-focal-py3.7-gcc7
       docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
@@ -72,7 +71,6 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-xenial-py3_7-clang7-asan-build
     with:
-      build-environment: linux-xenial-py3.7-clang7-asan
       docker-image: ${{ needs.linux-xenial-py3_7-clang7-asan-build.outputs.docker-image }}
       test-matrix: |
         { include: [
@@ -95,7 +93,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-xenial-py3_7-clang7-onnx-build
     with:
-      build-environment: linux-xenial-py3.7-clang7-onnx
+      script: .jenkins/caffe2/test.sh
       docker-image: ${{ needs.linux-xenial-py3_7-clang7-onnx-build.outputs.docker-image }}
       test-matrix: |
         { include: [
@@ -114,7 +112,6 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-py3_7-clang9-build
     with:
-      build-environment: linux-bionic-py3.7-clang9
       docker-image: ${{ needs.linux-bionic-py3_7-clang9-build.outputs.docker-image }}
       test-matrix: |
         { include: [
@@ -161,7 +158,6 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-xenial-cuda11_3-py3_7-gcc7-build
     with:
-      build-environment: linux-xenial-cuda11.3-py3.7-gcc7
       docker-image: ${{ needs.linux-xenial-cuda11_3-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
@@ -193,15 +189,15 @@ jobs:
     name: pytorch-xla-linux-bionic-py3.7-clang8
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: pytorch-xla-linux-bionic-py3.7-clang8
       docker-image-name: xla_base
+      # XLA test build fails when WERROR=1
+      env-variables: WERROR=0
 
   pytorch-xla-linux-bionic-py3_7-clang8-test:
     name: pytorch-xla-linux-bionic-py3.7-clang8
     uses: ./.github/workflows/_linux-test.yml
     needs: pytorch-xla-linux-bionic-py3_7-clang8-build
     with:
-      build-environment: pytorch-xla-linux-bionic-py3.7-clang8
       docker-image: ${{ needs.pytorch-xla-linux-bionic-py3_7-clang8-build.outputs.docker-image }}
       test-matrix: |
         { include: [
@@ -281,7 +277,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: deploy-linux-xenial-cuda11_3-py3_7-gcc7-build
     with:
-      build-environment: deploy-linux-xenial-cuda11.3-py3.7-gcc7
+      script: .jenkins/pytorch/test-deploy.sh
       docker-image: ${{ needs.deploy-linux-xenial-cuda11_3-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
