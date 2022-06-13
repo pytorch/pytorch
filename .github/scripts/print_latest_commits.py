@@ -69,7 +69,7 @@ def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, A
             )._asdict())
     return workflow_checks
 
-def isGreen(commit: str, results: Dict[str, Any]) -> Any:
+def isGreen(commit: str, results: Dict[str, Any]) -> bool:
     workflow_checks = get_commit_results(commit, results)
 
     for check in workflow_checks:
@@ -80,14 +80,14 @@ def isGreen(commit: str, results: Dict[str, Any]) -> Any:
                 pass
                 # there are trunk checks that run the same tests, so this pull workflow check can be skipped
             else:
-                return workflowName + " checks were not successful"
+                return False
         elif workflowName in ["periodic", "docker-release-builds"] and conclusion not in ["success", "skipped"]:
-            return workflowName + " checks were not successful"
+            return False
     return True
 
 def get_latest_green_commit(commits: List[str], results: Dict[str, Any]) -> Any:
     for commit in commits:
-        if isGreen(commit, results) is True:
+        if isGreen(commit, results):
             return commit
     return None
 
