@@ -28,10 +28,11 @@ def dl_open_guard():
 # Each OpOverload object contains pointer to a a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
 # You can obtain an OpOverload object through attribute query on OpOverloadPacket.
 class OpOverload:
-    def __init__(self, overloadpacket, op, schema):
+    def __init__(self, overloadpacket, op, schema, tags):
         self._op = op
         self._schema = schema
         self._overloadpacket = overloadpacket
+        self._tags = tags
         self._overloadname = 'default' if schema.overload_name == '' else schema.overload_name
         self.__name__ = "{}.{}".format(self._schema.name.split("::")[1], self._overloadname)
         self.__module__ = overloadpacket.__module__
@@ -64,6 +65,10 @@ class OpOverload:
     @property
     def op(self):
         return self._op
+
+    @property
+    def tags(self):
+        return self._tags
 
     # TODO: add more methods to expose information about input and output arguments
 
@@ -123,10 +128,10 @@ class OpOverloadPacket:
             # This is ok since we are guaranteed that an overload name for an aten op can't be 'default'
             use_key = '' if key == 'default' else key
             # TODO: disallow access to overloads registered by JIT
-            op_ = torch._C._get_operation_overload(
+            op_, tags = torch._C._get_operation_overload(
                 self._qualified_op_name, use_key)
             schema = torch._C._get_schema(self._qualified_op_name, use_key)
-            overload = OpOverload(self, op_, schema)
+            overload = OpOverload(self, op_, schema, tags)
             # cache the overload object
             setattr(self, key, overload)
             return overload
