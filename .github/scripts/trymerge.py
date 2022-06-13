@@ -947,7 +947,7 @@ def merge(pr_num: int, repo: GitRepo,
             pending = pr_get_pending_checks(pr)
             failing = pr_get_failed_checks(pr)
             if initial_commit_sha != pr.last_commit()['oid']:
-                raise RuntimeError("New commits were pushed so canceling merge. Please try running merge command again.")
+                raise RuntimeError("New commits were pushed while merging, so canceling merge. Please try running merge command again.")
             if (not mandatory_only and on_green) and len(failing) > 0:
                 raise RuntimeError(f"{len(failing)} additional jobs have failed, first few of them are: " +
                                    ' ,'.join(f"[{x[0]}]({x[1]})" for x in failing[:5]))
