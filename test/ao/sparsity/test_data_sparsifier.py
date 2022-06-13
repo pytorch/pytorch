@@ -2,10 +2,12 @@
 # Owner(s): ["module: unknown"]
 
 import logging
+import random
 import torch
 from torch.nn.utils.parametrize import is_parametrized
 from torch.testing._internal.common_utils import TestCase
 from torch.ao.sparsity import BaseDataSparsifier
+from typing import Tuple
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -21,126 +23,126 @@ class ImplementedSparsifier(BaseDataSparsifier):
         linear_state['step_count'] = linear_state.get('step_count', 0) + 1
 
 
-class TestBaseDataSparsifier(TestCase):
+class TestBaseDataSparsiferType(TestCase):
+    def __init__(self, data_list, defaults, data_with_config):
+        self.data_list = data_list
+        self.defaults = defaults
+        self.data_with_config = data_with_config
+
+    def get_name_data_config(self, some_data):
+        if isinstance(some_data, Tuple):
+            # dealing with data_list
+            name, data = some_data
+            config = self.defaults
+        else:
+            # dealing with data_with_config
+            name, data, config = some_data['name'], some_data['data'], some_data['config']
+        return name, data, config
+
+    def get_sparsifier(self):
+        sparsifier = ImplementedSparsifier(data_list=self.data_list, **self.defaults)
+        assert len(sparsifier.data_groups) == len(self.data_list)
+        for data_config_dict in self.data_with_config:
+            name, data, config = data_config_dict['name'], data_config_dict['data'], data_config_dict['config']
+            sparsifier.add_data(name=name, data=data, **config)
+        return sparsifier
+
     def test_constructor(self):
-        # Test for torch tensors
-        tensor1, tensor2, tensor3 = torch.randn(3, 3), torch.randn(4, 4), torch.randn(5, 5)
-        data_list = [('tensor1', tensor1), ('tensor2', tensor2)]
-        defaults = {'test': 2}
+        sparsifier = self.get_sparsifier()
+        assert len(sparsifier.data_groups) == len(self.data_list) + len(self.data_with_config)
 
-        sparsifier = ImplementedSparsifier(data_list=data_list, **defaults)
-        assert len(sparsifier.data_groups) == 2
+        all_data = self.data_list + self.data_with_config
 
-        sparsifier.add_data(name='tensor3', data=tensor3, test=3)
-        assert len(sparsifier.data_groups) == 3  # should now be 3
-
-        assert len(sparsifier.data_groups) == 3
-        # tensor names that should be present in the sparsifier
-        name_list = ['tensor1', 'tensor2', 'tensor3']
-        assert all(name in sparsifier.data_groups for name in name_list)
-        # check if the configs are loaded correctly
-        assert sparsifier.data_groups['tensor1']['test'] == 2
-        assert sparsifier.data_groups['tensor2']['test'] == 2
-        assert sparsifier.data_groups['tensor3']['test'] == 3
+        for some_data in all_data:
+            name, _, config = self.get_name_data_config(some_data)
+            assert name in sparsifier.data_groups
+            assert sparsifier.data_groups[name] == config
 
     def test_step(self):
-        # Test for torch tensors
-        tensor1 = torch.randn(3, 3)
-        sparsifier = ImplementedSparsifier()
+        sparsifier = self.get_sparsifier()
+        all_data = self.data_list + self.data_with_config
 
-        sparsifier.add_data(name='tensor1', data=tensor1, test=3)
+        # Check data and mask before doing the step
+        for some_data in all_data:
+            name, data, _ = self.get_name_data_config(some_data)
+            data = sparsifier._extract_weight(data)
+            sparsified_data = sparsifier.get_data(name=name, return_original=False)
+            original_data = sparsifier.get_data(name=name, return_original=True)
+            mask = sparsifier.get_mask(name=name)
+            assert torch.all(sparsified_data == data)
+            assert torch.all(original_data == data)
+            assert torch.all(mask[0] == 1)
 
-        # Before step
-        sparsified_data = sparsifier.get_data(name='tensor1', return_sparsified=True)
-        original_data = sparsifier.get_data(name='tensor1', return_sparsified=False)
-        mask = sparsifier.get_mask(name='tensor1')
-        assert torch.all(sparsified_data == tensor1)
-        assert torch.all(original_data == tensor1)
-        assert torch.all(mask[0] == 1)
         step_count = 3
+
         for _ in range(0, step_count):
-            sparsifier.step()
-        # after step
-        sparsified_data = sparsifier.get_data(name='tensor1', return_sparsified=True)
-        original_data = sparsifier.get_data(name='tensor1', return_sparsified=False)
-        assert torch.all(sparsified_data[0] == 0)
-        assert torch.all(original_data == tensor1)
-        assert torch.all(mask[0] == 0)
-        assert 'step_count' in sparsifier.state['tensor1']
-        assert sparsifier.state['tensor1']['step_count'] == 3
+            self.sparsifier.step()
+        for some_data in all_data:
+            name, data, _ = self.get_name_data_config(some_data)
+            data = sparsifier._extract_weight(data)
+            sparsified_data = sparsifier.get_data(name=name, return_original=False)
+            original_data = sparsifier.get_data(name=name, return_original=True)
+            mask = sparsifier.get_mask(name=name)
+            assert torch.all(sparsified_data[0] == 0)
+            assert torch.all(original_data == data)
+            assert torch.all(mask[0] == 0)
+            assert 'step_count' in sparsifier.state[name]
+            assert sparsifier[name]['step_count'] == 3
 
     def test_squash_mask(self):
-        # Test for torch tensors
-        tensor1 = torch.randn(3, 3)
-        sparsifier = ImplementedSparsifier()
-
-        sparsifier.add_data(name='tensor1', data=tensor1, test=3)
-        assert hasattr(sparsifier._container, 'tensor1')
-        assert is_parametrized(sparsifier._container, 'tensor1')
-
+        sparsifier = self.get_sparsifier()
+        all_data = self.data_list + self.data_with_config
+        for some_data in all_data:
+            name, _, _ = self.get_name_data_config(some_data)
+            assert hasattr(sparsifier._container, name)
+            assert is_parametrized(sparsifier._container, name)
         sparsifier.step()
         sparsifier.squash_mask()
 
-        assert not is_parametrized(sparsifier._container, 'tensor1')
-        with self.assertRaises(ValueError):
-            sparsifier.get_data('tensor1', return_sparsified=False)
+        for some_data in all_data:
+            name, _, _ = self.get_name_data_config(some_data)
+            assert not is_parametrized(sparsifier._container, name)  # not parametrized anymore
+            with self.assertRaises(ValueError):
+                sparsifier.get_data(name, return_original=True)
 
     def test_add_data(self):
-        # Test for torch tensors
-        tensor1 = torch.randn(3, 3)
-        sparsifier = ImplementedSparsifier()
+        sparsifier = self.get_sparsifier()
+        all_data = self.data_list + self.data_with_config
+        for some_data in all_data:
+            name1, data1, _ = self.get_name_data_config(some_data)
+            data1 = sparsifier._extract_weight(data1)
+            assert torch.all(data1 == sparsifier.get_data(name=name1))
+            # get some other data at random and with the same name
+            rand_idx = random.randint(0, len(all_data) - 1)
+            _, data2, _ = self.get_name_data_config(all_data[rand_idx])
+            data2 = sparsifier._extract_weight(data2)
+            sparsifier.add_data(name=name1, data=data2)
+            assert torch.all(data2 == sparsifier.get_data(name=name1))
 
-        sparsifier.add_data(name='tensor1', data=tensor1, test=3)
-        assert torch.all(sparsifier.get_data('tensor1') == tensor1)
+class TestBaseDataSparsifier(TestCase):
+    """To add unit tests to support new data types for the BaseDataSparsifier, create the following
+        data_list: List of tuples of name, data to be added to the constructor
+        defaults: default config for the above data in data_list
+        data_with_config: list of dictionaries defining name, data and config (look test_tensors())
 
-        tensor1_new = torch.randn(5, 5)
-        sparsifier.add_data(name='tensor1', data=tensor1_new, test=4)
-        assert torch.all(sparsifier.get_data('tensor1') == tensor1_new)
-        assert 'test' in sparsifier.data_groups['tensor1']
-        assert sparsifier.data_groups['tensor1']['test'] == 4
-
-    def test_state_dict(self):
-        # Test for torch tensors
+    Once the above is done, create an instance of TestBaseDataSparsifierType and call all it's functions
+    """
+    def test_tensors(self):
         tensor1, tensor2, tensor3 = torch.randn(3, 3), torch.randn(4, 4), torch.randn(5, 5)
-        data_list = [('tensor1', tensor1)]
-        defaults = {'test': 2}
+        tensor4, tensor5 = torch.randn(1, 1), torch.randn(4, 4)
+        data_list = [('tensor1', tensor1), ('tensor2', tensor2), ('tensor3', tensor3)]
+        defaults = {'test': 3}
 
-        sparsifier = ImplementedSparsifier(data_list=data_list, **defaults)
-        sparsifier.add_data(name='tensor3', data=tensor3, test=3)
-        sparsifier.step()
-        state_dict = sparsifier.state_dict()
-
-        sparsifier_new = ImplementedSparsifier()
-        sparsifier_new.add_data('tensor1', tensor1)
-        sparsifier_new.add_data('tensor2', tensor2)
-
-        assert sparsifier_new.state != sparsifier.state
-        mask, mask_new = sparsifier.get_mask('tensor1'), sparsifier_new.get_mask('tensor1')
-        self.assertNotEqual(mask, mask_new)
-
-        sparsifier_new.load_state_dict(state_dict)
-        assert len(sparsifier.state) == len(sparsifier_new.state)
-
-        for name in sparsifier.state.keys():
-            # compare mask and key names
-            assert name in sparsifier_new.state
-            assert 'mask' in sparsifier.state[name]
-            assert 'mask' in sparsifier_new.state[name]
-            mask = sparsifier.state[name]['mask']
-            assert torch.all(mask == sparsifier_new.state[name]['mask'])
-
-            # compare config
-            dg, dg_new = sparsifier.data_groups, sparsifier_new.data_groups
-            assert name in dg and name in dg_new
-            assert dg[name] == dg_new[name]
-
-            # compare container details
-            container, container_new = sparsifier._container, sparsifier_new._container
-            assert torch.all(getattr(container, name) == getattr(container_new, name))
-            assert is_parametrized(container, name) == is_parametrized(container_new, name)
-            if is_parametrized(container, name):
-                param = getattr(container.parametrizations, name)[0]
-                param_new = getattr(container_new.parametrizations, name)[0]
-                assert hasattr(param, 'mask')
-                assert hasattr(param_new, 'mask')
-                self.assertEqual(param.__dict__, param_new.__dict__)
+        data_with_config = [
+            {
+                'name': 'tensor4', 'data': tensor4, 'config': {'test': 7}
+            },
+            {
+                'name': 'tensor5', 'data': tensor5, 'config': {'test': 8}
+            },
+        ]
+        tensor_test = TestBaseDataSparsiferType(data_list=data_list, defaults=defaults,
+                                                data_with_config=data_with_config)
+        tensor_test.test_constructor()
+        tensor_test.test_squash_mask()
+        tensor_test.test_add_data()
