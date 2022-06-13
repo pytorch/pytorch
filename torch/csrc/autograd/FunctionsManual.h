@@ -668,8 +668,7 @@ Tensor kl_div_double_backward_target(
     const Tensor& grad_output,
     const Tensor& input,
     int64_t reduction,
-    bool log_target
-);
+    bool log_target);
 Tensor fft_backward(
     const Tensor& self,
     const Tensor& grad,

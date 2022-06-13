@@ -1914,16 +1914,15 @@ Tensor kl_div_double_backward_target(
     const Tensor& grad_output,
     const Tensor& input,
     int64_t reduction,
-    bool log_target
-) {
+    bool log_target) {
   Tensor g;
   if (log_target) {
     g = grad * result;
-  }
-  else {
+  } else {
     g = at::where(target > 0, -grad * grad_output, at::zeros({}, grad.options()));
     if (reduction == at::Reduction::Mean) {
-      g = areAnyTensorSubclassLike({g}) ? g / input.numel() : g.div_(input.numel());
+      g = areAnyTensorSubclassLike({g}) ? g / input.numel()
+                                        : g.div_(input.numel());
     }
   }
 
