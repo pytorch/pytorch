@@ -220,7 +220,11 @@ class Tensor(torch._C._TensorBase):
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
         if self.device.type in ['xla', 'ort', 'mps', 'hpu']:
-            return (torch._utils._rebuild_device_tensor_from_numpy, (self.cpu().numpy(),
+            # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
+            # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
+            # this would reconstruct the BFloat16 tensor from numpy.
+            numpy_tensor = self.cpu().numpy() if self.dtype != torch.bfloat16 else self.cpu().to(torch.float32).numpy()
+            return (torch._utils._rebuild_device_tensor_from_numpy, (numpy_tensor,
                                                                      self.dtype,
                                                                      str(self.device),
                                                                      self.requires_grad))

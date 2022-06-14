@@ -310,6 +310,7 @@ cmake_python_include_dir = sysconfig.get_path("include")
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
+package_type = os.getenv('PACKAGE_TYPE', 'wheel')
 version = get_torch_version()
 report("Building wheel {}-{}".format(package_name, version))
 
@@ -430,8 +431,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
     # Copy libiomp5.dylib inside the wheel package on OS X
     def _embed_libiomp(self):
-        if not IS_DARWIN:
-            return
+
         lib_dir = os.path.join(self.build_lib, 'torch', 'lib')
         libtorch_cpu_path = os.path.join(lib_dir, 'libtorch_cpu.dylib')
         if not os.path.exists(libtorch_cpu_path):
@@ -523,7 +523,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
-        self._embed_libiomp()
+        if IS_DARWIN and package_type != 'conda':
+            self._embed_libiomp()
 
         # Copy the essential export library to compile C++ extensions.
         if IS_WINDOWS:

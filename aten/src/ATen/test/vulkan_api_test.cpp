@@ -810,6 +810,36 @@ TEST_F(VulkanAPITest, copy) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, cumsum) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+  c10::InferenceMode mode;
+
+  const auto in_cpu = at::rand({1, 17, 37, 49}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  // 0 do nothing
+  // 1 frame
+  // not implemented
+
+  // 2 height
+  const auto out_cpu2 = at::cumsum(in_cpu, 2);
+  const auto out_vulkan2 = at::cumsum(in_cpu.vulkan(), 2);
+  const auto check2 = almostEqual(out_cpu2, out_vulkan2.cpu());
+  if (!check2) {
+    showRtol(out_cpu2, out_vulkan2.cpu());
+  }
+  ASSERT_TRUE(check2);
+
+  // 3 width
+  const auto out_cpu3 = at::cumsum(in_cpu, 3);
+  const auto out_vulkan3 = at::cumsum(in_cpu.vulkan(), 3);
+  const auto check3 = almostEqual(out_cpu3, out_vulkan3.cpu());
+  if (!check3) {
+    showRtol(out_cpu3, out_vulkan3.cpu());
+  }
+  ASSERT_TRUE(check3);
+}
+
 TEST_F(VulkanAPITest, div) {
   if (!at::is_vulkan_available()) {
     return;

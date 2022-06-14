@@ -319,7 +319,8 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> pos_weight_maybe_owned = at::borrow_from_optional_tensor(pos_weight_opt);
+  const Tensor& pos_weight = *pos_weight_maybe_owned;
 
     Tensor loss;
     auto max_val = (-input).clamp_min_(0);

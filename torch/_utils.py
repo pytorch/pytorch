@@ -79,6 +79,13 @@ def _cuda(self, device=None, non_blocking=False, **kwargs):
 
 
 def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
+    """ Return the non-blocking flag given the function name and kwargs.
+
+    Args:
+        function_name (str): the name of the function being used.
+        non_blocking (bool): the default value.
+        **kwargs (dict): the kwargs passed to the function.
+    """
     if not kwargs:
         return non_blocking
     if len(kwargs) != 1 or 'async' not in kwargs:
@@ -175,6 +182,13 @@ def _validate_loaded_sparse_tensors():
         _sparse_tensors_to_validate.clear()
 
 def _rebuild_sparse_tensor(layout, data):
+    """
+    Rebuilds a sparse tensor from its sparse storage representation.
+
+    Args:
+        layout (str): The sparse storage layout of the tensor.
+        data (tuple): The tensor's sparse storage representation.
+    """
     if layout == torch.sparse_coo:
         indices, values, size = data
         result = torch._sparse_coo_tensor_unsafe(indices, values, size)
