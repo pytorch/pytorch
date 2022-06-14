@@ -78,6 +78,8 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
     def add_data(self, name: str, data, **config):
         r""" Configures and parametrizes the internal container model with name and data
         """
+        assert type(data) in SUPPORTED_TYPES, \
+            "specified data type not supported at the moment"
         local_args = copy.deepcopy(self.defaults)
         local_args.update(config)
         self.data_groups[name] = local_args
