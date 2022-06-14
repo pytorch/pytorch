@@ -60,9 +60,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       : StorageImpl(
             use_byte_size_t(),
             size_bytes,
-            size_bytes.is_symbolic() ?
-              allocator->allocate(0) :
-              allocator->allocate(size_bytes.as_int_unchecked()),
+            size_bytes.is_symbolic()
+                ? allocator->allocate(0)
+                : allocator->allocate(size_bytes.as_int_unchecked()),
             allocator,
             resizable) {}
 
