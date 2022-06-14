@@ -639,7 +639,7 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
   auto as_nd = [&](const Tensor& t) {
     TORCH_CHECK(
       t.dim() == 1 || t.dim() == 0,
-      "prelu: Expected `weight` to be a scalar or 1D tensor");
+      "prelu: Expected `weight` to be a scalar or 1D tensor, but got: ndim = ", weight_.dim());
     if (ndim >= 2) {
       sizes[1] = t.dim() == 1 ? t.sizes(0) : 1;
       strides[1] = t.dim() == 1 ? t.strides(0) : 0;
