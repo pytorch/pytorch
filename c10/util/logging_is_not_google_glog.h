@@ -89,16 +89,18 @@ static_assert(
     "CAFFE2_LOG_THRESHOLD should at most be GLOG_FATAL.");
 // If n is under the compile time caffe log threshold, The _CAFFE_LOG(n)
 // should not generate anything in optimized code.
-#define LOG(n)                                 \
-  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD) \
-  ::c10::MessageLogger((const char*)__FILE__, __LINE__, ::c10::GLOG_##n).stream()
+#define LOG(n)                                                           \
+  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD)                           \
+  ::c10::MessageLogger((const char*)__FILE__, __LINE__, ::c10::GLOG_##n) \
+      .stream()
 #define VLOG(n)                   \
   if (-n >= CAFFE2_LOG_THRESHOLD) \
   ::c10::MessageLogger((const char*)__FILE__, __LINE__, -n).stream()
 
-#define LOG_IF(n, condition)                                  \
-  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD && (condition)) \
-  ::c10::MessageLogger((const char*)__FILE__, __LINE__, ::c10::GLOG_##n).stream()
+#define LOG_IF(n, condition)                                             \
+  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD && (condition))            \
+  ::c10::MessageLogger((const char*)__FILE__, __LINE__, ::c10::GLOG_##n) \
+      .stream()
 #define VLOG_IF(n, condition)                    \
   if (-n >= CAFFE2_LOG_THRESHOLD && (condition)) \
   ::c10::MessageLogger((const char*)__FILE__, __LINE__, -n).stream()
@@ -112,10 +114,11 @@ static_assert(
   ::c10::MessageLogger(file, line, ::c10::GLOG_##n).stream()
 
 // Log only if condition is met.  Otherwise evaluates to void.
-#define FATAL_IF(condition)                                                  \
-  condition ? (void)0                                                        \
-            : ::c10::LoggerVoidify() &                                       \
-          ::c10::MessageLogger((const char*)__FILE__, __LINE__, ::c10::GLOG_FATAL) \
+#define FATAL_IF(condition)                                       \
+  condition ? (void)0                                             \
+            : ::c10::LoggerVoidify() &                            \
+          ::c10::MessageLogger(                                   \
+              (const char*)__FILE__, __LINE__, ::c10::GLOG_FATAL) \
               .stream()
 
 // Check for a given boolean condition.
@@ -131,10 +134,11 @@ static_assert(
   while (false)           \
   CHECK(condition)
 
-#define DLOG(n)                                                            \
-  true ? (void)0                                                           \
-       : ::c10::LoggerVoidify() &                                          \
-          ::c10::MessageLogger((const char*)__FILE__, __LINE__, ::c10::GLOG_##n) \
+#define DLOG(n)                                                 \
+  true ? (void)0                                                \
+       : ::c10::LoggerVoidify() &                               \
+          ::c10::MessageLogger(                                 \
+              (const char*)__FILE__, __LINE__, ::c10::GLOG_##n) \
               .stream()
 #endif // NDEBUG
 
