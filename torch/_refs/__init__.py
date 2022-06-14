@@ -1,4 +1,3 @@
-import builtins
 import torch
 
 import torch._prims as prims
@@ -171,10 +170,6 @@ __all__ = [
     # Linear algebra ops
     #
     "addr",
-    #
-    # Interpolation ops
-    #
-    "lerp",
     #
     # View & Shape Ops
     #
@@ -1603,47 +1598,6 @@ def addr(
             return alpha * torch.outer(vec1, vec2)
         else:
             return beta * self + alpha * torch.outer(vec1, vec2)
-
-
-@out_wrapper
-def lerp(
-    input: TensorLikeType,
-    end: TensorLikeType,
-    weight: Union[float, complex, TensorLikeType],
-):
-    check(
-        input.dtype == end.dtype,
-        lambda: f"expected dtype {input.dtype} for `end` but got dtype {end.dtype}",
-    )
-
-    if isinstance(weight, TensorLike):
-        weight_dtype = weight.dtype
-        check(
-            input.dtype == weight_dtype,
-            lambda: f"expected dtype {input.dtype} for `weight` but got dtype {weight_dtype}",
-        )
-
-    # Computation should occur in higher-precision for half and float.
-    @elementwise_type_promotion_wrapper(
-        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-        type_promoting_args=("input", "end", "weight"),
-    )
-    def _lerp_computation(
-        input: TensorLikeType,
-        end: TensorLikeType,
-        weight: Union[float, complex, TensorLikeType],
-    ):
-        if isinstance(weight, (float, complex)):
-            if builtins.abs(weight) < 0.5:
-                return input + (weight * (end - input))
-            return end - ((1.0 - weight) * (end - input))
-        else:  # weight is TensorLikeType
-            ge_half = ge(abs(weight), 0.5)
-            le_half_computation = input + (weight * (end - input))
-            ge_half_computation = end - (sub(1.0, weight) * (end - input))
-            return where(ge_half, ge_half_computation, le_half_computation)
-
-    return _lerp_computation(input, end, weight)
 
 
 def atleast_1d(
