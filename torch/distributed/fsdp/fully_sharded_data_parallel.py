@@ -371,7 +371,10 @@ class _ExecOrderData():
         # Save `root_modules.parameters()` to `_all_flat_params` instead of
         # re-materializing each time to avoid the result depending on the
         # calling context (e.g. when some parameters have been rebuilt)
-        self._all_flat_params = list(root_module.parameters())
+        self._all_flat_params = [
+                param for param in root_module.parameters()
+                if isinstance(param, FlatParameter)
+            ]
         self._param_to_unflat_param_names = cast(
             Dict[FlatParameter, List[str]],
             _get_param_to_unflat_param_names(root_module)
@@ -1649,8 +1652,7 @@ class FullyShardedDataParallel(nn.Module):
                 m._streams = self._streams
                 m._fsdp_graph_order = self._fsdp_graph_order
                 # Give each non-root FSDP module an alias to the root's
-                # execution order data structure and the root's ignored
-                # parameters and all buffer names since only the root's names
+                # execution order data structure since only the root's names
                 # are fully prefixed like the state dict keys
                 m._exec_order_data = self._exec_order_data
 
