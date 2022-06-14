@@ -3,34 +3,35 @@ import os
 import subprocess
 import requests
 from typing import Any, Dict
+from argparse import ArgumentParser
 
 MERGEBOT_TOKEN = os.environ["MERGEBOT_TOKEN"]
 PYTORCHBOT_TOKEN = os.environ["PYTORCHBOT_TOKEN"]
 OWNER, REPO = "pytorch", "pytorch"
-REQUEST_HEADERS = {
-    "Accept": "application/vnd.github.v3+json",
-    "Authorization": f"token {MERGEBOT_TOKEN}",
-}
 
 
-def git_api(url: str, params: Dict[str, str], post: bool = False) -> Any:
+def git_api(
+    url: str, params: Dict[str, str], post: bool = False, token: str = MERGEBOT_TOKEN
+) -> Any:
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": f"token {token}",
+    }
     if post:
         return requests.post(
             f"https://api.github.com{url}",
             data=json.dumps(params),
-            headers=REQUEST_HEADERS,
+            headers=headers,
         ).json()
     else:
         return requests.get(
             f"https://api.github.com{url}",
             params=params,
-            headers=REQUEST_HEADERS,
+            headers=headers,
         ).json()
 
 
 def parse_args() -> Any:
-    from argparse import ArgumentParser
-
     parser = ArgumentParser("Rebase PR into branch")
     parser.add_argument("--repo-name", type=str)
     parser.add_argument("--branch", type=str)
@@ -42,20 +43,23 @@ def make_pr(repo_name: str, branch_name: str) -> Any:
         "title": f"[{repo_name} hash update] update the pinned {repo_name} hash",
         "head": branch_name,
         "base": "master",
-        "body": "This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/master/" +
-        f".github/workflows/_update-commit-hash.yml).\nUpdate the pinned {repo_name} hash.",
+        "body": "This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/master/"
+        + f".github/workflows/_update-commit-hash.yml).\nUpdate the pinned {repo_name} hash.",
     }
     response = git_api(f"/repos/{OWNER}/{REPO}/pulls", params, post=True)
-    print(f"made pr {response['number']}")
+    print(f"made pr {response['html_url']}")
     return response["number"]
 
 
 def approve_pr(pr_number: str) -> None:
     params = {"event": "APPROVE"}
     # use pytorchbot to approve the pr
-    REQUEST_HEADERS["Authorization"] = f"token {PYTORCHBOT_TOKEN}"
-    response = git_api(f"/repos/{OWNER}/{REPO}/pulls/{pr_number}/reviews", params, post=True)
-    REQUEST_HEADERS["Authorization"] = f"token {MERGEBOT_TOKEN}"
+    git_api(
+        f"/repos/{OWNER}/{REPO}/pulls/{pr_number}/reviews",
+        params,
+        post=True,
+        token=PYTORCHBOT_TOKEN,
+    )
 
 
 def make_comment(pr_number: str) -> None:
@@ -83,16 +87,16 @@ def main() -> None:
 
     # update file
     hash = subprocess.run(
-        f"git rev-parse {args.branch}".split(), capture_output=True, cwd=f'{args.repo_name}'
+        f"git rev-parse {args.branch}".split(),
+        capture_output=True,
+        cwd=f"{args.repo_name}",
     ).stdout.decode("utf-8")
     with open(f".github/{args.repo_name}_commit_hash.txt", "w") as f:
         f.write(hash.strip())
-    if (
-        subprocess.run(
-            f"git diff --exit-code .github/{args.repo_name}_commit_hash.txt".split()
-        ).returncode
-        == 1
-    ):
+    git_diff = subprocess.run(
+        f"git diff --exit-code .github/{args.repo_name}_commit_hash.txt".split()
+    )
+    if git_diff.returncode == 1:
         # if there was an update, push to branch
         subprocess.run(f"git checkout -b {branch_name}".split())
         subprocess.run(f"git add .github/{args.repo_name}_commit_hash.txt".split())
