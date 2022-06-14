@@ -708,9 +708,9 @@ class TestModelReportObserver(QuantizationTestCase):
         # initialize the model
         models = [self.NestedModifiedSingleLayerLinear(), LargerIncludeNestModel(), ThreeOps(2), HighDimensionNet()]
 
-        # get random number of epochs and batches
-        num_epochs = torch.randint(1, 10, (1,))  # cap epochs at 10
-        num_batches = torch.randint(1, 15, (1,))  # cap batches at 15
+        # get some number of epochs and batches
+        num_epochs = 10
+        num_batches = 15
 
         input_shapes = [(1, 5), (1, 5), (2, 3, 7), (4, 1, 8, 3)]
 
