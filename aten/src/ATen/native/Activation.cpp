@@ -617,6 +617,7 @@ TORCH_IMPL_FUNC(threshold_backward_out)(const Tensor& grad, const Tensor& self, 
 Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
   int64_t weight_num = weight_.numel();
   Tensor result = at::empty_like(self, self.suggest_memory_format());
+  TORCH_INTERNAL_ASSERT(weight_.defined());
 
   if (weight_num != 1) {
     int64_t input_ndim = self.dim();
@@ -637,7 +638,7 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
   DimVector sizes(ndim, 1), strides(ndim, 0);
   auto as_nd = [&](const Tensor& t) {
     TORCH_CHECK(
-      t.defined() && (t.dim() == 1 || t.dim() == 0),
+      t.dim() == 1 || t.dim() == 0,
       "prelu: Expected `weight` to be a scalar or 1D tensor");
     if (ndim >= 2) {
       sizes[1] = t.dim() == 1 ? t.sizes(0) : 1;
