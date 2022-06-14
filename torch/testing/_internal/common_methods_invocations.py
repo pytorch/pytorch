@@ -8168,11 +8168,11 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad, **kwargs):
         # no broadcast
         SampleInput(make_arg((S, S)), args=(make_arg((S, S)), 0.4)),
         # broadcast rhs
-        SampleInput(make_arg((S, S)), args=(make_arg((S,)), 0.4)),
+        SampleInput(make_arg((S, S)), args=(make_arg((S,)), 0.6)),
         # scalar tensor
         SampleInput(make_arg(()), args=(make_arg(()), 0.4)),
         # broadcast rhs scalar-tensor
-        SampleInput(make_arg((S, S)), args=(make_arg(()), 0.4)),
+        SampleInput(make_arg((S, S)), args=(make_arg(()), 0.6)),
         # broadcast rhs with weight tensor
         SampleInput(make_arg((S, S)), args=(make_arg((S,)), make_arg((S, S)))),
         # broadcast rhs and weight tensor
@@ -8180,7 +8180,7 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad, **kwargs):
         # broadcast lhs
         SampleInput(make_arg((S,)), args=(make_arg((S, S)), 0.4), broadcasts_input=True),
         # scalar broadcast_lhs
-        SampleInput(make_arg(()), args=(make_arg((S, S)), 0.4), broadcasts_input=True),
+        SampleInput(make_arg(()), args=(make_arg((S, S)), 0.9), broadcasts_input=True),
         # broadcast all
         SampleInput(make_arg((S, 1)), args=(make_arg((S, S)), 0.4), broadcasts_input=True),
         # tensor broadcast all
@@ -8213,6 +8213,62 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad, **kwargs):
         )
 
     return samples
+
+
+def reference_inputs_lerp(op, device, dtype, requires_grad, **kwargs):
+    S = 3
+    yield from sample_inputs_lerp(op, device, dtype, requires_grad, **kwargs)
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    for val in (float('nan'), float('inf')):
+        # `start` with `nan`/`inf`
+        start = make_arg((S, S))
+        if dtype.is_floating_point:
+            start[0] = val
+        yield SampleInput(start, args=(make_arg((S, S)), 0.4))
+
+        # `start` and `end` with `nan`/`inf`
+        start = make_arg((S, S))
+        if dtype.is_floating_point:
+            start[0] = val
+
+        end = make_arg((S, S))
+        if dtype.is_floating_point:
+            end[0] = val
+        yield SampleInput(start, args=(end, 0.6))
+
+        # `start`, `end` and `weight` with `nan`/`inf`
+        start = make_arg((S, S))
+        if dtype.is_floating_point:
+            start[0] = val
+
+        end = make_arg((S, S))
+        if dtype.is_floating_point:
+            end[1] = val
+
+        weight = make_arg((S, S))
+        if dtype.is_floating_point:
+            weight[2] = val
+        yield SampleInput(start, args=(end, weight))
+
+
+def error_inputs_lerp(op, device, **kwargs):
+    make_float_t = partial(make_tensor, dtype=torch.float, device=device, requires_grad=False)
+    make_long_t = partial(make_tensor, dtype=torch.long, device=device, requires_grad=False)
+
+    # mismatch in start and end dtype
+    si = SampleInput(make_float_t(10,), args=(make_long_t(10,), 0.4))
+    yield ErrorInput(si, error_regex="for `end` but got dtype")
+
+    # mismatch in start and weight dtype
+    si = SampleInput(make_float_t(10,), args=(make_float_t(10,), make_long_t(10,)))
+    yield ErrorInput(si, error_regex="for `weight` but got dtype")
+
+    # invalid shapes
+    si = SampleInput(make_float_t(10, 2), args=(make_float_t(10, 1), make_long_t(10, 5)))
+    yield ErrorInput(si, error_regex="for `weight` but got dtype")
+
 
 def sample_inputs_tensordot(self, device, dtype, requires_grad, **kwargs):
     cases = (
@@ -8381,19 +8437,9 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
     for args, reduce, initial in product(test_cases, reductions, [1, 2]):
         inp_shape, dim, lengths, unsafe = args
         lengths_t = torch.tensor(lengths, dtype=torch.long, device=device)
-        sample_input_kwargs = {'axis': dim, 'unsafe': unsafe, 'initial': initial}
-        if mode == 'lengths':
-            sample_input_kwargs['lengths'] = lengths_t
-        elif mode == 'offsets':
-            zeros_shape = list(lengths_t.shape)
-            zeros_shape[dim] = 1
-            offsets_t = torch.cat((lengths_t.new_zeros(zeros_shape), lengths_t), dim).cumsum_(dim)
-            sample_input_kwargs['offsets'] = offsets_t
-        else:
-            raise RuntimeError(f"mode most be one of 'offsets' or 'lengths' got '{mode}'.")
         yield SampleInput(_tensor(inp_shape),
                           args=(reduce,),
-                          kwargs=sample_input_kwargs)
+                          kwargs={'lengths': lengths_t, 'axis': dim, 'unsafe': unsafe, 'initial': initial})
 
 
 def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
@@ -11503,7 +11549,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('diag',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diag,
@@ -15924,8 +15970,9 @@ op_db: List[OpInfo] = [
     OpInfo('lerp',
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_lerp,
+           error_inputs_func=error_inputs_lerp,
+           reference_inputs_func=reference_inputs_lerp,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True),
@@ -17547,7 +17594,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_logsumexp),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            supports_inplace_autograd=False,
            supports_out=False,
            supports_forward_ad=True,
@@ -17615,13 +17663,13 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_adjoint),
     OpInfo('tril',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_tril_triu),
     OpInfo('triu',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_tril_triu),
@@ -19507,25 +19555,6 @@ op_db: List[OpInfo] = [
             ),
         ),
     ),
-    OpInfo(
-        'segment_reduce',
-        variant_test_name='offsets',
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        supports_out=False,
-        # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
-        supports_gradgrad=False,
-        sample_inputs_func=partial(sample_inputs_segment_reduce, mode='offsets'),
-        skips=(
-            # FIXME: CUDA driver API confirmed a leak in
-            # __main__.TestJitCUDA.test_variant_consistency_jit_segment_reduce_cuda_float32
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                device_type="cuda",
-            ),
-        ),
-    ),
     UnaryUfuncInfo(
         'special.bessel_j0',
         decorators=(
@@ -19949,6 +19978,16 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.abs",
         torch_opinfo_name="abs",
+        skips=(
+            # Reference result was farther (0.0) from the precise computation
+            # than the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
+            # Reference result was farther (0.0) from the precise computation
+            # than the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.acos",
@@ -20111,7 +20150,7 @@ python_ref_db = [
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
             ),
         ),
     ),
@@ -20351,7 +20390,7 @@ python_ref_db = [
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
             ),
         ),
     ),
@@ -20503,7 +20542,19 @@ python_ref_db = [
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32, torch.complex64, torch.complex128)
+            ),
+            # Reference result was farther (0.0) from the precise computation
+            # than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
+            ),
+            # Reference result was farther (0.0) from the precise computation
+            # than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
             ),
         )
     ),
@@ -20532,7 +20583,19 @@ python_ref_db = [
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
+            ),
+            # Reference result was farther (inf) from the precise
+            # computation than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+            ),
+            # Reference result was farther (inf) from the precise
+            # computation than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
             ),
         ),
     ),
@@ -20545,6 +20608,14 @@ python_ref_db = [
         skips=(
             # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # Reference result was farther (nan) from the precise computation than
+            # the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.chalf,), device_type='cpu'),
+            # Reference result was farther (nan) from the precise computation than
+            # the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.chalf,), device_type='cpu'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20558,7 +20629,19 @@ python_ref_db = [
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
+            ),
+            # Reference result was farther (0.7433461727239705) from the precise
+            # computation than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+            ),
+            # Reference result was farther (0.7433461727239705) from the precise
+            # computation than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
             ),
         ),
     ),
@@ -20849,6 +20932,22 @@ python_ref_db = [
         ),
     ),
     #
+    # Interpolation Reference OpInfos
+    #
+    PythonRefInfo(
+        "_refs.lerp",
+        torch_opinfo_name="lerp",
+        skips=(
+            # NotImplementedError: argument of type: <class 'complex'>
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.cfloat, torch.cdouble)),
+            # mul(): incompatible function arguments.
+            DecorateInfo(unittest.skip("Fails on aten executor but not on nvFuser executor"),
+                         'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.float,)),
+        )
+    ),
+    #
     # Reduction Reference OpInfos
     #
     ReductionPythonRefInfo(
@@ -21030,7 +21129,7 @@ python_ref_db = [
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.cfloat, torch.cdouble)),
+                         dtypes=(torch.chalf, torch.cfloat, torch.cdouble)),
             # TypeError: where(): incompatible function arguments.
             DecorateInfo(unittest.skip("Passes for aten executor but not nvfuser"), 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.float32, torch.int32)),
