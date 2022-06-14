@@ -15,6 +15,7 @@ typedef MPSGraphTensor* (^UnaryOpBlock)(MPSGraph*, MPSGraphTensor*);
 
 void unary_op(const Tensor& self, const Tensor& output, std::string op_name, UnaryOpBlock unaryBlock)
 {
+  TORCH_CHECK_TYPE(self.scalar_type() != ScalarType::Long, "Operation '", op_name, "()' does not support input type 'int64' in MPS backend.");
   if (!output.is_same_size(self)) {
     output.resize_(self.sizes());
   }
@@ -35,7 +36,12 @@ void unary_op(const Tensor& self, const Tensor& output, std::string op_name, Una
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
           newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-          newCachedGraph->outputTensor = unaryBlock(mpsGraph, newCachedGraph->inputTensor);
+          MPSGraphTensor* castTensor = newCachedGraph->inputTensor;
+          // Integer input must be cast to float if output is float
+          if (isIntegralType(self.scalar_type()) && isFloatingType(output.scalar_type())) {
+            castTensor = castMPSTensor(mpsGraph, newCachedGraph->inputTensor, output.scalar_type());
+          }
+          newCachedGraph->outputTensor = unaryBlock(mpsGraph, castTensor);
         }
         return newCachedGraph;
       });

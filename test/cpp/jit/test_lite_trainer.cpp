@@ -384,19 +384,16 @@ TEST(LiteTrainerTest, RandomSamplerReturnsIndicesInCorrectRange) {
 
   std::vector<size_t> indices = sampler.next(3).value();
   for (auto i : indices) {
-    AT_ASSERT(i >= 0);
     AT_ASSERT(i < 10);
   }
 
   indices = sampler.next(5).value();
   for (auto i : indices) {
-    AT_ASSERT(i >= 0);
     AT_ASSERT(i < 10);
   }
 
   indices = sampler.next(2).value();
   for (auto i : indices) {
-    AT_ASSERT(i >= 0);
     AT_ASSERT(i < 10);
   }
 
