@@ -1408,7 +1408,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             m,
             qconfig_dict,
             example_inputs=example_inputs,
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
         mp2 = copy.deepcopy(mp1)
         unmatchable_types_map = get_unmatchable_types_map()
         unmatchable_types_map['mods_unmatchable'].add(M1)
@@ -1455,7 +1455,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             m,
             qconfig_dict,
             example_inputs=example_inputs,
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
         mp(*example_inputs)
         mq = convert_fx(copy.deepcopy(mp))
 

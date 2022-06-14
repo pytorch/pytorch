@@ -100,6 +100,22 @@ from torch.ao.quantization.fx.pattern_utils import (
     get_default_output_activation_post_process_map
 )
 
+from torch.ao.quantization.fx.custom_config import (
+    STANDALONE_MODULE_NAME_DICT_KEY,
+    STANDALONE_MODULE_CLASS_DICT_KEY,
+    FLOAT_TO_OBSERVED_DICT_KEY,
+    OBSERVED_TO_QUANTIZED_DICT_KEY,
+    NON_TRACEABLE_MODULE_NAME_DICT_KEY,
+    NON_TRACEABLE_MODULE_CLASS_DICT_KEY,
+    INPUT_QUANTIZED_INDEXES_DICT_KEY,
+    OUTPUT_QUANTIZED_INDEXES_DICT_KEY,
+    PRESERVED_ATTRIBUTES_DICT_KEY,
+    FuseCustomConfig,
+    ConvertCustomConfig,
+    PrepareCustomConfig,
+    StandaloneModuleConfigEntry,
+)
+
 from torch.ao.quantization.fx.qconfig_utils import (
     maybe_adjust_qconfig_for_module_name_object_type_order,
 )
@@ -149,8 +165,6 @@ from torch.testing._internal.common_quantized import (
 from torch.testing._internal.common_utils import TemporaryFileName
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
-
-from torch.testing._internal.common_quantization import ConvModel
 
 from torch.testing import FileCheck
 
@@ -465,23 +479,6 @@ class TestFuseFx(QuantizationTestCase):
 
         self.checkGraphModuleNodes(m, expected_node=ns.call_module(torch.nn.intrinsic.modules.fused.LinearReLU))
 
-    def test_fuse_custom_config_dict_validity(self):
-        r"""
-        Verifies that if a user passes an invalid key or makes a typo when
-        constructing a fuse_custom_config_dict, an error will be thrown and
-        users will be notified of what keys are supported.
-        """
-        m = ConvModel().eval()
-        fuse_custom_config_dict = {"typo": None}
-
-        with self.assertRaises(ValueError) as context:
-            m = fuse_fx(m, fuse_custom_config_dict=fuse_custom_config_dict)
-        self.assertTrue(
-            'Expected fuse_custom_config_dict to have the following keys:'
-            in str(context.exception)
-        )
-        self.assertTrue('But found \'typo\' instead.' in str(context.exception))
-
     @unittest.skip("Temprorarily skipping the test case, will enable after the simple"
                    "pattern format is supported")
     def test_fuse_addtional_fuser_method(self):
@@ -501,7 +498,7 @@ class TestFuseFx(QuantizationTestCase):
                 return self.relu(self.conv(x))
 
         m = M().eval()
-        m = fuse_fx(m, fuse_custom_config_dict={
+        m = fuse_fx(m, fuse_custom_config={
             "additional_fuser_method_mapping": {
                 (torch.nn.Conv2d, torch.nn.ReLU): my_conv_relu_fuser
             }
@@ -1397,7 +1394,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 original_m_copy,
                 qconfig_dict,
                 example_inputs=example_inputs,
-                prepare_custom_config_dict=prepare_config)
+                prepare_custom_config=prepare_config)
             # calibration
             m(*example_inputs)
             self.checkGraphModuleNodes(m, expected_node_occurrence=prepare_count_check)
@@ -2046,46 +2043,240 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_dict = self._get_qconfig_dict_for_qconfig_mapping_test(global_qconfig, qconfig1, qconfig2)
         self.assertEqual(qconfig_mapping.to_dict(), qconfig_dict)
 
-    def test_prepare_custom_config_dict_validity(self):
-        r"""
-        Verifies that if a user passes an invalid key or makes a typo when
-        constructing a prepare_custom_config_dict, an error will be thrown and
-        users will be notified of what keys are supported.
+    # Dummy classes for PrepareCustomConfig testing
+
+    class _DummyStandaloneModule:
+        pass
+
+    class _DummyFloatModule:
+        pass
+
+    class _DummyObservedModule:
+        pass
+
+    class _DummyQuantizedModule:
+        pass
+
+    class _DummyNonTraceableModule1:
+        pass
+
+    class _DummyNonTraceableModule2:
+        pass
+
+    def test_prepare_custom_config_set_standalone_module_name(self):
+        qconfig_mapping = QConfigMapping()
+        example_inputs = (torch.randn(3),)
+        child_prepare_custom_config = PrepareCustomConfig()
+        backend_config_dict = {"name": "my_backend"}
+        config_entry = StandaloneModuleConfigEntry(
+            qconfig_mapping, example_inputs, child_prepare_custom_config, backend_config_dict)
+        prepare_custom_config = PrepareCustomConfig()
+        self.assertEqual(len(prepare_custom_config.standalone_module_names), 0)
+        prepare_custom_config.set_standalone_module_name(
+            "module1", qconfig_mapping, example_inputs, child_prepare_custom_config, backend_config_dict)
+        self.assertEqual(list(prepare_custom_config.standalone_module_names.keys()), ["module1"])
+        self.assertEqual(prepare_custom_config.standalone_module_names["module1"], config_entry)
+
+    def test_prepare_custom_config_set_standalone_module_class(self):
+        qconfig_mapping = QConfigMapping()
+        example_inputs = (torch.randn(3),)
+        child_prepare_custom_config = PrepareCustomConfig()
+        backend_config_dict = {"name": "my_backend"}
+        config_entry = StandaloneModuleConfigEntry(
+            qconfig_mapping, example_inputs, child_prepare_custom_config, backend_config_dict)
+        prepare_custom_config = PrepareCustomConfig()
+        self.assertEqual(len(prepare_custom_config.standalone_module_classes), 0)
+        prepare_custom_config.set_standalone_module_class(
+            self._DummyStandaloneModule, qconfig_mapping, example_inputs, child_prepare_custom_config, backend_config_dict)
+        self.assertEqual(len(prepare_custom_config.standalone_module_classes), 1)
+        self.assertTrue(self._DummyStandaloneModule in prepare_custom_config.standalone_module_classes)
+        self.assertEqual(prepare_custom_config.standalone_module_classes[self._DummyStandaloneModule], config_entry)
+
+    def test_prepare_custom_config_set_float_to_observed_mapping(self):
+        prepare_custom_config = PrepareCustomConfig()
+        self.assertEqual(len(prepare_custom_config.float_to_observed_mapping), 0)
+        prepare_custom_config.set_float_to_observed_mapping(self._DummyFloatModule, self._DummyObservedModule, QuantType.STATIC)
+        self.assertEqual(len(prepare_custom_config.float_to_observed_mapping), 1)
+        self.assertEqual(list(prepare_custom_config.float_to_observed_mapping.keys()), [QuantType.STATIC])
+        self.assertEqual(len(prepare_custom_config.float_to_observed_mapping[QuantType.STATIC]), 1)
+        self.assertTrue(self._DummyFloatModule in prepare_custom_config.float_to_observed_mapping[QuantType.STATIC])
+        self.assertEqual(prepare_custom_config.float_to_observed_mapping[QuantType.STATIC][self._DummyFloatModule],
+                         self._DummyObservedModule)
+
+    def test_prepare_custom_config_set_non_traceable_module_names(self):
+        prepare_custom_config = PrepareCustomConfig()
+        self.assertEqual(len(prepare_custom_config.non_traceable_module_names), 0)
+        prepare_custom_config.set_non_traceable_module_names(["module1", "module2"])
+        self.assertEqual(prepare_custom_config.non_traceable_module_names, ["module1", "module2"])
+
+    def test_prepare_custom_config_set_non_traceable_module_classes(self):
+        prepare_custom_config = PrepareCustomConfig()
+        self.assertEqual(len(prepare_custom_config.non_traceable_module_classes), 0)
+        prepare_custom_config.set_non_traceable_module_classes([self._DummyNonTraceableModule1, self._DummyNonTraceableModule2])
+        self.assertEqual(prepare_custom_config.non_traceable_module_classes,
+                         [self._DummyNonTraceableModule1, self._DummyNonTraceableModule2])
+
+    def test_prepare_custom_config_set_input_quantized_indexes(self):
+        prepare_custom_config = PrepareCustomConfig()
+        self.assertEqual(len(prepare_custom_config.input_quantized_indexes), 0)
+        prepare_custom_config.set_input_quantized_indexes([0, 1])
+        self.assertEqual(prepare_custom_config.input_quantized_indexes, [0, 1])
+
+    def test_prepare_custom_config_set_output_quantized_indexes(self):
+        prepare_custom_config = PrepareCustomConfig()
+        self.assertEqual(len(prepare_custom_config.output_quantized_indexes), 0)
+        prepare_custom_config.set_output_quantized_indexes([0, 1])
+        self.assertEqual(prepare_custom_config.output_quantized_indexes, [0, 1])
+
+    def test_prepare_custom_config_set_preserved_attributes(self):
+        prepare_custom_config = PrepareCustomConfig()
+        self.assertEqual(len(prepare_custom_config.preserved_attributes), 0)
+        prepare_custom_config.set_preserved_attributes(["attr1", "attr2"])
+        self.assertEqual(prepare_custom_config.preserved_attributes, ["attr1", "attr2"])
+
+    def _get_dummy_prepare_custom_config_dict(self):
         """
-        m = ConvModel().eval()
-        qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
-        prepare_custom_config_dict = {"typo": None}
-
-        with self.assertRaises(ValueError) as context:
-            m = prepare_fx(
-                m,
-                qconfig_dict,
-                example_inputs=(torch.randn(1, 3, 3, 3),),
-                prepare_custom_config_dict=prepare_custom_config_dict)
-        self.assertTrue(
-            'Expected prepare_custom_config_dict to have the following keys:'
-            in str(context.exception)
-        )
-        self.assertTrue('But found \'typo\' instead.' in str(context.exception))
-
-    def test_convert_custom_config_dict_validity(self):
-        r"""
-        Verifies that if a user passes an invalid key or makes a typo when
-        constructing a convert_custom_config_dict, an error will be thrown and
-        users will be notified of what keys are supported.
+        Return a dummy prepare_custom_config_dict to test PrepareCustomConfig's to_dict and from_dict methods.
         """
-        m = ConvModel().eval()
-        qconfig_dict = {"module_name_regex": [("conv*", default_qconfig)]}
-        m = prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 3, 3, 3),))
-        convert_custom_config_dict = {"typo": None}
+        return {
+            STANDALONE_MODULE_NAME_DICT_KEY: [(
+                "module1",
+                QConfigMapping(),
+                (torch.randn(3),),
+                PrepareCustomConfig(),
+                {"name", "my_backend"},
+            )],
+            STANDALONE_MODULE_CLASS_DICT_KEY: [(
+                self._DummyStandaloneModule,
+                QConfigMapping(),
+                (torch.randn(10),),
+                PrepareCustomConfig(),
+                {"name", "my_backend"},
+            )],
+            FLOAT_TO_OBSERVED_DICT_KEY: {
+                "static": {
+                    self._DummyFloatModule: self._DummyObservedModule
+                },
+            },
+            NON_TRACEABLE_MODULE_NAME_DICT_KEY: ["module2", "module3"],
+            NON_TRACEABLE_MODULE_CLASS_DICT_KEY: [self._DummyNonTraceableModule1, self._DummyNonTraceableModule2],
+            INPUT_QUANTIZED_INDEXES_DICT_KEY: [0, 1],
+            OUTPUT_QUANTIZED_INDEXES_DICT_KEY: [0, 1],
+            PRESERVED_ATTRIBUTES_DICT_KEY: ["attr1", "attr2"]
+        }
 
-        with self.assertRaises(ValueError) as context:
-            m = convert_fx(m, convert_custom_config_dict=convert_custom_config_dict)
-        self.assertTrue(
-            'Expected convert_custom_config_dict to have the following keys:'
-            in str(context.exception)
-        )
-        self.assertTrue('But found \'typo\' instead.' in str(context.exception))
+    def test_prepare_custom_config_from_dict(self):
+        prepare_custom_config_dict = self._get_dummy_prepare_custom_config_dict()
+        (sm_name, qm1, ei1, pcc1, bcd1) = prepare_custom_config_dict[STANDALONE_MODULE_NAME_DICT_KEY][0]
+        (sm_class, qm2, ei2, pcc2, bcd2) = prepare_custom_config_dict[STANDALONE_MODULE_CLASS_DICT_KEY][0]
+        sm_config_entry1 = StandaloneModuleConfigEntry(qm1, ei1, pcc1, bcd1)
+        sm_config_entry2 = StandaloneModuleConfigEntry(qm2, ei2, pcc2, bcd2)
+        prepare_custom_config = PrepareCustomConfig.from_dict(prepare_custom_config_dict)
+
+        # Standalone modules
+        self.assertEqual(len(prepare_custom_config.standalone_module_names), 1)
+        self.assertTrue(sm_name in prepare_custom_config.standalone_module_names)
+        self.assertEqual(prepare_custom_config.standalone_module_names[sm_name], sm_config_entry1)
+        self.assertEqual(len(prepare_custom_config.standalone_module_classes), 1)
+        self.assertTrue(sm_class in prepare_custom_config.standalone_module_classes)
+        self.assertEqual(prepare_custom_config.standalone_module_classes[sm_class], sm_config_entry2)
+
+        # Float to observed mapping
+        self.assertEqual(len(prepare_custom_config.float_to_observed_mapping), 1)
+        self.assertEqual(list(prepare_custom_config.float_to_observed_mapping.keys()), [QuantType.STATIC])
+        self.assertEqual(len(prepare_custom_config.float_to_observed_mapping[QuantType.STATIC]), 1)
+        self.assertTrue(self._DummyFloatModule in prepare_custom_config.float_to_observed_mapping[QuantType.STATIC])
+        self.assertEqual(prepare_custom_config.float_to_observed_mapping[QuantType.STATIC][self._DummyFloatModule],
+                         self._DummyObservedModule)
+
+        # Other
+        self.assertEqual(prepare_custom_config.non_traceable_module_names, ["module2", "module3"])
+        self.assertEqual(prepare_custom_config.non_traceable_module_classes,
+                         [self._DummyNonTraceableModule1, self._DummyNonTraceableModule2])
+        self.assertEqual(prepare_custom_config.input_quantized_indexes, [0, 1])
+        self.assertEqual(prepare_custom_config.output_quantized_indexes, [0, 1])
+        self.assertEqual(prepare_custom_config.preserved_attributes, ["attr1", "attr2"])
+
+    def test_prepare_custom_config_to_dict(self):
+        prepare_custom_config_dict = self._get_dummy_prepare_custom_config_dict()
+        (sm_name, qm1, ei1, pcc1, bcd1) = prepare_custom_config_dict[STANDALONE_MODULE_NAME_DICT_KEY][0]
+        (sm_class, qm2, ei2, pcc2, bcd2) = prepare_custom_config_dict[STANDALONE_MODULE_CLASS_DICT_KEY][0]
+        prepare_custom_config = PrepareCustomConfig() \
+            .set_standalone_module_name(sm_name, qm1, ei1, pcc1, bcd1) \
+            .set_standalone_module_class(sm_class, qm2, ei2, pcc2, bcd2) \
+            .set_float_to_observed_mapping(self._DummyFloatModule, self._DummyObservedModule) \
+            .set_non_traceable_module_names(["module2", "module3"]) \
+            .set_non_traceable_module_classes([self._DummyNonTraceableModule1, self._DummyNonTraceableModule2]) \
+            .set_input_quantized_indexes([0, 1]) \
+            .set_output_quantized_indexes([0, 1]) \
+            .set_preserved_attributes(["attr1", "attr2"])
+        # PrepareCustomConfig.to_dict also converts internal QConfigMappings and PrepareCustomConfigs to dicts
+        prepare_custom_config_dict[STANDALONE_MODULE_NAME_DICT_KEY][0] = (sm_name, qm1.to_dict(), ei1, pcc1.to_dict(), bcd1)
+        prepare_custom_config_dict[STANDALONE_MODULE_CLASS_DICT_KEY][0] = (sm_class, qm2.to_dict(), ei2, pcc2.to_dict(), bcd2)
+        self.assertEqual(prepare_custom_config.to_dict(), prepare_custom_config_dict)
+
+    def test_convert_custom_config_set_observed_to_quantized_mapping(self):
+        convert_custom_config = ConvertCustomConfig()
+        self.assertEqual(len(convert_custom_config.observed_to_quantized_mapping), 0)
+        convert_custom_config.set_observed_to_quantized_mapping(
+            self._DummyObservedModule, self._DummyQuantizedModule, QuantType.STATIC)
+        self.assertEqual(len(convert_custom_config.observed_to_quantized_mapping), 1)
+        self.assertEqual(list(convert_custom_config.observed_to_quantized_mapping.keys()), [QuantType.STATIC])
+        self.assertTrue(self._DummyObservedModule in convert_custom_config.observed_to_quantized_mapping[QuantType.STATIC])
+        self.assertEqual(convert_custom_config.observed_to_quantized_mapping[QuantType.STATIC][self._DummyObservedModule],
+                         self._DummyQuantizedModule)
+
+    def test_convert_custom_config_set_preserved_attributes(self):
+        convert_custom_config = ConvertCustomConfig()
+        self.assertEqual(len(convert_custom_config.preserved_attributes), 0)
+        convert_custom_config.set_preserved_attributes(["attr1", "attr2"])
+        self.assertEqual(convert_custom_config.preserved_attributes, ["attr1", "attr2"])
+
+    def _get_dummy_convert_custom_config_dict(self):
+        """
+        Return a dummy convert_custom_config_dict to test ConvertCustomConfig's to_dict and from_dict methods.
+        """
+        return {
+            OBSERVED_TO_QUANTIZED_DICT_KEY: {
+                "static": {
+                    self._DummyObservedModule: self._DummyQuantizedModule
+                },
+            },
+            PRESERVED_ATTRIBUTES_DICT_KEY: ["attr1", "attr2"]
+        }
+
+    def test_convert_custom_config_from_dict(self):
+        convert_custom_config_dict = self._get_dummy_convert_custom_config_dict()
+        convert_custom_config = ConvertCustomConfig.from_dict(convert_custom_config_dict)
+        self.assertEqual(len(convert_custom_config.observed_to_quantized_mapping), 1)
+        self.assertEqual(list(convert_custom_config.observed_to_quantized_mapping.keys()), [QuantType.STATIC])
+        self.assertEqual(len(convert_custom_config.observed_to_quantized_mapping[QuantType.STATIC]), 1)
+        self.assertTrue(self._DummyObservedModule in convert_custom_config.observed_to_quantized_mapping[QuantType.STATIC])
+        self.assertEqual(convert_custom_config.observed_to_quantized_mapping[QuantType.STATIC][self._DummyObservedModule],
+                         self._DummyQuantizedModule)
+        self.assertEqual(convert_custom_config.preserved_attributes, ["attr1", "attr2"])
+
+    def test_convert_custom_config_to_dict(self):
+        convert_custom_config = ConvertCustomConfig() \
+            .set_observed_to_quantized_mapping(self._DummyObservedModule, self._DummyQuantizedModule) \
+            .set_preserved_attributes(["attr1", "attr2"])
+        self.assertEqual(convert_custom_config.to_dict(), self._get_dummy_convert_custom_config_dict())
+
+    def test_fuse_custom_config_set_preserved_attributes(self):
+        fuse_custom_config = FuseCustomConfig()
+        self.assertEqual(len(fuse_custom_config.preserved_attributes), 0)
+        fuse_custom_config.set_preserved_attributes(["attr1", "attr2"])
+        self.assertEqual(fuse_custom_config.preserved_attributes, ["attr1", "attr2"])
+
+    def test_fuse_custom_config_from_dict(self):
+        fuse_custom_config_dict = {PRESERVED_ATTRIBUTES_DICT_KEY: ["attr1", "attr2"]}
+        fuse_custom_config = FuseCustomConfig.from_dict(fuse_custom_config_dict)
+        self.assertEqual(fuse_custom_config.preserved_attributes, ["attr1", "attr2"])
+
+    def test_fuse_custom_config_to_dict(self):
+        fuse_custom_config_dict = {PRESERVED_ATTRIBUTES_DICT_KEY: ["attr1", "attr2"]}
+        fuse_custom_config = FuseCustomConfig().set_preserved_attributes(["attr1", "attr2"])
+        self.assertEqual(fuse_custom_config.to_dict(), fuse_custom_config_dict)
 
     def test_remove_qconfig(self):
         class M(torch.nn.Module):
@@ -2271,7 +2462,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m,
             {"": default_qconfig},
             example_inputs=example_inputs,
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
 
         def assertAttrPreserved(m):
             self.assertTrue(hasattr(m, "preserved_attr"))
@@ -2281,7 +2472,7 @@ class TestQuantizeFx(QuantizationTestCase):
         convert_custom_config_dict = {
             "preserved_attributes": ["preserved_attr"]
         }
-        m = convert_fx(m, convert_custom_config_dict=convert_custom_config_dict)
+        m = convert_fx(m, convert_custom_config=convert_custom_config_dict)
         assertAttrPreserved(m)
 
     @skipIfNoFBGEMM
@@ -2481,7 +2672,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 original_m,
                 qconfig_dict,
                 example_inputs=example_inputs,
-                prepare_custom_config_dict=prepare_custom_config_dict)
+                prepare_custom_config=prepare_custom_config_dict)
             # calibration
             m(*example_inputs)
             # all activation observers are inserted in the top level module
@@ -2493,7 +2684,7 @@ class TestQuantizeFx(QuantizationTestCase):
             # check converted/quantized model
             m = convert_fx(
                 m,
-                convert_custom_config_dict=convert_custom_config_dict)
+                convert_custom_config=convert_custom_config_dict)
             if quant_type == QuantType.STATIC:
                 count_check = {
                     ns.call_function(torch.quantize_per_tensor) : 1,
@@ -2587,11 +2778,11 @@ class TestQuantizeFx(QuantizationTestCase):
             m,
             {"": default_qconfig},
             example_inputs=example_inputs,
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
         # make sure it works
         m = convert_fx(
             m,
-            convert_custom_config_dict=convert_custom_config_dict)
+            convert_custom_config=convert_custom_config_dict)
         # make sure it runs
         m(*example_inputs)
 
@@ -2640,7 +2831,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m = prepare_fx(
             m, qconfig_dict,
             example_inputs=({"key": torch.randn(1)},),
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
 
         node_occurrence = {
             ns.call_module(NonTraceable) : 1,
@@ -2773,7 +2964,7 @@ class TestQuantizeFx(QuantizationTestCase):
         mp = torch.ao.quantization.quantize_fx.prepare_fx(
             m, qconfig_dict,
             example_inputs=example_inputs,
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
         self.checkGraphModuleNodes(mp, expected_node_occurrence=prepare_count_check)
         mp(*example_inputs)
         mq = torch.ao.quantization.quantize_fx.convert_fx(mp)
@@ -3635,7 +3826,7 @@ class TestQuantizeFx(QuantizationTestCase):
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
             },
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
 
         # quantizeable node, quantized output
         class M2(torch.nn.Module):
@@ -3657,7 +3848,7 @@ class TestQuantizeFx(QuantizationTestCase):
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
             },
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
 
         # quantizeable node, quantized dictionary output
         class M3(torch.nn.Module):
@@ -3679,7 +3870,7 @@ class TestQuantizeFx(QuantizationTestCase):
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
             },
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
 
     def test_deepcopy_preserve_attributes(self):
         class M(torch.nn.Module):
@@ -3695,11 +3886,11 @@ class TestQuantizeFx(QuantizationTestCase):
             m,
             {"": default_qconfig},
             example_inputs=(torch.randn(1),),
-            prepare_custom_config_dict={"preserved_attributes": ["attr"]})
+            prepare_custom_config={"preserved_attributes": ["attr"]})
         self.assertTrue(hasattr(m, "attr"))
         m2 = copy.deepcopy(m)
         self.assertTrue(hasattr(m2, "attr"))
-        m = convert_fx(m, convert_custom_config_dict={"preserved_attributes": ["attr"]})
+        m = convert_fx(m, convert_custom_config={"preserved_attributes": ["attr"]})
         self.assertTrue(hasattr(m, "attr"))
         m2 = copy.deepcopy(m)
         self.assertTrue(hasattr(m2, "attr"))
@@ -4491,11 +4682,11 @@ class TestQuantizeFx(QuantizationTestCase):
         example_inputs = (torch.randn(2, 2),)
         mod_prep = torch.ao.quantization.quantize_fx.prepare_qat_fx(
             mod.train(), qconfig_dict, example_inputs=example_inputs,
-            prepare_custom_config_dict=prepare_custom_config_dict
+            prepare_custom_config=prepare_custom_config_dict
         )
         mod_prep = torch.ao.quantization.quantize_fx.prepare_qat_fx(
             mod.train(), qconfig_dict, example_inputs=example_inputs,
-            prepare_custom_config_dict=prepare_custom_config_dict
+            prepare_custom_config=prepare_custom_config_dict
         )
         self.assertTrue(
             isinstance(mod_prep.untraceable_module_class.linear, torch.nn.Linear)
@@ -5374,7 +5565,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         mp = torch.ao.quantization.quantize_fx.prepare_qat_fx(
             m, {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')},
             example_inputs=(torch.randn(1),),
-            prepare_custom_config_dict={"input_quantized_idxs": [0]})
+            prepare_custom_config={"input_quantized_idxs": [0]})
         expected_node_occurrence = {
             ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 1,
         }
@@ -6159,7 +6350,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         example_inputs = (torch.randn(1, 3, 3, 3),)
         prepared = prepare_fx(
             m, qconfig_dict, example_inputs=example_inputs,
-            prepare_custom_config_dict={"input_quantized_idxs": [0]})
+            prepare_custom_config={"input_quantized_idxs": [0]})
 
         # not runnable
         quantized = convert_fx(prepared)

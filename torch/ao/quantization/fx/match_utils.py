@@ -18,7 +18,15 @@ from .graph_module import (
     is_observed_standalone_module,
 )
 
-from typing import Any, Dict, List, Callable, Optional, Tuple, Set
+from typing import Any, Dict, List, Callable, Optional, Tuple, Type, Set
+
+
+# TODO: revisit this list. Many helper methods shouldn't be public
+__all__ = [
+    "is_match",
+    "find_matches",
+]
+
 
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
                     QConfigAny]
@@ -77,7 +85,7 @@ def find_matches(
         root_node_getter_mapping: Dict[Pattern, Callable],
         qconfig_map: Dict[str, QConfigAny],
         standalone_module_names: List[str] = None,
-        standalone_module_classes: List[Callable] = None,
+        standalone_module_classes: List[Type] = None,
         custom_module_classes: List[Any] = None) -> Dict[str, MatchResult]:
     """
     Matches the nodes in the input graph to quantization patterns, and

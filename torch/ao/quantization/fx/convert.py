@@ -57,6 +57,10 @@ from torch.ao.quantization.quantize import (
     _remove_qconfig,
     is_activation_post_process,
 )
+from .custom_config import (
+    ConvertCustomConfig,
+    PrepareCustomConfig,
+)
 from .lower_to_fbgemm import lower_to_fbgemm
 
 
@@ -83,15 +87,14 @@ __all__ = [
 def restore_state(
         observed: torch.nn.Module
 ) -> Tuple[Dict[str, Tuple[str, type]],
-           Dict[str, Any],
+           PrepareCustomConfig,
            Set[str]]:
     assert is_observed_module(observed), \
         'incoming model must be produced by prepare_fx'
-    prepare_custom_config_dict: Dict[str, Any] = \
-        observed._prepare_custom_config_dict  # type: ignore[assignment]
+    prepare_custom_config: PrepareCustomConfig = observed._prepare_custom_config  # type: ignore[assignment]
     node_name_to_scope: Dict[str, Tuple[str, type]] = observed._node_name_to_scope  # type: ignore[assignment]
     observed_node_names: Set[str] = observed._observed_node_names  # type: ignore[assignment]
-    return node_name_to_scope, prepare_custom_config_dict, observed_node_names
+    return node_name_to_scope, prepare_custom_config, observed_node_names
 
 def has_none_qconfig(node: Argument, qconfig_map: Dict[str, QConfigAny]) -> bool:
     """ Check if a node has a qconfig of None, i.e. user requested to not quantize
@@ -344,7 +347,7 @@ def convert_standalone_module(
         # we'll just add a dequantize node after this node
         insert_dequantize_node(node, model.graph)
 
-    # TODO: allow convert_custom_config_dict to override backend_config_dict
+    # TODO: allow convert_custom_config to override backend_config_dict
     # for standalone module
     # TODO: think about how to handle `is_reference` here
     quantized_standalone_module = convert(
@@ -531,7 +534,7 @@ def convert_custom_module(
 
 def convert(
         model: GraphModule, is_reference: bool = False,
-        convert_custom_config_dict: Dict[str, Any] = None,
+        convert_custom_config: Union[ConvertCustomConfig, Dict[str, Any], None] = None,
         is_standalone_module: bool = False,
         _remove_qconfig_flag: bool = True,
         qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
@@ -551,12 +554,18 @@ def convert(
     parent module, and will be quantized separately as one unit.
 
     Returns a quantized standalone module, whether input/output is quantized is
-    specified by prepare_custom_config_dict, with
+    specified by prepare_custom_config, with
     input_quantized_idxs, output_quantized_idxs, please
     see docs for prepare_fx for details
     """
-    if convert_custom_config_dict is None:
-        convert_custom_config_dict = {}
+    if convert_custom_config is None:
+        convert_custom_config = ConvertCustomConfig()
+
+    if isinstance(convert_custom_config, Dict):
+        warnings.warn(
+            "Passing a convert_custom_config_dict to convert is deprecated and will not be supported "
+            "in a future version. Please pass in a ConvertCustomConfig instead.")
+        convert_custom_config = ConvertCustomConfig.from_dict(convert_custom_config)
 
     if isinstance(qconfig_mapping, Dict):
         warnings.warn(
@@ -566,7 +575,7 @@ def convert(
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
     assert(qconfig_mapping is None or isinstance(qconfig_mapping, QConfigMapping))
 
-    node_name_to_scope, prepare_custom_config_dict, observed_node_names = restore_state(model)
+    node_name_to_scope, prepare_custom_config, observed_node_names = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
 
     # TODO this should be removed now that gpu support for quantization is being supported.
@@ -610,10 +619,8 @@ def convert(
                     "but {} was updated to {}".format(k, v, convert_qconfig_map[k])
         qconfig_map = convert_qconfig_map
 
-    custom_module_classes = get_custom_module_class_keys(
-        convert_custom_config_dict,
-        "observed_to_quantized_custom_module_class")
-    custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", {})
+    custom_module_classes = get_custom_module_class_keys(convert_custom_config.observed_to_quantized_mapping)
+    custom_module_class_mapping = convert_custom_config.observed_to_quantized_mapping
 
     if model._equalization_qconfig_map is not None:
         # If we want to do equalization then do the following:
@@ -700,10 +707,8 @@ def convert(
     # additional state to override inputs to be quantized, if specified
     # by the user
     placeholder_node_seen_cnt = 0
-    input_quantized_idxs: List[int] = prepare_custom_config_dict.get(
-        "input_quantized_idxs", [])
-    output_quantized_idxs: List[int] = prepare_custom_config_dict.get(
-        "output_quantized_idxs", [])
+    input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
+    output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
 
     if backend_config_dict is None:
         backend_config_dict = get_native_backend_config_dict()
@@ -771,7 +776,7 @@ def convert(
                     node, model.graph, modules, custom_module_class_mapping,
                     statically_quantized_custom_module_nodes)
 
-    preserved_attributes = set(convert_custom_config_dict.get("preserved_attributes", []))
+    preserved_attributes = set(convert_custom_config.preserved_attributes)
     model = QuantizedGraphModule(model, copy.deepcopy(model.graph), preserved_attributes)
 
     # remove deadcode after converting observers to quant/dequant ops
