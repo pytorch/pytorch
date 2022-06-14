@@ -752,6 +752,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.ctc_loss: (lambda log_probs, targets, input_lengths, target_lengths, blank=0,
                                        reduction='mean', zero_infinity=False: -1),
         torch.nn.functional.dropout: lambda input, p=0.5, training=True, inplace=False: -1,
+        torch.nn.functional.dropout1d: lambda input, p=0.5, training=True, inplace=False: -1,
         torch.nn.functional.dropout2d: lambda input, p=0.5, training=True, inplace=False: -1,
         torch.nn.functional.dropout3d: lambda input, p=0.5, training=True, inplace=False: -1,
         torch.nn.functional.elu: lambda input, alpha=1.0, inplace=False: -1,
