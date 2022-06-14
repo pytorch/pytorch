@@ -2055,7 +2055,7 @@ Example::
 
 
 solve = _add_docstr(_linalg.linalg_solve, r"""
-linalg.solve(A, B, *, out=None) -> Tensor
+linalg.solve(A, B, *, left=True, out=None) -> Tensor
 
 Computes the solution of a square system of linear equations with a unique solution.
 
@@ -2064,6 +2064,12 @@ this function computes the solution :math:`X \in \mathbb{K}^{n \times k}` of the
 :math:`A \in \mathbb{K}^{n \times n}, B \in \mathbb{K}^{n \times k}`, which is defined as
 
 .. math:: AX = B
+
+If :attr:`left`\ `= False`, this function returns the matrix :math:`X \in \mathbb{K}^{n \times k}` that solves the system
+
+.. math::
+
+    XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
 
 This system of linear equations has one solution if and only if :math:`A` is `invertible`_.
 This function assumes that :math:`A` is invertible.
@@ -2104,6 +2110,7 @@ Args:
                 according to the rules described above
 
 Keyword args:
+    left (bool, optional): whether to solve the system :math:`AX=B` or :math:`XA = B`. Default: `True`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Raises:

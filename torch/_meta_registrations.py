@@ -1,7 +1,11 @@
 import torch
 from torch import Tensor
 from torch._prims import utils
-from torch._prims.utils import check
+from torch._prims.utils import (
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    check,
+    elementwise_dtypes,
+)
 from torch._prims.wrappers import out_wrapper_multi, out_wrapper
 
 from typing import List, Optional
@@ -16,6 +20,45 @@ def toRealValueType(dtype):
         torch.cdouble: torch.double,
     }
     return from_complex.get(dtype, dtype)
+
+
+@torch.library.impl(meta_lib, "_fft_c2c")
+def meta_fft_c2c(self, dim, normalization, forward):
+    assert self.dtype.is_complex
+    return self.new_empty(self.size())
+
+
+@torch.library.impl(meta_lib, "_fft_r2c")
+def meta_fft_r2c(self, dim, normalization, onesided):
+    assert self.dtype.is_floating_point
+    output_sizes = list(self.size())
+
+    if onesided:
+        last_dim = dim[-1]
+        last_dim_halfsize = (output_sizes[last_dim] // 2) + 1
+        output_sizes[last_dim] = last_dim_halfsize
+
+    return self.new_empty(
+        output_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+    )
+
+
+@out_wrapper
+def meta_fft_c2r(self, dim, normalization, lastdim):
+    assert self.dtype.is_complex
+    output_sizes = list(self.size())
+    output_sizes[dim[-1]] = lastdim
+    return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
+
+
+torch.library.impl(meta_lib, "_fft_c2r")(meta_fft_c2r)
+torch.library.impl(meta_lib, "_fft_c2r.out")(meta_fft_c2r)
+
+
+@torch.library.impl(meta_lib, "conj_physical.out")
+def meta_conj_physical_out(self, out):
+    torch._resize_output_(out, self.size(), self.device)
+    return out.copy_(self)
 
 
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
@@ -41,6 +84,20 @@ def meta_max(self):
 @torch.library.impl(meta_lib, "min")
 def meta_min(self):
     return self.new_empty(())
+
+
+@torch.library.impl(meta_lib, "angle")
+def meta_angle(self):
+    _, result_dtype = elementwise_dtypes(
+        self, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    )
+    return self.new_empty(self.size(), dtype=result_dtype)
+
+
+@torch.library.impl(meta_lib, "angle.out")
+def meta_angle_out(self, out):
+    torch._resize_output_(out, self.size(), self.device)
+    return out.copy_(torch.angle(self))
 
 
 def squareCheckInputs(self, f_name):
@@ -160,7 +217,10 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
-@torch.library.impl(meta_lib, "index.Tensor")
+# Leaving this function around because a python implementation
+# of indexing shape inference is useful,
+# but not registering it to the dispatcher because we already
+# get shape inference through structured kernels
 def meta_index_Tensor(self, indices):
     check(indices, lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
@@ -443,6 +503,22 @@ def meta_embedding_bag(
         bag_size = offsets.new_empty(num_bags)
         max_indices = offsets.new_empty(bag_size.size())
     return output, offset2bag, bag_size, max_indices
+
+
+@torch.library.impl(meta_lib, "diag.out")
+def meta_diag_out(self, dim=0, *, out):
+    assert self.dim() in (1, 2), "matrix or a vector expected"
+    if self.dim() == 1:
+        sz = self.size(0) + abs(dim)
+        torch._resize_output_(out, (sz, sz), self.device)
+        return out
+    else:
+        if dim >= 0:
+            sz = min(self.size(0), self.size(1) - dim)
+        else:
+            sz = min(self.size(0) + dim, self.size(1))
+        torch._resize_output_(out, (sz,), self.device)
+        return out
 
 
 @torch.library.impl(meta_lib, "_embedding_bag_forward_only")
