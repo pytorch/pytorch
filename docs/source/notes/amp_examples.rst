@@ -42,7 +42,7 @@ Typical Mixed Precision Training
             optimizer.zero_grad()
 
             # Runs the forward pass with autocasting.
-            with autocast(device_):
+            with autocast(device_type='cuda', dtype=torch.float16):
                 output = model(input)
                 loss = loss_fn(output, target)
 
