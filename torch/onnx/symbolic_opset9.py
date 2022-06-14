@@ -19,7 +19,9 @@ from torch import _C
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
 from torch.onnx import symbolic_helper
-from torch.onnx._exporter_states import SymbolicContext  # Special case class import for readability
+from torch.onnx._exporter_states import (
+    SymbolicContext,  # Special case class import for readability
+)
 from torch.onnx._globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -5326,9 +5328,7 @@ class Prim:
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
     @staticmethod
-    def device(
-        ctx: SymbolicContext, g: _C.Graph, *inputs, **kwargs
-    ) -> None:
+    def device(ctx: SymbolicContext, g: _C.Graph, *inputs, **kwargs) -> None:
         output_type = ctx.cur_node.output().type()
         if isinstance(output_type, _C.DeviceObjType):
             return None
