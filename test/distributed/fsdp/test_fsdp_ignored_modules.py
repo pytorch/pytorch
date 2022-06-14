@@ -30,7 +30,9 @@ class Model(torch.nn.Module):
         super().__init__()
         self.layer0 = torch.nn.Linear(3, 5)
         layer1_modules = [
-            torch.nn.Linear(5, 4), torch.nn.Linear(4, 4), torch.nn.Linear(4, 4),
+            torch.nn.Linear(5, 4),
+            torch.nn.Linear(4, 4),
+            torch.nn.Linear(4, 4),
         ]
         self.layer1 = torch.nn.Sequential(*layer1_modules)
         self.layer2 = torch.nn.Linear(4, 2)
@@ -156,8 +158,10 @@ class TestFSDPIgnoredModules(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_diff_ignored_modules_across_ranks(self):
         """Tests ignoring different modules across ranks."""
-        num_ignored = self.rank + 1
-        model = ModelWithIgnoredModules(num_ignored=num_ignored).cuda()
+        # To exercise different `FlatParameter` enumerations across ranks,
+        # we wrap `layer3` with FSDP, where `layer3` is registered as a module
+        # after `layer1`, which has the variable number of ignored modules
+        model = ModelWithIgnoredModules(num_ignored=self.rank + 1).cuda()
         layer1_ignored_modules = [
             m for m in model.layer1.modules() if isinstance(m, IgnoredModule)
         ]
