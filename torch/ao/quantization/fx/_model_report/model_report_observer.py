@@ -73,9 +73,8 @@ class ModelReportObserver(ObserverBase):
         # set all the values back to their original defaults for a new epoch
         self.num_batches_tracked = 0
         self.average_batch_activation_range = torch.tensor(float(0))
-        self.epoch_activation_min, self.epoch_activation_max = torch.tensor(
-            float("inf")
-        ), torch.tensor(float("-inf"))
+        self.epoch_activation_min = torch.tensor(float("inf"))
+        self.epoch_activation_max = torch.tensor(float("-inf"))
 
     @torch.jit.export
     def calculate_qparams(self):
