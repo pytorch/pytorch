@@ -49,9 +49,7 @@ TensorView* variance(
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
 
   TORCH_CHECK(
-      correction >= 0,
-      "correction must be non-negative, but got ",
-      correction);
+      correction >= 0, "correction must be non-negative, but got ", correction);
 
   const int kNumberOfDims =
       TensorDomain::noReductions(x->getMaybeRFactorDomain()).size();
