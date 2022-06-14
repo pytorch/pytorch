@@ -333,13 +333,16 @@ void AddRequiresGradToDifferentiableGraph(Node* diff_graph) {
 
     // this node doesn't have any requires_grad info.
     // look at its uses to try to find a profile node.
-    c10::optional<bool> requiresGrad = c10::nullopt;
+    std::vector<bool> requiresGradResults;
     for (auto& use : diff_graph->output(i)->uses()) {
+      std::cerr << "--> user " << *use.user << std::endl;
+    }
+    for (auto& use : diff_graph->output(i)->uses()) {
+      std::cerr << "--> user " << *use.user << std::endl;
       if (use.user->kind() == prim::profile) {
         c10::optional<bool> req_grad_use;
         if ((req_grad_use = getProfileNodeRequiresGrad(use.user)).has_value()) {
-          requiresGrad = req_grad_use;
-          break;
+          requiresGradResults.push_back(*req_grad_use);
         }
       }
 
@@ -353,20 +356,20 @@ void AddRequiresGradToDifferentiableGraph(Node* diff_graph) {
             c10::optional<bool> req_grad_use;
             if ((req_grad_use = getProfileNodeRequiresGrad(dg_use.user))
                     .has_value()) {
-              requiresGrad = req_grad_use;
-              break;
+              requiresGradResults.push_back(*req_grad_use);
             }
           }
-        }
-        if (requiresGrad) {
-          break;
         }
       }
     }
 
-    if (requiresGrad.has_value()) {
+    if (!requiresGradResults.empty()) {
+      bool requires_grad = std::any_of(
+          requiresGradResults.begin(),
+          requiresGradResults.end(),
+          [](const bool& x) { return x; });
       output->setType(output->type()->expectRef<TensorType>().withRequiresGrad(
-          requiresGrad));
+          requires_grad));
     }
   }
 }
