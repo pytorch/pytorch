@@ -7,6 +7,7 @@ import random
 import unittest
 import warnings
 import subprocess
+import tempfile
 import os
 import torch
 import torch.nn as nn
@@ -4535,6 +4536,42 @@ class TestNoRegression(TestCase):
         a = torch.ones(2, device="mps")
 
         b = a.new(1)
+
+    def test_serialization_map_location(self):
+
+        # Ensures that cpu Tensor can be loaded on mps
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.rand(2)
+            torch.save(x, f)
+
+            f.seek(0)
+            x2 = torch.load(f, map_location="mps")
+
+            self.assertEqual(x, x2)
+            self.assertEqual(x2.device.type, "mps")
+
+        # Ensures that mps Tensors can be loaded on mps
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.rand(2, device="mps")
+            torch.save(x, f)
+
+            f.seek(0)
+            x2 = torch.load(f)
+
+            self.assertEqual(x, x2)
+            self.assertEqual(x2.device.type, "mps")
+
+        # Ensures that mps Tensors can be loaded on cpu
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.rand(2, device="mps")
+            torch.save(x, f)
+
+            f.seek(0)
+            x2 = torch.load(f, map_location="cpu")
+
+            self.assertEqual(x, x2)
+            self.assertEqual(x2.device.type, "cpu")
+
 
 
 
