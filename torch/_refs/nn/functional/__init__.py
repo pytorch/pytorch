@@ -248,8 +248,7 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # hardshrink(x) = x if x > lambd
     #               = x if x < -lambd
     #               = 0 otherwise
-    zero_mask = refs.logical_and(refs.ge(a, -lambd), refs.le(a, lambd))
-    return refs.where(zero_mask, 0, a)
+    return refs.where(abs(a) > abs(lambd), a, 0)
 
 
 @out_wrapper
@@ -258,17 +257,12 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     # softshrink(x) = x - lambd if x > lambd
     #               = x + lambd if x < -lambd
     #               = 0 otherwise
-    ge_mask = refs.ge(a, lambd)
-    a = refs.where(ge_mask, a - lambd, a)
-    le_mask = refs.le(a, -lambd)
-    a = refs.where(le_mask, a + lambd, a)
-
-    # TODO: Replace with refs.logical_not when it exists!
-    def logical_not(x):
-        return refs.eq(x, False)
-
-    zero_mask = logical_not(refs.logical_or(ge_mask, le_mask))
-    return refs.where(zero_mask, 0, a)
+    ge_mask = a > lambd
+    le_mask = a < -lambd
+    zero_mask = torch.logical_not(refs.logical_or(ge_mask, le_mask))
+    result = refs.where(ge_mask, a - lambd, a)
+    result = refs.where(le_mask, a + lambd, result)
+    return refs.where(zero_mask, 0, result)
 
 
 # Losses

@@ -20174,6 +20174,9 @@ python_ref_db = [
         skips=(
             # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # RuntimeError: no _refs support for torch.logical_not
+            # Should pass once `refs.logical_not` is implemented
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
         )
     ),
     #
