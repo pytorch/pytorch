@@ -358,6 +358,7 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
   auto jit_source_offset = storeExtraFilesAndGetOffset(fbb, jit_sources);
   std::vector<uint32_t> jit_constants_indexes;
   jit_constants_indexes.reserve(jit_constants.size());
+  const uint32_t mobile_ivalue_size = ivalue_offsets_.size();
   for (const auto& ival : jit_constants) {
     jit_constants_indexes.emplace_back(storeIValueAndGetIndex(fbb, ival));
   }
@@ -408,7 +409,8 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
       fbb.CreateVector(obj_types_offset_),
       jit_source_offset,
       fbb.CreateVector(jit_constants_indexes),
-      operator_version);
+      operator_version,
+      mobile_ivalue_size);
   FinishModuleBuffer(fbb, mod);
   return fbb.Release();
 }
