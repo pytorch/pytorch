@@ -22,18 +22,17 @@ MPSGraphTensor* chainViewOperation(MPSGraph* mpsGraph, IntArrayRef size,
   const size_t shape_size = size.size();
 
   @autoreleasepool {
-      int32_t* sizeArray = new int32_t[shape_size];
+      std::vector<int32_t> sizeArray;
       const int64_t int_max = std::numeric_limits<int32_t>::max();
       for (int i = 0; i < shape_size; i++) {
         TORCH_CHECK(size[i] <= int_max);
         sizeArray[i] = static_cast<int32_t>(size[i]);
       }
-      NSData* shapeData = [NSData dataWithBytes:sizeArray
+      NSData* shapeData = [NSData dataWithBytes:sizeArray.data()
                                          length:shape_size * sizeof(int32_t)];
       MPSGraphTensor* shapeTensor =  [mpsGraph constantWithData:shapeData
                                                           shape:@[[NSNumber numberWithUnsignedInteger: shape_size]]
                                                        dataType:MPSDataTypeInt32];
-      delete[] sizeArray;
 
       MPSGraphTensor* storageOffsetTensor = [mpsGraph constantWithScalar:storage_offset
                                                                 dataType:MPSDataTypeInt32];
