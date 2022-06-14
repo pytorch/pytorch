@@ -130,6 +130,8 @@ class Interpreter:
 
             if node.op == 'output':
                 output_val = self.env[node]
+                if output_val is None:
+                    return (None,)
                 return self.module.graph.process_outputs(output_val) if enable_io_processing else output_val
 
     @compatibility(is_backward_compatible=True)

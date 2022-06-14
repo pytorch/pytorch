@@ -58,13 +58,13 @@ from .match_utils import (
     find_matches,
 )
 
-from ..utils import _parent_name
 from .utils import (
     get_custom_module_class_keys,
     all_node_args_have_no_tensors,
     assert_and_get_unique_device,
     get_non_observable_arg_indexes_and_types,
     get_new_attr_name_with_prefix,
+    get_all_args_as_positional_args,
     NON_QUANTIZABLE_WEIGHT_OPS,
     WEIGHT_INDEX_DICT,
     BIAS_INDEX_DICT,
@@ -76,6 +76,7 @@ from torch.ao.quantization.quantize import (
 )
 
 from ..utils import (
+    _parent_name,
     get_qconfig_dtypes,
     get_swapped_custom_module_class,
     activation_is_statically_quantized,
@@ -220,8 +221,9 @@ def is_observer_in_same_graph(node, modules, node_name_to_target_dtype):
     in a different place rather than not observed.
     """
     node_output_dtype = get_arg_target_dtype_as_output(node, modules, node_name_to_target_dtype)
-    if len(node.args) > 0 and isinstance(node.args[0], Node):
-        if node_output_dtype == torch.quint8 and node.args[0].op == 'placeholder':
+    all_node_args = get_all_args_as_positional_args(node)
+    if len(all_node_args) > 0 and isinstance(all_node_args[0], Node):
+        if node_output_dtype == torch.quint8 and all_node_args[0].op == 'placeholder':
             return False
     return True
 
@@ -565,7 +567,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             # qconfig_dict and backend_config_dict to support more general configurations
             # of dynamic quantization, e.g. dynamically quantizing second input, third
             # input etc.
-            (arg_as_input_target_compute_dtype in [torch.quint8, torch.int8, torch.float16]) and arg is node.args[0]
+            (arg_as_input_target_compute_dtype in [torch.quint8, torch.int8, torch.float16]) and arg is get_all_args_as_positional_args(node)[0]
         )
 
     else:
@@ -579,7 +581,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
         # for args, this is set to the index of the current arg
         # for kwargs, this is left at None
         cur_input_idx = None
-        for arg_idx, arg_to_check in enumerate(node.args):
+        for arg_idx, arg_to_check in enumerate(get_all_args_as_positional_args(node)):
             if arg_to_check is arg:
                 cur_input_idx = arg_idx
                 break
@@ -902,7 +904,7 @@ def maybe_propagate_dtype_for_node(
     root_node, _, pattern, qhandler, qconfig = matches.get(
         node.name, (None, None, None, None, None))
     if qhandler is not None and qhandler.is_general_tensor_value_op():
-        prev_node = node.args[0]
+        prev_node = get_all_args_as_positional_args(node)[0]
         if isinstance(prev_node, Node):
             maybe_propagate_dtype_for_node(
                 prev_node, target_dtype, node_name_to_target_dtype, matches)
@@ -929,7 +931,7 @@ def propagate_dtypes_for_known_nodes(
             non_observable_indices = non_observable_arg_dict[arg_type](node)
 
             for index in non_observable_indices:
-                arg = node.args[index]
+                arg = get_all_args_as_positional_args(node)[index]
 
                 # when an argument is a tuple, it does not show up as another node so we need to go through
                 # all elements of the tuple manually
@@ -965,9 +967,10 @@ def maybe_make_input_output_share_observers(
     """
     first_arg = None
     # find the first non-Tensor arg
-    for i in range(len(node.args)):
-        if isinstance(node.args[i], (Node, list, tuple)):
-            first_arg = node.args[i]
+    all_node_args = get_all_args_as_positional_args(node)
+    for i in range(len(all_node_args)):
+        if isinstance(all_node_args[i], (Node, list, tuple)):
+            first_arg = all_node_args[i]
             break
 
     # if there is no non-Tensor arg, return directly
@@ -993,8 +996,9 @@ def maybe_make_input_output_share_observers(
             return False
         # trace back the args until we found the first Tensor/Node
         trace_back_node = None
-        for i in range(len(first_arg_arg.args)):
-            trace_back_node = first_arg_arg.args[i]
+        all_first_arg_arg_args = get_all_args_as_positional_args(first_arg_arg)
+        for i in range(len(all_first_arg_arg_args)):
+            trace_back_node = all_first_arg_arg_args[i]
             if isinstance(trace_back_node, Node):
                 break
         if trace_back_node is None:
@@ -1020,7 +1024,7 @@ def maybe_make_input_output_share_observers(
                 # failed to trace back since no input arg for the current node
                 if len(input_arg.args) < 1:
                     return False
-                input_arg = input_arg.args[0]
+                input_arg = get_all_args_as_positional_args(input_arg)[0]
                 iteration_guard += 1
                 if iteration_guard > 10000:
                     raise AssertionError('Unable to find observer of previous node')
@@ -1490,7 +1494,7 @@ def prepare(
     if is_qat:
         module_to_qat_module = get_module_to_qat_module(backend_config_dict)
         qat_swap_modules(model, module_to_qat_module)
-        update_qconfig_for_qat(qconfig_mapping, {})
+        update_qconfig_for_qat(qconfig_mapping, module_to_qat_module)
 
     # mapping from fully qualified module name to module instance
     # for example,

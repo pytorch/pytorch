@@ -109,11 +109,11 @@ class Embedding(torch.nn.Module):
         self._packed_params = EmbeddingPackedParams(num_embeddings, embedding_dim, dtype)
         self._packed_params.set_weight(qweight)
 
-    def forward(self, indices: Tensor) -> Tensor:
+    def forward(self, input: Tensor) -> Tensor:
         if self.dtype == torch.quint4x2:
-            return torch.ops.quantized.embedding_4bit(self._packed_params._packed_weight, indices)
+            return torch.ops.quantized.embedding_4bit(self._packed_params._packed_weight, input)
         else:
-            return torch.ops.quantized.embedding_byte(self._packed_params._packed_weight, indices)
+            return torch.ops.quantized.embedding_byte(self._packed_params._packed_weight, input)
 
     def _get_name(self):
         return 'QuantizedEmbedding'
@@ -224,14 +224,14 @@ class EmbeddingBag(Embedding):
         self.include_last_offset = include_last_offset
         self.dtype = dtype
 
-    def forward(self, indices: Tensor, offsets: Optional[Tensor] = None, per_sample_weights: Optional[Tensor] = None,
+    def forward(self, input: Tensor, offsets: Optional[Tensor] = None, per_sample_weights: Optional[Tensor] = None,
                 compressed_indices_mapping: Optional[Tensor] = None) -> Tensor:
         if self.dtype == torch.quint4x2:
-            return torch.ops.quantized.embedding_bag_4bit(self._packed_params._packed_weight, indices, offsets, False, 0,
+            return torch.ops.quantized.embedding_bag_4bit(self._packed_params._packed_weight, input, offsets, False, 0,
                                                           self.pruned_weights, per_sample_weights, compressed_indices_mapping,
                                                           self.include_last_offset)
         else:
-            return torch.ops.quantized.embedding_bag_byte(self._packed_params._packed_weight, indices, offsets, False, 0,
+            return torch.ops.quantized.embedding_bag_byte(self._packed_params._packed_weight, input, offsets, False, 0,
                                                           self.pruned_weights, per_sample_weights, compressed_indices_mapping,
                                                           self.include_last_offset)
 

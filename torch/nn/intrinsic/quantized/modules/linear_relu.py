@@ -24,9 +24,9 @@ class LinearReLU(nnq.Linear):
     def __init__(self, in_features, out_features, bias=True, dtype=torch.qint8):
         super().__init__(in_features, out_features, bias, dtype)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
         return torch.ops.quantized.linear_relu(
-            x, self._packed_params._packed_params, self.scale, self.zero_point)
+            input, self._packed_params._packed_params, self.scale, self.zero_point)
 
     def _get_name(self):
         return 'QuantizedLinearReLU'

@@ -157,9 +157,9 @@ class Linear(WeightedQuantizedModule):
     def __repr__(self):
         return hide_packed_params_repr(self, LinearPackedParams)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
         return torch.ops.quantized.linear(
-            x, self._packed_params._packed_params, self.scale, self.zero_point)
+            input, self._packed_params._packed_params, self.scale, self.zero_point)
 
     # ===== Serialization methods =====
     # The special consideration here is that we have to unpack the weights into their

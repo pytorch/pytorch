@@ -36,6 +36,7 @@ from torch.ao.quantization.backend_config.utils import (
     get_pattern_to_dtype_configs,
     get_fused_module_classes,
     get_qat_module_classes,
+    get_module_to_qat_module,
 )
 from torch.ao.quantization.backend_config import get_native_backend_config_dict
 from .graph_module import (
@@ -50,6 +51,7 @@ from .utils import (
     create_getattr_from_value,
     collect_producer_nodes,
     graph_module_from_producer_nodes,
+    get_all_args_as_positional_args,
     WEIGHT_INDEX_DICT,
 )
 
@@ -108,7 +110,7 @@ def run_weight_observers(observed: GraphModule) -> None:
     for node in observed.graph.nodes:
         if node.op != 'call_function' or node.target not in WEIGHT_INDEX_DICT:
             continue
-        for i, node_arg in enumerate(node.args):
+        for i, node_arg in enumerate(get_all_args_as_positional_args(node)):
             if i not in WEIGHT_INDEX_DICT[node.target]:
                 continue
             # node_arg is weight
@@ -155,7 +157,7 @@ def duplicate_dequantize_node(quantized: QuantizedGraphModule) -> QuantizedGraph
             if len(users) > 1:
                 for user in users:
                     with quantized.graph.inserting_before(node):
-                        new_node = quantized.graph.create_node("call_method", "dequantize", node.args, {})
+                        new_node = quantized.graph.create_node("call_method", "dequantize", tuple(get_all_args_as_positional_args(node)), {})
                     user.replace_input_with(node, new_node)
                 quantized.graph.erase_node(node)
 
@@ -175,7 +177,7 @@ def remove_extra_dequantize(quantized: QuantizedGraphModule) -> QuantizedGraphMo
 
         if len(dequant_users) > 1:
             with quantized.graph.inserting_after(node):
-                unique_dq = quantized.graph.create_node("call_method", "dequantize", users[0].args, {})
+                unique_dq = quantized.graph.create_node("call_method", "dequantize", tuple(get_all_args_as_positional_args(users[0])), {})
             for dequant in dequant_users:
                 dequant.replace_all_uses_with(unique_dq)
                 quantized.graph.erase_node(dequant)
@@ -190,9 +192,9 @@ def remove_quant_dequant_pairs(quantized: QuantizedGraphModule) -> QuantizedGrap
             users = list(node.users)
             user = users[0] if users else None
             if len(users) == 1 and user.op == "call_method" and user.target == "dequantize":
-                user.replace_all_uses_with(node.args[0])
+                user.replace_all_uses_with(get_all_args_as_positional_args(node)[0])
                 quantized.graph.erase_node(user)
-                orig_args = list(node.args)
+                orig_args = list(get_all_args_as_positional_args(node))
                 quantized.graph.erase_node(node)
                 for arg in orig_args:
                     if isinstance(arg, Node) and len(list(arg.users)) == 0:
@@ -208,7 +210,7 @@ def maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph):
     if isinstance(arg, Node) and \
        arg.op == "call_method" and \
        arg.target == "dequantize":
-        quantize_node = arg.args[0]
+        quantize_node = get_all_args_as_positional_args(arg)[0]
         # we only replace the specific use since dequantize could be used by other nodes
         # as well
         node.replace_input_with(arg, quantize_node)
@@ -232,7 +234,7 @@ def get_module_path_and_prefix(
     TODO: this logic is hacky, we should think about how to remove it or make it more
     general
     """
-    observed_node = obs_node.args[0]
+    observed_node = get_all_args_as_positional_args(obs_node)[0]
     # an observer can be inserted for both input of the next operator or output of the previous
     # operator (they can be the same)
     # this flag identifies if the observer is inserted only because the observed node is
@@ -322,12 +324,12 @@ def convert_standalone_module(
         ._standalone_module_input_quantized_idxs\
         .tolist()  # type: ignore[operator]
     # remove the dequantize nodes for inputs
-    args = list(node.args)
+    args = list(get_all_args_as_positional_args(node))
     for idx in range(len(args)):
         if idx in sm_input_quantized_idxs:
             arg = args[idx]
             if arg.op == "call_method" and arg.target == "dequantize":  # type: ignore[union-attr]
-                quantize_node = arg.args[0]  # type: ignore[union-attr]
+                quantize_node = get_all_args_as_positional_args(arg)[0]  # type: ignore[union-attr]
                 node.replace_input_with(arg, quantize_node)
                 if len(arg.users) == 0:  # type: ignore[union-attr]
                     model.graph.erase_node(arg)
@@ -500,7 +502,7 @@ def convert_custom_module(
     if activation_is_statically_quantized(qconfig):
         statically_quantized_custom_module_nodes.add(node)
         # remove the previous dequant node
-        prev_node = node.args[0]
+        prev_node = get_all_args_as_positional_args(node)[0]
         # expecting the input node for a custom module node to be a Node
         assert isinstance(prev_node, Node), \
             f"Expecting the argument for custom module node to be a Node, but got {prev_node}"
@@ -510,7 +512,7 @@ def convert_custom_module(
             # Before: quantize - dequantize - custom - module
             # After: quantize - custom - module
             #              \ - dequantize
-            node.replace_input_with(prev_node, prev_node.args[0])
+            node.replace_input_with(prev_node, get_all_args_as_positional_args(prev_node)[0])
 
             # Remove the dequantize node if it doesn't have other users
             if len(prev_node.users) == 0:
@@ -558,6 +560,9 @@ def convert(
     if convert_custom_config_dict is None:
         convert_custom_config_dict = {}
 
+    if backend_config_dict is None:
+        backend_config_dict = get_native_backend_config_dict()
+
     if isinstance(qconfig_mapping, Dict):
         warnings.warn(
             "Passing a QConfig dictionary to convert is deprecated and will not be supported "
@@ -595,7 +600,8 @@ def convert(
         modules_copy = copy.deepcopy(modules)
 
         if model._is_qat:
-            update_qconfig_for_qat(qconfig_mapping, {})
+            module_to_qat_module = get_module_to_qat_module(backend_config_dict)
+            update_qconfig_for_qat(qconfig_mapping, module_to_qat_module)
         update_qconfig_for_fusion(model, qconfig_mapping)
 
         compare_prepare_convert_qconfig_mappings(prepare_qconfig_mapping, qconfig_mapping)  # type: ignore[arg-type]
@@ -676,7 +682,7 @@ def convert(
                     # be registered as an attribute in qparams dict itself
                     # remove the prefix and suffix to get the keyword for quantize operator
                     arg_keyword = key[1:-1]
-                    if key in ['_scale_', '_zero_point_']:
+                    if key in ['_scale_', '_zero_point_', '_scales_', '_zero_points_']:
                         # For scale and zero_point values we register them as buffers in the root module.
                         # TODO: maybe need more complex attr name here
                         qparam_node = create_getattr_from_value(model, graph, module_path + prefix + key, value)
@@ -708,8 +714,6 @@ def convert(
     output_quantized_idxs: List[int] = prepare_custom_config_dict.get(
         "output_quantized_idxs", [])
 
-    if backend_config_dict is None:
-        backend_config_dict = get_native_backend_config_dict()
     root_module_to_quantized_reference_module = get_root_module_to_quantized_reference_module(backend_config_dict)
     # convert tuples so that it can work with isinstance(module, tuple_of_classes)
     root_module_classes = tuple(root_module_to_quantized_reference_module.keys())
@@ -735,7 +739,7 @@ def convert(
             # output_quantized_idxs override.
             # Remove the dequantize operator for the node in the end if any
             return_node = node
-            output = node.args[0]
+            output = get_all_args_as_positional_args(node)[0]
             # outputs can be Node, list, tuple, dict, other cases are not supported yet
             if isinstance(output, (list, tuple)):
                 for idx in output_quantized_idxs:

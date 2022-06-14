@@ -10,6 +10,7 @@ from torch.fx.graph import (
     Graph,
     Node,
 )
+from torch.fx.node import Argument
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union, Type
 from collections import namedtuple
@@ -128,7 +129,7 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined]
-            qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
+            qparams = {"_scales_": scale, "_zero_points_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
             quantize_op = torch.quantize_per_channel
         else:
             scale = float(scale)
@@ -205,7 +206,7 @@ def quantize_node(
     inputs = [in_node]
 
     for key, value in qparams.items():
-        if key in ['_scale_', '_zero_point_']:
+        if key in ['_scale_', '_zero_point_', '_scales_', '_zero_points_']:
             # For scale and zero_point values we register them as buffers in the root module.
             qparam_node = create_getattr_from_value(root_module, graph, module_path + prefix + key, value)
             inputs.append(qparam_node)
@@ -315,6 +316,8 @@ def collect_producer_nodes(node: Node) -> Optional[List[Node]]:
     frontier = [node]
     while frontier:
         node = frontier.pop()
+        if node is None:
+            return None
         all_args = list(node.args) + list(node.kwargs.values())
         for arg in all_args:
             if not isinstance(arg, Node):
@@ -593,3 +596,10 @@ def create_node_from_old_node_preserve_meta(
     new_node = quantized_graph.create_node(*create_node_args)
     new_node.stack_trace = old_node.stack_trace
     return new_node
+
+def get_all_args_as_positional_args(node: Node) -> List[Argument]:
+    """ Get a list of args and kwargs as positional args
+    """
+    all_args = list(node.args)
+    all_args.extend(list(node.kwargs.values()))
+    return all_args
