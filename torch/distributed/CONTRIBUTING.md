@@ -46,7 +46,7 @@ The RPC framework consists of several additional components:
 
 ### RPC Agents
 
-The core C++ interface of the RPC framework can be found in [rpc_agent.h](../csrc/distributed/rpc/rpc_agent.h) and the TensorPipe and ProcessGroupGloo implementations can be found at [process_group_agent.h](../csrc/distributed/rpc/process_group_agent.h) and [tensorpipe_agent.h](../csrc/distributed/rpc/tensorpipe_agent.h) respectively.
+The core C++ interface of the RPC framework can be found in [rpc_agent.h](../csrc/distributed/rpc/rpc_agent.h) and the TensorPipe implementation can be found at [tensorpipe_agent.h](../csrc/distributed/rpc/tensorpipe_agent.h).
 
 [request_callback.h](../csrc/distributed/rpc/request_callback.h) and [request_callback_impl.h](../csrc/distributed/rpc/request_callback_impl.h) deal with how to handle RPC calls on remote servers.
 
@@ -97,8 +97,12 @@ python test/distributed/rpc/cuda/test_tensorpipe_agent.py
 # Run the RPC test suite for the FaultyAgent
 python test/distributed/rpc/test_faulty_agent.py
 
-# Run a specific test method.
-pytest -k test_self_add test/distributed/rpc/test_process_group_agent.py
+# Run a specific test method. Uses pytest (pip install pytest).
+# ProcessGroup gloo/nccl test
+pytest -vs test/distributed/test_c10d_common.py -k test_multi_limit_single_dtype
+
+# RPC test
+pytest -vs test/distributed/rpc/test_tensorpipe_agent.py -k test_get_worker_infos
 ```
 
 Note that the RPC framework is by default only tested with filesystem [initialization](https://pytorch.org/docs/stable/distributed.html#initialization). To run tests with TCP initialization, set the
