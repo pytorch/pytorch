@@ -2020,23 +2020,21 @@ class TestLRScheduler(TestCase):
         self._test(scheduler, targets, epochs)
 
     @parametrize("T_mult", [1, 2, 4])
-    def test_CosineAnnealingWarmRestarts_lr1(self):
+    def test_CosineAnnealingWarmRestarts_lr1(self, T_mult):
         iters = 100
         eta_min = 1e-10
-        T_mults = [1, 2, 4]
-        for T_mult in T_mults:
-            T_i = 10
-            T_cur = 0
-            targets = [[0.05], [0.5]]
-            scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
-            for _ in range(1, iters, 1):
-                T_cur += 1
-                if T_cur >= T_i:
-                    T_cur = T_cur - T_i
-                    T_i = int(T_mult) * T_i
-                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
-                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
-            self._test(scheduler, targets, iters)
+        T_i = 10
+        T_cur = 0
+        targets = [[0.05], [0.5]]
+        scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
+        for _ in range(1, iters, 1):
+            T_cur += 1
+            if T_cur >= T_i:
+                T_cur = T_cur - T_i
+                T_i = int(T_mult) * T_i
+            targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+            targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+        self._test(scheduler, targets, iters)
 
     def test_CosineAnnealingWarmRestarts_lr2(self):
         iters = 30

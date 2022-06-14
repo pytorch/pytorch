@@ -78,8 +78,7 @@ class _LRScheduler(object):
         # Increment LR registration count
         # Tracks the number of schedulers which this optimizer is registered to
         self._scheduler_id = getattr(self.optimizer, "_lr_registration_count", 0)
-        self._scheduler_id += 1
-        setattr(self.optimizer, "_lr_registration_count", self._scheduler_id)
+        self.optimizer._lr_registration_count = self._scheduler_id + 1
 
         with self.init_optimizer_lr():
             self.step()
@@ -661,7 +660,7 @@ class SequentialLR(_LRScheduler):
         self.optimizer = optimizer
         self._init_step()
 
-    def get_scheduler(self):
+    def _get_scheduler(self):
         """
         Get the current scheduler and its index
         """
@@ -672,7 +671,7 @@ class SequentialLR(_LRScheduler):
         """Call step on the appropriate scheduler once more on initialization
         in order to correctly set the current learning rate
         """
-        _, scheduler = self.get_scheduler()
+        _, scheduler = self._get_scheduler()
         # decrement the last epoch of the appropriate scheduler, so that it
         # remains the same after the step
         scheduler.last_epoch -= 1
@@ -685,7 +684,7 @@ class SequentialLR(_LRScheduler):
 
     def step(self):
         self.last_epoch += 1
-        idx, scheduler = self.get_scheduler()
+        idx, scheduler = self._get_scheduler()
         if idx > 0 and self._milestones[idx - 1] == self.last_epoch:
             scheduler.step(0)
         else:
