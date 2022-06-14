@@ -24,7 +24,12 @@ class ImplementedSparsifier(BaseDataSparsifier):
         linear_state['step_count'] = linear_state.get('step_count', 0) + 1
 
 
-class TestBaseDataSparsiferType(TestCase):
+class TestBaseDataSparsiferRunner(TestCase):
+    r"""This helper test class takes in any supported type of and runs some tests.
+        The user is required to pass in the data that needs to sparsified and the
+        runner will run some tests that needs to be passed in order for the data
+        type to be supported.
+    """
     def __init__(self, data_list, defaults, data_with_config):
         self.data_list = data_list
         self.defaults = defaults
@@ -173,7 +178,7 @@ class TestBaseDataSparsifier(TestCase):
         defaults: default config for the above data in data_list
         data_with_config: list of dictionaries defining name, data and config (look test_tensors())
 
-    Once the above is done, create an instance of TestBaseDataSparsifierType and call all it's functions
+    Once the above is done, create an instance of TestBaseDataSparsifierType and call all the run_tests()
     """
     def test_tensors(self):
         tensor1, tensor2, tensor3 = torch.randn(3, 3), torch.randn(4, 4), torch.randn(5, 5)
@@ -189,8 +194,8 @@ class TestBaseDataSparsifier(TestCase):
                 'name': 'tensor5', 'data': tensor5, 'config': {'test': 8}
             },
         ]
-        tensor_test = TestBaseDataSparsiferType(data_list=data_list, defaults=defaults,
-                                                data_with_config=data_with_config)
+        tensor_test = TestBaseDataSparsiferRunner(data_list=data_list, defaults=defaults,
+                                                  data_with_config=data_with_config)
         tensor_test.run_tests()
 
     def test_nn_parameters(self):
@@ -207,8 +212,8 @@ class TestBaseDataSparsifier(TestCase):
                 'name': 'param5', 'data': param5, 'config': {'test': 8}
             },
         ]
-        param_test = TestBaseDataSparsiferType(data_list=data_list, defaults=defaults,
-                                               data_with_config=data_with_config)
+        param_test = TestBaseDataSparsiferRunner(data_list=data_list, defaults=defaults,
+                                                 data_with_config=data_with_config)
         param_test.run_tests()
 
     def test_nn_embeddings(self):
@@ -227,6 +232,6 @@ class TestBaseDataSparsifier(TestCase):
                 'name': 'emb3_bag', 'data': emb3_bag, 'config': {'test': 8}
             },
         ]
-        emb_test = TestBaseDataSparsiferType(data_list=data_list, defaults=defaults,
-                                             data_with_config=data_with_config)
+        emb_test = TestBaseDataSparsiferRunner(data_list=data_list, defaults=defaults,
+                                               data_with_config=data_with_config)
         emb_test.run_tests()
