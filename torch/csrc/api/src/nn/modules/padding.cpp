@@ -8,8 +8,7 @@ namespace torch {
 namespace nn {
 
 template <size_t D, typename Derived>
-ReflectionPadImpl<D, Derived>::ReflectionPadImpl(
-    const ReflectionPadOptions<D>& options_)
+ReflectionPadImpl<D, Derived>::ReflectionPadImpl(const ReflectionPadOptions<D>& options_)
     : options(options_) {}
 
 template <size_t D, typename Derived>
@@ -33,8 +32,7 @@ template class ReflectionPadImpl<3, ReflectionPad3dImpl>;
 // ============================================================================
 
 template <size_t D, typename Derived>
-ReplicationPadImpl<D, Derived>::ReplicationPadImpl(
-    const ReplicationPadOptions<D>& options_)
+ReplicationPadImpl<D, Derived>::ReplicationPadImpl(const ReplicationPadOptions<D>& options_)
     : options(options_) {}
 
 template <size_t D, typename Derived>
@@ -74,8 +72,7 @@ Tensor ZeroPad2dImpl::forward(const Tensor& input) {
 // ============================================================================
 
 template <size_t D, typename Derived>
-ConstantPadImpl<D, Derived>::ConstantPadImpl(
-    const ConstantPadOptions<D>& options_)
+ConstantPadImpl<D, Derived>::ConstantPadImpl(const ConstantPadOptions<D>& options_)
     : options(options_) {}
 
 template <size_t D, typename Derived>
@@ -83,15 +80,14 @@ void ConstantPadImpl<D, Derived>::reset() {}
 
 template <size_t D, typename Derived>
 Tensor ConstantPadImpl<D, Derived>::forward(const Tensor& input) {
-  return F::detail::pad(
-      input, options.padding(), torch::kConstant, options.value());
+  return F::detail::pad(input, options.padding(), torch::kConstant, options.value());
 }
 
 template <size_t D, typename Derived>
 void ConstantPadImpl<D, Derived>::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::ConstantPad" << D << "d"
-         << "(padding=" << options.padding() << ", value=" << options.value()
-         << ")";
+         << "(padding=" << options.padding()
+         << ", value=" << options.value() << ")";
 }
 
 template class ConstantPadImpl<1, ConstantPad1dImpl>;

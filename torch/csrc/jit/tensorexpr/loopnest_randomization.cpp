@@ -574,6 +574,9 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
 
         case COMPRESS_BUFFER: {
           auto buffers = NodeFinder<Buf>::find(l.root_stmt());
+          if (buffers.size() < 0) {
+            break;
+          }
           int buffer_n = std::rand() % (int)buffers.size();
           auto buffer = buffers[buffer_n];
 
@@ -586,6 +589,9 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
 
         case COMPRESS_ALL_BUFFERS: {
           auto buffers = BufFinder::find(l.root_stmt());
+          if (buffers.size() < 0) {
+            break;
+          }
 
           message = "compressAllBuffers(l.root_stmt());\n";
           randomization_helper::printHistory(n_transform, message);

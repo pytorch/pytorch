@@ -6,6 +6,9 @@
 
 set -ex
 
+# shellcheck disable=SC2034
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
+
 TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
 TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
 TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib
@@ -22,15 +25,12 @@ fi
 
 # Get fully qualified path using realpath
 if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
-  CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
+  CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
 fi
 
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-
-echo "Environment variables"
-env
 
 echo "Testing pytorch"
 
@@ -90,7 +90,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
+# --user breaks ppc64le builds and these packages are already in ppc64le docker
+if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
   pip_install --user ninja
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
@@ -205,6 +206,10 @@ test_aten() {
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
+    if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
+      SUDO=sudo
+    fi
+
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"

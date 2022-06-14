@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# shellcheck disable=SC2034
+COMPACT_JOB_NAME="short-perf-test-cpu"
+
 SCRIPT_PARENT_DIR=$(dirname "${BASH_SOURCE[0]}")
 
 # shellcheck source=.jenkins/pytorch/common.sh

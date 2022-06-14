@@ -16,8 +16,7 @@ template struct ConstantPadOptions<3>;
 
 namespace functional {
 
-PadFuncOptions::PadFuncOptions(std::vector<int64_t> pad)
-    : pad_(std::move(pad)) {}
+PadFuncOptions::PadFuncOptions(std::vector<int64_t> pad) : pad_(std::move(pad)) {}
 
 } // namespace functional
 

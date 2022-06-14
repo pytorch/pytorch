@@ -12,8 +12,9 @@ TEST(UtilTest, ExceptionCleanup) {
   EXPECT_EQ(exception, nullptr);
 
   {
-    ExceptionCleanup cleanup(
-        [&](std::exception_ptr&& e) { exception = std::move(e); });
+    ExceptionCleanup cleanup([&](std::exception_ptr&& e) {
+      exception = std::move(e);
+    });
 
     cleanup.SetStatus(std::make_exception_ptr(std::runtime_error("Oops!")));
   }
@@ -21,14 +22,15 @@ TEST(UtilTest, ExceptionCleanup) {
 
   try {
     std::rethrow_exception(exception);
-  } catch (const std::exception& e) {
+  } catch(const std::exception& e) {
     EXPECT_STREQ(e.what(), "Oops!");
   }
 
   exception = nullptr;
   {
-    ExceptionCleanup cleanup(
-        [&](std::exception_ptr&& e) { exception = std::move(e); });
+    ExceptionCleanup cleanup([&](std::exception_ptr&& e) {
+      exception = std::move(e);
+    });
 
     cleanup.SetStatus(std::make_exception_ptr(std::runtime_error("")));
     cleanup.Release();

@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <string>
-#include <type_traits>
 
 namespace torch {
 namespace jit {
@@ -596,18 +595,17 @@ void Pickler::pushDict(const IValue& ivalue) {
 
   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
 
-  static_assert(
-      std::is_unsigned<decltype(dict.size())>::value,
-      "Expected size to be non-negative.");
-  push<PickleOpCode>(PickleOpCode::MARK);
+  if (dict.size() >= 0) {
+    push<PickleOpCode>(PickleOpCode::MARK);
 
-  // Sort the dict for deterministic keys
-  for (const auto& entry : dict) {
-    pushIValue(entry.key());
-    pushIValue(entry.value());
+    // Sort the dict for deterministic keys
+    for (const auto& entry : dict) {
+      pushIValue(entry.key());
+      pushIValue(entry.value());
+    }
+
+    push<PickleOpCode>(PickleOpCode::SETITEMS);
   }
-
-  push<PickleOpCode>(PickleOpCode::SETITEMS);
 
   endTypeTag(ivalue);
 }

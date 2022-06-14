@@ -1,7 +1,5 @@
 #pragma once
 
-#include <ATen/ATen.h>
-
 namespace at {
 namespace autocast {
 

@@ -13,7 +13,9 @@ namespace lazy {
 class CacheNode : public Node {
  public:
   explicit CacheNode(const std::string& str)
-      : Node(OpKind(), /* num_outputs */ 1), hash_(Hash(str)), str_(str) {}
+      : Node(OpKind(), /* num_outputs */ 1),
+        hash_(Hash(str)),
+        str_(str) {}
   ~CacheNode() override = default;
 
   const std::vector<Output>& operands() const override {
@@ -24,13 +26,8 @@ class CacheNode : public Node {
     TORCH_INTERNAL_ASSERT(false, "Can't access operand[i] of test node");
   }
 
-  hash_t hash() const override {
-    return hash_;
-  }
-  hash_t shapeHash() const override {
-    return hash_;
-  }
-
+  hash_t hash() const override { return hash_; }
+  hash_t shapeHash() const override { return hash_; }
  private:
   hash_t hash_;
   std::string str_;
@@ -71,7 +68,7 @@ TEST(CacheTest, BasicTest) {
 class CacheNodeWithShape : public TsNode {
  public:
   explicit CacheNodeWithShape(const Shape& shape)
-      : TsNode(OpKind(), shape, /* num_outputs */ 1, /* seed */ 0) {}
+      : TsNode(OpKind(), shape, /* num_outputs */ 1, /* seed */ 0){}
 };
 
 TEST(CacheTest, ShapeCacheTestForDynamicShape) {
@@ -79,14 +76,16 @@ TEST(CacheTest, ShapeCacheTestForDynamicShape) {
   FLAGS_ltc_enable_dynamic_shapes = true;
 
   CacheNodeWithShape nodes[] = {
-      CacheNodeWithShape(Shape(c10::kFloat, {2, 4})),
-      CacheNodeWithShape(Shape(c10::kFloat, {4, 2}))};
+    CacheNodeWithShape(Shape(c10::kFloat, {2, 4})),
+    CacheNodeWithShape(Shape(c10::kFloat, {4, 2})) };
 
   /*
    * Make sure the cached shape for node (2, 4) is not used for node (4, 2)
    */
   for (auto& node : nodes) {
-    EXPECT_EQ(node.shape(), node.computeShape([&]() { return node.shape(); }));
+    EXPECT_EQ(node.shape(), node.computeShape([&]() {
+      return node.shape();
+    }));
   }
 
   // reset the flag

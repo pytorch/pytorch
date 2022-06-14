@@ -21,10 +21,11 @@ void main() {
 
   if (all(lessThan(pos, uBlock.size.xyz))) {
     const ivec3 corresponding_input_pos = ivec3(
-      clamp(pos.xy - uBlock.pad.xz,
-        ivec2(0, 0),
-        uBlock.size.xy - uBlock.pad.xz - uBlock.pad.yw - ivec2(1, 1)),
-      pos.z);
+        min(
+          max(ivec2(0, 0),
+              pos.xy - uBlock.pad.xz),
+          uBlock.size.xy - uBlock.pad.xz - uBlock.pad.yw - ivec2(1, 1)),
+        pos.z);
 
     imageStore(uOutput, pos, texelFetch(uInput, corresponding_input_pos, 0));
   }
