@@ -1077,6 +1077,49 @@ Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
   return at::sum(self, IntArrayRef{}, false, dtype);
 }
 
+Tensor sum_to_checked(const Tensor &grad, c10::optional<c10::SymIntArrayRef> size, const c10::optional<Tensor>& ten_size, int64_t grad_idx) {
+  
+  // TODO: since we already dispatched to `sum_to_checked`, it probably
+  // doesn't save us much doing this check.
+  TORCH_CHECK(
+      grad.is_nested() == ten_size.has_value(),
+      "Both grad and InputMetadata need to be either nested or non nested tensors.")
+
+  // TODO: if nested tensors re-implement this w/ their dispatch key, it should look cleaner.
+  bool sizes_equal = grad.is_nested() ?
+    at::native::get_nested_size_tensor(grad).is_same_size(*ten_size) :
+    grad.sizes().equals(c10::asIntArrayRefSlow(*size));
+
+  if (sizes_equal) {
+    return grad;
+  }
+
+  bool expandable = grad.is_nested() ? 
+    false : 
+    at::is_expandable_to(c10::asIntArrayRefSlow(*size), grad.sizes());
+
+  if (!expandable) {
+    std::stringstream ss;
+    ss << "invalid gradient at index " << grad_idx << " - got ";
+    if (grad.is_nested()) {
+      ss << at::native::get_nested_size_tensor(grad);
+    } else {
+      ss << grad.sizes();
+    }
+    ss << " but expected shape compatible with ";
+    if (ten_size.has_value()) {
+      ss << *ten_size;
+    } else {
+      ss << c10::asIntArrayRefSlow(*size);
+    }
+    // TODO: We still need to add the error prologue
+    // to match the error message exactly
+    AT_ERROR(ss.str());
+  }
+
+  return at::sum_to(std::move(grad), asIntArrayRefUnchecked(*size));
+}
+
 Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) {
   return at::sum(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }

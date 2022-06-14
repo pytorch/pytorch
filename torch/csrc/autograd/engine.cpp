@@ -21,6 +21,8 @@
 #include <c10/util/Optional.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/irange.h>
+#include <c10/core/StreamGuard.h>
+#include <ATen/ops/sum_to_checked.h>
 
 #include <atomic>
 #include <chrono>
@@ -722,14 +724,7 @@ void validate_outputs(
       continue;
     }
 
-    if (!metadata.is_same_shape(grad)) {
-      if (metadata.is_expandable_to_shape(grad)) {
-        grad = metadata.reduce_grad(grad);
-      } else {
-        const auto message = metadata.incompatible_shape_error_message(i, grad);
-        AT_ERROR(format_error(message.str()));
-      }
-    }
+    grad = grad.sum_to_checked({metadata.shape_as_dim_vector()}, {metadata.shape_as_tensor()}, i);
 
     bool input_is_complex =
         isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));
