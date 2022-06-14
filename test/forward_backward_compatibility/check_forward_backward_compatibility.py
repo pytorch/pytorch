@@ -139,13 +139,12 @@ ALLOW_LIST = [
     ("aten::stft", datetime.date(2022, 5, 23)),
     ("aten::linalg_lu_solve", datetime.date(2022, 5, 23)),
     ("aten::linalg_lu_solve.out", datetime.date(2022, 5, 23)),
-    ("aten::_unsafe_view", datetime.date(2022, 8, 15)),
     ("aten::_index_reduce", datetime.date(2022, 5, 15)),
     ("aten::_csr_to_block_csr", datetime.date(2022, 5, 20)),
     ("aten::_weight_norm_cuda_interface", datetime.date(9999, 1, 1)),
     ("aten::_weight_norm_cuda_interface_backward", datetime.date(9999, 1, 1)),
-    ("aten::segment_reduce", datetime.date(2022, 6, 30)),
-    ("aten::_segment_reduce_backward", datetime.date(2022, 6, 30)),
+    ("aten::segment_reduce", datetime.date(9999, 1, 1)),
+    ("aten::_segment_reduce_backward", datetime.date(9999, 1, 1)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
 ]
