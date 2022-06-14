@@ -531,10 +531,12 @@ def hook_iterator(namespace, profile_name):
                 datapipe = args[0]
                 msg = "thrown by __iter__ of"
                 single_iterator_msg = "single iterator per IterDataPipe constraint"
-                has_len = hasattr(e.args, '__len__') and len(e.args) >= 1
-                if has_len and msg not in e.args[0] and single_iterator_msg not in e.args[0]:
+                if hasattr(e.args, '__len__'):
                     full_msg = f"{msg} {datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
-                    e.args = (e.args[0] + f'\nThis exception is {full_msg}',) + e.args[1:]
+                    if len(e.args) == 0:  # If an exception message doesn't exist
+                        e.args = (f'\nThis exception is {full_msg}',)
+                    elif msg not in e.args[0] and single_iterator_msg not in e.args[0]:
+                        e.args = (e.args[0] + f'\nThis exception is {full_msg}',) + e.args[1:]
                 raise
 
         namespace['__iter__'] = wrap_generator
