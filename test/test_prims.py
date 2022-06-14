@@ -86,6 +86,28 @@ class TestPrims(TestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm
+    @dtypes(torch.float32)
+    def test_broadcast_in_dim_sum(self, device, dtype):
+        def _wrapper(a):
+            a_sum = prims.sum(a, [0, 1])
+            a_bc = prims.broadcast_in_dim(a_sum, [], [])
+            return a_bc
+
+        traced = make_traced(_wrapper)
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+        for executor in ('aten', 'nvfuser'):
+            fn = partial(traced, executor=executor)
+            shape = (5, 5)
+            a = make_arg(shape)
+            result = fn(a)
+
+            self.assertEqual(result.shape, ())
+            self.assertTrue(result.is_contiguous)
+            self.assertEqual(_wrapper(a), result)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
     def test_nvfuser_impl_is_used(self, device):
         # This test is to ensure that when the nvfuser implementation exists it is used
         # Assuming one-to-one mapping between prims and nvfuser implementations
