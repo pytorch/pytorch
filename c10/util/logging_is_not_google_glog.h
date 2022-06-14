@@ -91,17 +91,17 @@ static_assert(
 // should not generate anything in optimized code.
 #define LOG(n)                                 \
   if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD) \
-  ::c10::MessageLogger((char*)__FILE__, __LINE__, ::c10::GLOG_##n).stream()
+  ::c10::MessageLogger((const char*)__FILE__, __LINE__, ::c10::GLOG_##n).stream()
 #define VLOG(n)                   \
   if (-n >= CAFFE2_LOG_THRESHOLD) \
-  ::c10::MessageLogger((char*)__FILE__, __LINE__, -n).stream()
+  ::c10::MessageLogger((const char*)__FILE__, __LINE__, -n).stream()
 
 #define LOG_IF(n, condition)                                  \
   if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD && (condition)) \
-  ::c10::MessageLogger((char*)__FILE__, __LINE__, ::c10::GLOG_##n).stream()
+  ::c10::MessageLogger((const char*)__FILE__, __LINE__, ::c10::GLOG_##n).stream()
 #define VLOG_IF(n, condition)                    \
   if (-n >= CAFFE2_LOG_THRESHOLD && (condition)) \
-  ::c10::MessageLogger((char*)__FILE__, __LINE__, -n).stream()
+  ::c10::MessageLogger((const char*)__FILE__, __LINE__, -n).stream()
 
 #define VLOG_IS_ON(verboselevel) (CAFFE2_LOG_THRESHOLD <= -(verboselevel))
 
@@ -115,7 +115,7 @@ static_assert(
 #define FATAL_IF(condition)                                                  \
   condition ? (void)0                                                        \
             : ::c10::LoggerVoidify() &                                       \
-          ::c10::MessageLogger((char*)__FILE__, __LINE__, ::c10::GLOG_FATAL) \
+          ::c10::MessageLogger((const char*)__FILE__, __LINE__, ::c10::GLOG_FATAL) \
               .stream()
 
 // Check for a given boolean condition.
@@ -134,7 +134,7 @@ static_assert(
 #define DLOG(n)                                                            \
   true ? (void)0                                                           \
        : ::c10::LoggerVoidify() &                                          \
-          ::c10::MessageLogger((char*)__FILE__, __LINE__, ::c10::GLOG_##n) \
+          ::c10::MessageLogger((const char*)__FILE__, __LINE__, ::c10::GLOG_##n) \
               .stream()
 #endif // NDEBUG
 
