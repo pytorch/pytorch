@@ -70,7 +70,6 @@ if [[ "${SHARD_NUMBER}" == "1" ]]; then
 
   # Tests that cannot run in parallel.
   pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_onnx_export.py" \
     "$top_dir/test/onnx/test_models_onnxruntime.py" \
     "$top_dir/test/onnx/test_custom_ops.py" \
     "$top_dir/test/onnx/test_utility_funs.py"
