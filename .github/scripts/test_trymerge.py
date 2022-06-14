@@ -62,7 +62,7 @@ def mock_parse_args(revert: bool = False,
             self.pr_num = 76123
             self.dry_run = True
             self.comment_id = 0
-            self.mandatory_only = False
+            self.on_mandatory = False
             self.on_green = False
             self.reason = 'this is for testing'
 
@@ -79,7 +79,9 @@ def mock_merge(pr_num: int, repo: GitRepo,
                force: bool = False,
                comment_id: Optional[int] = None,
                mandatory_only: bool = False,
-               timeout_minutes: int = 400) -> None:
+               on_green: bool = False,
+               timeout_minutes: int = 400,
+               stale_pr_days: int = 3) -> None:
     pass
 
 def mock_gh_get_info() -> Any:
