@@ -22,7 +22,7 @@ MPSGraphTensor* chainViewOperation(MPSGraph* mpsGraph, IntArrayRef size,
   const size_t shape_size = size.size();
 
   @autoreleasepool {
-      std::vector<int32_t> sizeArray;
+      std::vector<int32_t> sizeArray(shape_size);
       const int64_t int_max = std::numeric_limits<int32_t>::max();
       for (int i = 0; i < shape_size; i++) {
         TORCH_CHECK(size[i] <= int_max);
