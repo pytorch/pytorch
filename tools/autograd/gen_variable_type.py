@@ -243,7 +243,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "addcdiv",
     "matrix_exp",
     "linalg_matrix_exp",
-    "linalg_eigh",
+    "_linalg_eigh",
     "cholesky_solve",
     "linalg_qr",
     "_linalg_svd",
