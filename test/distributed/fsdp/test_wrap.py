@@ -12,7 +12,6 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
     CPUOffload,
     BackwardPrefetch,
-    ForwardPrefetch,
 )
 from torch.distributed.fsdp.wrap import (
     always_wrap_policy,
@@ -227,10 +226,7 @@ class TestFSDPWrap(FSDPTest):
         "backward_prefetch",
         [BackwardPrefetch.BACKWARD_POST, BackwardPrefetch.BACKWARD_PRE]
     )
-    @parametrize(
-        "forward_prefetch",
-        [ForwardPrefetch(prefetch_full_params=True), ForwardPrefetch(prefetch_full_params=False)]
-    )
+    @parametrize("forward_prefetch", [True, False])
     @parametrize(
         "fsdp_init_mode",
         [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]

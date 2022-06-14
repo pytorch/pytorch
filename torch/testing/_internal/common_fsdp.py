@@ -273,7 +273,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         fsdp_init_mode=FSDPInitMode.CUDA_AFTER,
         cpu_offload=None,
         backward_prefetch=None,
-        forward_prefetch=None,
+        forward_prefetch=False,
         sharding_strategy=None,
         mixed_precision=None,
         **kwargs
@@ -536,7 +536,7 @@ class FSDPTest(MultiProcessTestCase):
         lr=0.01,
         cpu_offload=CPUOffload(),
         backward_prefetch=None,
-        forward_prefetch=None,
+        forward_prefetch=False,
         sharding_strategy=None,
         mixed_precision=None,
         save_model=True,

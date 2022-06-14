@@ -3,7 +3,6 @@ from .fully_sharded_data_parallel import FullyShardedDataParallel
 from .fully_sharded_data_parallel import (
     CPUOffload,
     BackwardPrefetch,
-    ForwardPrefetch,
     ShardingStrategy,
     MixedPrecision,
     FullStateDictConfig,
