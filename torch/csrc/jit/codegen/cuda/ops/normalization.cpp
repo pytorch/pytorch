@@ -37,6 +37,19 @@ TensorView* variance(
     bool unbiased,
     bool keepdim) {
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
+  int64_t correction = unbiased ? 1 : 0;
+  return variance(x, dims, correction, keepdim);
+}
+
+TensorView* variance(
+    TensorView* x,
+    const std::vector<int>& dims,
+    int64_t correction,
+    bool keepdim) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
+
+  TORCH_CHECK(
+      correction >= 0, "correction must be non-negative, but got ", correction);
 
   const int kNumberOfDims =
       TensorDomain::noReductions(x->getMaybeRFactorDomain()).size();
@@ -47,9 +60,9 @@ TensorView* variance(
   auto sum_x_mean_sub_sq = sum(x_mean_sub_sq, dims, keepdim);
 
   auto num_features = numFeatures(x, dims, kNumberOfDims);
-  if (unbiased) {
+  if (correction > 0) {
     num_features =
-        sub(num_features, IrBuilder::create<Double>(x->container(), 1.));
+        sub(num_features, IrBuilder::create<Int>(x->container(), correction));
   }
   auto y = div(sum_x_mean_sub_sq, num_features);
 
