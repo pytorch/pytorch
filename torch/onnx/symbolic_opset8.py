@@ -57,6 +57,7 @@ block_listed_operators = [
 
 for block_listed_op in block_listed_operators:
     vars()[block_listed_op] = symbolic_helper._block_list_in_opset(block_listed_op)
+    vars()[block_listed_op].__module__ = "torch.onnx.symbolic_opset8"
 
 
 def _interpolate(name, dim, interpolate_mode):
