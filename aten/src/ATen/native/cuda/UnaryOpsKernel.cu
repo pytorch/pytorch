@@ -43,11 +43,7 @@ void exp_kernel_cuda(TensorIteratorBase& iter) {
       static const auto exp_string = jiterator_stringify(
           template <typename T>
           T exp_kernel(T x) {
-#ifdef __HIPCC__
-            return exp(x);
-#else
             return std::exp(x);
-#endif
       }); // exp_string
       AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "exp_cuda", [&]() {
           jitted_gpu_kernel<
