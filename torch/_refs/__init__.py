@@ -832,6 +832,8 @@ fmod = _make_elementwise_binary_reference(
     prims.fmod,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmod,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
 )
 
 # TODO: add docstring
