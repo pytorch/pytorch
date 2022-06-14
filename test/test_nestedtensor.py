@@ -482,6 +482,52 @@ class TestNestedTensorDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             nt1.clone(memory_format=torch.channels_last)
 
+    # cannot test torch.float16 because: RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
+    @dtypes(torch.float, torch.double)
+    def test_dropout(self, device, dtype):
+        # edge case: empty nested tensor
+        nt0 = torch.nested_tensor([])
+        y = torch.nn.functional.dropout(nt0, 0.5)
+        self.nt_equal(nt0, y)
+        # normal nested tensor
+        ntensors = 4
+        nt = self.random_nt(device, dtype, ntensors, (4, 4))
+        # edge case: invalid dropout
+        self.assertRaises(ValueError, lambda: torch.nn.Dropout(-0.1))
+        self.assertRaises(ValueError, lambda: torch.nn.Dropout(1.1))
+        self.assertRaises(ValueError, lambda: torch.nn.functional.dropout(nt, -0.1))
+        self.assertRaises(ValueError, lambda: torch.nn.functional.dropout(nt, 1.1))
+        # edge case: no dropout
+        dropouter = torch.nn.Dropout(0.0)
+        y0 = dropouter(nt)
+        y1 = torch.nn.functional.dropout(nt, 0.0)
+        self.nt_equal(nt, y0)
+        self.nt_equal(nt, y1)
+        # edge case: all dropout
+        dropouter = torch.nn.Dropout(1.0)
+        y0 = dropouter(nt)
+        y1 = torch.nn.functional.dropout(nt, 1.0)
+        nt0 = nt.clone()
+        for i in range(ntensors):
+            nt0[i].fill_(0.0)
+        self.nt_equal(nt0, y0)
+        self.nt_equal(nt0, y1)
+        # normal case: normal dropout
+        p = 0.2
+        dropouter = torch.nn.Dropout(p)
+        torch.manual_seed(233)
+        torch.cuda.manual_seed(233)
+        y0 = dropouter(nt)
+        torch.manual_seed(233)
+        torch.cuda.manual_seed(233)
+        y1 = torch.nn.functional.dropout(nt, p)
+        self.nt_equal(y0, y1)
+        # inplace
+        torch.manual_seed(233)
+        torch.cuda.manual_seed(233)
+        torch.nn.functional.dropout(nt, p, inplace=True)
+        self.nt_equal(y0, nt)
+
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 
 if __name__ == '__main__':
