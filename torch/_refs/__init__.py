@@ -819,6 +819,8 @@ fmax = _make_elementwise_binary_reference(
     prims.fmax,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmax,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
 )
 
 # TODO: add docstring
@@ -826,6 +828,8 @@ fmin = _make_elementwise_binary_reference(
     prims.fmin,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmin,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
 )
 
 # TODO: add docstring
@@ -849,11 +853,23 @@ gt = _make_elementwise_binary_reference(
     supports_lhs_python_scalar=False,
 )
 
+
+def _heaviside(input: TensorLikeType, values: TensorLikeType) -> TensorLikeType:
+    zeros_like_input = zeros_like(input)
+    ones_like_input = ones_like(input)
+    eq_zero = eq(input, zeros_like_input)
+    lt_zero = logical_or(lt(input, zeros_like_input), isnan(input))
+    zeros_and_ones = where(lt_zero, zeros_like_input, ones_like_input)
+    output = where(eq_zero, values, zeros_and_ones)
+    return output
+
+
 heaviside = _make_elementwise_binary_reference(
-    prims.heaviside,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    _heaviside,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
+    aten_op=torch.ops.aten.heaviside,
 )
 
 hypot = _make_elementwise_binary_reference(

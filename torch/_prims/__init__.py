@@ -97,7 +97,6 @@ __all__ = [
     "fmod",
     "ge",
     "gt",
-    "heaviside",
     "hypot",
     "igamma",
     "igammac",
@@ -935,13 +934,6 @@ gt = _make_elementwise_binary_prim(
     impl_nvfuser=_gt_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
-)
-
-heaviside = _make_elementwise_binary_prim(
-    "heaviside",
-    impl_aten=torch.heaviside,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 hypot = _make_elementwise_binary_prim(
