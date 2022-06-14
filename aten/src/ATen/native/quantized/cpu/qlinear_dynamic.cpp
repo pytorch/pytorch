@@ -235,8 +235,7 @@ template <bool ReluFused>
 at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
     at::Tensor input) {
   if (reduce_range) {
-    TORCH_WARN("Currently, qnnpack incorrectly ignores reduce_range when it is set to true; this may change in a future release. "
-    "Reducing the range for qnnpack would currently lead to bc-breaking behavior.");
+    TORCH_WARN("Currently, qnnpack incorrectly ignores reduce_range when it is set to true; this may change in a future release.");
   }
 
   using at::Tensor;
