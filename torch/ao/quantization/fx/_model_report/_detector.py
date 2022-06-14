@@ -135,6 +135,8 @@ DEFAULT_POST_OBSERVER_NAME = "model_report_post_observer"
 DEFAULT_STATIONARY = "stationary"
 DEFAULT_NON_STATIONARY = "non-stationary"
 
+# modules that are supported both dynamic and static for this report function
+DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED = set([nn.Linear])
 
 def _detect_dynamic_vs_static(model: GraphModule, tolerance=0.5) -> Tuple[str, Dict[str, Any]]:
     """
@@ -170,10 +172,18 @@ def _detect_dynamic_vs_static(model: GraphModule, tolerance=0.5) -> Tuple[str, D
     # store modules dynamic vs static information
     module_dynamic_static_info = {}
 
+    # This for loop goes through the modules, and extracts all relavent information into module_dynamic_static_info
+    #   This information primary includes whether the data distributions around a supported module is stationary or not
+    #   Based on this, it is recorded whether dynamic or static quantization is recommended
+
     # loop through all submodules included nested ones
-    for name, module in model.named_modules():
-        # if module has the ModelReportObserver attached to it
-        if hasattr(module, DEFAULT_PRE_OBSERVER_NAME) and hasattr(module, DEFAULT_POST_OBSERVER_NAME):
+    for fqn, module in model.named_modules():
+
+        # check to see if module is of a supported type
+        is_supported_type = sum(list(map(lambda x: isinstance(module, x), DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
+
+        # if module is Linear has the ModelReportObserver attached to it
+        if is_supported_type and hasattr(module, DEFAULT_PRE_OBSERVER_NAME) and hasattr(module, DEFAULT_POST_OBSERVER_NAME):
             # get pre and post observers for the module
             pre_obs = getattr(module, DEFAULT_PRE_OBSERVER_NAME)
             post_obs = getattr(module, DEFAULT_POST_OBSERVER_NAME)
@@ -200,13 +210,17 @@ def _detect_dynamic_vs_static(model: GraphModule, tolerance=0.5) -> Tuple[str, D
                 "post_observer_data_dist": post_obs_dist_classification,
             }
 
-            module_dynamic_static_info[name] = module_info
+            module_dynamic_static_info[fqn] = module_info
 
     dynamic_vs_static_string = "Dynamic vs. Static Quantization suggestions: \n"
 
-    for module_name in module_dynamic_static_info.keys():
+    # This for loop goes through the information collected in module_dynamic_static_info and:
+    #   Populates the string based report with the information from module_dynamic_static_info
+    #   Compiles the complete report by appending relavent formatted strings
 
-        module_info = module_dynamic_static_info[module_name]
+    for module_fqn in module_dynamic_static_info.keys():
+
+        module_info = module_dynamic_static_info[module_fqn]
         suggestion_string_template = "For module {} it is suggested to use {} quantization because {}.\n"
 
         # decide what string formatting values will be
@@ -236,7 +250,7 @@ def _detect_dynamic_vs_static(model: GraphModule, tolerance=0.5) -> Tuple[str, D
         # now set the quantization explanation string
         quantization_reasoning = (
             quantization_reasoning.format(
-                module_name, module_info["pre_observer_data_dist"], module_info["post_observer_data_dist"]
+                module_fqn, module_info["pre_observer_data_dist"], module_info["post_observer_data_dist"]
             )
             + benefit_str
         )
@@ -253,7 +267,7 @@ def _detect_dynamic_vs_static(model: GraphModule, tolerance=0.5) -> Tuple[str, D
 
         # format the overall suggestion string with the specific inputs
         module_suggestion_string = suggestion_string_template.format(
-            module_name, quantization_type, quantization_reasoning
+            module_fqn, quantization_type, quantization_reasoning
         )
 
         # append to overall suggestion
