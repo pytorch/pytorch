@@ -151,12 +151,21 @@ class TestSchemaCheck(JitTestCase):
             with enable_torch_dispatch_mode(SchemaCheckMode()):
                 IncorrectAliasTensor(x).add(IncorrectAliasTensor(y), alpha=2)
 
+    # Tests that an exception is raised for a mismatching alias over multiple ops
     def test_alias_check_fail_multiple_operators(self):
         with self.assertRaises(RuntimeError):
             x = torch.rand((3, 3), requires_grad=True)
             y = torch.rand((3, 3), requires_grad=True)
             with enable_torch_dispatch_mode(SchemaCheckMode()):
                 IncorrectAliasTensor(x).sin().relu().add(IncorrectAliasTensor(y), alpha=2)
+
+    # Tests that an exception is raised for a centered mismatching alias over multiple ops
+    def test_alias_check_fail_multiple_operators_centered(self):
+        with self.assertRaises(RuntimeError):
+            x = torch.rand((3, 3), requires_grad=True)
+            y = torch.rand((3, 3), requires_grad=True)
+            with enable_torch_dispatch_mode(SchemaCheckMode()):
+                IncorrectAliasTensor(x).sin().add(IncorrectAliasTensor(y), alpha=2).relu()
 
     # Tests that isAliasOf returns as expected
     def test_is_alias_of(self):

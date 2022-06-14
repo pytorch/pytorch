@@ -48,13 +48,13 @@ class SchemaCheckMode(TorchDispatchMode):
                 after = tree_flatten(arguments.get(name))[0]
                 if (any([has_mutated(i, j) for i, j in zip(before, after)]) and not argument.is_mutable):
                     raise RuntimeError(f"Argument {name} is not defined as mutable but was mutated")
-                for i in before:
+                for b in before:
                     if not isinstance(out, tuple):
-                        if (have_values_aliased(i, out) and not is_aliasing(argument, func._schema.returns[0])):
+                        if (have_values_aliased(b, out) and not is_aliasing(argument, func._schema.returns[0])):
                             raise RuntimeError(f'Argument {name} is not defined to alias output but was aliasing')
                     else:
                         for j in range(len(out)):
-                            if (have_values_aliased(i, out[j]) and not is_aliasing(argument, func._schema.returns[j])):
+                            if (have_values_aliased(b, out[j]) and not is_aliasing(argument, func._schema.returns[j])):
                                 raise RuntimeError(f'Argument {name} is not defined to alias output but was aliasing')
 
         return out
