@@ -256,6 +256,7 @@ class DataLoader(Generic[T_co]):
                 torch.utils.data.graph_settings.apply_sharding(self.dataset, ws, rank)
         elif isinstance(self.dataset, MapDataPipe):
             self.dataset = _MapDataPipeSerializationWrapper(self.dataset)
+            ws, rank = _get_distributed_settings()
             if num_workers > 0:
                 self.worker_init_fn = functools.partial(
                     _sharding_worker_init_fn, self.worker_init_fn, ws, rank)
