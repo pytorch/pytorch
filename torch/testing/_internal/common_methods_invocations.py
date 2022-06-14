@@ -3345,6 +3345,7 @@ def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
         ((S, S), (1,), True),
         ((S, S), (1,), False),
         ((S, S), (-2,), False),
+        ((S, S), (0, 1), False),
     )
     samples = []
     # Test large inputs to check numerical stability
