@@ -55,8 +55,7 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
 
 @torch.library.impl(meta_lib, "conj_physical.out")
 def meta_conj_physical_out(self, out):
-    torch._resize_output_(out, self.size(), self.device)
-    return out.copy_(self)
+    return torch._resize_output_(out, self.size(), self.device)
 
 
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
