@@ -3716,7 +3716,6 @@ class FullyShardedDataParallel(nn.Module):
             _broadcast_processed_optim_state_dict(
                 processed_osd if rank == 0 else None,
                 fsdp_flat_param_ids if rank == 0 else None, rank, group,
-                broadcast_device,
             )
         # Broadcast positive-dimension tensor state (both sharded tensors for
         # FSDP parameters and unsharded tensors for non-FSDP parameters)

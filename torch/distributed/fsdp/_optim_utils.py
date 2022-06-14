@@ -673,7 +673,6 @@ def _broadcast_processed_optim_state_dict(
     fsdp_flat_param_ids: Optional[Set[int]],
     rank: int,
     group,
-    device: torch.device,
 ) -> Tuple[Dict[str, Any], Set[int]]:
     """
     Broadcasts the processed optimizer state dict and the accompanying FSDP
@@ -685,8 +684,6 @@ def _broadcast_processed_optim_state_dict(
             with metadata if on rank 0; ignored otherwise.
         fsdp_flat_param_ids (Optional[Set[int]]): Parameter IDs corresponding
             to FSDP parameters if on rank 0; ignored otherwise.
-        device (torch.device): Device to move zero-dimension tensors post-
-            broadcast.
 
     Returns:
         Tuple[Dict[str, Any], Set[int]]: The processed optimizer state dict
@@ -699,11 +696,7 @@ def _broadcast_processed_optim_state_dict(
     processed_optim_state_dict, fsdp_flat_param_ids = obj_list  # type: ignore[assignment]
     assert processed_optim_state_dict is not None
     assert fsdp_flat_param_ids is not None
-    # Move zero-dimension tensors to `device`
-    for param_state in processed_optim_state_dict["state"].values():
-        for state_name, value in param_state.items():
-            if _is_zero_dim_tensor(value):
-                param_state[state_name] = value.to(device)
+    # Keep zero-dimension tensors on CPU
     return processed_optim_state_dict, fsdp_flat_param_ids
 
 

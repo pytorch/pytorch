@@ -392,7 +392,7 @@ class TestFSDPOptimState(FSDPTest):
         ``on_gpu=True`` and on CPU if ``on_gpu=False``."""
         for param_state in osd["state"].values():
             for value in param_state.values():
-                if torch.is_tensor(value):
+                if torch.is_tensor(value) and value.dim() > 0:
                     if on_gpu:
                         self.assertTrue(value.is_cuda)
                     else:
