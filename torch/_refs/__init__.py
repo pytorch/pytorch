@@ -536,22 +536,22 @@ def log_softmax(
 @out_wrapper
 def logsumexp(
     a: TensorLikeType,
-    dims: DimsType,
+    dim: DimsType,
     keepdim: bool = False,
 ) -> TensorLikeType:
-    dims = utils.canonicalize_dims(a.ndim, dims)
+    dim = utils.canonicalize_dims(a.ndim, dim)
     # ATen specifies int[1] type dims which expands integers to tuples of length 1
-    if not isinstance(dims, Iterable):
-        dims = (dims,)
+    if not isinstance(dim, Iterable):
+        dim = (dim,)
     if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
         # For float and complex dtypes, we shift input to exp by a constant to avoid overflow
-        a_max = amax(a, dims, keepdim=True)
+        a_max = amax(a, dim, keepdim=True)
         a_max = where(abs(a_max) == float("inf"), 0.0, a_max)
-        a_max_squeezed = prims.squeeze(a_max, dims) if not keepdim else a_max
-        result = log(sum(exp(a - a_max), dims, keepdim=keepdim)) + a_max_squeezed
+        a_max_squeezed = prims.squeeze(a_max, dim) if not keepdim else a_max
+        result = log(sum(exp(a - a_max), dim, keepdim=keepdim)) + a_max_squeezed
     else:
         # This case covers boolean and integer dtypes and we use non-stabilized computation
-        result = log(sum(exp(a), dims, keepdim=keepdim))
+        result = log(sum(exp(a), dim, keepdim=keepdim))
     return result
 
 
