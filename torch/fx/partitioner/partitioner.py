@@ -28,18 +28,15 @@ from itertools import groupby
 from collections import defaultdict
 
 class Partition:
-    def __init__(self, partition_id=None, nodes: Iterable[Node]=set()):
-        self.partition_id = partition_id
-        self.nodes: Set[Node] = set(nodes)
-
-    def __str__(self):
-        return str(self.partition_id)
+    def __init__(self, id=None, nodes: List[Node]=list()):
+        self.id = id
+        self.nodes: List[Node] = nodes
 
     def __repr__(self) -> str:
         return str(self.nodes)
 
     def add_node(self, node: Node):
-        self.nodes.add(node)
+        self.nodes.append(node)
 
     def size(self):
         return len(self.nodes)
@@ -77,14 +74,14 @@ class CapabilityBasedPartitioner:
         # True if b depends on a (,or equivalently a is an upstream depedency of b)
         return a in self.dependency_map[b]
 
-    def __partition_depends_on(self, partition_a: List[Node], partition_b: List[Node]) -> bool:
+    def __partition_depends_on(self, partition_a: Partition, partition_b: Partition) -> bool:
         # True if b depends on a (,or equivalently a is an upstream depedency of b)
 
         # TODO: build a cache here to speedup the query
 
         # return True if any of node in partition_a is an upstream node of any node in partition_b
-        for node_a in partition_a:
-            for node_b in partition_b:
+        for node_a in partition_a.nodes:
+            for node_b in partition_b.nodes:
                 if self.__node_depends_on(node_a, node_b):
                     return True
 
@@ -105,11 +102,12 @@ class CapabilityBasedPartitioner:
         assignment = {}
         partition_id = 0
         partitions_by_id = dict()
+
         def assign(node, id):
             assignment[node] = id
 
             if id not in partitions_by_id:
-                partitions_by_id[id] = Partition(partition_id=id, nodes={node})
+                partitions_by_id[id] = Partition(id=id, nodes=[node])
             else:
                 partitions_by_id[id].add_node(node)
 
@@ -120,17 +118,17 @@ class CapabilityBasedPartitioner:
         # visit candidates in reversed topological order
         for node in reversed(candidates):
 
-            partition_candidates: List[List[Node]] = list()
+            partition_candidates: List[Partition] = list()
             partition_candidates_id : Set[int] = set()
             for user_node in node.users:
                 if user_node in assignment:
                     if assignment[user_node] not in partition_candidates_id:
                         id = assignment[user_node]
                         partition_candidates_id.add(id)
-                        partition_candidates.append(list(partitions_by_id[id].nodes))
+                        partition_candidates.append(partitions_by_id[id])
 
                 else:
-                    partition_candidates.append([user_node])
+                    partition_candidates.append(Partition(nodes=[user_node]))
 
 
             # TODO: simple sort is probably not enough, need to do strict topo sort
@@ -160,8 +158,8 @@ class CapabilityBasedPartitioner:
 
             candidate_partition_ids = []
             for partition in partition_candidates:
-                if partition[0] in assignment:
-                    candidate_partition_ids.append(assignment[partition[0]])
+                if partition.id is not None:
+                    candidate_partition_ids.append(partition.id)
 
             if len(candidate_partition_ids) == 0:
                 # create a new partition
@@ -181,7 +179,7 @@ class CapabilityBasedPartitioner:
 
         print("assignment", assignment)
 
-        return [list(partition.nodes) for partition in partitions_by_id.values()]
+        return [partition.nodes for partition in partitions_by_id.values()]
 
     def fuse_partitions(self, partitions):
         # partitions: [ [node0, node1], [node2, node3] ]
