@@ -54,7 +54,6 @@ from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
 from torch.nn.utils.rnn import PackedSequence
 from torch.onnx import (
-    CheckerError,
     register_custom_op_symbolic,
     unregister_custom_op_symbolic,
 )
@@ -12085,7 +12084,7 @@ class _TestONNXRuntime:
         f = io.BytesIO()
 
         try:
-            with self.assertRaises(CheckerError) as cm:
+            with self.assertRaises(torch.onnx.errors.CheckerError):
                 torch.onnx.export(test_model, (x, y), f)
         finally:
             unregister_custom_op_symbolic("::add", 1)

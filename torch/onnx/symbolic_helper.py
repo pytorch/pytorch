@@ -7,11 +7,9 @@ from typing import Optional, Set
 
 import torch
 import torch._C._onnx as _C_onnx
-import torch.onnx
 from torch import _C
 
-# This import monkey-patches graph manipulation methods on Graph, used for the
-# ONNX symbolics
+# Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
 from torch.onnx._globals import GLOBALS
 
@@ -57,6 +55,23 @@ from torch.onnx._globals import GLOBALS
 # type annotation of torch.onnx.SymbolicContext will be called with that additional context.
 # During export, it is populated from `utils._run_symbolic_function`
 # to contain the context for each node being converted.
+
+__all__ = [
+    "args_have_same_dtype",
+    "cast_pytorch_to_onnx",
+    "check_training_mode",
+    "dequantize_helper",
+    "is_caffe2_aten_fallback",
+    "parse_args",
+    "pytorch_name_to_type",
+    "quantize_helper",
+    "quantized_args",
+    "requantize_bias_helper",
+    "scalar_name_to_pytorch",
+    "scalar_type_to_onnx",
+    "scalar_type_to_pytorch_type",
+    "ScalarType",
+]
 
 # ---------------------------------------------------------------------------------
 # Helper functions
