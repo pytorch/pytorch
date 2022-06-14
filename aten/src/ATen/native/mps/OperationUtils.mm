@@ -26,7 +26,7 @@ MPSGeneratorImpl::MPSGeneratorImpl(DeviceIndex device_index)
 }
 
 const Generator& getDefaultMPSGenerator() {
-  auto gen = make_generator<MPSGeneratorImpl>(0);
+  static auto gen = make_generator<MPSGeneratorImpl>(0);
   gen.seed();
   return gen;
 }
