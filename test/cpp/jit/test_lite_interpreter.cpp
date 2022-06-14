@@ -563,8 +563,7 @@ TEST(LiteInterpreterTest, GetContainTypes) {
   std::stringstream ss;
   m._save_for_mobile(ss, {}, true);
 
-  auto contained_types = _get_mobile_model_contained_types(ss);
-  AT_ASSERT(contained_types.size() >= 0);
+  _get_mobile_model_contained_types(ss);
 }
 
 namespace {
@@ -1183,7 +1182,6 @@ TEST(RunTimeTest, ParseOperator) {
   std::vector<IValue> constants{
       to_tuple({1}),
   };
-  int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
   // 2. Parse the function
   std::string function_name("test_function");
   auto function = std::unique_ptr<mobile::Function>(
@@ -1567,7 +1565,6 @@ TEST(RunTimeTest, RuntimeCall) {
   std::vector<IValue> constantsCall{
       1,
   };
-  int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
 
   auto foo = std::make_unique<mobile::Function>(c10::QualifiedName("foo"));
   c10::ivalue::TupleElements debug_handles_m_tuple;
@@ -2091,6 +2088,7 @@ TEST(LiteInterpreterUpgraderTest, Upgrader) {
   std::vector<mobile::Function> upgrader_functions;
 
   for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    byteCodeFunctionWithOperator.function.initialize_operators(true);
     ASSERT_EQ(
         byteCodeFunctionWithOperator.function.get_code().operators_.size(),
         byteCodeFunctionWithOperator.function.get_code().op_names_.size());

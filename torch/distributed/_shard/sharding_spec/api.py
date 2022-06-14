@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import functools
-from typing import Callable, Dict, List, Type, TYPE_CHECKING
+from typing import Callable, Dict, List, TYPE_CHECKING
 
 import torch
 
@@ -14,6 +14,7 @@ from ._internals import (
 from torch.distributed._shard.metadata import ShardMetadata
 
 import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta
+from torch.distributed._shard.op_registry_utils import _decorator_func
 
 if TYPE_CHECKING:
     # Only include ShardedTensor when do type checking, exclude it
@@ -86,46 +87,24 @@ class ShardingSpec(ABC):
         """
 
 # Ops customized for a particular ShardingSpec.
-CUSTOM_SHARDING_SPEC_OPS: Dict[str, Dict[Callable, Callable]] = {}
-
-def _register_custom_op(sharding_spec_cls: Type, op: Callable, func: Callable):
-    """
-    Allows registration of a custom op for ShardedTensor to enable
-    custom optimizations for a particular ShardingSpec.
-    Args:
-        sharding_spec(type): The ShardingSpec for which we need to add this custom op.
-        op(Callable): The op to override (ex: torch.bmm)
-        func(Callable): The custom implementation for ``op``
-    """
-    from inspect import signature
-    if len(signature(func).parameters) != 3:
-        raise TypeError(
-            f'Custom sharded op function expects signature: '
-            f'(types, args, kwargs), but received '
-            f'signature: {signature(func)}')
-
-    global CUSTOM_SHARDING_SPEC_OPS
-    class_name = sharding_spec_cls.__qualname__
-    if class_name not in CUSTOM_SHARDING_SPEC_OPS:
-        CUSTOM_SHARDING_SPEC_OPS[class_name] = {}
-    CUSTOM_SHARDING_SPEC_OPS[class_name][op] = func
+_CUSTOM_SHARDING_SPEC_OPS: Dict[str, Dict[Callable, Callable]] = {}
 
 def _has_custom_op(sharding_spec, op):
     """
     Returns whether or not the ShardingSpec has a custom op implementation.
     """
     class_name = type(sharding_spec).__qualname__
-    return class_name in CUSTOM_SHARDING_SPEC_OPS and op in CUSTOM_SHARDING_SPEC_OPS[class_name]
+    return class_name in _CUSTOM_SHARDING_SPEC_OPS and op in _CUSTOM_SHARDING_SPEC_OPS[class_name]
 
-def _dispatch_custom_op(sharding_spec, op: Callable, types, args, kwargs):
+def _dispatch_custom_op(sharding_spec, op: Callable, types, args, kwargs, process_group):
     """
     Calls the custom op for this ShardingSpec if it exists.
     """
     class_name = type(sharding_spec).__qualname__
     if not _has_custom_op(sharding_spec, op):
         raise RuntimeError(f'Custom op: {op} not registered for {class_name}')
-    func = CUSTOM_SHARDING_SPEC_OPS[class_name][op]
-    return func(types, args, kwargs)
+    func = _CUSTOM_SHARDING_SPEC_OPS[class_name][op]
+    return func(types, args, kwargs, process_group)
 
 def custom_sharding_spec_op(sharding_spec_class, func):
     """
@@ -134,14 +113,14 @@ def custom_sharding_spec_op(sharding_spec_class, func):
         sharding_spec_class(type): The ShardingSpec for which we need to add this custom op.
         func(Callable): The op to override (ex: torch.bmm)
     """
-    def decorator_sharded_func(wrapped_func):
-        _register_custom_op(sharding_spec_class, func, wrapped_func)
-
-        @functools.wraps(wrapped_func)
-        def wrapper(*args, **kwargs):
-            return wrapped_func(*args, **kwargs)
-        return wrapper
-    return decorator_sharded_func
+    class_name = sharding_spec_class.__qualname__
+    if class_name not in _CUSTOM_SHARDING_SPEC_OPS:
+        _CUSTOM_SHARDING_SPEC_OPS[class_name] = {}
+    return functools.partial(
+        _decorator_func,
+        op=func,
+        op_table=_CUSTOM_SHARDING_SPEC_OPS[class_name]
+    )
 
 
 @dataclass

@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import threading
+import subprocess
 import time
 import traceback
 import types
@@ -13,8 +14,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
-from functools import partial, reduce
-from functools import wraps
+from functools import (
+    partial,
+    reduce,
+    wraps
+)
 from io import StringIO
 from typing import NamedTuple, Optional, Union
 
@@ -335,6 +339,9 @@ else:
     TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 
+# https://github.com/pytorch/pytorch/issues/75665
+if TEST_WITH_ROCM:
+    TIMEOUT_OVERRIDE["test_join_kwargs"] = 200
 
 def create_device(interface=None):
     if sys.platform == "win32" or interface is None:
@@ -798,3 +805,32 @@ class MultiProcessTestCase(TestCase):
     @property
     def is_master(self) -> bool:
         return self.rank == 0
+
+# Cannot use functools.cache as it requires python 3.9
+EFA_PROBE_RESULT = None
+
+def has_efa() -> bool:
+    """
+    If shell command `fi_info -p efa -t FI_EP_RDM` returns exit code 0 then we assume that the machine has
+    Libfabric EFA interfaces and EFA software components installed,
+    see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-start.html.
+    """
+    global EFA_PROBE_RESULT
+    if EFA_PROBE_RESULT is not None:
+        return EFA_PROBE_RESULT
+
+    try:
+        EFA_PROBE_RESULT = subprocess.run(["fi_info", "-p", "efa", "-t", "FI_EP_RDM"]).returncode == 0
+    except FileNotFoundError:
+        EFA_PROBE_RESULT = False
+    return EFA_PROBE_RESULT
+
+
+def tp_transports():
+    """
+    If the machine has Libfabric EFA interfaces and EFA software components installed it may cause
+    'RuntimeError: In operator() at tensorpipe/common/ibv.h:172 "": Operation not supported' if tensorpipe
+    uses InfiniBand transport, so we exclude it from tensorpipe transports,
+    see https://github.com/pytorch/pytorch/issues/73885 and https://github.com/pytorch/pytorch/issues/65022
+    """
+    return ["shm", "uv"] if has_efa() else None
