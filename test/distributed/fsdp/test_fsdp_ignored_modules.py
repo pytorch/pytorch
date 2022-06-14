@@ -25,22 +25,13 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class IgnoredModule(torch.nn.Module):
-    def __init__(self, in_dim: int, out_dim: int) -> None:
-        super().__init__()
-        self.weight = torch.nn.Parameter(torch.randn((in_dim, out_dim)))
-
-    def forward(self, x):
-        return x @ self.weight
-
-
-class ModelWithIgnoredModules(torch.nn.Module):
-    def __init__(self, num_ignored: int) -> None:
+class Model(torch.nn.Module):
+    def __init__(self) -> None:
         super().__init__()
         self.layer0 = torch.nn.Linear(3, 5)
-        layer1_modules = [torch.nn.Linear(5, 4), torch.nn.Linear(4, 4)] + \
-            [IgnoredModule(4, 4) for _ in range(num_ignored)] + \
-            [torch.nn.Linear(4, 4)]
+        layer1_modules = [
+            torch.nn.Linear(5, 4), torch.nn.Linear(4, 4), torch.nn.Linear(4, 4),
+        ]
         self.layer1 = torch.nn.Sequential(*layer1_modules)
         self.layer2 = torch.nn.Linear(4, 2)
         self.layer3 = torch.nn.Linear(2, 2)
@@ -63,6 +54,26 @@ class ModelWithIgnoredModules(torch.nn.Module):
         loss.backward()
 
 
+class IgnoredModule(torch.nn.Module):
+    def __init__(self, in_dim: int, out_dim: int) -> None:
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.randn((in_dim, out_dim)))
+
+    def forward(self, x):
+        return x @ self.weight
+
+
+class ModelWithIgnoredModules(Model):
+    """Adds a variable number of :class:`IgnoredModule` to ``self.layer1``."""
+    def __init__(self, num_ignored: int) -> None:
+        assert num_ignored >= 0
+        super().__init__()
+        layer1_modules = [torch.nn.Linear(5, 4), torch.nn.Linear(4, 4)] + \
+            [IgnoredModule(4, 4) for _ in range(num_ignored)] + \
+            [torch.nn.Linear(4, 4)]
+        self.layer1 = torch.nn.Sequential(*layer1_modules)
+
+
 class TestFSDPIgnoredModules(FSDPTest):
     def _train_model(self, model, optim, num_iters, device=torch.device("cuda")):
         for _ in range(num_iters):
@@ -79,7 +90,9 @@ class TestFSDPIgnoredModules(FSDPTest):
         # Initialize an FSDP-wrapped transformer model that has FSDP ignore
         # the `nn.Transformer` module's parameters
         group = dist.distributed_c10d._get_default_group()
-        wrapped_model = self._get_wrapped_model(group, ignore_modules=True)
+        wrapped_model = self._get_wrapped_model(
+            group, cuda_first=True, ignore_modules=True,
+        )
         # Check that the wrapped model's flattened parameter does not include
         # the ignored transformer module's parameters
         nonwrapped_model = self._get_nonwrapped_model(group)
@@ -102,12 +115,12 @@ class TestFSDPIgnoredModules(FSDPTest):
         # Initialize an FSDP-wrapped nested model that first wraps the nested
         # sequential's second linear layer (`layer1[1]`) and then wraps the
         # overall model while ignoring the nested sequential (`layer1`)
-        model = ModelWithIgnoredModules(num_ignored=0).cuda()
+        model = Model().cuda()
         model.layer1[1] = FSDP(model.layer1[1])
         wrapped_model = FSDP(model, ignored_modules=[model.layer1])
         # Check that the wrapped model's flattened parameter does not include
         # the ignored nested sequential's parameters
-        nonwrapped_model = ModelWithIgnoredModules(num_ignored=0)
+        nonwrapped_model = Model()
         total_numel = sum(p.numel() for p in nonwrapped_model.parameters())
         ignored_numel = sum(
             p.numel() for p in nonwrapped_model.layer1.parameters()
@@ -124,7 +137,7 @@ class TestFSDPIgnoredModules(FSDPTest):
     def test_ignored_modules_invalid(self):
         """Tests that passing an FSDP module as an ignored module or the
         top-level module itself errors."""
-        model = ModelWithIgnoredModules(num_ignored=0).cuda()
+        model = Model().cuda()
         model.layer1 = FSDP(model.layer1)
         # Passing an FSDP module as an ignored module should error
         with self.assertRaises(
