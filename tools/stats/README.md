@@ -7,7 +7,7 @@ We track various stats about each CI job.
    https://github.com/pytorch/pytorch/blob/a9f6a35a33308f3be2413cc5c866baec5cfe3ba1/.github/workflows/_linux-build.yml#L144-L151
 2. When a workflow completes, a `workflow_run` event [triggers
    `upload-test-stats.yml`](https://github.com/pytorch/pytorch/blob/d9fca126fca7d7780ae44170d30bda901f4fe35e/.github/workflows/upload-test-stats.yml#L4).
-3. `upload-test-stats` downloads the raw stats form the intermediate data store
+3. `upload-test-stats` downloads the raw stats from the intermediate data store
    and uploads them as JSON to Rockset, our metrics backend.
 
 ```mermaid
