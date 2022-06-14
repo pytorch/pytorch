@@ -419,6 +419,8 @@ Tensor class reference
     Tensor.index_fill
     Tensor.index_put_
     Tensor.index_put
+    Tensor.index_reduce_
+    Tensor.index_reduce
     Tensor.index_select
     Tensor.indices
     Tensor.inner
@@ -623,7 +625,6 @@ Tensor class reference
     Tensor.size
     Tensor.slogdet
     Tensor.slice_scatter
-    Tensor.solve
     Tensor.sort
     Tensor.split
     Tensor.sparse_mask

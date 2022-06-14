@@ -692,3 +692,14 @@ class TestModuleContainers(JitTestCase):
                 return r
 
         self.checkModule(MyModule(), (torch.zeros(1),))
+
+    def test_parameterdict_script_getitem(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.parameter_dict = nn.ParameterDict({k: nn.Parameter(torch.zeros(1)) for k in ['a', 'b', 'c']})
+
+            def forward(self, x):
+                return self.parameter_dict['a'] * x + self.parameter_dict['b'] * self.parameter_dict['c']
+
+        self.checkModule(MyModule(), (torch.ones(1),))
