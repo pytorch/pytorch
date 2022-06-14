@@ -2,7 +2,7 @@ import json
 import os
 import subprocess
 import requests
-from typing import Any
+from typing import Any, Dict
 
 MERGEBOT_TOKEN = os.environ["MERGEBOT_TOKEN"]
 PYTORCHBOT_TOKEN = os.environ["PYTORCHBOT_TOKEN"]
@@ -13,7 +13,7 @@ REQUEST_HEADERS = {
 }
 
 
-def git_api(url, params, post=False) -> Any:
+def git_api(url: str, params: Dict[str, str], post: bool = False) -> Any:
     if post:
         return requests.post(
             f"https://api.github.com{url}",
@@ -37,28 +37,28 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def make_pr(repo_name, branch_name) -> Any:
+def make_pr(repo_name: str, branch_name: str) -> Any:
     params = {
         "title": f"[{repo_name} hash update] update the pinned {repo_name} hash",
         "head": branch_name,
         "base": "master",
-        "body": f"This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/master/.github/workflows/_update-commit-hash.yml).\nUpdate the pinned {repo_name} hash.",
+        "body": "This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/master/" +
+        f".github/workflows/_update-commit-hash.yml).\nUpdate the pinned {repo_name} hash.",
     }
     response = git_api(f"/repos/{OWNER}/{REPO}/pulls", params, post=True)
     print(f"made pr {response['number']}")
     return response["number"]
 
 
-def approve_pr(pr_number):
+def approve_pr(pr_number: str) -> None:
     params = {"event": "APPROVE"}
     # use pytorchbot to approve the pr
     REQUEST_HEADERS["Authorization"] = f"token {PYTORCHBOT_TOKEN}"
     response = git_api(f"/repos/{OWNER}/{REPO}/pulls/{pr_number}/reviews", params, post=True)
     REQUEST_HEADERS["Authorization"] = f"token {MERGEBOT_TOKEN}"
-    print(json.dumps(response, indent=2))
 
 
-def make_comment(pr_number):
+def make_comment(pr_number: str) -> None:
     params = {"body": "@pytorchbot merge -g"}
     git_api(f"/repos/{OWNER}/{REPO}/issues/{pr_number}/comments", params, post=True)
 
