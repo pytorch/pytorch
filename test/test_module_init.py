@@ -48,6 +48,7 @@ def build_constructor_arg_db():
         torch.nn.CosineSimilarity: ((), {}),
         torch.nn.CrossEntropyLoss: ((), {}),
         torch.nn.CrossMapLRN2d: ((5,), {}),
+        torch.nn.Dropout1d: ((), {}),
         torch.nn.Dropout2d: ((), {}),
         torch.nn.Dropout3d: ((), {}),
         torch.nn.Dropout: ((), {}),
