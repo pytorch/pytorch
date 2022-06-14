@@ -176,9 +176,6 @@ const std::string jit_common_types = R"ESCAPE(
   #ifndef __forceinline__
   #define __forceinline__ inline __attribute__((always_inline))
   #endif
-  // Map HIP_DYNAMIC_SHARED to "extern __shared__" for compatibility with old HIP applications
-  #define HIP_DYNAMIC_SHARED(type, var) extern __shared__ type var[];
-  #define HIP_DYNAMIC_SHARED_ATTRIBUTE
   #else
   //TODO use _assert_fail, because assert is disabled in non-debug builds
   #define ERROR_UNSUPPORTED_CAST assert(false);
