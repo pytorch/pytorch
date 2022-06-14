@@ -295,28 +295,31 @@ class Subset(Dataset[T_co]):
         return len(self.indices)
 
 
-def random_split(dataset: Dataset[T], lengths_or_frac: Sequence[Union[int, float]],
+def random_split(dataset: Dataset[T], lengths: Sequence[Union[int, float]],
                  generator: Optional[Generator] = default_generator) -> List[Subset[T]]:
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.
-    If a list of fractions is given, the lengths will be computed automatically as floor(frac * len(dataset)).
-    If the sum of the list of the fractions is not equal to 1 or the split leaves a remainder,
+    If a list of fractions is given, the lengths will be computed automatically as
+    floor(frac * len(dataset)).
+    If the sum of the list of the fractions is not equal to 1 or the split leaves a
+    remainder,
     a new entry will be appended
     to the end of the list with the remaining fraction
 
     Optionally fix the generator for reproducible results, e.g.:
 
     >>> random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(42))
-    >>> random_split(range(30), [0.3, 0.3, 0.4], generator=torch.Generator().manual_seed(42))
+    >>> random_split(range(30), [0.3, 0.3, 0.4], generator=torch.Generator(
+    ).manual_seed(42))
 
     Args:
         dataset (Dataset): Dataset to be split
-        lengths_or_frac (sequence): lengths or fractions of splits to be produced
+        lengths (sequence): lengths or fractions of splits to be produced
         generator (Generator): Generator used for the random permutation.
     """
-    if math.isclose(sum(lengths_or_frac), 1):
+    if math.isclose(sum(lengths), 1):
         lengths = []
-        for i, frac in enumerate(lengths_or_frac):
+        for i, frac in enumerate(lengths):
             if frac < 0 or frac > 1:
                 raise ValueError(f"Fraction at index {i} is not between 0 and 1")
             n_items_in_split = int(
@@ -327,8 +330,7 @@ def random_split(dataset: Dataset[T], lengths_or_frac: Sequence[Union[int, float
         # add 1 to all the lengths in round-robin fashion until the remainder is 0
         for i in range(remainder):
             lengths[i % len(lengths)] += 1
-    else:
-        lengths = lengths_or_frac  # type: ignore[assignment]
+
     # Cannot verify that dataset is Sized
     if sum(lengths) != len(dataset):    # type: ignore[arg-type]
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
