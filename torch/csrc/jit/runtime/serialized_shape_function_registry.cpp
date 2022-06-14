@@ -2549,63 +2549,6 @@ def native_batch_norm(input: List[int],
   return (out, _size, _size)
 
 )=====")
-+ std::string(R"=====(def index_Tensor(self: List[int],
-    indices: List[Optional[List[int]]]) -> List[int]:
-  _0 = "AssertionError: More indices than dimensions to index"
-  _1 = "The size of tensor a {} must match the size of tensor b ({}) at non-singleton dimension {}"
-  _2 = torch.le(torch.len(indices), torch.len(self))
-  if _2:
-    pass
-  else:
-    ops.prim.RaiseException(_0)
-  broadcasted_shape = annotate(List[int], [])
-  for _3 in range(torch.len(indices)):
-    index_tensor_shape = indices[_3]
-    _4 = torch.__isnot__(index_tensor_shape, None)
-    if _4:
-      index_tensor_shape0 = unchecked_cast(List[int], index_tensor_shape)
-      dimsA = torch.len(broadcasted_shape)
-      dimsB = torch.len(index_tensor_shape0)
-      ndim = ops.prim.max(dimsA, dimsB)
-      broadcasted_shape1 = annotate(List[int], [])
-      for i in range(ndim):
-        offset = torch.sub(torch.sub(ndim, 1), i)
-        dimA = torch.sub(torch.sub(dimsA, 1), offset)
-        dimB = torch.sub(torch.sub(dimsB, 1), offset)
-        if torch.ge(dimA, 0):
-          sizeA = broadcasted_shape[dimA]
-        else:
-          sizeA = 1
-        if torch.ge(dimB, 0):
-          sizeB = index_tensor_shape0[dimB]
-        else:
-          sizeB = 1
-        if torch.ne(sizeA, sizeB):
-          _5 = torch.ne(sizeA, 1)
-        else:
-          _5 = False
-        if _5:
-          _6 = torch.ne(sizeB, 1)
-        else:
-          _6 = False
-        if _6:
-          _7 = torch.format(_1, sizeA, sizeB, i)
-          _8 = torch.add("AssertionError: ", _7)
-          ops.prim.RaiseException(_8)
-        else:
-          pass
-        if torch.eq(sizeA, 1):
-          _9 = sizeB
-        else:
-          _9 = sizeA
-        _10 = torch.append(broadcasted_shape1, _9)
-      broadcasted_shape0 = broadcasted_shape1
-    else:
-      broadcasted_shape0 = broadcasted_shape
-    broadcasted_shape = broadcasted_shape0
-  return broadcasted_shape
-
-)=====")
 + std::string(R"=====(def broadcast_three(a: List[int],
     b: List[int],
     c: List[int]) -> List[int]:
@@ -2815,7 +2758,7 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", "conv_backwards"},
     {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
     {"aten::cat(Tensor[] tensors, int dim=0) -> Tensor", "cat"},
-    {"stack(Tensor[] tensors, int dim=0) -> Tensor", "stack"},
+    {"aten::stack(Tensor[] tensors, int dim=0) -> Tensor", "stack"},
     {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
     {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
     {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "expand"},
@@ -2838,7 +2781,6 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", "nll_loss_forward"},
     {"aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", "native_layer_norm"},
     {"aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
-    {"aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", "index_Tensor"},
     {"aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor", "broadcast_three"},
     {"aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor", "broadcast_one_three"},
     {"aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", "broadcast_inplace"},
@@ -2854,7 +2796,6 @@ const OperatorMap<std::pair<std::string, std::string>>& GetBoundedShapeMappings(
 
   return shape_mappings;
 }
-
 
 // clang-format on
 
