@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/ExpandUtils.h>
+#include <ATen/NestedTensorImpl.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/native/nested/NestedTensorMath.h>
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
