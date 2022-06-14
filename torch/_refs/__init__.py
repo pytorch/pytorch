@@ -529,8 +529,8 @@ def log_softmax(
 ) -> TensorLikeType:
     result_dtype = dtype or a.dtype
     computation_dtype = utils.get_computation_dtype(a.dtype)
-    a = prims.convert_element_type(a, computation_dtype)
-    return prims.convert_element_type(a - logsumexp(a, dim, keepdim=True), result_dtype)
+    a = _maybe_convert_to_dtype(a, computation_dtype)
+    return _maybe_convert_to_dtype(a - logsumexp(a, dim, keepdim=True), result_dtype)
 
 
 def _squeeze_multiple(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
@@ -2065,11 +2065,11 @@ def softmax(
 ) -> TensorLikeType:
     result_dtype = dtype or a.dtype
     computation_dtype = utils.get_computation_dtype(a.dtype)
-    a = prims.convert_element_type(a, computation_dtype)
+    a = _maybe_convert_to_dtype(a, computation_dtype)
     a_max = amax(a, dim, keepdim=True)
-    unnormalized = exp(a - a_max)
-    return prims.convert_element_type(
-        true_divide(unnormalized, sum(unnormalized, dim, keepdim=True)), result_dtype
+    a_exp = exp(a - a_max)
+    return _maybe_convert_to_dtype(
+        true_divide(a_exp, sum(a_exp, dim, keepdim=True)), result_dtype
     )
 
 
