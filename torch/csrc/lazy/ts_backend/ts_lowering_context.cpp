@@ -11,7 +11,8 @@ TSLoweringContext::TSLoweringContext(
     BackendDevice device)
     : torch::lazy::LoweringContext(name, device),
       graph_(std::make_shared<torch::jit::Graph>()),
-      function_(std::make_shared<torch::jit::GraphFunction>(name, graph_, nullptr)) {}
+      function_(
+          std::make_shared<torch::jit::GraphFunction>(name, graph_, nullptr)) {}
 
 TSLoweringContext::TSLoweringContext(
     const std::string& name,
@@ -20,12 +21,12 @@ TSLoweringContext::TSLoweringContext(
     Util::EmissionMap emit_status)
     : torch::lazy::LoweringContext(name, device, post_order, emit_status),
       graph_(std::make_shared<torch::jit::Graph>()),
-      function_(std::make_shared<torch::jit::GraphFunction>(name, graph_, nullptr)) {
+      function_(
+          std::make_shared<torch::jit::GraphFunction>(name, graph_, nullptr)) {
   for (auto node : post_order) {
     Lower(node);
   }
 }
-
 
 void TSLoweringContext::Lower(const Node* node) {
   if (auto* tsnode = dynamic_cast<const torch::lazy::TsNode*>(node)) {
@@ -37,8 +38,7 @@ void TSLoweringContext::Lower(const Node* node) {
     for (size_t i = 0; i < ops.size(); ++i) {
       AssignOutputOp(torch::lazy::Output(node, i), ops[i]);
     }
-  }
-  else {
+  } else {
     throw std::runtime_error(
         "Expected torch::lazy::TsNode but could not dynamic cast");
   }
@@ -56,8 +56,7 @@ void TSLoweringContext::AssignOutputOp(
 }
 
 torch::jit::Value* TSLoweringContext::GetParameter(BackendDataPtr data) {
-  const auto ts_data =
-      std::static_pointer_cast<TSData>(data);
+  const auto ts_data = std::static_pointer_cast<TSData>(data);
   BackendData::Handle handle = ts_data->GetHandle();
   auto it = parameters_map_.find(handle);
   if (it == parameters_map_.end()) {

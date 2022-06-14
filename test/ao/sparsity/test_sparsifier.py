@@ -7,7 +7,7 @@ import re
 
 import torch
 from torch import nn
-from torch.ao.sparsity import BaseSparsifier, WeightNormSparsifier, FakeSparsity
+from torch.ao.sparsity import BaseSparsifier, WeightNormSparsifier, FakeSparsity, NearlyDiagonalSparsifier
 from torch.nn.utils.parametrize import is_parametrized
 
 from torch.testing._internal.common_utils import TestCase
@@ -346,3 +346,118 @@ class TestWeightNormSparsifier(TestCase):
                 true_sl = min(max(sl, 0.0), 1.0)
                 true_sl = true_sl * zpb / sbs[0] / sbs[1]
                 assert sparse_mask.mean() == true_sl
+
+
+class TestNearlyDiagonalSparsifier(TestCase):
+    def test_constructor(self):
+        model = Model()
+        sparsifier = NearlyDiagonalSparsifier(nearliness=1)
+        sparsifier.prepare(model, config=None)
+        for g in sparsifier.module_groups:
+            assert isinstance(g['module'], nn.Linear)
+            # The module_groups are unordered
+            assert g['fqn'] in ('seq.0', 'linear', 'head')
+
+    def test_step(self):
+        model = Model()
+        sparsifier = NearlyDiagonalSparsifier(nearliness=1)
+        sparsifier.prepare(model, config=[model.linear])
+
+        for g in sparsifier.module_groups:
+            # Before step
+            module = g['module']
+            assert (1.0 - module.parametrizations['weight'][0].mask.mean()) == 0  # checking sparsity level is 0
+
+        sparsifier.enable_mask_update = True
+        sparsifier.step()
+        mask = module.parametrizations['weight'][0].mask
+        height, width = mask.shape
+        assert torch.all(mask == torch.eye(height, width))
+
+        for g in sparsifier.module_groups:
+            # After step
+            module = g['module']
+            assert (1.0 - module.parametrizations['weight'][0].mask.mean()) > 0  # checking sparsity level has increased
+
+        # Test if the mask collapses to all zeros if the weights are randomized
+        iters_before_collapse = 1000
+        for _ in range(iters_before_collapse):
+            model.linear.weight.data = torch.randn(model.linear.weight.shape)
+            sparsifier.step()
+        for g in sparsifier.module_groups:
+            # After step
+            module = g['module']
+            assert (1.0 - module.parametrizations['weight'][0].mask.mean()) > 0  # checking sparsity level did not collapse
+
+    def test_prepare(self):
+        model = Model()
+        sparsifier = NearlyDiagonalSparsifier(nearliness=1)
+        sparsifier.prepare(model, config=None)
+        for g in sparsifier.module_groups:
+            module = g['module']
+            # Check mask exists
+            assert hasattr(module.parametrizations['weight'][0], 'mask')
+            # Check parametrization exists and is correct
+            assert is_parametrized(module, 'weight')
+            assert type(module.parametrizations.weight[0]) == FakeSparsity
+
+    def test_mask_squash(self):
+        model = Model()
+        sparsifier = NearlyDiagonalSparsifier(nearliness=1)
+        sparsifier.prepare(model, config=None)
+        sparsifier.step()
+        sparsifier.squash_mask()
+        for g in sparsifier.module_groups:
+            module = g['module']
+            assert not is_parametrized(module, 'weight')
+            assert not hasattr(module, 'mask')
+            weights = module.weight
+            height, width = weights.shape
+            assert torch.all(weights == torch.eye(height, width) * weights)  # only diagonal to be present
+
+    def test_sparsity_levels(self):
+        nearliness_levels = list(nearliness for nearliness in range(-1, 100))
+        model = nn.Sequential()
+
+        p = re.compile(r'[-\.\s]')
+        for nearliness in nearliness_levels:
+            sparsifier = NearlyDiagonalSparsifier(nearliness=1)
+            layer_name = f'{nearliness}'
+            layer_name = p.sub('_', layer_name)
+
+            layer = nn.Linear(32, 32, bias=False)
+            layer.weight = nn.Parameter(torch.ones(32, 32))
+            width, height = layer.weight.shape
+            model.add_module(layer_name, layer)
+            config = {
+                'fqn': layer_name,
+                'nearliness': nearliness
+            }
+
+            sparsifier.prepare(model, [config])
+            # should raise a ValueError when nearliness arg is illegal
+            if (nearliness > 0 and nearliness % 2 == 0) or (nearliness // 2 >= min(width, height)):
+                with self.assertRaises(ValueError):
+                    sparsifier.step()
+            else:
+                sparsifier.step()
+                sparsifier.squash_mask()
+                model.eval()
+
+                layer = getattr(model, layer_name)
+                # verify that mask created corresponds to the nearliness
+                self._verify_nearliness(layer.weight, nearliness)
+
+    # helper function to verify nearliness of a mask
+    def _verify_nearliness(self, mask: torch.Tensor, nearliness: int):
+        if nearliness <= 0:
+            assert torch.all(mask == torch.zeros(mask.shape[0], mask.shape[1]))
+        else:
+            height, width = mask.shape
+            dist_to_diagonal = nearliness // 2
+            for row in range(0, height):
+                for col in range(0, width):
+                    if abs(row - col) <= dist_to_diagonal:
+                        assert mask[row, col] == 1
+                    else:
+                        assert mask[row, col] == 0
