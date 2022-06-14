@@ -29,17 +29,17 @@ def clip_grad_norm_(
     """
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
-    grads = [p.grad for p in parameters if p.grad is not None]
+    parameters = [p for p in parameters if p.grad is not None]
     max_norm = float(max_norm)
     norm_type = float(norm_type)
-    if len(grads) == 0:
+    if len(parameters) == 0:
         return torch.tensor(0.)
-    device = grads[0].device
+    device = parameters[0].grad.device
     if norm_type == inf:
-        norms = [g.detach().abs().max().to(device) for g in grads]
+        norms = [p.grad.detach().abs().max().to(device) for p in parameters]
         total_norm = norms[0] if len(norms) == 1 else torch.max(torch.stack(norms))
     else:
-        total_norm = torch.norm(torch.stack([torch.norm(g.detach(), norm_type).to(device) for g in grads]), norm_type)
+        total_norm = torch.norm(torch.stack([torch.norm(p.grad.detach(), norm_type).to(device) for p in parameters]), norm_type)
     if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
         raise RuntimeError(
             f'The total norm of order {norm_type} for gradients from '
@@ -51,8 +51,8 @@ def clip_grad_norm_(
     # avoids a `if clip_coef < 1:` conditional which can require a CPU <=> device synchronization
     # when the gradients do not reside in CPU memory.
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
-    for g in grads:
-        g.detach().mul_(clip_coef_clamped.to(g.device))
+    for p in parameters:
+        p.grad.detach().mul_(clip_coef_clamped.to(p.grad.device))
     return total_norm
 
 

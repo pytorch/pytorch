@@ -1,11 +1,10 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
-#include <memory>
 #include <string>
+#include <memory>
+#include <torch/csrc/Export.h>
 
-namespace torch {
-namespace autograd {
+namespace torch { namespace autograd {
 
 // forward declaration of Node from function.h
 struct Node;
@@ -18,7 +17,7 @@ struct TORCH_API AnomalyMode {
     _enabled = enabled;
   }
 
- private:
+private:
   static bool _enabled;
 };
 
@@ -61,5 +60,4 @@ struct TORCH_API AnomalyMetadata {
   std::shared_ptr<Node> parent_;
 };
 
-} // namespace autograd
-} // namespace torch
+}}

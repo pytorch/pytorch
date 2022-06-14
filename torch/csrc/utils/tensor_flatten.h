@@ -1,13 +1,12 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/core/functional.h>
-#include <c10/core/TensorOptions.h>
 #include <torch/csrc/Export.h>
+#include <ATen/ATen.h>
 #include <utility>
+#include <c10/core/TensorOptions.h>
 
-namespace torch {
-namespace utils {
+namespace torch { namespace utils {
 
 /// Generate an ID for a combination of tensor backend + scalar type to be used
 /// when ordering tensors ('like' tensors are grouped by pulling out their
@@ -22,9 +21,7 @@ inline at::Tensor flatten_dense_tensors(at::TensorList tensors) {
   return at::flatten_dense_tensors(tensors);
 }
 
-inline std::vector<at::Tensor> unflatten_dense_tensors(
-    const at::Tensor& flat,
-    at::TensorList tensors) {
+inline std::vector<at::Tensor> unflatten_dense_tensors(const at::Tensor& flat, at::TensorList tensors) {
   return at::unflatten_dense_tensors(flat, tensors);
 }
 
@@ -71,17 +68,13 @@ TORCH_API std::vector<TensorGroup> take_tensors(
     size_t size_limit,
     bool fine_grained = false);
 
-TORCH_API void reorder_tensors_like(
-    std::vector<at::Tensor>& tensors,
-    at::TensorList order);
+TORCH_API void reorder_tensors_like(std::vector<at::Tensor>& tensors, at::TensorList order);
 
-TORCH_API std::pair<at::Tensor, at::Tensor> flatten_sparse_tensors(
-    at::TensorList tensors);
+TORCH_API std::pair<at::Tensor, at::Tensor> flatten_sparse_tensors(at::TensorList tensors);
 
 TORCH_API std::vector<at::Tensor> unflatten_sparse_tensors(
     const at::Tensor& flat_indices,
     const at::Tensor& flat_values,
     at::TensorList tensors);
 
-} // namespace utils
-} // namespace torch
+}}

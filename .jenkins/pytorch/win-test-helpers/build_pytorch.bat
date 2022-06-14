@@ -154,5 +154,7 @@ python setup.py install --cmake && sccache --show-stats && (
   )
 )
 
-sccache --show-stats | python tools/stats/sccache_stats_to_json.py > sccache-stats-%BUILD_ENVIRONMENT%-%OUR_GITHUB_JOB_ID%.json
+sccache --show-stats > stats.txt
+python -m tools.stats.upload_sccache_stats stats.txt
 sccache --stop-server
+rm stats.txt

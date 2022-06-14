@@ -1,16 +1,15 @@
-import torch
 import torch.nn as nn
 
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 
 class SimpleMegatronLM(nn.Module):
-    def __init__(self, linear_size, rank=None, dtype=torch.float32):
+    def __init__(self, linear_size, rank=None):
         super().__init__()
-        self.fc1 = nn.Linear(*linear_size[0], dtype=dtype)
+        self.fc1 = nn.Linear(*linear_size[0])
         self.gelu = nn.GELU()
-        self.fc2 = nn.Linear(*linear_size[1], dtype=dtype)
-        if rank is not None:
+        self.fc2 = nn.Linear(*linear_size[1])
+        if rank:
             self.fc1.cuda(rank)
             self.fc2.cuda(rank)
 

@@ -16,9 +16,6 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
             return at::empty(shape, self.options());
         }
     }
-    if (self.is_meta()) {
-        AT_ERROR("Can not infer total number of classes from meta tensor.");
-    }
 
     // non-empty tensor
     if (self.device().type() != at::kCUDA) {

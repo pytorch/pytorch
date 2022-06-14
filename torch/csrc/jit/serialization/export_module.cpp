@@ -345,6 +345,17 @@ void pushMobileFunctionsToIValues(
   }
 }
 
+std::unordered_set<const FunctionSchema*> getInterfaceCalls(Graph& graph) {
+  std::unordered_set<const FunctionSchema*> ret;
+  auto nodes = findAllNodes(graph, c10::prim::CallMethod, true);
+  for (Node* node : nodes) {
+    if (auto iface = node->input(0)->type()->castRaw<InterfaceType>()) {
+      ret.insert(iface->getMethod(node->s(attr::name)));
+    }
+  }
+  return ret;
+}
+
 struct ModuleMethod {
   ModuleMethod(const Module& m, const GraphFunction& f, c10::QualifiedName n)
       : module(m), function(f), exportName(std::move(n)) {}
@@ -352,6 +363,28 @@ struct ModuleMethod {
   const GraphFunction& function;
   c10::QualifiedName exportName;
 };
+
+std::vector<ModuleMethod> getModuleInterfaceExports(
+    const Module& module,
+    const std::unordered_set<const FunctionSchema*>& schemas) {
+  if (schemas.size() == 0) {
+    return {};
+  }
+  std::unordered_set<std::string> names;
+  for (auto schema : schemas) {
+    names.insert(schema->name());
+  }
+  std::vector<ModuleMethod> ret;
+  for (const auto& submodule : module.modules()) {
+    for (const auto& method : submodule.get_methods()) {
+      const auto& f = toGraphFunction(method.function());
+      if (names.find(f.qualname().name()) != names.end()) {
+        ret.emplace_back(submodule, f, f.qualname());
+      }
+    }
+  }
+  return ret;
+}
 
 bool isLoweredModule(const Module& m) {
   c10::QualifiedName type_name;

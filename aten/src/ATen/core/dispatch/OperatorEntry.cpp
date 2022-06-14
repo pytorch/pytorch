@@ -19,9 +19,6 @@ namespace {
 OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 : name_(std::move(operator_name))
 , schema_()
-#ifndef C10_MOBILE
-, tags_()
-#endif
 , dispatchTable_()
 , dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
 , kernels_()
@@ -60,7 +57,7 @@ const AnnotatedKernel& OperatorEntry::ambiguousAutogradOtherKernel() const {
   return kernel;
 }
 
-void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug, std::vector<at::Tag> tags) {
+void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
   for (const auto& kernel : kernels_) {
     for (const auto &j : kernel.second) {
@@ -72,9 +69,6 @@ void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug,
   // NB: don't register schema until after we've checked everything!
   dispatchKeyExtractor_.registerSchema(schema);
   schema_ = AnnotatedSchema(std::move(schema), std::move(debug));
-  #ifndef C10_MOBILE
-    tags_ = std::move(tags);
-  #endif
 }
 
 void OperatorEntry::deregisterSchema() {
@@ -212,14 +206,6 @@ const AnnotatedKernel* OperatorEntry::getKernelForDispatchKey(DispatchKey dispat
     return &kern_it->second.front();
   }
   return nullptr;
-}
-
-const std::vector<at::Tag>& OperatorEntry::getTags() const {
-  #if defined C10_MOBILE
-    TORCH_CHECK(false, "tags are not saved for Mobile");
-  #else
-    return tags_;
-  #endif
 }
 
 std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTableEntryWithDebug(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const {

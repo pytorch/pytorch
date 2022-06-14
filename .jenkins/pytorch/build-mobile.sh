@@ -6,6 +6,9 @@ set -eu -o pipefail
 # build & test mobile libtorch without having to setup Android/iOS
 # toolchain/simulator.
 
+# shellcheck disable=SC2034
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -28,5 +31,3 @@ elif [[ "$BUILD_ENVIRONMENT" == *-mobile-lightweight-dispatch* ]]; then
 else
   TEST_DEFAULT_BUILD=1 test/mobile/custom_build/build.sh
 fi
-
-print_sccache_stats

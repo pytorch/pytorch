@@ -9,10 +9,10 @@
 
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
-#include <torch/csrc/Generator.h>
 #include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_tuples.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/Generator.h>
 
 #include <stdexcept>
 #include <utility>
@@ -27,8 +27,7 @@ PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true);
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonOrSharedTypePtr<T>);
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonTypePtr<T>, true);
 
-namespace pybind11 {
-namespace detail {
+namespace pybind11 { namespace detail {
 
 // torch.Tensor <-> at::Tensor conversions (without unwrapping)
 template <>
@@ -46,10 +45,8 @@ struct type_caster<at::Tensor> {
     return false;
   }
 
-  static handle cast(
-      const at::Tensor& src,
-      return_value_policy /* policy */,
-      handle /* parent */) {
+  static handle
+  cast(const at::Tensor& src, return_value_policy /* policy */, handle /* parent */) {
     return handle(THPVariable_Wrap(src));
   }
 };
@@ -70,10 +67,8 @@ struct type_caster<at::Storage> {
     return false;
   }
 
-  static handle cast(
-      const at::Storage& src,
-      return_value_policy /* policy */,
-      handle /* parent */) {
+  static handle
+  cast(const at::Storage& src, return_value_policy /* policy */, handle /* parent */) {
     return handle(torch::createPyObject(src));
   }
 };
@@ -93,36 +88,30 @@ struct type_caster<at::Generator> {
     return false;
   }
 
-  static handle cast(
-      const at::Generator& src,
-      return_value_policy /* policy */,
-      handle /* parent */) {
+  static handle
+  cast(const at::Generator& src, return_value_policy /* policy */, handle /* parent */) {
     return handle(THPGenerator_Wrap(src));
   }
 };
 
-template <>
-struct type_caster<at::IntArrayRef> {
- public:
+template<> struct type_caster<at::IntArrayRef> {
+public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(at::IntArrayRef, _("at::IntArrayRef"));
 
   bool load(handle src, bool) {
-    PyObject* source = src.ptr();
+    PyObject *source = src.ptr();
     auto tuple = PyTuple_Check(source);
     if (tuple || PyList_Check(source)) {
       // NOLINTNEXTLINE(bugprone-branch-clone)
-      const auto size =
-          tuple ? PyTuple_GET_SIZE(source) : PyList_GET_SIZE(source);
+      const auto size = tuple ? PyTuple_GET_SIZE(source) : PyList_GET_SIZE(source);
       v_value.resize(size);
-      for (const auto idx : c10::irange(size)) {
-        PyObject* obj = tuple ? PyTuple_GET_ITEM(source, idx)
-                              : PyList_GET_ITEM(source, idx);
+      for(const auto idx : c10::irange(size)) {
+        PyObject* obj = tuple ? PyTuple_GET_ITEM(source, idx) : PyList_GET_ITEM(source, idx);
         if (THPVariable_Check(obj)) {
           v_value[idx] = THPVariable_Unpack(obj).item<int64_t>();
         } else if (PyLong_Check(obj)) {
-          // use THPUtils_unpackLong after it is safe to include
-          // python_numbers.h
+          // use THPUtils_unpackLong after it is safe to include python_numbers.h
           v_value[idx] = THPUtils_unpackLong(obj);
         } else {
           return false;
@@ -133,14 +122,10 @@ struct type_caster<at::IntArrayRef> {
     }
     return false;
   }
-  static handle cast(
-      at::IntArrayRef src,
-      return_value_policy /* policy */,
-      handle /* parent */) {
+  static handle cast(at::IntArrayRef src, return_value_policy /* policy */, handle /* parent */) {
     return handle(THPUtils_packInt64Array(src.size(), src.data()));
   }
-
- private:
+private:
   std::vector<int64_t> v_value;
 };
 
@@ -165,10 +150,8 @@ struct type_caster<at::Device> {
     return false;
   }
 
-  static handle cast(
-      const at::Device& src,
-      return_value_policy /* policy */,
-      handle /* parent */) {
+  static handle
+  cast(const at::Device& src, return_value_policy /* policy */, handle /* parent */) {
     return handle(THPDevice_New(src));
   }
 };
@@ -177,8 +160,7 @@ struct type_caster<at::Device> {
 // http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
 template <typename T>
 struct type_caster<c10::optional<T>> : optional_caster<c10::optional<T>> {};
-} // namespace detail
-} // namespace pybind11
+}} // namespace pybind11::detail
 
 namespace torch {
 namespace impl {
@@ -210,10 +192,8 @@ namespace impl {
 // violation (why does code that is ostensibly Python agnostic calling into the
 // GIL).
 //
-// Adapted from
-// https://github.com/pybind/pybind11/issues/1446#issuecomment-406341510
-template <typename T>
-inline void destroy_without_gil(T* ptr) {
+// Adapted from https://github.com/pybind/pybind11/issues/1446#issuecomment-406341510
+template <typename T> inline void destroy_without_gil(T *ptr) {
   // Because the ownership of a shared_ptr is diffuse, it's not possible to
   // necessarily predict whether or not the last reference to an object will
   // be destructed from Python or C++.  This means that in the destructor here,

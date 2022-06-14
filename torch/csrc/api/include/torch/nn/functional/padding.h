@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/native/PadNd.h>
 #include <torch/nn/options/padding.h>
+#include <ATen/native/PadNd.h>
 
 namespace torch {
 namespace nn {
@@ -9,11 +9,10 @@ namespace functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor pad(
-    const Tensor& input,
-    IntArrayRef pad,
-    PadFuncOptions::mode_t mode,
-    double value) {
+inline Tensor pad(const Tensor& input,
+                  IntArrayRef pad,
+                  PadFuncOptions::mode_t mode,
+                  double value) {
   const auto mode_enum = [&] {
     if (c10::get_if<enumtype::kConstant>(&mode)) {
       return at::padding_mode::constant;
@@ -36,18 +35,16 @@ inline Tensor pad(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.pad
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.pad
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::PadFuncOptions` class to
-/// learn what optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::PadFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::pad(input, F::PadFuncOptions({1, 2, 2, 1, 1,
-/// 2}).mode(torch::kReplicate));
+/// F::pad(input, F::PadFuncOptions({1, 2, 2, 1, 1, 2}).mode(torch::kReplicate));
 /// ```
 inline Tensor pad(const Tensor& input, const PadFuncOptions& options) {
   return detail::pad(input, options.pad(), options.mode(), options.value());

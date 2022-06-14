@@ -7,8 +7,7 @@ namespace F = torch::nn::functional;
 namespace torch {
 namespace nn {
 
-UpsampleImpl::UpsampleImpl(
-    const UpsampleOptions& options_) // NOLINT(modernize-pass-by-value)
+UpsampleImpl::UpsampleImpl(const UpsampleOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {}
 
 void UpsampleImpl::reset() {}

@@ -608,7 +608,7 @@ void initPythonIRBindings(PyObject* module_) {
           "schema",
           [](Node& n) {
             std::stringstream ss;
-            if (n.maybeSchema()) {
+            if (auto sch = n.maybeSchema()) {
               ss << n.schema();
             } else {
               ss << "(no schema)";
