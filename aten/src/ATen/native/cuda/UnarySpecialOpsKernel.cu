@@ -129,7 +129,11 @@ void sigmoid_kernel_cuda(TensorIteratorBase& iter) {
       static const auto sigmoid_string = jiterator_stringify(
         template <typename T>
         T sigmoid(T x) {
+#ifdef __HIPCC__
+          return T{1} / (T{1} + exp(-x));
+#else
           return T{1} / (T{1} + std::exp(-x));
+#endif
         }
       ); // sigmoid_string
       AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "sigmoid_cuda", [&]() {

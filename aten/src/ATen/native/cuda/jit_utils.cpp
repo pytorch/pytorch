@@ -170,10 +170,10 @@ const std::string jit_common_types = R"ESCAPE(
   #ifdef __HIPCC__
   #ifndef __forceinline__
   #define __forceinline__ inline __attribute__((always_inline))
+  #endif
   // Map HIP_DYNAMIC_SHARED to "extern __shared__" for compatibility with old HIP applications
   #define HIP_DYNAMIC_SHARED(type, var) extern __shared__ type var[];
   #define HIP_DYNAMIC_SHARED_ATTRIBUTE
-  #endif
   // corresponds to aten/src/ATen/native/cuda/thread_constants.h
   #define CUDA_OR_ROCM_NUM_THREADS 256
   // corresponds to aten/src/ATen/cuda/detail/OffsetCalculator.cuh
