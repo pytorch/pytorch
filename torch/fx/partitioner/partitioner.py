@@ -1,4 +1,5 @@
 import operator
+import random
 from typing import Dict, List, Set, NamedTuple, Tuple, Iterable
 from functools import cmp_to_key
 
@@ -71,21 +72,32 @@ class CapabilityBasedPartitioner:
         return dependency_map
 
     def __node_depends_on(self, a: Node, b: Node) -> bool:
-        # True if b depends on a (,or equivalently a is an upstream depedency of b)
-        return a in self.dependency_map[b]
+        # Returns
+        # 1 if b depends on a (,or equivalently a is an upstream depedency of b)
+        # -1 if a depends on b (,or equivalently b is an upstream depedency of a)
+        # 0 if a and b doesn't have dependency between each other
+
+        if a in self.dependency_map[b]:
+            return 1
+        elif b in self.dependency_map[a]:
+            return -1
+        else:
+            return 0
 
     def __partition_depends_on(self, partition_a: Partition, partition_b: Partition) -> bool:
-        # True if b depends on a (,or equivalently a is an upstream depedency of b)
+        # Returns
+        # 1 if b depends on a (,or equivalently a is an upstream depedency of b)
+        # -1 if a depends on b (,or equivalently b is an upstream depedency of a)
+        # 0 if a and b doesn't have dependency between each other
 
         # TODO: build a cache here to speedup the query
 
-        # return True if any of node in partition_a is an upstream node of any node in partition_b
         for node_a in partition_a.nodes:
             for node_b in partition_b.nodes:
-                if self.__node_depends_on(node_a, node_b):
-                    return True
-
-        return False
+                dependency = self.__node_depends_on(node_a, node_b)
+                if dependency != 0:
+                    return dependency
+        return 0
 
     def get_candidates(self):
         candidates = []
@@ -99,9 +111,8 @@ class CapabilityBasedPartitioner:
 
     def partition(self, candidates: NodeList) -> NodeList:
         # assumptions: nodes in candidate list is sorted in topological order
-        assignment = {}
-        partition_id = 0
-        partitions_by_id = dict()
+        assignment: Dict[Node, int] = {}   # maping from node to partition_id
+        partitions_by_id: Dict[int, Partition] = dict()   # mapping from partition_id to partition
 
         def assign(node, id):
             assignment[node] = id
@@ -118,53 +129,46 @@ class CapabilityBasedPartitioner:
         # visit candidates in reversed topological order
         for node in reversed(candidates):
 
-            partition_candidates: List[Partition] = list()
-            partition_candidates_id : Set[int] = set()
+            user_partitions: Set[Partition] = set()
             for user_node in node.users:
                 if user_node in assignment:
-                    if assignment[user_node] not in partition_candidates_id:
-                        id = assignment[user_node]
-                        partition_candidates_id.add(id)
-                        partition_candidates.append(partitions_by_id[id])
-
+                    id = assignment[user_node]
+                    user_partitions.add(partitions_by_id[id])
                 else:
-                    partition_candidates.append(Partition(nodes=[user_node]))
-
-
-            # TODO: simple sort is probably not enough, need to do strict topo sort
-            # After sorting: partitions_sorted[0] <= partitions_sorted[1] <=... partitions_sorted[n]
-            partitions_sorted = sorted(partition_candidates, key=cmp_to_key(self.__partition_depends_on))
+                    user_partitions.add(Partition(nodes=[user_node]))
 
             print(node)
-            print("partitions_sorted", partitions_sorted)
+            print('user_partitions', user_partitions)
 
-            # find all the parallel partitions
-            # After filtering: partition_candidates[0] == partition_candidates[1] ==... partition_candidates[n]
-            partition_candidates = [ partitions_sorted[0] ]
-            for partition in partitions_sorted[1:]:
-                if self.__partition_depends_on(partition_candidates[-1], partition):
-                    # partition depends on partition_candidates[-1]
-                    break
-                else:
-                    partition_candidates.append(partition)
+            # Filter out all the partitions that has dependency on other users
+            # TODO: find a better way to do this, rather than pair-wise comparision
+            user_partitions_list = list(user_partitions)
+            for i in range(len(user_partitions_list)):
+                for j in range(i+1, len(user_partitions_list)):
+                    pi = user_partitions_list[i]
+                    pj = user_partitions_list[j]
+                    dependency = self.__partition_depends_on(pi, pj)
+                    if dependency == 1 and pj in user_partitions:
+                        user_partitions.remove(pj)
+                    elif dependency == -1 and pi in user_partitions:
+                        user_partitions.remove(pi)
+
+            print("user_partitions after filtering", user_partitions)
 
             # We use the following rules for partition assignment:
             # 1. If none of the candidates has been assigned to a partition, create a new partition
             # 2. If all of the candidate has been assigned to the same partition, assign to the same partition
             # 3. If candidates has been assigned to more then one paritions, assign to the largest partition (by node count)
             # 4. If none of rule above can break the tie, randomly assign to one of the largest partition among candidates
-
-            print("partition_candidates", partition_candidates)
-
             candidate_partition_ids = []
-            for partition in partition_candidates:
+            for partition in user_partitions:
                 if partition.id is not None:
                     candidate_partition_ids.append(partition.id)
 
             if len(candidate_partition_ids) == 0:
                 # create a new partition
-                assign(node, partition_id)
-                partition_id += 1
+                id = len(partitions_by_id)
+                assign(node, id)
 
             elif all_equal(candidate_partition_ids):
                 id = candidate_partition_ids[0]
