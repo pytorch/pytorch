@@ -26,7 +26,12 @@ class ImplementedSparsifier(BaseDataSparsifier):
         linear_state['step_count'] = linear_state.get('step_count', 0) + 1
 
 
-class TestBaseDataSparsiferType(TestCase):
+class TestBaseDataSparsiferRunner(TestCase):
+    r"""This helper test class takes in any supported type of and runs some tests.
+        The user is required to pass in the data that needs to sparsified and the
+        runner will run some tests that needs to be passed in order for the data
+        type to be supported.
+    """
     def __init__(self, data_list, defaults, data_with_config):
         self.data_list = data_list
         self.defaults = defaults
@@ -175,7 +180,7 @@ class TestBaseDataSparsifier(TestCase):
         defaults: default config for the above data in data_list
         data_with_config: list of dictionaries defining name, data and config (look test_tensors())
 
-    Once the above is done, create an instance of TestBaseDataSparsifierType and call all it's functions
+    Once the above is done, create an instance of TestBaseDataSparsifierType and call all the run_tests()
     """
     def test_tensors(self):
         tensor1, tensor2, tensor3 = torch.randn(3, 3), torch.randn(4, 4), torch.randn(5, 5)
@@ -191,8 +196,8 @@ class TestBaseDataSparsifier(TestCase):
                 'name': 'tensor5', 'data': tensor5, 'config': {'test': 8}
             },
         ]
-        tensor_test = TestBaseDataSparsiferType(data_list=data_list, defaults=defaults,
-                                                data_with_config=data_with_config)
+        tensor_test = TestBaseDataSparsiferRunner(data_list=data_list, defaults=defaults,
+                                                  data_with_config=data_with_config)
         tensor_test.run_tests()
 
     def test_nn_parameters(self):
@@ -209,8 +214,8 @@ class TestBaseDataSparsifier(TestCase):
                 'name': 'param5', 'data': param5, 'config': {'test': 8}
             },
         ]
-        param_test = TestBaseDataSparsiferType(data_list=data_list, defaults=defaults,
-                                               data_with_config=data_with_config)
+        param_test = TestBaseDataSparsiferRunner(data_list=data_list, defaults=defaults,
+                                                 data_with_config=data_with_config)
         param_test.run_tests()
 
     def test_nn_embeddings(self):
@@ -229,15 +234,15 @@ class TestBaseDataSparsifier(TestCase):
                 'name': 'emb3_bag', 'data': emb3_bag, 'config': {'test': 8}
             },
         ]
-        emb_test = TestBaseDataSparsiferType(data_list=data_list, defaults=defaults,
-                                             data_with_config=data_with_config)
+        emb_test = TestBaseDataSparsiferRunner(data_list=data_list, defaults=defaults,
+                                               data_with_config=data_with_config)
         emb_test.run_tests()
 
 
-class TestNormDataSparsifierType(TestBaseDataSparsiferType):
+class TestNormDataSparsifierRunner(TestBaseDataSparsiferRunner):
     r"""This helper test class takes in any supported type of and runs some tests.
-        This inherits the TestBaseDataSparsifier type wherein some functions are
-        over-ridden to take into account the specific sparsifier.
+        This inherits the TestBaseDataSparsifierRuner wherein some functions are
+        over-ridden to take accomodate the specific sparsifier.
     """
     def __init__(self, data_list, defaults, data_with_config, norm_type='L1'):
         super().__init__(data_list=data_list, defaults=defaults, data_with_config=data_with_config)
@@ -383,7 +388,7 @@ class TestNormDataSparsifiers(TestCase):
         defaults: default config for the above data in data_list
         data_with_config: list of dictionaries defining name, data and config (look test_tensors())
 
-        Once the above is done, create an instance of TestNormDataSparsifierType and call run_tests()
+        Once the above is done, create an instance of TestNormDataSparsifierRunner and call run_tests()
     """
     def test_tensors(self):
         tensor1, tensor2, tensor3 = torch.randn(3, 3), torch.randn(4, 4), torch.randn(5, 5)
@@ -401,12 +406,12 @@ class TestNormDataSparsifiers(TestCase):
                 'config': {'sparsity_level': 0.3, 'sparse_block_shape': (2, 3), 'zeros_per_block': 6}
             },
         ]
-        tensor_test_l1 = TestNormDataSparsifierType(data_list=data_list, defaults=defaults,
-                                                    data_with_config=data_with_config, norm_type='L1')
+        tensor_test_l1 = TestNormDataSparsifierRunner(data_list=data_list, defaults=defaults,
+                                                      data_with_config=data_with_config, norm_type='L1')
         tensor_test_l1.run_tests()
 
-        tensor_test_l2 = TestNormDataSparsifierType(data_list=data_list, defaults=defaults,
-                                                    data_with_config=data_with_config, norm_type='L2')
+        tensor_test_l2 = TestNormDataSparsifierRunner(data_list=data_list, defaults=defaults,
+                                                      data_with_config=data_with_config, norm_type='L2')
         tensor_test_l2.run_tests()
 
     def test_nn_parameters(self):
@@ -425,12 +430,12 @@ class TestNormDataSparsifiers(TestCase):
                 'config': {'sparsity_level': 0.3, 'sparse_block_shape': (2, 3), 'zeros_per_block': 6}
             },
         ]
-        param_test_l1 = TestNormDataSparsifierType(data_list=data_list, defaults=defaults,
-                                                   data_with_config=data_with_config, norm_type='L1')
+        param_test_l1 = TestNormDataSparsifierRunner(data_list=data_list, defaults=defaults,
+                                                     data_with_config=data_with_config, norm_type='L1')
         param_test_l1.run_tests()
 
-        param_test_l2 = TestNormDataSparsifierType(data_list=data_list, defaults=defaults,
-                                                   data_with_config=data_with_config, norm_type='L2')
+        param_test_l2 = TestNormDataSparsifierRunner(data_list=data_list, defaults=defaults,
+                                                     data_with_config=data_with_config, norm_type='L2')
         param_test_l2.run_tests()
 
     def test_nn_embeddings(self):
@@ -451,11 +456,11 @@ class TestNormDataSparsifiers(TestCase):
                 'config': {'sparsity_level': 0.3, 'sparse_block_shape': (2, 3), 'zeros_per_block': 6}
             },
         ]
-        emb_test_l1 = TestNormDataSparsifierType(data_list=data_list, defaults=defaults,
-                                                 data_with_config=data_with_config, norm_type='L1')
+        emb_test_l1 = TestNormDataSparsifierRunner(data_list=data_list, defaults=defaults,
+                                                   data_with_config=data_with_config, norm_type='L1')
         emb_test_l1.run_tests()
 
-        emb_test_l2 = TestNormDataSparsifierType(data_list=data_list, defaults=defaults,
-                                                 data_with_config=data_with_config, norm_type='L2')
+        emb_test_l2 = TestNormDataSparsifierRunner(data_list=data_list, defaults=defaults,
+                                                   data_with_config=data_with_config, norm_type='L2')
 
         emb_test_l2.run_tests()
