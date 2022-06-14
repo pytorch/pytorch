@@ -23,7 +23,12 @@ class ImplementedSparsifier(BaseDataSparsifier):
         linear_state['step_count'] = linear_state.get('step_count', 0) + 1
 
 
-class TestBaseDataSparsiferType(TestCase):
+class TestBaseDataSparsiferRunner(TestCase):
+    r"""This helper test class takes in any supported type of and runs some tests.
+        The user is required to pass in the data that needs to sparsified and the
+        runner will run some tests that needs to be passed in order for the data
+        type to be supported.
+    """
     def __init__(self, data_list, defaults, data_with_config):
         self.data_list = data_list
         self.defaults = defaults
@@ -148,6 +153,6 @@ class TestBaseDataSparsifier(TestCase):
                 'name': 'tensor5', 'data': tensor5, 'config': {'test': 8}
             },
         ]
-        tensor_test = TestBaseDataSparsiferType(data_list=data_list, defaults=defaults,
-                                                data_with_config=data_with_config)
+        tensor_test = TestBaseDataSparsiferRunner(data_list=data_list, defaults=defaults,
+                                                  data_with_config=data_with_config)
         tensor_test.run_tests()
