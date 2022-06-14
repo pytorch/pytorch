@@ -847,19 +847,16 @@ namespace {
 class TORCH_API ForkedSubgraphSRLauncher {
  public:
   ForkedSubgraphSRLauncher(
-      std::shared_ptr<torch::jit::Graph> graph,
-      StaticModuleOptions opts,
+      std::shared_ptr<StaticModule> smodule,
       std::vector<IValue> args,
       c10::intrusive_ptr<Future> future)
-      : graph_(std::move(graph)),
-        opts_(opts),
+      : smodule_(std::move(smodule)),
         args_(std::move(args)),
         future_(std::move(future)) {}
 
   void operator()() {
     try {
-      StaticModule smodule(graph_, opts_, {});
-      StaticRuntime runtime(smodule);
+      StaticRuntime runtime(*smodule_);
       auto output = runtime(args_, {});
       future_->markCompleted(output);
     } catch (const std::exception& e) {
@@ -869,8 +866,7 @@ class TORCH_API ForkedSubgraphSRLauncher {
   }
 
  private:
-  std::shared_ptr<torch::jit::Graph> graph_;
-  StaticModuleOptions opts_;
+  std::shared_ptr<StaticModule> smodule_;
   std::vector<IValue> args_;
   c10::intrusive_ptr<Future> future_;
 };
@@ -908,10 +904,12 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     [](Node* node) -> SROperator {
       auto forkedGraph = node->g(attr::Subgraph);
       Inline(*forkedGraph);
-      return [forkedGraph = std::move(forkedGraph)](ProcessedNode* p_node) {
-        StaticModuleOptions opts;
-        opts.manage_output_tensors = true;
+      StaticModuleOptions opts;
+      opts.manage_output_tensors = true;
+      auto smodule = std::make_shared<StaticModule>(forkedGraph, opts);
 
+      return [forkedGraph = std::move(forkedGraph),
+              smodule = std::move(smodule)](ProcessedNode* p_node) {
         std::vector<IValue> args;
         args.reserve(p_node->num_inputs());
         for (const auto i : c10::irange(p_node->num_inputs())) {
@@ -923,8 +921,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         p_node->Output(0) = future;
 
         TaskLauncher taskLauncher_ = at::launch;
-        ForkedSubgraphSRLauncher runtime_launcher(
-            forkedGraph, opts, args, future);
+        ForkedSubgraphSRLauncher runtime_launcher(smodule, args, future);
         taskLauncher_(std::move(runtime_launcher));
       };
     });
