@@ -1685,7 +1685,7 @@ class FullyShardedDataParallel(nn.Module):
         )
         if state == TrainingState_.FORWARD:
             return (
-                self.forward_prefetch.prefetch_full_params
+                self.forward_prefetch
                 and valid_fsdp_graph_and_index
                 and self._my_fsdp_idx_in_graph < len(self._fsdp_graph_order) - 1
                 and self._fsdp_graph_order[self._my_fsdp_idx_in_graph + 1].training_state
