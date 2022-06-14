@@ -6,7 +6,6 @@
 #include <ATen/OpMathType.h>
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/CPUBlas.h>
-#include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOps.h>
@@ -169,121 +168,6 @@ TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor&
 namespace native {
 
 DEFINE_DISPATCH(addr_stub);
-
-// As P is a permutation matrix
-// det(P) = 1 if it's an even permutation and det(P) = -1 if it's an odd permutation
-static inline Tensor _lu_det_P(const Tensor& lu, const Tensor& pivs) {
-  const auto n = lu.size(-1);
-  auto det_P = (at::arange(1, n + 1, pivs.options()) != pivs)
-    .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong)
-    .fmod_(2)
-    // take 0 to 1 and 1 to -1
-    .mul_(-2)
-    .add_(1);
-  return det_P;
-}
-
-// Given a pivoted LU factorization A = P L U,
-// det(A) = det(P) * det(L) * det(U).
-std::tuple<Tensor, Tensor, Tensor> _det_lu_based_helper(const Tensor& self) {
-  Tensor pivs, lu;
-  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
-  const auto det_P = _lu_det_P(lu, pivs);
-  auto det = det_P * at::prod(lu.diagonal(0, -2 ,-1), /*dim=*/-1);
-
-  return std::make_tuple(std::move(det), std::move(lu), std::move(pivs));
-}
-
-// torch.det, alias for torch.linalg.det
-Tensor det(const Tensor& self) {
-  return at::linalg_det(self);
-}
-
-Tensor linalg_det(const Tensor& self) {
-  squareCheckInputs(self, "linalg.det");
-  checkFloatingOrComplex(self, "linalg.det");
-
-  return std::get<0>(at::_det_lu_based_helper(self));
-}
-
-Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
-  checkSameDevice("torch.linalg.det", out, self, "out");
-  checkLinalgCompatibleDtype("torch.linalg.det", out, self, "out");
-
-  IntArrayRef out_sizes(self.sizes().data(), self.dim() - 2);
-  at::native::resize_output(out, out_sizes);
-
-  auto det = at::native::linalg_det(self);
-  out.copy_(det);
-  return out;
-}
-
-Tensor logdet(const Tensor& self) {
-  squareCheckInputs(self, "logdet");
-  checkFloatingOrComplex(self, "logdet");
-
-  Tensor pivs, lu;
-  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
-  const auto det_P = _lu_det_P(lu, pivs);
-  const auto diag_U = lu.diagonal(0, -2 ,-1);
-  const auto det_sign = diag_U.sign().prod(-1).mul_(det_P);
-
-  // If det_sign > 0, diag_U.abs_().log_().sum(-1) gives logdet (this means U is not singular).
-  // If det_sign <= 0, then we get proper nan (when det < 0, i.e., det_sign) or -inf (when det = 0, i.e., U is singular).
-  // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
-  Tensor logdet_vals = diag_U.abs_().log_().sum(-1);
-  if (self.dim() > 2) {
-    auto indices = toListOfOptionalTensors((det_sign < 0).nonzero_numpy());
-    // NOLINTNEXTLINE(performance-move-const-arg)
-    logdet_vals.index_put_(std::move(indices), at::full({}, NAN, self.options()));
-  } else if (det_sign.item<double>() < 0) {
-    logdet_vals.fill_(NAN);
-  }
-  return logdet_vals;
-}
-
-std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
-  squareCheckInputs(self, "linalg.slogdet");
-  ScalarType t = self.scalar_type();
-  TORCH_CHECK(t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
-              "linalg.slogdet: expected a tensor of float, double, cfloat or cdouble types but got ", t);
-
-  Tensor pivs, lu;
-  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
-  const auto det_P = _lu_det_P(lu, pivs);
-  const auto diag_U = lu.diagonal(0, -2 ,-1);
-  const auto det_sign = diag_U.sgn().prod(-1).mul_(det_P);
-  // abslogdet_val is -inf if U is singular, in which case diag_U.abs_().log_().sum(-1) will return -inf.
-  // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
-  // Since abslogdet_val cannot take nan, no special case handling is required.
-  // in-place abs is not supported for complex tensors
-  auto abslogdet_val = isComplexType(t) ? diag_U.abs().log_().sum(-1) : diag_U.abs_().log_().sum(-1);
-  return std::make_tuple(det_sign, abslogdet_val);
-}
-
-// TODO: implement _out variant avoiding copy and using already allocated storage directly
-std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& input, Tensor& sign, Tensor& logabsdet) {
-  checkSameDevice("linalg.slogdet", sign, input, "sign");
-  checkSameDevice("linalg.slogdet", logabsdet, input, "logabsdet");
-  checkLinalgCompatibleDtype("linalg.slogdet", sign, input, "sign");
-  ScalarType real_dtype = toRealValueType(input.scalar_type());
-  // logabsdet is always real-valued here
-  checkLinalgCompatibleDtype("linalg.slogdet", logabsdet.scalar_type(), real_dtype, "logabsdet");
-
-  Tensor sign_tmp, logabsdet_tmp;
-  std::tie(sign_tmp, logabsdet_tmp) = at::linalg_slogdet(input);
-
-  at::native::resize_output(sign, sign_tmp.sizes());
-  sign.copy_(sign_tmp);
-  at::native::resize_output(logabsdet, logabsdet_tmp.sizes());
-  logabsdet.copy_(logabsdet_tmp);
-
-  return std::tuple<Tensor&, Tensor&>(sign, logabsdet);
-}
-
-std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
-  return at::linalg_slogdet(self);
-}
 
 namespace {
 
