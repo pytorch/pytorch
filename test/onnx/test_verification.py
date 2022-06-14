@@ -1,13 +1,13 @@
 # Owner(s): ["module: onnx"]
 
-import unittest
-
 import torch
 from torch.onnx import _experimental, verification
+from test_pytorch_common import TestCase
 
 
-class TestVerification(unittest.TestCase):
+class TestVerification(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         torch.manual_seed(0)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)
