@@ -704,7 +704,9 @@ inline py::object toPyObject(IValue ivalue) {
         case at::ScalarType::Double:
           return py::cast(*tensor.data_ptr<double>());
         case at::ScalarType::ComplexDouble:
-          return py::cast(*tensor.data_ptr<c10::complex<double>>());
+          // TODO: https://github.com/pytorch/pytorch/issues/77134
+          return py::cast(static_cast<std::complex<double>>(
+              *tensor.data_ptr<c10::complex<double>>()));
         default:
           TORCH_CHECK(
               false,
@@ -1213,7 +1215,8 @@ inline py::object _get_operation_for_overload_or_packet(
         total_arg_num,
         false /* throw_error */);
   }
-  if (overloaded_args.size() > 0) {
+  if (overloaded_args.size() > 0 ||
+      at::impl::PythonTorchFunctionTLS::get_mode()) {
     std::vector<py::object> overloaded_types;
     overloaded_types.reserve(overloaded_args.size());
     for (auto& oarg : overloaded_args) {

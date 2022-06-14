@@ -34,11 +34,11 @@ set_bool(AT_MAGMA_ENABLED USE_MAGMA)
 set_bool(CAFFE2_STATIC_LINK_CUDA_INT CAFFE2_STATIC_LINK_CUDA)
 
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
-# TODO: Don't unconditionally generate CUDAConfig.h.in.  Unfortunately,
-# this file generates AT_ROCM_ENABLED() which is required by the miopen
-# files, which are compiled even if we are doing a vanilla CUDA build.
-# Once we properly split CUDA and HIP in ATen, we can remove this code.
-configure_file(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
+# TODO: Do not generate CUDAConfig.h for ROCm BUILDS
+# At the moment, `jit_macors.h` include CUDAConfig.h for both CUDA and HIP builds
+if(USE_CUDA OR USE_ROCM)
+  configure_file(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
+endif()
 if(USE_ROCM)
   configure_file(hip/HIPConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/hip/HIPConfig.h")
 endif()
@@ -100,6 +100,14 @@ file(GLOB native_ao_sparse_cpp
             "native/ao_sparse/cpu/*.cpp"
             "native/ao_sparse/quantized/*.cpp"
             "native/ao_sparse/quantized/cpu/*.cpp")
+# MPS
+file(GLOB mps_cpp "mps/*.cpp")
+file(GLOB mps_mm "mps/*.mm")
+file(GLOB mps_h "mps/*.h")
+file(GLOB_RECURSE native_mps_cpp "native/mps/*.cpp")
+file(GLOB_RECURSE native_mps_mm "native/mps/*.mm")
+file(GLOB_RECURSE native_mps_h "native/mps/*.h")
+
 file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
@@ -412,7 +420,6 @@ if(USE_CUDA AND NOT USE_ROCM)
       ${CUDA_LIBRARIES}
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusparse_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static_nocallback.a
       )
    if(NOT BUILD_LAZY_CUDA_LINALG)
@@ -483,6 +490,10 @@ list(APPEND ATen_CPU_DEPENDENCY_LIBS ATEN_CPU_FILES_GEN_LIB)
 if(USE_CUDA)
   set(ATen_NVRTC_STUB_SRCS ${cuda_nvrtc_stub_cpp})
   list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
+endif()
+
+if(USE_MPS)
+    set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h})
 endif()
 
 if(USE_ROCM)
@@ -571,6 +582,7 @@ set(ATen_CUDA_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY} PARENT_SCOPE)
 set(ATen_CUDA_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY} PARENT_SCOPE)
 set(ATen_NVRTC_STUB_SRCS ${ATen_NVRTC_STUB_SRCS} PARENT_SCOPE)
 set(ATen_HIP_SRCS ${ATen_HIP_SRCS} PARENT_SCOPE)
+set(ATen_MPS_SRCS ${ATen_MPS_SRCS} PARENT_SCOPE)
 set(ATen_QUANTIZED_SRCS ${ATen_QUANTIZED_SRCS} PARENT_SCOPE)
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
