@@ -610,15 +610,19 @@ Tensor _batch_tile_tensor(const Tensor& self, IntArrayRef blocksize) {
   if (self.dim() == 2) {
     return _tile_tensor(self, blocksize);
   }
+  auto n_batch_dim = self.dim() - 2;
   // Same as _tile_tensor, just per matrix entry of self, if self is 3D.
-  TORCH_CHECK(self.dim() == 3, "Currently _batch_tile_tensor only supports 2D or 3D inputs.");
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[0] > 0);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[1] > 0);
   auto block_size_0 = self.size(-2) / blocksize[0];
   auto block_size_1 = self.size(-1) / blocksize[1];
-  return self.reshape({self.size(0), block_size_0, blocksize[0], block_size_1, blocksize[1]})
-      .transpose(2, 3)
-      .contiguous();
+  auto tiled_sizes = DimVector(self.sizes().slice(0, n_batch_dim));
+  tiled_sizes.push_back(block_size_0);
+  tiled_sizes.push_back(blocksize[0]);
+  tiled_sizes.push_back(block_size_1);
+  tiled_sizes.push_back(blocksize[1]);
+
+  return self.reshape(tiled_sizes).transpose(-3, -2).contiguous();
 }
 
 Tensor _mask_to_indices(const Tensor& mask) {
@@ -650,7 +654,6 @@ std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
 }
 
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
-  TORCH_CHECK(self.dim() == 2 || self.dim() == 3, "Can only convert 2D or 3D Tensor to BSR.");
   TORCH_CHECK(
       blocksize[0] > 0 && blocksize[1] > 0,
       "blocksize needs to be non zero, but got ",
