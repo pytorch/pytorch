@@ -87,7 +87,7 @@ class TestNonUniformObserver(unittest.TestCase):
 
     """
         Test case 4
-        Same as test case 1 but with signed = True
+        Same as test case 2 but with signed = True
         Assume hardcoded parameters:
         * b = 4 (total number of bits across all terms)
         * k = 2 (base bitwidth, i.e. bitwidth of every term)
