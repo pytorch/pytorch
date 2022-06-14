@@ -46,7 +46,7 @@
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
 # related to Github Actions
-/.github/ @seemethere @janeyx99 @atalman
+/.github/ @pytorch/pytorch-dev-infra
 
 # Custom Test Infrastructure
 /test/run_test.py @pytorch/pytorch-dev-infra
@@ -73,3 +73,8 @@ test/test_unary_ufuncs.py @mruberry @ngimel
 test/test_binary_ufuncs.py @mruberry @ngimel
 test/test_reductions.py @mruberry @ngimel
 test/test_type_promotion.py @mruberry @ngimel
+
+# torch MPS
+test/test_mps.py @kulinseth
+aten/src/ATen/mps/ @kulinseth
+aten/src/ATen/native/mps/ @kulinseth

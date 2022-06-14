@@ -29,10 +29,12 @@ install_ubuntu() {
   apt-get update
   # TODO: Some of these may not be necessary
   ccache_deps="asciidoc docbook-xml docbook-xsl xsltproc"
+  deploy_deps="libffi-dev libbz2-dev libreadline-dev libncurses5-dev libncursesw5-dev libgdbm-dev libsqlite3-dev uuid-dev tk-dev"
   numpy_deps="gfortran"
   apt-get install -y --no-install-recommends \
     $ccache_deps \
     $numpy_deps \
+    ${deploy_deps} \
     ${cmake3} \
     apt-transport-https \
     autoconf \
