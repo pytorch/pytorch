@@ -1,5 +1,5 @@
 import operator
-from typing import Dict, List, Set, NamedTuple, Tuple
+from typing import Dict, List, Set, NamedTuple, Tuple, Iterable
 from functools import cmp_to_key
 
 from torch.fx.passes.fuser_utils import fuse_by_partitions
@@ -28,9 +28,9 @@ from itertools import groupby
 from collections import defaultdict
 
 class Partition:
-    def __init__(self, partition_id=None, nodes=set()):
+    def __init__(self, partition_id=None, nodes: Iterable[Node]=set()):
         self.partition_id = partition_id
-        self.nodes: Set[Node] = nodes
+        self.nodes: Set[Node] = set(nodes)
 
     def __str__(self):
         return str(self.partition_id)
@@ -104,11 +104,14 @@ class CapabilityBasedPartitioner:
         # assumptions: nodes in candidate list is sorted in topological order
         assignment = {}
         partition_id = 0
-        partitions_by_id = defaultdict(list)
-
+        partitions_by_id = dict()
         def assign(node, id):
             assignment[node] = id
-            partitions_by_id[id].append(node)
+
+            if id not in partitions_by_id:
+                partitions_by_id[id] = Partition(partition_id=id, nodes={node})
+            else:
+                partitions_by_id[id].add_node(node)
 
         def all_equal(iterable):
             g = groupby(iterable)
@@ -117,15 +120,14 @@ class CapabilityBasedPartitioner:
         # visit candidates in reversed topological order
         for node in reversed(candidates):
 
-            partition_candidates: List[List[Node]] = []
+            partition_candidates: List[List[Node]] = list()
             partition_candidates_id : Set[int] = set()
             for user_node in node.users:
                 if user_node in assignment:
-
                     if assignment[user_node] not in partition_candidates_id:
                         id = assignment[user_node]
                         partition_candidates_id.add(id)
-                        partition_candidates.append(partitions_by_id[id])
+                        partition_candidates.append(list(partitions_by_id[id].nodes))
 
                 else:
                     partition_candidates.append([user_node])
@@ -171,7 +173,7 @@ class CapabilityBasedPartitioner:
                 assign(node, id)
 
             else:
-                partitions_size_by_id = [ [len(partitions_by_id[id]), id] for id in candidate_partition_ids]
+                partitions_size_by_id = [ [partitions_by_id[id].size(), id] for id in candidate_partition_ids]
                 partitions_size_by_id = sorted(partitions_size_by_id, reverse=True)
 
                 id = partitions_size_by_id[0][1]
@@ -179,7 +181,7 @@ class CapabilityBasedPartitioner:
 
         print("assignment", assignment)
 
-        return partitions_by_id.values()
+        return [list(partition.nodes) for partition in partitions_by_id.values()]
 
     def fuse_partitions(self, partitions):
         # partitions: [ [node0, node1], [node2, node3] ]
