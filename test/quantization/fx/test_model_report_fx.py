@@ -5,6 +5,10 @@ import torch
 import torch.ao.quantization.quantize_fx
 from torch.ao.quantization import QConfig, QConfigMapping
 from torch.ao.quantization.fx._model_report._detector import _detect_per_channel
+import torch.nn.functional as F
+from torch.ao.quantization.fx._model_report.model_report_observer import (
+    ModelReportObserver,
+)
 from torch.ao.quantization.observer import (
     default_per_channel_weight_observer,
     HistogramObserver,
@@ -13,6 +17,7 @@ from torch.nn.intrinsic.modules.fused import ConvReLU2d, LinearReLU
 from torch.testing._internal.common_quantization import (
     ConvModel,
     QuantizationTestCase,
+    SingleLayerLinearModel,
     skipIfNoFBGEMM,
     skipIfNoQNNPACK,
     TwoLayerLinearModel,
@@ -431,3 +436,290 @@ class TestModelReportFxDetector(QuantizationTestCase):
             module_entry = per_channel_info["per_channel_status"][key]
             self.assertEqual(module_entry["per_channel_supported"], True)
             self.assertEqual(module_entry["per_channel_used"], False)
+
+
+"""
+Partition on Domain / Things to Test
+
+- All zero tensor
+- Multiple tensor dimensions
+- All of the outward facing functions
+- Epoch min max are correctly updating
+- Batch range is correctly averaging as expected
+- Reset for each epoch is correctly resetting the values
+
+Partition on Output
+- the calcuation of the ratio is occurring correctly
+
+"""
+
+
+class TestModelReportObserver(QuantizationTestCase):
+    class NestedModifiedSingleLayerLinear(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.obs1 = ModelReportObserver()
+            self.mod1 = SingleLayerLinearModel()
+            self.obs2 = ModelReportObserver()
+            self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            x = self.obs1(x)
+            x = self.mod1(x)
+            x = self.obs2(x)
+            x = self.fc1(x)
+            x = self.relu(x)
+            return x
+
+    def run_model_and_common_checks(self, model, ex_input, num_epochs, batch_size):
+        # split up data into batches
+        split_up_data = torch.split(ex_input, batch_size)
+        for epoch in range(num_epochs):
+            # reset all model report obs
+            model.apply(
+                lambda module: module.reset_batch_and_epoch_values()
+                if isinstance(module, ModelReportObserver)
+                else None
+            )
+
+            # quick check that a reset occurred
+            self.assertEqual(
+                getattr(model, "obs1").average_batch_activation_range,
+                torch.tensor(float(0)),
+            )
+            self.assertEqual(
+                getattr(model, "obs1").epoch_activation_min, torch.tensor(float("inf"))
+            )
+            self.assertEqual(
+                getattr(model, "obs1").epoch_activation_max, torch.tensor(float("-inf"))
+            )
+
+            # loop through the batches and run through
+            for index, batch in enumerate(split_up_data):
+
+                num_tracked_so_far = getattr(model, "obs1").num_batches_tracked
+                self.assertEqual(num_tracked_so_far, index)
+
+                # get general info about the batch and the model to use later
+                batch_min, batch_max = torch.aminmax(batch)
+                current_average_range = getattr(
+                    model, "obs1"
+                ).average_batch_activation_range
+                current_epoch_min = getattr(model, "obs1").epoch_activation_min
+                current_epoch_max = getattr(model, "obs1").epoch_activation_max
+
+                # run input through
+                model(ex_input)
+
+                # check that average batch activation range updated correctly
+                correct_updated_value = (
+                    current_average_range * num_tracked_so_far + (batch_max - batch_min)
+                ) / (num_tracked_so_far + 1)
+                self.assertEqual(
+                    getattr(model, "obs1").average_batch_activation_range,
+                    correct_updated_value,
+                )
+
+                if current_epoch_max - current_epoch_min > 0:
+                    self.assertEqual(
+                        getattr(model, "obs1").get_batch_to_epoch_ratio(),
+                        correct_updated_value / (current_epoch_max - current_epoch_min),
+                    )
+
+    """Case includes:
+        all zero tensor
+        dim size = 2
+        run for 1 epoch
+        run for 10 batch
+        tests input data observer
+    """
+
+    def test_zero_tensor_errors(self):
+        # initialize the model
+        model = self.NestedModifiedSingleLayerLinear()
+
+        # generate the desired input
+        ex_input = torch.zeros((10, 1, 5))
+
+        # run it through the model and do general tests
+        self.run_model_and_common_checks(model, ex_input, 1, 1)
+
+        # make sure final values are all 0
+        self.assertEqual(getattr(model, "obs1").epoch_activation_min, 0)
+        self.assertEqual(getattr(model, "obs1").epoch_activation_max, 0)
+        self.assertEqual(getattr(model, "obs1").average_batch_activation_range, 0)
+
+        # we should get an error if we try to calculate the ratio
+        with self.assertRaises(ValueError):
+            ratio_val = getattr(model, "obs1").get_batch_to_epoch_ratio()
+
+    """Case includes:
+    non-zero tensor
+    dim size = 2
+    run for 1 epoch
+    run for 1 batch
+    tests input data observer
+    """
+
+    def test_single_batch_of_ones(self):
+        # initialize the model
+        model = self.NestedModifiedSingleLayerLinear()
+
+        # generate the desired input
+        ex_input = torch.ones((1, 1, 5))
+
+        # run it through the model and do general tests
+        self.run_model_and_common_checks(model, ex_input, 1, 1)
+
+        # make sure final values are all 0 except for range
+        self.assertEqual(getattr(model, "obs1").epoch_activation_min, 1)
+        self.assertEqual(getattr(model, "obs1").epoch_activation_max, 1)
+        self.assertEqual(getattr(model, "obs1").average_batch_activation_range, 0)
+
+        # we should get an error if we try to calculate the ratio
+        with self.assertRaises(ValueError):
+            ratio_val = getattr(model, "obs1").get_batch_to_epoch_ratio()
+
+    """Case includes:
+    non-zero tensor
+    dim size = 2
+    run for 10 epoch
+    run for 15 batch
+    tests non input data observer
+    """
+
+    def test_observer_after_relu(self):
+
+        # model specific to this test
+        class NestedModifiedObserverAfterRelu(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.obs1 = ModelReportObserver()
+                self.mod1 = SingleLayerLinearModel()
+                self.obs2 = ModelReportObserver()
+                self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.obs1(x)
+                x = self.mod1(x)
+                x = self.fc1(x)
+                x = self.relu(x)
+                x = self.obs2(x)
+                return x
+
+        # initialize the model
+        model = NestedModifiedObserverAfterRelu()
+
+        # generate the desired input
+        ex_input = torch.randn((15, 1, 5))
+
+        # run it through the model and do general tests
+        self.run_model_and_common_checks(model, ex_input, 10, 15)
+
+    """Case includes:
+        non-zero tensor
+        dim size = 2
+        run for multiple epoch
+        run for multiple batch
+        tests input data observer
+    """
+
+    def test_random_epochs_and_batches(self):
+
+        # set up a basic model
+        class TinyNestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.obs1 = ModelReportObserver()
+                self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
+                self.relu = torch.nn.ReLU()
+                self.obs2 = ModelReportObserver()
+
+            def forward(self, x):
+                x = self.obs1(x)
+                x = self.fc1(x)
+                x = self.relu(x)
+                x = self.obs2(x)
+                return x
+
+        class LargerIncludeNestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.obs1 = ModelReportObserver()
+                self.nested = TinyNestModule()
+                self.fc1 = SingleLayerLinearModel()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.obs1(x)
+                x = self.nested(x)
+                x = self.fc1(x)
+                x = self.relu(x)
+                return x
+
+        class ThreeOps(torch.nn.Module):
+            def __init__(self, batch_norm_dim):
+                super(ThreeOps, self).__init__()
+                self.obs1 = ModelReportObserver()
+                self.linear = torch.nn.Linear(7, 3, 2)
+                self.obs2 = ModelReportObserver()
+
+                if batch_norm_dim == 2:
+                    self.bn = torch.nn.BatchNorm2d(2)
+                elif batch_norm_dim == 3:
+                    self.bn = torch.nn.BatchNorm3d(4)
+                else:
+                    raise ValueError("Dim should only be 2 or 3")
+
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.obs1(x)
+                x = self.linear(x)
+                x = self.obs2(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                return x
+
+        class HighDimensionNet(torch.nn.Module):
+            def __init__(self):
+                super(HighDimensionNet, self).__init__()
+                self.obs1 = ModelReportObserver()
+                self.fc1 = torch.nn.Linear(3, 7)
+                self.block1 = ThreeOps(3)
+                self.fc2 = torch.nn.Linear(3, 7)
+                self.block2 = ThreeOps(3)
+                self.fc3 = torch.nn.Linear(3, 7)
+
+            def forward(self, x):
+                x = self.obs1(x)
+                x = self.fc1(x)
+                x = self.block1(x)
+                x = self.fc2(x)
+                y = self.block2(x)
+                y = self.fc3(y)
+                z = x + y
+                z = F.relu(z)
+                return z
+
+        # the purpose of this test is to give the observers a variety of data examples
+        # initialize the model
+        models = [self.NestedModifiedSingleLayerLinear(), LargerIncludeNestModel(), ThreeOps(2), HighDimensionNet()]
+
+        # get some number of epochs and batches
+        num_epochs = 10
+        num_batches = 15
+
+        input_shapes = [(1, 5), (1, 5), (2, 3, 7), (4, 1, 8, 3)]
+
+        # generate the desired inputs
+        inputs = []
+        for shape in input_shapes:
+            ex_input = torch.randn((num_batches, *shape))
+            inputs.append(ex_input)
+
+        # run it through the model and do general tests
+        for index, model in enumerate(models):
+            self.run_model_and_common_checks(model, inputs[index], num_epochs, num_batches)
