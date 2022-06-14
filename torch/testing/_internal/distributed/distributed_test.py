@@ -6,7 +6,6 @@ import random
 import sys
 import tempfile
 import time
-import pickle
 from collections import namedtuple, OrderedDict
 from contextlib import contextmanager, suppress
 from datetime import timedelta
@@ -8829,11 +8828,11 @@ class DistributedTest:
 
             input = torch.randn(1, 1, device=rank)
             net = torch.nn.Linear(1, 5).to(rank)
-            ddp_model = torch.nn.parallel.DistributedDataParallel(
+            ddp_model = DistributedDataParallel(
                 net,
                 device_ids=[rank]
             )
-            dummy_ddp_model = torch.nn.parallel.DistributedDataParallel(
+            dummy_ddp_model = DistributedDataParallel(
                 net,
                 device_ids=[rank]
             )
@@ -8848,8 +8847,8 @@ class DistributedTest:
 
             state = {
                 'state_dict': ddp_model.state_dict(),
-                'comm_hook': pickle.dumps(hook),
-                'comm_hook_state': pickle.dumps(hook_state)
+                'comm_hook': hook,
+                'comm_hook_state': hook_state
             }
 
             if rank == 0:
@@ -8857,36 +8856,32 @@ class DistributedTest:
 
             dist.barrier()
             map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
-            checkpoint = torch.load(chkpt_file, map_location=map_location)
-
-            dummy_ddp_model.load_state_dict(checkpoint['state_dict'])
-            dummy_hook = pickle.loads(checkpoint['comm_hook'])
-
             with self.assertLogs() as captured:
-                dummy_hook_state = pickle.loads(checkpoint['comm_hook_state'])
+                checkpoint = torch.load(chkpt_file, map_location=map_location)
 
             # Check that the logger has only one entry
             self.assertEqual(len(captured.records), 1)
             # Check that the logger has an expected entry
             self.assertEqual(
                 captured.records[0].getMessage(),
-                "NOTE: PowerSGDState is set to use the default process group."
+                'NOTE: Current process group is set to default.'
             )
+
+            dummy_ddp_model.load_state_dict(checkpoint['state_dict'])
+            dummy_hook = checkpoint['comm_hook']
+            dummy_hook_state = checkpoint['comm_hook_state']
+
             # Check that loaded function is correct
             self.assertEqual(dummy_hook.__qualname__, hook.__qualname__)
 
-            slots_original = hook_state.__slots__
-            slots_restored = dummy_hook_state.__slots__
-            self.assertEqual(slots_original, slots_restored)
+            # Check that all slots' keys were restored correctly
+            self.assertEqual(hook_state.__slots__, dummy_hook_state.__slots__)
 
-            slots = copy.copy(slots_restored)
-            slots.remove("process_group")
-            slots.remove("rng")
-
-            # Check that all attributes are restored correctly.
+            # Check that all slots' attributes are restored correctly
             # Excluding ``process_group`` and ``rng``.
-            for entry in slots:
-                self.assertEqual(getattr(dummy_hook_state, entry), getattr(hook_state, entry))
+            for entry in dummy_hook_state.__slots__:
+                if entry != "process_group" and entry != "rng":
+                    self.assertEqual(getattr(dummy_hook_state, entry), getattr(hook_state, entry))
 
             # Check that ``process_group`` was set to default
             self.assertEqual(dummy_hook_state.process_group, _get_default_group())
@@ -8920,10 +8915,6 @@ class DistributedTest:
                 start_powerSGD_iter=4,
             )
             self._test_hook_pickling(hook, powersgd_state)
-
-
-
-
 
 
 instantiate_parametrized_tests(DistributedTest._DistTestBase)

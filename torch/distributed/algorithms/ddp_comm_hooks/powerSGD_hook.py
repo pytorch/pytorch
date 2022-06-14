@@ -268,15 +268,13 @@ class PowerSGDState(object):
 
     def __getstate__(self):
         r"""
-        Returns a ``PowerSGDState`` which will be pickled and saved.
+        Returns a ``Dict[str, Any]`` which will be pickled and saved.
         ``process_group`` is not serializable and excluded from
         a returned state.
         """
-        slots = copy.copy(self.__slots__)
-        slots.remove("process_group")
         return {
             slot: getattr(self, slot)
-            for slot in slots if hasattr(self, slot)
+            for slot in self.__slots__ if slot != "process_group"
         }
 
     def __setstate__(self, state):
@@ -286,7 +284,7 @@ class PowerSGDState(object):
         """
         self.process_group = distributed_c10d._get_default_group()
         logger.warning(
-            "NOTE: PowerSGDState is set to use the default process group."
+            "NOTE: Current process group is set to default."
         )
         for slot, value in state.items():
             setattr(self, slot, value)
