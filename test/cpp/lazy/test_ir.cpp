@@ -1,26 +1,28 @@
 #include <gtest/gtest.h>
 
-#include <torch/csrc/lazy/generated/LazyIr.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/lazy/core/config.h>
+#include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_builder.h>
-#include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
+#include <torch/csrc/lazy/generated/LazyIr.h>
+#include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 #include <memory>
-#include <c10/core/ScalarType.h>
-#include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 
 namespace torch {
 namespace lazy {
 
 class TestLeafNode : public Node {
  public:
-  static const OpKind class_op_kind;
+  static OpKind ClassOpKind() {
+    return OpKind();
+  }
 
   explicit TestLeafNode(size_t param)
-      : Node(OpKind(), /* num_outputs */ 1),
+      : Node(ClassOpKind(), /* num_outputs */ 1),
         hash_(Hash(param)),
         param_(param) {}
   ~TestLeafNode() override = default;
@@ -33,14 +35,17 @@ class TestLeafNode : public Node {
     TORCH_INTERNAL_ASSERT(false, "Can't access operand[i] of leaf node");
   }
 
-  hash_t hash() const override { return hash_; }
-  hash_t shapeHash() const override { return hash_; }
+  hash_t hash() const override {
+    return hash_;
+  }
+  hash_t shapeHash() const override {
+    return hash_;
+  }
+
  private:
   hash_t hash_;
   size_t param_;
 };
-
-const OpKind TestLeafNode::class_op_kind = OpKind();
 
 TEST(IrTest, BasicTest) {
   NodePtr node1 = MakeNode<TestLeafNode>(1);
@@ -79,8 +84,9 @@ TEST(IrTest, MetaDataTest) {
   dummySourceLocation.file = "file";
   dummySourceLocation.function = "function";
   dummySourceLocation.line = 10;
-  GetPythonFramesFunction() =
-      [&]() -> std::vector<SourceLocation> { return {dummySourceLocation}; };
+  GetPythonFramesFunction() = [&]() -> std::vector<SourceLocation> {
+    return {dummySourceLocation};
+  };
   node = MakeNode<TestLeafNode>(1);
   auto metaWithSourceLoc = node->metadata();
   EXPECT_EQ(metaWithSourceLoc.scope.size(), 0);
@@ -111,7 +117,6 @@ TEST(IrTest, TsNodeTest) {
 }
 
 TEST(IrTest, DimensionNodeTest) {
-
   const size_t DIM0 = 5;
   const size_t DIM1 = 8;
   NodePtr node1 = MakeNode<TsNode>(
@@ -120,16 +125,20 @@ TEST(IrTest, DimensionNodeTest) {
       /*num_outputs*/ 1,
       /*hash_seed*/ kHashSeed);
 
-  auto size0 = std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 0));
-  auto size1 = std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 1));
+  auto size0 =
+      std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 0));
+  auto size1 =
+      std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 1));
 
   ASSERT_EQ(DIM0, size0->getStaticValue());
   ASSERT_EQ(DIM1, size1->getStaticValue());
 
-  auto add_dim = std::dynamic_pointer_cast<SizeAdd>(MakeNode<SizeAdd>(Value{size0}, Value{size1}));
+  auto add_dim = std::dynamic_pointer_cast<SizeAdd>(
+      MakeNode<SizeAdd>(Value{size0}, Value{size1}));
   ASSERT_EQ(DIM0 + DIM1, add_dim->getStaticValue());
 
-  auto mul_dim = std::dynamic_pointer_cast<SizeMul>(MakeNode<SizeMul>(Value{size0}, Value{size1}));
+  auto mul_dim = std::dynamic_pointer_cast<SizeMul>(
+      MakeNode<SizeMul>(Value{size0}, Value{size1}));
   ASSERT_EQ(DIM0 * DIM1, mul_dim->getStaticValue());
 }
 

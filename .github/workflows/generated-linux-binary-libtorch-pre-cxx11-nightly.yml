@@ -26,12 +26,9 @@ env:
   BUILD_ENVIRONMENT: linux-binary-libtorch-pre-cxx11
   BUILDER_ROOT: /builder
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  IN_CI: 1
-  IS_GHA: 1
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   PYTORCH_FINAL_PACKAGE_DIR: /artifacts
-  PYTORCH_RETRY_TEST_CASES: 1
   PYTORCH_ROOT: /pytorch
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
@@ -116,9 +113,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -139,7 +136,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cpu-shared-with-deps-pre-cxx11
           retention-days: 14
@@ -200,7 +197,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-with-deps-pre-cxx11
@@ -247,9 +244,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -322,7 +319,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-with-deps-pre-cxx11
@@ -454,9 +451,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -477,7 +474,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cpu-shared-without-deps-pre-cxx11
           retention-days: 14
@@ -538,7 +535,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-without-deps-pre-cxx11
@@ -585,9 +582,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -660,7 +657,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-without-deps-pre-cxx11
@@ -792,9 +789,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -815,7 +812,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cpu-static-with-deps-pre-cxx11
           retention-days: 14
@@ -876,7 +873,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-with-deps-pre-cxx11
@@ -923,9 +920,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -998,7 +995,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-with-deps-pre-cxx11
@@ -1130,9 +1127,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1153,7 +1150,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cpu-static-without-deps-pre-cxx11
           retention-days: 14
@@ -1214,7 +1211,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-without-deps-pre-cxx11
@@ -1261,9 +1258,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1336,7 +1333,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-without-deps-pre-cxx11
@@ -1469,9 +1466,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1492,7 +1489,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda10_2-shared-with-deps-pre-cxx11
           retention-days: 14
@@ -1554,7 +1551,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-shared-with-deps-pre-cxx11
@@ -1612,9 +1609,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1688,7 +1685,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-shared-with-deps-pre-cxx11
@@ -1821,9 +1818,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1844,7 +1841,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda10_2-shared-without-deps-pre-cxx11
           retention-days: 14
@@ -1906,7 +1903,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-shared-without-deps-pre-cxx11
@@ -1964,9 +1961,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2040,7 +2037,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-shared-without-deps-pre-cxx11
@@ -2173,9 +2170,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2196,7 +2193,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda10_2-static-with-deps-pre-cxx11
           retention-days: 14
@@ -2258,7 +2255,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-static-with-deps-pre-cxx11
@@ -2316,9 +2313,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2392,7 +2389,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-static-with-deps-pre-cxx11
@@ -2525,9 +2522,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2548,7 +2545,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda10_2-static-without-deps-pre-cxx11
           retention-days: 14
@@ -2610,7 +2607,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-static-without-deps-pre-cxx11
@@ -2668,9 +2665,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2744,7 +2741,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda10_2-static-without-deps-pre-cxx11
@@ -2880,9 +2877,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2903,7 +2900,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_3-shared-with-deps-pre-cxx11
           retention-days: 14
@@ -2965,7 +2962,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-with-deps-pre-cxx11
@@ -3023,9 +3020,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -3099,7 +3096,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-with-deps-pre-cxx11
@@ -3235,9 +3232,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -3258,7 +3255,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_3-shared-without-deps-pre-cxx11
           retention-days: 14
@@ -3320,7 +3317,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-without-deps-pre-cxx11
@@ -3378,9 +3375,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -3454,7 +3451,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-without-deps-pre-cxx11
@@ -3590,9 +3587,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -3613,7 +3610,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_3-static-with-deps-pre-cxx11
           retention-days: 14
@@ -3675,7 +3672,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-with-deps-pre-cxx11
@@ -3733,9 +3730,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -3809,7 +3806,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-with-deps-pre-cxx11
@@ -3945,9 +3942,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -3968,7 +3965,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_3-static-without-deps-pre-cxx11
           retention-days: 14
@@ -4030,7 +4027,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-without-deps-pre-cxx11
@@ -4088,9 +4085,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -4164,7 +4161,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-without-deps-pre-cxx11
@@ -4300,9 +4297,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -4323,7 +4320,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_6-shared-with-deps-pre-cxx11
           retention-days: 14
@@ -4385,7 +4382,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-shared-with-deps-pre-cxx11
@@ -4443,9 +4440,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -4519,7 +4516,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-shared-with-deps-pre-cxx11
@@ -4655,9 +4652,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -4678,7 +4675,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_6-shared-without-deps-pre-cxx11
           retention-days: 14
@@ -4740,7 +4737,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-shared-without-deps-pre-cxx11
@@ -4798,9 +4795,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -4874,7 +4871,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-shared-without-deps-pre-cxx11
@@ -5010,9 +5007,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -5033,7 +5030,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_6-static-with-deps-pre-cxx11
           retention-days: 14
@@ -5095,7 +5092,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-static-with-deps-pre-cxx11
@@ -5153,9 +5150,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -5229,7 +5226,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-static-with-deps-pre-cxx11
@@ -5365,9 +5362,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -5388,7 +5385,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_6-static-without-deps-pre-cxx11
           retention-days: 14
@@ -5450,7 +5447,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-static-without-deps-pre-cxx11
@@ -5508,9 +5505,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -5584,7 +5581,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-static-without-deps-pre-cxx11
@@ -5717,9 +5714,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -5740,7 +5737,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-rocm5_0-shared-with-deps-pre-cxx11
           retention-days: 14
@@ -5817,8 +5814,9 @@ jobs:
           killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v3
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-rocm5_0-shared-with-deps-pre-cxx11
@@ -5868,9 +5866,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -5934,7 +5932,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-rocm5_0-shared-with-deps-pre-cxx11
@@ -6067,9 +6065,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -6090,7 +6088,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-rocm5_0-static-with-deps-pre-cxx11
           retention-days: 14
@@ -6167,8 +6165,9 @@ jobs:
           killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v3
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-rocm5_0-static-with-deps-pre-cxx11
@@ -6218,9 +6217,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -6284,7 +6283,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-rocm5_0-static-with-deps-pre-cxx11
@@ -6417,9 +6416,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -6440,7 +6439,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-rocm5_1_1-shared-with-deps-pre-cxx11
           retention-days: 14
@@ -6517,8 +6516,9 @@ jobs:
           killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v3
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-rocm5_1_1-shared-with-deps-pre-cxx11
@@ -6568,9 +6568,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -6634,7 +6634,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-rocm5_1_1-shared-with-deps-pre-cxx11
@@ -6767,9 +6767,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -6790,7 +6790,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-rocm5_1_1-static-with-deps-pre-cxx11
           retention-days: 14
@@ -6867,8 +6867,9 @@ jobs:
           killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v3
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-rocm5_1_1-static-with-deps-pre-cxx11
@@ -6918,9 +6919,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -6984,7 +6985,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-rocm5_1_1-static-with-deps-pre-cxx11
