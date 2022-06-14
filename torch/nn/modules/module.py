@@ -615,6 +615,7 @@ class Module:
                     grad_applied = fn(param.grad)
                 should_use_set_data = compute_should_use_set_data(param.grad, grad_applied)
                 if should_use_set_data:
+                    assert out_param.grad is not None
                     out_param.grad.data = grad_applied
                 else:
                     assert param.grad.is_leaf
@@ -1555,6 +1556,9 @@ class Module:
             exists in :attr:`state_dict`, :meth:`load_state_dict` will raise a
             ``RuntimeError``.
         """
+        if not isinstance(state_dict, Mapping):
+            raise TypeError("Expected state_dict to be dict-like, got {}.".format(type(state_dict)))
+
         missing_keys: List[str] = []
         unexpected_keys: List[str] = []
         error_msgs: List[str] = []

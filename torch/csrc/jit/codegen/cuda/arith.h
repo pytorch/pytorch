@@ -24,6 +24,9 @@ namespace cuda {
 TORCH_CUDA_CU_API Val* castOp(DataType dtype, Val* v1);
 TORCH_CUDA_CU_API TensorView* castOp(DataType dtype, TensorView* v1);
 
+TORCH_CUDA_CU_API Val* bitCastOp(DataType dtype, Val* v1);
+TORCH_CUDA_CU_API TensorView* bitCastOp(DataType dtype, TensorView* v1);
+
 // Perform unary op type and return the output
 TORCH_CUDA_CU_API Val* unaryOp(UnaryOpType type, Val* v1);
 TORCH_CUDA_CU_API TensorView* unaryOp(UnaryOpType type, TensorView* v1);
@@ -223,9 +226,9 @@ TORCH_CUDA_CU_API TensorView* tanh(TensorView*);
 // trunc
 TORCH_CUDA_CU_API Val* trunc(Val*);
 TORCH_CUDA_CU_API TensorView* trunc(TensorView*);
-// not
-TORCH_CUDA_CU_API Val* notOp(Val*);
-TORCH_CUDA_CU_API TensorView* notOp(TensorView*);
+// bitwise_not
+TORCH_CUDA_CU_API Val* bitwise_not(Val*);
+TORCH_CUDA_CU_API TensorView* bitwise_not(TensorView*);
 // isfinite
 TORCH_CUDA_CU_API Val* isfinite(Val*);
 TORCH_CUDA_CU_API TensorView* isfinite(TensorView*);
@@ -317,16 +320,36 @@ TORCH_CUDA_CU_API Val* ceilDiv(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* ceilDiv(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* ceilDiv(Val* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* ceilDiv(TensorView* v1, TensorView* v2);
-// lshift
-TORCH_CUDA_CU_API Val* lshift(Val* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* lshift(TensorView* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* lshift(Val* v1, TensorView* v2);
-TORCH_CUDA_CU_API TensorView* lshift(TensorView* v1, TensorView* v2);
-// rshift
-TORCH_CUDA_CU_API Val* rshift(Val* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* rshift(TensorView* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* rshift(Val* v1, TensorView* v2);
-TORCH_CUDA_CU_API TensorView* rshift(TensorView* v1, TensorView* v2);
+// Bitwise binary ops
+// bitwise_and
+TORCH_CUDA_CU_API Val* bitwise_and(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_and(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_and(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_and(TensorView* v1, TensorView* v2);
+// bitwise_left_shift
+TORCH_CUDA_CU_API Val* bitwise_left_shift(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_left_shift(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_left_shift(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_left_shift(
+    TensorView* v1,
+    TensorView* v2);
+// bitwise_right_shift
+TORCH_CUDA_CU_API Val* bitwise_right_shift(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_right_shift(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_right_shift(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_right_shift(
+    TensorView* v1,
+    TensorView* v2);
+// bitwise_or
+TORCH_CUDA_CU_API Val* bitwise_or(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_or(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_or(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_or(TensorView* v1, TensorView* v2);
+// bitwise_xor
+TORCH_CUDA_CU_API Val* bitwise_xor(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_xor(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_xor(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_xor(TensorView* v1, TensorView* v2);
 // Logical binary ops
 // eq
 TORCH_CUDA_CU_API Val* eq(Val* v1, Val* v2);
@@ -358,22 +381,6 @@ TORCH_CUDA_CU_API Val* ne(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* ne(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* ne(Val* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* ne(TensorView* v1, TensorView* v2);
-
-// andOp
-TORCH_CUDA_CU_API Val* andOp(Val* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* andOp(TensorView* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* andOp(Val* v1, TensorView* v2);
-TORCH_CUDA_CU_API TensorView* andOp(TensorView* v1, TensorView* v2);
-// orOp
-TORCH_CUDA_CU_API Val* orOp(Val* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* orOp(TensorView* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* orOp(Val* v1, TensorView* v2);
-TORCH_CUDA_CU_API TensorView* orOp(TensorView* v1, TensorView* v2);
-// xorOp
-TORCH_CUDA_CU_API Val* xorOp(Val* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* xorOp(TensorView* v1, Val* v2);
-TORCH_CUDA_CU_API TensorView* xorOp(Val* v1, TensorView* v2);
-TORCH_CUDA_CU_API TensorView* xorOp(TensorView* v1, TensorView* v2);
 
 // REDUCTION OPERATIONS
 TORCH_CUDA_CU_API TensorView* sum(
@@ -578,6 +585,11 @@ TORCH_CUDA_CU_API TensorView* gather(
     const std::vector<std::vector<int>>& pad_width,
     const std::vector<int>& strides = {},
     bool trim_out_of_bounds = false);
+
+// Append a new IterDomain to the end of a TenorView to allow
+// iterating on a vector type. The input tensor must have
+// vector dtype.
+TORCH_CUDA_CU_API TensorView* viewAsScalar(TensorView* inp);
 
 //! A fused pointwise multiply and sum
 //!  operator that instantiates the following
