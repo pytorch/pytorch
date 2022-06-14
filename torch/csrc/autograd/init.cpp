@@ -639,6 +639,44 @@ static PyObject* python_exit_dual_level(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* record_function_enter_fast(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_record_function_enter_fast(Tensor prev, c10::string_view name, c10::string_view args=None)"});
+
+  ParsedArgs<3> parsed_args;
+  auto _r = parser.parse(args, kwargs, parsed_args);
+
+  // auto res = torch::autograd::profiler::record_function_enter_legacy(_r.tensor(0), _r.string(1), _r.string(2));
+  static auto op = c10::Dispatcher::singleton()
+                     .findSchemaOrThrow("profiler::_record_function_enter", "")
+                     .typed<decltype(torch::autograd::profiler::record_function_enter_legacy)>();
+  auto res = op.call(_r.tensor(0), _r.string(1), _r.string(2));
+  return THPVariable_Wrap(std::move(res));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* record_function_exit_fast(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_record_function_exit_fast(Tensor handle)"});
+
+  ParsedArgs<1> parsed_args;
+  auto _r = parser.parse(args, kwargs, parsed_args);
+
+  // torch::autograd::profiler::record_function_exit_legacy(_r.tensor(0));
+  static auto op = c10::Dispatcher::singleton()
+                     .findSchemaOrThrow("profiler::_record_function_exit", "")
+                     .typed<decltype(torch::autograd::profiler::record_function_exit_legacy)>();
+  op.call(_r.tensor(0));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* set_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (arg == Py_None) {
@@ -730,6 +768,14 @@ static PyMethodDef methods[] = { // NOLINT
     {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
     {"_exit_dual_level",
      castPyCFunctionWithKeywords(python_exit_dual_level),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_record_function_enter_fast",
+     castPyCFunctionWithKeywords(record_function_enter_fast),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_record_function_exit_fast",
+     castPyCFunctionWithKeywords(record_function_exit_fast),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_set_torch_dispatch_mode", set_torch_dispatch_mode, METH_O, nullptr},
