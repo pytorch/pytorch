@@ -4,8 +4,7 @@ from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.utils.common import (_check_lambda_fn,
-                                                     _deprecation_warning,
-                                                     ensure_map_fn_works)
+                                                     _deprecation_warning)
 
 __all__ = ["FilterIterDataPipe", ]
 
