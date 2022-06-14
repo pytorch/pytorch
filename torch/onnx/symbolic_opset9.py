@@ -16,10 +16,10 @@ import torch.nn.modules.utils
 import torch.onnx
 from torch import _C
 
-# This import monkey-patches graph manipulation methods on Graph, used for the
-# ONNX symbolics
+# Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
-from torch.onnx import _exporter_states, symbolic_helper
+from torch.onnx import symbolic_helper
+from torch.onnx._exporter_states import SymbolicContext  # Special case class import for readability
 from torch.onnx._globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -5327,7 +5327,7 @@ class Prim:
     # -----------------------------------------------------------------------------
     @staticmethod
     def device(
-        ctx: _exporter_states.SymbolicContext, g: _C.Graph, *inputs, **kwargs
+        ctx: SymbolicContext, g: _C.Graph, *inputs, **kwargs
     ) -> None:
         output_type = ctx.cur_node.output().type()
         if isinstance(output_type, _C.DeviceObjType):
@@ -5339,7 +5339,7 @@ class Prim:
         )
 
     @staticmethod
-    def Loop(ctx: _exporter_states.SymbolicContext, g, *inputs, **attrs):
+    def Loop(ctx: SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
         env = ctx.env
         params_dict = ctx.params_dict
@@ -5385,7 +5385,7 @@ class Prim:
         return new_op_outputs
 
     @staticmethod
-    def If(ctx: _exporter_states.SymbolicContext, g, *inputs, **attrs):
+    def If(ctx: SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
         block = ctx.onnx_block
         env = ctx.env
@@ -5473,7 +5473,7 @@ class Prim:
             return new_op_outputs
 
     @staticmethod
-    def Constant(ctx: _exporter_states.SymbolicContext, g, *inputs, **attrs):
+    def Constant(ctx: SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
 
         if n.mustBeNone():
@@ -5504,7 +5504,7 @@ class Onnx:
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
     @staticmethod
-    def Placeholder(ctx: _exporter_states.SymbolicContext, g, *inputs, **attrs):
+    def Placeholder(ctx: SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
         block = ctx.onnx_block
         env = ctx.env
