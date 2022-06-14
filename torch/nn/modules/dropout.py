@@ -124,9 +124,16 @@ class Dropout2d(_DropoutNd):
         inplace (bool, optional): If set to ``True``, will do this operation
             in-place
 
+    .. warning ::
+        Due to historical reasons, this class will perform 1D channel-wise dropout
+        for 3D inputs (as done by :class:`nn.Dropout1d`). Thus, it currently does NOT
+        support inputs without a batch dimension of shape :math:`(C, H, W)`. This
+        behavior will change in a future release to interpret 3D inputs as no-batch-dim
+        inputs. To maintain the old behavior, switch to :class:`nn.Dropout1d`.
+
     Shape:
-        - Input: :math:`(N, C, H, W)` or :math:`(C, H, W)`.
-        - Output: :math:`(N, C, H, W)` or :math:`(C, H, W)` (same shape as input).
+        - Input: :math:`(N, C, H, W)` or :math:`(N, C, L)`.
+        - Output: :math:`(N, C, H, W)` or :math:`(N, C, L)` (same shape as input).
 
     Examples::
 
