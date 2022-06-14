@@ -685,10 +685,21 @@ def run_tests(argv=UNITTEST_ARGS):
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print('Test results will be stored in {}'.format(test_report_path))
+        import cProfile
+        from pstats import Stats
+
+        pr = cProfile.Profile()
+        pr.enable()
+
         unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
             output=test_report_path,
             verbosity=2 if verbose else 1,
-            resultclass=XMLTestResultVerbose))
+            resultclass=XMLTestResultVerbose), exit=False)
+
+
+        pr.disable()
+        stats = Stats(pr)
+        stats.sort_stats('tottime').print_stats(10)
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
