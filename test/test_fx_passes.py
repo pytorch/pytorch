@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: fx"]
 
+import collections
 import math
 import numbers
 import operator
@@ -29,7 +30,8 @@ import copy
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
 from torch.fx.passes.fuser_utils import fuse_by_partitions
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests
+
 from torch.testing._internal.jit_utils import JitTestCase
 
 try:
@@ -76,33 +78,168 @@ class TestFXGraphPasses(JitTestCase):
     # torchvision.models.mnasnet1_0,
     # torchvision.models.resnext50_32x4d,
 
-    def test_nvfuser_partition(self):
-        class TestModule2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                self.linear2 = torch.nn.Linear(4, 4)
-                self.param = torch.nn.Parameter(torch.rand(4, 4))
 
-            def forward(self, a, b, c):
-                add = a + b
+    def forward1(a, b, c):
+        add = a + b
+        add_1 = add +  b
+        add_2 = add_1 + c
+        relu_1 = add_2.relu()
+        add_3 = add_1 + add_2
+        add_4 = add_1 + relu_1 + add_3
+        relu_2 = add_4.relu()
+        add_5 = relu_2 + add_4
+        add_6 = add_5 + add_4
+        return add_4, add_6
 
-                linear_1 = self.linear(add)
+    def forward2(a, b, _):
+        add = a + b
+        add_1 = add +  b
+        relu_1 = add_1.relu() # blocked by this
+        add_3 = add_1 + relu_1
+        add_4 = add_1 + add_3
+        return add_4, add_1
 
-                add_1 = add + c
-                add_2 = add_1 + self.param
-                add_3 = add_1 + linear_1
-                add_4 = add_2 + add_3
+    def forward3(a, b, c):
+        add = a + b
+        add_1 = a + c
+        add_2 = b + c
+        return add, add_1, add_2
 
-                linear_2 = self.linear2(add_4)
+    def forward4(a, b, c):
+        add = a + b
+        add_1 = a + c
+        add_2 = b + c
+        return torch.where(add > 0, add_1, add_2)
 
-                add_5 = linear_2 + add_4
-                add_6 = add_5 + add_4
+    def forward5(a, b, c):
+        # add should be fused right branch, as left branch is not supported
+        add = a + 1
 
-                return add_4, add_6
+        # left branch
+        relu = add.relu()
+        # right branch
+        add_1 = add + 2
 
-        m = TestModule2()
-        traced = symbolic_trace(m)
+        return relu, add_1
+
+    def forward6(a, b, c):
+        # add should have its own partition, as neither branchs are supported
+        add = a + 1
+
+        # left branch
+        relu = add.relu()
+        # right branch
+        relu_1 = add.relu()
+
+        return relu, relu_1
+
+    def forward7(a, b, c):
+        # both branches are supported, but add should be merged with right branch, as right branch is larger
+        add = a + 1
+
+        # left branch
+        add_1 = add + 2
+
+        # right branch is larger
+        add_2 = add + 1
+        add_3 = add_2 + 1
+
+        return add_3, add_1
+
+    def forward8(a, b, c):
+         # both branches are in the same partition, add should join the same partition
+        add = a + 1
+
+        # left branch
+        add_1 = add + 2
+
+        # right branch
+        add_2 = add + 1
+
+        # left and right branch merges
+        add_3 = add_2 + add_1
+
+        return add_3
+
+    def forward9(a, b, c):
+        add = a + 1
+
+        # branch 1
+        add_1 = add + 1
+
+        # branch 2
+        add_2 = add + 1
+
+        # branch_3
+        add_3 = add + 1
+
+        out = torch.stack([add_1, add_2, add_3])
+
+        return out
+
+    def forward10(a, b, c):
+        add = a + 1
+
+        # branch 1
+        add_1 = add + 1
+
+        # branch 2
+        add_2 = add + 1
+
+        # branch 3: depends on branch 2
+        add_3 = add + add_2
+
+        out = torch.stack([add_1, add_2, add_3])
+
+        return out
+
+    def forward11(a, b, c):
+        add = a + 1
+
+        # branch 1
+        add_1 = add.relu()
+
+        # branch 2 depends on branch 1
+        add_2 = add + add_1
+
+        # branch 3
+        add_3 = add.relu()
+
+        out = torch.stack([add_1, add_2, add_3])
+
+        return out
+
+
+    @parametrize("fn, expected_partition", [
+        (forward1, [["add_7", "add_6"], ["add_5", "add_4", "add_3"], ["add_2", "add_1", "add"]]),
+        (forward2, [["add_3", "add_2"], ["add_1", "add"]]),
+
+        # 2 branches cases
+        (forward5, [["add_1", "add"]]),
+        (forward6, [["add"]]),
+        (forward7, [["add_3", "add_2", "add"], ["add_1"]]),
+        (forward8, [["add_3", "add_2", "add", "add_1"]]),
+
+        # 3 branch cases
+        (forward9, [['add_3'], ['add_2'], ['add_1', 'add']]),
+        (forward10, [['add_3', 'add_2', 'add'], ['add_1']]),
+        (forward11, [['add_1'], ['add']]),
+
+
+    ])
+    # failing cases
+    # @parametrize("fn, expected_partition", [
+    #     (forward3, [["add_2", "add_1", "add"]]),  # horizontal fusion without a common downstream node, not working yet
+    #     (forward4, [["add_2", "add_1", "add"]]),  # horizontal fusion with a common downstream node, not working yet
+    # ]
+    def test_nvfuser_partition(self, fn, expected_partition):
+
+        traced = symbolic_trace(fn)
+
+        drawer = FxGraphDrawer(traced, "test")
+        dot_graph = drawer.get_dot_graph()
+        dot_graph.write_png("before.png")
+
 
         supported_ops = NvFuserOperatorSupport()
         partitioner = CapabilityBasedPartitioner(traced, supported_ops)
@@ -111,10 +248,11 @@ class TestFXGraphPasses(JitTestCase):
 
         partitions = partitioner.partition(candidates)
 
-        print("partition", partitions)
-        drawer = FxGraphDrawer(traced, "test")
-        dot_graph = drawer.get_dot_graph()
-        dot_graph.write_png("before.png")
+        partitions_name = [[node.name for node in partition] for partition in partitions]
+
+        assert len(partitions_name) == len(expected_partition)
+        for i in range(len(partitions_name)):
+            assert set(partitions_name[i]) == set(expected_partition[i])
 
         fused_graph = partitioner.fuse_partitions(partitions)
 
@@ -124,7 +262,7 @@ class TestFXGraphPasses(JitTestCase):
 
         a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
 
-        expected = m(a, b, c)
+        expected = fn(a, b, c)
         result = fused_graph(a, b, c)
 
         torch.testing.assert_close(expected, result)
@@ -255,6 +393,9 @@ class TestFXGraphPasses(JitTestCase):
         traced = t.trace(m)
 
         print(traced)
+
+
+instantiate_parametrized_tests(TestFXGraphPasses)
 
 if __name__ == "__main__":
     run_tests()

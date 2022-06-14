@@ -166,12 +166,12 @@ class CapabilityBasedPartitioner:
                 assignment[node] = id
                 partitions_by_id[id].append(node)
 
-            # elif:
-                # TODO: add skipped case 3
-
             else:
-                # randomly picked the first one
-                id = assigned_candidate_partition_ids[0]
+
+                partitions_size_by_id = [ [len(partitions_by_id[id]), id] for id in assigned_candidate_partition_ids]
+                partitions_size_by_id = sorted(partitions_size_by_id, reverse=True)
+
+                id = partitions_size_by_id[0][1]
                 assignment[node] = id
                 partitions_by_id[id].append(node)
 
