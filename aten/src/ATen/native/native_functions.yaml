@@ -4571,6 +4571,11 @@
   device_check: NoCheck
   device_guard: False
 
+- func: sum_to_checked(Tensor self, SymInt[] size) -> Tensor
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+
 - func: sqrt(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: sqrt.out

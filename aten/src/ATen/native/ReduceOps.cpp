@@ -1077,6 +1077,23 @@ Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
   return at::sum(self, IntArrayRef{}, false, dtype);
 }
 
+Tensor sum_to_checked(const Tensor &grad, c10::SymIntArrayRef size) {
+  if (!grad.sizes().equals(asIntArrayRefUnchecked(size))) {
+    if (!at::is_expandable_to(asIntArrayRefUnchecked(size), grad.sizes())) {
+      std::stringstream ss;
+      // TODO: refactor to pass in the right index
+      std::string i = "N/A";
+      ss << "invalid gradient at index " << i << " - got ";
+      ss << grad.sizes() << " but expected shape compatible with ";
+      ss << size;
+      // TODO: refactor to match the exact error message: format_error(ss.str())
+      AT_ERROR(ss.str());
+    }
+    return at::sum_to(std::move(grad), asIntArrayRefUnchecked(size));
+  }
+  return grad;
+}
+
 Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) {
   return at::sum(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }

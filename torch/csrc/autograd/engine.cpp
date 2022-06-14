@@ -21,6 +21,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/core/StreamGuard.h>
+#include <ATen/ops/sum_to_checked.h>
 
 #include <atomic>
 #include <chrono>
@@ -691,18 +692,8 @@ void validate_outputs(
       // AT_ERROR(format_error(ss.str()));
       continue;
     }
-    if (!grad.sym_sizes().equals(metadata.shape())) {
-      if (!at::is_expandable_to(asIntArrayRefSlow(metadata.shape()), grad.sizes())) {
-        std::stringstream ss;
-        ss << "invalid gradient at index " << i << " - got ";
-        ss << grad.sizes() << " but expected shape compatible with ";
-        ss << metadata.shape();
-        AT_ERROR(format_error(ss.str()));
-      }
-      // TODO: add the SymInt sum_to overload
-      grad = at::sum_to(std::move(grad), asIntArrayRefSlow(metadata.shape()));
-    }
 
+    grad = grad.sum_to_checked(metadata.shape());
     bool input_is_complex = isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));
     bool grad_is_complex = isComplexType(grad.scalar_type());
 
