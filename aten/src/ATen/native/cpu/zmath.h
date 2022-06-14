@@ -8,6 +8,32 @@
 
 namespace at { namespace native {
 inline namespace CPU_CAPABILITY {
+
+template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
+inline VALUE_TYPE zabs (SCALAR_TYPE z) {
+  return z;
+}
+
+template<>
+inline c10::complex<float> zabs <c10::complex<float>> (c10::complex<float> z) {
+  return c10::complex<float>(std::abs(z));
+}
+
+template<>
+inline float zabs <c10::complex<float>, float> (c10::complex<float> z) {
+  return std::abs(z);
+}
+
+template<>
+inline c10::complex<double> zabs <c10::complex<double>> (c10::complex<double> z) {
+  return c10::complex<double>(std::abs(z));
+}
+
+template<>
+inline double zabs <c10::complex<double>, double> (c10::complex<double> z) {
+  return std::abs(z);
+}
+
 // This overload corresponds to non-complex dtypes.
 // The function is consistent with its NumPy equivalent
 // for non-complex dtypes where `pi` is returned for
@@ -132,7 +158,7 @@ inline c10::complex<T> sgn_impl (c10::complex<T> z) {
   if (z == c10::complex<T>(0, 0)) {
     return c10::complex<T>(0, 0);
   } else {
-    return z / std::abs(z);
+    return z / zabs(z);
   }
 }
 
