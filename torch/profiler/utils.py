@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from torch.profiler import DeviceType
 from torch.autograd.profiler import profile
 import re
-
+import math
 
 class EventKey:
     def __init__(self, event):
@@ -32,7 +32,11 @@ class EventMetrics:
 
     # heuristic to determine which event is more impactful and optimizable
     def score(self):
-        return self.fraction_idle_time()
+        def cost(self_t, duration_t, idle_t):
+            if self_t == 0 or idle_t == 0 or duration_t == 0:
+                return 0.0
+            return self.fraction_idle_time()
+        return cost(self.self_time_ns, self.duration_time_ns, self.idle_time_ns)
 
 
 def compute_event_metrics(prof: profile):
@@ -84,13 +88,13 @@ def compute_idle_time(prof: profile, metrics: dict[EventKey, EventMetrics]):
     cuda_kernel_events = [event for event in event_list if is_cuda_launch_kernel(event) or is_cuda_kernel(event)]
     cuda_kernel_events.sort(key=lambda e: e.start_us())
 
-    for prev_event, curr_event in zip(cuda_kernel_events, cuda_kernel_events[1:]):
-        if (is_cuda_launch_kernel(prev_event)):
+    for curr_event, next_event in zip(cuda_kernel_events, cuda_kernel_events[1:]):
+        if (is_cuda_launch_kernel(curr_event)):
             queue_depth += 1
-        if (is_cuda_kernel(prev_event)):
+        if (is_cuda_kernel(curr_event)):
             queue_depth -= 1
-        if (prev_event.start_us() + prev_event.duration_us()) < curr_event.start_us() and queue_depth == 0:
-            idle_interval.append((prev_event.start_us() + prev_event.duration_us(), curr_event.start_us()))
+        if (curr_event.start_us() + curr_event.duration_us()) < next_event.start_us() and queue_depth == 0:
+            idle_interval.append((curr_event.start_us() + next_event.duration_us(), next_event.start_us()))
 
     # For every event, compute the absolute idle time and the percentage idle time
     # idle_interval Seems correct
@@ -117,8 +121,16 @@ def get_optimizable_events(prof: profile, length: int = 1):
     # Print the list of events in human-friendly format
     print("Optimizable events:")
     for event in event_list:
-        print(f"Event:                {event}\nSource code location: {source_code_location(event.event)}")
+        print(
+f"""--------------------------------------------------------------------------------
+Event:                {event}
+Source code location: {source_code_location(event.event)}
+Percentage idle time: {metrics[event].fraction_idle_time() * 100:.2f}%
+Heuristic score:      {metrics[event].score():.2f}
+--------------------------------------------------------------------------------"""
+            )
     return event_list
+
 
 def source_code_location(event):
     while(event is not None):

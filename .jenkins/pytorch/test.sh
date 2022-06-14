@@ -22,12 +22,15 @@ fi
 
 # Get fully qualified path using realpath
 if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
-  CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
+  CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
 fi
 
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+echo "Environment variables"
+env
 
 echo "Testing pytorch"
 
@@ -137,7 +140,9 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # it to be loaded globally.  This isn't really a good idea though, because
     # it depends on a ton of dynamic libraries that most programs aren't gonna
     # have, and it applies to child processes.
-    export LD_PRELOAD=/usr/lib/llvm-7/lib/clang/7.1.0/lib/linux/libclang_rt.asan-x86_64.so
+
+    # TODO: get rid of the hardcoded path
+    export LD_PRELOAD=/usr/lib/llvm-7/lib/clang/7.0.1/lib/linux/libclang_rt.asan-x86_64.so
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
