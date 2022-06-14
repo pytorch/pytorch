@@ -54,14 +54,16 @@ def scatter_add(g, self, dim, index, src):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("scatter", self, dim, index, src, overload_name="src")
 
-    if symbolic_helper._get_tensor_sizes(src) != symbolic_helper._get_tensor_sizes(
-        index
-    ):
-        symbolic_helper._unimplemented(
-            "scatter_add", "index should have the same dimensionality as src"
+    src_type = src.type().scalarType()
+    src_sizes = symbolic_helper._get_tensor_sizes(src)
+    index_sizes = symbolic_helper._get_tensor_sizes(index)
+
+    if src_sizes != index_sizes:
+        return symbolic_helper._unimplemented(
+            "scatter_add",
+            f"index {index_sizes} should have the same dimensionality as src {src_sizes}",
         )
 
-    src_type = src.type().scalarType()
     src = symbolic_helper._maybe_get_scalar(src)
     if symbolic_helper._is_value(src):
         return g.op("ScatterElements", self, index, src, axis_i=dim, reduction_s="add")
