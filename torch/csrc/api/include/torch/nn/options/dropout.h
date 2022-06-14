@@ -97,8 +97,7 @@ using Dropout3dFuncOptions = DropoutFuncOptions;
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::alpha_dropout(input,
-/// F::AlphaDropoutFuncOptions().p(0.5).training(false));
+/// F::alpha_dropout(input, F::AlphaDropoutFuncOptions().p(0.5).training(false));
 /// ```
 struct TORCH_API AlphaDropoutFuncOptions {
   TORCH_ARG(double, p) = 0.5;
@@ -113,8 +112,7 @@ struct TORCH_API AlphaDropoutFuncOptions {
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::feature_alpha_dropout(input,
-/// F::FeatureAlphaDropoutFuncOptions().p(0.5).training(false));
+/// F::feature_alpha_dropout(input, F::FeatureAlphaDropoutFuncOptions().p(0.5).training(false));
 /// ```
 struct TORCH_API FeatureAlphaDropoutFuncOptions {
   TORCH_ARG(double, p) = 0.5;

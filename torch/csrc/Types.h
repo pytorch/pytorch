@@ -7,7 +7,6 @@
 #include <cstdint>
 #endif
 
-template <typename T>
-struct THPTypeInfo {};
+template <typename T> struct THPTypeInfo {};
 
 #endif

@@ -925,6 +925,7 @@ struct ExclusivelyOwnedTraits<at::TensorBase> {
       toDestroy->refcount_ = 0;
       toDestroy->weakcount_ = 0;
 #endif
+      toDestroy->release_resources();
       delete toDestroy;
     }
   }

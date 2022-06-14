@@ -12,7 +12,8 @@ namespace lazy {
 
 class IrUtilNode : public Node {
  public:
-  explicit IrUtilNode() : Node(OpKind(), /* num_outputs */ 1), hash_(Hash(0)) {}
+  explicit IrUtilNode()
+      : Node(OpKind(), /* num_outputs */ 1), hash_(Hash(0)) {}
   ~IrUtilNode() override = default;
 
   void AddOperand(Value v) {
@@ -23,13 +24,8 @@ class IrUtilNode : public Node {
     operands_.push_back(std::move(v.node));
   }
 
-  hash_t hash() const override {
-    return hash_;
-  }
-  hash_t shapeHash() const override {
-    return hash_;
-  }
-
+  hash_t hash() const override { return hash_; }
+  hash_t shapeHash() const override { return hash_; }
  private:
   hash_t hash_;
 };

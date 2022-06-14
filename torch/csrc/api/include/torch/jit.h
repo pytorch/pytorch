@@ -3,8 +3,8 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/api/module.h>
 
-#include <memory>
 #include <string>
+#include <memory>
 
 namespace torch {
 namespace jit {

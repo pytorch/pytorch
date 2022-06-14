@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
 #include <cstddef>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace data {

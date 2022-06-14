@@ -1351,6 +1351,18 @@ TensorDomain::TensorDomain(const TensorDomain* src, IrCloner* ir_cloner)
       contiguity_(src->contiguity()),
       has_nontrivial_reduction_(src->has_nontrivial_reduction_) {}
 
+namespace {
+std::vector<IterDomain*> lowerIterDomains(
+    const std::vector<fuser::cuda::IterDomain*>& domains) {
+  std::vector<IterDomain*> lowered_domains;
+  lowered_domains.reserve(domains.size());
+  for (const auto iter_domain : domains) {
+    lowered_domains.push_back(iter_domain);
+  }
+  return lowered_domains;
+};
+} // namespace
+
 bool TensorDomain::hasBlockBroadcast() const {
   return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
     return id->isBroadcast() && id->isThreadDim();

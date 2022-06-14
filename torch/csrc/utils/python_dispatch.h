@@ -6,6 +6,4 @@ namespace dispatch {
 
 void initDispatchBindings(PyObject* module);
 
-}
-} // namespace impl
-} // namespace torch
+}}} // namespace torch::impl::dispatch

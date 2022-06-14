@@ -6,35 +6,40 @@ the values observed during calibration (PTQ) or training (QAT).
 import torch
 import itertools
 import math
-import matplotlib.pyplot as plt
 from torch.ao.quantization.observer import ObserverBase
+from typing import Tuple
 
-class APoTObserver(ObserverBase):
-    max_val: float
+class NonUniformQuantizationObserverBase(ObserverBase):
+    min_val: torch.Tensor
+    max_val: torch.Tensor
+    level_indices: torch.Tensor
     b: int
     k: int
     n: int
     alpha: float
     gamma: float
-    level_indices: torch.Tensor
 
     def __init__(
         self,
-        max_val,
-        b,
-        k,
+        min_val=None,
+        max_val=None,
+        b=None,
+        k=None,
             dtype=torch.quint8) -> None:
         super().__init__(dtype)
+        self.min_val = min_val
         self.max_val = max_val
+        self.level_indices = torch.tensor([])
         self.b = b
         self.k = k
-
-    def calculate_qparams(self, signed):
-        return self._calculate_qparams(signed)
+        self.n = 0
+        self.alpha = 0.0
+        self.gamma = 0.0
 
     r""" Calculates nonuniform quantization parameters given min and max value tensors.
     Parameters calculated according to APoT paper: https://arxiv.org/pdf/1909.13144.pdf
     Args:
+        min_val: minimum values per channel
         max_val: maximum values per channel
         signed: specifies whether to include signed values in quantization level calculations
     Returns:
@@ -42,9 +47,14 @@ class APoTObserver(ObserverBase):
         quantization_levels: non-uniform quantization levels
         level_indices: int representation of quantization_levels indices
     """
-    def _calculate_qparams(self, signed):
+    def _calculate_qparams(
+        self,
+        signed: bool,
+        min_val=None,
+            max_val=None) -> Tuple[float, torch.Tensor, torch.Tensor]:
         # compute alpha
-        self.alpha = self.max_val
+        if max_val:
+            self.alpha = max_val.item()
 
         # check for valid inputs of b, k
         assert(self.k and self.k != 0)
@@ -76,16 +86,10 @@ class APoTObserver(ObserverBase):
                 p_all.append(p_curr)
 
         # gamma calculation:
-        # loop through all tensors
-        # if signed, add element at index 0 for each tensor
-        # else, add element at index 1 for each tensor
-        # gamma defined to ensure alpha is at max of range
+        # loop through all tensors, add element at index 1 for each tensor
         p_sum = 0.0
         for tens in p_all:
-            if signed:
-                p_sum += float(tens[0])
-            else:
-                p_sum += float(tens[1])
+            p_sum += float(tens[1])
 
         # assign gamma
         self.gamma = self.alpha / p_sum
@@ -105,50 +109,53 @@ class APoTObserver(ObserverBase):
         quantization_levels_gamma = [self.gamma * ele for ele in quantization_levels_list]
         quantization_levels = torch.tensor(quantization_levels_gamma)
         level_indices = torch.tensor([])
-        quantization_levels, self.level_indices = quantization_levels.sort()
+        quantization_levels, level_indices = quantization_levels.sort()
 
-        return (self.gamma, quantization_levels, self.level_indices)
+        return (self.gamma, quantization_levels, level_indices)
+
+    def float_to_apot(self, x, levels, indices):
+        levels_lst = list(levels)
+        indices_lst = list(indices)
+
+        min_delta = math.inf
+        best_idx = 0
+
+        for level, idx in zip(levels_lst, indices_lst):
+            cur_delta = abs(level - x)
+            if cur_delta < min_delta:
+                min_delta = cur_delta
+                best_idx = idx
+
+        return best_idx
+
+    def apot_to_float(self, x_apot, levels, indices):
+        idx = list(indices).index(x_apot)
+        return levels[idx]
+
+class APoTObserver(NonUniformQuantizationObserverBase):
+    def __init__(
+        self,
+        min_val=None,
+        max_val=None,
+        b=0,
+            k=0) -> None:
+        super(APoTObserver, self).__init__(min_val, max_val, b, k)
+
+    def calculate_qparams(self, signed):
+        return self._calculate_qparams(signed, self.min_val, self.max_val)
+
+    def _calculate_qparams(self, signed, min_val, max_val):
+        return super(APoTObserver, self)._calculate_qparams(signed, min_val, max_val)
 
     def forward(self, x_orig):
-        r"""Records the running maximum of ``x``."""
-        max_val = self.max_val
+        r"""Records the running minimum and maximum of ``x``."""
+        if x_orig.numel() == 0:
+            return x_orig
+        x = x_orig.detach()
+        x = x.to(self.min_val.dtype)
+        min_val_cur, max_val_cur = torch.aminmax(x)
+        min_val = torch.min(min_val_cur, self.min_val)
+        max_val = torch.max(max_val_cur, self.max_val)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
         return x_orig
-
-    def quant_levels_visualization(self, obs_result, filename):
-        xs = [float(x) / 1000.0 for x in range(1000)]
-        ys = [apot_to_float(float_to_apot(x, obs_result[1], obs_result[2]),
-                            obs_result[1], obs_result[2]).item() for x in xs]
-
-        f = plt.figure(figsize=(15, 10))
-
-        plt.plot(xs, ys)
-        plt.title("APoT Quantization Plot")
-        plt.xlabel("Full Precision")
-        plt.ylabel("Quantized")
-        filestr = "pytorch/test/quantization/core/experimental/plots/" + filename
-        plt.savefig(filestr)
-
-r"""Converts floating point input into int4 APoT2 number
-    based on quantization levels
-"""
-def float_to_apot(x, levels, indices):
-    levels_lst = list(levels)
-    indices_lst = list(indices)
-
-    min_delta = math.inf
-    best_idx = 0
-
-    for level, idx in zip(levels_lst, indices_lst):
-        cur_delta = abs(level - x)
-        if cur_delta < min_delta:
-            min_delta = cur_delta
-            best_idx = idx
-
-    return best_idx
-
-r"""Converts int4 APoT2 input into floating point number
-based on quantization levels
-"""
-def apot_to_float(x_apot, levels, indices):
-    idx = list(indices).index(x_apot)
-    return levels[idx]

@@ -1,7 +1,7 @@
 #include <c10d/reducer_timer.hpp>
 
-#include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/DeviceGuard.h>
+#include <ATen/cuda/CUDAEvent.h>
 
 namespace c10d {
 namespace {
@@ -19,7 +19,8 @@ class CudaTimer : public Timer {
       at::cuda::CUDAEvent(cudaEventDefault);
   at::cuda::CUDAEvent backward_comm_start =
       at::cuda::CUDAEvent(cudaEventDefault);
-  at::cuda::CUDAEvent backward_comm_end = at::cuda::CUDAEvent(cudaEventDefault);
+  at::cuda::CUDAEvent backward_comm_end =
+      at::cuda::CUDAEvent(cudaEventDefault);
 
   at::cuda::CUDAEvent& getEvent(Event event) {
     switch (event) {

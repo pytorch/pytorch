@@ -10,14 +10,13 @@
 
 using namespace at;
 
-namespace torch {
-namespace TraceType {
+namespace torch { namespace TraceType {
 
 namespace {
 
-Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
+Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;
-  if (torch::jit::tracer::isTracing()) {
+  if(torch::jit::tracer::isTracing()) {
     const jit::tracer::TracingState& state = *jit::tracer::getTracingState();
     auto& graph = state.graph;
     if (state.force_outplace && self.storage().use_count() <= 1) {
@@ -34,8 +33,7 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
           {jit::tracer::getValueTrace(self), jit::tracer::getValueTrace(src)});
       jit::tracer::recordSourceLocation(output->node());
     }
-    jit::tracer::ensureUniqueIfOutOfPlaced(
-        "copy_ (possibly due to an assignment)", self);
+    jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
   }
 
   {
@@ -43,7 +41,7 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
     self.copy_(src, non_blocking);
   }
 
-  if (torch::jit::tracer::isTracing()) {
+  if(torch::jit::tracer::isTracing()) {
     jit::tracer::setOutput(output, self);
   }
   return self;
@@ -84,7 +82,7 @@ const Tensor& resize_as_(
   return self;
 }
 
-Tensor detach(const Tensor& self) {
+Tensor detach(const Tensor & self) {
   torch::jit::Node* node = nullptr;
   if (jit::tracer::isTracing()) {
     auto& graph = jit::tracer::getTracingState()->graph;
@@ -105,7 +103,7 @@ Tensor detach(const Tensor& self) {
   return result;
 }
 
-Tensor& detach_(Tensor& self) {
+Tensor & detach_(Tensor & self) {
   torch::jit::Node* node = nullptr;
   if (jit::tracer::isTracing()) {
     auto& graph = jit::tracer::getTracingState()->graph;
@@ -128,8 +126,7 @@ Tensor& detach_(Tensor& self) {
 }
 
 // Invariant:
-// - Ops registered to DispatchKey::Tracer below must be included in
-// `MANUAL_TRACER` in tools/autograd/gen_variable_type.py
+// - Ops registered to DispatchKey::Tracer below must be included in `MANUAL_TRACER` in tools/autograd/gen_variable_type.py
 TORCH_LIBRARY_IMPL(aten, Tracer, m) {
   m.impl("resize_", resize_);
   m.impl("resize_as_", resize_as_);
@@ -137,8 +134,7 @@ TORCH_LIBRARY_IMPL(aten, Tracer, m) {
   m.impl("detach_", detach_);
   m.impl("copy_", copy_);
 
-  // Skip tracing for the following ops by registering fallthrough kernel
-  // explicitly.
+  // Skip tracing for the following ops by registering fallthrough kernel explicitly.
   m.impl("_backward", CppFunction::makeFallthrough());
   m.impl("set_data", CppFunction::makeFallthrough());
   m.impl("data", CppFunction::makeFallthrough());
@@ -151,14 +147,15 @@ TORCH_LIBRARY_IMPL(aten, Tracer, m) {
   m.impl("_make_dual", CppFunction::makeFallthrough());
 }
 
-} // namespace
+}  // namespace
 
-} // namespace TraceType
-} // namespace torch
+}} // namespace torch::TraceType
 
-namespace torch {
-namespace jit {
-void general_trace_function(const c10::OperatorHandle& op, Stack* stack) {
+namespace torch{
+namespace jit{
+void general_trace_function(
+    const c10::OperatorHandle& op,
+    Stack* stack) {
   const auto input_size = op.schema().arguments().size();
   const auto output_size = op.schema().returns().size();
 
@@ -176,7 +173,7 @@ void general_trace_function(const c10::OperatorHandle& op, Stack* stack) {
     const auto& args = op.schema().arguments();
     int i = 0;
     for (auto iter = stack->end() - input_size; iter != stack->end();
-         ++iter, ++i) {
+          ++iter, ++i) {
       // TODO we need to refactor graph APIs (e.g., addInputs)
       // appropriately; after that, we can get rid of the giant if-else
       // block we will clean this tech debt together in the following PRs
@@ -220,7 +217,8 @@ void general_trace_function(const c10::OperatorHandle& op, Stack* stack) {
           for (IValue iv : list) {
             objects.emplace_back(std::move(iv).toObject());
           }
-          tracer::addInputs(node, args[i].name().c_str(), objects, class_type);
+          tracer::addInputs(
+              node, args[i].name().c_str(), objects, class_type);
         } else if (elem_type->kind() == TypeKind::FloatType) {
           AT_ASSERT(iter->isDoubleList());
           // NB: now, tracer doesn't support tracing double list. We add
@@ -233,7 +231,8 @@ void general_trace_function(const c10::OperatorHandle& op, Stack* stack) {
             tracer::recordSourceLocation(info[value_index]->node());
           }
           node->addInput(
-              graph->insertNode(graph->createList(FloatType::get(), info))
+              graph
+                  ->insertNode(graph->createList(FloatType::get(), info))
                   ->output());
         } else if (elem_type->kind() == TypeKind::IntType) {
           AT_ASSERT(iter->isIntList());
@@ -266,7 +265,7 @@ void general_trace_function(const c10::OperatorHandle& op, Stack* stack) {
     tracer::setTracingState(std::move(tracer_state));
     int i = 0;
     for (auto iter = stack->end() - output_size; iter != stack->end();
-         ++iter, ++i) {
+          ++iter, ++i) {
       const auto& type = op.schema().returns()[i].type();
       if (type->isSubtypeOf(*TensorType::get())) {
         AT_ASSERT(iter->isTensor());
@@ -290,10 +289,11 @@ void general_trace_function(const c10::OperatorHandle& op, Stack* stack) {
       }
     }
   }
+
+
 }
-TORCH_LIBRARY_IMPL(_, Tracer, m) {
-  m.fallback(CppFunction::makeFromBoxedFunction<&general_trace_function>());
+TORCH_LIBRARY_IMPL(_, Tracer, m){
+       m.fallback(CppFunction::makeFromBoxedFunction<&general_trace_function>());
 }
 
-} // namespace jit
-} // namespace torch
+}}// namespace torch::jit
