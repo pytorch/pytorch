@@ -584,16 +584,16 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](TensorView* input,
          std::vector<int>& output_shape,
          std::vector<int>& broadcast_dims) -> TensorView* {
-        auto ndim = input->domain()->noReductions().size();
+        const auto input_ndims = input->domain()->noReductions().size();
         TORCH_CHECK(
-            output_shape.size() >= ndim,
+            output_shape.size() >= input_ndims,
             "The new shape is expected to be greater-then-or-equal to the input",
             output_shape.size(),
-            ndim);
+            input_ndims);
         TORCH_CHECK(
-            ndim == broadcast_dims.size(),
+            input_ndims == broadcast_dims.size(),
             "The broadcast dimensions should match the input dimensions.",
-            ndim,
+            input_ndims,
             broadcast_dims.size());
 
         std::vector<bool> is_broadcast_dim(output_shape.size(), true);
