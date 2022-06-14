@@ -1,7 +1,5 @@
 import operator
-import random
-from typing import Dict, List, Set, NamedTuple, Tuple, Iterable
-from functools import cmp_to_key
+from typing import Dict, List, Set, Iterable
 
 from torch.fx.passes.fuser_utils import fuse_by_partitions
 
@@ -9,7 +7,6 @@ from torch.fx.passes.tools_common import NodeList, NodeSet, legalize_graph
 
 import torch
 # from torch.fx.experimental.partitioner_utils import (
-#     Partition,
 #     Device,
 #     PartitionerConfig,
 #     get_partition_to_latency_mapping,
@@ -29,15 +26,15 @@ from itertools import groupby
 from collections import defaultdict
 
 class Partition:
-    def __init__(self, id=None, nodes: List[Node]=list()):
+    def __init__(self, id=None, nodes: Iterable[Node]=set()):
         self.id = id
-        self.nodes: List[Node] = nodes
+        self.nodes: Set[Node] = set(nodes)
 
     def __repr__(self) -> str:
         return str(self.nodes)
 
     def add_node(self, node: Node):
-        self.nodes.append(node)
+        self.nodes.add(node)
 
     def size(self):
         return len(self.nodes)
@@ -68,7 +65,6 @@ class CapabilityBasedPartitioner:
                 dependency_map[node].add(input_node)
                 dependency_map[node].update(dependency_map[input_node])
 
-        print(dependency_map)
         return dependency_map
 
     def __node_depends_on(self, a: Node, b: Node) -> bool:
@@ -109,7 +105,7 @@ class CapabilityBasedPartitioner:
                     candidates.append(node)
         return candidates
 
-    def partition(self, candidates: NodeList) -> NodeList:
+    def partition(self, candidates: NodeList) -> List[Partition]:
         # assumptions: nodes in candidate list is sorted in topological order
         assignment: Dict[Node, int] = {}   # maping from node to partition_id
         partitions_by_id: Dict[int, Partition] = dict()   # mapping from partition_id to partition
@@ -183,8 +179,8 @@ class CapabilityBasedPartitioner:
 
         print("assignment", assignment)
 
-        return [partition.nodes for partition in partitions_by_id.values()]
+        return partitions_by_id.values()
 
-    def fuse_partitions(self, partitions):
-        # partitions: [ [node0, node1], [node2, node3] ]
-        return fuse_by_partitions(self.module, partitions)
+    def fuse_partitions(self, partitions: List[Partition]):
+        # fuse_by_partitions expects partitions in List[List[Node]]: [ [node0, node1], [node2, node3] ]
+        return fuse_by_partitions(self.module, [partition.nodes for partition in partitions] )
