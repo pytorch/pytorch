@@ -21,16 +21,16 @@ namespace libkineto {
 enum class ActivityType;
 struct CpuTraceBuffer;
 class ActivityTraceInterface;
-}
+} // namespace libkineto
 #endif
 
 namespace torch {
 namespace profiler {
 
 #ifdef USE_KINETO
-constexpr bool kKinetoAvailable {true};
+constexpr bool kKinetoAvailable{true};
 #else
-constexpr bool kKinetoAvailable {false};
+constexpr bool kKinetoAvailable{false};
 #endif
 
 namespace impl {
@@ -58,38 +58,38 @@ using trace_t = DummyTraceBuffer;
 using interface_trace_t = DummyTraceBuffer;
 #endif // USE_KINETO
 
+// Subset of `libkineto::ActivityType` for `addCPUActivity`.
+enum class KinetoActivityType : uint8_t {
+  CPU_OP = 0,
+  CPU_INSTANT_EVENT,
+  USER_ANNOTATION,
+  PYTHON_FUNCTION
+};
+
+using annotation_t = std::vector<std::pair<std::string, std::string>>;
+
 // Wraps: libkineto::CpuTraceBuffer
 struct TraceWrapper {
   TraceWrapper(const int64_t start_time, const std::string& name);
   TraceWrapper(TraceWrapper&&) = default;
   TraceWrapper(const TraceWrapper&) = delete;
 
-  // The caller is expected to hold a mutex when calling `addCPUActivity` and
-  // addMemoryUsageActivity.
+  // The caller is expected to hold a mutex when calling `addCPUActivity`.
   void addCPUActivity(
       const std::string& name,
-      const uint8_t scope,
+      const KinetoActivityType kineto_type,
       const DeviceAndResource device_and_resource,
       const uint64_t correlation_id,
       const int64_t start_time,
-      const int64_t end_time);
-
-  void addMemoryUsageActivity(
-      const std::string& name,
-      const DeviceAndResource device_and_resource,
-      const int64_t time,
-      const c10::Device device,
-      const void* ptr,
-      const int64_t alloc_size,
-      const int64_t total_allocated,
-      const int64_t total_reserved);
+      const int64_t end_time,
+      const annotation_t& annotations);
 
   void transferCpuTrace(int64_t end_time);
 
   explicit operator bool() const;
 
   std::unique_ptr<trace_t>& get() {
-      return cpu_trace_;
+    return cpu_trace_;
   }
 
  private:
@@ -106,7 +106,7 @@ struct ActivityTraceWrapper {
   void save(const std::string& path);
 
   const std::unique_ptr<interface_trace_t>& get() {
-      return trace_;
+    return trace_;
   }
 
  private:
@@ -116,7 +116,8 @@ struct ActivityTraceWrapper {
 
 using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
 void prepareTrace(
-    const bool cpuOnly, const ActivitySet& activities,
+    const bool cpuOnly,
+    const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config);
 void startTrace();
 ActivityTraceWrapper stopTrace();
