@@ -111,8 +111,7 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
   setStrided(result, size, stride, storage_offset);
 
   // 0 sizes won't result in any change in the shape of the Tensor so we can
-  // skip it. Also if the memory is contiguous we don't need to do
-  // gather-scatter operations using graph.
+  // skip it.
   if (size.size() > 0) {
 
     // If self itself was a view tensor, that means we need to chain the graphs
@@ -127,17 +126,33 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
     MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
     @autoreleasepool {
+      string lookup_key = mps::getStridedKey(self, self.sizes(), self.strides(),
+                self.storage_offset());
+
+      MPSGraphTensor *parentInputTensor = nil;
+      CachedGraph* parentCachedGraph = static_cast<CachedGraph *>(cache_->LookUp(lookup_key));
+      if (parentCachedGraph) {
+        parentInputTensor = parentCachedGraph->inputTensor_;
+      }
+
       string key = mps::getStridedKey(self, size, stride, storage_offset);
       CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
       if (!cachedGraph) {
         cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
           CachedGraph *newCachedGraph = nil;
           @autoreleasepool {
+              MPSShape *shape = nil;
               MPSGraph* mpsGraph = make_mps_graph();
               newCachedGraph = new CachedGraph(mpsGraph);
 
+              // All chained view operations should use the shape of the first contiguous tensor from which the view was created
+              if (parentInputTensor)
+                shape = [parentInputTensor shape];
+              else
+                shape = getMPSShape(self);
+
               // Self is the input tensor we are creating view of
-              MPSGraphTensor* inputTensor = [mpsGraph placeholderWithShape : getMPSShape(self)
+              MPSGraphTensor* inputTensor = [mpsGraph placeholderWithShape : shape
                                                                   dataType : getMPSDataType(self.scalar_type())
                                                                       name : nil];
               newCachedGraph->inputTensor_ = inputTensor;
