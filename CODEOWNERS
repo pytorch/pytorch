@@ -16,6 +16,19 @@
 /aten/src/ATen/native/native_functions.yaml @bdhirsh
 /aten/src/ATen/native/tags.yaml @anjali411
 
+# Architecture Optimization (quantization, sparsity, etc.)
+/torch/quantization/ @jerryzh168 @vkuzo
+/test/test_quantization.py @jerryzh168
+/test/ao/ @jerryzh168 @z-a-f @hdcharles
+/test/quantization/ @jerryzh168 @z-a-f
+nn/quantized/ @jerryzh168 @vkuzo
+nn/quantizable/ @jerryzh168 @z-a-f
+nn/qat/ @jerryzh168 @vkuzo
+nn/intrinsic @jerryzh168 @vkuzo
+ao/ @vkuzo
+ao/sparisty/ @z-a-f @hdcharles
+ao/ns/ @vkuzo
+
 # Tensorpipe RPC Agent.
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
 /torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw @beauby
