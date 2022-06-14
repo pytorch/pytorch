@@ -227,13 +227,6 @@ else
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
 
-    if which sccache > /dev/null; then
-      echo 'PyTorch Build Statistics'
-      sccache --show-stats
-
-      sccache --show-stats | python -m tools.stats.upload_sccache_stats
-    fi
-
     assert_git_not_dirty
     # Copy ninja build logs to dist folder
     mkdir -p dist
@@ -316,3 +309,5 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python test/run_test.py --export-past-test-times
 fi
+
+print_sccache_stats
