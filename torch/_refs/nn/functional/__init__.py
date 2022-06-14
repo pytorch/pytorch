@@ -394,18 +394,18 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
     )
 
     if weight.numel() != 1:
-        check(a.ndim > 0, lambda: "prelu: `a` cannot be a zero-dim tensor.")
+        check(a.ndim > 0, lambda: "Not allow zero-dim input tensor.")
         channel_size = a.shape[1] if a.ndim >= 2 else 1
         check(
             weight.numel() == channel_size,
-            lambda: f"prelu: Expected number of elements to equal channel size."
-            f" channel_size = {channel_size}, but got: weight.numel() = {weight.numel()}",
+            lambda: f"Mismatch of parameter numbers and input channel size. Found parameter numbers ="
+            f" {weight.numel()} and channel size = {channel_size}.",
         )
 
     check(
         weight.ndim == 0 or weight.ndim == 1,
         lambda: f"prelu: Expected `weight` to be a scalar or 1D tensor, but got: "
-        f"weight.ndim() = {weight.ndim}",
+        f"ndim = {weight.ndim}",
     )
     weight = prims.broadcast_in_dim(
         weight, a.shape, tuple() if weight.ndim == 0 else (1,)
