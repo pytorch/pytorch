@@ -1386,7 +1386,7 @@ class TestCuda(TestCase):
 
         # check that the allocation is not re-used if it's in-use by a copy
         gpu_tensor = torch.cuda.FloatTensor([0])
-        torch.cuda._sleep(int(50 * cycles_per_ms))  # delay the copy
+        torch.cuda._sleep(int(1000 * cycles_per_ms))  # delay the copy by 1s
         gpu_tensor.copy_(t, non_blocking=True)
         del t
         t = torch.FloatTensor([1]).pin_memory()
@@ -1405,7 +1405,7 @@ class TestCuda(TestCase):
         gpu_tensor1 = torch.cuda.FloatTensor([0], device=1)
 
         with torch.cuda.device(1):
-            torch.cuda._sleep(int(50 * cycles_per_ms))  # delay the copy
+            torch.cuda._sleep(int(1000 * cycles_per_ms))  # delay the copy by 1s
             gpu_tensor1.copy_(t, non_blocking=True)
 
         del t
