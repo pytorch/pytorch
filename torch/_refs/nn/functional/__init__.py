@@ -1,7 +1,9 @@
 import torch
 
+import torch._prims as prims
 import torch._prims.utils as utils
 from torch._prims.utils import (
+    check,
     TensorLike,
     TensorLikeType,
     NumberType,
@@ -376,3 +378,37 @@ def gelu(a: TensorLikeType, approximate: str = "none") -> TensorLikeType:
         return a * 0.5 * (1 + torch.erf(a * kAlpha))
     else:
         raise RuntimeError("approximate argument must be either none or tanh.")
+
+
+def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.prelu
+    """
+    check(
+        isinstance(a, TensorLike),
+        lambda: f"prelu: Expected `a` to be tensor, but got: {type(a)}",
+    )
+    check(
+        isinstance(weight, TensorLike),
+        lambda: f"prelu: Expected `weight` to be tensor, but got: {type(weight)}",
+    )
+
+    if weight.numel() != 1:
+        check(a.ndim > 0, lambda: "prelu: `a` cannot be a zero-dim tensor.")
+        channel_size = a.shape[1] if a.ndim >= 2 else 1
+        check(
+            weight.numel() == channel_size,
+            lambda: f"prelu: Expected number of elements to equal channel size."
+            f" channel_size = {channel_size}, but got: weight.numel() = {weight.numel()}",
+        )
+
+    check(
+        weight.ndim == 0 or weight.ndim == 1,
+        lambda: f"prelu: Expected `weight` to be a scalar or 1D tensor, but got: "
+        f"weight.ndim() = {weight.ndim}",
+    )
+    weight = prims.broadcast_in_dim(
+        weight, a.shape, tuple() if weight.ndim == 0 else (1,)
+    )
+
+    return refs.where(a > 0, a, a * weight)
