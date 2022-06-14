@@ -26,7 +26,7 @@ from .. import _vmap_internals
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
 _OptionalTensor = Optional[torch.Tensor]
-_ShapeorNestedShape = Union[_size, Sequence[_size]]
+_ShapeorNestedShape = Union[_size, Sequence[_size], torch.Tensor]
 
 
 def _calculate_shape(output: torch.Tensor, grad: torch.Tensor,
