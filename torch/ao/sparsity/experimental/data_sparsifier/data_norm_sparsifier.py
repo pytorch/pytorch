@@ -44,10 +44,11 @@ class DataNormSparsifier(BaseDataSparsifier):
         super().__init__(data_list=data_list, **defaults)
 
     def __get_scatter_folded_mask(self, data, dim, indices, output_size, sparse_block_shape):
-        mask = torch.ones_like(data, dtype=torch.uint8)  # need only int datatype
+        mask = torch.ones_like(data)
         mask.scatter_(dim=dim, index=indices, value=0)  # zeroing out
         mask = F.fold(mask, output_size=output_size, kernel_size=sparse_block_shape,
                       stride=sparse_block_shape)
+        mask = mask.to(torch.int8)
         return mask
 
     def __get_block_level_mask(self, data,
@@ -60,7 +61,7 @@ class DataNormSparsifier(BaseDataSparsifier):
 
         # just return zeros if zeroing all elements in block
         if values_per_block == zeros_per_block:
-            return torch.zeros_like(data, dtype=torch.uint8)
+            return torch.zeros_like(data, dtype=torch.int8)
 
         # creating additional height and width to support padding
         dh = (block_height - height % block_height) % block_height

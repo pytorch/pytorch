@@ -298,6 +298,7 @@ class TestNormDataSparsifierType(TestBaseDataSparsiferType):
             mask = sparsifier.get_mask(name=name)
             config = sparsifier.data_groups[name]
             lb, ub = self.get_bounds_on_actual_sparsity(config, mask.shape)
+            mask = mask.to(torch.float)
             actual_sparsity = round(1 - mask.mean().item(), 3)
             assert actual_sparsity >= lb and actual_sparsity <= ub
             assert actual_sparsity > 0.0  # exact sparsity level cannot be achieved due to size of tensor
@@ -311,6 +312,7 @@ class TestNormDataSparsifierType(TestBaseDataSparsiferType):
             test_sparsifier.add_data(name='test_data', data=new_data)
             test_sparsifier.step()
             mask = test_sparsifier.get_mask(name='test_data')
+            mask = mask.to(torch.float)
             assert (1.0 - mask.mean().item()) > 0  # some sparsity achieved
 
     def test_step_2_of_4(self):
@@ -324,6 +326,7 @@ class TestNormDataSparsifierType(TestBaseDataSparsiferType):
         for some_data in data_list:
             name, _ = some_data
             mask = sparsifier.get_mask(name=name)
+            mask = mask.to(torch.float)
             self.assertAlmostEqual(1.0 - mask.mean().item(), 0.5, places=2)
             for row in mask:
                 for idx in range(0, len(row), 4):
