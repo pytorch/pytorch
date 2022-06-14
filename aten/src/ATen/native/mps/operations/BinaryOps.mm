@@ -33,32 +33,10 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
   }
   MPSStream* mpsStream = getCurrentMPSStream();
 
+  auto output = output_.is_contiguous() ? output_ : output_.contiguous();
+
   const bool is_self_scalar = self.dim() == 0;
   const bool is_other_scalar = other.dim() == 0;
-  bool needsScatterOrNotContig = false;
-
-  Tensor output;
-  if (!output_.is_contiguous()) {
-    output = output_.contiguous();
-    needsScatterOrNotContig = true;
-  }
-  else if (output_.is_view() && (self.storage().data() == output_.storage().data() || other.storage().data() == output_.storage().data())) {
-    // Determine if this is an in-place operation
-    IValue selfIVal(self);
-    IValue otherIVal(other);
-    IValue outputIVal(output_);
-
-   if (selfIVal.isAliasOf(outputIVal) || otherIVal.isAliasOf(outputIVal)) {
-      output = at::native::empty_mps(
-                        output_.sizes(),
-                        output_.scalar_type(),
-                        c10::nullopt,
-                        kMPS,
-                        c10::nullopt,
-                        c10::nullopt);
-      needsScatterOrNotContig = true;
-    }
-  }
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
@@ -113,13 +91,14 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
       feeds[cachedGraph->alphaTensor] = getMPSGraphTensorFromScalar(mpsStream, alpha, getMPSScalarType(other.scalar_type()));
     }
 
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, needsScatterOrNotContig ? output : output_);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
     };
     runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
-    if (needsScatterOrNotContig) {
-      output_.copy_(output);
+
+    if (!output_.is_contiguous()) {
+      const_cast<Tensor&>(output_) = output;
     }
   }
 }
