@@ -4046,14 +4046,15 @@ Tensor linalg_det_backward(
     return at::linalg_lu_solve(LU_, pivots, d, /*left=*/true, /*adjoint=*/true);
   } else {
     // TODO In this case, the trick above just does not cut it
-    // The proper way of doing this is doing `auto mask = det == 0.;` and then if any determinant
-    // is zero, use an SVD decomposition to compute the derivative in those inputs (not all inputs).
-    // The derivative may be then computed explicitly by noting that the gradient of the derivative
-    // of the determinant is given by adj(A^H)* grad where adj(A) is the adjugate of A.
+    // The proper way of doing this is doing `auto mask = det == 0.;` and then
+    // if any determinant is zero, use an SVD decomposition to compute the
+    // derivative in those inputs (not all inputs). The derivative may be then
+    // computed explicitly by noting that the gradient of the derivative of the
+    // determinant is given by adj(A^H)* grad where adj(A) is the adjugate of A.
     // Then, the adjugate of a singular matrix may be computed as per
     // https://nhigham.com/2020/06/16/what-is-the-adjugate-of-a-matrix/
     // adj(A) = conj(det(V)) * det(U) * (S[:-1].prod()) * U[-1] @ Vh[-1]
-    return at::linalg_solve(A_.mH(), d);
+    return at::linalg_solve(A.mH(), d);
   }
 }
 

@@ -111,7 +111,7 @@ class TestNamedTupleAPI(TestCase):
                input=(torch.tensor([1]), torch.tensor([1]), torch.tensor([0.1]), torch.tensor([0.1]),
                torch.tensor([0.1]), torch.tensor([1]), 0.01, 0, 255, 0), names=('output', 'mask',), hasout=False),
             op(operators=['_linalg_det'],
-               input=(), names=('result', 'lu', 'pivs'), hasout=False),
+               input=(), names=('result', 'LU', 'pivs'), hasout=False),
             op(operators=['aminmax'], input=(), names=('min', 'max'), hasout=True),
             op(operators=['_lu_with_info'],
                input=(), names=('LU', 'pivots', 'info'), hasout=False),
