@@ -1,6 +1,6 @@
 #pragma once
-#include <c10/macros/Export.h>
 #include <c10/util/Flags.h>
+#include <c10/macros/Export.h>
 
 C10_DECLARE_bool(torch_lazy_ir_debug);
 C10_DECLARE_bool(torch_lazy_handle_special_scalars);
@@ -22,5 +22,4 @@ C10_DECLARE_int(torch_lazy_shape_cache_size);
 namespace torch {
 namespace lazy {
 TORCH_API std::string& getLTCForceFallback();
-}
-} // namespace torch
+} }

@@ -123,9 +123,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
             # See Note [External Backends Follow Dispatcher API]
             kernel_name = dispatcher.name(native_functions_map[op_name].func)
             # TODO: allow structured external backends later.
-            m = BackendMetadata(
-                kernel=kernel_name, structured=False, cpp_namespace=cpp_namespace
-            )
+            m = BackendMetadata(kernel=kernel_name, structured=False)
             metadata[op_name] = m
         return BackendIndex(
             dispatch_key=dispatch_key,
@@ -375,6 +373,7 @@ def gen_dispatcher_registrations(
     fm: FileManager,
     output_dir: str,
     class_name: str,
+    cpp_namespace: str,
     backend_indices: Dict[DispatchKey, BackendIndex],
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     backend_dispatch_key: DispatchKey,
@@ -404,6 +403,7 @@ def gen_dispatcher_registrations(
                 Target.REGISTRATION,
                 selector,
                 rocm=False,
+                cpp_namespace=cpp_namespace,
                 class_method_name=f"{class_name}",
                 skip_dispatcher_op_registration=False,
             ),
@@ -462,6 +462,7 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
                         Target.ANONYMOUS_DEFINITION,
                         selector,
                         rocm=False,
+                        cpp_namespace=cpp_namespace,
                         class_method_name=f"{class_name}",
                         skip_dispatcher_op_registration=False,
                     ),
@@ -547,6 +548,7 @@ def run(
             fm,
             output_dir,
             class_name,
+            cpp_namespace,
             backend_indices,
             grouped_native_functions,
             backend_key,

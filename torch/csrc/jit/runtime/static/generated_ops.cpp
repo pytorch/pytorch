@@ -4902,18 +4902,17 @@ REGISTER_OPERATOR_FUNCTOR(
     aten_linalg_solve,
     [](Node* n) -> SROperator {
       if (n->matches(torch::schema(
-              "aten::linalg_solve(Tensor input, Tensor other, bool left) -> Tensor"))) {
+              "aten::linalg_solve(Tensor input, Tensor other) -> Tensor"))) {
         return [](ProcessedNode* p_node) {
           const auto& input = p_node->Input(0).toTensor();
           const auto& other = p_node->Input(1).toTensor();
-          auto left = p_node->Input(2).toBool();
           if (p_node->Output(0).isNone()) {
-            p_node->Output(0) = at::native::linalg_solve(input, other, left);
+            p_node->Output(0) = at::native::linalg_solve(input, other);
             return;
           }
           auto& out = p_node->Output(0).toTensor();
           fastResizeToZero(out);
-          at::native::linalg_solve_out(input, other, left, out);
+          at::native::linalg_solve_out(input, other, out);
         };
       }
       LogAndDumpSchema(n);

@@ -2,7 +2,8 @@
 
 namespace torch {
 
-const std::vector<std::string>& IMethod::getArgumentNames() const {
+const std::vector<std::string>& IMethod::getArgumentNames() const
+{
   if (isArgumentNamesInitialized_) {
     return argumentNames_;
   }

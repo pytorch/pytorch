@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/irange.h>
 #include <tensorpipe/common/cpu_buffer.h>
 #include <tensorpipe/core/message.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/torch.h>
 
@@ -20,9 +20,8 @@ TEST(TensorpipeSerialize, Base) {
   torch::distributed::rpc::MessageType mtype =
       torch::distributed::rpc::MessageType::UNKNOWN;
   int64_t mId = 100;
-  auto sendingRpcMessage =
-      c10::make_intrusive<torch::distributed::rpc::Message>(
-          std::move(payload), std::move(tensors), mtype);
+  auto sendingRpcMessage = c10::make_intrusive<torch::distributed::rpc::Message>(
+      std::move(payload), std::move(tensors), mtype);
   sendingRpcMessage->setId(mId);
   tensorpipe::Message sendingTpMessage;
   torch::distributed::rpc::TensorpipeWriteBuffers sendingTpBuffers;
@@ -91,7 +90,8 @@ TEST(TensorpipeSerialize, Base) {
   // - Unpickle
   c10::intrusive_ptr<torch::distributed::rpc::Message> recvingRpcMessage =
       torch::distributed::rpc::tensorpipeDeserialize(
-          std::move(recvingTpDescriptor), std::move(recvingTpBuffers));
+          std::move(recvingTpDescriptor),
+          std::move(recvingTpBuffers));
 
   // Data is ready
   EXPECT_EQ(mtype, recvingRpcMessage->type());
@@ -113,9 +113,8 @@ TEST(TensorpipeSerialize, RecopySparseTensors) {
   std::vector<char> payload = {'1', '2', '3'};
   torch::distributed::rpc::MessageType mtype =
       torch::distributed::rpc::MessageType::UNKNOWN;
-  auto sendingRpcMessage =
-      c10::make_intrusive<torch::distributed::rpc::Message>(
-          std::move(payload), std::move(tensors), mtype);
+  auto sendingRpcMessage = c10::make_intrusive<torch::distributed::rpc::Message>(
+      std::move(payload), std::move(tensors), mtype);
 
   tensorpipe::Message sendingTpMessage;
   torch::distributed::rpc::TensorpipeWriteBuffers tpBuffers;
@@ -146,9 +145,8 @@ TEST(TensorpipeSerialize, NoDeleterTensors) {
   std::vector<char> payload = {'1', '2', '3'};
   torch::distributed::rpc::MessageType mtype =
       torch::distributed::rpc::MessageType::UNKNOWN;
-  auto sendingRpcMessage =
-      c10::make_intrusive<torch::distributed::rpc::Message>(
-          std::move(payload), std::move(tensors), mtype);
+  auto sendingRpcMessage = c10::make_intrusive<torch::distributed::rpc::Message>(
+      std::move(payload), std::move(tensors), mtype);
 
   tensorpipe::Message sendingTpMessage;
   torch::distributed::rpc::TensorpipeWriteBuffers tpBuffers;

@@ -49,15 +49,10 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
         output_min_(output_min),
         output_max_(output_max) {}
 
-  ~Conv2dOpContext() {
-    if (releaseCallback_) {
-      releaseCallback_(conv2dOp_);
-    }
-  }
-
   void release_resources() override {
     if (releaseCallback_) {
       releaseCallback_(conv2dOp_);
+      conv2dOp_ = nullptr;
     }
   }
 
@@ -144,15 +139,10 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
         output_min_(output_min),
         output_max_(output_max) {}
 
-  ~LinearOpContext() {
-    if (releaseCallback_) {
-      releaseCallback_(opaqueOpPtr_);
-    }
-  }
-
   void release_resources() override {
     if (releaseCallback_) {
       releaseCallback_(opaqueOpPtr_);
+      opaqueOpPtr_ = nullptr;
     }
   }
 

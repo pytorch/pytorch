@@ -60,7 +60,6 @@ class TORCH_API DistEngine {
   DistEngine& operator=(const DistEngine&) = delete;
   DistEngine(DistEngine&&) = delete;
   DistEngine& operator=(DistEngine&&) = delete;
-
  private:
   // Make sure this is a singleton.
   DistEngine();

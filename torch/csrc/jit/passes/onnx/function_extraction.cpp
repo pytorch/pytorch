@@ -553,6 +553,7 @@ Node* FunctionExtractor::CreateFunctionNode(
     const std::string& domain_name,
     const std::string& func_name) {
   const auto& func_scope = func_ctx.scope_key_;
+  const auto& func_scope_ctx = func_ctx.scope_ctxs_[func_scope];
   GRAPH_DEBUG(
       "Create and insert local function for scope: ",
       func_scope->namesFromRoot());
@@ -670,7 +671,8 @@ void FunctionExtractor::ConvertScopeToFunction(
   const auto func_name =
       construct_unique_module_name(module_class_name.substr(pos + 1));
 
-  CreateFunctionDefNode(func_ctx, graph, domain_name, func_name);
+  auto func_def_n =
+      CreateFunctionDefNode(func_ctx, graph, domain_name, func_name);
 
   // create and insert local function node to graph.
   for (const auto& it : func_ctx.scope_ctxs_) {
