@@ -439,15 +439,19 @@ std::vector<Shape> compute_shape_expand(const at::Tensor & self, at::IntArrayRef
 
 std::vector<Shape> compute_shape_expand(const at::Tensor & self, c10::SymIntArrayRef size, bool implicit) {
   CHECK_GE(size.size(), self.dim());
-  // NOTE: hm... how can we allow size dimensions to hold -1?
-  // NOTE: should move this block somewhere better - ref: https://github.com/pytorch/xla/pull/3558/files
-  std::vector<int64_t> target_size;
   std::vector<c10::SymInt> _sizes = ToVector<c10::SymInt>(size);
-  for (auto& _size : _sizes) {
-    std::shared_ptr<c10::SymbolicIntNode> symbolicIntNode = _size.toSymbolicIntNode();
+  int64_t num_new_dimensions = _sizes.size() - self.dim();
+  std::vector<int64_t> padded_self(num_new_dimensions, 0);
+  padded_self.insert(padded_self.end(), self.sizes().begin(),
+                     self.sizes().end());
+  std::vector<int64_t> target_size(_sizes.size());
+  for (const auto idx : c10::irange(_sizes.size())) {
+    // NOTE: should move this block somewhere better - ref: https://github.com/pytorch/xla/pull/3558/files
+    std::shared_ptr<c10::SymbolicIntNode> symbolicIntNode = _sizes[idx].toSymbolicIntNode();
     auto lazySymIntNode = std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>(symbolicIntNode);
     auto size_node = lazySymIntNode->node_;
-    target_size.push_back(std::dynamic_pointer_cast<DimensionNode>(size_node)->getStaticValue());
+    auto static_value = std::dynamic_pointer_cast<DimensionNode>(size_node)->getStaticValue();
+    target_size[idx] = static_value == -1 ? padded_self[idx] : static_value;
   }
   return {Shape(self.scalar_type(), target_size)};
 }
