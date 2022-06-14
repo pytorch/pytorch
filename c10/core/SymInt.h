@@ -48,6 +48,7 @@ class C10_API SymInt {
   }
 
   SymInt operator+(SymInt sci) const;
+  SymInt operator*(SymInt sci) const;
   bool operator<(SymInt sci) const;
   void operator*=(SymInt sci);
 
@@ -56,7 +57,7 @@ class C10_API SymInt {
   bool operator==(int64_t sci) const;
   bool operator!=(int64_t sci) const;
 
-  std::shared_ptr<SymbolicIntNode> toSymbolicIntNode();
+  std::shared_ptr<SymbolicIntNode> toSymbolicIntNode() const;
   static c10::SymInt toSymInt(std::shared_ptr<SymbolicIntNode> sin);
 
   int64_t as_int_unchecked() const {
