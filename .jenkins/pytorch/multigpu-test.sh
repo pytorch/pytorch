@@ -25,6 +25,9 @@ time python test/run_test.py --verbose -i distributed/test_c10d_spawn_nccl
 time python test/run_test.py --verbose -i distributed/test_store
 time python test/run_test.py --verbose -i distributed/test_pg_wrapper
 time python test/run_test.py --verbose -i distributed/rpc/cuda/test_tensorpipe_agent
+# FSDP tests
+for f in test/distributed/fsdp/*.py ; do time python test/run_test.py --verbose -i "${f#*/}" ; done
+# ShardedTensor tests
 time python test/run_test.py --verbose -i distributed/_shard/checkpoint/test_checkpoint
 time python test/run_test.py --verbose -i distributed/_shard/checkpoint/test_file_system_checkpoint
 time python test/run_test.py --verbose -i distributed/_shard/sharding_spec/test_sharding_spec
