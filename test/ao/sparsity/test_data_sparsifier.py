@@ -235,6 +235,10 @@ class TestBaseDataSparsifier(TestCase):
 
 
 class TestNormDataSparsifierType(TestBaseDataSparsiferType):
+    r"""This helper test class takes in any supported type of and runs some tests.
+        This inherits the TestBaseDataSparsifier type wherein some functions are
+        over-ridden to take into account the specific sparsifier.
+    """
     def __init__(self, data_list, defaults, data_with_config, norm_type='L1'):
         super().__init__(data_list=data_list, defaults=defaults, data_with_config=data_with_config)
         assert norm_type in ['L1', 'L2']
@@ -376,7 +380,7 @@ class TestNormDataSparsifiers(TestCase):
         defaults: default config for the above data in data_list
         data_with_config: list of dictionaries defining name, data and config (look test_tensors())
 
-        Once the above is done, create an instance of TestNormDataSparsifierType and call all it's functions
+        Once the above is done, create an instance of TestNormDataSparsifierType and call run_tests()
     """
     def test_tensors(self):
         tensor1, tensor2, tensor3 = torch.randn(3, 3), torch.randn(4, 4), torch.randn(5, 5)
