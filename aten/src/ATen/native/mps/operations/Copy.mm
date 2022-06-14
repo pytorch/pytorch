@@ -425,17 +425,13 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_,
   } else {
     src = src_;
   }
-  Tensor dst = dst_;
-  dst._set_conj(dst_.is_conj());
   src._set_conj(src_.is_conj());
-
-  dst._set_neg(dst_.is_neg());
   src._set_neg(src_.is_neg());
 
-  auto dst_byte_offset = dst.storage_offset() * dst.itemsize();
-  id<MTLBuffer> destBuffer = __builtin_bit_cast(id<MTLBuffer>, dst.storage().data());
+  auto dst_byte_offset = dst_.storage_offset() * dst_.itemsize();
+  id<MTLBuffer> destBuffer = __builtin_bit_cast(id<MTLBuffer>, dst_.storage().data());
 
-  if (src.dtype() == dst.dtype()) {
+  if (src.dtype() == dst_.dtype()) {
     MPSStream* stream = getCurrentMPSStream();
     dispatch_sync(stream->queue(), ^() {
       @autoreleasepool {
@@ -453,7 +449,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_,
   } else {
     copy_cast_mps(dst_, src_, destBuffer, sourceBuffer);
   }
-  return dst;
+  return dst_;
 }
 
 at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
