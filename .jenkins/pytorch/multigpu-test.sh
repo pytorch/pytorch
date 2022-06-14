@@ -4,14 +4,11 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-# shellcheck disable=SC2034
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
-
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch (distributed only)"
-if [ -n "${IN_CI}" ]; then
+if [ -n "${CI}" ]; then
   # TODO move this to docker
   # Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
   pip_install "unittest-xml-reporting<=3.2.0,>=2.0.0"
