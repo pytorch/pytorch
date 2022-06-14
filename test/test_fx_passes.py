@@ -246,7 +246,7 @@ class TestFXGraphPasses(JitTestCase):
 
         partitions = partitioner.partition(candidates)
 
-        partitions_name = [[node.name for node in partition] for partition in partitions]
+        partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
 
         print("partitions_name", partitions_name)
         print("expected_partition", expected_partition)
