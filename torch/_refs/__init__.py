@@ -550,11 +550,13 @@ def logsumexp(
     if not isinstance(dims, Iterable):
         dims = (dims,)
     if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
+        # For float and complex dtypes, we shift input to exp by a constant to avoid overflow
         a_max = amax(a, dims, keepdim=True)
         a_max = where(abs(a_max) == float("inf"), 0.0, a_max)
         a_max_squeezed = _squeeze_multiple(a_max, dims) if not keepdim else a_max
         result = log(sum(exp(a - a_max), dims, keepdim=keepdim)) + a_max_squeezed
     else:
+        # This case covers boolean and integer dtypes and we use non-stabilized computation
         result = log(sum(exp(a), dims, keepdim=keepdim))
     return result
 
