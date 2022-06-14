@@ -130,16 +130,19 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
       string key = mps::getStridedKey(self, size, stride, storage_offset);
       CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
       if (!cachedGraph) {
+        // Check if this stride operation is already performed on a strided tensor
+        auto origKey = getStridedKey(self, self.sizes(), self.strides(), self.storage_offset());
+        auto origGraph = static_cast<CachedGraph *>(cache_->LookUp(origKey));
         cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
           CachedGraph *newCachedGraph = nil;
           @autoreleasepool {
               MPSGraph* mpsGraph = make_mps_graph();
               newCachedGraph = new CachedGraph(mpsGraph);
 
-              // Self is the input tensor we are creating view of
-              MPSGraphTensor* inputTensor = [mpsGraph placeholderWithShape : getMPSShape(self)
-                                                                  dataType : getMPSDataType(self.scalar_type())
-                                                                      name : nil];
+              // Self is the input tensor we are creating view of, which can also be a stride
+              // In later case, preserve shape from the original graph
+              auto shape = origGraph ? [origGraph->inputTensor_ shape] : getMPSShape(self);
+              auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()), shape);
               newCachedGraph->inputTensor_ = inputTensor;
               newCachedGraph->outputTensor_ = chainViewOperation(mpsGraph, size, stride,
                                                                  storage_offset, inputTensor, self);
