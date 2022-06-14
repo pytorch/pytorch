@@ -1,5 +1,5 @@
-#include <torch/python/init.h>
 #include <torch/python.h>
+#include <torch/python/init.h>
 
 #include <torch/nn/module.h>
 #include <torch/ordered_dict.h>

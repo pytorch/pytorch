@@ -6,7 +6,6 @@
 
 namespace c10d {
 
-
 ncclComm_t NCCLComm::getNcclComm() {
   std::unique_lock<std::mutex> lock(mutex_);
   if (aborted_) {
@@ -37,11 +36,12 @@ std::string getNcclVersion() {
       versionString = "Unknown NCCL version";
     } else {
       // NCCL changed version coding starting 2.9
-      const int majorBase =  version < 2900 ? 1000 : 10000;
+      const int majorBase = version < 2900 ? 1000 : 10000;
       const int minorBase = 100;
       auto ncclMajor = version / majorBase;
       auto ncclMinor = (version % majorBase) / minorBase;
-      auto ncclPatch = version % (ncclMajor * majorBase + ncclMinor * minorBase);
+      auto ncclPatch =
+          version % (ncclMajor * majorBase + ncclMinor * minorBase);
       versionString = std::to_string(ncclMajor) + "." +
           std::to_string(ncclMinor) + "." + std::to_string(ncclPatch);
     }
