@@ -50,8 +50,6 @@ class TestNonUniformObserver(unittest.TestCase):
         level_indices2_test_list = obs2_result[2].tolist()
         self.assertEqual(len(level_indices2_test_list), len(set(level_indices2_test_list)))
 
-        obs2.quant_levels_visualization(obs2_result, "plt1")
-
     """
         Test case 3
         Assume hardcoded parameters:
@@ -86,8 +84,6 @@ class TestNonUniformObserver(unittest.TestCase):
         # check level indices unique values
         level_indices3_test_list = obs3_result[2].tolist()
         self.assertEqual(len(level_indices3_test_list), len(set(level_indices3_test_list)))
-
-        obs3.quant_levels_visualization(obs3_result, "plt2")
 
     """
         Test case 4
@@ -131,8 +127,6 @@ class TestNonUniformObserver(unittest.TestCase):
         # check level indices unique elements
         level_indices4_test_list = obs4_result[2].tolist()
         self.assertEqual(len(level_indices4_test_list), len(set(level_indices4_test_list)))
-
-        obs4.quant_levels_visualization(obs4_result, "plt3")
 
 if __name__ == '__main__':
     unittest.main()
