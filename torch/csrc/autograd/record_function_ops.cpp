@@ -1,8 +1,8 @@
 #include <ATen/ThreadLocalState.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/record_function.h>
-#include <torch/csrc/profiler/api.h>
 #include <torch/csrc/autograd/record_function_ops.h>
+#include <torch/csrc/profiler/api.h>
 
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/library.h>
@@ -39,9 +39,11 @@ at::Tensor record_function_enter_legacy(
     const std::string& name,
     const c10::optional<std::string>& args) {
   if (profilerEnabled()) {
-    auto rec = std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
+    auto rec =
+        std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
     record_function_enter(name, args, *rec);
-    return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
+    return at::cpp_custom_type_hack::create(
+        std::move(rec), at::TensorOptions());
   } else {
     return prev;
   }
