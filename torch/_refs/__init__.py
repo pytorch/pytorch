@@ -533,9 +533,7 @@ def log_softmax(
     a_max = amax(a, dim, keepdim=True)
     shifted = a - a_max
     shifted_logsumexp = logsumexp(shifted, dim, keepdim=True)
-    return prims.convert_element_type(
-        shifted - shifted_logsumexp, result_dtype
-    )
+    return prims.convert_element_type(shifted - shifted_logsumexp, result_dtype)
 
 
 def _squeeze_multiple(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
