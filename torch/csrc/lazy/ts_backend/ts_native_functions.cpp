@@ -21,6 +21,8 @@
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 #include <torch/library.h>
 
+using at::Tensor;
+
 namespace torch {
 namespace lazy {
 namespace {
@@ -605,16 +607,15 @@ at::Tensor LazyNativeFunctions::slice_backward(
 
 // re-use the composite kernel from core, that way we don't need to provide a
 // backwards formula for native_group_norm
-std::tuple<at::Tensor, at::Tensor, at::Tensor> LazyNativeFunctions::
-    native_group_norm(
-        const at::Tensor& input,
-        const c10::optional<at::Tensor>& weight,
-        const c10::optional<at::Tensor>& bias,
-        int64_t N,
-        int64_t C,
-        int64_t HxW,
-        int64_t group,
-        double eps) {
+std::tuple<Tensor, Tensor, Tensor> LazyNativeFunctions::native_group_norm(
+    const at::Tensor& input,
+    const c10::optional<at::Tensor>& weight,
+    const c10::optional<at::Tensor>& bias,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    double eps) {
   return at::native::math_group_norm(
       input, weight, bias, N, C, HxW, group, eps);
 }

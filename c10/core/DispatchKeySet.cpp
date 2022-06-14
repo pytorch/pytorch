@@ -24,7 +24,7 @@ constexpr DispatchKeySet backend_dispatch_keyset =
 // then you don't want to decompose a functional op into an op that causes
 // aliasing. You should just directly write a kernel for that functional op
 // instead!
-constexpr DispatchKeySet nonfunctional_backend_dispatch_keyset =
+constexpr DispatchKeySet non_functional_backend_dispatch_keyset =
     backend_dispatch_keyset
         // XLA and LazyTensor are currently the only 2 backends in core
         // that use functionalization pass in eager mode.
@@ -64,7 +64,7 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
     case DispatchKey::CompositeExplicitAutograd:
       return backend_dispatch_keyset;
     case DispatchKey::CompositeExplicitAutogradNonFunctional:
-      return nonfunctional_backend_dispatch_keyset;
+      return non_functional_backend_dispatch_keyset;
     default:
       return DispatchKeySet(t);
   }
@@ -84,7 +84,7 @@ bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
     case DispatchKey::CompositeExplicitAutogradNonFunctional:
       // See Note [NestedTensor Not Included in Backend Keys]
       return k != DispatchKey::NestedTensor &&
-          nonfunctional_backend_dispatch_keyset.has(k);
+          non_functional_backend_dispatch_keyset.has(k);
     default:
       return t == k;
   }
